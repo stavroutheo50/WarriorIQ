@@ -1,0 +1,526 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import patch
+
+import cv2
+import numpy as np
+from fastapi.testclient import TestClient
+
+import app.main as webapp
+import core.db as database
+import core.retention as retention
+from app.main import GUEST_COOKIE, SESSION_COOKIE, app
+from app.state import create_job, delete_job
+from core.auth import register
+from core.payments import PLANS
+
+
+class AccountAndProductIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.original_db = database.DB_PATH
+        self.original_outputs = webapp.OUTPUTS
+        self.original_uploads = webapp.UPLOADS
+        self.original_retention_outputs = retention.OUTPUTS
+        self.original_retention_uploads = retention.UPLOADS
+        database.DB_PATH = Path(self.temp.name) / "product-test.sqlite3"
+        webapp.OUTPUTS = Path(self.temp.name) / "outputs"
+        webapp.UPLOADS = Path(self.temp.name) / "uploads"
+        retention.OUTPUTS = webapp.OUTPUTS
+        retention.UPLOADS = webapp.UPLOADS
+        webapp.OUTPUTS.mkdir()
+        webapp.UPLOADS.mkdir()
+        database.init_db()
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        self.client.close()
+        database.DB_PATH = self.original_db
+        webapp.OUTPUTS = self.original_outputs
+        webapp.UPLOADS = self.original_uploads
+        retention.OUTPUTS = self.original_retention_outputs
+        retention.UPLOADS = self.original_retention_uploads
+        self.temp.cleanup()
+
+    def test_signup_creates_private_session_and_workspace(self):
+        response = self.client.post(
+            "/signup",
+            data={
+                "email": "athlete@example.com", "password": "Strong-Local-Password", "next_path": "/dashboard",
+                "accept_terms": "true", "account_manager_confirmed": "true",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/dashboard")
+        self.assertIn(SESSION_COOKIE, self.client.cookies)
+        dashboard = self.client.get("/dashboard")
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertIn("Your baseline starts with one fight", dashboard.text)
+        self.assertNotIn("Create your private athlete workspace", dashboard.text)
+        account = database.get_account_by_email("athlete@example.com")
+        acceptances = database.list_legal_acceptances(profile_id=account["profile_id"])
+        self.assertEqual(acceptances[0]["kind"], "account_terms_privacy_acceptable_use_manager")
+
+    def test_compare_explains_why_it_is_unavailable_before_two_fights(self):
+        self.client.post(
+            "/signup",
+            data={
+                "email": "athlete@example.com",
+                "password": "Strong-Local-Password",
+                "accept_terms": "true",
+                "account_manager_confirmed": "true",
+            },
+        )
+        comparison = self.client.get("/compare")
+        self.assertEqual(comparison.status_code, 200)
+        self.assertIn("Two fights required", comparison.text)
+        self.assertIn('href="/#analyze">Analyze another fight', comparison.text)
+        self.assertNotIn('id="compareForm"', comparison.text)
+
+    def test_signup_requires_account_manager_terms_and_privacy_acceptance(self):
+        response = self.client.post(
+            "/signup",
+            data={"email": "athlete@example.com", "password": "Strong-Local-Password"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Terms, Privacy Policy, and Acceptable Use Policy", response.text)
+        self.assertIsNone(database.get_account_by_email("athlete@example.com"))
+
+    def test_login_requires_and_records_policy_acceptance(self):
+        account = register("athlete@example.com", "Strong-Local-Password")
+        denied = self.client.post(
+            "/login",
+            data={"email": "athlete@example.com", "password": "Strong-Local-Password"},
+            follow_redirects=False,
+        )
+        self.assertEqual(denied.status_code, 400)
+        self.assertNotIn(SESSION_COOKIE, self.client.cookies)
+
+        accepted = self.client.post(
+            "/login",
+            data={
+                "email": "athlete@example.com",
+                "password": "Strong-Local-Password",
+                "accept_policies": "true",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(accepted.status_code, 303)
+        self.assertIn(SESSION_COOKIE, self.client.cookies)
+        acceptances = database.list_legal_acceptances(profile_id=account["profile_id"])
+        self.assertEqual(acceptances[0]["kind"], "account_signin_policies")
+
+    def test_cross_site_state_change_is_blocked(self):
+        response = self.client.post(
+            "/signup",
+            data={
+                "email": "athlete@example.com", "password": "Strong-Local-Password",
+                "accept_terms": "true", "account_manager_confirmed": "true",
+            },
+            headers={"Origin": "https://attacker.example", "Sec-Fetch-Site": "cross-site"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertIsNone(database.get_account_by_email("athlete@example.com"))
+
+    def test_account_export_requires_password_and_excludes_password_hash(self):
+        self.client.post(
+            "/signup",
+            data={
+                "email": "athlete@example.com", "password": "Strong-Local-Password",
+                "accept_terms": "true", "account_manager_confirmed": "true",
+            },
+        )
+        denied = self.client.post("/account/export", data={"password": "wrong-password"})
+        self.assertEqual(denied.status_code, 400)
+        exported = self.client.post("/account/export", data={"password": "Strong-Local-Password"})
+        self.assertEqual(exported.status_code, 200)
+        self.assertIn("attachment", exported.headers["content-disposition"])
+        self.assertEqual(exported.json()["account"]["email"], "athlete@example.com")
+        self.assertNotIn("password_hash", exported.text)
+        self.assertNotIn("video_path", exported.text)
+        self.assertNotIn("report_path", exported.text)
+        self.assertNotIn("sequence_path", exported.text)
+
+    def test_checkout_fails_closed_until_real_operator_details_are_configured(self):
+        self.client.post(
+            "/signup",
+            data={
+                "email": "athlete@example.com", "password": "Strong-Local-Password",
+                "accept_terms": "true", "account_manager_confirmed": "true",
+            },
+        )
+        response = self.client.post(
+            "/checkout/athlete", data={"billing_acceptance": "true"}, follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("operator", response.text.lower())
+
+    def test_login_failure_is_generic_and_open_redirect_is_rejected(self):
+        register("athlete@example.com", "Strong-Local-Password")
+        response = self.client.post(
+            "/login",
+            data={"email": "athlete@example.com", "password": "incorrect-one", "next_path": "https://attacker.example", "accept_policies": "true"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email or password is incorrect", response.text)
+        success = self.client.post(
+            "/login",
+            data={"email": "athlete@example.com", "password": "Strong-Local-Password", "next_path": "//attacker.example", "accept_policies": "true"},
+            follow_redirects=False,
+        )
+        self.assertEqual(success.status_code, 303)
+        self.assertEqual(success.headers["location"], "/dashboard")
+
+    def test_starter_daily_allowance_is_atomic_and_failed_use_is_returned(self):
+        account = register("athlete@example.com", "Strong-Local-Password")
+        today = datetime.now(timezone.utc)
+        self.assertTrue(database.reserve_analysis(account["id"], "starter-1", today))
+        self.assertTrue(database.reserve_analysis(account["id"], "starter-1", today))
+        self.assertFalse(database.reserve_analysis(account["id"], "starter-2", today))
+        self.assertTrue(database.release_analysis(account["id"], "starter-1"))
+        self.assertTrue(database.reserve_analysis(account["id"], "starter-2", today))
+        self.assertTrue(database.reserve_analysis(account["id"], "starter-next-day", today + timedelta(days=1)))
+        self.client.post("/login", data={"email": "athlete@example.com", "password": "Strong-Local-Password", "accept_policies": "true"})
+        home = self.client.get("/")
+        self.assertIn("Limit reached", home.text)
+        self.assertIn("Analysis allowance used", home.text)
+
+    def test_checkout_webhook_event_is_idempotent(self):
+        account = register("athlete@example.com", "Strong-Local-Password")
+        self.assertTrue(database.apply_checkout_event("evt_123", "checkout.session.completed", account["id"], "athlete", 0))
+        self.assertFalse(database.apply_checkout_event("evt_123", "checkout.session.completed", account["id"], "athlete", 0))
+        self.assertEqual(database.get_account(account["id"])["plan"], "athlete")
+
+    def test_permanent_plan_override_survives_billing_changes(self):
+        account = register("owner@example.com", "Strong-Local-Password")
+        self.assertTrue(database.set_plan_override(account["id"], "gym"))
+        self.assertTrue(database.apply_checkout_event("evt-owner", "checkout.session.completed", account["id"], "athlete", 0))
+        saved = database.get_account(account["id"])
+        self.assertEqual(saved["plan"], "athlete")
+        self.assertEqual(saved["plan_override"], "gym")
+        allowance = database.analysis_allowance(account["id"])
+        self.assertIs(allowance["plan"], PLANS["gym"])
+        self.assertIsNone(allowance["limit"])
+
+        database.save_session(account["id"], "owner-session", "2999-01-01T00:00:00+00:00")
+        session_account = database.account_for_session("owner-session")
+        self.assertEqual(session_account["plan_override"], "gym")
+
+    def test_paid_plan_allowances_match_the_pricing_contract(self):
+        today = datetime(2026, 8, 24, 12, tzinfo=timezone.utc)
+        athlete = register("daily@example.com", "Strong-Local-Password")
+        database.apply_checkout_event("evt-athlete", "checkout.session.completed", athlete["id"], "athlete", 0)
+        for index in range(3):
+            self.assertTrue(database.reserve_analysis(athlete["id"], f"athlete-{index}", today))
+        self.assertFalse(database.reserve_analysis(athlete["id"], "athlete-4", today))
+        self.assertTrue(database.reserve_analysis(athlete["id"], "athlete-tomorrow", today + timedelta(days=1)))
+
+        coach = register("coach@example.com", "Strong-Local-Password")
+        database.apply_checkout_event("evt-coach", "checkout.session.completed", coach["id"], "coach", 30)
+        for index in range(30):
+            self.assertTrue(database.reserve_analysis(coach["id"], f"coach-{index}", today))
+        self.assertFalse(database.reserve_analysis(coach["id"], "coach-31", today))
+        self.assertTrue(database.reserve_analysis(coach["id"], "coach-next-month", datetime(2026, 9, 1, tzinfo=timezone.utc)))
+
+        gym = register("gym@example.com", "Strong-Local-Password")
+        database.apply_checkout_event("evt-gym", "checkout.session.completed", gym["id"], "gym", 0)
+        for index in range(40):
+            self.assertTrue(database.reserve_analysis(gym["id"], f"gym-{index}", today))
+
+        self.assertEqual(PLANS["athlete_pro"]["daily_limit"], 10)
+        self.assertEqual(PLANS["athlete_pro"]["report_tier"], "full")
+        self.assertTrue(PLANS["gym"]["unlimited"])
+
+    def test_assignment_cannot_be_toggled_by_another_profile(self):
+        first = register("first@example.com", "Strong-Local-Password")
+        second = register("second@example.com", "Another-Local-Password")
+        assignment_id = database.add_assignment(first["profile_id"], "Guard recovery", "Three rounds")
+        self.assertFalse(database.toggle_assignment(assignment_id, second["profile_id"]))
+        self.assertTrue(database.toggle_assignment(assignment_id, first["profile_id"]))
+        self.assertEqual(database.list_assignments(first["profile_id"])[0]["status"], "complete")
+
+    def test_duplicate_active_coach_assignment_is_not_added_twice(self):
+        account = register("coach@example.com", "Strong-Local-Password")
+        first = database.add_assignment(account["profile_id"], "Guard return", "Four rounds")
+        second = database.add_assignment(account["profile_id"], "Guard return", "Four rounds")
+        self.assertEqual(first, second)
+        self.assertEqual(len(database.list_assignments(account["profile_id"])), 1)
+
+    def test_coach_assignment_can_be_created_and_completed_from_dashboard(self):
+        self.client.post(
+            "/signup",
+            data={
+                "email": "coach@example.com",
+                "password": "Strong-Local-Password",
+                "accept_terms": "true",
+                "account_manager_confirmed": "true",
+            },
+        )
+        created = self.client.post(
+            "/coach/assignments",
+            data={
+                "title": "Guard recovery",
+                "detail": "Four controlled rounds",
+                "next_path": "/dashboard",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(created.status_code, 303)
+        self.assertEqual(created.headers["location"], "/dashboard")
+        account = database.get_account_by_email("coach@example.com")
+        assignment = database.list_assignments(account["profile_id"])[0]
+        dashboard = self.client.get("/dashboard")
+        self.assertIn("Guard recovery", dashboard.text)
+        self.assertIn("Four controlled rounds", dashboard.text)
+
+        completed = self.client.post(
+            f"/coach/assignments/{assignment['id']}/toggle",
+            data={"next_path": "/dashboard"},
+            follow_redirects=False,
+        )
+        self.assertEqual(completed.status_code, 303)
+        self.assertEqual(completed.headers["location"], "/dashboard")
+        self.assertEqual(database.list_assignments(account["profile_id"])[0]["status"], "complete")
+
+    def test_sensitive_pages_send_security_headers(self):
+        response = self.client.get("/dashboard")
+        self.assertEqual(response.headers["x-frame-options"], "DENY")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
+
+    def test_replay_page_renders_identity_state_in_every_template_block(self):
+        self.client.get("/")
+        guest_id = self.client.cookies.get(GUEST_COOKIE)
+        self.assertIsNotNone(guest_id)
+        job_id = "replayrender1"
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"video-placeholder")
+        report = {
+            "classifier": {"custom_temporal_checkpoint_loaded": False},
+            "setup": {"ruleset": "K1", "start_seconds": 0, "end_seconds": 10},
+            "video": {"analysis_target": "BOTH"},
+            "performance": {"segment_duration_seconds": 10},
+            "rounds": [{"number": 1, "start_seconds": 0, "end_seconds": 10, "selected": True}],
+            "events": [], "key_moments": [], "illegal_moves": [], "integrity": {},
+            "scorecard": {"ruleset_label": "K-1"}, "metrics": {},
+            "tracking": {
+                "fighter_A_coverage": .90, "fighter_B_coverage": .91,
+                "fighter_A_seed_source": "manual_anchor", "fighter_B_seed_source": "manual_anchor",
+            },
+        }
+        (job_dir / "report.json").write_text(json.dumps(report), encoding="utf-8")
+        create_job(job_id, {
+            "owner_key": f"guest:{guest_id}", "status": "complete", "video_path": str(video_path),
+        })
+        try:
+            response = self.client.get(f"/replay/{job_id}")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Movement with skeletons", response.text)
+            self.assertIn("Play full fight", response.text)
+            self.assertIn("Jump anywhere in the fight", response.text)
+            self.assertNotIn("No verified key moments are available", response.text)
+            self.assertIn("identitySafe=true", response.text)
+        finally:
+            delete_job(job_id)
+
+    def test_public_navigation_destinations_render(self):
+        for path in ("/", "/dashboard", "/history", "/compare", "/coach", "/validation", "/pricing", "/privacy", "/login", "/signup"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("WARRIOR", response.text)
+
+    def test_primary_actions_are_real_and_explain_their_state(self):
+        home = self.client.get("/").text
+        self.assertIn('href="#analyze">Analyze a fight', home)
+        self.assertIn('id="uploadSubmit" type="submit"', home)
+        self.assertIn("Choose a video to continue", home)
+        self.assertIn('class="nav-more"', home)
+        self.assertIn('href="/history">Fight library', home)
+
+        pricing = self.client.get("/pricing").text
+        self.assertNotIn("checkout disabled</span>", pricing)
+        self.assertNotIn("Private beta onboarding</span>", pricing)
+        self.assertIn("1 analysis per day", pricing)
+        self.assertIn("3 analyses per day", pricing)
+        self.assertIn("10 analyses per day", pricing)
+        self.assertIn("30 analyses per month", pricing)
+        self.assertIn("Unlimited fight analyses", pricing)
+        self.assertIn("€89.99", pricing)
+        self.assertIn('class="plan-banner">Most flexible', pricing)
+
+    def test_guest_upload_is_temporary_private_and_not_saved_to_library(self):
+        source = Path(self.temp.name) / "source.mp4"
+        writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"), 24.0, (640, 480))
+        for index in range(30):
+            frame = np.full((480, 640, 3), 80 + index, dtype=np.uint8)
+            cv2.rectangle(frame, (120, 80), (230, 420), (220, 220, 220), -1)
+            cv2.rectangle(frame, (410, 80), (520, 420), (150, 180, 230), -1)
+            writer.write(frame)
+        writer.release()
+        with source.open("rb") as handle:
+            response = self.client.post(
+                "/upload",
+                data={"rights_confirmed": "true", "guardian_authorized_upload": "true"},
+                files={"video": ("private-fight-name.mp4", handle, "video/mp4")},
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 303)
+        job_id = response.headers["location"].split("/")[-1]
+        job = webapp.get_job(job_id)
+        self.assertFalse(job["persist_result"])
+        self.assertTrue(job["owner_key"].startswith("guest:"))
+        self.assertEqual(database.list_fights(1), [])
+        frame_page = self.client.get(f"/frame/{job_id}")
+        self.assertEqual(frame_page.status_code, 200)
+        self.assertNotIn("private-fight-name", frame_page.text)
+        status = self.client.get(f"/api/status/{job_id}")
+        self.assertNotIn("original_name", status.json())
+        other_browser = TestClient(app)
+        try:
+            self.assertEqual(other_browser.get(f"/frame/{job_id}").status_code, 404)
+        finally:
+            other_browser.close()
+
+    def test_selected_fighter_is_report_focus_while_engine_analyzes_both(self):
+        self.client.get("/")
+        guest_id = self.client.cookies.get(GUEST_COOKIE)
+        job_id = "focusfight1"
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        selection = np.full((360, 640, 3), 90, dtype=np.uint8)
+        cv2.imwrite(str(job_dir / "selection.jpg"), selection)
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"video-placeholder")
+        create_job(job_id, {
+            "owner_key": f"guest:{guest_id}", "status": "selection",
+            "video_path": str(video_path), "original_name": "hidden.mp4",
+            "fight_type": "competition", "ruleset": "K1", "start_seconds": 0.0,
+            "round_count": 1, "round_duration_seconds": 120.0,
+            "break_duration_seconds": 60.0, "selected_rounds": [1], "end_seconds": None,
+            "profile_id": 0, "persist_result": False, "openai_identity_recovery": False,
+        })
+        try:
+            with patch.object(webapp.executor, "submit") as submit:
+                response = self.client.post(f"/api/start/{job_id}", json={
+                    "fighter_a_box": [80, 40, 250, 340],
+                    "fighter_b_box": [390, 40, 560, 340],
+                    "focus_fighter": "B",
+                })
+            self.assertEqual(response.status_code, 200)
+            request = submit.call_args.args[2]
+            self.assertEqual(request.analysis_target, "BOTH")
+            self.assertEqual(request.focus_fighter, "B")
+            saved = webapp.get_job(job_id)
+            self.assertEqual(saved["analysis_target"], "BOTH")
+            self.assertEqual(saved["focus_fighter"], "B")
+        finally:
+            delete_job(job_id)
+
+    def test_cleanup_never_removes_a_protected_running_guest_job(self):
+        metadata = retention.mark_guest_job("active123", "guest-token", str(webapp.UPLOADS / "active123.mp4"))
+        metadata["expires_at"] = "2000-01-01T00:00:00+00:00"
+        marker = webapp.OUTPUTS / "active123" / "guest.json"
+        marker.write_text(json.dumps(metadata), encoding="utf-8")
+        self.assertEqual(retention.cleanup_expired_guest_jobs({"active123"}), [])
+        self.assertTrue(marker.exists())
+        self.assertEqual(retention.cleanup_expired_guest_jobs(), ["active123"])
+        self.assertFalse(marker.exists())
+
+    def test_account_deletion_is_blocked_during_analysis(self):
+        self.client.post(
+            "/signup",
+            data={
+                "email": "athlete@example.com", "password": "Strong-Local-Password", "next_path": "/dashboard",
+                "accept_terms": "true", "account_manager_confirmed": "true",
+            },
+        )
+        account = database.get_account_by_email("athlete@example.com")
+        create_job("running123", {"owner_key": f"account:{account['id']}", "status": "running"})
+        try:
+            response = self.client.post(
+                "/account/delete",
+                data={"password": "Strong-Local-Password", "confirmation": "DELETE"},
+            )
+            self.assertEqual(response.status_code, 409)
+            self.assertIsNotNone(database.get_account(account["id"]))
+        finally:
+            delete_job("running123")
+
+    def test_owner_can_review_candidates_add_missed_actions_and_complete(self):
+        account = register("reviewer@example.com", "Strong-Local-Password")
+        database.set_plan_override(account["id"], "gym")
+        self.client.post("/login", data={"email": "reviewer@example.com", "password": "Strong-Local-Password", "accept_policies": "true"})
+        job_id = "reviewfight1"
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"video-placeholder")
+        candidate = {
+            "peak_time": 3.0, "fighter": "A", "technique": "left_head_kick", "family": "kick",
+            "limb": "left_leg", "target": "head", "outcome": "clean", "confidence": .94,
+            "contact_confidence": .94,
+        }
+        report = {
+            "classifier": {"custom_temporal_checkpoint_loaded": False},
+            "setup": {"ruleset": "K1", "start_seconds": 0, "end_seconds": 10},
+            "video": {"analysis_target": "BOTH"}, "performance": {"segment_duration_seconds": 10},
+            "rounds": [{"number": 1, "start_seconds": 0, "end_seconds": 10, "selected": True}],
+            "events": [candidate], "key_moments": [], "illegal_moves": [], "integrity": {},
+            "scorecard": {"ruleset_label": "K-1"}, "metrics": {},
+            "tracking": {
+                "fighter_A_coverage": .90, "fighter_B_coverage": .91,
+                "fighter_A_seed_source": "manual_anchor", "fighter_B_seed_source": "manual_anchor",
+                "initial_iou_A": 0.0, "initial_iou_B": 0.0,
+            },
+        }
+        report_path = job_dir / "report.json"
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        database.save_fight(
+            job_id, account["profile_id"], "hidden-name.mp4", str(video_path), str(report_path),
+            "competition", "K1", "BOTH", {},
+        )
+
+        review = self.client.get(f"/review/{job_id}")
+        self.assertEqual(review.status_code, 200)
+        self.assertIn("Review action candidates", review.text)
+        self.assertIn("Not an action", review.text)
+
+        candidate_label = self.client.post(f"/api/annotations/{job_id}", json={
+            "event_time": 3.0, "predicted": candidate, "fighter": "A", "technique": "none",
+            "target": "none", "outcome": "uncertain", "manual": False,
+        })
+        self.assertEqual(candidate_label.status_code, 200)
+        self.assertFalse(candidate_label.json()["training_consent"])
+        missed_label = self.client.post(f"/api/annotations/{job_id}", json={
+            "event_time": 6.2, "predicted": {}, "fighter": "B", "technique": "right_low_kick",
+            "target": "leg", "outcome": "clean", "manual": True,
+        })
+        self.assertEqual(missed_label.status_code, 200)
+        self.client.post(
+            "/profile",
+            data={"display_name": "Reviewer", "default_fighter": "A", "allow_model_training": "true"},
+        )
+        opted_in_label = self.client.post(f"/api/annotations/{job_id}", json={
+            "event_time": 7.2, "predicted": {}, "fighter": "A", "technique": "jab",
+            "target": "head", "outcome": "clean", "manual": True,
+        })
+        self.assertEqual(opted_in_label.status_code, 200)
+        self.assertTrue(opted_in_label.json()["training_consent"])
+        completed = self.client.post(f"/review/{job_id}/complete", data={"complete": "true"}, follow_redirects=False)
+        self.assertEqual(completed.status_code, 303)
+        self.assertEqual(database.get_fight_review(job_id)["status"], "complete")
+
+
+if __name__ == "__main__":
+    unittest.main()

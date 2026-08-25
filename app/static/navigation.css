@@ -1,0 +1,3 @@
+.global-back{position:fixed;z-index:100;left:18px;bottom:18px;display:inline-flex;align-items:center;gap:8px;border:1px solid #294c85;border-radius:999px;padding:11px 15px;background:rgba(9,20,39,.92);backdrop-filter:blur(16px);color:#b9d2ff;font:800 13px Inter,"Segoe UI",sans-serif;box-shadow:0 14px 38px rgba(0,0,0,.4);cursor:pointer;transition:.2s}
+.global-back:hover{background:#163261;border-color:#2f6fed;color:white;transform:translateY(-2px)}.global-back[hidden]{display:none}.global-back span{letter-spacing:.2px}#errorActions{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}#errorActions[hidden]{display:none}
+@media(max-width:620px){.global-back{left:12px;bottom:12px;padding:10px 13px}.global-back span{display:none}}

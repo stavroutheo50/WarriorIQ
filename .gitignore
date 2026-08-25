@@ -1,0 +1,30 @@
+# Python and local tooling
+__pycache__/
+*.py[cod]
+.venv/
+.idea/
+.tmp/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local model/runtime caches
+.huggingface/
+.ultralytics/
+Ultralytics/
+models/
+*.pt
+*.engine
+*.onnx
+
+# Private and generated application data
+.env
+warrioriq.sqlite3
+uploads/
+outputs/
+
+# Local logs and operating-system files
+*.log
+.codex-*.log
+Thumbs.db
+.DS_Store

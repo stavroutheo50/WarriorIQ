@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block head %}<link rel="stylesheet" href="/static/components.css"><link rel="stylesheet" href="/static/frame-picker.css">{% endblock %}
+{% block title %}Choose Frame · WarriorIQ{% endblock %}
+{% block content %}
+<div class="section-title"><div><div class="eyebrow">Step 2 of 3</div><h2>Choose the fighter-selection frame</h2></div><div class="pill">Frame selection</div></div>
+{% if job.quality %}<section class="quality-strip {{job.quality.status}}"><div><div class="eyebrow">Automatic Quality Guardian</div><h3>{{job.quality.score}}/100 · {{job.quality.status|title}} capture</h3></div><div class="quality-measures"><span>{{job.quality.measurements.resolution}}</span><span>{{job.quality.measurements.fps}} FPS</span></div><ul>{% for note in job.quality.notes[:2] %}<li>{{note}}</li>{% endfor %}</ul></section>{% endif %}
+<div class="notice"><strong>Choose a clear moment:</strong> both fighters should be fully visible, separated from each other, and away from the referee.</div>
+<section class="frame-picker card"><h3>Pause on the clearest frame</h3><p class="muted small">Move through the video until both fighters can be identified easily. WarriorIQ locks their identities here and analyzes forward from this frame.</p><video id="sourceVideo" controls preload="metadata" src="/media/{{job_id}}"></video><button class="btn" id="useFrame" type="button">Use this frame and continue →</button><div class="small muted" id="frameStatus">Current frame: {{'%.1f'|format(job.start_seconds)}} seconds.</div></section>
+{% endblock %}
+{% block scripts %}<script>
+const jobId={{job_id|tojson}},video=document.getElementById('sourceVideo'),button=document.getElementById('useFrame'),statusBox=document.getElementById('frameStatus');
+button.onclick=async()=>{button.disabled=true;statusBox.textContent='Preparing this frame…';try{const r=await fetch(`/api/selection-frame/${jobId}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seconds:video.currentTime})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Could not use this frame');location.href=`/select/${jobId}`}catch(e){statusBox.textContent=e.message;button.disabled=false}};
+</script>{% endblock %}

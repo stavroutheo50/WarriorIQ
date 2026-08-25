@@ -1,0 +1,20 @@
+{
+  "name": "WarriorIQ",
+  "short_name": "WarriorIQ",
+  "description": "Evidence-backed kickboxing video analysis for athletes and coaches.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#081226",
+  "theme_color": "#081226",
+  "orientation": "any",
+  "categories": ["sports", "fitness", "productivity"],
+  "icons": [
+    {
+      "src": "/static/warrioriq-logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Evidence Review · WarriorIQ{% endblock %}
+{% block content %}
+<div class="section-title">
+  <div><div class="eyebrow">Ground-truth workspace · Review action candidates</div><h2>{% if mode == 'scorecard' %}Verify the scorecard{% else %}Build a full action dataset{% endif %}</h2></div>
+  <a class="btn secondary" href="/result/{{job_id}}">Back to report</a>
+</div>
+
+<div class="selection-tools"><a class="btn {% if mode != 'scorecard' %}secondary{% endif %}" href="/review/{{job_id}}?mode=scorecard">Quick scorecard check</a><a class="btn {% if mode != 'dataset' %}secondary{% endif %}" href="/review/{{job_id}}?mode=dataset">Optional full model review</a></div>
+
+<div class="notice"><strong>{% if mode == 'scorecard' %}Turn the estimate into video-checked facts.{% else %}Help improve the action model.{% endif %}</strong> {% if mode == 'scorecard' %}Only scoring candidates are shown. Watch each moment, correct it or choose <em>Not an action</em>, then add any scoring action the detector missed at the video's current time.{% else %}This optional workspace includes scoring and non-scoring action candidates. Its labels can rebuild coaching and create temporal-model training data.{% endif %}</div>
+
+<section class="card review-player">
+  <video id="reviewVideo" controls preload="metadata" src="/media/{{job_id}}"></video>
+  <div>
+    <div class="eyebrow">Review progress</div>
+    <h2 id="reviewProgress"><span id="reviewedCount">{{reviewed_total}}</span> / {{candidate_total}} candidates labeled</h2>
+    <p class="muted">{% if mode == 'scorecard' %}The preliminary estimate becomes a human-reviewed scorecard only after every scoring candidate is checked and you watch the analyzed segment for missed scores.{% else %}These positive and negative labels train the temporal model and can rebuild fighter-specific coaching after the full review.{% endif %}</p>
+    <button class="btn secondary" id="useCurrentTime" type="button">Add missed action at current time</button>
+  </div>
+</section>
+
+<section class="card" id="manualLabel" hidden>
+  <div class="eyebrow">Missed by the detector</div><h2>Add a ground-truth action</h2>
+  <form class="review-form" data-async="true" data-manual="true">
+    <input type="hidden" name="event_time" id="manualTime" value="0">
+    <div class="row">
+      <div class="field"><label>Fighter</label><select name="fighter"><option>A</option><option>B</option></select></div>
+      <div class="field"><label>Technique</label><select name="technique">{% for value in annotation_techniques %}{% if value != 'none' %}<option value="{{value}}">{{value.replace('_',' ')|title}}</option>{% endif %}{% endfor %}</select></div>
+      <div class="field"><label>Target</label><select name="target"><option value="head">Head</option><option value="body">Body</option><option value="leg">Leg</option><option value="none">No target</option></select></div>
+      <div class="field"><label>Outcome</label><select name="outcome"><option value="clean">Landed clean</option><option value="blocked">Blocked</option><option value="checked">Checked</option><option value="missed">Missed</option><option value="uncertain">Uncertain</option></select></div>
+    </div>
+    <div class="selection-tools"><button class="btn" type="submit">Save missed action</button><button class="btn secondary" id="cancelManual" type="button">Cancel</button><span class="small muted form-status"></span></div>
+  </form>
+</section>
+
+<div class="review-list">
+{% for e in candidates %}
+{% set key='%.3f'|format(e.peak_time) %}{% set saved=annotations.get(key) %}{% set answer=saved.corrected if saved else e %}
+<section class="card review-candidate {% if saved %}reviewed{% endif %}">
+  <div class="review-candidate-head">
+    <div><span class="pill">{{'%.2f'|format(e.peak_time)}}s</span> <strong>Candidate: Fighter {{e.fighter}} · {{e.technique.replace('_',' ')|title}}</strong></div>
+    <button class="btn secondary jump-candidate" type="button" data-time="{{e.peak_time}}">Watch from 1s before</button>
+  </div>
+  <form class="review-form" data-async="true" data-manual="false" data-predicted-fighter="{{e.fighter}}" data-predicted-technique="{{e.technique}}" data-predicted-target="{{e.target or 'none'}}" data-predicted-outcome="{{e.outcome}}" data-predicted-family="{{e.family}}" data-predicted-limb="{{e.limb}}">
+    <input type="hidden" name="event_time" value="{{e.peak_time}}">
+    <details class="review-details"><summary>Edit the fighter, technique, target or outcome</summary><div class="row">
+      <div class="field"><label>Who acted?</label><select name="fighter"><option {% if answer.fighter == 'A' %}selected{% endif %}>A</option><option {% if answer.fighter == 'B' %}selected{% endif %}>B</option></select></div>
+      <div class="field"><label>What happened?</label><select name="technique">{% for value in annotation_techniques %}<option value="{{value}}" {% if answer.technique == value %}selected{% endif %}>{{'Not an action' if value == 'none' else value.replace('_',' ')|title}}</option>{% endfor %}</select></div>
+      <div class="field"><label>Target</label><select name="target">{% for value in ['head','body','leg','none'] %}<option value="{{value}}" {% if (answer.target or 'none') == value %}selected{% endif %}>{{value|title}}</option>{% endfor %}</select></div>
+      <div class="field"><label>Outcome</label><select name="outcome">{% for value,label in [('clean','Landed clean'),('blocked','Blocked'),('checked','Checked'),('missed','Missed'),('uncertain','Uncertain')] %}<option value="{{value}}" {% if answer.outcome == value %}selected{% endif %}>{{label}}</option>{% endfor %}</select></div>
+    </div></details>
+    <div class="selection-tools"><button class="btn" type="submit">{{'Save changes' if saved else '✓ Looks right'}}</button><button class="btn secondary reject-action" type="button">Not an action</button><span class="small {% if saved %}good{% else %}muted{% endif %} form-status">{% if saved %}Saved · {{'not an action' if answer.technique == 'none' else answer.technique.replace('_',' ')}}{% else %}Not reviewed{% endif %}</span></div>
+  </form>
+</section>
+{% else %}<section class="card"><p class="muted">The rule engine found no candidates. Watch the video and add real actions manually.</p></section>{% endfor %}
+</div>
+
+{% if page_count > 1 %}<div class="selection-tools pagination">{% if page > 1 %}<a class="btn secondary" href="/review/{{job_id}}?mode={{mode}}&page={{page-1}}">Previous 40</a>{% endif %}<span class="pill">Page {{page}} of {{page_count}}</span>{% if page < page_count %}<a class="btn secondary" href="/review/{{job_id}}?mode={{mode}}&page={{page+1}}">Next 40</a>{% endif %}</div>{% endif %}
+
+<section class="card">
+  <div class="eyebrow">Video-check declaration</div><h2>{% if mode == 'scorecard' %}Finish the verified scorecard{% else %}Finish the full evidence review{% endif %}</h2>
+  <p class="muted">Every candidate in this workspace must have a label. Scrub through the analyzed segment and add genuine actions the detector missed. {% if mode == 'scorecard' %}Completion rebuilds the score only from your confirmed labels.{% else %}Completion also rebuilds fighter-specific coaching and training from the full action dataset.{% endif %}</p>
+  {% set mode_complete = review.status == 'complete' or (mode == 'scorecard' and review.status == 'scorecard_complete') %}
+  {% if mode_complete %}<div class="notice good">This {% if mode == 'scorecard' %}scorecard{% else %}fight dataset{% endif %} is marked human-reviewed. Editing a label updates the report immediately.</div>{% else %}<form action="/review/{{job_id}}/complete" method="post"><input type="hidden" name="mode" value="{{mode}}"><label class="check"><input type="checkbox" name="complete" value="true" required> I watched the analyzed segment, reviewed every shown candidate, and added the scoring actions that were missed.</label><button class="btn" id="completeReview" data-ready-label="{% if mode == 'scorecard' %}Create human-reviewed scorecard{% else %}Complete evidence review{% endif %}" type="submit" {% if remaining_total > 0 %}disabled title="Review {{remaining_total}} remaining candidates first"{% endif %}>{% if remaining_total > 0 %}<span id="remainingCount">{{remaining_total}}</span> labels remaining{% elif mode == 'scorecard' %}Create human-reviewed scorecard{% else %}Complete evidence review{% endif %}</button></form>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script>
+const video=document.getElementById('reviewVideo'),manual=document.getElementById('manualLabel');
+document.querySelectorAll('.jump-candidate').forEach(button=>button.onclick=()=>{video.currentTime=Math.max(0,Number(button.dataset.time)-1);video.play().catch(()=>{});video.scrollIntoView({behavior:'smooth',block:'center'})});
+document.getElementById('useCurrentTime').onclick=()=>{document.getElementById('manualTime').value=video.currentTime.toFixed(3);manual.hidden=false;manual.scrollIntoView({behavior:'smooth',block:'center'})};
+document.getElementById('cancelManual').onclick=()=>manual.hidden=true;
+document.querySelectorAll('.reject-action').forEach(button=>button.onclick=()=>{const form=button.closest('form');form.querySelector('[name="technique"]').value='none';form.querySelector('[name="target"]').value='none';form.querySelector('[name="outcome"]').value='uncertain';form.requestSubmit(form.querySelector('[type="submit"]'))});
+document.querySelectorAll('.review-form').forEach(form=>form.onsubmit=async event=>{event.preventDefault();const status=form.querySelector('.form-status'),button=event.submitter,data=new FormData(form),manualLabel=form.dataset.manual==='true',card=form.closest('.review-candidate'),wasReviewed=card?.classList.contains('reviewed');if(button){button.disabled=true;button.setAttribute('aria-busy','true')}status.textContent='Saving private correction…';const predicted=manualLabel?{}:{fighter:form.dataset.predictedFighter,technique:form.dataset.predictedTechnique,target:form.dataset.predictedTarget==='none'?null:form.dataset.predictedTarget,outcome:form.dataset.predictedOutcome,family:form.dataset.predictedFamily,limb:form.dataset.predictedLimb};const payload={event_time:Number(data.get('event_time')),predicted,fighter:data.get('fighter'),technique:data.get('technique'),target:data.get('target'),outcome:data.get('outcome'),manual:manualLabel};try{const response=await fetch('/api/annotations/{{job_id}}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),result=await response.json();if(!response.ok)throw new Error(result.detail||'Could not save label');status.textContent=result.sequence_exported?'Saved · opt-in training sequence exported':'Saved privately · model-training export off';status.className='small good form-status';card?.classList.add('reviewed');if(button){button.disabled=false;button.removeAttribute('aria-busy');button.textContent='Save changes'}if(manualLabel){manual.hidden=true;form.reset()}else if(!wasReviewed){const reviewed=document.getElementById('reviewedCount'),remaining=document.getElementById('remainingCount'),complete=document.getElementById('completeReview');if(reviewed)reviewed.textContent=String(Number(reviewed.textContent)+1);if(remaining){const left=Math.max(0,Number(remaining.textContent)-1);remaining.textContent=String(left);if(left===0&&complete){complete.disabled=false;complete.removeAttribute('title');complete.textContent=complete.dataset.readyLabel}}}}catch(error){status.textContent=error.message;status.className='small bad form-status';if(button){button.disabled=false;button.removeAttribute('aria-busy')}}});
+</script>{% endblock %}

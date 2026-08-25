@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block head %}<link rel="stylesheet" href="/static/components.css">{% endblock %}
+{% block title %}WarriorIQ · Analyze Fight{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow">Fight intelligence for athletes and coaches</div>
+    <h1>See the fight. <em>Train what matters.</em></h1>
+    <p>Upload a bout, identify the athletes, and leave with a clear review built for the next session—not another dashboard full of guesses.</p>
+    <div class="hero-actions"><a class="btn" data-motion-primary href="#analyze">Analyze a fight <span aria-hidden="true">→</span></a><a class="btn secondary" href="#how-it-works">How it works</a></div>
+    <div class="fight-path" aria-label="WarriorIQ workflow"><span><b>01</b> Upload</span><i aria-hidden="true"></i><span><b>02</b> Review</span><i aria-hidden="true"></i><span><b>03</b> Train</span></div>
+    <div class="trust-row"><span class="status-dot"></span><span class="small muted">Private processing</span><span class="pill">6 rulesets</span><span class="pill">Evidence linked</span></div>
+  </div>
+  <div class="hero-card" id="analyze" data-upload-state="empty">
+    <div class="console-head"><div><div class="eyebrow">Step 1 of 3</div><h2>Drop in a fight</h2></div><span class="console-badge">{% if allowance and allowance.remaining == 0 %}Limit reached{% elif allowance and allowance.remaining is not none %}{{allowance.remaining}} left{% else %}Ready{% endif %}</span></div>
+    {% if allowance %}<div class="console-allowance"><span>{{allowance.plan.label}}</span><strong>{{allowance.plan.limit_label}}</strong></div>{% endif %}
+    {% set allowance_exhausted = allowance and allowance.remaining == 0 %}
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <div class="field upload-field"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="video/*" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}Resets automatically{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% else %}MP4, MOV, MKV, AVI, M4V or WEBM{% endif %}</div></div>
+      <div class="row">
+        <div class="field"><label for="fightType">Video type</label><select id="fightType" name="fight_type"><option value="competition">Competition</option><option value="sparring">Sparring</option></select></div>
+        <div class="field"><label for="fightRuleset">Ruleset</label><select id="fightRuleset" name="ruleset">{% for key,label in rulesets.items() %}<option value="{{key}}">{{label}}</option>{% endfor %}</select></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label for="roundCount">Rounds</label><input id="roundCount" name="round_count" type="number" min="1" max="20" value="3"></div>
+        <div class="field"><label for="roundSeconds">Round seconds</label><input id="roundSeconds" name="round_duration_seconds" type="number" min="10" value="120"></div>
+      </div>
+      <label class="notice small" style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" name="openai_identity_recovery" value="true"> <span><strong>OpenAI identity recovery</strong><br>When local tracking becomes uncertain, send a few selected fight frames to OpenAI to recover Fighter A/B. Requires an API key and internet connection.</span></label>
+      <div class="upload-consent card-inset" aria-label="Footage confirmations"><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> I own this footage or have permission and another lawful basis to analyse every identifiable person shown.</label><label class="check"><input type="checkbox" name="guardian_authorized_upload" value="true" required> I am authorised to manage this upload. If a child appears, their parent or legal guardian manages the upload and has the rights required for analysis.</label></div>
+      <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Preparing video…" data-motion-primary disabled>Choose a video to continue</button>
+      {% if request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Guest analysis is temporary and automatically removed after two hours. <a class="text-link" href="/signup">Create an account to save progress.</a></p>{% endif %}
+    </form>
+  </div>
+</section>
+<section class="product-section" id="how-it-works"><div class="section-intro" data-reveal><div class="eyebrow">Simple on purpose</div><h2>Three steps. No technical homework.</h2><p>Family-friendly and built for every age. A parent or legal guardian manages younger athletes' accounts and uploads; WarriorIQ handles the complicated analysis behind the scenes.</p></div><div class="grid3" data-motion-sequence="steps">
+  <div class="card step-card"><div class="step-icon">↥</div><div class="feature-number">01</div><h3>Upload your fight</h3><p class="muted">A quick quality check catches hard-to-see footage before the long analysis starts.</p></div>
+  <div class="card step-card"><div class="step-icon">⌗</div><div class="feature-number">02</div><h3>Point out the fighters</h3><p class="muted">Pause on one clear frame and draw a box around each athlete. That is the only manual step.</p></div>
+  <div class="card step-card"><div class="step-icon">↗</div><div class="feature-number">03</div><h3>Take it to training</h3><p class="muted">Replay key moments, understand the evidence, and open a plan based on that fighter’s mistakes.</p></div>
+</div></section>
+
+<section class="product-section"><div class="section-intro" data-reveal><div class="eyebrow">More than a report</div><h2>Your next round starts here.</h2><p>Every useful insight has somewhere to go—into a replay, a training session, or a conversation with your coach.</p></div><div class="feature-band" data-reveal>
+  <a href="/dashboard"><span class="feature-icon">↗</span><h3>See your progress</h3><p class="muted">Follow supported trends across saved fights.</p><b>Open progress →</b></a>
+  <a href="/coach"><span class="feature-icon">◎</span><h3>Train with purpose</h3><p class="muted">Turn report findings into clear assignments.</p><b>Open coach space →</b></a>
+  <a href="/history"><span class="feature-icon">⌁</span><h3>Revisit the action</h3><p class="muted">Find saved fights and replay the key moments.</p><b>Open fight library →</b></a>
+</div></section>
+
+<section class="trust-panel"><div><div class="eyebrow">Built for serious review</div><h2>Evidence before claims.</h2><p>When footage cannot support a conclusion, WarriorIQ says so. Measured observations stay separate from uncertainty, and scorecards remain training estimates—not official judging.</p></div><div class="trust-checks"><span>Confidence-gated scorecards</span><span>Ruleset-aware evidence</span><span>Temporary guest processing</span><span>Account-controlled deletion</span></div></section>
+
+<section class="product-section coach-callout" data-reveal><div><div class="eyebrow">Bring your corner with you</div><h2>Built for athletes. Useful for coaches.</h2><p class="muted">Save progress, share a private summary, and turn the same fight evidence into practical work between sessions.</p></div><div class="hero-actions"><a class="btn" href="/signup">Create private workspace</a><a class="btn secondary" href="/pricing">Explore beta plans</a></div></section>
+
+<section class="product-section faq"><div class="section-intro" data-reveal><div class="eyebrow">Questions</div><h2>Before you upload</h2></div><details><summary>Is WarriorIQ an official judge?</summary><p>No. Scorecards are evidence-gated estimates for training and review, not replacements for licensed officials.</p></details><details><summary>Does a guest fight remain saved?</summary><p>No. Guest files are held temporarily so the report can work, excluded from the fight library, and automatically removed after two hours.</p></details><details><summary>What happens when the AI is uncertain?</summary><p>It uses recovery evidence and suppresses unsupported claims. The planned uncertainty flow asks only a few simple questions when automatic recovery cannot resolve an important moment.</p></details>
+</section>
+{% endblock %}
+{% block scripts %}<script>const videoInput=document.getElementById('fightVideo'),fileStatus=document.getElementById('fileStatus'),fileButton=document.getElementById('fileButton'),fileButtonText=document.getElementById('fileButtonText'),uploadSubmit=document.getElementById('uploadSubmit'),uploadCard=document.getElementById('analyze');videoInput.addEventListener('change',()=>{const ready=Boolean(videoInput.files[0]);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?'Ready for WarriorIQ analysis':'MP4, MOV, MKV, AVI, M4V or WEBM';fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}});</script>{% endblock %}

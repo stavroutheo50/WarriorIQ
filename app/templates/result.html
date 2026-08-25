@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Fight Report · WarriorIQ{% endblock %}
+{% block content %}
+<div class="section-title result-hero" data-reveal>
+  <div><div class="eyebrow">Analysis complete</div><h2>Fight analysis</h2></div>
+  <div class="selection-tools">{% if can_share %}<form action="/share/{{job_id}}" method="post"><button class="btn" type="submit">Create 7-day coach link</button></form><form action="/shares/{{job_id}}/revoke" method="post"><button class="btn secondary" type="submit">Revoke links</button></form>{% endif %}</div>
+</div>
+{% if not request.state.account %}<div class="notice"><strong>Temporary guest report:</strong> this fight is not in the saved library and its local files are automatically removed after two hours. <a class="text-link" href="/signup">Create an account before the next analysis to build progress.</a></div>{% endif %}
+{% if report_access.report_tier != 'full' %}<div class="report-access-banner"><div><span class="eyebrow">{{report_access.report_label}}</span><strong>{{report_access.label}} report depth</strong><p>{% if report_access.report_tier == 'compact' %}This view includes the essential summary, estimated scorecard, three key moments, and one coaching priority.{% else %}This view includes core performance, scorecard, coaching highlights, and a short training plan.{% endif %}</p></div><a class="btn secondary" href="/pricing">Compare report levels</a></div>{% endif %}
+
+{% set focus=report.video.focus_fighter|default(report.video.analysis_target|default('BOTH'), true) %}{% set analysis_target=report.video.analysis_target|default('BOTH') %}{% set action_ready=report.integrity.action_metrics_trusted|default(false) %}
+{% if not report.integrity.identity_evidence_trusted|default(true) %}<div class="notice bad"><strong>Fighter identity check failed.</strong> This result is not safe to use because at least one selected fighter was not tracked reliably. <a class="text-link" href="/select/{{job_id}}">Choose the fighters again</a>.</div>{% elif not action_ready %}<div class="notice automatic-notice"><strong>Fully automatic movement report ready.</strong> Identity-safe pose measurements power the performance cards, coach report, and training plan. Strike labels stay hidden while the action model is in calibration, and a visible score remains preliminary. You do not need to label, verify, or correct anything.</div>{% else %}<div class="notice good automatic-notice"><strong>Fully automatic evidence report ready.</strong> Every displayed action passed the active model and evidence gates. No manual scorecard work is required.</div>{% endif %}
+<nav class="report-path" aria-label="Fight report sections" data-reveal><div><span class="eyebrow">Fighter {{focus}} report</span><strong>Four useful stops</strong></div><a href="#report-performance">Performance</a><a href="#report-scorecard">Scorecard</a><a href="#report-coaching">Coach advice</a><a href="#report-training">Training plan</a></nav>
+<section class="analysis-quality {{analysis_quality.tone}}" aria-label="Analysis quality summary">
+  <div class="analysis-quality-heading"><div><span class="eyebrow">How well did WarriorIQ observe this fight?</span><h2>{{analysis_quality.label}}</h2></div><span class="quality-focus">Detailed report · Fighter {{analysis_quality.focus}}</span></div>
+  <div class="analysis-quality-grid">
+    <div><span>Fighter A observed</span><strong>{{'%.0f'|format(analysis_quality.coverage.A*100)}}%</strong></div>
+    <div><span>Fighter B observed</span><strong>{{'%.0f'|format(analysis_quality.coverage.B*100)}}%</strong></div>
+    <div><span>Fighter {{analysis_quality.focus}} pose evidence</span><strong>{{'%.0f'|format(analysis_quality.pose_coverage*100)}}%</strong></div>
+    <div><span>Identity stability</span><strong>{{'Stable' if analysis_quality.identity_stable else 'Needs attention'}}</strong></div>
+    <div><span>Action evidence</span><strong>{{'Validated' if analysis_quality.action_trusted else 'Still calibrating'}}</strong></div>
+  </div>
+  <p>Observation coverage is the share of analyzed frames with a usable fighter observation. It is not ground-truth identity or action accuracy.</p>
+</section>
+<div class="grid{% if focus != 'BOTH' %} single{% endif %}" id="report-performance">
+{% for fighter in ['A','B'] %}
+{% if focus == 'BOTH' or focus == fighter %}
+{% set m=report.metrics[fighter] %}
+<section class="card performance-card fighter-{{fighter|lower}}">
+  <div style="display:flex;gap:16px;align-items:center">
+    <img src="/fighter-portrait/{{job_id}}/{{fighter}}" alt="Fighter {{fighter}}" style="width:84px;height:84px;object-fit:cover;border-radius:16px;border:1px solid var(--border)" onerror="this.style.display='none'">
+    <div><div class="eyebrow">Fighter {{fighter}}</div><h2 style="margin:4px 0">Performance</h2></div>
+  </div>
+  <div class="performance-rail" tabindex="0" aria-label="Fighter {{fighter}} performance measurements; scroll horizontally for more">
+    <article class="performance-stat"><span>Pose evidence</span><strong>{{'%.0f'|format(m.pose_coverage*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} pose evidence" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.pose_coverage*100)}}"><i style="--meter-value:{{'%.1f'|format(m.pose_coverage*100)}}%"></i></div><small>Usable fighter observations</small></article>
+    {% if m.guard_index is not none %}<article class="performance-stat"><span>Guard baseline</span><strong>{{'%.0f'|format(m.guard_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} guard-position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.guard_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.guard_index*100)}}%"></i></div><small>Hands near defensive position</small></article>{% endif %}
+    {% if m.balance_index is not none %}<article class="performance-stat"><span>Balance baseline</span><strong>{{'%.0f'|format(m.balance_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} post-action balance baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.balance_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.balance_index*100)}}%"></i></div><small>Stable movement frames</small></article>{% endif %}
+    {% if m.ring_center_control is not none %}<article class="performance-stat"><span>Center position</span><strong>{{'%.0f'|format(m.ring_center_control*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} ring-center position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.ring_center_control*100)}}"><i style="--meter-value:{{'%.1f'|format(m.ring_center_control*100)}}%"></i></div><small>Time near the ring center</small></article>{% endif %}
+    {% if action_ready and m.attacks.accuracy is not none %}<article class="performance-stat"><span>Action conversion</span><strong>{{'%.0f'|format(m.attacks.accuracy*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} verified action conversion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.attacks.accuracy*100)}}"><i style="--meter-value:{{'%.1f'|format(m.attacks.accuracy*100)}}%"></i></div><small>Evidence-supported actions</small></article>{% endif %}
+  </div>
+  {% if action_ready %}<div class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:16px">
+    <div class="metric"><div class="value">{{m.attacks.landed}}</div><div class="label">Landed</div></div>
+    <div class="metric"><div class="value">{{m.attacks.attempts}}</div><div class="label">Attempts</div></div>
+    <div class="metric"><div class="value">{% if m.attacks.accuracy is not none %}{{'%.0f'|format(m.attacks.accuracy*100)}}%{% else %}—{% endif %}</div><div class="label">Accuracy</div></div>
+  </div>{% endif %}
+  {% set ns=namespace(items=[]) %}{% for key,item in m.availability.items() %}{% if not item.available and not (key == 'round_consistency' and report.setup.round_count < 2) %}{% set ns.items=ns.items+[item] %}{% endif %}{% endfor %}{% set unavailable=ns.items %}
+  {% if unavailable %}<div class="notice"><strong>Evidence limitations</strong><ul class="list-clean">{% set limitation_count = 3 if report_access.report_tier == 'full' else 2 if report_access.report_tier == 'expanded' else 1 %}{% for item in unavailable[:limitation_count] %}<li>{{item.reason}}</li>{% endfor %}</ul></div>{% endif %}
+  <details class="report-details">
+  <summary>More performance details <span>Open the deeper numbers only when you need them</span></summary>
+  <div class="report-details-body">
+  <div class="performance-insights">
+    <article><span>Guard</span><strong>{% if m.guard_index is not none %}{{'%.0f'|format(m.guard_index*100)}}%{% else %}Not measured{% endif %}</strong><p>How often the hands stayed near a defensive position in usable pose frames.</p></article>
+    <article><span>Balance</span><strong>{% if m.balance_index is not none %}{{'%.0f'|format(m.balance_index*100)}}%{% else %}Not measured{% endif %}</strong><p>How often the athlete maintained a stable base during measured movement.</p></article>
+    <article><span>Ring position</span><strong>{% if m.ring_center_control is not none %}{{'%.0f'|format(m.ring_center_control*100)}}%{% else %}Not measured{% endif %}</strong><p>The share of observed movement spent near the central fighting space.</p></article>
+    <article><span>Footwork pace</span><strong>{% if m.footwork_body_lengths_per_second is not none %}{{'%.2f'|format(m.footwork_body_lengths_per_second)}}{% else %}Not measured{% endif %}</strong><p>Body-lengths travelled per second, normalized to the selected athlete.</p></article>
+  </div>
+  <div class="table-wrap"><table>
+    <tr><td>Pose coverage</td><td>{{'%.1f'|format(m.pose_coverage*100)}}%</td></tr>
+    {% if action_ready %}<tr><td>Strongest weapon</td><td>{{m.strongest_weapon|default('No confirmed weapon', true)}}</td></tr>{% endif %}
+    {% if action_ready and report_access.report_tier in ['expanded','full'] %}
+    <tr><td>Missed / blocked / checked</td><td>{{m.attacks.missed}} / {{m.attacks.blocked}} / {{m.attacks.checked}}</td></tr>
+    <tr><td>Combinations</td><td>{{m.combinations.count}} · max {{m.combinations.max_length}}</td></tr>
+    <tr><td>Counters</td><td>{{m.counters.count}}</td></tr>
+    {% endif %}
+    {% if report_access.report_tier in ['expanded','full'] %}<tr><td>Guard-position baseline</td><td>{% if m.guard_index is not none %}{{'%.0f'|format(m.guard_index*100)}}%{% else %}{{m.availability.guard.reason}}{% endif %}</td></tr>{% endif %}
+    {% if report_access.report_tier == 'full' %}
+    <tr><td>Post-action balance baseline</td><td>{% if m.balance_index is not none %}{{'%.0f'|format(m.balance_index*100)}}%{% else %}{{m.availability.balance.reason}}{% endif %}</td></tr>
+    <tr><td>Ring-center position baseline</td><td>{% if m.ring_center_control is not none %}{{'%.0f'|format(m.ring_center_control*100)}}%{% else %}{{m.availability.movement.reason}}{% endif %}</td></tr>
+    <tr><td>Pressure index</td><td>{% if m.pressure_index is not none %}{{'%.2f'|format(m.pressure_index)}}{% else %}{{m.availability.movement.reason}}{% endif %}</td></tr>
+    <tr><td>Footwork</td><td>{% if m.footwork_body_lengths_per_second is not none %}{{'%.2f'|format(m.footwork_body_lengths_per_second)}} body-lengths/s{% else %}{{m.availability.movement.reason}}{% endif %}</td></tr>
+    {% endif %}
+  </table></div>
+  {% if report_access.report_tier == 'full' and report.metrics.round_pose_coverage %}<h3>Fighter {{fighter}} round-by-round evidence</h3><div class="table-wrap"><table><thead><tr><th>Round</th><th>Usable pose evidence</th></tr></thead><tbody>{% for round,coverage in report.metrics.round_pose_coverage.items() %}<tr><td>{{round}}</td><td>{{'%.1f'|format(coverage[fighter]*100)}}%</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+
+  {% if action_ready and report_access.report_tier in ['expanded','full'] %}
+  <h3>Performance dashboard</h3>
+  {% set d=m.dashboard %}
+  <div class="metric-grid">
+    <div class="metric"><div class="value">{% if d.technique_execution_confidence is not none %}{{'%.0f'|format(d.technique_execution_confidence*100)}}%{% else %}<span class="small">No verified landings</span>{% endif %}</div><div class="label">Technique evidence</div></div>
+    <div class="metric"><div class="value">{% if d.defense_response_rate is not none %}{{'%.0f'|format(d.defense_response_rate*100)}}%{% else %}<span class="small">No verified attacks</span>{% endif %}</div><div class="label">Defense response</div></div>
+    <div class="metric"><div class="value">{{'%.1f'|format(d.activity_attempts_per_minute)}}</div><div class="label">Attempts / min</div></div>
+    <div class="metric"><div class="value">{{'%.1f'|format(d.combinations_per_minute)}}</div><div class="label">Combos / min</div></div>
+    {% if report.setup.round_count > 1 %}<div class="metric"><div class="value">{% if d.round_to_round_consistency is not none %}{{'%.0f'|format(d.round_to_round_consistency*100)}}%{% else %}<span class="small">Not enough round evidence</span>{% endif %}</div><div class="label">Round consistency</div></div>{% endif %}
+  </div>{% endif %}
+  {% if action_ready and report_access.report_tier == 'full' %}
+  <h3>Offensive profile</h3>
+  <div class="table-wrap"><table><thead><tr><th>Measure</th><th>Result</th></tr></thead><tbody>
+    <tr><td>Activity</td><td>{{'%.1f'|format(d.activity_attempts_per_minute)}} attempts per minute</td></tr>
+    <tr><td>Combination rate</td><td>{{'%.1f'|format(d.combinations_per_minute)}} per minute</td></tr>
+    <tr><td>Longest detected sequence</td><td>{{m.combinations.max_length}} techniques</td></tr>
+    {% for family,count in m.attacks.families.items() %}<tr><td>{{family.replace('_',' ')|title}} attempts</td><td>{{count}}</td></tr>{% endfor %}
+    {% for target,count in m.attacks.targets_landed.items() %}<tr><td>Verified {{target}} successes</td><td>{{count}}</td></tr>{% endfor %}
+  </tbody></table></div>
+
+  <h3>Evidence breakdown</h3>
+  <div class="table-wrap"><table><thead><tr><th>Category</th><th>Evidence</th><th>Count</th></tr></thead><tbody>
+  {% for name, count in m.attacks.techniques.items() %}{% if loop.index <= 3 %}<tr><td>Technique</td><td>{{name.replace('_',' ')|title}}</td><td>{{count}}</td></tr>{% endif %}{% endfor %}
+  {% for name, count in m.attacks.targets_landed.items() %}{% if loop.index <= 2 %}<tr><td>Successful target</td><td>{{name|title}}</td><td>{{count}}</td></tr>{% endif %}{% endfor %}
+  {% for name, count in m.defenses.items() %}{% if loop.index <= 2 %}<tr><td>Defense</td><td>{{name.replace('_',' ')|title}}</td><td>{{count}}</td></tr>{% endif %}{% endfor %}
+  {% for name, count in m.vulnerability_targets.items() %}{% if loop.index <= 2 %}<tr><td>Needs protection</td><td>{{name|title}}</td><td>{{count}}</td></tr>{% endif %}{% endfor %}
+  {% if not m.attacks.techniques and not m.attacks.targets_landed and not m.defenses and not m.vulnerability_targets %}<tr><td colspan="3" class="muted">No verified evidence available.</td></tr>{% endif %}
+  </tbody></table></div>
+  {% endif %}
+  </div></details>
+</section>
+{% endif %}
+{% endfor %}
+</div>
+
+<section class="card" id="report-scorecard">
+  <div class="section-title" style="margin-top:0"><h2>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary automatic scorecard{% else %}Automatic estimated scorecard{% endif %}</h2><span class="pill">{{report.scorecard.ruleset_label}}</span></div>
+  {% if report.scorecard.available %}<div class="grid">
+    <div><div class="score">{{report.scorecard.totals.A}}</div><div class="muted">Fighter A</div></div>
+    <div><div class="score">{{report.scorecard.totals.B}}</div><div class="muted">Fighter B</div></div>
+  </div>{% else %}<div class="notice">{{report.scorecard.disclaimer}}</div>{% endif %}
+  <p class="small muted">{{report.scorecard.disclaimer}}</p>
+  {% if report.scorecard.evidence and analysis_target == 'BOTH' and report.scorecard.status != 'identity_integrity_failed' %}<p class="small muted">Evidence used: {% if report.scorecard.evidence.evidence_source == 'unvalidated_action_candidates' %}{{report.scorecard.evidence.scoring_action_candidates}} unverified scoring candidates{% else %}{{report.scorecard.evidence.verified_scoring_actions}} verified scoring actions{% endif %} · A {{'%.0f'|format(report.scorecard.evidence.fighter_A_tracking_coverage*100)}}% / B {{'%.0f'|format(report.scorecard.evidence.fighter_B_tracking_coverage*100)}}% observation coverage.</p>{% endif %}
+  {% if report.scorecard.available %}<div class="table-wrap"><table><thead><tr><th>Round</th><th>A</th><th>B</th><th>Estimate</th></tr></thead><tbody>{% for r in report.scorecard.rounds %}<tr><td>{{r.round}}</td><td>{{r.fighter_A}}</td><td>{{r.fighter_B}}</td><td>{{r.winner}}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+</section>
+
+<div class="grid{% if focus != 'BOTH' %} single{% endif %}" id="report-coaching">
+{% for fighter in ['A','B'] %}
+{% if focus == 'BOTH' or focus == fighter %}
+<section class="card"><div class="eyebrow">Coach report · Fighter {{fighter}}</div>{% if report.coaching[fighter].evidence_type|default('') == 'pose_only' %}<p class="muted">Built from this fighter's identity-safe pose measurements. Strike-specific advice remains hidden until action labels are validated.</p>{% elif not action_ready %}<p class="muted">Coach advice is withheld because this fighter did not pass the identity check.</p>{% endif %}
+  {% if report_access.report_tier != 'compact' %}{% set strengths = report.coaching[fighter].strengths if report_access.report_tier == 'full' else report.coaching[fighter].strengths[:report_access.coaching_items] %}<h3>Strengths</h3><ul class="list-clean">{% for x in strengths %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span>{% if x.evidence_times %}<div class="small">Evidence: {{x.evidence_times}}</div>{% endif %}</li>{% else %}<li class="muted">No evidence-backed strength item available yet.</li>{% endfor %}</ul>{% endif %}
+  {% set improvements = report.coaching[fighter].improvements if report_access.report_tier == 'full' else report.coaching[fighter].improvements[:report_access.coaching_items] %}<h3>{% if report_access.report_tier == 'compact' %}Top coaching priority{% else %}Improvements{% endif %}</h3><ul class="list-clean">{% for x in improvements %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span>{% if x.evidence_times %}<div class="small">Evidence: {{x.evidence_times}}</div>{% endif %}</li>{% else %}<li class="muted">No evidence-backed improvement item available yet.</li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endfor %}
+</div>
+
+{% if report_access.training_items != 0 %}<div class="grid{% if focus != 'BOTH' %} single{% endif %}" id="report-training">
+{% for fighter in ['A','B'] %}{% if focus == 'BOTH' or focus == fighter %}
+{% set training = report.training_plan[fighter] if report_access.report_tier == 'full' else report.training_plan[fighter][:report_access.training_items] %}<section class="card"><div class="eyebrow">Training plan · Fighter {{fighter}}</div><h2>Next-session plan</h2><ul class="list-clean">{% for x in training %}<li><strong>{{x.focus}}</strong><br><span class="muted">{{x.work}}</span><div class="small">Goal: {{x.goal}}</div></li>{% else %}<li class="muted">No safe plan could be generated from this analysis.</li>{% endfor %}</ul></section>
+{% endif %}{% endfor %}
+</div>{% else %}<section class="locked-report-card" id="report-training"><div><div class="eyebrow">Complete training plan</div><h2>Turn the report into your next session.</h2><p class="muted">Expanded and Complete reports include a fighter-specific training plan linked to the measured evidence.</p></div><a class="btn secondary" href="/pricing">See report options</a></section>{% endif %}
+
+<section class="card replay-callout">
+  <div><div class="eyebrow">Fighter {{focus}} replay</div><h2>Watch the movement with skeletons</h2><p class="muted">Use the normal video controls. The overlay follows only the athlete selected for this detailed report, and any trusted key moments start one second before the action.</p></div>
+  <a class="btn" href="/replay/{{job_id}}" data-motion-primary>Replay with skeletons</a>
+</section>
+
+{% if report_access.report_tier == 'full' %}
+<section class="card">
+  <div class="section-title" style="margin-top:0"><h2>Illegal moves · {{report.scorecard.ruleset_label}}</h2><span class="pill">WAKO rules</span></div>
+  {% for e in report.illegal_moves|default([]) %}{% if focus == 'BOTH' or focus == e.fighter %}<div class="event"><div>R{{e.round_number or '-'}}</div><div class="time">{{'%.2f'|format(e.peak_time)}}s</div><div><strong>Fighter {{e.fighter}}</strong> · {{e.technique.replace('_',' ')|title}}</div><div class="bad">Illegal</div><div class="small muted">{{e.legality_reason}}</div></div>{% endif %}{% else %}<p class="muted">No automatic illegal-technique label passed the evidence gate for Fighter {{focus}} in this ruleset.</p>{% endfor %}
+  <p class="small muted">{{report.integrity.rules_reference}}</p>
+</section>
+{% endif %}
+
+{% if report_access.report_tier == 'full' %}<details class="card report-technical"><summary><span><strong>Technical analysis details</strong><small>Tracking, timing and model information</small></span><b aria-hidden="true">＋</b></summary><div class="report-technical-body"><div class="eyebrow">Performance integrity</div><div class="metric-grid">
+  <div class="metric"><div class="value">{{'%.1f'|format(report.performance.analysis_seconds)}}s</div><div class="label">Analysis time</div></div>
+  <div class="metric"><div class="value">{{'%.1f'|format(report.performance.segment_duration_seconds)}}s</div><div class="label">Video analyzed</div></div>
+  <div class="metric"><div class="value">{{'%.1f'|format(report.tracking.fighter_A_coverage*100)}}%</div><div class="label">A observation coverage</div></div>
+  <div class="metric"><div class="value">{{'%.1f'|format(report.tracking.fighter_B_coverage*100)}}%</div><div class="label">B observation coverage</div></div>
+</div>
+<h3>AI tracking consensus</h3>
+<div class="table-wrap"><table>
+  <tr><td>Fighter A first-frame identity gate</td><td>{% if report.tracking.fighter_A_initial_lock_safe|default(false) %}Passed · {{report.tracking.fighter_A_seed_source|replace('_',' ')|title}}{% else %}<span class="bad">Failed · choose Fighter A again</span>{% endif %}</td></tr>
+  <tr><td>Fighter B first-frame identity gate</td><td>{% if report.tracking.fighter_B_initial_lock_safe|default(false) %}Passed · {{report.tracking.fighter_B_seed_source|replace('_',' ')|title}}{% else %}<span class="bad">Failed · choose Fighter B again</span>{% endif %}</td></tr>
+  <tr><td>SAM2 continuous mask tracking</td><td>{% if report.tracking.sam_continuous_frames|default(0) > 0 %}Active · {{report.tracking.sam_continuous_frames}} propagated frames{% else %}Unavailable{% if report.tracking.sam_continuous_failure_reason %} · {{report.tracking.sam_continuous_failure_reason}}{% endif %}{% endif %}</td></tr>
+  <tr><td>Pose detector and ReID tracker</td><td>{{report.performance.pose_model}} · {{report.performance.gpu}}</td></tr>
+  <tr><td>Fighter A SAM-confirmed observations</td><td>{{report.tracking.fighter_A_sam_guided_frames|default(0)}}</td></tr>
+  <tr><td>Fighter B SAM-confirmed observations</td><td>{{report.tracking.fighter_B_sam_guided_frames|default(0)}}</td></tr>
+  <tr><td>Fighter A focused pose recoveries</td><td>{{report.tracking.fighter_A_guided_pose_recoveries|default(0)}}</td></tr>
+  <tr><td>Fighter B focused pose recoveries</td><td>{{report.tracking.fighter_B_guided_pose_recoveries|default(0)}}</td></tr>
+  <tr><td>OpenAI ambiguity referee</td><td>{% if report.tracking.openai_identity_enabled %}Enabled · {{report.tracking.openai_identity_attempts}} reviews · {{report.tracking.openai_identity_recoveries}} recoveries{% else %}Not enabled for this analysis{% endif %}</td></tr>
+</table></div>
+{% if report.metrics.round_pose_coverage %}<h3>Round-by-round pose evidence</h3><div class="table-wrap"><table><thead><tr><th>Round</th><th>Fighter A</th><th>Fighter B</th></tr></thead><tbody>{% for round,coverage in report.metrics.round_pose_coverage.items() %}<tr><td>{{round}}</td><td>{{'%.1f'|format(coverage.A*100)}}%</td><td>{{'%.1f'|format(coverage.B*100)}}%</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+<p class="small muted">Observation coverage means a fighter observation was available; it is not presented as identity accuracy. First-frame identity and propagated-mask agreement are checked separately.</p>
+<p class="small muted">Classifier: {{report.classifier.action_classifier}} · {{report.integrity.uncertainty_policy}}</p>
+<p class="small muted">Speed budget: {% if report.performance.within_video_length_budget %}passed{% else %}not yet passed{% endif %}. Quality mode: {{report.performance.quality_mode}}.</p>
+</div></details>{% endif %}
+{% endblock %}

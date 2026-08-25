@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#081226">
+  <meta name="description" content="{% block description %}WarriorIQ turns kickboxing video into evidence-backed coaching and training priorities.{% endblock %}">
+  <meta name="application-name" content="WarriorIQ"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="WarriorIQ"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="robots" content="{% if request.state.noindex %}noindex,nofollow{% else %}index,follow,max-image-preview:large{% endif %}">
+  {% if request.state.canonical_url %}<link rel="canonical" href="{{request.state.canonical_url}}">{% endif %}
+  <meta property="og:type" content="website"><meta property="og:site_name" content="WarriorIQ">
+  <meta property="og:title" content="WarriorIQ · Evidence-backed kickboxing analysis">
+  <meta property="og:description" content="Turn fight video into reviewable evidence, coaching priorities and a fighter-specific training plan.">
+  {% if request.state.canonical_url %}<meta property="og:url" content="{{request.state.canonical_url}}">{% endif %}
+  {% if request.state.social_image_url %}<meta property="og:image" content="{{request.state.social_image_url}}"><meta property="og:image:alt" content="WarriorIQ logo">{% endif %}
+  <meta name="twitter:card" content="summary"><meta name="twitter:title" content="WarriorIQ">
+  <title>{% block title %}WarriorIQ{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/navigation.css">
+  <link rel="stylesheet" href="/static/fixes.css?v=20260826-live3">
+  <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" type="image/png" href="/static/warrioriq-logo.png"><link rel="apple-touch-icon" href="/static/warrioriq-logo.png">
+  {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-backed kickboxing video analysis for athletes and coaches.","url":"{{request.state.canonical_url}}"}</script>{% endif %}
+  {% block head %}{% endblock %}
+  <link rel="stylesheet" href="/static/motion.css?v=20260825-1">
+</head>
+{% set page_key = request.url.path.strip('/').split('/')[0] if request.url.path.strip('/') else 'home' %}
+<body data-page="{{page_key}}">
+  <div class="page-scroll-progress" id="pageScrollProgress" aria-hidden="true"><i></i></div>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <button class="global-back" id="globalBack" type="button" aria-label="Go to the previous WarriorIQ page">← <span>Back</span></button>
+  <div class="shell">
+    <nav class="nav" aria-label="Main navigation">
+      <a class="brand" href="/"><img class="brand-logo" src="/static/warrioriq-logo.png" alt="WarriorIQ logo">WARRIOR<span>IQ</span></a>
+      <div class="navlinks">
+        <a data-nav="analyze" href="/">Analyze</a><a data-nav="progress" href="/dashboard">Progress</a><a data-nav="coach" href="/coach">Coach</a><a data-nav="plans" href="/pricing">Plans</a>
+        <details class="nav-more" id="navMore"><summary>More <span aria-hidden="true">⌄</span></summary><div class="nav-more-panel"><a href="/history">Fight library<span>Saved analyses</span></a><a href="/compare">Compare fights<span>See changes over time</span></a><a href="/validation">Accuracy lab<span>Model validation</span></a></div></details>
+      </div>
+      <div class="account-nav">{% if request.state.active_analysis %}<a class="active-analysis-chip" id="activeAnalysisLink" data-analysis-status="{{request.state.active_analysis.status}}" href="/{% if request.state.active_analysis.status == 'complete' %}result{% else %}progress{% endif %}/{{request.state.active_analysis.job_id}}"><i aria-hidden="true"></i><span id="activeAnalysisLabel">{% if request.state.active_analysis.status == 'complete' %}Results ready{% elif request.state.active_analysis.status == 'interrupted' %}Analysis paused{% elif request.state.active_analysis.status == 'error' %}Analysis needs attention{% else %}Analyzing {{'%.0f'|format(request.state.active_analysis.percent or 0)}}%{% endif %}</span></a>{% endif %}{% if request.state.account %}<a href="/profile" class="account-chip">{{request.state.account.email}}</a><form action="/logout" method="post"><button type="submit" class="nav-text-button">Sign out</button></form>{% else %}<a href="/login">Sign in</a><a class="btn nav-signup" href="/signup">Create account</a>{% endif %}</div>
+      <button class="mobile-menu-button" id="mobileMenuButton" type="button" aria-expanded="false" aria-controls="mobileMenu" aria-label="Open navigation"><span></span><span></span><span></span></button>
+    </nav>
+    <div class="mobile-menu" id="mobileMenu" hidden>{% if request.state.active_analysis %}<a class="active-analysis-mobile" id="activeAnalysisMobile" href="/{% if request.state.active_analysis.status == 'complete' %}result{% else %}progress{% endif %}/{{request.state.active_analysis.job_id}}">● {% if request.state.active_analysis.status == 'complete' %}Open completed results{% elif request.state.active_analysis.status == 'error' %}Analysis needs attention{% else %}Return to live analysis{% endif %}</a>{% endif %}<a href="/">Analyze</a><a href="/dashboard">Progress</a><a href="/coach">Coach</a><a href="/pricing">Plans</a>{% if request.state.account %}<a href="/profile">My account</a><form action="/logout" method="post"><button type="submit">Sign out</button></form>{% else %}<a href="/login">Sign in</a><a href="/signup">Create account</a>{% endif %}</div>
+    <main id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>
+    <footer class="footer legal-footer"><div><strong>WARRIORIQ</strong><span>Training support from reviewable fight evidence—not an official judge.</span></div><nav aria-label="Legal and support"><a href="/legal">Legal center</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/cookies">Cookies</a><a href="/accessibility">Accessibility</a><a href="/dmca">Copyright</a><a href="/security">Security</a><a href="/contact">Contact</a></nav><span class="small muted">Policy version {{request.state.launch.policy_version}} · © 2026 WarriorIQ</span></footer>
+  </div>
+  <aside class="cookie-notice" id="cookieNotice" aria-labelledby="cookieTitle" hidden><div><strong id="cookieTitle">Essential cookies only</strong><p>WarriorIQ uses session and guest cookies for private access. Optional analytics and advertising trackers are off in this build.</p></div><div class="selection-tools"><a class="btn secondary" href="/cookies">Cookie details</a><button class="btn" id="acceptEssentialCookies" type="button">Understood</button></div></aside>
+  <div class="app-toast" id="appToast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+  {% block scripts %}{% endblock %}
+  <script>
+  (()=>{
+    const path=location.pathname,back=document.getElementById('globalBack'),menuButton=document.getElementById('mobileMenuButton'),mobileMenu=document.getElementById('mobileMenu'),navMore=document.getElementById('navMore'),toast=document.getElementById('appToast'),cookieNotice=document.getElementById('cookieNotice'),acceptEssentialCookies=document.getElementById('acceptEssentialCookies');
+    const fallback=()=>{const match=path.match(/^\/(frame|select|progress|result|replay|review)\/([^/]+)/);if(match){const[,page,id]=match;if(page==='select')return`/frame/${id}`;if(page==='progress')return`/select/${id}`;if(page==='replay'||page==='review')return`/result/${id}`;if(page==='result')return'/history'}return'/'};
+    if(path==='/')back.hidden=true;
+    back.addEventListener('click',()=>{let previous=null;try{previous=document.referrer?new URL(document.referrer):null}catch{}if(previous&&previous.origin===location.origin&&previous.pathname!==path)history.back();else location.href=fallback()});
+    menuButton.addEventListener('click',()=>{const open=mobileMenu.hidden;mobileMenu.hidden=!open;menuButton.setAttribute('aria-expanded',String(open));menuButton.setAttribute('aria-label',open?'Close navigation':'Open navigation');document.body.classList.toggle('menu-open',open)});
+    document.addEventListener('click',event=>{if(navMore?.open&&!navMore.contains(event.target))navMore.open=false});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'){if(navMore)navMore.open=false;if(!mobileMenu.hidden){mobileMenu.hidden=true;menuButton.setAttribute('aria-expanded','false');menuButton.setAttribute('aria-label','Open navigation');document.body.classList.remove('menu-open')}}});
+    const active=path==='/'||/^\/(frame|select)\//.test(path)?'analyze':/^\/(dashboard|history|compare|progress|result|replay|review)\b/.test(path)?'progress':path.startsWith('/coach')?'coach':path.startsWith('/pricing')?'plans':'';
+    const activeLink=document.querySelector(`[data-nav="${active}"]`);if(activeLink)activeLink.setAttribute('aria-current','page');
+    let toastTimer;window.wiqToast=(message,tone='info')=>{clearTimeout(toastTimer);toast.textContent=message;toast.dataset.tone=tone;toast.hidden=false;requestAnimationFrame(()=>toast.classList.add('show'));toastTimer=setTimeout(()=>{toast.classList.remove('show');setTimeout(()=>toast.hidden=true,180)},2800)};
+    let cookieAcknowledged=false;try{cookieAcknowledged=localStorage.getItem('warrioriq_cookie_notice')==='acknowledged'}catch{}if(!cookieAcknowledged)cookieNotice.hidden=false;acceptEssentialCookies.addEventListener('click',()=>{try{localStorage.setItem('warrioriq_cookie_notice','acknowledged')}catch{}cookieNotice.hidden=true});
+    document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{if(event.defaultPrevented||form.dataset.async==='true')return;const submitter=event.submitter;if(!submitter||submitter.dataset.keepLabel==='true')return;submitter.dataset.originalLabel=submitter.textContent;submitter.textContent=submitter.dataset.loadingLabel||'Working…';submitter.setAttribute('aria-busy','true');submitter.disabled=true}));
+  })();
+  </script>
+  <script src="/static/motion.js?v=20260825-1" defer></script>
+</body></html>

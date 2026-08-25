@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Live analysis · WarriorIQ{% endblock %}
+{% block content %}
+<section class="analysis-page live-analysis-page" id="analysisPage" aria-labelledby="analysisTitle">
+  <div class="live-analysis-toolbar">
+    <a class="analysis-exit" href="/dashboard">← Leave analysis running</a>
+    <div class="analysis-live"><i aria-hidden="true"></i><span id="liveLabel">Connecting to analysis…</span></div>
+  </div>
+
+  <header class="analysis-header live-analysis-header" data-reveal>
+    <div><div class="eyebrow">Live fight analysis</div><h1 id="analysisTitle">Watch WarriorIQ read the fight.</h1><p>The video stays at the center while supported observations arrive from the real analysis pipeline.</p></div>
+    <div class="analysis-scoreboard"><div class="big-progress" id="percent">0%</div><span>Real pipeline progress</span></div>
+  </header>
+
+  <div class="live-analysis-grid">
+    <section class="live-video-card" aria-label="Fight video and analysis overlays">
+      <div class="live-video-wrap" id="videoWrap">
+        <video id="liveVideo" src="/media/{{job_id}}" controls playsinline preload="metadata"></video>
+        <div class="live-video-status"><span id="videoStage">Preparing video</span><small id="analysisCursor">Waiting for the first analyzed frame</small></div>
+        <div class="fighter-overlay fighter-a" id="fighterAOverlay" hidden><b>A</b><span>Fighter A</span></div>
+        <div class="fighter-overlay fighter-b" id="fighterBOverlay" hidden><b>B</b><span>Fighter B</span></div>
+        <div class="event-flash" id="eventFlash" hidden></div>
+      </div>
+      <div class="analysis-timeline" id="analysisTimeline" aria-label="Detected event timeline">
+        <div class="analysis-frontier" id="analysisFrontier"></div>
+        <div class="analysis-markers" id="analysisMarkers"></div>
+      </div>
+      <div class="progress-shell analysis-progress" role="progressbar" aria-label="Fight analysis progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressShell"><div class="progress-bar" id="bar"></div></div>
+      <div class="live-status-row"><p id="message" role="status" aria-live="polite">Queued for fight analysis…</p><span id="timing">Analysis running 0s · ETA calculating…</span></div>
+      <p class="playback-ahead" id="playbackAhead" hidden>This section is playable, but WarriorIQ has not analyzed it yet.</p>
+    </section>
+
+    <aside class="live-feed-card" aria-labelledby="feedTitle">
+      <div class="live-feed-heading"><div><div class="eyebrow">Verified activity</div><h2 id="feedTitle">Fight feed</h2></div><span id="eventCount">0 moments</span></div>
+      <div class="current-analysis-panel" aria-live="polite"><span>Current analysis</span><strong id="currentAnalysis">Reconnecting to live analysis…</strong><small id="currentAnalysisTime">Waiting for the latest measured update</small></div>
+      <ol class="live-event-feed" id="eventFeed" aria-live="polite">
+        <li class="live-event-empty" id="eventEmpty"><strong>Waiting for supported moments</strong><span>Events appear here only when the action model and evidence checks support them.</span></li>
+      </ol>
+      <div class="live-evidence-note" id="evidenceNote">Checking which action evidence this model can report safely…</div>
+    </aside>
+  </div>
+
+  <section class="live-stats" aria-labelledby="statsTitle">
+    <div class="live-section-heading"><div><div class="eyebrow" id="statsStateLabel">Live · provisional statistics</div><h2 id="statsTitle">Statistics update as footage is processed</h2></div><p>Final values are calculated once the full selected footage has been analyzed.</p></div>
+    <div class="live-fighter-stats">
+      {% for fighter in ('A', 'B') %}<article class="fighter-stat-panel" data-fighter="{{fighter}}">
+        <header><span class="fighter-letter">{{fighter}}</span><div><strong>Fighter {{fighter}}</strong><small id="coverage{{fighter}}">0% observed</small></div></header>
+        <div class="live-stat-grid">
+          <div><span>Punch attempts</span><b id="punchAttempts{{fighter}}">—</b></div><div><span>Punches landed</span><b id="punchLanded{{fighter}}">—</b></div><div><span>Punches missed</span><b id="punchMissed{{fighter}}">—</b></div><div><span>Punches blocked</span><b id="punchBlocked{{fighter}}">—</b></div>
+          <div><span>Kick attempts</span><b id="kickAttempts{{fighter}}">—</b></div><div><span>Kicks landed</span><b id="kickLanded{{fighter}}">—</b></div><div><span>Kicks missed</span><b id="kickMissed{{fighter}}">—</b></div><div><span>Kicks blocked</span><b id="kickBlocked{{fighter}}">—</b></div>
+          <div><span>Total strikes</span><b id="totalStrikes{{fighter}}">—</b></div><div><span>Accuracy</span><b id="accuracy{{fighter}}">—</b></div><div><span>Activity / min</span><b id="activityRate{{fighter}}">—</b></div><div><span>Combinations</span><b id="combinations{{fighter}}">—</b></div><div><span>Identity lock</span><b id="identity{{fighter}}">—</b></div>
+        </div>
+      </article>{% endfor %}
+    </div>
+  </section>
+
+  <section class="analysis-process-card" aria-labelledby="stageTitle">
+    <div class="live-section-heading"><div><div class="eyebrow">Evidence chain</div><h2 id="stageTitle">What WarriorIQ is doing</h2></div><span id="quality">Waiting for the first measured update…</span></div>
+    <ol class="compact-analysis-stages" id="stageList">
+      <li class="analysis-stage" data-stage="upload"><i>01</i><span>Upload preparation<small>Fight video received securely</small></span></li>
+      <li class="analysis-stage" data-stage="video"><i>02</i><span>Video processing<small>Models and footage prepared</small></span></li>
+      <li class="analysis-stage" data-stage="detection"><i>03</i><span>Fighter detection<small>Manual identities confirmed</small></span></li>
+      <li class="analysis-stage" data-stage="tracking"><i>04</i><span>Fighter tracking<small>SAM2 follows A and B</small></span></li>
+      <li class="analysis-stage" data-stage="pose"><i>05</i><span>Pose analysis<small>Movement evidence measured</small></span></li>
+      <li class="analysis-stage" data-stage="strikes"><i>06</i><span>Strike analysis<small>Temporal evidence checked</small></span></li>
+      <li class="analysis-stage" data-stage="scoring"><i>07</i><span>Scoring<small>Supported evidence is counted</small></span></li>
+      <li class="analysis-stage" data-stage="report"><i>08</i><span>Report generation<small>Findings become coaching priorities</small></span></li>
+    </ol>
+    <p class="analysis-stage-note">Pose, strike, contact and scoring share one evidence pass. WarriorIQ does not invent separate percentages for stages the backend processes together.</p>
+  </section>
+
+  <div id="completeActions" class="analysis-actions" hidden><a class="btn" id="viewResults" data-motion-primary href="/result/{{job_id}}">View completed results →</a><a class="btn secondary" href="/dashboard">Return to progress</a></div>
+  <div id="errorActions" class="analysis-actions" hidden><button class="btn" id="restartAnalysis" type="button" hidden>Restart preserved analysis</button><a class="btn secondary" href="/select/{{job_id}}">Return to fighter selection</a><a class="btn secondary" href="/">Start over</a></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const jobId={{job_id|tojson}},initialState={{initial_status|tojson}},page=document.getElementById('analysisPage'),video=document.getElementById('liveVideo'),progressShell=document.getElementById('progressShell'),stages=[...document.querySelectorAll('.analysis-stage')];let stopped=false,retryDelay=900,latestData={},events=[],feedPinned=true;
+const $=id=>document.getElementById(id),clamp=(n,min=0,max=1)=>Math.min(max,Math.max(min,Number(n)||0));
+function fmtTime(seconds){seconds=Math.max(0,Math.round(Number(seconds)||0));return seconds<60?`${seconds}s`:`${Math.floor(seconds/60)}m ${seconds%60}s`;}
+function clock(seconds){seconds=Math.max(0,Math.round(Number(seconds)||0));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;}
+function words(value){return String(value||'Action').replaceAll('_',' ').replace(/\b\w/g,letter=>letter.toUpperCase());}
+function setStages(d){const backend=d.stage||'preparing',state=Object.fromEntries(stages.map(item=>[item.dataset.stage,'waiting']));state.upload='done';state.detection='done';if(backend==='tracking'){state.video='done';state.tracking='active';}else if(backend==='analysis'){state.video='done';state.tracking='done';state.pose='active';state.strikes='active';if(Number(d.percent)>=96)state.scoring='active';if(Number(d.percent)>=98)state.report='active';}else if(backend==='complete'||d.status==='complete'){Object.keys(state).forEach(key=>state[key]='done');}else state.video='active';if(['error','interrupted'].includes(d.status)){const active=Object.keys(state).find(key=>state[key]==='active')||'video';state[active]='error';}stages.forEach(item=>item.dataset.state=state[item.dataset.stage]);}
+function positionOverlay(element,fighter,observation){const data=observation?.fighters?.[fighter],sameMoment=Math.abs((video.currentTime||0)-Number(observation?.time_seconds||-99))<1.6;if(!data?.visible||!data.box||!sameMoment){element.hidden=true;return;}const [x1,y1,x2,y2]=data.box.map(value=>clamp(value));element.hidden=false;element.style.left=`${x1*100}%`;element.style.top=`${y1*100}%`;element.style.width=`${Math.max(.02,x2-x1)*100}%`;element.style.height=`${Math.max(.03,y2-y1)*100}%`;}
+function renderOverlay(){positionOverlay($('fighterAOverlay'),'A',latestData.latest_observation);positionOverlay($('fighterBOverlay'),'B',latestData.latest_observation);const processed=Number(latestData.processed_video_seconds||0),start=Number(latestData.analysis_start_seconds||0),current=Number(video.currentTime||0);$('playbackAhead').hidden=!(latestData.status==='running'&&current-start>processed+1);const nearby=events.filter(event=>Math.abs(Number(event.time_seconds)-current)<.7).sort((a,b)=>Math.abs(a.time_seconds-current)-Math.abs(b.time_seconds-current))[0];if(nearby){$('eventFlash').hidden=false;$('eventFlash').textContent=`Fighter ${nearby.fighter} · ${words(nearby.technique)} · ${words(nearby.outcome)}`;}else $('eventFlash').hidden=true;}
+function eventElementById(id){return[...$('eventFeed').querySelectorAll('[data-event-id]')].find(element=>element.dataset.eventId===String(id))||null;}
+function markerElementById(id){return[...$('analysisMarkers').querySelectorAll('[data-event-id]')].find(element=>element.dataset.eventId===String(id))||null;}
+function seekToEvent(event){video.currentTime=Math.max(0,Number(event.time_seconds)-1);video.play().catch(()=>{});}
+function createEventElement(event){const li=document.createElement('li'),button=document.createElement('button'),time=document.createElement('time'),copy=document.createElement('span'),title=document.createElement('strong'),detail=document.createElement('small'),watch=document.createElement('b');li.dataset.eventId=event.id;li.className=`live-event-item fighter-${event.fighter==='B'?'b':'a'} is-new`;button.type='button';time.textContent=clock(event.time_seconds);title.textContent=`Fighter ${event.fighter} · ${words(event.technique)}`;detail.textContent=`${words(event.outcome)}${event.target?` · ${words(event.target)}`:''} · ${Math.round(clamp(event.confidence)*100)}% evidence`;watch.textContent='Watch';copy.append(title,detail);button.append(time,copy,watch);button.addEventListener('click',()=>seekToEvent(event));li.appendChild(button);return li;}
+function renderCurrentAnalysis(d){const latest=events.at(-1);if(latest){$('currentAnalysis').textContent=`Fighter ${latest.fighter} · ${words(latest.technique)} · ${words(latest.outcome)}`;$('currentAnalysisTime').textContent=`Detected at ${clock(latest.time_seconds)} · ${words(latest.target||latest.family)}`;return}const messages={queued:'Waiting for the analysis worker…',tracking:'Locking onto Fighter A and Fighter B…',analysis:'Tracking movement and checking supported actions…',complete:'Analysis complete. Final report is ready.'};$('currentAnalysis').textContent=messages[d.status==='queued'?'queued':d.status==='complete'?'complete':d.stage]||'Preparing the fight analysis…';$('currentAnalysisTime').textContent=d.live_event_mode==='movement_only'?'Unvalidated action guesses stay hidden':'Only high-confidence supported events appear here';}
+function renderEvents(d){events=Array.isArray(d.live_events)?d.live_events.slice(-160):[];const duration=Number(d.video_duration_seconds||video.duration||1),feed=$('eventFeed'),markers=$('analysisMarkers'),activeIds=new Set(events.map(event=>String(event.id))),wasPinned=feedPinned||feed.scrollHeight-feed.scrollTop-feed.clientHeight<48;feed.querySelectorAll('[data-event-id]').forEach(item=>{if(!activeIds.has(item.dataset.eventId))item.remove()});markers.querySelectorAll('[data-event-id]').forEach(item=>{if(!activeIds.has(item.dataset.eventId))item.remove()});let added=false;for(const event of events){let li=eventElementById(event.id);if(!li){li=createEventElement(event);added=true;setTimeout(()=>li.classList.remove('is-new'),720)}feed.appendChild(li);let marker=markerElementById(event.id);if(!marker){marker=document.createElement('button');marker.type='button';marker.dataset.eventId=event.id;marker.addEventListener('click',()=>seekToEvent(event));}const family=['punch','kick','knee'].includes(event.family)?event.family:'strike';marker.className=`fighter-${event.fighter==='B'?'b':'a'} family-${family} outcome-${event.outcome}`;marker.style.left=`${clamp(Number(event.time_seconds)/duration)*100}%`;marker.title=`${clock(event.time_seconds)} · Fighter ${event.fighter} · ${words(event.technique)} · ${words(event.outcome)}${event.target?` · ${words(event.target)}`:''}`;marker.setAttribute('aria-label',marker.title);markers.appendChild(marker);}$('eventEmpty').hidden=events.length>0;$('eventCount').textContent=`${events.length} ${events.length===1?'moment':'moments'}`;renderCurrentAnalysis(d);if(added&&wasPinned)requestAnimationFrame(()=>feed.scrollTop=feed.scrollHeight);}
+function updateCount(element,value,{suffix='',decimals=0}={}){if(value===null||value===undefined||!Number.isFinite(Number(value))){element.textContent='—';delete element.dataset.wiqValue;return}const number=Number(value);if(window.WarriorIQMotion?.countTo)window.WarriorIQMotion.countTo(element,number,{suffix,decimals,impact:true});else{element.textContent=number.toFixed(decimals)+suffix;element.dataset.wiqValue=String(number)}}
+function renderStats(d){const stats=d.provisional_stats||{},fighters=stats.fighters||{},mapping=[['punchAttempts','punch_attempts'],['punchLanded','punches_landed'],['punchMissed','punches_missed'],['punchBlocked','punches_blocked'],['kickAttempts','kick_attempts'],['kickLanded','kicks_landed'],['kickMissed','kicks_missed'],['kickBlocked','kicks_blocked'],['totalStrikes','total_strikes'],['combinations','combinations']];for(const fighter of ['A','B']){const item=fighters[fighter]||{},available=stats.action_labels_available===true;updateCount($(`coverage${fighter}`),Math.round(clamp(item.observation_coverage)*100),{suffix:'% observed'});for(const[id,key]of mapping)updateCount($(`${id}${fighter}`),available?item[key]:null);updateCount($(`accuracy${fighter}`),available&&item.accuracy!==null?Number(item.accuracy)*100:null,{suffix:'%',decimals:1});updateCount($(`activityRate${fighter}`),available?item.activity_rate:null,{decimals:1});const confidence=d[`fighter_${fighter.toLowerCase()}_confidence`];updateCount($(`identity${fighter}`),confidence===undefined?null:Math.round(clamp(confidence)*100),{suffix:'%'});}$('statsStateLabel').textContent=d.status==='complete'?'Final fight statistics':'Live · provisional statistics';$('statsTitle').textContent=d.status==='complete'?'Final supported statistics are ready':'Statistics update as footage is processed';$('evidenceNote').innerHTML=stats.action_labels_available?'<strong>Validated action model:</strong> only high-confidence, legal, deduplicated moments appear live.':'<strong>Movement-only live view:</strong> this action model has not passed WarriorIQ’s release gate, so strike names and counts remain hidden instead of being guessed.';}
+function finishNavigation(d){const resultUrl=d.result_url||`/result/${jobId}`,link=$('activeAnalysisLink'),label=$('activeAnalysisLabel'),mobile=$('activeAnalysisMobile');if(link){link.href=resultUrl;link.dataset.analysisStatus='complete'}if(label)label.textContent='Results ready';if(mobile){mobile.href=resultUrl;mobile.textContent='● Open completed results'}$('viewResults').href=resultUrl;}
+function render(d){latestData=d;const percent=clamp(d.percent,0,100),analysisDuration=Number(d.analysis_duration_seconds||d.video_duration_seconds||1);$('percent').textContent=`${percent.toFixed(1)}%`;$('bar').style.width=`${percent}%`;progressShell.setAttribute('aria-valuenow',percent.toFixed(1));$('message').textContent=d.message||d.status||'Analysis running';$('timing').textContent=d.status==='complete'?`Analysis finished in ${fmtTime(d.elapsed_seconds)}`:`Analysis running ${fmtTime(d.elapsed_seconds)} · ETA ${d.eta_seconds===null||d.eta_seconds===undefined?'calculating…':fmtTime(d.eta_seconds)}`;$('quality').textContent=`Round ${d.current_round??'—'} · ${words(d.quality_mode||'balanced')} quality`;$('videoStage').textContent=words(d.stage||d.status||'Preparing');$('analysisCursor').textContent=d.processed_video_seconds===undefined?'Waiting for the first analyzed frame':`Footage analyzed ${clock(d.processed_video_seconds)} / ${clock(analysisDuration)}`;$('analysisFrontier').style.width=`${clamp(Number(d.processed_video_seconds||0)/analysisDuration)*100}%`;setStages(d);renderEvents(d);renderStats(d);renderOverlay();if(d.status==='complete'){stopped=true;page.classList.add('analysis-complete');$('liveLabel').textContent='Final analysis complete';$('completeActions').hidden=false;finishNavigation(d);}else if(d.status==='error'||d.status==='interrupted'){stopped=true;page.classList.add('analysis-error');$('liveLabel').textContent=d.status==='interrupted'?'Analysis paused safely':'Analysis needs attention';$('errorActions').hidden=false;$('restartAnalysis').hidden=d.status!=='interrupted';}else{$('liveLabel').textContent=d.status==='queued'?'Waiting for analysis worker':'Analysis running';}}
+async function poll(){if(stopped)return;try{const response=await fetch(`/api/status/${jobId}`,{cache:'no-store'}),data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not read analysis status');retryDelay=900;render(data);}catch(error){$('liveLabel').textContent='Reconnecting…';$('message').textContent=`Connection lost. WarriorIQ is retrying automatically. ${error.message}`;retryDelay=Math.min(8000,retryDelay*1.6);}if(!stopped)setTimeout(poll,document.hidden?2500:retryDelay);}
+$('restartAnalysis').addEventListener('click',async()=>{const button=$('restartAnalysis');button.disabled=true;button.textContent='Restarting…';try{const response=await fetch(`/api/restart/${jobId}`,{method:'POST'}),data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not restart analysis');stopped=false;$('errorActions').hidden=true;page.classList.remove('analysis-error');retryDelay=300;poll();}catch(error){button.disabled=false;button.textContent='Restart preserved analysis';$('message').textContent=error.message;}});
+const feed=$('eventFeed');feed.addEventListener('scroll',()=>{feedPinned=feed.scrollHeight-feed.scrollTop-feed.clientHeight<48},{passive:true});video.addEventListener('timeupdate',renderOverlay);video.addEventListener('seeked',renderOverlay);video.addEventListener('error',()=>{$('playbackAhead').hidden=false;$('playbackAhead').textContent='The video preview could not load. The analysis is still running; refresh this page to reconnect.';});render(initialState);poll();
+</script>
+{% endblock %}

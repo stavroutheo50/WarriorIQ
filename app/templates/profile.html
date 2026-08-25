@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Profile · WarriorIQ{% endblock %}
+{% block content %}
+{% if not profile %}
+<section class="empty-workspace card"><div class="eyebrow">Athlete profile</div><h1>Save progress in a private workspace</h1><p class="muted">Create an account before adding profile media or saving fight analyses.</p><div class="hero-actions"><a class="btn" href="/signup?next=/profile">Create account</a><a class="btn secondary" href="/login?next=/profile">Sign in</a></div></section>
+{% else %}
+<div class="section-title"><div><div class="eyebrow">Athlete profile</div><h2>{{profile.display_name}}</h2></div></div>
+<div class="grid">
+<section class="card">
+  <div class="profile-head">
+    {% if profile.photo_path %}<img class="avatar" src="{{profile.photo_path}}" alt="{{profile.display_name}} profile photo">{% else %}<div class="avatar empty-avatar" aria-label="No profile photo">IQ</div>{% endif %}
+    <div><h3 style="margin:0">{{profile.display_name}}</h3><div class="muted">Saved WarriorIQ athlete profile</div></div>
+  </div>
+  {% if profile.video_path %}<video controls src="{{profile.video_path}}" style="width:100%;margin-top:18px;border-radius:14px"></video>{% endif %}
+  <form action="/profile" method="post" enctype="multipart/form-data" style="margin-top:20px">
+    <div class="field"><label>Display name</label><input name="display_name" value="{{profile.display_name}}" required></div>
+    <div class="field"><label>My identity in reports</label><select name="default_fighter"><option value="A" {% if profile.default_fighter == 'A' %}selected{% endif %}>Fighter A</option><option value="B" {% if profile.default_fighter == 'B' %}selected{% endif %}>Fighter B</option></select><div class="small muted">The progress dashboard follows this fighter across saved reports.</div></div>
+    <div class="field"><label>Profile photo</label><input class="file-native" id="profilePhoto" type="file" name="photo" accept="image/*"><label class="file-button" id="photoButton" for="profilePhoto"><span>＋</span><b id="photoText">Choose profile photo</b></label></div>
+    <div class="field"><label>Profile / highlight video</label><input class="file-native" id="profileVideo" type="file" name="profile_video" accept="video/*"><label class="file-button" id="profileVideoButton" for="profileVideo"><span>＋</span><b id="profileVideoText">Choose profile video</b></label></div>
+    <div class="field"><label>Coach / athlete notes</label><textarea name="notes" rows="5">{{profile.notes or ''}}</textarea></div>
+    <label class="check legal-check"><input type="checkbox" name="allow_model_training" value="true" {% if profile.allow_model_training %}checked{% endif %}> <span><strong>Help improve WarriorIQ models</strong><br><span class="small muted">Optional. When enabled, corrections you deliberately save may export a pose-feature sequence to the private training dataset. Raw video is not added by this setting. Turning it off stops future exports.</span></span></label>
+    <button class="btn" type="submit">Save profile</button>
+  </form>
+</section>
+<section class="card"><div class="eyebrow">Fight library</div><h3>{{fights|length}} saved analyses</h3><ul class="list-clean">{% for f in fights[:8] %}<li><a href="/result/{{f.job_id}}"><strong>Fight analysis</strong></a><br><span class="small muted">{{f.ruleset}} · {{f.created_at}}</span></li>{% else %}<li class="muted">No saved fights yet.</li>{% endfor %}</ul><p><a class="btn secondary" href="/history">Open full history</a></p></section>
+</div>
+<section class="card"><div class="eyebrow">Your data</div><h3>Download an account copy</h3><p class="muted">Export your profile, fight metadata, corrections, assignments and legal acceptance history. The download does not include password secrets or the video files themselves.</p><form action="/account/export" method="post"><div class="field"><label for="exportPassword">Current password</label><input id="exportPassword" type="password" name="password" autocomplete="current-password" required></div><button class="btn secondary" type="submit" data-keep-label="true">Download my data</button></form></section>
+<section class="card account-danger"><div class="eyebrow">Account and data</div><h3>Delete local account</h3><p class="muted">This permanently removes the account, profile, saved fight videos, reports, corrections, assignments, acceptance records, and share links stored by this local build.</p><form action="/account/delete" method="post" onsubmit="return confirm('Permanently delete this WarriorIQ account and every saved fight?')"><div class="row"><div class="field"><label>Type DELETE</label><input name="confirmation" autocomplete="off" required></div><div class="field"><label>Current password</label><input type="password" name="password" autocomplete="current-password" required></div></div><button class="btn danger" type="submit">Delete account and saved data</button></form></section>
+{% endif %}
+{% endblock %}
+{% block scripts %}{% if profile %}<script>function themedUpload(inputId,buttonId,textId,done){const input=document.getElementById(inputId),button=document.getElementById(buttonId),text=document.getElementById(textId);input.addEventListener('change',()=>{if(input.files[0]){text.textContent=done;button.classList.add('uploaded')}else{button.classList.remove('uploaded')}})}themedUpload('profilePhoto','photoButton','photoText','Profile photo uploaded');themedUpload('profileVideo','profileVideoButton','profileVideoText','Profile video uploaded');</script>{% endif %}{% endblock %}

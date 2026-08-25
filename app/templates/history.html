@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}History · WarriorIQ{% endblock %}
+{% block content %}
+<div class="section-title"><div><div class="eyebrow">Saved fights</div><h2>WarriorIQ history</h2></div><a class="btn" href="/#analyze">Analyze another fight</a></div>
+{% if not signed_in %}<section class="empty-workspace card"><h2>Sign in to open your private fight library</h2><p class="muted">Guest analyses are temporary and never appear in this library.</p><div class="hero-actions"><a class="btn" href="/signup?next=/history">Create account</a><a class="btn secondary" href="/login?next=/history">Sign in</a></div></section>{% else %}
+<section class="card table-wrap"><table><thead><tr><th>Fight</th><th>Type</th><th>Ruleset</th><th>Speed</th><th>Observation coverage</th><th></th></tr></thead><tbody>
+{% for f in fights %}<tr><td><a href="/result/{{f.job_id}}"><strong>Fight analysis</strong></a><br><span class="small muted">{{f.created_at}}</span></td><td>{{f.fight_type}}</td><td>{{f.ruleset}}</td><td>{% if f.summary %}{{'%.2f'|format((f.summary.video_seconds or 0)/(f.summary.analysis_seconds or 1))}}×{% else %}—{% endif %}</td><td>{% if f.summary %}A {{'%.0f'|format((f.summary.fighter_A_coverage or 0)*100)}}% · B {{'%.0f'|format((f.summary.fighter_B_coverage or 0)*100)}}%{% else %}—{% endif %}</td><td><a class="btn secondary" href="/replay/{{f.job_id}}">Replay</a> <form action="/delete/{{f.job_id}}" method="post" style="display:inline" onsubmit="return confirm('Delete this saved fight and local analysis files?')"><button class="btn danger" type="submit">Delete</button></form></td></tr>{% else %}<tr><td colspan="6" class="muted">No saved analyses yet.</td></tr>{% endfor %}
+</tbody></table></section>
+{% endif %}
+{% endblock %}

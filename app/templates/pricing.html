@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Plans · WarriorIQ{% endblock %}
+{% block description %}Compare WarriorIQ Starter, Athlete, Athlete Pro, Coach and Gym fight-analysis plans.{% endblock %}
+{% block content %}
+<header class="pricing-hero">
+  <div class="eyebrow">WarriorIQ plans</div>
+  <h1>Pick your pace.<br><em>Keep improving.</em></h1>
+  <p>Every plan uses the same fight-analysis engine. Higher plans unlock more daily analyses and a deeper performance report.</p>
+  <div class="pricing-promise"><span>✓ No video filename shown</span><span>✓ Guest files stay temporary</span><span>✓ Upgrade when you need more</span></div>
+</header>
+
+{% if not request.state.launch.ready %}<div class="notice"><strong>Paid checkout is safely locked.</strong> Real operator and legal contact details have not all been configured, so this build cannot collect subscriptions yet. <a class="text-link" href="/legal">Open launch readiness</a>.</div>{% endif %}
+
+{% if allowance %}
+<section class="allowance-strip">
+  <div><span class="small muted">Your current plan</span><strong>{{allowance.plan.label}}</strong></div>
+  <div><span class="small muted">Current allowance</span><strong>{{allowance.plan.limit_label}}</strong></div>
+  <div><span class="small muted">Available now</span><strong>{% if allowance.remaining is none %}Unlimited{% else %}{{allowance.remaining}} remaining{% endif %}</strong></div>
+</section>
+{% endif %}
+
+<div class="pricing-grid">
+{% for key,plan in plans.items() %}
+  <section class="card pricing-card {% if key == 'athlete_pro' %}featured{% elif key == 'gym' %}gym-featured{% endif %}" data-plan="{{key}}">
+    {% if plan.highlight %}<div class="plan-banner">{{plan.highlight}}</div>{% endif %}
+    <div class="plan-card-head">
+      <div class="eyebrow">{{plan.label}}</div>
+      {% if account and (account.plan_override or account.plan) == key %}<span class="current-plan">Current plan</span>{% endif %}
+    </div>
+    <div class="plan-price">{{plan.price}}</div>
+    <div class="small muted">{{plan.period}}</div>
+    <p class="muted plan-description">{{plan.description}}</p>
+    <div class="plan-entitlement"><strong>{{plan.limit_label}}</strong><span>{{plan.report_label}}</span></div>
+    <ul class="plan-features">{% for feature in plan.features %}<li><span aria-hidden="true">✓</span>{{feature}}</li>{% endfor %}</ul>
+    {% if key == 'gym' %}<div class="gym-note"><strong>Built to stay out of the way.</strong><span>Run every athlete through the same repeatable review workflow without counting each upload.</span></div>{% endif %}
+
+    {% if account and (account.plan_override or account.plan) == key %}
+      <a class="btn secondary" href="{% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Open your workspace</a>
+    {% elif key == 'free' %}
+      {% if account %}<a class="btn secondary" href="/dashboard">Use Starter</a>{% else %}<a class="btn" href="/signup">Start free</a>{% endif %}
+    {% elif payments_enabled and plan.stripe_price_id %}
+      <form method="post" action="/checkout/{{key}}"><label class="check billing-check"><input type="checkbox" name="billing_acceptance" value="true" required> I understand {{plan.price}} {{plan.period}}, recurring until cancelled, with {{plan.limit_label|lower}}. I accept the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms</a> and <a class="text-link" href="/refunds" target="_blank" rel="noopener">cancellation policy</a>.</label><button class="btn" type="submit" data-loading-label="Opening secure checkout…">Continue to secure payment</button></form>
+    {% elif account %}
+      <a class="btn secondary" href="{% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Preview in local beta</a>
+    {% else %}
+      <a class="btn secondary" href="/signup?next={% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Create account first</a>
+    {% endif %}
+  </section>
+{% endfor %}
+</div>
+
+<section class="report-levels">
+  <div class="section-intro"><div class="eyebrow">What changes between reports?</div><h2>More detail when the work gets serious.</h2><p>The tracking and analysis pipeline stays evidence-first on every plan. The report depth changes.</p></div>
+  <div class="grid3">
+    <div class="card"><span class="report-dot compact"></span><h3>Compact</h3><p class="muted">Essential performance numbers, three key moments, and one clear coaching priority.</p></div>
+    <div class="card"><span class="report-dot expanded"></span><h3>Expanded</h3><p class="muted">Core performance, estimated scorecard, coaching highlights, and a short training plan.</p></div>
+    <div class="card"><span class="report-dot full"></span><h3>Complete</h3><p class="muted">Every supported metric, full coaching, training, evidence, ruleset, correction, and integrity view.</p></div>
+  </div>
+</section>
+
+<section class="trust-panel pricing-trust"><div><div class="eyebrow">Honest billing foundation</div><h2>No charge before checkout is ready</h2><p>This local build opens paid checkout only after Stripe prices and signed webhooks are configured. Daily and monthly allowances are enforced atomically, and a failed analysis returns its reserved use.</p></div><div class="trust-checks"><span>✓ Secure hosted checkout</span><span>✓ Signed webhook verification</span><span>✓ Account-linked allowances</span><span>✓ Failed analyses are returned</span></div></section>
+{% endblock %}
