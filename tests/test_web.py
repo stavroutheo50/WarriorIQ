@@ -80,10 +80,24 @@ class PublicPageTests(unittest.TestCase):
 
     def test_professional_home_has_product_and_trust_sections(self):
         response = self.client.get("/")
-        self.assertIn("Three steps. No technical homework.", response.text)
+        self.assertIn("Four steps. No technical homework.", response.text)
         self.assertIn("Your next round starts here.", response.text)
         self.assertIn("Evidence before claims.", response.text)
         self.assertNotIn("V" + "4", response.text)
+
+    def test_professional_polish_uses_shared_product_surfaces(self):
+        home = self.client.get("/").text
+        history = self.client.get("/history").text
+        shell = (Path(__file__).resolve().parents[1] / "app" / "templates" / "base.html").read_text(encoding="utf-8")
+        history_template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "history.html").read_text(encoding="utf-8")
+
+        self.assertIn('/static/product.css', shell)
+        self.assertIn("Your fight.", home)
+        self.assertIn("Frame by frame.", home)
+        self.assertIn('class="product-preview"', home)
+        self.assertIn('class="workflow-track"', home)
+        self.assertIn('class="fight-archive"', history)
+        self.assertIn('id="historySearch"', history_template)
 
     def test_home_hero_copy_starts_at_the_top_of_the_upload_card(self):
         css = self.client.get("/static/fixes.css").text

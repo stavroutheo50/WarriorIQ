@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app import state
 from app.main import GUEST_COOKIE, app
-from core.analyzer import _provisional_stats
+from core.analyzer import _live_event_payload, _provisional_stats
 
 
 class DurableAnalysisStateTests(TestCase):
@@ -99,6 +100,39 @@ class DurableAnalysisStateTests(TestCase):
         self.assertEqual(stats["A"]["total_strikes"], 3)
         self.assertAlmostEqual(stats["A"]["accuracy"], 1 / 3)
         self.assertAlmostEqual(stats["B"]["observation_coverage"], .7)
+
+    def test_unvalidated_live_pipeline_emits_only_generic_observed_attempts(self):
+        candidate = SimpleNamespace(
+            fighter="A", round_number=1, peak_time=12.4, peak_frame=372,
+            technique="left_head_kick", family="kick", limb="left_leg",
+            target="head", outcome="clean", confidence=.94, contact_confidence=.91,
+            attempted=True,
+            metadata={"attacker_identity_confidence": .93, "opponent_identity_confidence": .90},
+        )
+        weak_candidate = SimpleNamespace(
+            fighter="B", round_number=1, peak_time=13.0, peak_frame=390,
+            technique="jab", family="punch", limb="left_hand", target="head",
+            outcome="missed", confidence=.45, contact_confidence=.20, attempted=True,
+            metadata={"attacker_identity_confidence": .91, "opponent_identity_confidence": .91},
+        )
+
+        observed = _live_event_payload([candidate, weak_candidate], "K1", False, limit=None)
+
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0]["fighter"], "A")
+        self.assertEqual(observed[0]["family"], "kick")
+        self.assertEqual(observed[0]["verification"], "observed")
+        self.assertIsNone(observed[0]["technique"])
+        self.assertIsNone(observed[0]["target"])
+        self.assertEqual(observed[0]["outcome"], "unclassified")
+
+        stats = _provisional_stats(observed, {"A": 9, "B": 8}, 10, False, 30.0)
+        self.assertFalse(stats["action_labels_available"])
+        self.assertTrue(stats["attempt_counts_available"])
+        self.assertEqual(stats["fighters"]["A"]["kick_attempts"], 1)
+        self.assertEqual(stats["fighters"]["A"]["total_strikes"], 1)
+        self.assertIsNone(stats["fighters"]["A"]["kicks_landed"])
+        self.assertIsNone(stats["fighters"]["A"]["accuracy"])
 
     def test_live_status_is_owner_scoped_and_excludes_private_job_fields(self):
         client = TestClient(app)
