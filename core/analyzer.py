@@ -5,6 +5,7 @@ import hashlib
 import math
 import time
 from collections import deque
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable
@@ -19,6 +20,7 @@ from core.contact import classify_contact
 from core.db import save_fight
 from core.defense import DefenseEngine
 from core.evidence_trust import automated_evidence_trust
+from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.identity import IdentityManager
 from core.metrics import MetricsAccumulator
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
@@ -67,7 +69,7 @@ def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | 
     reliable = sorted(
         (
             event for event in events
-            if (_live_event_reliable(event, ruleset) if trusted else _live_attempt_reliable(event))
+            if _live_attempt_reliable(event)
         ),
         key=lambda item: item.peak_time,
     )
@@ -86,19 +88,37 @@ def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | 
             deduplicated[duplicate_index].confidence,
         ):
             deduplicated[duplicate_index] = event
-    payload = [{
-        "id": f"{event.fighter}-{event.peak_frame}-{event.technique if trusted else event.family}",
-        "fighter": event.fighter,
-        "round_number": event.round_number,
-        "time_seconds": float(event.peak_time),
-        "technique": event.technique if trusted else None,
-        "family": event.family,
-        "limb": event.limb if trusted else None,
-        "target": event.target if trusted else None,
-        "outcome": event.outcome if trusted else "unclassified",
-        "confidence": float(min(event.confidence, event.contact_confidence) if trusted else event.confidence),
-        "verification": "verified" if trusted else "observed",
-    } for event in deduplicated]
+    payload = []
+    for event in deduplicated:
+        outcome_reliable = trusted and _live_event_reliable(event, ruleset)
+        outcome = "uncertain"
+        if outcome_reliable:
+            outcome = normalize_outcome(event.outcome)
+            defense = str(event.metadata.get("defense") or "")
+            defense_confidence = float(event.metadata.get("defense_confidence", 0.0) or 0.0)
+            if event.outcome == "missed" and defense_confidence >= 0.70:
+                if defense in {"slip", "evade"}:
+                    outcome = "evaded"
+                elif defense == "parry":
+                    outcome = "blocked"
+        payload.append({
+            "id": f"{event.fighter}-{event.peak_frame}-{event.technique if trusted else event.family}",
+            "kind": "strike",
+            "fighter": event.fighter,
+            "round_number": event.round_number,
+            "start_time": float(getattr(event, "start_time", event.peak_time)),
+            "time_seconds": float(event.peak_time),
+            "end_time": float(getattr(event, "end_time", event.peak_time)),
+            "technique": event.technique if trusted else None,
+            "family": event.family,
+            "limb": event.limb if trusted else None,
+            "target": event.target if outcome_reliable else None,
+            "outcome": outcome if trusted else "unclassified",
+            "confidence": float(
+                min(event.confidence, event.contact_confidence) if outcome_reliable else event.confidence
+            ),
+            "verification": "verified" if outcome_reliable else "supported" if trusted else "observed",
+        })
     return payload if limit is None else payload[-max(1, int(limit)):]
 
 
@@ -116,50 +136,9 @@ def _provisional_stats(
     live_events: list[dict], found: dict, analyzed_frames: int, trusted: bool,
     processed_seconds: float | None = None,
 ) -> dict:
-    coverage = {
-        fighter: (float(found[fighter]) / analyzed_frames if analyzed_frames else 0.0)
-        for fighter in ("A", "B")
-    }
-    fighters = {}
-    for fighter in ("A", "B"):
-        own = [event for event in live_events if event["fighter"] == fighter]
-        punches = [event for event in own if event.get("family") == "punch"]
-        kicks = [event for event in own if event.get("family") == "kick"]
-        landed = sum(event["outcome"] == "clean" for event in own)
-        blocked = sum(event["outcome"] in {"blocked", "checked"} for event in own)
-        missed = sum(event["outcome"] == "missed" for event in own)
-        combinations = sum(
-            1 for previous, current in zip(own, own[1:])
-            if 0.10 <= current["time_seconds"] - previous["time_seconds"] <= 1.20
-        )
-        fighters[fighter] = {
-            "attempts": len(own),
-            "clean": landed if trusted else None,
-            "blocked_or_checked": blocked if trusted else None,
-            "missed": missed if trusted else None,
-            "combinations": combinations if trusted else None,
-            "punch_attempts": len(punches),
-            "punches_landed": sum(event["outcome"] == "clean" for event in punches) if trusted else None,
-            "punches_missed": sum(event["outcome"] == "missed" for event in punches) if trusted else None,
-            "punches_blocked": sum(event["outcome"] in {"blocked", "checked"} for event in punches) if trusted else None,
-            "kick_attempts": len(kicks),
-            "kicks_landed": sum(event["outcome"] == "clean" for event in kicks) if trusted else None,
-            "kicks_missed": sum(event["outcome"] == "missed" for event in kicks) if trusted else None,
-            "kicks_blocked": sum(event["outcome"] in {"blocked", "checked"} for event in kicks) if trusted else None,
-            "total_strikes": len(own),
-            "accuracy": (float(landed) / len(own)) if trusted and own else (0.0 if trusted else None),
-            "activity_rate": (
-                float(len(own)) / (float(processed_seconds) / 60.0)
-                if processed_seconds and processed_seconds > 0 else 0.0
-            ),
-            "observation_coverage": coverage[fighter],
-        }
-    return {
-        "action_labels_available": trusted,
-        "attempt_counts_available": True,
-        "event_mode": "validated_actions" if trusted else "observed_attempts",
-        "fighters": fighters,
-    }
+    return summarize_fight_events(
+        live_events, found, analyzed_frames, trusted, processed_seconds,
+    )
 
 
 def _latest_observation(seconds: float, width: int, height: int, fighter_a, fighter_b, manager) -> dict:
@@ -569,6 +548,8 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                     events.append(event)
                     defense = defense_engine.classify(event)
                     if defense is not None:
+                        event.metadata["defense"] = defense.defense
+                        event.metadata["defense_confidence"] = float(defense.confidence)
                         defenses.append(defense)
 
             if tracking_file is not None:
@@ -638,7 +619,16 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     realtime_speed = segment_duration / analysis_seconds if analysis_seconds > 0 else 0.0
     within_budget = analysis_seconds <= segment_duration
 
-    metric_data = metrics.finalize(events, defenses, segment_duration)
+    all_final_live_events = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
+    public_event_ids = {item["id"] for item in all_final_live_events}
+    report_events = (
+        [
+            event for event in events
+            if f"{event.fighter}-{event.peak_frame}-{event.technique}" in public_event_ids
+        ]
+        if live_action_trusted else events
+    )
+    metric_data = metrics.finalize(report_events, defenses, segment_duration)
     signature_payload = {
         "video_segment": [start_frame, end_frame, round(info.fps, 6)],
         "canonical_boxes": [canonical_a_box, canonical_b_box],
@@ -715,13 +705,53 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         req=req,
         original_name=original_name,
         rounds=rounds,
-        events=events,
+        events=report_events,
         defenses=defenses,
         metrics=metric_data,
         tracking=tracking,
         performance=performance,
         classifier=classifier,
     )
+    # Freeze the exact customer-facing event stream once. Live completion,
+    # saved report totals, round summaries, evidence buttons, and progress
+    # history all consume this same snapshot so their numbers cannot drift.
+    final_live_stats = _provisional_stats(
+        all_final_live_events, found, analyzed_frames, live_action_trusted, segment_duration,
+    )
+    final_live_stats["diagnostics"] = _live_event_diagnostics(
+        events, req.ruleset, live_action_trusted, all_final_live_events,
+    )
+    report["statistics"] = final_live_stats
+    report["event_feed"] = all_final_live_events
+    if live_action_trusted:
+        for fighter in ("A", "B"):
+            public = final_live_stats["fighters"][fighter]
+            attacks = report["metrics"][fighter]["attacks"]
+            attacks.update({
+                "attempts": public["attempts"],
+                "landed": public["landed"],
+                "missed": public["missed"],
+                "blocked": public["blocked"],
+                "checked": 0,
+                "uncertain": public["uncertain"],
+                "accuracy": public["accuracy"],
+            })
+            report["metrics"][fighter]["combinations"].update({
+                "count": public["combinations"],
+                "max_length": public["longest_combination"],
+                "evidence": [
+                    sequence["techniques"] for sequence in public["combination_sequences"]
+                ],
+            })
+            report["metrics"][fighter]["strongest_weapon"] = (
+                public["best_weapon"]["technique"] if public["best_weapon"] else None
+            )
+            dashboard = report["metrics"][fighter]["dashboard"]
+            dashboard["accuracy"] = public["accuracy"]
+            dashboard["activity_attempts_per_minute"] = public["activity_rate"]
+            dashboard["combinations_per_minute"] = (
+                float(public["combinations"]) / max(1e-6, segment_duration / 60.0)
+            )
     json_path, html_path = write_report(job_dir, report)
     events_path.write_text(json.dumps([e.to_dict() for e in events], indent=2), encoding="utf-8")
 
@@ -741,6 +771,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             "setup": report.get("setup", {}),
             "integrity": report.get("integrity", {}),
             "metrics": report.get("metrics", {}),
+            "statistics": report.get("statistics", {}),
             "coaching": report.get("coaching", {}),
             "training_plan": report.get("training_plan", {}),
         },
@@ -756,16 +787,12 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             ruleset=req.ruleset,
             analysis_target=req.focus_fighter or req.analysis_target,
             summary=summary,
+            video_delete_after=(
+                datetime.now(timezone.utc) + timedelta(days=SETTINGS.saved_video_retention_days)
+            ).isoformat(),
         )
 
-    all_final_live_events = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
     final_live_events = all_final_live_events[-160:]
-    final_live_stats = _provisional_stats(
-        all_final_live_events, found, analyzed_frames, live_action_trusted, segment_duration,
-    )
-    final_live_stats["diagnostics"] = _live_event_diagnostics(
-        events, req.ruleset, live_action_trusted, all_final_live_events,
-    )
     progress(
         "Complete", 100.0, analysis_seconds, segment_duration, manager, None, quality,
         stage="complete",

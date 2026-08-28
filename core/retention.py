@@ -78,3 +78,36 @@ def cleanup_expired_guest_jobs(protected_job_ids: set[str] | None = None) -> lis
             shutil.rmtree(job_dir, ignore_errors=True)
         removed.append(marker.parent.name)
     return removed
+
+
+def cleanup_abandoned_processing_files(
+    protected_job_ids: set[str],
+    saved_job_ids: set[str],
+    *,
+    older_than_hours: int,
+) -> list[str]:
+    """Remove only old, unowned processing artifacts inside the two storage roots."""
+    cutoff = datetime.now(timezone.utc).timestamp() - max(1, older_than_hours) * 3600
+    protected = set(protected_job_ids) | set(saved_job_ids)
+    removed: set[str] = set()
+    uploads_root = UPLOADS.resolve()
+    outputs_root = OUTPUTS.resolve()
+    for video in UPLOADS.iterdir():
+        if not video.is_file() or video.stem in protected:
+            continue
+        try:
+            if video.stat().st_mtime <= cutoff and video.resolve().parent == uploads_root:
+                video.unlink(missing_ok=True)
+                removed.add(video.stem)
+        except OSError:
+            continue
+    for folder in OUTPUTS.iterdir():
+        if not folder.is_dir() or folder.name in protected or (folder / "guest.json").exists():
+            continue
+        try:
+            if folder.stat().st_mtime <= cutoff and folder.resolve().parent == outputs_root:
+                shutil.rmtree(folder, ignore_errors=True)
+                removed.add(folder.name)
+        except OSError:
+            continue
+    return sorted(removed)

@@ -159,6 +159,15 @@ class Settings:
     privacy_email: str = os.getenv("WARRIORIQ_PRIVACY_EMAIL", "").strip()
     dmca_email: str = os.getenv("WARRIORIQ_DMCA_EMAIL", "").strip()
     dmca_agent_name: str = os.getenv("WARRIORIQ_DMCA_AGENT_NAME", "").strip()
+    minimum_account_age: int = int(os.getenv("WARRIORIQ_MINIMUM_AGE", "18"))
+    saved_video_retention_days: int = max(1, int(os.getenv("WARRIORIQ_VIDEO_RETENTION_DAYS", "30")))
+    failed_upload_retention_hours: int = max(1, int(os.getenv("WARRIORIQ_FAILED_UPLOAD_RETENTION_HOURS", "24")))
+    admin_emails: tuple[str, ...] = tuple(
+        email.strip().lower()
+        for email in os.getenv("WARRIORIQ_ADMIN_EMAILS", "").split(",")
+        if email.strip()
+    )
+    email_provider: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER", "").strip()
 
 
 SETTINGS = Settings()

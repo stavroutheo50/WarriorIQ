@@ -25,7 +25,8 @@ class PublicPageTests(unittest.TestCase):
     def test_legal_center_and_every_policy_render(self):
         paths = (
             "/legal", "/terms", "/cookies", "/acceptable-use", "/refunds", "/eula",
-            "/dmca", "/accessibility", "/ai-transparency", "/security", "/subprocessors", "/contact",
+            "/video-upload-policy", "/sports-medical-disclaimer", "/dmca", "/accessibility",
+            "/ai-transparency", "/security", "/subprocessors", "/contact",
         )
         for path in paths:
             with self.subTest(path=path):
@@ -37,8 +38,9 @@ class PublicPageTests(unittest.TestCase):
 
     def test_footer_exposes_compact_legal_navigation(self):
         page = self.client.get("/").text
-        for path in ("/legal", "/privacy", "/terms", "/cookies", "/accessibility", "/dmca", "/security", "/contact"):
+        for path in ("/terms", "/privacy", "/cookies", "/video-upload-policy", "/refunds", "/acceptable-use", "/contact"):
             self.assertIn(f'href="{path}"', page)
+        self.assertIn("© 2026 WarriorIQ. All rights reserved.", page)
 
     def test_health_probe_is_minimal_and_available(self):
         response = self.client.get("/health")
@@ -62,21 +64,24 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("That page left the ring", response.text)
         self.assertIn("Start an analysis", response.text)
 
-    def test_family_access_uses_guardian_management_without_an_18_plus_gate(self):
+    def test_adult_accounts_and_minor_video_permissions_are_separate(self):
         home = self.client.get("/").text
         self.assertIn('name="rights_confirmed"', home)
-        self.assertIn('name="guardian_authorized_upload"', home)
+        self.assertIn('name="people_permissions_confirmed"', home)
+        self.assertIn('name="minor_permission_status"', home)
+        self.assertIn("Video Upload Policy", home)
         self.assertNotIn("These confirmations apply to this fight video", home)
         self.assertNotIn("Account policies are accepted only", home)
-        self.assertNotIn("at least 18", home.lower())
-        self.assertIn("parent or legal guardian", home.lower())
+        self.assertIn("18 or older", home.lower())
+        self.assertIn("parent or guardian", home.lower())
         signup = self.client.get("/signup").text
         self.assertIn('name="accept_terms"', signup)
         self.assertIn('name="accept_policies"', self.client.get("/login").text)
-        self.assertIn("Acceptable Use Policy", signup)
-        self.assertIn('name="account_manager_confirmed"', signup)
-        self.assertNotIn("at least 18", signup.lower())
-        self.assertIn("parent or legal guardian", signup.lower())
+        self.assertIn("Terms of Service", signup)
+        self.assertIn("Privacy Policy", signup)
+        self.assertIn('name="age_confirmed"', signup)
+        self.assertIn("at least 18", signup.lower())
+        self.assertIn('name="marketing_consent"', signup)
 
     def test_professional_home_has_product_and_trust_sections(self):
         response = self.client.get("/")
@@ -342,6 +347,14 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("Uploading is subject to", upload)
         self.assertNotIn("Account policies are accepted only when creating an account or signing in", upload)
 
+    def test_report_carries_ai_scoring_and_medical_limits(self):
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
+        for phrase in (
+            "AI-Assisted Analysis", "detection mistakes are possible", "not guaranteed facts",
+            "official judging decision", "not medical advice", "Camera angle",
+        ):
+            self.assertIn(phrase, template)
+
     def test_compare_button_never_silently_reloads_an_empty_comparison(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "compare.html").read_text(encoding="utf-8")
         self.assertIn("fights|length < 2", template)
@@ -559,6 +572,19 @@ class PublicPageTests(unittest.TestCase):
         self.assertTrue(report["scorecard"]["available"])
         self.assertEqual(report["scorecard"]["evidence"]["evidence_source"], "human_ground_truth")
         self.assertTrue(report["coaching"]["A"]["improvements"])
+
+    def test_performance_report_is_numbers_first_without_removing_deep_detail(self):
+        root = Path(__file__).resolve().parents[1]
+        template = (root / "app" / "templates" / "result.html").read_text(encoding="utf-8")
+        analyzer = (root / "core" / "analyzer.py").read_text(encoding="utf-8")
+
+        self.assertIn('class="numbers-first-report"', template)
+        self.assertIn("Fighter comparison", template)
+        self.assertIn("Watch moments", template)
+        self.assertIn("report.statistics", template)
+        self.assertIn('class="report-deep-dive"', template)
+        self.assertIn('report["statistics"] = final_live_stats', analyzer)
+        self.assertIn('report["event_feed"] = all_final_live_events', analyzer)
 
 
 if __name__ == "__main__":

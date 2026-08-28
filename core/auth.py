@@ -71,7 +71,11 @@ def authenticate(email: str, password: str) -> dict | None:
     if not valid_email(email) or not valid_password(password):
         return None
     account = get_account_by_email(normalize_email(email))
-    if not account or not verify_password(password, account.get("password_hash", "")):
+    if (
+        not account
+        or account.get("account_status", "active") != "active"
+        or not verify_password(password, account.get("password_hash", ""))
+    ):
         return None
     return account
 

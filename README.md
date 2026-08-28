@@ -30,7 +30,7 @@ This build consolidates the WarriorIQ requirements discussed across the project 
 - Original fight replay with timeline jump buttons.
 - Skeleton overlay and skeleton-only replay; only Fighter A/B are drawn.
 - Saved local athlete profile/photo/notes, fight history, comparison and coach portal.
-- Private athlete accounts with salted password hashes and expiring local sessions.
+- Private adult athlete accounts with salted password hashes, expiring local sessions and one-time password-reset tokens.
 - Temporary guest analyses that are excluded from history and removed after two hours.
 - Athlete progress trends that preserve missing/unavailable measurements.
 - Coach assignments with active/completed status.
@@ -39,7 +39,7 @@ This build consolidates the WarriorIQ requirements discussed across the project 
 - Credit-aware Stripe Checkout and signed webhook foundations, disabled until configured.
 - Internal JSON/HTML analysis artifacts; raw exports are not exposed in the public interface.
 - No fake/demo statistics. Unsupported/low-evidence values remain unavailable/uncertain.
-- Local privacy controls and fight deletion.
+- Privacy settings for account export, separate video/analysis/account deletion, consent choices and session revocation.
 - Standard Stripe-ready architecture, disabled by default and requiring a lawful configured account.
 
 ## Install on the WarriorIQ Windows PC
@@ -83,7 +83,9 @@ WarriorIQ now includes a Legal Center plus Privacy, Terms, Cookie, Acceptable Us
 
 Copy the real values from `.env.example` into your deployment environment. The code intentionally does not invent a company name, address, registration number, jurisdiction or monitored contact. Paid checkout returns a safe 503 response until every launch-critical operator field is configured with a public HTTPS base URL.
 
-Signup records the accepted policy version and age confirmation. Every fight upload records footage-rights/guardian confirmation, and optional OpenAI frame processing has a separate record. Corrections are private by default; model-training sequence export happens only after a signed-in user enables it on Athlete Profile. Account export and deletion are password protected.
+Signup is currently 18+ and separately records Terms, Privacy, age and optional marketing choices. The database includes a future guardian-approval status, but junior accounts are not enabled. Every fight upload records footage rights, permissions for people shown and either no-minor or appropriate guardian-permission confirmation; optional OpenAI frame processing has a separate record. Corrections are private by default; model-training sequence export happens only after a signed-in user enables it on Athlete Profile. Account export and deletion are password protected.
+
+Original signed-in videos are scheduled for deletion after `WARRIORIQ_VIDEO_RETENTION_DAYS` (30 by default), while reports can be retained separately. Guests expire after two hours, and abandoned processing artifacts are cleaned after `WARRIORIQ_FAILED_UPLOAD_RETENTION_HOURS`. See `COMPLIANCE_OPERATIONS.md` for the provider inventory and remaining operational launch blockers.
 
 Read `PRODUCTION_LAUNCH_CHECKLIST.md` before any public deployment. Passing the code-level gate does not replace legal, security, accessibility, payment, AI validation or operational sign-off.
 

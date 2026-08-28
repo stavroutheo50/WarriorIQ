@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -52,7 +53,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             "/signup",
             data={
                 "email": "athlete@example.com", "password": "Strong-Local-Password", "next_path": "/dashboard",
-                "accept_terms": "true", "account_manager_confirmed": "true",
+                "accept_terms": "true", "age_confirmed": "true",
             },
             follow_redirects=False,
         )
@@ -65,7 +66,14 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertNotIn("Create your private athlete workspace", dashboard.text)
         account = database.get_account_by_email("athlete@example.com")
         acceptances = database.list_legal_acceptances(profile_id=account["profile_id"])
-        self.assertEqual(acceptances[0]["kind"], "account_terms_privacy_acceptable_use_manager")
+        self.assertEqual({item["kind"] for item in acceptances}, {
+            "terms_acceptance", "privacy_acknowledgement", "age_18_plus_confirmation", "marketing_consent",
+        })
+        saved_account = database.get_account(account["id"])
+        self.assertIsNotNone(saved_account["policies_accepted_at"])
+        self.assertEqual(saved_account["terms_version"], webapp.SETTINGS.policy_version)
+        self.assertEqual(saved_account["privacy_version"], webapp.SETTINGS.policy_version)
+        self.assertEqual(saved_account["marketing_consent"], 0)
 
     def test_compare_explains_why_it_is_unavailable_before_two_fights(self):
         self.client.post(
@@ -74,7 +82,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
                 "email": "athlete@example.com",
                 "password": "Strong-Local-Password",
                 "accept_terms": "true",
-                "account_manager_confirmed": "true",
+                "age_confirmed": "true",
             },
         )
         comparison = self.client.get("/compare")
@@ -89,8 +97,107 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             data={"email": "athlete@example.com", "password": "Strong-Local-Password"},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Terms, Privacy Policy, and Acceptable Use Policy", response.text)
+        self.assertIn("at least 18", response.text)
+        self.assertIn("Terms of Service and Privacy Policy", response.text)
         self.assertIsNone(database.get_account_by_email("athlete@example.com"))
+
+    def test_marketing_consent_is_optional_separate_and_withdrawable(self):
+        response = self.client.post(
+            "/signup",
+            data={
+                "email": "marketing@example.com", "password": "Strong-Local-Password",
+                "accept_terms": "true", "age_confirmed": "true", "marketing_consent": "true",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303)
+        account = database.get_account_by_email("marketing@example.com")
+        self.assertEqual(account["marketing_consent"], 1)
+        self.assertIsNotNone(account["marketing_consent_at"])
+        privacy_page = self.client.get("/settings/privacy")
+        self.assertEqual(privacy_page.status_code, 200)
+        self.assertIn("Delete Account &amp; Data", privacy_page.text)
+        self.assertIn("Change cookie preferences", privacy_page.text)
+        withdrawn = self.client.post("/settings/marketing", data={}, follow_redirects=False)
+        self.assertEqual(withdrawn.status_code, 303)
+        self.assertEqual(database.get_account(account["id"])["marketing_consent"], 0)
+        records = database.list_legal_acceptances(profile_id=account["profile_id"])
+        self.assertEqual(records[0]["kind"], "marketing_consent")
+        self.assertEqual(records[0]["current_status"], "withdrawn")
+
+    def test_cookie_choices_are_server_stored_and_nonessential_defaults_off(self):
+        page = self.client.get("/")
+        self.assertIn("Accept All", page.text)
+        self.assertIn("Reject Non-Essential", page.text)
+        self.assertFalse(page.request.headers.get("x-analytics-enabled"))
+        saved = self.client.post(
+            "/cookie-preferences",
+            data={"choice": "custom", "analytics": "true", "next_path": "/cookies"},
+            follow_redirects=False,
+        )
+        self.assertEqual(saved.status_code, 303)
+        self.assertEqual(self.client.cookies.get(webapp.COOKIE_PREFERENCES_COOKIE), "custom-analytics")
+        self.assertNotIn("Accept All", self.client.get("/").text)
+        guest_id = self.client.cookies.get(GUEST_COOKIE)
+        records = database.list_legal_acceptances(guest_id=guest_id)
+        self.assertEqual(records[0]["metadata"], {"analytics": True, "marketing": False})
+
+    def test_password_reset_is_one_time_and_revokes_existing_sessions(self):
+        account = register("reset@example.com", "Strong-Local-Password")
+        with patch.object(webapp, "send_transactional_email", return_value=True) as send_email:
+            requested = self.client.post("/forgot-password", data={"email": "reset@example.com"})
+        self.assertEqual(requested.status_code, 200)
+        self.assertEqual(database.list_outbound_messages(account["id"]), [])
+        email_body = send_email.call_args.args[2]
+        reset_path = "/reset-password/" + email_body.split("/reset-password/", 1)[1].split()[0]
+        changed = self.client.post(reset_path, data={"password": "New-Strong-Password"}, follow_redirects=False)
+        self.assertEqual(changed.status_code, 303)
+        self.assertIsNone(webapp.authenticate("reset@example.com", "Strong-Local-Password"))
+        self.assertIsNotNone(webapp.authenticate("reset@example.com", "New-Strong-Password"))
+        reused = self.client.post(reset_path, data={"password": "Another-Strong-Password"})
+        self.assertEqual(reused.status_code, 410)
+
+    def test_withdrawal_is_separate_from_cancellation_and_queues_confirmation(self):
+        self.client.post(
+            "/signup",
+            data={
+                "email": "billing@example.com", "password": "Strong-Local-Password",
+                "accept_terms": "true", "age_confirmed": "true",
+            },
+        )
+        account = database.get_account_by_email("billing@example.com")
+        with database.connection() as con:
+            con.execute(
+                "UPDATE accounts SET plan='athlete',stripe_subscription_id='sub_test',subscription_status='active' WHERE id=?",
+                (account["id"],),
+            )
+        response = self.client.post(
+            "/settings/billing/withdraw", data={"confirm": "true"}, follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303)
+        action = database.list_subscription_actions(account["id"])[0]
+        self.assertEqual(action["action_type"], "eu_withdrawal")
+        self.assertEqual(action["status"], "pending_review")
+        self.assertTrue(action["metadata"]["eligibility_not_determined"])
+        self.assertEqual(database.list_outbound_messages(account["id"])[0]["message_type"], "withdrawal_request_confirmation")
+        billing_page = self.client.get("/settings/billing")
+        self.assertEqual(billing_page.status_code, 200)
+        self.assertIn("Cancel Subscription", billing_page.text)
+        self.assertIn("Withdraw from Contract", billing_page.text)
+
+    def test_copyright_intake_is_private_and_admin_is_closed_by_default(self):
+        response = self.client.post(
+            "/copyright-report",
+            data={
+                "email": "rights@example.com", "resource_id": "fight-123",
+                "details": "I own the identified footage and request review and removal of this unauthorised copy.",
+                "good_faith": "true",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Report recorded", response.text)
+        self.assertEqual(database.list_moderation_reports()[0]["resource_id"], "fight-123")
+        self.assertEqual(self.client.get("/admin").status_code, 404)
 
     def test_login_requires_and_records_policy_acceptance(self):
         account = register("athlete@example.com", "Strong-Local-Password")
@@ -121,7 +228,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             "/signup",
             data={
                 "email": "athlete@example.com", "password": "Strong-Local-Password",
-                "accept_terms": "true", "account_manager_confirmed": "true",
+                "accept_terms": "true", "age_confirmed": "true",
             },
             headers={"Origin": "https://attacker.example", "Sec-Fetch-Site": "cross-site"},
         )
@@ -133,7 +240,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             "/signup",
             data={
                 "email": "athlete@example.com", "password": "Strong-Local-Password",
-                "accept_terms": "true", "account_manager_confirmed": "true",
+                "accept_terms": "true", "age_confirmed": "true",
             },
         )
         denied = self.client.post("/account/export", data={"password": "wrong-password"})
@@ -152,7 +259,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             "/signup",
             data={
                 "email": "athlete@example.com", "password": "Strong-Local-Password",
-                "accept_terms": "true", "account_manager_confirmed": "true",
+                "accept_terms": "true", "age_confirmed": "true",
             },
         )
         response = self.client.post(
@@ -260,7 +367,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
                 "email": "coach@example.com",
                 "password": "Strong-Local-Password",
                 "accept_terms": "true",
-                "account_manager_confirmed": "true",
+                "age_confirmed": "true",
             },
         )
         created = self.client.post(
@@ -371,7 +478,10 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         with source.open("rb") as handle:
             response = self.client.post(
                 "/upload",
-                data={"rights_confirmed": "true", "guardian_authorized_upload": "true"},
+                data={
+                    "rights_confirmed": "true", "people_permissions_confirmed": "true",
+                    "minor_permission_status": "no_minors",
+                },
                 files={"video": ("private-fight-name.mp4", handle, "video/mp4")},
                 follow_redirects=False,
             )
@@ -391,6 +501,42 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             self.assertEqual(other_browser.get(f"/frame/{job_id}").status_code, 404)
         finally:
             other_browser.close()
+
+    def test_saved_video_is_owner_scoped_and_can_be_deleted_without_report(self):
+        owner = register("owner@example.com", "Strong-Local-Password")
+        other = register("other@example.com", "Another-Local-Password")
+        job_id = "privateowner1"
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"private-video")
+        report_dir = webapp.OUTPUTS / job_id
+        report_dir.mkdir()
+        report_path = report_dir / "report.json"
+        report_path.write_text("{}", encoding="utf-8")
+        database.save_fight(
+            job_id, owner["profile_id"], "hidden.mp4", str(video_path), str(report_path),
+            "competition", "K1", "A", {}, "2999-01-01T00:00:00+00:00",
+        )
+        other_client = TestClient(app)
+        try:
+            other_client.post(
+                "/login",
+                data={"email": other["email"], "password": "Another-Local-Password", "accept_policies": "true"},
+            )
+            self.assertEqual(other_client.get(f"/media/{job_id}").status_code, 404)
+            self.assertEqual(other_client.post(f"/settings/videos/{job_id}/delete").status_code, 404)
+        finally:
+            other_client.close()
+        self.client.post(
+            "/login",
+            data={"email": owner["email"], "password": "Strong-Local-Password", "accept_policies": "true"},
+        )
+        deleted = self.client.post(f"/settings/videos/{job_id}/delete", follow_redirects=False)
+        self.assertEqual(deleted.status_code, 303)
+        self.assertFalse(video_path.exists())
+        self.assertTrue(report_path.exists())
+        saved = database.get_fight(job_id)
+        self.assertEqual(saved["video_path"], "")
+        self.assertIsNotNone(saved["video_deleted_at"])
 
     def test_selected_fighter_is_report_focus_while_engine_analyzes_both(self):
         self.client.get("/")
@@ -437,12 +583,36 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(retention.cleanup_expired_guest_jobs(), ["active123"])
         self.assertFalse(marker.exists())
 
+    def test_abandoned_processing_cleanup_preserves_active_and_saved_jobs(self):
+        old = (datetime.now(timezone.utc) - timedelta(hours=48)).timestamp()
+        for job_id in ("abandoned1", "active1", "saved1"):
+            video = webapp.UPLOADS / f"{job_id}.mp4"
+            video.write_bytes(b"video")
+            folder = webapp.OUTPUTS / job_id
+            folder.mkdir()
+            (folder / "selection.jpg").write_bytes(b"frame")
+            os.utime(video, (old, old))
+            os.utime(folder, (old, old))
+        report_path = webapp.OUTPUTS / "saved1" / "report.json"
+        report_path.write_text("{}", encoding="utf-8")
+        database.save_fight(
+            "saved1", 1, "hidden.mp4", str(webapp.UPLOADS / "saved1.mp4"), str(report_path),
+            "competition", "K1", "A", {}, "2999-01-01T00:00:00+00:00",
+        )
+        removed = retention.cleanup_abandoned_processing_files(
+            {"active1"}, {"saved1"}, older_than_hours=24,
+        )
+        self.assertEqual(removed, ["abandoned1"])
+        self.assertFalse((webapp.UPLOADS / "abandoned1.mp4").exists())
+        self.assertTrue((webapp.UPLOADS / "active1.mp4").exists())
+        self.assertTrue((webapp.UPLOADS / "saved1.mp4").exists())
+
     def test_account_deletion_is_blocked_during_analysis(self):
         self.client.post(
             "/signup",
             data={
                 "email": "athlete@example.com", "password": "Strong-Local-Password", "next_path": "/dashboard",
-                "accept_terms": "true", "account_manager_confirmed": "true",
+                "accept_terms": "true", "age_confirmed": "true",
             },
         )
         account = database.get_account_by_email("athlete@example.com")

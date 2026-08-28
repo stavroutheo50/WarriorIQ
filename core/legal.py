@@ -13,6 +13,7 @@ REQUIRED_LAUNCH_FIELDS = {
     "privacy_email": "Privacy-rights email",
     "dmca_email": "Copyright/DMCA email",
     "dmca_agent_name": "Designated copyright agent name",
+    "email_provider": "Transactional email provider",
 }
 
 
@@ -44,7 +45,7 @@ LEGAL_DOCUMENTS = {
         "description": "The rules for using WarriorIQ's fight-analysis website and athlete workspace.",
         "intro": "These Terms govern the WarriorIQ website and analysis service and take effect when a user accepts the policy version shown below.",
         "sections": [
-            ("Who may use WarriorIQ", "Athletes of any age may benefit from WarriorIQ. The person creating and managing an account must be legally able to accept these Terms or must be the parent or legal guardian managing the workspace for a child. A child must not create an unsupervised account or provide legal consent where local law requires guardian authorisation. Public child access requires a separately reviewed age-assurance, verifiable guardian-consent, privacy and safeguarding programme."),
+            ("Who may use WarriorIQ", "The initial public launch permits standard account registration only for people aged 18 or older. Fight footage may include junior athletes only when the uploader has every required right and appropriate parent or guardian permission. Junior accounts are not enabled yet; they require a separately reviewed age-assurance, verifiable guardian-approval, privacy and safeguarding programme."),
             ("Your footage and permissions", "You keep ownership of your footage. You give the operator a limited licence to store, decode, process, display and delete it only as needed to provide the service. Before uploading, you must have the rights to the recording and an appropriate legal basis or permission for every identifiable person shown. A checkbox does not replace consent or another legal basis required by local law."),
             ("Analysis limitations", "WarriorIQ produces training and coaching support, not an official judging decision, medical assessment, safety guarantee or substitute for a qualified coach. Automated labels, identities and estimated scorecards can be wrong. Confidence labels and evidence replay must be considered before acting on a result."),
             ("Accounts and security", "Provide accurate account information, protect your password, and tell support about suspected unauthorised access. A parent or legal guardian managing a child's workspace is responsible for its settings, uploads and sharing choices unless the law says otherwise."),
@@ -62,9 +63,32 @@ LEGAL_DOCUMENTS = {
         "intro": "WarriorIQ uses essential browser storage for security and private job access. Optional advertising or cross-site tracking is not installed in this build.",
         "sections": [
             ("Essential cookies", "warrioriq_session keeps a signed-in account authenticated for up to 30 days. warrioriq_guest separates a temporary guest job from other browser sessions for up to 24 hours. Both are HttpOnly, SameSite=Lax, and Secure when the site uses HTTPS."),
-            ("Preference storage", "The browser stores whether the cookie notice has been acknowledged. This avoids repeating the notice. It does not enable advertising, profiling or optional analytics."),
+            ("Preference storage", "WarriorIQ stores a first-party preference cookie recording Accept All, Reject Non-Essential or a custom selection. Signed-in choices are also linked to the account. Essential security and session storage remains separate and cannot be disabled while using authenticated or temporary private functions."),
             ("Analytics", "No third-party analytics tracker is installed in this build. If product analytics is added later, non-essential storage must remain off until the user makes a clear choice, and this policy and the preference controls must be updated first."),
             ("Managing storage", "You can remove cookies and local storage in browser settings. Removing an essential cookie can sign you out or make a temporary guest analysis inaccessible. The service must not use a cookie wall for functions that do not require optional tracking."),
+        ],
+    },
+    "video-upload-policy": {
+        "title": "Video Upload Policy",
+        "description": "Rights, privacy and permission requirements for fight footage.",
+        "intro": "Only upload footage that you are legally permitted to store and process with WarriorIQ.",
+        "sections": [
+            ("Your rights", "You must own the footage or have the necessary licence or permission to upload, privately store and analyse it. WarriorIQ receives only the limited permission needed to provide those requested functions; it does not automatically take ownership of the footage."),
+            ("People shown", "You are responsible for an appropriate legal basis and any permissions required for identifiable athletes, referees, coaches, spectators or other people shown. If a minor appears, you must have appropriate parent or guardian permission and satisfy applicable safeguarding requirements."),
+            ("Broadcast footage", "Do not upload an unauthorised UFC, GLORY, ONE, DAZN, television, streaming-platform or other copyrighted broadcast. Access to a stream or recording does not automatically grant a right to copy or process it."),
+            ("Private processing", "Uploads, videos, reports and profiles are private by default. WarriorIQ does not create a public fight-video feed and does not provide automatic YouTube, broadcast or stream downloading."),
+            ("Removal and complaints", "Rights holders can use the copyright-report form. The operator may restrict or remove reported content while investigating and may suspend repeat or serious violations under the Acceptable Use Policy."),
+        ],
+    },
+    "sports-medical-disclaimer": {
+        "title": "Sports and Medical Disclaimer",
+        "description": "Training purpose and important health limits of WarriorIQ analysis.",
+        "intro": "WarriorIQ is an AI-assisted combat-sports training and performance analytics platform.",
+        "sections": [
+            ("Training purpose", "Results are intended for training and educational review with a qualified coach. WarriorIQ is not an official fight judging authority and scores or statistics are estimates."),
+            ("No medical advice", "WarriorIQ does not provide medical advice, diagnose concussion or injury, estimate brain damage or medical conditions, or determine whether an athlete is medically safe to continue fighting."),
+            ("Seek qualified care", "Stop training and seek an appropriately qualified healthcare professional or emergency service for possible concussion, injury, severe symptoms or any health concern. Do not rely on a WarriorIQ report for a medical decision."),
+            ("No diagnosis features", "Health-diagnosis features must not be added without separate medical, legal, privacy, safety and regulatory review."),
         ],
     },
     "acceptable-use": {

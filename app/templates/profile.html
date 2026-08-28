@@ -4,7 +4,7 @@
 {% if not profile %}
 <section class="empty-workspace card"><div class="eyebrow">Athlete profile</div><h1>Save progress in a private workspace</h1><p class="muted">Create an account before adding profile media or saving fight analyses.</p><div class="hero-actions"><a class="btn" href="/signup?next=/profile">Create account</a><a class="btn secondary" href="/login?next=/profile">Sign in</a></div></section>
 {% else %}
-<div class="section-title"><div><div class="eyebrow">Athlete profile</div><h2>{{profile.display_name}}</h2></div></div>
+<div class="section-title"><div><div class="eyebrow">Athlete profile</div><h2>{{profile.display_name}}</h2></div><a class="btn secondary" href="/settings/privacy">Settings &amp; privacy</a></div>
 <div class="grid">
 <section class="card">
   <div class="profile-head">

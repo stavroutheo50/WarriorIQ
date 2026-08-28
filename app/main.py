@@ -22,25 +22,39 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.state import create_job, delete_job, get_job, list_jobs, update_job
 from core.analyzer import analyze, get_pose_tracker
-from core.auth import authenticate, end_session, issue_session, register, resolve_session, session_token, token_digest
+from core.auth import (
+    authenticate, end_session, hash_password, issue_session, register, resolve_session,
+    session_token, token_digest, valid_email, valid_password,
+)
 from core.config import OUTPUTS, ROOT, RULESET_LABELS, SETTINGS, UPLOADS
 from core.annotations import accuracy_summary, export_sequence
 from core.db import (
-    add_assignment, analysis_allowance, apply_checkout_event, delete_account, delete_fight,
-    delete_legal_acceptances_for_resource, get_annotations, get_fight,
-    get_fight_review, get_profile, get_report_share, init_db, list_annotations, list_assignments,
-    list_fights, list_legal_acceptances, record_legal_acceptance, release_analysis, reserve_analysis,
-    revoke_report_shares, save_annotation, save_report_share,
-    set_annotation_sequence, set_fight_review_status, toggle_assignment, update_profile,
+    add_assignment, analysis_allowance, apply_checkout_event, consume_password_reset_token,
+    create_moderation_report, delete_account, delete_fight, delete_legal_acceptances_for_resource,
+    get_account, get_account_by_email, get_annotations, get_fight, get_fight_review, get_profile,
+    get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
+    list_expired_fight_videos, list_fights, list_legal_acceptances, list_moderation_reports,
+    list_outbound_messages, list_security_events, list_subscription_actions, mark_fight_video_deleted,
+    mark_outbound_message_sent,
+    queue_outbound_message, record_account_signup_acceptance, record_legal_acceptance,
+    record_security_event, record_subscription_action, release_analysis, reserve_analysis,
+    resolve_moderation_report, revoke_account_sessions, revoke_report_shares, save_annotation,
+    save_password_reset_token, save_report_share, set_account_status, set_annotation_sequence,
+    set_fight_review_status, toggle_assignment, update_cookie_preferences,
+    update_marketing_consent, update_password_hash, update_profile,
 )
 from core.evidence_trust import report_evidence_trust
 from core.coaching import build_coaching, build_training_plan
-from core.payments import PLANS, create_checkout, plan_for_key, verify_webhook
+from core.payments import PLANS, cancel_subscription_at_period_end, create_checkout, plan_for_key, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness
+from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
 from core.report import build_preliminary_scorecard, refresh_identity_integrity
-from core.retention import GUEST_RETENTION_HOURS, cleanup_expired_guest_jobs, guest_job_valid, mark_guest_job
+from core.retention import (
+    GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
+    guest_job_valid, mark_guest_job,
+)
 from core.scoring import deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import get_video_info, read_frame
@@ -54,7 +68,11 @@ init_db()
 SESSION_COOKIE = "warrioriq_session"
 GUEST_COOKIE = "warrioriq_guest"
 ACTIVE_ANALYSIS_COOKIE = "warrioriq_active_analysis"
+LAST_COMPLETED_ANALYSIS_COOKIE = "warrioriq_last_completed_analysis"
+COOKIE_PREFERENCES_COOKIE = "warrioriq_cookie_preferences"
 _last_guest_cleanup = 0.0
+_last_saved_video_cleanup = 0.0
+_rate_windows: dict[str, list[float]] = {}
 MAX_FIGHT_BYTES = 2 * 1024 * 1024 * 1024
 MAX_PROFILE_PHOTO_BYTES = 15 * 1024 * 1024
 MAX_PROFILE_VIDEO_BYTES = 500 * 1024 * 1024
@@ -62,14 +80,15 @@ _progress_report_cache: dict[str, tuple[int, dict]] = {}
 
 PUBLIC_INDEX_ROUTES = (
     "/", "/pricing", "/privacy", "/legal", "/terms", "/cookies",
-    "/acceptable-use", "/refunds", "/eula", "/dmca", "/accessibility",
-    "/ai-transparency", "/security", "/subprocessors", "/contact", "/login", "/signup",
+    "/acceptable-use", "/refunds", "/video-upload-policy", "/sports-medical-disclaimer",
+    "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
+    "/subprocessors", "/contact", "/copyright-report", "/login", "/signup",
 )
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/dashboard", "/history",
     "/compare", "/coach", "/profile", "/validation", "/s/", "/share/", "/shares/",
-    "/account/", "/checkout/", "/stripe/",
+    "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
 )
 
 
@@ -133,15 +152,47 @@ def _active_job_for_owner(owner_key: str) -> dict | None:
     return jobs[0]
 
 
+def _owned_job(owner_key: str, job_id: str | None, statuses: set[str]) -> dict | None:
+    if not job_id:
+        return None
+    job = get_job(job_id)
+    if not job or job.get("owner_key") != owner_key or job.get("status") not in statuses:
+        return None
+    return {"job_id": job_id, **job}
+
+
+def _analysis_navigation_state(
+    owner_key: str,
+    active_job_id: str | None,
+    completed_job_id: str | None,
+) -> dict:
+    """Keep the processing pointer and completed-result pointer independent.
+
+    A stale cookie that names a completed fight must never hide a currently
+    processing fight. The completed pointer is retained only as the exact
+    result destination once no processing job owns the top-bar position.
+    """
+    processing_statuses = {"queued", "running", "interrupted"}
+    active = _owned_job(owner_key, active_job_id, processing_statuses)
+    if active is None:
+        active = _active_job_for_owner(owner_key)
+
+    completed = _owned_job(owner_key, completed_job_id, {"complete"})
+    if completed is None:
+        # Backward-compatible migration for browsers that only have the older
+        # active-analysis cookie after that exact job completed.
+        completed = _owned_job(owner_key, active_job_id, {"complete"})
+
+    return {
+        "active": active,
+        "last_completed": completed,
+        "display": active or completed,
+    }
+
+
 def _analysis_navigation_job(owner_key: str, preferred_job_id: str | None) -> dict | None:
-    """Resolve the exact session selected by this browser before using a safe owner fallback."""
-    if preferred_job_id:
-        preferred = get_job(preferred_job_id)
-        if preferred and preferred.get("owner_key") == owner_key and preferred.get("status") in {
-            "queued", "running", "interrupted", "complete", "error",
-        }:
-            return {"job_id": preferred_job_id, **preferred}
-    return _active_job_for_owner(owner_key)
+    """Compatibility wrapper for callers that need only the displayed job."""
+    return _analysis_navigation_state(owner_key, preferred_job_id, None)["display"]
 
 
 def _analysis_navigation_url(job: dict) -> str:
@@ -152,6 +203,58 @@ def _analysis_navigation_url(job: dict) -> str:
 def _safe_next(value: str | None, fallback: str = "/dashboard") -> str:
     value = (value or "").strip()
     return value if value.startswith("/") and not value.startswith("//") else fallback
+
+
+def _is_admin(request: Request) -> bool:
+    account = _account(request)
+    return bool(account and account.get("email", "").lower() in SETTINGS.admin_emails)
+
+
+def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int) -> None:
+    """Small single-process safety limit; production should add an edge/shared limiter too."""
+    now = time.monotonic()
+    client = request.client.host if request.client else "unknown"
+    key = f"{scope}:{client}"
+    recent = [stamp for stamp in _rate_windows.get(key, []) if now - stamp < window_seconds]
+    if len(recent) >= limit:
+        record_security_event(
+            "rate_limit_exceeded", severity="warning", resource_type="route", resource_id=scope,
+            metadata={"client": client},
+        )
+        raise HTTPException(429, "Too many requests. Wait a little and try again.")
+    recent.append(now)
+    _rate_windows[key] = recent
+
+
+def _cookie_preferences(request: Request) -> dict:
+    raw = request.cookies.get(COOKIE_PREFERENCES_COOKIE, "")
+    if raw == "all":
+        return {"decided": True, "analytics": True, "marketing": True}
+    if raw == "custom-analytics":
+        return {"decided": True, "analytics": True, "marketing": False}
+    if raw == "custom-marketing":
+        return {"decided": True, "analytics": False, "marketing": True}
+    if raw == "essential":
+        return {"decided": True, "analytics": False, "marketing": False}
+    return {"decided": False, "analytics": False, "marketing": False}
+
+
+def _queue_transactional_notice(
+    account_id: int,
+    message_type: str,
+    recipient: str,
+    subject: str,
+    body: str,
+    payload: dict,
+) -> int:
+    message_id = queue_outbound_message(account_id, message_type, recipient, payload)
+    try:
+        if send_transactional_email(recipient, subject, body):
+            mark_outbound_message_sent(message_id)
+    except Exception:
+        # The durable queued record lets the production delivery worker retry.
+        pass
+    return message_id
 
 
 def _authorized_job(request: Request, job_id: str) -> dict | None:
@@ -268,15 +371,27 @@ def _save_upload_limited(upload: UploadFile, destination: Path, limit: int) -> N
 
 @app.middleware("http")
 async def viewer_context(request: Request, call_next):
-    global _last_guest_cleanup
+    global _last_guest_cleanup, _last_saved_video_cleanup
+    forwarded_scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",", 1)[0].strip()
+    if SETTINGS.public_base_url.startswith("https://") and forwarded_scheme != "https":
+        target = f"{SETTINGS.public_base_url}{request.url.path}"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=308)
     request.state.account = resolve_session(request.cookies.get(SESSION_COOKIE))
     guest_id = request.cookies.get(GUEST_COOKIE)
     new_guest = not guest_id or len(guest_id) < 24 or len(guest_id) > 96
     request.state.guest_id = session_token() if new_guest else guest_id
-    request.state.active_analysis = _analysis_navigation_job(
-        _owner_key(request), request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
+    request.state.analysis_navigation = _analysis_navigation_state(
+        _owner_key(request),
+        request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
+        request.cookies.get(LAST_COMPLETED_ANALYSIS_COOKIE),
     )
+    request.state.active_analysis = request.state.analysis_navigation["display"]
     request.state.launch = launch_readiness()
+    request.state.minimum_account_age = SETTINGS.minimum_account_age
+    request.state.cookie_preferences = _cookie_preferences(request)
+    request.state.is_admin = _is_admin(request)
     request.state.noindex = (
         not SETTINGS.public_base_url
         or request.url.path.startswith(PRIVATE_ROUTE_PREFIXES)
@@ -309,6 +424,30 @@ async def viewer_context(request: Request, call_next):
             delete_legal_acceptances_for_resource(job_id)
             delete_job(job_id)
         _last_guest_cleanup = now
+    if now - _last_saved_video_cleanup > 3600:
+        for fight in list_expired_fight_videos():
+            video = Path(fight.get("video_path") or "missing").resolve()
+            if video.parent == UPLOADS.resolve():
+                video.unlink(missing_ok=True)
+                mark_fight_video_deleted(fight["job_id"], int(fight["profile_id"]))
+                record_security_event(
+                    "video_retention_deleted", account_id=None, resource_type="fight",
+                    resource_id=fight["job_id"], metadata={"scheduled": True},
+                )
+        protected = {
+            job_id for job_id, job in list_jobs()
+            if job.get("status") in {"selecting", "queued", "running"}
+        }
+        saved = {item["job_id"] for item in list_all_fight_storage()}
+        for abandoned_job_id in cleanup_abandoned_processing_files(
+            protected, saved, older_than_hours=SETTINGS.failed_upload_retention_hours,
+        ):
+            delete_legal_acceptances_for_resource(abandoned_job_id)
+            delete_job(abandoned_job_id)
+            record_security_event(
+                "abandoned_processing_files_deleted", resource_type="fight", resource_id=abandoned_job_id,
+            )
+        _last_saved_video_cleanup = now
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
@@ -736,23 +875,36 @@ def signup(
     password: str = Form(...),
     next_path: str = Form("/dashboard"),
     accept_terms: bool = Form(False),
-    account_manager_confirmed: bool = Form(False),
+    age_confirmed: bool = Form(False),
+    marketing_consent: bool = Form(False),
 ):
-    if not accept_terms or not account_manager_confirmed:
+    _enforce_rate_limit(request, "signup", 20, 300)
+    if not accept_terms or not age_confirmed:
         return _auth_page(
             request, "signup",
-            "Confirm that you can legally manage this account and accept the Terms, Privacy Policy, and Acceptable Use Policy.",
+            f"Confirm that you are at least {SETTINGS.minimum_account_age} and accept the Terms of Service and Privacy Policy.",
             next_path,
         )
     try:
         account = register(email, password)
     except ValueError as exc:
         return _auth_page(request, "signup", str(exc), next_path)
-    record_legal_acceptance(
-        "account_terms_privacy_acceptable_use_manager", SETTINGS.policy_version,
-        profile_id=int(account["profile_id"]),
-        metadata={"guardian_managed_child_access": True, "source": "signup"},
+    record_account_signup_acceptance(
+        int(account["id"]), terms_version=SETTINGS.policy_version,
+        privacy_version=SETTINGS.policy_version, marketing_consent=bool(marketing_consent),
     )
+    for kind, status in (
+        ("terms_acceptance", "accepted"),
+        ("privacy_acknowledgement", "accepted"),
+        ("age_18_plus_confirmation", "accepted"),
+        ("marketing_consent", "accepted" if marketing_consent else "declined"),
+    ):
+        record_legal_acceptance(
+            kind, SETTINGS.policy_version, profile_id=int(account["profile_id"]),
+            metadata={"source": "signup", "enabled": bool(marketing_consent) if kind == "marketing_consent" else True},
+            current_status=status,
+        )
+    record_security_event("account_created", account_id=int(account["id"]), metadata={"policy_version": SETTINGS.policy_version})
     response = RedirectResponse(_safe_next(next_path), status_code=303)
     response.set_cookie(
         SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
@@ -776,6 +928,7 @@ def login(
     next_path: str = Form("/dashboard"),
     accept_policies: bool = Form(False),
 ):
+    _enforce_rate_limit(request, "login", 30, 300)
     if not accept_policies:
         return _auth_page(
             request, "login",
@@ -784,6 +937,7 @@ def login(
         )
     account = authenticate(email, password)
     if not account:
+        record_security_event("login_failed", severity="warning", metadata={"email_hash": token_digest(email.strip().lower())[:16]})
         return _auth_page(request, "login", "The email or password is incorrect.", next_path)
     record_legal_acceptance(
         "account_signin_policies", SETTINGS.policy_version,
@@ -791,6 +945,7 @@ def login(
         metadata={"source": "login"},
     )
     response = RedirectResponse(_safe_next(next_path), status_code=303)
+    record_security_event("login_succeeded", account_id=int(account["id"]))
     response.set_cookie(
         SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
         httponly=True, samesite="lax", secure=request.url.scheme == "https",
@@ -802,6 +957,64 @@ def login(
 def logout(request: Request):
     end_session(request.cookies.get(SESSION_COOKIE))
     response = RedirectResponse("/", status_code=303)
+    response.delete_cookie(SESSION_COOKIE)
+    return response
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+def forgot_password_page(request: Request):
+    return templates.TemplateResponse(
+        request=request, name="password_reset.html",
+        context={"request": request, "token": "", "message": ""},
+    )
+
+
+@app.post("/forgot-password", response_class=HTMLResponse)
+def request_password_reset(request: Request, email: str = Form(...)):
+    _enforce_rate_limit(request, "password-reset", 8, 900)
+    account = get_account_by_email(email.strip().lower()) if valid_email(email) else None
+    if account and account.get("account_status", "active") == "active":
+        token = session_token()
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        save_password_reset_token(int(account["id"]), token_digest(token), expires)
+        reset_url = f"{str(request.base_url).rstrip('/')}/reset-password/{token}"
+        try:
+            delivered = send_transactional_email(
+                account["email"], "Reset your WarriorIQ password",
+                f"Use this one-time link within 30 minutes:\n\n{reset_url}\n\nIf you did not request this, ignore this message.",
+            )
+        except Exception:
+            delivered = False
+        record_security_event(
+            "password_reset_requested", account_id=int(account["id"]),
+            metadata={"email_delivery": "sent" if delivered else "unavailable"},
+        )
+    return templates.TemplateResponse(
+        request=request, name="password_reset.html",
+        context={
+            "request": request, "token": "",
+            "message": "If an eligible account exists, a time-limited reset link has been queued for its email provider.",
+        },
+    )
+
+
+@app.get("/reset-password/{token}", response_class=HTMLResponse)
+def reset_password_page(request: Request, token: str):
+    return templates.TemplateResponse(
+        request=request, name="password_reset.html",
+        context={"request": request, "token": token, "message": ""},
+    )
+
+
+@app.post("/reset-password/{token}")
+def reset_password(request: Request, token: str, password: str = Form(...)):
+    if not valid_password(password):
+        raise HTTPException(400, "Password must contain between 10 and 1,024 characters.")
+    account_id = consume_password_reset_token(token_digest(token))
+    if account_id is None or not update_password_hash(account_id, hash_password(password)):
+        raise HTTPException(410, "This password-reset link is invalid or expired.")
+    record_security_event("password_reset_completed", account_id=account_id)
+    response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
 
@@ -839,12 +1052,19 @@ async def upload(
     selected_rounds: str = Form("ALL"),
     openai_identity_recovery: bool = Form(False),
     rights_confirmed: bool = Form(False),
-    guardian_authorized_upload: bool = Form(False),
+    people_permissions_confirmed: bool = Form(False),
+    minor_permission_status: str = Form(""),
 ):
-    if not rights_confirmed or not guardian_authorized_upload:
+    _enforce_rate_limit(request, "fight-upload", 12, 600)
+    minor_permission_status = minor_permission_status.strip().lower()
+    if (
+        not rights_confirmed
+        or not people_permissions_confirmed
+        or minor_permission_status not in {"no_minors", "guardian_authorized"}
+    ):
         raise HTTPException(
             400,
-            "Confirm that you are authorised to use the footage and that a parent or legal guardian manages any upload involving a child.",
+            "Confirm your footage rights, permission for people shown, and the minor/guardian status before upload.",
         )
     account = _account(request)
     if account:
@@ -910,10 +1130,22 @@ async def upload(
     )
     acceptance_owner = {"profile_id": int(account["profile_id"])} if account else {"guest_id": request.state.guest_id}
     record_legal_acceptance(
-        "fight_upload_rights", SETTINGS.policy_version,
+        "fight_video_upload_permission", SETTINGS.policy_version,
         resource_id=job_id,
-        metadata={"ruleset": normalize_ruleset(ruleset), "external_ai_enabled": bool(openai_identity_recovery)},
+        metadata={
+            "rights_confirmed": True,
+            "people_permissions_confirmed": True,
+            "minor_permission_status": minor_permission_status,
+            "ruleset": normalize_ruleset(ruleset),
+            "external_ai_enabled": bool(openai_identity_recovery),
+            "private_by_default": True,
+        },
         **acceptance_owner,
+    )
+    record_security_event(
+        "fight_video_uploaded", account_id=int(account["id"]) if account else None,
+        resource_type="fight", resource_id=job_id,
+        metadata={"guest": not bool(account), "minor_permission_status": minor_permission_status},
     )
     if openai_identity_recovery:
         record_legal_acceptance(
@@ -1001,6 +1233,7 @@ def detect_people(request: Request, job_id: str):
 
 @app.post("/api/start/{job_id}")
 def start(request: Request, job_id: str, payload: StartPayload):
+    _enforce_rate_limit(request, "analysis-start", 12, 600)
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
@@ -1093,22 +1326,42 @@ def _public_job_status(job_id: str, job: dict) -> dict:
 
 
 @app.get("/api/status/{job_id}")
-def status(request: Request, job_id: str):
+def status(request: Request, response: Response, job_id: str):
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
+    if job.get("status") == "complete":
+        response.set_cookie(
+            LAST_COMPLETED_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
+            httponly=True, samesite="lax", secure=request.url.scheme == "https",
+        )
+        if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:
+            response.delete_cookie(ACTIVE_ANALYSIS_COOKIE, httponly=True, samesite="lax")
     return _public_job_status(job_id, job)
 
 
 @app.get("/api/active-analysis")
 def active_analysis(request: Request):
-    job = _analysis_navigation_job(
-        _owner_key(request), request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
+    navigation = _analysis_navigation_state(
+        _owner_key(request),
+        request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
+        request.cookies.get(LAST_COMPLETED_ANALYSIS_COOKIE),
     )
+    job = navigation["display"]
     if not job:
-        return {"active": False}
+        return {
+            "active": False,
+            "processing": False,
+            "active_analysis_id": None,
+            "last_completed_analysis_id": None,
+        }
     return {
         "active": True,
+        "processing": navigation["active"] is not None,
+        "active_analysis_id": navigation["active"]["job_id"] if navigation["active"] else None,
+        "last_completed_analysis_id": (
+            navigation["last_completed"]["job_id"] if navigation["last_completed"] else None
+        ),
         "job_id": job["job_id"],
         "status": job.get("status"),
         "percent": float(job.get("percent", 0.0)),
@@ -1136,12 +1389,19 @@ def result_page(request: Request, job_id: str):
     _apply_report_annotations(report, [])
     refresh_identity_integrity(report)
     report_access = _request_plan(request)
-    return templates.TemplateResponse(request=request, name="result.html", context={
+    response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "report_access": report_access,
         "analysis_quality": _analysis_quality_summary(report),
         "can_share": bool(_account(request) and report_access.get("can_share")),
     })
+    response.set_cookie(
+        LAST_COMPLETED_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
+        httponly=True, samesite="lax", secure=request.url.scheme == "https",
+    )
+    if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:
+        response.delete_cookie(ACTIVE_ANALYSIS_COOKIE, httponly=True, samesite="lax")
+    return response
 
 
 @app.post("/api/annotations/{job_id}")
@@ -1315,15 +1575,34 @@ def validation_page(request: Request):
     return templates.TemplateResponse(request=request, name="validation.html", context={"request": request, "summary": accuracy_summary(annotations), "annotations": annotations})
 
 
-def _build_replay_chapters(report: dict, focus: str) -> tuple[list[dict], str]:
+def _build_replay_chapters(
+    report: dict,
+    focus: str,
+    fighter_filter: str | None = None,
+    family_filter: str | None = None,
+    outcome_filter: str | None = None,
+) -> tuple[list[dict], str]:
     """Build useful replay navigation without turning candidates into facts."""
     focus = focus if focus in {"A", "B", "BOTH"} else "BOTH"
+    fighter_filter = fighter_filter if fighter_filter in {"A", "B"} else None
+    family_filter = family_filter if family_filter in {"punch", "kick"} else None
+    outcome_filter = outcome_filter if outcome_filter in {"landed", "missed", "blocked", "evaded"} else None
+    filtered = any((fighter_filter, family_filter, outcome_filter))
+    source_events = report.get("event_feed", []) if filtered else report.get("key_moments", [])
     verified = []
-    for event in report.get("key_moments", []):
-        if focus != "BOTH" and event.get("fighter") != focus:
+    for event in source_events:
+        if filtered and event.get("verification") != "verified":
+            continue
+        if fighter_filter and event.get("fighter") != fighter_filter:
+            continue
+        if family_filter and event.get("family") != family_filter:
+            continue
+        if outcome_filter and event.get("outcome") != outcome_filter:
+            continue
+        if not fighter_filter and focus != "BOTH" and event.get("fighter") != focus:
             continue
         try:
-            event_time = float(event.get("peak_time"))
+            event_time = float(event.get("time_seconds", event.get("peak_time")))
         except (TypeError, ValueError):
             continue
         if not math.isfinite(event_time) or event_time < 0:
@@ -1366,7 +1645,13 @@ def _build_replay_chapters(report: dict, focus: str) -> tuple[list[dict], str]:
 
 
 @app.get("/replay/{job_id}", response_class=HTMLResponse)
-def replay_page(request: Request, job_id: str):
+def replay_page(
+    request: Request,
+    job_id: str,
+    fighter: str | None = None,
+    family: str | None = None,
+    outcome: str | None = None,
+):
     if not _authorized_job(request, job_id):
         raise HTTPException(404)
     path = OUTPUTS / job_id / "report.json"
@@ -1379,7 +1664,12 @@ def replay_page(request: Request, job_id: str):
     refresh_identity_integrity(report)
     identity_safe = bool(report.get("integrity", {}).get("identity_evidence_trusted", True))
     focus = report.get("video", {}).get("focus_fighter") or report.get("video", {}).get("analysis_target", "BOTH")
-    replay_chapters, replay_mode = _build_replay_chapters(report, focus)
+    replay_chapters, replay_mode = _build_replay_chapters(
+        report, focus,
+        fighter.upper() if fighter else None,
+        family.lower() if family else None,
+        outcome.lower() if outcome else None,
+    )
     return templates.TemplateResponse(
         request=request,
         name="replay.html",
@@ -1388,6 +1678,10 @@ def replay_page(request: Request, job_id: str):
             "identity_safe": identity_safe,
             "replay_chapters": replay_chapters,
             "replay_mode": replay_mode,
+            "evidence_filter": " · ".join(
+                value.replace("_", " ").title()
+                for value in (fighter, family, outcome) if value
+            ),
         },
     )
 
@@ -1451,6 +1745,128 @@ def profile_page(request: Request):
     )
 
 
+@app.get("/settings")
+def settings_root(request: Request):
+    return RedirectResponse("/settings/privacy", status_code=303)
+
+
+@app.get("/settings/{section}", response_class=HTMLResponse)
+def settings_page(request: Request, section: str, notice: str = ""):
+    account = _account(request)
+    if not account:
+        return RedirectResponse(f"/login?next=/settings/{section}", status_code=303)
+    if section not in {"privacy", "billing"}:
+        raise HTTPException(404)
+    account = get_account(int(account["id"])) or account
+    return templates.TemplateResponse(
+        request=request,
+        name="settings.html",
+        context={
+            "request": request,
+            "section": section,
+            "notice": notice,
+            "account": account,
+            "profile": get_profile(int(account["profile_id"])) or {},
+            "fights": list_fights(int(account["profile_id"])),
+            "video_retention_days": SETTINGS.saved_video_retention_days,
+            "plan": plan_for_key(account.get("plan_override") or account.get("plan")),
+            "subscription_actions": list_subscription_actions(int(account["id"])),
+        },
+    )
+
+
+@app.post("/settings/marketing")
+def save_marketing_preference(request: Request, enabled: bool = Form(False)):
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    update_marketing_consent(int(account["id"]), bool(enabled))
+    record_legal_acceptance(
+        "marketing_consent", SETTINGS.policy_version, profile_id=int(account["profile_id"]),
+        metadata={"enabled": bool(enabled), "source": "privacy_settings"},
+        current_status="accepted" if enabled else "withdrawn",
+    )
+    return RedirectResponse("/settings/privacy?notice=Marketing+preference+saved", status_code=303)
+
+
+@app.post("/settings/sessions/revoke")
+def revoke_other_sessions(request: Request):
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    current = request.cookies.get(SESSION_COOKIE)
+    revoke_account_sessions(int(account["id"]), token_digest(current) if current else None)
+    record_security_event("other_sessions_revoked", account_id=int(account["id"]))
+    return RedirectResponse("/settings/privacy?notice=Other+sessions+signed+out", status_code=303)
+
+
+@app.post("/settings/videos/{job_id}/delete")
+def delete_original_video(request: Request, job_id: str):
+    account = _account(request)
+    fight = get_fight(job_id)
+    if not account or not fight or int(fight["profile_id"]) != int(account["profile_id"]):
+        raise HTTPException(404)
+    video = Path(fight.get("video_path") or "missing").resolve()
+    if video.parent == UPLOADS.resolve():
+        video.unlink(missing_ok=True)
+    mark_fight_video_deleted(job_id, int(account["profile_id"]))
+    record_security_event(
+        "fight_video_deleted", account_id=int(account["id"]), resource_type="fight", resource_id=job_id,
+    )
+    return RedirectResponse("/settings/privacy?notice=Original+video+deleted", status_code=303)
+
+
+@app.post("/settings/billing/cancel")
+def cancel_subscription(request: Request):
+    session_account = _account(request)
+    if not session_account:
+        raise HTTPException(403)
+    account = get_account(int(session_account["id"])) or session_account
+    subscription_id = account.get("stripe_subscription_id")
+    if not subscription_id:
+        raise HTTPException(400, "No connected paid subscription can be cancelled.")
+    try:
+        provider = cancel_subscription_at_period_end(str(subscription_id))
+    except Exception as exc:
+        raise HTTPException(503, f"Cancellation was not confirmed by the payment provider: {exc}")
+    if not provider.get("cancel_at_period_end"):
+        raise HTTPException(503, "The payment provider did not confirm cancellation.")
+    action = record_subscription_action(
+        int(account["id"]), "cancel", "scheduled",
+        effective_at=account.get("subscription_period_end"), provider_reference=str(subscription_id),
+        metadata={"provider_status": provider.get("status")},
+    )
+    _queue_transactional_notice(
+        int(account["id"]), "subscription_cancellation_confirmation", account["email"],
+        "Your WarriorIQ subscription cancellation",
+        f"Cancellation was scheduled on {action['requested_at']}. Access ends at {account.get('subscription_period_end') or 'the confirmed billing-period end'}. No further renewal should be charged after that date.",
+        {"requested_at": action["requested_at"], "access_ends": account.get("subscription_period_end")},
+    )
+    return RedirectResponse("/settings/billing?notice=Cancellation+scheduled", status_code=303)
+
+
+@app.post("/settings/billing/withdraw")
+def request_contract_withdrawal(request: Request, confirm: bool = Form(False)):
+    account = _account(request)
+    if not account or not confirm:
+        raise HTTPException(400, "Confirm the withdrawal request.")
+    full_account = get_account(int(account["id"])) or account
+    if not full_account.get("stripe_subscription_id"):
+        raise HTTPException(400, "No connected purchase is available for withdrawal review.")
+    action = record_subscription_action(
+        int(account["id"]), "eu_withdrawal", "pending_review",
+        provider_reference=full_account.get("stripe_subscription_id"),
+        metadata={"eligibility_not_determined": True, "policy_version": SETTINGS.policy_version},
+    )
+    _queue_transactional_notice(
+        int(account["id"]), "withdrawal_request_confirmation", account["email"],
+        "WarriorIQ withdrawal request received",
+        f"Your withdrawal request was received on {action['requested_at']} and is pending eligibility and payment review. This is separate from normal subscription cancellation.",
+        {"requested_at": action["requested_at"], "status": "pending_review"},
+    )
+    return RedirectResponse("/settings/billing?notice=Withdrawal+request+recorded+for+review", status_code=303)
+
+
 @app.post("/profile")
 async def save_profile(
     request: Request,
@@ -1505,10 +1921,10 @@ async def save_profile(
         photo_path, profile_video_path, notes.strip()[:2000], default_fighter, allow_model_training,
     )
     record_legal_acceptance(
-        "model_training_opt_in" if allow_model_training else "model_training_opt_out",
-        SETTINGS.policy_version,
+        "ai_training_consent", SETTINGS.policy_version,
         profile_id=profile_id,
         metadata={"enabled": bool(allow_model_training), "source": "profile"},
+        current_status="accepted" if allow_model_training else "withdrawn",
     )
     return RedirectResponse("/profile", status_code=303)
 
@@ -1568,6 +1984,11 @@ def delete_fight_route(request: Request, job_id: str):
     fight = delete_fight(job_id)
     if fight:
         _remove_fight_files(fight)
+        account = _account(request)
+        record_security_event(
+            "fight_analysis_deleted", account_id=int(account["id"]) if account else None,
+            resource_type="fight", resource_id=job_id,
+        )
     return RedirectResponse("/history", status_code=303)
 
 
@@ -1656,9 +2077,45 @@ def privacy_page(request: Request):
         request=request, name="privacy.html",
         context={
             "request": request, "guest_retention_hours": GUEST_RETENTION_HOURS,
+            "video_retention_days": SETTINGS.saved_video_retention_days,
+            "minimum_account_age": SETTINGS.minimum_account_age,
             "launch": launch_readiness(), "policy_version": SETTINGS.policy_version,
         },
     )
+
+
+@app.post("/cookie-preferences")
+def save_cookie_preferences(
+    request: Request,
+    choice: str = Form(...),
+    next_path: str = Form("/"),
+    analytics: bool = Form(False),
+    marketing: bool = Form(False),
+):
+    if choice == "all":
+        analytics = marketing = True
+        value = "all"
+    elif choice == "essential":
+        analytics = marketing = False
+        value = "essential"
+    elif choice == "custom":
+        value = "custom-analytics" if analytics and not marketing else "custom-marketing" if marketing and not analytics else "all" if analytics else "essential"
+    else:
+        raise HTTPException(400, "Choose a valid cookie preference.")
+    account = _account(request)
+    owner = {"profile_id": int(account["profile_id"])} if account else {"guest_id": request.state.guest_id}
+    if account:
+        update_cookie_preferences(int(account["id"]), analytics=analytics, marketing=marketing)
+    record_legal_acceptance(
+        "cookie_preferences", SETTINGS.policy_version, metadata={"analytics": analytics, "marketing": marketing},
+        current_status="accepted" if analytics or marketing else "declined", **owner,
+    )
+    response = RedirectResponse(_safe_next(next_path, "/"), status_code=303)
+    response.set_cookie(
+        COOKIE_PREFERENCES_COOKIE, value, max_age=60 * 60 * 24 * 365,
+        httponly=True, samesite="lax", secure=request.url.scheme == "https",
+    )
+    return response
 
 
 @app.get("/legal", response_class=HTMLResponse)
@@ -1676,6 +2133,8 @@ def legal_center(request: Request):
 @app.get("/cookies", response_class=HTMLResponse)
 @app.get("/acceptable-use", response_class=HTMLResponse)
 @app.get("/refunds", response_class=HTMLResponse)
+@app.get("/video-upload-policy", response_class=HTMLResponse)
+@app.get("/sports-medical-disclaimer", response_class=HTMLResponse)
 @app.get("/eula", response_class=HTMLResponse)
 @app.get("/dmca", response_class=HTMLResponse)
 @app.get("/accessibility", response_class=HTMLResponse)
@@ -1695,6 +2154,94 @@ def legal_document(request: Request):
             "launch": launch_readiness(), "policy_version": SETTINGS.policy_version,
         },
     )
+
+
+@app.get("/copyright-report", response_class=HTMLResponse)
+def copyright_report_page(request: Request):
+    return templates.TemplateResponse(
+        request=request, name="copyright_report.html",
+        context={"request": request, "submitted": False, "reference": None},
+    )
+
+
+@app.post("/copyright-report", response_class=HTMLResponse)
+def submit_copyright_report(
+    request: Request,
+    email: str = Form(...),
+    details: str = Form(...),
+    resource_id: str = Form(""),
+    good_faith: bool = Form(False),
+):
+    _enforce_rate_limit(request, "copyright-report", 6, 3600)
+    if not valid_email(email) or len(details.strip()) < 40 or not good_faith:
+        raise HTTPException(400, "Provide a valid email, a detailed good-faith report and the required confirmation.")
+    report_id = create_moderation_report("copyright", email.strip().lower(), details.strip(), resource_id.strip())
+    record_security_event("copyright_report_received", resource_type="moderation_report", resource_id=str(report_id))
+    return templates.TemplateResponse(
+        request=request, name="copyright_report.html",
+        context={"request": request, "submitted": True, "reference": report_id},
+    )
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, q: str = ""):
+    if not _is_admin(request):
+        raise HTTPException(404)
+    account = _account(request)
+    record_security_event("admin_area_viewed", account_id=int(account["id"]), resource_type="admin")
+    return templates.TemplateResponse(
+        request=request, name="admin.html",
+        context={
+            "request": request, "query": q[:200], "users": list_accounts(q),
+            "reports": list_moderation_reports(), "security_events": list_security_events(),
+        },
+    )
+
+
+@app.post("/admin/accounts/{account_id}/status")
+def admin_account_status(request: Request, account_id: int, status: str = Form(...)):
+    if not _is_admin(request):
+        raise HTTPException(404)
+    actor = _account(request)
+    if int(actor["id"]) == int(account_id) and status != "active":
+        raise HTTPException(400, "An administrator cannot suspend their current account.")
+    if not set_account_status(account_id, status):
+        raise HTTPException(404)
+    record_security_event(
+        "admin_account_status_changed", account_id=int(actor["id"]), severity="warning",
+        resource_type="account", resource_id=str(account_id), metadata={"status": status},
+    )
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/reports/{report_id}/resolve")
+def admin_resolve_report(request: Request, report_id: int):
+    if not _is_admin(request):
+        raise HTTPException(404)
+    if not resolve_moderation_report(report_id):
+        raise HTTPException(404)
+    actor = _account(request)
+    record_security_event(
+        "admin_moderation_report_resolved", account_id=int(actor["id"]),
+        resource_type="moderation_report", resource_id=str(report_id),
+    )
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/videos/delete")
+def admin_delete_prohibited_video(request: Request, job_id: str = Form(...)):
+    if not _is_admin(request):
+        raise HTTPException(404)
+    fight = delete_fight(job_id.strip())
+    if not fight:
+        raise HTTPException(404, "No saved analysis matches that ID.")
+    _remove_fight_files(fight)
+    actor = _account(request)
+    record_security_event(
+        "admin_prohibited_content_deleted", account_id=int(actor["id"]), severity="warning",
+        resource_type="fight", resource_id=job_id.strip(),
+    )
+    return RedirectResponse("/admin", status_code=303)
 
 
 @app.get("/robots.txt", response_class=PlainTextResponse)
@@ -1718,7 +2265,8 @@ def sitemap_xml():
     base = SETTINGS.public_base_url
     routes = (
         "/", "/pricing", "/privacy", "/legal", "/terms", "/cookies", "/acceptable-use",
-        "/refunds", "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security", "/subprocessors", "/contact",
+        "/refunds", "/video-upload-policy", "/sports-medical-disclaimer", "/eula", "/dmca",
+        "/accessibility", "/ai-transparency", "/security", "/subprocessors", "/contact",
     )
     urls = "" if not base else "".join(
         f"<url><loc>{html.escape(base + path)}</loc></url>" for path in routes
@@ -1745,6 +2293,7 @@ def pricing_page(request: Request):
 
 @app.post("/share/{job_id}")
 def share_report(request: Request, job_id: str):
+    _enforce_rate_limit(request, "report-share", 20, 3600)
     profile_id = _profile_id(request)
     fight = get_fight(job_id)
     if profile_id is None or not _request_plan(request).get("can_share"):
@@ -1786,6 +2335,7 @@ def revoke_shares(request: Request, job_id: str):
 
 @app.post("/account/export")
 def export_account_data(request: Request, password: str = Form(...)):
+    _enforce_rate_limit(request, "account-export", 5, 3600)
     account = _account(request)
     if not account or not authenticate(account["email"], password):
         raise HTTPException(400, "Enter the current account password to export your data.")
@@ -1812,6 +2362,18 @@ def export_account_data(request: Request, password: str = Form(...)):
         "account": {
             "email": account["email"], "plan": account.get("plan"),
             "plan_override": account.get("plan_override"), "created_at": account.get("created_at"),
+            "account_status": account.get("account_status"),
+            "terms_version": account.get("terms_version"),
+            "privacy_version": account.get("privacy_version"),
+            "policies_accepted_at": account.get("policies_accepted_at"),
+            "marketing_consent": bool(account.get("marketing_consent")),
+            "marketing_consent_at": account.get("marketing_consent_at"),
+            "cookie_preferences": {
+                "analytics": bool(account.get("cookie_analytics")),
+                "marketing": bool(account.get("cookie_marketing")),
+            },
+            "subscription_status": account.get("subscription_status"),
+            "subscription_period_end": account.get("subscription_period_end"),
         },
         "profile": profile,
         "fights": fights,
@@ -1837,6 +2399,17 @@ def delete_account_route(request: Request, password: str = Form(...), confirmati
         for _, job in list_jobs()
     ):
         raise HTTPException(409, "Wait for the running analysis to finish before deleting the account.")
+    if account.get("stripe_subscription_id"):
+        try:
+            cancellation = cancel_subscription_at_period_end(str(account["stripe_subscription_id"]))
+        except Exception as exc:
+            raise HTTPException(
+                503,
+                f"Account deletion is paused because subscription cancellation was not confirmed: {exc}",
+            )
+        if not cancellation.get("cancel_at_period_end"):
+            raise HTTPException(503, "Account deletion is paused because subscription cancellation was not confirmed.")
+    record_security_event("account_deletion_requested", account_id=int(account["id"]), severity="warning")
     removed = delete_account(int(account["id"]))
     if removed:
         for fight in removed["fights"]:
@@ -1869,12 +2442,27 @@ def checkout(request: Request, plan_key: str, billing_acceptance: bool = Form(Fa
     base = str(request.base_url).rstrip("/")
     try:
         url = create_checkout(
-            plan_key, f"{base}/pricing?paid=1", f"{base}/pricing?cancelled=1",
+            plan_key, f"{base}/purchase/confirmation?session_id={{CHECKOUT_SESSION_ID}}", f"{base}/pricing?cancelled=1",
             int(account["id"]), account["email"],
         )
     except Exception as exc:
         raise HTTPException(400, str(exc))
     return RedirectResponse(url, status_code=303)
+
+
+@app.get("/purchase/confirmation", response_class=HTMLResponse)
+def purchase_confirmation(request: Request):
+    account = _account(request)
+    if not account:
+        return RedirectResponse("/login?next=/purchase/confirmation", status_code=303)
+    receipt = next(
+        (message for message in list_outbound_messages(int(account["id"])) if message["message_type"] == "purchase_confirmation"),
+        None,
+    )
+    return templates.TemplateResponse(
+        request=request, name="purchase_confirmation.html",
+        context={"request": request, "account": account, "receipt": receipt},
+    )
 
 
 @app.post("/stripe/webhook")
@@ -1891,8 +2479,31 @@ async def stripe_webhook(request: Request):
         plan_key = metadata.get("warrioriq_plan")
         plan = PLANS.get(plan_key)
         if account_id and plan and session.get("payment_status") in {"paid", "no_payment_required"}:
-            apply_checkout_event(
+            recorded = apply_checkout_event(
                 str(event.get("id", "")), str(event.get("type", "")), int(account_id),
                 plan_key, int(plan.get("credits", 0)),
+                customer_id=str(session.get("customer") or "") or None,
+                subscription_id=str(session.get("subscription") or "") or None,
+                subscription_status="active",
             )
+            if recorded:
+                account = get_account(int(account_id)) or {}
+                currency = str(session.get("currency") or "eur").upper()
+                amount = int(session.get("amount_total") or 0) / 100
+                tax = int((session.get("total_details") or {}).get("amount_tax") or 0) / 100
+                payment_date = datetime.fromtimestamp(int(session.get("created") or time.time()), tz=timezone.utc).isoformat()
+                receipt_payload = {
+                        "plan": plan["label"], "amount": f"{amount:.2f} {currency}",
+                        "tax": f"{tax:.2f} {currency}", "payment_date": payment_date,
+                        "renewal": f"Automatically renews {plan['period']} until cancelled",
+                        "cancellation_path": "/settings/billing", "terms_path": "/terms",
+                        "refunds_path": "/refunds",
+                    }
+                _queue_transactional_notice(
+                    int(account_id), "purchase_confirmation", account.get("email", ""),
+                    f"WarriorIQ {plan['label']} purchase confirmation",
+                    f"Plan: {plan['label']}\nAmount: {amount:.2f} {currency}\nTax: {tax:.2f} {currency}\nPayment date: {payment_date}\nRenewal: automatically renews {plan['period']} until cancelled.\nCancel: /settings/billing\nRefunds and withdrawal: /refunds\nTerms: /terms",
+                    receipt_payload,
+                )
+                record_security_event("purchase_confirmed", account_id=int(account_id), resource_type="plan", resource_id=plan_key)
     return {"received": True}

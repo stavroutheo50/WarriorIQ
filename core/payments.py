@@ -152,3 +152,22 @@ def verify_webhook(payload: bytes, signature: str):
     import stripe
 
     return stripe.Webhook.construct_event(payload, signature, secret)
+
+
+def cancel_subscription_at_period_end(subscription_id: str) -> dict:
+    """Schedule cancellation with Stripe; never claim success without its response."""
+    if not SETTINGS.payments_enabled:
+        raise RuntimeError("Payments are not configured.")
+    secret = os.getenv("STRIPE_SECRET_KEY", "")
+    if not secret or not subscription_id:
+        raise RuntimeError("No active Stripe subscription is connected to this account.")
+    import stripe
+
+    stripe.api_key = secret
+    subscription = stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
+    return {
+        "id": str(subscription.get("id") or subscription_id),
+        "status": str(subscription.get("status") or "active"),
+        "cancel_at_period_end": bool(subscription.get("cancel_at_period_end")),
+        "current_period_end": subscription.get("current_period_end"),
+    }

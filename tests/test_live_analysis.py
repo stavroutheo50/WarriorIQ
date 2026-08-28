@@ -47,7 +47,10 @@ class DurableAnalysisStateTests(TestCase):
         self.assertIn("event.time_seconds)-1", template)
         self.assertIn("feedPinned", template)
         self.assertIn("markerElementById", template)
-        self.assertNotIn("setTimeout(()=>location.href", template)
+        self.assertIn('autoplay muted', template)
+        self.assertIn('preload="auto"', template)
+        self.assertIn("scheduleReportTransition", template)
+        self.assertIn("location.assign(resultUrl)", template)
         fixes = (
             Path(__file__).resolve().parents[1] / "app" / "static" / "fixes.css"
         ).read_text(encoding="utf-8")
@@ -82,6 +85,42 @@ class DurableAnalysisStateTests(TestCase):
             state.delete_job(job_id)
             client.close()
 
+    def test_stale_completed_cookie_never_overrides_a_processing_fight(self):
+        client = TestClient(app)
+        completed_id = "completed-analysis-cookie"
+        active_id = "new-processing-analysis"
+        try:
+            client.get("/")
+            guest_id = client.cookies.get(GUEST_COOKIE)
+            owner_key = f"guest:{guest_id}"
+            state.create_job(completed_id, {
+                "owner_key": owner_key,
+                "status": "complete",
+                "percent": 100.0,
+                "video_path": "completed.mp4",
+            })
+            state.create_job(active_id, {
+                "owner_key": owner_key,
+                "status": "running",
+                "percent": 37.0,
+                "video_path": "active.mp4",
+            })
+            client.cookies.set("warrioriq_active_analysis", completed_id)
+
+            dashboard = client.get("/dashboard").text
+            self.assertIn(f'href="/progress/{active_id}"', dashboard)
+            self.assertIn("Analyzing 37%", dashboard)
+            self.assertNotIn(f'href="/result/{completed_id}"', dashboard)
+
+            navigation = client.get("/api/active-analysis").json()
+            self.assertEqual(navigation["active_analysis_id"], active_id)
+            self.assertEqual(navigation["last_completed_analysis_id"], completed_id)
+            self.assertEqual(navigation["url"], f"/progress/{active_id}")
+        finally:
+            state.delete_job(completed_id)
+            state.delete_job(active_id)
+            client.close()
+
     def test_live_statistics_are_split_by_strike_family_and_outcome(self):
         events = [
             {"fighter": "A", "family": "punch", "outcome": "clean", "time_seconds": 2.0},
@@ -100,6 +139,49 @@ class DurableAnalysisStateTests(TestCase):
         self.assertEqual(stats["A"]["total_strikes"], 3)
         self.assertAlmostEqual(stats["A"]["accuracy"], 1 / 3)
         self.assertAlmostEqual(stats["B"]["observation_coverage"], .7)
+
+    def test_outcomes_balance_attempts_and_distinguish_evaded(self):
+        events = [
+            {"id": "a1", "fighter": "A", "family": "punch", "outcome": "landed", "time_seconds": 1.0},
+            {"id": "a2", "fighter": "A", "family": "punch", "outcome": "missed", "time_seconds": 2.0},
+            {"id": "a3", "fighter": "A", "family": "punch", "outcome": "blocked", "time_seconds": 3.0},
+            {"id": "a4", "fighter": "A", "family": "punch", "outcome": "evaded", "time_seconds": 4.0},
+            {"id": "a5", "fighter": "A", "family": "kick", "outcome": "uncertain", "time_seconds": 5.0},
+        ]
+
+        fighter = _provisional_stats(events, {"A": 10, "B": 10}, 10, True, 10.0)["fighters"]["A"]
+
+        self.assertEqual(fighter["attempts"], 5)
+        self.assertEqual(fighter["landed"], 1)
+        self.assertEqual(fighter["missed"], 1)
+        self.assertEqual(fighter["blocked"], 1)
+        self.assertEqual(fighter["evaded"], 1)
+        self.assertEqual(fighter["uncertain"], 1)
+        self.assertEqual(
+            fighter["attempts"],
+            fighter["landed"] + fighter["missed"] + fighter["blocked"] + fighter["evaded"] + fighter["uncertain"],
+        )
+        self.assertIsNone(fighter["accuracy"])
+        self.assertAlmostEqual(fighter["punch_accuracy"], .25)
+        self.assertIsNone(fighter["kick_accuracy"])
+
+    def test_combination_requires_an_uninterrupted_same_fighter_sequence(self):
+        events = [
+            {"id": "a1", "fighter": "A", "family": "punch", "technique": "jab", "outcome": "landed", "time_seconds": 1.0, "round_number": 1},
+            {"id": "a2", "fighter": "A", "family": "punch", "technique": "cross", "outcome": "missed", "time_seconds": 1.6, "round_number": 1},
+            {"id": "b1", "fighter": "B", "family": "punch", "technique": "jab", "outcome": "missed", "time_seconds": 2.0, "round_number": 1},
+            {"id": "a3", "fighter": "A", "family": "kick", "technique": "right_low_kick", "outcome": "landed", "time_seconds": 2.4, "round_number": 1},
+            {"id": "a4", "fighter": "A", "family": "punch", "technique": "jab", "outcome": "landed", "time_seconds": 4.2, "round_number": 1},
+            {"id": "a5", "fighter": "A", "family": "punch", "technique": "cross", "outcome": "landed", "time_seconds": 4.8, "round_number": 1},
+            {"id": "a6", "fighter": "A", "family": "kick", "technique": "left_low_kick", "outcome": "blocked", "time_seconds": 5.4, "round_number": 1},
+        ]
+
+        fighter = _provisional_stats(events, {"A": 10, "B": 10}, 10, True, 10.0)["fighters"]["A"]
+
+        self.assertEqual(fighter["combinations"], 2)
+        self.assertEqual(fighter["longest_combination"], 3)
+        self.assertEqual(fighter["combination_sequences"][0]["techniques"], ["jab", "cross"])
+        self.assertEqual(fighter["combination_sequences"][1]["techniques"], ["jab", "cross", "left_low_kick"])
 
     def test_unvalidated_live_pipeline_emits_only_generic_observed_attempts(self):
         candidate = SimpleNamespace(

@@ -153,11 +153,74 @@ def init_db() -> None:
                 FOREIGN KEY(profile_id) REFERENCES profiles(id)
             );
 
+            CREATE TABLE IF NOT EXISTS subscription_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                action_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                requested_at TEXT NOT NULL,
+                effective_at TEXT,
+                provider_reference TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY(account_id) REFERENCES accounts(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS security_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL DEFAULT 'info',
+                resource_type TEXT,
+                resource_id TEXT,
+                occurred_at TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY(account_id) REFERENCES accounts(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS moderation_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_type TEXT NOT NULL,
+                reporter_email TEXT NOT NULL,
+                resource_id TEXT,
+                details TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                resolved_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS outbound_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER,
+                message_type TEXT NOT NULL,
+                recipient TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                created_at TEXT NOT NULL,
+                sent_at TEXT,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY(account_id) REFERENCES accounts(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT,
+                FOREIGN KEY(account_id) REFERENCES accounts(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_analysis_usage_account_period
             ON analysis_usage(account_id, period_key);
 
             CREATE INDEX IF NOT EXISTS idx_legal_acceptances_profile
             ON legal_acceptances(profile_id, accepted_at);
+
+            CREATE INDEX IF NOT EXISTS idx_security_events_account_time
+            ON security_events(account_id, occurred_at);
+
+            CREATE INDEX IF NOT EXISTS idx_subscription_actions_account_time
+            ON subscription_actions(account_id, requested_at);
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -170,6 +233,34 @@ def init_db() -> None:
         account_columns = {row[1] for row in con.execute("PRAGMA table_info(accounts)").fetchall()}
         if "plan_override" not in account_columns:
             con.execute("ALTER TABLE accounts ADD COLUMN plan_override TEXT")
+        account_migrations = {
+            "terms_version": "TEXT",
+            "privacy_version": "TEXT",
+            "policies_accepted_at": "TEXT",
+            "age_confirmed_at": "TEXT",
+            "guardian_approval_status": "TEXT NOT NULL DEFAULT 'not_applicable'",
+            "marketing_consent": "INTEGER NOT NULL DEFAULT 0",
+            "marketing_consent_at": "TEXT",
+            "cookie_analytics": "INTEGER NOT NULL DEFAULT 0",
+            "cookie_marketing": "INTEGER NOT NULL DEFAULT 0",
+            "account_status": "TEXT NOT NULL DEFAULT 'active'",
+            "stripe_customer_id": "TEXT",
+            "stripe_subscription_id": "TEXT",
+            "subscription_status": "TEXT",
+            "subscription_period_end": "TEXT",
+            "subscription_cancelled_at": "TEXT",
+        }
+        for column, definition in account_migrations.items():
+            if column not in account_columns:
+                con.execute(f"ALTER TABLE accounts ADD COLUMN {column} {definition}")
+        fight_columns = {row[1] for row in con.execute("PRAGMA table_info(fights)").fetchall()}
+        if "video_delete_after" not in fight_columns:
+            con.execute("ALTER TABLE fights ADD COLUMN video_delete_after TEXT")
+        if "video_deleted_at" not in fight_columns:
+            con.execute("ALTER TABLE fights ADD COLUMN video_deleted_at TEXT")
+        acceptance_columns = {row[1] for row in con.execute("PRAGMA table_info(legal_acceptances)").fetchall()}
+        if "current_status" not in acceptance_columns:
+            con.execute("ALTER TABLE legal_acceptances ADD COLUMN current_status TEXT NOT NULL DEFAULT 'accepted'")
         row = con.execute("SELECT id FROM profiles ORDER BY id LIMIT 1").fetchone()
         if row is None:
             now = datetime.now(timezone.utc).isoformat()
@@ -227,6 +318,7 @@ def save_fight(
     ruleset: str,
     analysis_target: str,
     summary: dict,
+    video_delete_after: str | None = None,
 ) -> None:
     init_db()
     now = datetime.now(timezone.utc).isoformat()
@@ -234,8 +326,8 @@ def save_fight(
         con.execute(
             """
             INSERT INTO fights(job_id, profile_id, original_name, video_path, report_path,
-                               fight_type, ruleset, analysis_target, created_at, summary_json)
-            VALUES(?,?,?,?,?,?,?,?,?,?)
+                               fight_type, ruleset, analysis_target, created_at, summary_json, video_delete_after)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(job_id) DO UPDATE SET
                 report_path=excluded.report_path,
                 summary_json=excluded.summary_json
@@ -251,6 +343,7 @@ def save_fight(
                 analysis_target,
                 now,
                 json.dumps(summary),
+                video_delete_after,
             ),
         )
 
@@ -271,6 +364,14 @@ def list_fights(profile_id: int = 1) -> list[dict]:
             item["summary"] = {}
         fights.append(item)
     return fights
+
+
+def list_all_fight_storage() -> list[dict]:
+    """Internal cleanup inventory; never expose this across account boundaries."""
+    init_db()
+    with connection() as con:
+        rows = con.execute("SELECT job_id,profile_id,video_path,report_path FROM fights").fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_fight(job_id: str) -> dict | None:
@@ -299,6 +400,38 @@ def delete_fight(job_id: str) -> dict | None:
         con.execute("DELETE FROM legal_acceptances WHERE resource_id=?", (job_id,))
         con.execute("DELETE FROM fights WHERE job_id=?", (job_id,))
     return fight
+
+
+def mark_fight_video_deleted(job_id: str, profile_id: int) -> dict | None:
+    """Detach the original video while preserving its generated report."""
+    fight = get_fight(job_id)
+    if fight is None or int(fight["profile_id"]) != int(profile_id):
+        return None
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            "UPDATE fights SET video_deleted_at=?,video_path='' WHERE job_id=? AND profile_id=?",
+            (now, job_id, int(profile_id)),
+        )
+    fight["video_deleted_at"] = now
+    return fight
+
+
+def list_expired_fight_videos(now: datetime | None = None) -> list[dict]:
+    moment = (now or datetime.now(timezone.utc)).isoformat()
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            """SELECT * FROM fights WHERE video_path<>'' AND video_deleted_at IS NULL
+               AND video_delete_after IS NOT NULL AND video_delete_after<=? ORDER BY id""",
+            (moment,),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["summary"] = json.loads(item.pop("summary_json") or "{}")
+        result.append(item)
+    return result
 
 
 def save_annotation(job_id: str, event_time: float, ruleset: str, predicted: dict, corrected: dict) -> int:
@@ -346,6 +479,7 @@ def record_legal_acceptance(
     guest_id: str | None = None,
     resource_id: str | None = None,
     metadata: dict | None = None,
+    current_status: str = "accepted",
 ) -> int:
     if not profile_id and not guest_id:
         raise ValueError("A profile or guest identifier is required")
@@ -353,9 +487,12 @@ def record_legal_acceptance(
     with connection() as con:
         cursor = con.execute(
             """INSERT INTO legal_acceptances(
-                   profile_id,guest_id,kind,policy_version,resource_id,accepted_at,metadata_json
-               ) VALUES(?,?,?,?,?,?,?)""",
-            (profile_id, guest_id, kind[:80], policy_version[:40], resource_id, now, json.dumps(metadata or {})),
+                   profile_id,guest_id,kind,policy_version,resource_id,accepted_at,metadata_json,current_status
+               ) VALUES(?,?,?,?,?,?,?,?)""",
+            (
+                profile_id, guest_id, kind[:80], policy_version[:40], resource_id, now,
+                json.dumps(metadata or {}), current_status[:24],
+            ),
         )
         return int(cursor.lastrowid)
 
@@ -450,6 +587,118 @@ def get_account_by_email(email: str) -> dict | None:
     return dict(row) if row else None
 
 
+def record_account_signup_acceptance(
+    account_id: int,
+    *,
+    terms_version: str,
+    privacy_version: str,
+    marketing_consent: bool,
+) -> dict:
+    """Persist the account contract and optional marketing choice separately."""
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            """UPDATE accounts SET terms_version=?,privacy_version=?,policies_accepted_at=?,
+               age_confirmed_at=?,guardian_approval_status='not_applicable',
+               marketing_consent=?,marketing_consent_at=? WHERE id=?""",
+            (
+                terms_version, privacy_version, now, now, int(marketing_consent),
+                now if marketing_consent else None, int(account_id),
+            ),
+        )
+    return get_account(account_id) or {}
+
+
+def update_marketing_consent(account_id: int, enabled: bool) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            "UPDATE accounts SET marketing_consent=?,marketing_consent_at=? WHERE id=?",
+            (int(enabled), now, int(account_id)),
+        )
+    return get_account(account_id) or {}
+
+
+def update_cookie_preferences(account_id: int, *, analytics: bool, marketing: bool) -> dict:
+    with connection() as con:
+        con.execute(
+            "UPDATE accounts SET cookie_analytics=?,cookie_marketing=? WHERE id=?",
+            (int(analytics), int(marketing), int(account_id)),
+        )
+    return get_account(account_id) or {}
+
+
+def revoke_account_sessions(account_id: int, keep_token_hash: str | None = None) -> int:
+    with connection() as con:
+        if keep_token_hash:
+            cursor = con.execute(
+                "DELETE FROM sessions WHERE account_id=? AND token_hash<>?",
+                (int(account_id), keep_token_hash),
+            )
+        else:
+            cursor = con.execute("DELETE FROM sessions WHERE account_id=?", (int(account_id),))
+        return int(cursor.rowcount)
+
+
+def update_password_hash(account_id: int, password_hash: str) -> bool:
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE accounts SET password_hash=? WHERE id=? AND account_status='active'",
+            (password_hash, int(account_id)),
+        )
+        if cursor.rowcount:
+            con.execute("DELETE FROM sessions WHERE account_id=?", (int(account_id),))
+        return cursor.rowcount == 1
+
+
+def save_password_reset_token(account_id: int, token_hash: str, expires_at: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute("DELETE FROM password_reset_tokens WHERE expires_at<=? OR used_at IS NOT NULL", (now,))
+        con.execute(
+            "INSERT INTO password_reset_tokens(account_id,token_hash,created_at,expires_at) VALUES(?,?,?,?)",
+            (int(account_id), token_hash, now, expires_at),
+        )
+
+
+def consume_password_reset_token(token_hash: str) -> int | None:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            """SELECT id,account_id FROM password_reset_tokens
+               WHERE token_hash=? AND used_at IS NULL AND expires_at>?""",
+            (token_hash, now),
+        ).fetchone()
+        if row is None:
+            return None
+        con.execute("UPDATE password_reset_tokens SET used_at=? WHERE id=?", (now, int(row["id"])))
+        return int(row["account_id"])
+
+
+def set_account_status(account_id: int, status: str) -> bool:
+    if status not in {"active", "suspended", "disabled"}:
+        raise ValueError("Invalid account status")
+    with connection() as con:
+        cursor = con.execute("UPDATE accounts SET account_status=? WHERE id=?", (status, int(account_id)))
+        if status != "active":
+            con.execute("DELETE FROM sessions WHERE account_id=?", (int(account_id),))
+        return cursor.rowcount == 1
+
+
+def list_accounts(search: str = "", limit: int = 100) -> list[dict]:
+    init_db()
+    query = f"%{search.strip().lower()}%"
+    with connection() as con:
+        rows = con.execute(
+            """SELECT id,email,profile_id,plan,plan_override,account_status,created_at,
+               terms_version,privacy_version,policies_accepted_at,marketing_consent
+               FROM accounts WHERE lower(email) LIKE ? ORDER BY id DESC LIMIT ?""",
+            (query, max(1, min(int(limit), 250))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def set_plan_override(account_id: int, plan: str | None) -> bool:
     """Set a permanent local entitlement without altering billing state."""
     init_db()
@@ -486,9 +735,14 @@ def account_for_session(token_hash: str) -> dict | None:
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
         row = con.execute(
-            """SELECT accounts.id,accounts.email,accounts.profile_id,accounts.plan,accounts.plan_override,accounts.credits,accounts.created_at
+            """SELECT accounts.id,accounts.email,accounts.profile_id,accounts.plan,accounts.plan_override,
+               accounts.credits,accounts.created_at,accounts.account_status,accounts.marketing_consent,
+               accounts.marketing_consent_at,accounts.cookie_analytics,accounts.cookie_marketing,
+               accounts.terms_version,accounts.privacy_version,accounts.policies_accepted_at,
+               accounts.stripe_customer_id,accounts.stripe_subscription_id,accounts.subscription_status,
+               accounts.subscription_period_end,accounts.subscription_cancelled_at
                FROM sessions JOIN accounts ON accounts.id=sessions.account_id
-               WHERE sessions.token_hash=? AND sessions.expires_at>?""",
+               WHERE sessions.token_hash=? AND sessions.expires_at>? AND accounts.account_status='active'""",
             (token_hash, now),
         ).fetchone()
     return dict(row) if row else None
@@ -499,7 +753,18 @@ def delete_session(token_hash: str) -> None:
         con.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
 
 
-def apply_checkout_event(event_id: str, event_type: str, account_id: int, plan: str, credits: int) -> bool:
+def apply_checkout_event(
+    event_id: str,
+    event_type: str,
+    account_id: int,
+    plan: str,
+    credits: int,
+    *,
+    customer_id: str | None = None,
+    subscription_id: str | None = None,
+    subscription_status: str | None = None,
+    period_end: str | None = None,
+) -> bool:
     init_db()
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
@@ -511,10 +776,169 @@ def apply_checkout_event(event_id: str, event_type: str, account_id: int, plan: 
         except sqlite3.IntegrityError:
             return False
         con.execute(
-            "UPDATE accounts SET plan=?,credits=MAX(credits,?) WHERE id=?",
-            (plan, max(0, int(credits)), account_id),
+            """UPDATE accounts SET plan=?,credits=MAX(credits,?),
+               stripe_customer_id=COALESCE(?,stripe_customer_id),
+               stripe_subscription_id=COALESCE(?,stripe_subscription_id),
+               subscription_status=COALESCE(?,subscription_status),
+               subscription_period_end=COALESCE(?,subscription_period_end) WHERE id=?""",
+            (
+                plan, max(0, int(credits)), customer_id, subscription_id,
+                subscription_status, period_end, account_id,
+            ),
         )
     return True
+
+
+def record_subscription_action(
+    account_id: int,
+    action_type: str,
+    status: str,
+    *,
+    effective_at: str | None = None,
+    provider_reference: str | None = None,
+    metadata: dict | None = None,
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            """INSERT INTO subscription_actions(
+               account_id,action_type,status,requested_at,effective_at,provider_reference,metadata_json
+               ) VALUES(?,?,?,?,?,?,?)""",
+            (
+                int(account_id), action_type[:40], status[:32], now, effective_at,
+                provider_reference, json.dumps(metadata or {}),
+            ),
+        )
+        if action_type == "cancel" and status in {"scheduled", "complete"}:
+            con.execute(
+                "UPDATE accounts SET subscription_status=?,subscription_cancelled_at=? WHERE id=?",
+                ("cancel_at_period_end" if status == "scheduled" else "cancelled", now, int(account_id)),
+            )
+        row = con.execute("SELECT * FROM subscription_actions WHERE id=?", (cursor.lastrowid,)).fetchone()
+    result = dict(row)
+    result["metadata"] = json.loads(result.pop("metadata_json") or "{}")
+    return result
+
+
+def list_subscription_actions(account_id: int) -> list[dict]:
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM subscription_actions WHERE account_id=? ORDER BY id DESC",
+            (int(account_id),),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+        result.append(item)
+    return result
+
+
+def record_security_event(
+    event_type: str,
+    *,
+    account_id: int | None = None,
+    severity: str = "info",
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    metadata: dict | None = None,
+) -> int:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            """INSERT INTO security_events(
+               account_id,event_type,severity,resource_type,resource_id,occurred_at,metadata_json
+               ) VALUES(?,?,?,?,?,?,?)""",
+            (
+                account_id, event_type[:80], severity[:16], resource_type, resource_id,
+                now, json.dumps(metadata or {}),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_security_events(limit: int = 200) -> list[dict]:
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM security_events ORDER BY id DESC LIMIT ?",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+        result.append(item)
+    return result
+
+
+def create_moderation_report(report_type: str, reporter_email: str, details: str, resource_id: str = "") -> int:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            """INSERT INTO moderation_reports(report_type,reporter_email,resource_id,details,status,created_at)
+               VALUES(?,?,?,?,?,?)""",
+            (report_type[:40], reporter_email[:320], resource_id[:120] or None, details[:6000], "open", now),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_moderation_reports(limit: int = 200) -> list[dict]:
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM moderation_reports ORDER BY id DESC LIMIT ?",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def resolve_moderation_report(report_id: int) -> bool:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE moderation_reports SET status='resolved',resolved_at=? WHERE id=?",
+            (now, int(report_id)),
+        )
+        return cursor.rowcount == 1
+
+
+def queue_outbound_message(account_id: int | None, message_type: str, recipient: str, payload: dict) -> int:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            """INSERT INTO outbound_messages(account_id,message_type,recipient,status,created_at,payload_json)
+               VALUES(?,?,?,?,?,?)""",
+            (account_id, message_type[:60], recipient[:320], "queued", now, json.dumps(payload)),
+        )
+        return int(cursor.lastrowid)
+
+
+def mark_outbound_message_sent(message_id: int) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            "UPDATE outbound_messages SET status='sent',sent_at=? WHERE id=?",
+            (now, int(message_id)),
+        )
+
+
+def list_outbound_messages(account_id: int | None = None) -> list[dict]:
+    init_db()
+    with connection() as con:
+        if account_id is None:
+            rows = con.execute("SELECT * FROM outbound_messages ORDER BY id DESC").fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM outbound_messages WHERE account_id=? ORDER BY id DESC", (int(account_id),)
+            ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+        result.append(item)
+    return result
 
 
 def consume_credit(account_id: int) -> bool:
@@ -700,6 +1124,13 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM legal_acceptances WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM analysis_usage WHERE account_id=?", (account_id,))
+        con.execute("DELETE FROM subscription_actions WHERE account_id=?", (account_id,))
+        con.execute("DELETE FROM outbound_messages WHERE account_id=?", (account_id,))
+        con.execute("DELETE FROM password_reset_tokens WHERE account_id=?", (account_id,))
+        con.execute(
+            "UPDATE security_events SET account_id=NULL,metadata_json='{}' WHERE account_id=?",
+            (account_id,),
+        )
         con.execute("DELETE FROM sessions WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM accounts WHERE id=?", (account_id,))
         con.execute("DELETE FROM profiles WHERE id=?", (profile_id,))
