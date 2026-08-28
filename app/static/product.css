@@ -126,3 +126,130 @@ body[data-page=result] .report-path{border-radius:12px;background:#0b1422}body[d
 }
 @media(prefers-reduced-motion:reduce){.preview-scan,.live-event-empty:before{display:none}.fight-thumb img,.fight-thumb span{transition:none}}
 @media(forced-colors:active){.nav,.card,.hero-card,.fight-record,.preview-screen,.empty-state{border:1px solid CanvasText}.preview-fighter{border:2px solid Highlight}.btn{border:1px solid ButtonText}}
+
+/* 2026-08 professional consistency pass
+   Keep WarriorIQ's sports identity while reducing decorative UI noise. */
+:root{
+  --wiq-type-xs:10px;
+  --wiq-type-sm:12px;
+  --wiq-type-body:15px;
+  --wiq-control-height:44px;
+  --wiq-ease:cubic-bezier(.2,.75,.25,1);
+  --wiq-fast:160ms;
+  --wiq-normal:240ms;
+}
+
+body{font-size:var(--wiq-type-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a,button,input,select,summary{transition-duration:var(--wiq-fast);transition-timing-function:var(--wiq-ease)}
+button,input,select{font:inherit}
+button:disabled,input:disabled,select:disabled{cursor:not-allowed;opacity:.52}
+:focus-visible{outline:2px solid #82a5ff;outline-offset:3px}
+.btn{min-height:var(--wiq-control-height);padding:10px 16px;border-radius:var(--wiq-radius-sm);font-size:var(--wiq-type-sm);font-weight:780;letter-spacing:.01em}
+.btn:active{transform:translateY(1px);box-shadow:none}
+.field>label,.upload-field>label{font-size:var(--wiq-type-xs);letter-spacing:.075em}
+.field input,.field select{min-height:var(--wiq-control-height);border-radius:var(--wiq-radius-sm);border-color:#2c3d58;background:#091120}
+.field input:hover,.field select:hover{border-color:#405573}
+.field input:focus,.field select:focus{border-color:#718ddb;box-shadow:0 0 0 3px rgba(92,130,239,.12)}
+.notice{border-radius:var(--wiq-radius-sm);box-shadow:none}
+.card{border-radius:var(--wiq-radius-md);box-shadow:none}
+
+/* Navigation stays quiet until the user needs it. */
+.nav{height:68px}
+.navlinks>a,.nav-more>summary{padding-inline:13px;font-weight:720}
+.navlinks>a[aria-current=page]:after{left:13px;right:13px}
+.nav-signup{min-height:40px;padding:8px 13px}
+.mobile-menu{border-radius:var(--wiq-radius-md);background:#0a1220;box-shadow:0 22px 55px rgba(0,0,0,.4)}
+.mobile-menu a,.mobile-menu button{min-height:44px}
+
+/* Home: clearer hierarchy and a shorter path to the upload action. */
+body[data-page=home] .hero{padding-top:54px;gap:clamp(36px,4.5vw,64px)}
+body[data-page=home] .hero h1{max-width:680px;font-size:clamp(50px,6.3vw,80px);line-height:.9;letter-spacing:-.052em}
+body[data-page=home] .hero p{max-width:570px;font-size:16px;line-height:1.65}
+body[data-page=home] .hero-card{border-radius:var(--wiq-radius-lg)}
+.file-button{border-radius:var(--wiq-radius-md);transition:border-color var(--wiq-fast) var(--wiq-ease),background var(--wiq-fast) var(--wiq-ease),transform var(--wiq-fast) var(--wiq-ease)}
+.file-button:hover{transform:none}
+.advanced-option{margin:14px 0;border:1px solid #2b3c58;border-radius:var(--wiq-radius-sm);background:#0a1323}
+.advanced-option>summary{display:flex;min-height:52px;align-items:center;justify-content:space-between;gap:16px;padding:10px 13px;color:#dce5f2;cursor:pointer;list-style:none}
+.advanced-option>summary::-webkit-details-marker{display:none}
+.advanced-option>summary span{display:flex;min-width:0;flex-direction:column;gap:2px}
+.advanced-option>summary strong{font-size:12px}
+.advanced-option>summary small{color:#8291a7;font-size:10px;font-weight:550;line-height:1.4}
+.advanced-option>summary b{color:#829ce8;font-size:17px;font-weight:500;transition:transform var(--wiq-fast) var(--wiq-ease)}
+.advanced-option[open]>summary b{transform:rotate(45deg)}
+.advanced-option>.check{margin:0;padding:13px;border-top:1px solid #263750;color:#aebbd0;font-size:11px;line-height:1.5}
+.upload-consent{border-radius:var(--wiq-radius-sm);background:#091222}
+.upload-consent legend{padding-inline:7px;color:#bdc8d8;font-size:11px;font-weight:780}
+
+/* Pricing: comparison-led rather than promo-led. */
+.pricing-hero{max-width:760px;padding:68px 0 42px}
+.pricing-hero h1{max-width:700px;margin:13px 0 18px;font-size:clamp(46px,6vw,70px);line-height:.96;letter-spacing:-.045em}
+.pricing-hero h1 em{background:none;color:#9db3f2;-webkit-text-fill-color:currentColor}
+.pricing-hero>p{font-size:16px;line-height:1.65}
+.pricing-promise{gap:18px;margin-top:22px}
+.pricing-promise span{padding:0;border:0;border-radius:0;background:none;color:#93a1b4;font-size:10px}
+.pricing-grid{gap:14px}
+.pricing-card,.pricing-card[data-plan=coach],.pricing-card.gym-featured{min-height:0;padding:24px;border-color:#293a54;background:#0d1625;box-shadow:none}
+.pricing-card:hover{border-color:#415673}
+.pricing-card.featured{border-color:#526ca9;box-shadow:none}
+.pricing-card.gym-featured{border-color:#526ca9;background:#10192a;box-shadow:none}
+.plan-banner{margin:-24px -24px 21px;padding:9px 14px;background:#1d2f58;color:#cddaff;font-size:10px;letter-spacing:1.3px}
+.gym-featured .plan-banner{background:#203853}
+.plan-price{margin-top:16px;font-size:38px;letter-spacing:-1.5px}
+.billing-details{margin:15px 0 2px;border-top:1px solid var(--wiq-line-soft);border-bottom:1px solid var(--wiq-line-soft)}
+.billing-details>summary{display:flex;min-height:48px;align-items:center;justify-content:space-between;gap:14px;color:#b8c4d5;cursor:pointer;list-style:none}
+.billing-details>summary::-webkit-details-marker{display:none}
+.billing-details>summary::marker{content:""}
+.billing-details>summary span{display:flex;flex-direction:column;gap:2px;font-size:11px;font-weight:780}
+.billing-details>summary small{color:#728197;font-size:9px;font-weight:550}
+.billing-details>summary b{color:#7893dc;font-size:16px;font-weight:500;transition:transform var(--wiq-fast) var(--wiq-ease)}
+.billing-details[open]>summary b{transform:rotate(45deg)}
+.billing-details .billing-facts{margin:0;padding:4px 0 13px;border:0;color:#99a7ba;font-size:10px}
+.plan-entitlement{margin:15px 0;padding:12px;border-radius:var(--wiq-radius-sm);background:#0a1322}
+.plan-features{gap:8px;margin-bottom:21px}
+.plan-features li{font-size:12px;line-height:1.45}
+.gym-note{border-radius:var(--wiq-radius-sm);background:#111b30}
+.report-levels .card{padding:24px}
+
+/* Account access should read as a form, not a wall of feature cards. */
+.auth-layout{min-height:660px;gap:clamp(36px,6vw,72px)}
+.auth-copy h1{max-width:720px;font-size:clamp(42px,5.6vw,68px)}
+.auth-copy>p{max-width:660px;font-size:16px}
+.auth-copy .trust-checks{grid-template-columns:1fr 1fr;gap:0;margin-top:24px;border-top:1px solid var(--wiq-line-soft)}
+.auth-copy .trust-checks span{position:relative;padding:12px 16px 12px 21px;border:0;border-bottom:1px solid var(--wiq-line-soft);border-radius:0;background:none;color:#96a5b9;font-size:11px}
+.auth-copy .trust-checks span:before{content:"";position:absolute;left:0;top:17px;width:6px;height:6px;border-radius:50%;background:var(--wiq-success)}
+.auth-card{border-radius:var(--wiq-radius-lg)}
+
+/* Dense product screens use consistent compact chrome. */
+.section-title{gap:20px}
+.section-title h1,.section-title h2{letter-spacing:-.03em}
+.metric,.quality-strip,.analysis-quality,.live-video-card,.live-feed-card,.live-stats,.analysis-process-card{border-radius:var(--wiq-radius-md);box-shadow:none}
+.table-wrap{border:1px solid var(--wiq-line-soft);border-radius:var(--wiq-radius-sm)}
+table th{color:#7e8da2;font-size:9px;letter-spacing:.07em;text-transform:uppercase}
+table td{font-size:12px}
+.global-back{left:14px;bottom:14px;min-height:40px;padding:8px 12px;border-color:#30425f;border-radius:var(--wiq-radius-sm);background:rgba(9,16,28,.9);font-size:11px;box-shadow:0 10px 28px rgba(0,0,0,.3)}
+.global-back:hover{background:#142139;border-color:#526b93;transform:none}
+
+@media(max-width:900px){
+  .nav{height:64px}
+  body[data-page=home] .hero{padding-top:40px}
+  .pricing-hero{padding-top:52px}
+}
+@media(max-width:620px){
+  body[data-page=home] .hero{gap:36px;padding-top:34px}
+  body[data-page=home] .hero h1{font-size:clamp(43px,13vw,54px);line-height:.94}
+  body[data-page=home] .hero p{font-size:15px}
+  .hero-actions{display:grid;grid-template-columns:1fr 1fr}
+  .hero-actions .btn{width:100%}
+  .pricing-hero h1{font-size:44px}
+  .pricing-promise{display:grid;gap:8px}
+  .pricing-card,.pricing-card[data-plan=coach],.pricing-card.gym-featured{padding:20px}
+  .plan-banner{margin:-20px -20px 18px}
+  .auth-layout{padding-top:38px}
+  .auth-copy .trust-checks{grid-template-columns:1fr}
+  .auth-copy .trust-checks span{padding-block:10px}
+  body:not([data-page=home]) main{padding-bottom:46px}
+  .global-back{left:10px;bottom:10px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}

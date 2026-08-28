@@ -16,11 +16,11 @@
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/navigation.css">
   <link rel="stylesheet" href="/static/fixes.css?v=20260826-live3">
-  <link rel="stylesheet" href="/static/product.css?v=20260826-polish1">
+  <link rel="stylesheet" href="/static/product.css?v=20260828-polish3">
   <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" type="image/png" href="/static/warrioriq-logo.png"><link rel="apple-touch-icon" href="/static/warrioriq-logo.png">
   {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-backed kickboxing video analysis for athletes and coaches.","url":"{{request.state.canonical_url}}"}</script>{% endif %}
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/motion.css?v=20260825-1">
+  <link rel="stylesheet" href="/static/motion.css?v=20260828-2">
 </head>
 {% set page_key = request.url.path.strip('/').split('/')[0] if request.url.path.strip('/') else 'home' %}
 <body data-page="{{page_key}}">
@@ -59,5 +59,5 @@
     document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{if(event.defaultPrevented||form.dataset.async==='true')return;const submitter=event.submitter;if(!submitter||submitter.name||submitter.dataset.keepLabel==='true')return;submitter.dataset.originalLabel=submitter.textContent;submitter.textContent=submitter.dataset.loadingLabel||'Working…';submitter.setAttribute('aria-busy','true');submitter.disabled=true}));
   })();
   </script>
-  <script src="/static/motion.js?v=20260825-1" defer></script>
+  <script src="/static/motion.js?v=20260828-2" defer></script>
 </body></html>

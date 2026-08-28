@@ -1,7 +1,7 @@
 :root{
   --wiq-motion-fast:140ms;
   --wiq-motion-base:260ms;
-  --wiq-motion-slow:520ms;
+  --wiq-motion-slow:420ms;
   --wiq-ease-out:cubic-bezier(.2,.82,.2,1);
   --wiq-ease-impact:cubic-bezier(.18,.89,.32,1.22);
 }
@@ -38,7 +38,7 @@ body.motion-enabled .wiq-reveal.is-visible{opacity:1;transform:none}
 .wiq-primary-motion:after{content:"";position:absolute;z-index:2;inset:-55% -35%;pointer-events:none;background:linear-gradient(108deg,transparent 37%,rgba(255,255,255,.17) 48%,transparent 59%);transform:translateX(-70%);opacity:0;transition:transform 460ms var(--wiq-ease-out),opacity 120ms ease}
 .wiq-primary-motion:hover:after{transform:translateX(70%);opacity:1}
 .card,.hero-card,.analysis-quality,.performance-stat{transition:border-color var(--wiq-motion-base) ease,transform var(--wiq-motion-base) var(--wiq-ease-out),box-shadow var(--wiq-motion-base) ease}
-.card:hover{transform:translateY(-2px)}
+.card:hover{transform:none}
 
 details>summary{transition:color var(--wiq-motion-fast) ease,background-color var(--wiq-motion-base) ease}
 details[open]>summary{color:#fff}
@@ -47,7 +47,7 @@ details[open]>*:not(summary){animation:wiq-details-in var(--wiq-motion-base) var
 .correction-dialog[open]::backdrop{animation:wiq-backdrop-in var(--wiq-motion-base) ease both}
 
 /* Home and upload: keep the restored layout, add intentional interaction. */
-body[data-page=home] .hero-copy>*{animation:wiq-copy-in var(--wiq-motion-slow) var(--wiq-ease-out) both;animation-delay:calc(var(--hero-order,0)*70ms)}
+body[data-page=home] .hero-copy>*{animation:wiq-copy-in var(--wiq-motion-slow) var(--wiq-ease-out) both;animation-delay:calc(var(--hero-order,0)*45ms)}
 body[data-page=home] .hero-copy>.eyebrow{--hero-order:0}
 body[data-page=home] .hero-copy>h1{--hero-order:1}
 body[data-page=home] .hero-copy>p{--hero-order:2}
@@ -132,8 +132,8 @@ body[data-page=result] .report-details[open],body[data-page=result] .report-tech
 body[data-page=result] table tbody tr{transition:background-color var(--wiq-motion-fast) ease}
 body[data-page=result] table tbody tr:hover{background:rgba(105,127,204,.07)}
 
-@keyframes wiq-page-enter{from{opacity:.01;transform:translateY(7px)}to{opacity:1;transform:none}}
-@keyframes wiq-copy-in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes wiq-page-enter{from{opacity:.78;transform:translateY(3px)}to{opacity:1;transform:none}}
+@keyframes wiq-copy-in{from{opacity:.2;transform:translateY(9px)}to{opacity:1;transform:none}}
 @keyframes wiq-menu-in{from{opacity:0;transform:translateY(-7px) scaleY(.96)}to{opacity:1;transform:none}}
 @keyframes wiq-details-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 @keyframes wiq-modal-in{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
