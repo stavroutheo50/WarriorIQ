@@ -611,6 +611,29 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         finally:
             delete_job(job_id)
 
+    def test_missing_selection_model_keeps_manual_fighter_selection_available(self):
+        self.client.get("/")
+        guest_id = self.client.cookies.get(GUEST_COOKIE)
+        job_id = "manualfallback1"
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        selection = np.full((360, 640, 3), 90, dtype=np.uint8)
+        cv2.imwrite(str(job_dir / "selection.jpg"), selection)
+        create_job(job_id, {
+            "owner_key": f"guest:{guest_id}", "status": "selection",
+            "video_path": str(webapp.UPLOADS / f"{job_id}.mp4"),
+            "original_name": "hidden.mp4", "video_width": 640, "video_height": 360,
+        })
+        try:
+            with patch.object(webapp, "_get_pose_tracker", side_effect=RuntimeError("missing private checkpoint")):
+                response = self.client.get(f"/api/detect/{job_id}")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["people"], [])
+            self.assertEqual(response.json()["availability"], "manual_only")
+            self.assertNotIn("checkpoint", response.text)
+        finally:
+            delete_job(job_id)
+
     def test_cleanup_never_removes_a_protected_running_guest_job(self):
         metadata = retention.mark_guest_job("active123", "guest-token", str(webapp.UPLOADS / "active123.mp4"))
         metadata["expires_at"] = "2000-01-01T00:00:00+00:00"

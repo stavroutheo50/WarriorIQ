@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import html
+import logging
 import math
 import shutil
 import time
@@ -21,7 +22,6 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.state import create_job, delete_job, get_job, list_jobs, update_job
-from core.analyzer import analyze, get_pose_tracker
 from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
@@ -79,6 +79,7 @@ MAX_FIGHT_BYTES = 2 * 1024 * 1024 * 1024
 MAX_PROFILE_PHOTO_BYTES = 15 * 1024 * 1024
 MAX_PROFILE_VIDEO_BYTES = 500 * 1024 * 1024
 _progress_report_cache: dict[str, tuple[int, dict]] = {}
+LOGGER = logging.getLogger("warrioriq")
 
 PUBLIC_INDEX_ROUTES = (
     "/", "/pricing", "/privacy", "/legal", "/terms", "/cookies",
@@ -118,6 +119,47 @@ class AnnotationPayload(BaseModel):
     target: str
     outcome: str
     manual: bool = False
+
+
+def _analyze(req: AnalysisRequest, progress_callback):
+    """Import the heavy vision stack only after a user starts analysis."""
+    from core.analyzer import analyze
+
+    return analyze(req, progress_callback)
+
+
+def _get_pose_tracker():
+    """Lazy model access for optional selection-page candidate detection."""
+    from core.analyzer import get_pose_tracker
+
+    return get_pose_tracker()
+
+
+def _forwarded_header(request: Request, name: str, fallback: str) -> str:
+    return request.headers.get(name, fallback).split(",", 1)[0].strip()
+
+
+def _external_scheme(request: Request) -> str:
+    return _forwarded_header(request, "x-forwarded-proto", request.url.scheme).lower()
+
+
+def _external_origin(request: Request) -> str:
+    scheme = _external_scheme(request)
+    host = _forwarded_header(request, "x-forwarded-host", request.headers.get("host", request.url.netloc))
+    return f"{scheme}://{host}".lower()
+
+
+def _request_is_secure(request: Request) -> bool:
+    return _external_scheme(request) == "https"
+
+
+def _public_analysis_error(exc: Exception) -> str:
+    """Return a useful status without leaking model names or server paths."""
+    if isinstance(exc, (FileNotFoundError, ImportError, ModuleNotFoundError)):
+        return "The analysis engine is unavailable on this server. Your upload and fighter selections are preserved."
+    if isinstance(exc, MemoryError) or "out of memory" in str(exc).lower():
+        return "This analysis exceeded the server's available memory. Your upload and fighter selections are preserved."
+    return "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again."
 
 
 def _account(request: Request) -> dict | None:
@@ -365,7 +407,7 @@ def _save_upload_limited(upload: UploadFile, destination: Path, limit: int) -> N
             while chunk := upload.file.read(1024 * 1024):
                 total += len(chunk)
                 if total > limit:
-                    raise HTTPException(413, "The uploaded file is larger than this local build allows.")
+                    raise HTTPException(413, "The uploaded file exceeds the maximum allowed size.")
                 handle.write(chunk)
     except Exception:
         destination.unlink(missing_ok=True)
@@ -375,8 +417,10 @@ def _save_upload_limited(upload: UploadFile, destination: Path, limit: int) -> N
 @app.middleware("http")
 async def viewer_context(request: Request, call_next):
     global _last_guest_cleanup, _last_saved_video_cleanup
-    forwarded_scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",", 1)[0].strip()
-    if SETTINGS.public_base_url.startswith("https://") and forwarded_scheme != "https":
+    forwarded_scheme = _external_scheme(request)
+    # Render may call the health probe over its private HTTP network. Keep that
+    # endpoint directly reachable while redirecting public browser traffic.
+    if request.url.path != "/health" and SETTINGS.public_base_url.startswith("https://") and forwarded_scheme != "https":
         target = f"{SETTINGS.public_base_url}{request.url.path}"
         if request.url.query:
             target += f"?{request.url.query}"
@@ -408,11 +452,11 @@ async def viewer_context(request: Request, call_next):
         f"{SETTINGS.public_base_url}/static/warrioriq-logo.png" if SETTINGS.public_base_url else ""
     )
     if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path != "/stripe/webhook":
-        expected_origin = f"{request.url.scheme}://{request.url.netloc}"
+        expected_origin = _external_origin(request)
         source = request.headers.get("origin") or request.headers.get("referer")
         if source:
             parsed = urlsplit(source)
-            source_origin = f"{parsed.scheme}://{parsed.netloc}"
+            source_origin = f"{parsed.scheme}://{parsed.netloc}".lower()
             if source_origin != expected_origin:
                 return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
         if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
@@ -467,12 +511,12 @@ async def viewer_context(request: Request, call_next):
         response.headers.setdefault("Cache-Control", "no-store")
     elif request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "public, max-age=604800")
-    if request.url.scheme == "https":
+    if _request_is_secure(request):
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     if new_guest:
         response.set_cookie(
             GUEST_COOKIE, request.state.guest_id, max_age=60 * 60 * 24,
-            httponly=True, samesite="lax", secure=request.url.scheme == "https",
+            httponly=True, samesite="lax", secure=_request_is_secure(request),
         )
     return response
 
@@ -496,6 +540,25 @@ async def http_error_page(request: Request, exc: StarletteHTTPException):
         context={"request": request, "status_code": exc.status_code, "error_title": title, "error_detail": str(exc.detail or "")},
         status_code=exc.status_code,
         headers=exc.headers,
+    )
+
+
+@app.exception_handler(Exception)
+async def unexpected_error_page(request: Request, exc: Exception):
+    LOGGER.exception("Unhandled request failure", exc_info=exc)
+    detail = "WarriorIQ could not complete this request. Please try again."
+    if request.url.path.startswith(("/api/", "/stripe/")) or "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"detail": detail}, status_code=500)
+    return templates.TemplateResponse(
+        request=request,
+        name="error.html",
+        context={
+            "request": request,
+            "status_code": 500,
+            "error_title": "WarriorIQ hit a technical problem",
+            "error_detail": detail,
+        },
+        status_code=500,
     )
 
 
@@ -840,22 +903,23 @@ def _run_job(job_id: str, req: AnalysisRequest):
         def cb(patch: dict):
             update_job(job_id, patch)
 
-        update_job(job_id, {"status": "running", "message": "Starting GPU analysis"})
-        report = analyze(req, cb)
+        update_job(job_id, {"status": "running", "message": "Starting fight analysis"})
+        report = _analyze(req, cb)
         update_job(job_id, {"status": "complete", "report": report, "percent": 100.0, "message": "Complete"})
     except Exception as exc:
         job = get_job(job_id)
         if job and job.get("usage_reserved") and job.get("account_id"):
             release_analysis(int(job["account_id"]), job_id)
             update_job(job_id, {"usage_reserved": False})
-        update_job(job_id, {"status": "error", "message": f"{type(exc).__name__}: {exc}"})
+        LOGGER.exception("Analysis job %s failed", job_id, exc_info=exc)
+        update_job(job_id, {"status": "error", "message": _public_analysis_error(exc)})
 
 
 def _analysis_started_response(request: Request, job_id: str) -> JSONResponse:
     response = JSONResponse({"ok": True, "progress_url": f"/progress/{job_id}"})
     response.set_cookie(
         ACTIVE_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
-        httponly=True, samesite="lax", secure=request.url.scheme == "https",
+        httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
 
@@ -916,7 +980,7 @@ def signup(
     response = RedirectResponse(_safe_next(next_path), status_code=303)
     response.set_cookie(
         SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
-        httponly=True, samesite="lax", secure=request.url.scheme == "https",
+        httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
 
@@ -956,7 +1020,7 @@ def login(
     record_security_event("login_succeeded", account_id=int(account["id"]))
     response.set_cookie(
         SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
-        httponly=True, samesite="lax", secure=request.url.scheme == "https",
+        httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
 
@@ -1165,7 +1229,7 @@ async def upload(
     response = RedirectResponse(f"/frame/{job_id}", status_code=303)
     response.set_cookie(
         ACTIVE_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
-        httponly=True, samesite="lax", secure=request.url.scheme == "https",
+        httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
 
@@ -1213,30 +1277,45 @@ def set_selection_frame(request: Request, job_id: str, payload: SelectionFramePa
 
 @app.get("/api/detect/{job_id}")
 def detect_people(request: Request, job_id: str):
-    """Pre-warm YOLO and return clickable person boxes for fighter selection."""
+    """Return optional person candidates without blocking manual selection."""
     job = _authorized_job(request, job_id)
     path = OUTPUTS / job_id / "selection.jpg"
     if not job or not path.exists():
         raise HTTPException(404)
+    if not SETTINGS.selection_detection_enabled:
+        return {
+            "people": [], "width": job["video_width"], "height": job["video_height"],
+            "availability": "manual_only",
+        }
     frame = cv2.imread(str(path))
     if frame is None:
         raise HTTPException(500, "Could not read selection image")
-    tracker = get_pose_tracker()
-    tracker.warmup(frame)
-    results = tracker.model.predict(
-        frame,
-        device=tracker.device,
-        imgsz=SETTINGS.default_imgsz,
-        conf=SETTINGS.detection_conf,
-        classes=[0],
-        verbose=False,
-    )
+    try:
+        tracker = _get_pose_tracker()
+        tracker.warmup(frame)
+        results = tracker.model.predict(
+            frame,
+            device=tracker.device,
+            imgsz=SETTINGS.default_imgsz,
+            conf=SETTINGS.detection_conf,
+            classes=[0],
+            verbose=False,
+        )
+    except Exception as exc:
+        LOGGER.warning("Selection candidate detection unavailable: %s", type(exc).__name__)
+        return {
+            "people": [], "width": job["video_width"], "height": job["video_height"],
+            "availability": "manual_only",
+        }
     boxes = []
     result = results[0]
     if result.boxes is not None:
         for box, conf in zip(result.boxes.xyxy.detach().cpu().numpy(), result.boxes.conf.detach().cpu().numpy()):
             boxes.append({"box": [float(x) for x in box], "confidence": float(conf)})
-    return {"people": boxes, "width": job["video_width"], "height": job["video_height"]}
+    return {
+        "people": boxes, "width": job["video_width"], "height": job["video_height"],
+        "availability": "candidates_ready",
+    }
 
 
 def _validated_fighter_box(box: list[float], width: float, height: float, label: str) -> list[float]:
@@ -1381,7 +1460,7 @@ def status(request: Request, response: Response, job_id: str):
     if job.get("status") == "complete":
         response.set_cookie(
             LAST_COMPLETED_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
-            httponly=True, samesite="lax", secure=request.url.scheme == "https",
+            httponly=True, samesite="lax", secure=_request_is_secure(request),
         )
         if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:
             response.delete_cookie(ACTIVE_ANALYSIS_COOKIE, httponly=True, samesite="lax")
@@ -2179,7 +2258,7 @@ def save_cookie_preferences(
     response = RedirectResponse(_safe_next(next_path, "/"), status_code=303)
     response.set_cookie(
         COOKIE_PREFERENCES_COOKIE, value, max_age=60 * 60 * 24 * 365,
-        httponly=True, samesite="lax", secure=request.url.scheme == "https",
+        httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
 

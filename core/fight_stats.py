@@ -140,6 +140,20 @@ def _family_summary(events: list[dict], trusted: bool) -> dict:
     }
 
 
+def _technique_breakdown(events: list[dict], trusted: bool) -> dict[str, dict]:
+    """Return one outcome-balanced row per supported technique label."""
+    if not trusted:
+        return {}
+    breakdown: dict[str, dict] = {}
+    techniques = sorted({str(item.get("technique") or "other") for item in events})
+    for technique in techniques:
+        matching = [item for item in events if str(item.get("technique") or "other") == technique]
+        summary = _family_summary(matching, True)
+        summary["family"] = str(matching[0].get("family") or "other")
+        breakdown[technique] = summary
+    return breakdown
+
+
 def summarize_fight_events(
     events: Iterable[dict],
     found: dict[str, int] | None,
@@ -162,6 +176,8 @@ def summarize_fight_events(
         kick = _family_summary(kicks, trusted)
         overall = _family_summary(own, trusted)
         sequences = combinations[fighter]
+        successful_combinations = sum(sequence["landed"] >= 2 for sequence in sequences) if trusted else None
+        failed_combinations = len(sequences) - successful_combinations if trusted else None
         landed_techniques = Counter(
             str(item.get("technique") or item.get("family") or "strike")
             for item in own if normalize_outcome(item.get("outcome")) == "landed"
@@ -202,11 +218,14 @@ def summarize_fight_events(
                 if processed_seconds and processed_seconds > 0 else 0.0
             ),
             "combinations": len(sequences) if trusted else None,
-            "successful_combinations": (
-                sum(sequence["landed"] >= 2 for sequence in sequences) if trusted else None
+            "successful_combinations": successful_combinations,
+            "failed_combinations": failed_combinations,
+            "combination_success_rate": (
+                successful_combinations / len(sequences) if trusted and sequences else None
             ),
             "longest_combination": max((sequence["length"] for sequence in sequences), default=0) if trusted else None,
             "combination_sequences": sequences if trusted else [],
+            "technique_breakdown": _technique_breakdown(own, trusted),
             "best_weapon": best_weapon,
             "observation_coverage": coverage[fighter],
             "families": {"punch": punch, "kick": kick},
@@ -221,14 +240,20 @@ def summarize_fight_events(
     round_numbers = sorted({_round(item) for item in strikes if _round(item) is not None})
     for number in round_numbers:
         round_events = [item for item in strikes if _round(item) == number]
+        round_fighters: dict[str, dict] = {}
+        for fighter in ("A", "B"):
+            own_round = [item for item in round_events if item.get("fighter") == fighter]
+            summary = _family_summary(own_round, trusted)
+            summary["families"] = {
+                family: _family_summary(
+                    [item for item in own_round if item.get("family") == family], trusted
+                )
+                for family in ("punch", "kick")
+            }
+            round_fighters[fighter] = summary
         rounds.append({
             "round": number,
-            "fighters": {
-                fighter: _family_summary(
-                    [item for item in round_events if item.get("fighter") == fighter], trusted
-                )
-                for fighter in ("A", "B")
-            },
+            "fighters": round_fighters,
         })
 
     return {

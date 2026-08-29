@@ -68,6 +68,20 @@ Original signed-in videos are scheduled for deletion after `WARRIORIQ_VIDEO_RETE
 
 Read `PRODUCTION_LAUNCH_CHECKLIST.md` before any public deployment. Passing the code-level gate does not replace legal, security, accessibility, payment, AI validation or operational sign-off.
 
+## Render deployment
+
+The repository includes `render.yaml`. Render should build with `pip install -r requirements.txt`, start with `python run.py`, and probe `/health`. `run.py` reads Render's `PORT`, binds to `0.0.0.0`, trusts proxy headers through Uvicorn, and does not open a desktop browser in production.
+
+Set `WARRIORIQ_PUBLIC_BASE_URL` to the final public HTTPS origin, for example `https://warrioriq.onrender.com`. Add the verified operator and legal-contact values listed in `.env.example` before paid public launch. Render supplies `RENDER` and `PORT`; do not create replacements for them. The web interface now starts without importing Torch, Ultralytics, or SAM2. Fighter selection remains available through manual box drawing when optional candidate detection is disabled or unavailable.
+
+The default Render profile disables selection-page YOLO detection and SAM2 recovery to protect a small CPU instance from avoidable startup and memory pressure. A capable analysis worker can opt in with `WARRIORIQ_SELECTION_DETECTION=true`, `WARRIORIQ_SAM_RECOVERY=true`, and `WARRIORIQ_SAM_CONTINUOUS=true`. These are quality/performance controls, not requirements for the website to load.
+
+Render's free filesystem is ephemeral. Without a persistent disk, accounts, uploaded videos, analyses, and the SQLite database can disappear after a restart or redeploy. On a paid service with a disk mounted at `/var/data`, set `WARRIORIQ_DATA_DIR=/var/data/warrioriq`. Do not set that path unless the disk is actually mounted and writable.
+
+### OuiHeberg / OuiPanel
+
+WarriorIQ also supports OuiPanel's `SERVER_PORT` automatically. Upload the repository without a local `.env`, set `run.py` as the startup file, and create the production `.env` only inside OuiPanel. Set `WARRIORIQ_PUBLIC_BASE_URL=https://warrioriq.eu`, then connect the Python server's assigned port to `warrioriq.eu` in Proxy Manager with SSL enabled. The entrypoint binds to `0.0.0.0` and loads the server-side `.env` before FastAPI imports its configuration.
+
 ## Performance requirement
 
 The hard product target is **<= 1.0x wall time**: a 120-second entered fight segment should finish analysis in <=120 seconds. WarriorIQ records whether the test passes; it does not fake a pass.

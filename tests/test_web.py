@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.main import _apply_report_annotations, _build_replay_chapters, _prediction_at, _review_candidates, app
+from app.main import (
+    _apply_report_annotations, _build_replay_chapters, _prediction_at,
+    _public_analysis_error, _review_candidates, app,
+)
+from core.config import SETTINGS
 from core.evidence_trust import automated_evidence_trust
 from core.temporal_model import ACTION_CLASSES
 
@@ -48,6 +57,99 @@ class PublicPageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok", "service": "WarriorIQ"})
         self.assertNotIn("gpu", response.text.lower())
+
+    def test_render_entrypoint_binds_public_host_and_port(self):
+        from run import server_config
+
+        with patch.dict(os.environ, {"RENDER": "true", "PORT": "10000"}, clear=True):
+            self.assertEqual(server_config(), ("0.0.0.0", 10000, False))
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(server_config(), ("127.0.0.1", 8000, True))
+
+    def test_ouipanel_entrypoint_uses_server_port(self):
+        from run import server_config
+
+        with patch.dict(os.environ, {"SERVER_PORT": "25639"}, clear=True):
+            self.assertEqual(server_config(), ("0.0.0.0", 25639, False))
+
+    def test_ouipanel_environment_loader_is_installed(self):
+        requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(encoding="utf-8")
+        self.assertIn("python-dotenv", requirements)
+
+    def test_health_probe_is_not_redirected_on_render_private_http(self):
+        original = SETTINGS.public_base_url
+        object.__setattr__(SETTINGS, "public_base_url", "https://warrioriq.onrender.com")
+        try:
+            response = self.client.get("/health", follow_redirects=False)
+        finally:
+            object.__setattr__(SETTINGS, "public_base_url", original)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+
+    def test_web_import_does_not_initialize_heavy_ai_runtimes(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            environment = dict(os.environ)
+            environment.update({"PYTHONPATH": str(root), "WARRIORIQ_DATA_DIR": temporary})
+            completed = subprocess.run(
+                [sys.executable, "-c", "import sys; import app.main; print(int('torch' in sys.modules), int('ultralytics' in sys.modules))"],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "0 0")
+
+    def test_configured_data_directory_keeps_runtime_files_outside_source_tree(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            environment = dict(os.environ)
+            environment.update({"PYTHONPATH": str(root), "WARRIORIQ_DATA_DIR": temporary})
+            completed = subprocess.run(
+                [sys.executable, "-c", "from core.config import DATA_ROOT,UPLOADS,OUTPUTS,DB_PATH; print(DATA_ROOT); print(UPLOADS.parent==DATA_ROOT, OUTPUTS.parent==DATA_ROOT, DB_PATH.parent==DATA_ROOT)"],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("True True True", completed.stdout)
+
+    def test_render_blueprint_uses_health_probe_and_port_aware_entrypoint(self):
+        blueprint = (Path(__file__).resolve().parents[1] / "render.yaml").read_text(encoding="utf-8")
+        self.assertIn("healthCheckPath: /health", blueprint)
+        self.assertIn("startCommand: python run.py", blueprint)
+
+    def test_https_proxy_origin_and_secure_cookie_work_on_render(self):
+        response = self.client.post(
+            "/cookie-preferences",
+            data={"choice": "essential", "next_path": "/"},
+            headers={
+                "host": "warrioriq.onrender.com",
+                "origin": "https://warrioriq.onrender.com",
+                "x-forwarded-proto": "https",
+                "x-forwarded-host": "warrioriq.onrender.com",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("Secure", response.headers["set-cookie"])
+
+    def test_public_pages_never_show_configuration_placeholders(self):
+        for path in ("/", "/legal", "/privacy", "/terms"):
+            with self.subTest(path=path):
+                self.assertNotIn("Not configured", self.client.get(path).text)
+
+    def test_analysis_errors_are_safe_for_public_status(self):
+        message = _public_analysis_error(FileNotFoundError("C:/private/models/checkpoint.pt"))
+        self.assertNotIn("C:/private", message)
+        self.assertNotIn("checkpoint.pt", message)
+        self.assertIn("analysis engine", message.lower())
 
     def test_robots_sitemap_and_private_noindex_are_safe(self):
         robots = self.client.get("/robots.txt")
@@ -189,6 +291,16 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("d.message", template)
         self.assertIn("does not invent separate percentages", template)
         self.assertIn('role="progressbar"', template)
+
+    def test_fight_playback_starts_only_when_backend_analysis_begins(self):
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
+        video_tag = template.split('<video id="liveVideo"', 1)[1].split("</video>", 1)[0]
+
+        self.assertNotIn("autoplay", video_tag)
+        self.assertIn("analysisPlaybackReady", template)
+        self.assertIn("d.status==='running'&&d.stage==='analysis'", template)
+        self.assertIn("startPlaybackWhenAnalysisStarts(d)", template)
+        self.assertNotIn("tryImmediatePlayback", template)
 
     def test_home_copy_uses_the_warrioriq_combat_sports_voice(self):
         page = self.client.get("/").text
@@ -406,11 +518,12 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("One-click suggestions", template)
         self.assertIn("Mark complete", template)
 
-    def test_advanced_report_diagnostics_are_optional_not_front_and_center(self):
+    def test_advanced_report_diagnostics_stay_structured_but_open_for_full_reports(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
-        self.assertIn('<details class="report-details">', template)
+        self.assertIn('<details class="report-details"', template)
+        self.assertIn("report_access.report_tier == 'full' %}open", template)
         self.assertIn("More performance details", template)
-        self.assertIn('<details class="card report-technical">', template)
+        self.assertIn('<details class="card report-technical" open>', template)
         self.assertIn("Technical analysis details", template)
         self.assertNotIn('<section class="card"><div class="eyebrow">Performance integrity</div>', template)
 
@@ -644,6 +757,18 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('class="report-deep-dive"', template)
         self.assertIn('report["statistics"] = final_live_stats', analyzer)
         self.assertIn('report["event_feed"] = all_final_live_events', analyzer)
+
+    def test_complete_report_exposes_every_supported_analysis_section(self):
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
+
+        self.assertIn('class="report-deep-dive" open', template)
+        self.assertIn('id="report-strikes"', template)
+        self.assertIn('id="report-combinations"', template)
+        self.assertIn('id="report-key-moments"', template)
+        self.assertIn('id="report-summary"', template)
+        self.assertIn("technique_breakdown", template)
+        for outcome in ("Attempts", "Landed", "Missed", "Blocked", "Evaded", "Uncertain"):
+            self.assertIn(outcome, template)
 
 
 if __name__ == "__main__":

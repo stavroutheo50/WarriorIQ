@@ -5,13 +5,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-UPLOADS = ROOT / "uploads"
-OUTPUTS = ROOT / "outputs"
-MODELS = ROOT / "models"
-DATASET = ROOT / "dataset"
-DB_PATH = ROOT / "warrioriq.sqlite3"
-ULTRALYTICS_CONFIG = ROOT / ".ultralytics"
-HUGGINGFACE_CACHE = ROOT / ".huggingface"
+DATA_ROOT = Path(os.getenv("WARRIORIQ_DATA_DIR", str(ROOT))).expanduser().resolve()
+UPLOADS = DATA_ROOT / "uploads"
+OUTPUTS = DATA_ROOT / "outputs"
+MODELS = DATA_ROOT / "models"
+DATASET = DATA_ROOT / "dataset"
+DB_PATH = DATA_ROOT / "warrioriq.sqlite3"
+ULTRALYTICS_CONFIG = DATA_ROOT / ".ultralytics"
+HUGGINGFACE_CACHE = DATA_ROOT / ".huggingface"
 
 # Keep Ultralytics settings inside the project. This avoids roaming-profile
 # permission failures and keeps the local build's configuration self-contained.
@@ -27,6 +28,9 @@ def env_bool(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+IS_RENDER = env_bool("RENDER", False)
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,9 @@ class Settings:
     default_imgsz: int = int(os.getenv("WARRIORIQ_IMGSZ", "640"))
     min_imgsz: int = int(os.getenv("WARRIORIQ_MIN_IMGSZ", "512"))
     detection_conf: float = float(os.getenv("WARRIORIQ_DET_CONF", "0.20"))
+    # Fighter drawing is fully manual. Candidate detection is only a visual
+    # advisory, so free-tier web instances can skip loading YOLO on this page.
+    selection_detection_enabled: bool = env_bool("WARRIORIQ_SELECTION_DETECTION", not IS_RENDER)
 
     # ------------------------------------------------------------
     # Performance target
@@ -86,8 +93,8 @@ class Settings:
     # ------------------------------------------------------------
     # SAM2 propagates the two user-selected identities through the segment.
     # YOLO pose/ReID must still confirm a person before metrics are accepted.
-    sam_recovery_enabled: bool = env_bool("WARRIORIQ_SAM_RECOVERY", True)
-    sam_continuous_enabled: bool = env_bool("WARRIORIQ_SAM_CONTINUOUS", True)
+    sam_recovery_enabled: bool = env_bool("WARRIORIQ_SAM_RECOVERY", not IS_RENDER)
+    sam_continuous_enabled: bool = env_bool("WARRIORIQ_SAM_CONTINUOUS", not IS_RENDER)
     sam_continuous_fps: float = float(os.getenv("WARRIORIQ_SAM_FPS", "4"))
     sam_continuous_max_frames: int = int(os.getenv("WARRIORIQ_SAM_MAX_FRAMES", "360"))
     # Keep the bounded two-minute guidance pass in one memory state. Short

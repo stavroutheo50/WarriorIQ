@@ -49,8 +49,9 @@ class DurableAnalysisStateTests(TestCase):
         self.assertIn("event.time_seconds)-1", template)
         self.assertIn("feedPinned", template)
         self.assertIn("markerElementById", template)
-        self.assertIn('autoplay muted', template)
-        self.assertIn('preload="auto"', template)
+        self.assertNotIn('autoplay muted', template)
+        self.assertIn('preload="metadata"', template)
+        self.assertIn("startPlaybackWhenAnalysisStarts", template)
         self.assertIn("scheduleReportTransition", template)
         self.assertIn("location.assign(resultUrl)", template)
         self.assertIn('id="analysisWarmup"', template)
@@ -242,6 +243,28 @@ class DurableAnalysisStateTests(TestCase):
         self.assertEqual(fighter["longest_combination"], 3)
         self.assertEqual(fighter["combination_sequences"][0]["techniques"], ["jab", "cross"])
         self.assertEqual(fighter["combination_sequences"][1]["techniques"], ["jab", "cross", "left_low_kick"])
+
+    def test_complete_statistics_include_techniques_combinations_and_round_outcomes(self):
+        events = [
+            {"id": "a1", "fighter": "A", "family": "punch", "technique": "jab", "outcome": "landed", "time_seconds": 1.0, "round_number": 1},
+            {"id": "a2", "fighter": "A", "family": "punch", "technique": "jab", "outcome": "missed", "time_seconds": 1.8, "round_number": 1},
+            {"id": "a3", "fighter": "A", "family": "kick", "technique": "right_low_kick", "outcome": "blocked", "time_seconds": 4.0, "round_number": 1},
+        ]
+
+        stats = _provisional_stats(events, {"A": 20, "B": 18}, 20, True, 60.0)
+        fighter = stats["fighters"]["A"]
+        jab = fighter["technique_breakdown"]["jab"]
+
+        self.assertEqual(jab["attempts"], 2)
+        self.assertEqual(jab["landed"], 1)
+        self.assertEqual(jab["missed"], 1)
+        self.assertEqual(fighter["failed_combinations"], 1)
+        self.assertEqual(fighter["successful_combinations"], 0)
+        self.assertEqual(fighter["combination_success_rate"], 0.0)
+        round_a = stats["rounds"][0]["fighters"]["A"]
+        self.assertEqual(round_a["blocked"], 1)
+        self.assertEqual(round_a["families"]["punch"]["attempts"], 2)
+        self.assertEqual(round_a["families"]["kick"]["attempts"], 1)
 
     def test_unvalidated_live_pipeline_emits_only_generic_observed_attempts(self):
         candidate = SimpleNamespace(
