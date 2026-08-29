@@ -76,6 +76,14 @@ class PublicPageTests(unittest.TestCase):
         requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(encoding="utf-8")
         self.assertIn("python-dotenv", requirements)
 
+    def test_cpanel_passenger_entrypoint_is_valid_and_loads_environment_first(self):
+        passenger = (Path(__file__).resolve().parents[1] / "passenger_wsgi.py").read_text(encoding="utf-8")
+
+        compile(passenger, "passenger_wsgi.py", "exec")
+        self.assertIn("from a2wsgi import ASGIMiddleware", passenger)
+        self.assertLess(passenger.index("load_dotenv()"), passenger.index("from app.main import app"))
+        self.assertIn("application = ASGIMiddleware(app", passenger)
+
     def test_health_probe_is_not_redirected_on_render_private_http(self):
         original = SETTINGS.public_base_url
         object.__setattr__(SETTINGS, "public_base_url", "https://warrioriq.onrender.com")
