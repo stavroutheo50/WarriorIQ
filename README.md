@@ -42,28 +42,7 @@ This build consolidates the WarriorIQ requirements discussed across the project 
 - Privacy settings for account export, separate video/analysis/account deletion, consent choices and session revocation.
 - Standard Stripe-ready architecture, disabled by default and requiring a lawful configured account.
 
-## Install on the WarriorIQ Windows PC
 
-Open this folder in PyCharm, open Terminal, then:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\install_windows.ps1
-```
-
-Verify the project before the first run:
-
-```powershell
-.\.venv\Scripts\python.exe tools\verify_project.py
-```
-
-Only continue if the project check passes. Then run:
-
-```powershell
-.\.venv\Scripts\python.exe run.py
-```
-
-The browser should open `http://127.0.0.1:8000` automatically.
 
 ## First professional-workspace setup
 
