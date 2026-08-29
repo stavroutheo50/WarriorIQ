@@ -1,9 +1,100 @@
 {% extends "base.html" %}
 {% block title %}Accuracy · WarriorIQ{% endblock %}
 {% block content %}
-<div class="section-title"><div><div class="eyebrow">Ground-truth validation</div><h2>WarriorIQ accuracy</h2></div><span class="pill">{{summary.annotations}} corrections · {{summary.fights}} fights</span></div>
-{% if not summary.annotations %}<div class="notice">No measured accuracy yet. Correct timeline events inside fight reports to build the ground-truth dataset. WarriorIQ will not display invented accuracy.</div>{% endif %}
-<div class="grid3">{% for name,item in summary.metrics.items() %}<section class="card"><div class="eyebrow">{{name.replace('_',' ')}}</div><div class="score" style="font-size:46px">{% if item.accuracy is not none %}{{'%.1f'|format(item.accuracy*100)}}%{% else %}—{% endif %}</div><div class="small {% if item.passed %}good{% else %}muted{% endif %}">Release target {{'%.0f'|format(item.threshold*100)}}% · {{item.correct}}/{{item.total}} correct</div></section>{% endfor %}</div>
-<section class="card"><div class="eyebrow">Training readiness</div><h2>{% if summary.train_ready %}Dataset ready for an experimental held-out-fight training run{% else %}More ground truth required{% endif %}</h2><p class="muted">Current labels: {{summary.positive_labels}} real actions and {{summary.negative_labels}} false candidates across {{summary.fights}} fights. The starter training gate requires at least 20 of each across two fights. Public automatic evidence still requires the stricter checkpoint release gate and a completely untouched test set.</p><p><code>.\.venv\Scripts\python.exe tools\train_temporal_model.py --dataset-version corrections-v1</code></p></section>
-<section class="card"><h2>Recent corrections</h2><div class="table-wrap"><table><thead><tr><th>Fight</th><th>Time</th><th>Prediction</th><th>Ground truth</th><th>Sequence</th></tr></thead><tbody>{% for x in annotations[:30] %}<tr><td>Fight analysis</td><td>{{'%.2f'|format(x.event_time)}}s</td><td>{{x.predicted.technique|default('unknown')|replace('_',' ')}}</td><td>{{x.corrected.fighter}} · {{x.corrected.technique|replace('_',' ')}} · {{x.corrected.target or 'none'}} · {{x.corrected.outcome}}</td><td>{% if x.sequence_path %}<span class="good">Exported</span>{% else %}<span class="warn">No pose sequence</span>{% endif %}</td></tr>{% else %}<tr><td colspan="5" class="muted">No corrections saved.</td></tr>{% endfor %}</tbody></table></div></section>
+<div class="section-title accuracy-title">
+  <div><div class="eyebrow">Ground-truth validation</div><h1>WarriorIQ Accuracy Lab</h1><p>Measured evidence for fighter identity, techniques and model-release readiness. Missing data stays missing—never invented.</p></div>
+  <span class="pill">{{summary.annotations}} labels · {{summary.fights}} fights</span>
+</div>
+
+<section class="card accuracy-next-step">
+  <div>
+    <div class="eyebrow">Best next action</div>
+    {% if dataset.development.invalid_sequences %}
+      <h2>Repair {{dataset.development.invalid_sequences}} invalid training sequence{% if dataset.development.invalid_sequences != 1 %}s{% endif %}</h2>
+      <p>The invalid files are excluded from every readiness number below, so they cannot make the dataset look healthier than it is.</p>
+    {% elif not dataset.development.experimental_train_ready %}
+      <h2>Build the ground-truth development set</h2>
+      <p>Collect balanced real actions and negative movement from separate fights. Referees, feints, guard movement and footwork are essential negative examples.</p>
+    {% elif not dataset.untouched_test_ready %}
+      <h2>Build the untouched test set</h2>
+      <p>The development set can support an experiment. Release still requires separate complete fights that are never used during training or tuning.</p>
+    {% else %}
+      <h2>Run the model benchmark</h2>
+      <p>The file-level data gate is ready. The checkpoint must still pass overall accuracy, every-class recall and every-class F1 before customer evidence is unlocked.</p>
+    {% endif %}
+  </div>
+  <span class="accuracy-state {% if dataset.release_data_ready %}good{% else %}warn{% endif %}">{% if dataset.release_data_ready %}Data gate ready{% else %}Evidence building{% endif %}</span>
+</section>
+
+{% if not summary.annotations %}<div class="notice">No measured prediction accuracy yet. Accuracy will appear only after ground-truth labels exist; tracking coverage is never substituted for action accuracy.</div>{% endif %}
+
+<div class="grid3 accuracy-metric-grid">
+  {% for name,item in summary.metrics.items() %}
+  <section class="card accuracy-metric">
+    <div class="eyebrow">{{name.replace('_',' ')}}</div>
+    <div class="score">{% if item.accuracy is not none %}{{'%.1f'|format(item.accuracy*100)}}%{% else %}—{% endif %}</div>
+    <div class="small {% if item.passed %}good{% else %}muted{% endif %}">Release target {{'%.0f'|format(item.threshold*100)}}% · {{item.correct}}/{{item.total}} measured</div>
+  </section>
+  {% endfor %}
+</div>
+
+<section class="card timing-validation">
+  <div class="accuracy-card-head"><div><div class="eyebrow">Evidence alignment</div><h2>Contact timing</h2></div>{% if summary.timing.mean_absolute_error_seconds is not none %}<span class="pill">Mean error {{'%.3f'|format(summary.timing.mean_absolute_error_seconds)}}s</span>{% endif %}</div>
+  {% if summary.timing.samples %}
+  <div class="accuracy-error-strip"><div><span>Measured actions</span><strong>{{summary.timing.samples}}</strong></div><div><span>Median error</span><strong>{{'%.3f'|format(summary.timing.median_absolute_error_seconds)}}s</strong></div><div><span>Within 250 ms</span><strong>{{'%.1f'|format(summary.timing.within_250ms_rate*100)}}%</strong></div><div><span>Within 500 ms</span><strong>{{'%.1f'|format(summary.timing.within_500ms_rate*100)}}%</strong></div></div>
+  {% else %}
+  <div class="accuracy-empty"><strong>No timing benchmark yet</strong><span>Pause a reviewed action at contact and save the exact video time to measure timeline alignment.</span></div>
+  {% endif %}
+</section>
+
+<div class="section-title accuracy-subtitle"><div><div class="eyebrow">Training data</div><h2>Dataset integrity</h2></div></div>
+<div class="grid accuracy-dataset-grid">
+  <section class="card">
+    <div class="accuracy-card-head"><div><div class="eyebrow">Development set</div><h2>{{dataset.development.valid_sequences}} valid sequences</h2></div><span class="pill">{{dataset.development.fights}} fights</span></div>
+    <div class="accuracy-bars">
+      <div><span>Real actions</span><strong>{{dataset.development.positive_sequences}}</strong></div>
+      <div><span>Negative motion</span><strong>{{dataset.development.negative_sequences}}</strong></div>
+      <div><span>Classes covered</span><strong>{{dataset.development.covered_classes}} / {{dataset.development.total_classes}}</strong></div>
+      <div><span>Invalid files</span><strong class="{% if dataset.development.invalid_sequences %}warn{% else %}good{% endif %}">{{dataset.development.invalid_sequences}}</strong></div>
+    </div>
+    <p class="muted">{% if dataset.development.experimental_train_ready %}Ready for an experimental fight-group training run.{% else %}Starter gate: 20 real actions, 20 negatives and at least two separate fights, with no invalid sequences.{% endif %}</p>
+  </section>
+  <section class="card">
+    <div class="accuracy-card-head"><div><div class="eyebrow">Release benchmark</div><h2>Untouched test set</h2></div><span class="pill">{{dataset.untouched_test.fights}} fights</span></div>
+    <div class="accuracy-bars">
+      <div><span>Valid sequences</span><strong>{{dataset.untouched_test.valid_sequences}}</strong></div>
+      <div><span>Classes covered</span><strong>{{dataset.untouched_test.covered_classes}} / {{dataset.untouched_test.total_classes}}</strong></div>
+      <div><span>Fight leakage</span><strong class="{% if dataset.fight_overlap %}warn{% else %}good{% endif %}">{{dataset.fight_overlap|length}}</strong></div>
+      <div><span>Duplicate leakage</span><strong class="{% if dataset.content_overlap %}warn{% else %}good{% endif %}">{{dataset.content_overlap}}</strong></div>
+    </div>
+    <p class="muted">{% if dataset.untouched_test_ready %}File-level untouched-test gate is ready.{% else %}Requires all supported classes across at least three completely separate fights. More representative fights will still be needed for a public product claim.{% endif %}</p>
+  </section>
+</div>
+
+{% if dataset.development.issues %}
+<section class="card accuracy-issues"><div class="eyebrow">Files excluded from readiness</div><h2>Dataset problems</h2><ul class="list-clean">{% for issue in dataset.development.issues[:20] %}<li><strong>{{issue.file}}</strong><br><span class="muted">{{issue.reason}}</span></li>{% endfor %}</ul></section>
+{% endif %}
+
+<section class="card class-coverage">
+  <div class="accuracy-card-head"><div><div class="eyebrow">Balance check</div><h2>Action-class coverage</h2></div><span class="pill">{{dataset.development.covered_classes}} / {{dataset.development.total_classes}}</span></div>
+  <div class="class-support-grid">{% for name,count in dataset.development.class_support.items() %}<div class="{% if not count %}missing{% endif %}"><span>{{name.replace('_',' ')}}</span><strong>{{count}}</strong></div>{% endfor %}</div>
+</section>
+
+<section class="card per-class-validation">
+  <div class="accuracy-card-head"><div><div class="eyebrow">Prediction quality</div><h2>Per-class validation</h2></div>{% if summary.technique_validation.macro_action_f1 is not none %}<span class="pill">Macro action F1 {{'%.1f'|format(summary.technique_validation.macro_action_f1*100)}}%</span>{% endif %}</div>
+  {% if summary.technique_validation.samples %}
+  <div class="accuracy-error-strip"><div><span>Measured labels</span><strong>{{summary.technique_validation.samples}}</strong></div><div><span>False alarms</span><strong>{{summary.technique_validation.false_alarms}}</strong></div><div><span>Missed actions</span><strong>{{summary.technique_validation.missed_actions}}</strong></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Class</th><th>Support</th><th>Precision</th><th>Recall</th><th>F1</th></tr></thead><tbody>{% for name,item in summary.technique_validation.per_class.items() %}{% if item.support or item.predicted %}<tr><td>{{name.replace('_',' ')}}</td><td>{{item.support}}</td><td>{% if item.precision is not none %}{{'%.1f'|format(item.precision*100)}}%{% else %}—{% endif %}</td><td>{% if item.recall is not none %}{{'%.1f'|format(item.recall*100)}}%{% else %}—{% endif %}</td><td>{% if item.f1 is not none %}{{'%.1f'|format(item.f1*100)}}%{% else %}—{% endif %}</td></tr>{% endif %}{% endfor %}</tbody></table></div>
+  {% else %}
+  <div class="accuracy-empty"><strong>No action benchmark yet</strong><span>Precision, recall and F1 will appear after ground-truth labels exist.</span></div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="eyebrow">Training readiness</div><h2>{% if summary.train_ready %}Label gate ready for an experimental run{% else %}More ground truth required{% endif %}</h2>
+  <p class="muted">Current labels: {{summary.positive_labels}} real actions and {{summary.negative_labels}} false candidates across {{summary.fights}} fights. Training and validation always split by whole fight, never random clips.</p>
+  <p><code>.\.venv\Scripts\python.exe tools\train_temporal_model.py --dataset-version corrections-v1</code></p>
+</section>
+
+<section class="card"><h2>Recent ground-truth labels</h2><div class="table-wrap"><table><thead><tr><th>Fight</th><th>Contact time</th><th>Prediction</th><th>Ground truth</th><th>Training sequence</th></tr></thead><tbody>{% for x in annotations[:30] %}<tr><td>Fight analysis</td><td>{{'%.2f'|format(x.event_time)}}s</td><td>{{x.predicted.technique|default('unknown')|replace('_',' ')}}</td><td>{{x.corrected.fighter}} · {{x.corrected.technique|replace('_',' ')}} · {{x.corrected.target or 'none'}} · {{x.corrected.outcome}}</td><td>{% if x.sequence_path %}<span class="good">Exported</span>{% else %}<span class="muted">Not exported</span>{% endif %}</td></tr>{% else %}<tr><td colspan="5" class="muted">No labels saved.</td></tr>{% endfor %}</tbody></table></div></section>
 {% endblock %}

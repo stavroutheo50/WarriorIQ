@@ -154,6 +154,10 @@ class TemporalModel:
                     "test_accuracy": payload.get("test_accuracy"),
                     "held_out_test_fights": payload.get("held_out_test_fights"),
                     "per_class_test_accuracy": payload.get("per_class_test_accuracy"),
+                    "per_class_test_precision": payload.get("per_class_test_precision"),
+                    "per_class_test_f1": payload.get("per_class_test_f1"),
+                    "macro_test_f1": payload.get("macro_test_f1"),
+                    "macro_action_test_f1": payload.get("macro_action_test_f1"),
                 }
             self.available = True
         except Exception:

@@ -7,6 +7,7 @@ import numpy as np
 
 from core.action import Sample, _feature_vector
 from core.config import DATASET, OUTPUTS, SETTINGS
+from core.model_validation import classification_metrics
 from core.scoring import is_legal_event
 from core.temporal_model import ACTION_CLASSES
 from core.types import StrikeEvent
@@ -121,6 +122,38 @@ def accuracy_summary(annotations: list[dict]) -> dict:
     fights = len({item["job_id"] for item in annotations})
     negative_labels = sum(item.get("corrected", {}).get("technique") == "none" for item in annotations)
     positive_labels = len(annotations) - negative_labels
+    timing_errors = []
+    for item in annotations:
+        predicted_technique = item.get("predicted", {}).get("technique", "none")
+        corrected = item.get("corrected", {})
+        corrected_technique = corrected.get("technique", "none")
+        # Missed actions and false candidates are counted by classification,
+        # but they have no like-for-like predicted contact timestamp.
+        if predicted_technique == "none" or corrected_technique == "none":
+            continue
+        try:
+            predicted_time = float(item["event_time"])
+            corrected_time = float(corrected.get("contact_time", predicted_time))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if np.isfinite(predicted_time) and np.isfinite(corrected_time):
+            timing_errors.append(abs(predicted_time - corrected_time))
+    timing_samples = len(timing_errors)
+    timing = {
+        "samples": timing_samples,
+        "mean_absolute_error_seconds": None if not timing_samples else float(np.mean(timing_errors)),
+        "median_absolute_error_seconds": None if not timing_samples else float(np.median(timing_errors)),
+        "p95_absolute_error_seconds": None if not timing_samples else float(np.percentile(timing_errors, 95)),
+        "within_250ms": sum(value <= 0.2500001 for value in timing_errors),
+        "within_500ms": sum(value <= 0.5000001 for value in timing_errors),
+    }
+    timing["within_250ms_rate"] = None if not timing_samples else timing["within_250ms"] / timing_samples
+    timing["within_500ms_rate"] = None if not timing_samples else timing["within_500ms"] / timing_samples
+    technique_validation = classification_metrics(
+        [_temporal_label(item.get("corrected", {}).get("technique", "none")) for item in annotations],
+        [_temporal_label(item.get("predicted", {}).get("technique", "none")) for item in annotations],
+        classes=ACTION_CLASSES,
+    )
     return {
         "metrics": counts,
         "annotations": len(annotations),
@@ -128,4 +161,6 @@ def accuracy_summary(annotations: list[dict]) -> dict:
         "negative_labels": negative_labels,
         "fights": fights,
         "train_ready": fights >= 2 and positive_labels >= 20 and negative_labels >= 20,
+        "technique_validation": technique_validation,
+        "timing": timing,
     }

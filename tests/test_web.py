@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.main import _apply_report_annotations, _build_replay_chapters, _prediction_at, _review_candidates, app
 from core.evidence_trust import automated_evidence_trust
+from core.temporal_model import ACTION_CLASSES
 
 
 class PublicPageTests(unittest.TestCase):
@@ -103,6 +104,24 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('class="workflow-track"', home)
         self.assertIn('class="fight-archive"', history)
         self.assertIn('id="historySearch"', history_template)
+
+    def test_fight_setup_redesign_preserves_analysis_workflow_contracts(self):
+        root = Path(__file__).resolve().parents[1]
+        frame = (root / "app" / "templates" / "frame.html").read_text(encoding="utf-8")
+        selection = (root / "app" / "templates" / "select.html").read_text(encoding="utf-8")
+
+        self.assertIn('class="workflow-steps"', frame)
+        self.assertIn('class="frame-workbench"', frame)
+        self.assertIn('id="sourceVideo"', frame)
+        self.assertIn('id="useFrame"', frame)
+        self.assertIn("setFrameStatus", frame)
+        self.assertIn('class="fighter-lock-layout"', selection)
+        self.assertIn('id="stage"', selection)
+        self.assertIn('id="canvas"', selection)
+        self.assertIn('name="focusFighter" value="A"', selection)
+        self.assertIn('name="focusFighter" value="B"', selection)
+        self.assertIn('id="start"', selection)
+        self.assertNotIn('name="focusFighter" value="BOTH"', selection)
 
     def test_home_hero_copy_starts_at_the_top_of_the_upload_card(self):
         css = self.client.get("/static/fixes.css").text
@@ -422,6 +441,9 @@ class PublicPageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Ground-truth validation", response.text)
         self.assertIn("Release target", response.text)
+        self.assertIn("Dataset integrity", response.text)
+        self.assertIn("Per-class validation", response.text)
+        self.assertIn("Untouched test set", response.text)
 
     def test_correction_reclassifies_wako_legality(self):
         report = {"setup": {"ruleset": "LIGHT_CONTACT"}, "key_moments": [], "illegal_moves": [{
@@ -434,11 +456,12 @@ class PublicPageTests(unittest.TestCase):
             "limb": "left_knee", "target": "body", "outcome": "clean",
         }, "corrected": {
             "fighter": "A", "technique": "left_front_kick", "family": "kick",
-            "limb": "left_leg", "target": "body", "outcome": "blocked",
+            "limb": "left_leg", "target": "body", "outcome": "blocked", "contact_time": 4.05,
         }}]
         _apply_report_annotations(report, annotations)
         self.assertEqual(report["illegal_moves"], [])
         self.assertEqual(report["key_moments"][0]["technique"], "left_front_kick")
+        self.assertEqual(report["key_moments"][0]["peak_time"], 4.05)
         self.assertTrue(report["key_moments"][0]["is_corrected"])
 
     def test_annotation_prediction_comes_from_report(self):
@@ -544,9 +567,15 @@ class PublicPageTests(unittest.TestCase):
         classifier["temporal_validation"].update({
             "test_accuracy": .94,
             "held_out_test_fights": ["t1", "t2", "t3"],
-            "per_class_test_accuracy": {f"class_{index}": .85 for index in range(18)},
+            "per_class_test_accuracy": {name: .85 for name in ACTION_CLASSES},
+            "per_class_test_f1": {name: .82 for name in ACTION_CLASSES},
         })
         self.assertTrue(automated_evidence_trust(classifier)["automated_evidence_trusted"])
+
+        classifier["temporal_validation"]["per_class_test_accuracy"] = {
+            f"invented_{index}": .99 for index in range(len(ACTION_CLASSES))
+        }
+        self.assertFalse(automated_evidence_trust(classifier)["automated_evidence_trusted"])
 
     def test_completed_human_review_rebuilds_score_and_coaching(self):
         candidate = {

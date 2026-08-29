@@ -26,8 +26,9 @@ from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
 )
-from core.config import OUTPUTS, ROOT, RULESET_LABELS, SETTINGS, UPLOADS
+from core.config import DATASET, OUTPUTS, ROOT, RULESET_LABELS, SETTINGS, UPLOADS
 from core.annotations import accuracy_summary, export_sequence
+from core.model_validation import audit_dataset_split
 from core.db import (
     add_assignment, analysis_allowance, apply_checkout_event, consume_password_reset_token,
     create_moderation_report, delete_account, delete_fight, delete_legal_acceptances_for_resource,
@@ -109,6 +110,7 @@ class SelectionFramePayload(BaseModel):
 
 class AnnotationPayload(BaseModel):
     event_time: float
+    contact_time: float | None = None
     predicted: dict
     fighter: str
     technique: str
@@ -707,6 +709,8 @@ def _apply_report_annotations(
     for annotation in annotations:
         event_time = float(annotation["event_time"])
         key = f"{event_time:.3f}"
+        corrected_time = float(annotation["corrected"].get("contact_time", event_time))
+        corrected_key = f"{corrected_time:.3f}"
         closest = min(raw_events, key=lambda event: abs(float(event.get("peak_time", -999)) - event_time), default=None)
         if closest is None or abs(float(closest.get("peak_time", -999)) - event_time) > 0.04:
             closest = {
@@ -716,12 +720,14 @@ def _apply_report_annotations(
                 "start_time": event_time, "peak_time": event_time, "end_time": event_time,
             }
         item = dict(closest)
+        original_peak_time = float(item.get("peak_time", event_time))
+        time_shift = corrected_time - original_peak_time
         item["original_prediction"] = annotation["predicted"]
         item.update(annotation["corrected"])
-        item["peak_time"] = event_time
-        item["start_time"] = float(item.get("start_time", event_time))
-        item["end_time"] = float(item.get("end_time", event_time))
-        item["round_number"] = item.get("round_number") or _round_number_at(report, event_time)
+        item["peak_time"] = corrected_time
+        item["start_time"] = max(0.0, float(item.get("start_time", original_peak_time)) + time_shift)
+        item["end_time"] = max(corrected_time, float(item.get("end_time", original_peak_time)) + time_shift)
+        item["round_number"] = _round_number_at(report, corrected_time) or item.get("round_number")
         item["human_verified"] = True
         item["evidence_source"] = "human_ground_truth"
         item["is_corrected"] = annotation["predicted"] != annotation["corrected"]
@@ -730,7 +736,8 @@ def _apply_report_annotations(
         if item.get("technique") == "none":
             displayed.pop(key, None)
         else:
-            displayed[key] = item
+            displayed.pop(key, None)
+            displayed[corrected_key] = item
 
     legal_moments: list[dict] = []
     illegal_moments: list[dict] = []
@@ -1389,16 +1396,21 @@ def result_page(request: Request, job_id: str):
     _apply_report_annotations(report, [])
     refresh_identity_integrity(report)
     report_access = _request_plan(request)
+    # Opening the exact completed report acknowledges its one-time notification.
+    # Without this reset, the green "Results ready" chip was written back on
+    # every report view and could appear indefinitely before a new analysis.
+    displayed = request.state.active_analysis
+    if displayed and displayed.get("job_id") == job_id and displayed.get("status") == "complete":
+        request.state.analysis_navigation["last_completed"] = None
+        request.state.analysis_navigation["display"] = request.state.analysis_navigation.get("active")
+        request.state.active_analysis = request.state.analysis_navigation.get("active")
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "report_access": report_access,
         "analysis_quality": _analysis_quality_summary(report),
         "can_share": bool(_account(request) and report_access.get("can_share")),
     })
-    response.set_cookie(
-        LAST_COMPLETED_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
-        httponly=True, samesite="lax", secure=request.url.scheme == "https",
-    )
+    response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
     if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:
         response.delete_cookie(ACTIVE_ANALYSIS_COOKIE, httponly=True, samesite="lax")
     return response
@@ -1415,8 +1427,10 @@ def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
     target = payload.target.lower()
     outcome = payload.outcome.lower()
     technique = payload.technique.lower().strip().replace(" ", "_")
+    contact_time = payload.event_time if payload.contact_time is None else payload.contact_time
     if (
         not math.isfinite(payload.event_time) or payload.event_time < 0
+        or not math.isfinite(contact_time) or contact_time < 0
         or fighter not in {"A", "B"}
         or target not in {"head", "body", "leg", "none"}
         or outcome not in {"clean", "blocked", "checked", "missed", "uncertain"}
@@ -1430,7 +1444,7 @@ def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
         side = "left" if technique.startswith("left_") else "right" if technique.startswith("right_") else ""
         limb = f"{side + '_' if side else ''}{'knee' if family == 'knee' else 'leg' if family == 'kick' else 'hand'}"
     corrected = {"fighter": fighter, "technique": technique, "target": None if target == "none" else target,
-                 "outcome": outcome, "family": family, "limb": limb}
+                 "outcome": outcome, "family": family, "limb": limb, "contact_time": float(contact_time)}
     report = json.loads(report_path.read_text(encoding="utf-8"))
     refresh_identity_integrity(report)
     if not report.get("integrity", {}).get("identity_evidence_trusted", True):
@@ -1438,11 +1452,13 @@ def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
     predicted = _prediction_at(report, payload.event_time)
     if predicted is None and not payload.manual:
         raise HTTPException(404, "No analyzed action exists at that time")
+    segment_end = float(report.get("setup", {}).get("end_seconds") or (
+        float(report.get("setup", {}).get("start_seconds", 0))
+        + float(report.get("performance", {}).get("segment_duration_seconds", 0))
+    ))
+    if contact_time > segment_end + 0.05:
+        raise HTTPException(400, "The exact contact time is outside the analyzed segment")
     if predicted is None:
-        segment_end = float(report.get("setup", {}).get("end_seconds") or (
-            float(report.get("setup", {}).get("start_seconds", 0))
-            + float(report.get("performance", {}).get("segment_duration_seconds", 0))
-        ))
         if payload.event_time > segment_end + 0.05:
             raise HTTPException(400, "The label time is outside the analyzed segment")
         predicted = {"fighter": fighter, "technique": "none", "target": None,
@@ -1450,7 +1466,7 @@ def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
     annotation_id = save_annotation(job_id, payload.event_time, report.get("setup", {}).get("ruleset", "K1"), predicted, corrected)
     profile = get_profile(_profile_id(request))
     training_consent = bool(profile and profile.get("allow_model_training"))
-    sequence_path = export_sequence(job_id, annotation_id, corrected, payload.event_time) if training_consent else None
+    sequence_path = export_sequence(job_id, annotation_id, corrected, contact_time) if training_consent else None
     set_annotation_sequence(annotation_id, sequence_path)
     return {
         "ok": True, "annotation_id": annotation_id,
@@ -1572,7 +1588,13 @@ def validation_page(request: Request):
     profile_id = _profile_id(request)
     owned_jobs = {fight["job_id"] for fight in list_fights(profile_id)} if profile_id is not None else set()
     annotations = [item for item in list_annotations() if item["job_id"] in owned_jobs]
-    return templates.TemplateResponse(request=request, name="validation.html", context={"request": request, "summary": accuracy_summary(annotations), "annotations": annotations})
+    dataset = audit_dataset_split(DATASET / "sequences", DATASET / "untouched_test")
+    return templates.TemplateResponse(request=request, name="validation.html", context={
+        "request": request,
+        "summary": accuracy_summary(annotations),
+        "annotations": annotations,
+        "dataset": dataset,
+    })
 
 
 def _build_replay_chapters(

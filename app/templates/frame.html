@@ -1,13 +1,39 @@
 {% extends "base.html" %}
-{% block head %}<link rel="stylesheet" href="/static/components.css"><link rel="stylesheet" href="/static/frame-picker.css">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/components.css"><link rel="stylesheet" href="/static/frame-picker.css?v=20260829-1">{% endblock %}
 {% block title %}Choose Frame · WarriorIQ{% endblock %}
 {% block content %}
-<div class="section-title"><div><div class="eyebrow">Step 2 of 3</div><h2>Choose the fighter-selection frame</h2></div><div class="pill">Frame selection</div></div>
-{% if job.quality %}<section class="quality-strip {{job.quality.status}}"><div><div class="eyebrow">Automatic Quality Guardian</div><h3>{{job.quality.score}}/100 · {{job.quality.status|title}} capture</h3></div><div class="quality-measures"><span>{{job.quality.measurements.resolution}}</span><span>{{job.quality.measurements.fps}} FPS</span></div><ul>{% for note in job.quality.notes[:2] %}<li>{{note}}</li>{% endfor %}</ul></section>{% endif %}
-<div class="notice"><strong>Choose a clear moment:</strong> both fighters should be fully visible, separated from each other, and away from the referee.</div>
-<section class="frame-picker card"><h3>Pause on the clearest frame</h3><p class="muted small">Move through the video until both fighters can be identified easily. WarriorIQ locks their identities here and analyzes forward from this frame.</p><video id="sourceVideo" controls preload="metadata" src="/media/{{job_id}}"></video><button class="btn" id="useFrame" type="button">Use this frame and continue →</button><div class="small muted" id="frameStatus">Current frame: {{'%.1f'|format(job.start_seconds)}} seconds.</div></section>
+<section class="selection-workflow">
+  <ol class="workflow-steps" aria-label="Fight setup progress">
+    <li class="complete"><span>1</span><div><strong>Fight uploaded</strong><small>Video ready</small></div></li>
+    <li class="active" aria-current="step"><span>2</span><div><strong>Choose frame</strong><small>Find a clear moment</small></div></li>
+    <li><span>3</span><div><strong>Lock fighters</strong><small>Identify A and B</small></div></li>
+  </ol>
+  <header class="workflow-heading">
+    <div><div class="eyebrow">Frame selection</div><h1>Find one clear moment.</h1><p>Pause where both fighters are visible from head to toe. This gives the identity tracker the strongest possible start.</p></div>
+    <div class="workflow-step-count"><strong>02</strong><span>of 03</span></div>
+  </header>
+  <div class="frame-workbench">
+    <section class="frame-player-panel" aria-labelledby="frame-player-title">
+      <div class="panel-heading"><div><span class="panel-kicker">Selection video</span><h2 id="frame-player-title">Pause on the clearest frame</h2></div><span class="live-indicator"><i></i> Ready</span></div>
+      <video id="sourceVideo" controls preload="metadata" src="/media/{{job_id}}"></video>
+      <div class="frame-action-row"><div class="frame-time" id="frameStatus" role="status" aria-live="polite"><span>Selected moment</span><strong>{{'%.1f'|format(job.start_seconds)}}s</strong></div><button class="btn" id="useFrame" type="button" data-motion-primary>Use this frame <span aria-hidden="true">→</span></button></div>
+    </section>
+    <aside class="frame-guidance" aria-label="Frame selection guidance">
+      <div><span class="panel-kicker">A strong selection</span><h2>Keep it simple.</h2><p>You only need one clean frame. WarriorIQ uses it to understand who should remain Fighter A and Fighter B.</p></div>
+      <ul class="frame-checklist">
+        <li><span>01</span><div><strong>Both fighters visible</strong><small>Include each fighter’s full body.</small></div></li>
+        <li><span>02</span><div><strong>Clear separation</strong><small>Avoid clinches and overlapping bodies.</small></div></li>
+        <li><span>03</span><div><strong>Referee out of the way</strong><small>Choose a moment with a clean view.</small></div></li>
+      </ul>
+      {% if job.quality %}<section class="capture-readout {{job.quality.status}}"><div><span>Video quality</span><strong>{{job.quality.score}}/100</strong></div><div class="capture-meta"><span>{{job.quality.measurements.resolution}}</span><span>{{job.quality.measurements.fps}} FPS</span></div>{% if job.quality.notes %}<p>{{job.quality.notes[0]}}</p>{% endif %}</section>{% endif %}
+    </aside>
+  </div>
+</section>
 {% endblock %}
 {% block scripts %}<script>
 const jobId={{job_id|tojson}},video=document.getElementById('sourceVideo'),button=document.getElementById('useFrame'),statusBox=document.getElementById('frameStatus');
-button.onclick=async()=>{button.disabled=true;statusBox.textContent='Preparing this frame…';try{const r=await fetch(`/api/selection-frame/${jobId}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seconds:video.currentTime})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Could not use this frame');location.href=`/select/${jobId}`}catch(e){statusBox.textContent=e.message;button.disabled=false}};
+function setFrameStatus(label,value){const caption=document.createElement('span'),reading=document.createElement('strong');caption.textContent=label;reading.textContent=value;statusBox.replaceChildren(caption,reading)}
+function showFrameTime(){setFrameStatus('Selected moment',`${video.currentTime.toFixed(1)}s`)}
+video.addEventListener('loadedmetadata',()=>{if({{job.start_seconds|tojson}}>0)video.currentTime={{job.start_seconds|tojson}};showFrameTime()});video.addEventListener('timeupdate',showFrameTime);video.addEventListener('seeked',showFrameTime);
+button.onclick=async()=>{button.disabled=true;button.setAttribute('aria-busy','true');setFrameStatus('Selected moment','Preparing…');try{const r=await fetch(`/api/selection-frame/${jobId}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seconds:video.currentTime})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Could not use this frame');location.href=`/select/${jobId}`}catch(e){setFrameStatus('Could not continue',e.message);button.disabled=false;button.removeAttribute('aria-busy')}};
 </script>{% endblock %}

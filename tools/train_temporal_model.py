@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
-from collections import Counter
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +11,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, Subset
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.model_validation import audit_sequence_directory, classification_metrics
 from core.temporal_model import ACTION_CLASSES, build_temporal_network
 
 
@@ -74,24 +79,15 @@ def group_split(dataset: SequenceDataset, val_fraction: float, seed: int):
 
 def evaluate(model, loader, device):
     model.eval()
-    correct = total = 0
-    class_correct = Counter()
-    class_total = Counter()
+    expected = []
+    predicted = []
     with torch.inference_mode():
         for x, y in loader:
             x, y = x.to(device), y.to(device)
             pred = model(x).argmax(-1)
-            matches = pred == y
-            correct += int(matches.sum())
-            total += int(y.numel())
-            for label, ok in zip(y.detach().cpu().tolist(), matches.detach().cpu().tolist()):
-                class_total[int(label)] += 1
-                class_correct[int(label)] += int(bool(ok))
-    per_class = {
-        ACTION_CLASSES[i]: class_correct[i] / class_total[i]
-        for i in class_total
-    }
-    return correct / max(1, total), per_class
+            expected.extend(ACTION_CLASSES[index] for index in y.detach().cpu().tolist())
+            predicted.extend(ACTION_CLASSES[index] for index in pred.detach().cpu().tolist())
+    return classification_metrics(expected, predicted, classes=ACTION_CLASSES)
 
 
 def main():
@@ -108,7 +104,20 @@ def main():
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-    dataset = SequenceDataset(Path(args.data))
+    data_root = Path(args.data)
+    audit = audit_sequence_directory(data_root)
+    if audit["invalid_sequences"]:
+        first = audit["issues"][0]
+        raise RuntimeError(
+            f"Dataset audit rejected {audit['invalid_sequences']} invalid sequence(s). "
+            f"First problem: {first['file']}: {first['reason']}"
+        )
+    if not audit["experimental_train_ready"]:
+        raise RuntimeError(
+            "Experimental training requires at least 20 real actions, 20 negative-motion sequences "
+            "and two separate fights. Run tools/audit_accuracy_dataset.py for the exact gaps."
+        )
+    dataset = SequenceDataset(data_root)
     sample_x, _ = dataset[0]
     input_dim = int(sample_x.shape[-1])
     train_ds, val_ds, val_fights = group_split(dataset, args.val_fraction, args.seed)
@@ -146,7 +155,8 @@ def main():
             scaler.update()
             running += float(loss.detach())
 
-        accuracy, per_class = evaluate(model, val_loader, device)
+        validation_metrics = evaluate(model, val_loader, device)
+        accuracy = float(validation_metrics["accuracy"] or 0.0)
         print(f"epoch {epoch:03d} loss={running/max(1,len(train_loader)):.4f} val_acc={accuracy:.4f}")
         if accuracy > best:
             best = accuracy
@@ -160,7 +170,17 @@ def main():
                     "held_out_fights": val_fights,
                     "training_fights": training_fights,
                     "dataset_version": args.dataset_version,
-                    "per_class_validation_accuracy": per_class,
+                    "per_class_validation_accuracy": {
+                        name: item["recall"] for name, item in validation_metrics["per_class"].items()
+                    },
+                    "per_class_validation_precision": {
+                        name: item["precision"] for name, item in validation_metrics["per_class"].items()
+                    },
+                    "per_class_validation_f1": {
+                        name: item["f1"] for name, item in validation_metrics["per_class"].items()
+                    },
+                    "macro_validation_f1": validation_metrics["macro_f1"],
+                    "macro_action_validation_f1": validation_metrics["macro_action_f1"],
                 },
                 out,
             )

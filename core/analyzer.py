@@ -294,7 +294,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             # cursor must advance only when the action/pose pass has processed
             # that video time, otherwise the live timeline would get ahead of
             # the evidence actually available to the user.
-            processed_video_seconds=float(processed if stage in {"analysis", "complete"} else 0.0),
+            processed_video_seconds=float(processed if stage in {"analysis", "report", "complete"} else 0.0),
             speed=float(speed),
             eta_seconds=float(max(0.0, eta)) if eta is not None else None,
             fighter_a_confidence=0.0 if manager is None else float(manager.a.identity_confidence),
@@ -620,6 +620,13 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     within_budget = analysis_seconds <= segment_duration
 
     all_final_live_events = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
+    final_live_stats = _provisional_stats(
+        all_final_live_events, found, analyzed_frames, live_action_trusted, segment_duration,
+    )
+    final_live_stats["diagnostics"] = _live_event_diagnostics(
+        events, req.ruleset, live_action_trusted, all_final_live_events,
+    )
+    final_live_events = all_final_live_events[-160:]
     public_event_ids = {item["id"] for item in all_final_live_events}
     report_events = (
         [
@@ -700,6 +707,11 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "pose_model": pose_tracker.model_path,
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
     }
+    progress(
+        "Building performance report", 98.3, analysis_seconds, segment_duration, manager, None, quality,
+        stage="report", live_events_snapshot=final_live_events, stats=final_live_stats,
+        observation=_latest_observation(segment_end_seconds, info.width, info.height, fighter_a, fighter_b, manager),
+    )
     original_name = req.original_name or Path(req.video_path).name
     report = build_report(
         req=req,
@@ -712,15 +724,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         performance=performance,
         classifier=classifier,
     )
+    progress(
+        "Finalizing coaching priorities", 99.2, time.perf_counter() - wall_start, segment_duration,
+        manager, None, quality, stage="report", live_events_snapshot=final_live_events,
+        stats=final_live_stats,
+        observation=_latest_observation(segment_end_seconds, info.width, info.height, fighter_a, fighter_b, manager),
+    )
     # Freeze the exact customer-facing event stream once. Live completion,
     # saved report totals, round summaries, evidence buttons, and progress
     # history all consume this same snapshot so their numbers cannot drift.
-    final_live_stats = _provisional_stats(
-        all_final_live_events, found, analyzed_frames, live_action_trusted, segment_duration,
-    )
-    final_live_stats["diagnostics"] = _live_event_diagnostics(
-        events, req.ruleset, live_action_trusted, all_final_live_events,
-    )
     report["statistics"] = final_live_stats
     report["event_feed"] = all_final_live_events
     if live_action_trusted:
@@ -752,8 +764,25 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             dashboard["combinations_per_minute"] = (
                 float(public["combinations"]) / max(1e-6, segment_duration / 60.0)
             )
+    # The customer-facing duration includes report construction, not only the
+    # pose pass. Keep the saved report, progress screen and history summary on
+    # the same wall-clock definition.
+    analysis_seconds = time.perf_counter() - wall_start
+    realtime_speed = segment_duration / analysis_seconds if analysis_seconds > 0 else 0.0
+    within_budget = analysis_seconds <= segment_duration
+    report["performance"].update({
+        "analysis_seconds": analysis_seconds,
+        "realtime_speed": realtime_speed,
+        "within_video_length_budget": within_budget,
+    })
     json_path, html_path = write_report(job_dir, report)
     events_path.write_text(json.dumps([e.to_dict() for e in events], indent=2), encoding="utf-8")
+    progress(
+        "Saving completed report", 99.7, time.perf_counter() - wall_start, segment_duration,
+        manager, None, quality, stage="report", live_events_snapshot=final_live_events,
+        stats=final_live_stats,
+        observation=_latest_observation(segment_end_seconds, info.width, info.height, fighter_a, fighter_b, manager),
+    )
 
     summary = {
         "winner_estimate": report["scorecard"]["winner_estimate"],
@@ -792,9 +821,8 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             ).isoformat(),
         )
 
-    final_live_events = all_final_live_events[-160:]
     progress(
-        "Complete", 100.0, analysis_seconds, segment_duration, manager, None, quality,
+        "Complete", 100.0, time.perf_counter() - wall_start, segment_duration, manager, None, quality,
         stage="complete",
         live_events_snapshot=final_live_events,
         stats=final_live_stats,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
@@ -13,6 +14,7 @@ from core.coaching import build_pose_coaching, build_training_plan
 from core.config import SETTINGS
 from core.identity import IdentityManager
 from core.metrics import MetricsAccumulator
+from core.model_validation import audit_sequence_directory, classification_metrics
 from core.pose_tracker import find_initial_people
 from core.progress_insights import build_progress
 from core.quality_guardian import quality_summary
@@ -20,6 +22,7 @@ from core.report import refresh_identity_integrity
 from core.scoring import deduplicate_scoring_events, event_legality, is_legal_event, score_fight
 from core.sam_recovery import nearest_guidance, sam_sampling_stride
 from core.types import PersonObservation, StrikeEvent
+from core.temporal_model import ACTION_CLASSES
 
 
 def _person(track_id: int, x1: float, x2: float, appearance_index: int) -> PersonObservation:
@@ -528,15 +531,58 @@ class AnnotationAccuracyTests(unittest.TestCase):
         self.assertTrue(all(item["accuracy"] is None for item in summary["metrics"].values()))
 
     def test_corrections_measure_fields_independently(self):
-        item = {"job_id": "fight1", "ruleset": "KICK_LIGHT", "predicted": {
+        item = {"job_id": "fight1", "event_time": 12.4, "ruleset": "KICK_LIGHT", "predicted": {
             "fighter": "A", "technique": "left_low_kick", "target": "leg", "outcome": "clean", "family": "kick", "limb": "left_leg"
         }, "corrected": {
-            "fighter": "A", "technique": "right_low_kick", "target": "leg", "outcome": "blocked", "family": "kick", "limb": "right_leg"
+            "fighter": "A", "technique": "right_low_kick", "target": "leg", "outcome": "blocked", "family": "kick", "limb": "right_leg", "contact_time": 12.15,
         }}
         summary = accuracy_summary([item])
         self.assertEqual(summary["metrics"]["fighter_identity"]["accuracy"], 1.0)
         self.assertEqual(summary["metrics"]["limb_side"]["accuracy"], 0.0)
         self.assertEqual(summary["metrics"]["outcome"]["accuracy"], 0.0)
+        self.assertEqual(summary["timing"]["samples"], 1)
+        self.assertAlmostEqual(summary["timing"]["mean_absolute_error_seconds"], 0.25)
+        self.assertEqual(summary["timing"]["within_250ms"], 1)
+
+    def test_classification_metrics_expose_false_alarms_and_missed_classes(self):
+        metrics = classification_metrics(
+            ["none", "cross", "cross", "jab"],
+            ["cross", "cross", "jab", "jab"],
+            classes=ACTION_CLASSES,
+        )
+
+        self.assertEqual(metrics["samples"], 4)
+        self.assertEqual(metrics["false_alarms"], 1)
+        self.assertEqual(metrics["missed_actions"], 0)
+        self.assertAlmostEqual(metrics["per_class"]["cross"]["precision"], 0.5)
+        self.assertAlmostEqual(metrics["per_class"]["cross"]["recall"], 0.5)
+        self.assertAlmostEqual(metrics["per_class"]["cross"]["f1"], 0.5)
+
+    def test_dataset_audit_rejects_bad_shapes_and_reports_real_class_coverage(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            np.savez_compressed(
+                root / "fight-1__valid.npz",
+                x=np.zeros((SETTINGS.action_window, 102), dtype=np.float32),
+                y=np.int64(ACTION_CLASSES.index("cross")),
+                fight_id=np.asarray("fight-1"),
+            )
+            np.savez_compressed(
+                root / "fight-2__invalid.npz",
+                x=np.zeros((SETTINGS.action_window, 99), dtype=np.float32),
+                y=np.int64(ACTION_CLASSES.index("jab")),
+                fight_id=np.asarray("fight-2"),
+            )
+
+            audit = audit_sequence_directory(root)
+
+        self.assertEqual(audit["files"], 2)
+        self.assertEqual(audit["valid_sequences"], 1)
+        self.assertEqual(audit["invalid_sequences"], 1)
+        self.assertEqual(audit["fights"], 1)
+        self.assertEqual(audit["class_support"]["cross"], 1)
+        self.assertEqual(audit["covered_classes"], 1)
+        self.assertIn("102 features", audit["issues"][0]["reason"])
 
 
 if __name__ == "__main__":

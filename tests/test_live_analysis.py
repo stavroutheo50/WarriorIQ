@@ -5,8 +5,10 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from fastapi.responses import HTMLResponse
 
 from app import state
+from app import main as webapp
 from app.main import GUEST_COOKIE, app
 from core.analyzer import _live_event_payload, _provisional_stats
 
@@ -51,10 +53,25 @@ class DurableAnalysisStateTests(TestCase):
         self.assertIn('preload="auto"', template)
         self.assertIn("scheduleReportTransition", template)
         self.assertIn("location.assign(resultUrl)", template)
+        self.assertIn('id="analysisWarmup"', template)
+        self.assertIn("warmupVisible", template)
+        self.assertIn("Math.min(99.9,backendPercent)", template)
         fixes = (
             Path(__file__).resolve().parents[1] / "app" / "static" / "fixes.css"
         ).read_text(encoding="utf-8")
         self.assertIn(".live-event-empty[hidden]{display:none}", fixes)
+        self.assertIn(".analysis-warmup[hidden]{display:none}", fixes)
+        self.assertIn("@media(prefers-reduced-motion:reduce)", fixes)
+
+    def test_report_generation_has_real_late_pipeline_progress(self):
+        analyzer = (
+            Path(__file__).resolve().parents[1] / "core" / "analyzer.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('"Building performance report", 98.3', analyzer)
+        self.assertIn('"Finalizing coaching priorities", 99.2', analyzer)
+        self.assertIn('"Saving completed report", 99.7', analyzer)
+        self.assertIn('stage="report"', analyzer)
 
     def test_current_analysis_pointer_advances_to_results_instead_of_disappearing(self):
         client = TestClient(app)
@@ -120,6 +137,49 @@ class DurableAnalysisStateTests(TestCase):
             state.delete_job(completed_id)
             state.delete_job(active_id)
             client.close()
+
+    def test_opening_a_completed_report_clears_the_ready_notification(self):
+        client = TestClient(app)
+        job_id = "completed-report-seen"
+        rendered_state = {}
+        with TemporaryDirectory() as temporary, patch.object(state, "OUTPUTS", Path(temporary)), patch.object(webapp, "OUTPUTS", Path(temporary)):
+            try:
+                client.get("/")
+                guest_id = client.cookies.get(GUEST_COOKIE)
+                client.cookies.set("warrioriq_active_analysis", job_id)
+                state.create_job(job_id, {
+                    "owner_key": f"guest:{guest_id}",
+                    "status": "complete",
+                    "percent": 100.0,
+                    "video_path": "fight.mp4",
+                })
+                report_dir = Path(temporary) / job_id
+                report_dir.mkdir(exist_ok=True)
+                (report_dir / "report.json").write_text(
+                    '{"events":[],"key_moments":[],"tracking":{"fighter_A_coverage":1,"fighter_B_coverage":1},"video":{"analysis_target":"BOTH"},"scorecard":{"available":false}}',
+                    encoding="utf-8",
+                )
+
+                def fake_template_response(*, request, name, context):
+                    rendered_state["active_analysis"] = request.state.active_analysis
+                    return HTMLResponse("report")
+
+                with (
+                    patch.object(webapp.templates, "TemplateResponse", side_effect=fake_template_response),
+                    patch.object(webapp, "_apply_report_annotations"),
+                    patch.object(webapp, "refresh_identity_integrity"),
+                    patch.object(webapp, "_analysis_quality_summary", return_value={}),
+                ):
+                    response = client.get(f"/result/{job_id}")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIsNone(rendered_state["active_analysis"])
+                cookie_headers = "\n".join(response.headers.get_list("set-cookie"))
+                self.assertIn("warrioriq_last_completed_analysis=", cookie_headers)
+                self.assertIn("Max-Age=0", cookie_headers)
+            finally:
+                state.delete_job(job_id)
+                client.close()
 
     def test_live_statistics_are_split_by_strike_family_and_outcome(self):
         events = [

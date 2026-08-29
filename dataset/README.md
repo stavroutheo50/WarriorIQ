@@ -35,15 +35,16 @@ If `fight_id` is omitted, the trainer groups files using the filename prefix bef
 
 ## Workflow
 
-1. Open a WarriorIQ result, choose **Review candidates**, and label every proposal. Use **Not an action** for false detections and add actions the detector missed at the video's exact current time. WarriorIQ exports the matching pose sequence when tracking data is available.
+1. In the private development workspace, open a WarriorIQ result and label every proposal. Use **Not an action** for false detections, add actions the detector missed, and pause the video at exact contact to correct timing. This is model-development work, not a task required from normal WarriorIQ customers.
 2. Use the **Accuracy** page to monitor fighter identity, technique, side, target, outcome and WAKO-legality agreement. No percentage is displayed until human corrections exist.
 3. Collect at least 20 real actions and 20 negative labels across at least two different fights before the first experimental training run. This is only a minimum engineering gate, not proof of market readiness.
 4. For a production-scale dataset, also annotate full kickboxing fights/sparring in Roboflow or another suitable video annotation workflow.
 5. Build balanced labels across stance, camera angle, lighting, clothing, ruleset and fighter skill level.
 6. Include negative motion: guard movement, feints, steps, bounces, clinch movement, referee motion and pre-round movement so these are not learned as strikes.
 7. Extract the 102-dimensional pose+velocity sequences used by WarriorIQ.
-8. Train with `python tools/train_temporal_model.py --dataset-version corrections-v1`.
-9. The trainer performs a **fight-group validation split**, not a random clip split.
-10. Keep another completely untouched full-fight test directory with all 18 classes represented. Evaluate and promote only after it passes: `python tools/evaluate_temporal_model.py --test-data dataset/untouched_test --promote`.
+8. Audit first with `python tools/audit_accuracy_dataset.py --require experimental`. Invalid shapes, non-finite values, duplicate sequences and fight/test leakage are excluded or rejected rather than silently counted.
+9. Train with `python tools/train_temporal_model.py --dataset-version corrections-v1`.
+10. The trainer performs a **fight-group validation split**, not a random clip split.
+11. Keep another completely untouched full-fight test directory with all 17 supported temporal classes represented. Evaluate and promote only after it passes overall accuracy, every-class recall and every-class F1: `python tools/evaluate_temporal_model.py --test-data dataset/untouched_test --promote`.
 
 WarriorIQ should not be called market-best until complete unseen-fight benchmarks pass identity, technique, contact/outcome, target, scoring agreement and real-time performance without manual corrections after initial fighter selection.
