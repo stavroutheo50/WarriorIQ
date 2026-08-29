@@ -84,6 +84,15 @@ class PublicPageTests(unittest.TestCase):
         self.assertLess(passenger.index("load_dotenv()"), passenger.index("from app.main import app"))
         self.assertIn("application = ASGIMiddleware(app", passenger)
 
+    def test_cpanel_deployment_targets_the_stable_python_app_root(self):
+        deployment = (Path(__file__).resolve().parents[1] / ".cpanel.yml").read_text(encoding="utf-8")
+
+        self.assertIn("DEPLOYPATH=/home/dchoodxm/warrioriq", deployment)
+        self.assertIn("/bin/cp -R app core dataset tests tools $DEPLOYPATH", deployment)
+        self.assertIn("passenger_wsgi.py", deployment)
+        self.assertNotIn(".env ", deployment)
+        self.assertNotIn("uploads", deployment)
+
     def test_health_probe_is_not_redirected_on_render_private_http(self):
         original = SETTINGS.public_base_url
         object.__setattr__(SETTINGS, "public_base_url", "https://warrioriq.onrender.com")

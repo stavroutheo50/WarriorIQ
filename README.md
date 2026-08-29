@@ -78,11 +78,11 @@ The default Render profile disables selection-page YOLO detection and SAM2 recov
 
 Render's free filesystem is ephemeral. Without a persistent disk, accounts, uploaded videos, analyses, and the SQLite database can disappear after a restart or redeploy. On a paid service with a disk mounted at `/var/data`, set `WARRIORIQ_DATA_DIR=/var/data/warrioriq`. Do not set that path unless the disk is actually mounted and writable.
 
-### Namecheap shared hosting / cPanel
+### OuiHeberg cPanel with Namecheap DNS
 
-`warrioriq.eu` currently uses Namecheap shared-hosting DNS and cPanel. Create the Python application from cPanel's **Setup Python App**, point its application root at this repository, and use `passenger_wsgi.py` as the Passenger startup file. Install `requirements.txt` inside the application virtual environment. Do not upload a local `.env`; create it privately on the server and set at minimum `WARRIORIQ_PUBLIC_BASE_URL=https://warrioriq.eu`. Keep payments disabled until every legal/operator field and Stripe webhook is configured and verified.
+`warrioriq.eu` currently uses Namecheap nameservers while the purchased application hosting is OuiHeberg cPanel. The repository is checked out at `/home/dchoodxm/warrioriq_repo`; `.cpanel.yml` deploys tracked application files into the Python application's stable root at `/home/dchoodxm/warrioriq` without copying Git metadata, local secrets or generated uploads. Use `passenger_wsgi.py` as the Passenger startup file and install `requirements.txt` inside the application virtual environment. Do not upload a local `.env`; create production variables through **Setup Python App** and set at minimum `WARRIORIQ_PUBLIC_BASE_URL=https://warrioriq.eu`. Keep payments disabled until every legal/operator field and Stripe webhook is configured and verified.
 
-After the application is created, restart it in cPanel, run `/health`, and enable AutoSSL for both `warrioriq.eu` and `www.warrioriq.eu`. The public site is not ready while either hostname has a certificate error. Use cPanel's Git Version Control deployment support (or an SSH pull) to update from `main`; never place GitHub credentials or production secrets in the repository.
+After each GitHub update, use cPanel Git Version Control to **Update from Remote** and then **Deploy HEAD Commit**. Restart the Python application, run `/health`, and enable AutoSSL for both `warrioriq.eu` and `www.warrioriq.eu`. The domain must use the DNS nameservers supplied by OuiHeberg before certificates and traffic can reach this application. The public site is not ready while either hostname has a certificate error. Never place GitHub credentials or production secrets in the repository.
 
 This repository also remains compatible with hosts that provide `PORT` or `SERVER_PORT`. `run.py` binds to `0.0.0.0` in those environments, while Passenger uses the separate `passenger_wsgi.py` WSGI adapter.
 
