@@ -1,0 +1,43 @@
+.fighter-stage-panel .select-stage canvas {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.selection-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.selection-edit-button {
+  padding: 8px 11px;
+  border: 1px solid #30435f;
+  border-radius: 8px;
+  background: #0d192a;
+  color: #9cadc2;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.selection-edit-button:hover:not(:disabled) {
+  border-color: #5978be;
+  color: #e1e9f4;
+}
+
+.selection-edit-button:disabled {
+  cursor: not-allowed;
+  opacity: .4;
+}
+
+@media (max-width: 650px) {
+  .selection-edit-actions {
+    justify-content: stretch;
+  }
+
+  .selection-edit-button {
+    flex: 1;
+  }
+}

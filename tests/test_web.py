@@ -232,6 +232,19 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("focus_fighter:focusFighter", template)
         self.assertNotIn('value="BOTH"', template)
 
+    def test_fighter_selection_is_immediately_drawable_and_detector_safe(self):
+        root = Path(__file__).resolve().parents[1]
+        template = (root / "app" / "templates" / "select.html").read_text(encoding="utf-8")
+        css = (root / "app" / "static" / "fighter-selection.css").read_text(encoding="utf-8")
+
+        self.assertIn("mode='A_DRAW'", template)
+        self.assertIn("loadDetectionCandidates", template)
+        self.assertNotIn("boxA=boxB=null;mode='A_DRAW'", template)
+        self.assertIn('id="redrawA"', template)
+        self.assertIn('id="redrawB"', template)
+        self.assertIn("imageViewport", template)
+        self.assertIn("touch-action: none", css)
+
     def test_progress_shows_elapsed_time_not_realtime_speed(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
         self.assertIn("Analysis running", template)

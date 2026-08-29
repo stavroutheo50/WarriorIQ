@@ -573,6 +573,44 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         finally:
             delete_job(job_id)
 
+    def test_start_rejects_invalid_or_overlapping_fighter_boxes(self):
+        self.client.get("/")
+        guest_id = self.client.cookies.get(GUEST_COOKIE)
+        job_id = "invalidboxes1"
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        selection = np.full((360, 640, 3), 90, dtype=np.uint8)
+        cv2.imwrite(str(job_dir / "selection.jpg"), selection)
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"video-placeholder")
+        create_job(job_id, {
+            "owner_key": f"guest:{guest_id}", "status": "selection",
+            "video_path": str(video_path), "original_name": "hidden.mp4",
+            "video_width": 640, "video_height": 360,
+            "fight_type": "competition", "ruleset": "K1", "start_seconds": 0.0,
+            "round_count": 1, "round_duration_seconds": 120.0,
+            "break_duration_seconds": 60.0, "selected_rounds": [1], "end_seconds": None,
+            "profile_id": 0, "persist_result": False, "openai_identity_recovery": False,
+        })
+        try:
+            invalid = self.client.post(f"/api/start/{job_id}", json={
+                "fighter_a_box": [-20, 30, 180, 330],
+                "fighter_b_box": [390, 30, 560, 330],
+                "focus_fighter": "A",
+            })
+            self.assertEqual(invalid.status_code, 400)
+            self.assertIn("inside the video frame", invalid.json()["detail"])
+
+            overlapping = self.client.post(f"/api/start/{job_id}", json={
+                "fighter_a_box": [80, 30, 300, 340],
+                "fighter_b_box": [100, 40, 310, 340],
+                "focus_fighter": "A",
+            })
+            self.assertEqual(overlapping.status_code, 400)
+            self.assertIn("separate fighter", overlapping.json()["detail"])
+        finally:
+            delete_job(job_id)
+
     def test_cleanup_never_removes_a_protected_running_guest_job(self):
         metadata = retention.mark_guest_job("active123", "guest-token", str(webapp.UPLOADS / "active123.mp4"))
         metadata["expires_at"] = "2000-01-01T00:00:00+00:00"

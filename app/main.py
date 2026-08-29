@@ -1239,6 +1239,29 @@ def detect_people(request: Request, job_id: str):
     return {"people": boxes, "width": job["video_width"], "height": job["video_height"]}
 
 
+def _validated_fighter_box(box: list[float], width: float, height: float, label: str) -> list[float]:
+    if len(box) != 4 or any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        for value in box
+    ):
+        raise HTTPException(400, f"{label} needs four valid coordinates.")
+    x1, y1, x2, y2 = (float(value) for value in box)
+    tolerance = 1e-3
+    if x1 < -tolerance or y1 < -tolerance or x2 > width + tolerance or y2 > height + tolerance:
+        raise HTTPException(400, f"Keep the {label} box inside the video frame.")
+    x1, y1 = max(0.0, x1), max(0.0, y1)
+    x2, y2 = min(width, x2), min(height, y2)
+    if x2 <= x1 or y2 <= y1:
+        raise HTTPException(400, f"Draw the {label} box from one corner to the opposite corner.")
+    minimum_width = max(16.0, width * 0.025)
+    minimum_height = max(32.0, height * 0.10)
+    if x2 - x1 < minimum_width or y2 - y1 < minimum_height:
+        raise HTTPException(400, f"Draw a larger full-body box around {label}.")
+    return [x1, y1, x2, y2]
+
+
 @app.post("/api/start/{job_id}")
 def start(request: Request, job_id: str, payload: StartPayload):
     _enforce_rate_limit(request, "analysis-start", 12, 600)
@@ -1247,8 +1270,25 @@ def start(request: Request, job_id: str, payload: StartPayload):
         raise HTTPException(404)
     if job.get("status") in {"queued", "running"}:
         return _analysis_started_response(request, job_id)
-    if len(payload.fighter_a_box) != 4 or len(payload.fighter_b_box) != 4:
-        raise HTTPException(400, "Each fighter selection needs four coordinates.")
+    video_width = float(job.get("video_width") or 0)
+    video_height = float(job.get("video_height") or 0)
+    if video_width <= 0 or video_height <= 0:
+        selection = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
+        if selection is None:
+            raise HTTPException(409, "The selected frame is unavailable. Choose another frame.")
+        video_height, video_width = selection.shape[:2]
+    fighter_a_box = _validated_fighter_box(payload.fighter_a_box, video_width, video_height, "Fighter A")
+    fighter_b_box = _validated_fighter_box(payload.fighter_b_box, video_width, video_height, "Fighter B")
+    shared = (
+        max(0.0, min(fighter_a_box[2], fighter_b_box[2]) - max(fighter_a_box[0], fighter_b_box[0]))
+        * max(0.0, min(fighter_a_box[3], fighter_b_box[3]) - max(fighter_a_box[1], fighter_b_box[1]))
+    )
+    smallest = min(
+        (fighter_a_box[2] - fighter_a_box[0]) * (fighter_a_box[3] - fighter_a_box[1]),
+        (fighter_b_box[2] - fighter_b_box[0]) * (fighter_b_box[3] - fighter_b_box[1]),
+    )
+    if shared / max(1.0, smallest) >= 0.28:
+        raise HTTPException(400, "Draw a separate fighter in each box; the two selections overlap too much.")
     # A/B is the report focus, not a tracking shortcut. WarriorIQ always
     # analyzes both selected fighters so identity context and the scorecard do
     # not disappear when the user asks for a detailed report on one athlete.
@@ -1256,10 +1296,10 @@ def start(request: Request, job_id: str, payload: StartPayload):
     if focus_fighter not in {"A", "B"}:
         raise HTTPException(400, "Choose Fighter A or Fighter B for the detailed report.")
 
-    _save_fighter_portrait(job_id, "A", payload.fighter_a_box)
-    _save_fighter_portrait(job_id, "B", payload.fighter_b_box)
+    _save_fighter_portrait(job_id, "A", fighter_a_box)
+    _save_fighter_portrait(job_id, "B", fighter_b_box)
 
-    req = _analysis_request(job_id, job, payload.fighter_a_box, payload.fighter_b_box, focus_fighter)
+    req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, focus_fighter)
     if job.get("account_id") and not job.get("usage_reserved"):
         if not reserve_analysis(int(job["account_id"]), job_id):
             plan = _request_plan(request)
@@ -1268,7 +1308,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
     update_job(job_id, {
         "status": "queued", "message": "Queued for fight analysis", "percent": 0.0,
         "analysis_target": "BOTH", "focus_fighter": focus_fighter,
-        "fighter_a_box": payload.fighter_a_box, "fighter_b_box": payload.fighter_b_box,
+        "fighter_a_box": fighter_a_box, "fighter_b_box": fighter_b_box,
     })
     executor.submit(_run_job, job_id, req)
     return _analysis_started_response(request, job_id)
