@@ -11,3 +11,4 @@ huggingface_hub>=0.27
 sam2==1.1.0
 stripe>=11.0
 openai>=2.0
+a2wsgi
