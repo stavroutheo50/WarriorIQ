@@ -78,9 +78,15 @@ The default Render profile disables selection-page YOLO detection and SAM2 recov
 
 Render's free filesystem is ephemeral. Without a persistent disk, accounts, uploaded videos, analyses, and the SQLite database can disappear after a restart or redeploy. On a paid service with a disk mounted at `/var/data`, set `WARRIORIQ_DATA_DIR=/var/data/warrioriq`. Do not set that path unless the disk is actually mounted and writable.
 
-### OuiHeberg / OuiPanel
+### Namecheap shared hosting / cPanel
 
-WarriorIQ also supports OuiPanel's `SERVER_PORT` automatically. Upload the repository without a local `.env`, set `run.py` as the startup file, and create the production `.env` only inside OuiPanel. Set `WARRIORIQ_PUBLIC_BASE_URL=https://warrioriq.eu`, then connect the Python server's assigned port to `warrioriq.eu` in Proxy Manager with SSL enabled. The entrypoint binds to `0.0.0.0` and loads the server-side `.env` before FastAPI imports its configuration.
+`warrioriq.eu` currently uses Namecheap shared-hosting DNS and cPanel. Create the Python application from cPanel's **Setup Python App**, point its application root at this repository, and use `passenger_wsgi.py` as the Passenger startup file. Install `requirements.txt` inside the application virtual environment. Do not upload a local `.env`; create it privately on the server and set at minimum `WARRIORIQ_PUBLIC_BASE_URL=https://warrioriq.eu`. Keep payments disabled until every legal/operator field and Stripe webhook is configured and verified.
+
+After the application is created, restart it in cPanel, run `/health`, and enable AutoSSL for both `warrioriq.eu` and `www.warrioriq.eu`. The public site is not ready while either hostname has a certificate error. Use cPanel's Git Version Control deployment support (or an SSH pull) to update from `main`; never place GitHub credentials or production secrets in the repository.
+
+This repository also remains compatible with hosts that provide `PORT` or `SERVER_PORT`. `run.py` binds to `0.0.0.0` in those environments, while Passenger uses the separate `passenger_wsgi.py` WSGI adapter.
+
+Shared hosting is suitable for serving and testing the web product, but the complete Torch/Ultralytics/SAM2 fight-analysis workload may exceed its memory, process-time or CPU limits. Confirm those limits with the hosting plan before enabling public uploads. If the analysis worker cannot finish a two-minute video reliably, keep the domain and web layer here and run analysis on a dedicated GPU worker instead of silently reducing analysis quality.
 
 ## Performance requirement
 
