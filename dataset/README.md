@@ -46,5 +46,6 @@ If `fight_id` is omitted, the trainer groups files using the filename prefix bef
 9. Train with `python tools/train_temporal_model.py --dataset-version corrections-v1`.
 10. The trainer performs a **fight-group validation split**, not a random clip split.
 11. Keep another completely untouched full-fight test directory with all 17 supported temporal classes represented. Evaluate and promote only after it passes overall accuracy, every-class recall and every-class F1: `python tools/evaluate_temporal_model.py --test-data dataset/untouched_test --promote`.
+12. A technique checkpoint alone cannot unlock fight facts. Run the separate end-to-end benchmark for fighter identity, target, outcome, ruleset legality and contact timing: `python tools/promote_end_to_end_validation.py --annotations private-ground-truth.json --promote`. The tool refuses promotion when any required dimension is missing or below its gate.
 
 WarriorIQ should not be called market-best until complete unseen-fight benchmarks pass identity, technique, contact/outcome, target, scoring agreement and real-time performance without manual corrections after initial fighter selection.

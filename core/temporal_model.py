@@ -158,6 +158,7 @@ class TemporalModel:
                     "per_class_test_f1": payload.get("per_class_test_f1"),
                     "macro_test_f1": payload.get("macro_test_f1"),
                     "macro_action_test_f1": payload.get("macro_action_test_f1"),
+                    "end_to_end_validation": payload.get("end_to_end_validation"),
                 }
             self.available = True
         except Exception:

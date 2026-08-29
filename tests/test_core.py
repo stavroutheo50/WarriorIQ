@@ -19,6 +19,7 @@ from core.pose_tracker import find_initial_people
 from core.progress_insights import build_progress
 from core.quality_guardian import quality_summary
 from core.report import refresh_identity_integrity
+from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.scoring import deduplicate_scoring_events, event_legality, is_legal_event, score_fight
 from core.sam_recovery import nearest_guidance, sam_sampling_stride
 from core.types import PersonObservation, StrikeEvent
@@ -583,6 +584,24 @@ class AnnotationAccuracyTests(unittest.TestCase):
         self.assertEqual(audit["class_support"]["cross"], 1)
         self.assertEqual(audit["covered_classes"], 1)
         self.assertIn("102 features", audit["issues"][0]["reason"])
+
+    def test_end_to_end_gate_requires_every_fight_fact_dimension(self):
+        summary = accuracy_summary([])
+        empty = assess_end_to_end_validation(end_to_end_metadata(summary))
+        self.assertFalse(empty["passed"])
+        self.assertTrue(any("fighter_identity_accuracy" in item for item in empty["failures"]))
+
+        complete = assess_end_to_end_validation({
+            "fights": 5,
+            "action_labels": 100,
+            "timing_samples": 50,
+            "fighter_identity_accuracy": .95,
+            "target_accuracy": .90,
+            "outcome_accuracy": .85,
+            "legality_accuracy": .95,
+            "timing_mae_seconds": .25,
+        })
+        self.assertTrue(complete["passed"])
 
 
 if __name__ == "__main__":

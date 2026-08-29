@@ -29,6 +29,7 @@ from core.auth import (
 from core.config import DATASET, OUTPUTS, ROOT, RULESET_LABELS, SETTINGS, UPLOADS
 from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
+from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
     add_assignment, analysis_allowance, apply_checkout_event, consume_password_reset_token,
     create_moderation_report, delete_account, delete_fight, delete_legal_acceptances_for_resource,
@@ -1589,11 +1590,14 @@ def validation_page(request: Request):
     owned_jobs = {fight["job_id"] for fight in list_fights(profile_id)} if profile_id is not None else set()
     annotations = [item for item in list_annotations() if item["job_id"] in owned_jobs]
     dataset = audit_dataset_split(DATASET / "sequences", DATASET / "untouched_test")
+    summary = accuracy_summary(annotations)
+    end_to_end = assess_end_to_end_validation(end_to_end_metadata(summary))
     return templates.TemplateResponse(request=request, name="validation.html", context={
         "request": request,
-        "summary": accuracy_summary(annotations),
+        "summary": summary,
         "annotations": annotations,
         "dataset": dataset,
+        "end_to_end": end_to_end,
     })
 
 

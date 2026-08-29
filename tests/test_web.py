@@ -570,7 +570,24 @@ class PublicPageTests(unittest.TestCase):
             "per_class_test_accuracy": {name: .85 for name in ACTION_CLASSES},
             "per_class_test_f1": {name: .82 for name in ACTION_CLASSES},
         })
+        self.assertFalse(automated_evidence_trust(classifier)["automated_evidence_trusted"])
+        classifier["temporal_validation"]["end_to_end_validation"] = {
+            "fights": 5,
+            "action_labels": 120,
+            "timing_samples": 80,
+            "fighter_identity_accuracy": .97,
+            "target_accuracy": .93,
+            "outcome_accuracy": .88,
+            "legality_accuracy": .97,
+            "timing_mae_seconds": .16,
+        }
         self.assertTrue(automated_evidence_trust(classifier)["automated_evidence_trusted"])
+
+        classifier["temporal_validation"]["end_to_end_validation"]["outcome_accuracy"] = .70
+        decision = automated_evidence_trust(classifier)
+        self.assertFalse(decision["automated_evidence_trusted"])
+        self.assertIn("outcome", " ".join(decision["end_to_end_gate"]["failures"]))
+        classifier["temporal_validation"]["end_to_end_validation"]["outcome_accuracy"] = .88
 
         classifier["temporal_validation"]["per_class_test_accuracy"] = {
             f"invented_{index}": .99 for index in range(len(ACTION_CLASSES))

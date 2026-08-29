@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.temporal_model import ACTION_CLASSES
+from core.release_validation import assess_end_to_end_validation
 
 
 # These are release gates, not claims about the current build.  A checkpoint
@@ -28,6 +29,7 @@ def automated_evidence_trust(classifier: dict[str, Any] | None) -> dict[str, Any
     held_out_test_fights = validation.get("held_out_test_fights")
     per_class_test = validation.get("per_class_test_accuracy") or {}
     per_class_test_f1 = validation.get("per_class_test_f1") or {}
+    end_to_end_gate = assess_end_to_end_validation(validation.get("end_to_end_validation"))
     dataset_version = str(validation.get("dataset_version") or "").strip()
 
     try:
@@ -88,6 +90,7 @@ def automated_evidence_trust(classifier: dict[str, Any] | None) -> dict[str, Any
         and worst_test_f1 >= MIN_PER_CLASS_TEST_F1
         and expected_classes_present
         and len(tested_class_values) >= MIN_TESTED_ACTION_CLASSES
+        and end_to_end_gate["passed"]
     )
     if trusted:
         reason = (
@@ -112,6 +115,7 @@ def automated_evidence_trust(classifier: dict[str, Any] | None) -> dict[str, Any
         "automated_evidence_trusted": trusted,
         "action_evidence_status": status,
         "action_evidence_reason": reason,
+        "end_to_end_gate": end_to_end_gate,
         "release_gate": {
             "minimum_validation_accuracy": MIN_ACTION_VALIDATION_ACCURACY,
             "minimum_held_out_fights": MIN_HELD_OUT_FIGHTS,
