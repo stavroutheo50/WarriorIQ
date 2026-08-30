@@ -1,6 +1,18 @@
 <!doctype html>
 <html lang="en">
 <head>
+{%  if request.state.cookie_preferences.analytics %}
+
+    <!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-5V5Q4H30LD"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-5V5Q4H30LD');
+</script>
+{%  endif %}
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#081226">
   <meta name="description" content="{% block description %}WarriorIQ analyzes kickboxing fight video into evidence-linked performance reports, coaching priorities and fighter-specific training plans.{% endblock %}">
   <meta name="application-name" content="WarriorIQ"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="WarriorIQ"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
