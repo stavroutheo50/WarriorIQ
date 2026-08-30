@@ -502,6 +502,28 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         finally:
             other_browser.close()
 
+    def test_failed_selection_frame_creation_removes_partial_upload(self):
+        source = Path(self.temp.name) / "selection-failure.mp4"
+        writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"), 12.0, (320, 240))
+        for _ in range(12):
+            writer.write(np.full((240, 320, 3), 90, dtype=np.uint8))
+        writer.release()
+
+        with source.open("rb") as handle, patch.object(webapp.cv2, "imwrite", return_value=False):
+            response = self.client.post(
+                "/upload",
+                data={
+                    "rights_confirmed": "true",
+                    "people_permissions_confirmed": "true",
+                    "minor_permission_status": "no_minors",
+                },
+                files={"video": ("fight.mp4", handle, "video/mp4")},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(list(webapp.UPLOADS.iterdir()), [])
+        self.assertEqual(list(webapp.OUTPUTS.iterdir()), [])
+
     def test_saved_video_is_owner_scoped_and_can_be_deleted_without_report(self):
         owner = register("owner@example.com", "Strong-Local-Password")
         other = register("other@example.com", "Another-Local-Password")

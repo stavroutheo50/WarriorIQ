@@ -7,6 +7,7 @@ import math
 import shutil
 import time
 import uuid
+import os
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -21,7 +22,10 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.state import create_job, delete_job, get_job, list_jobs, update_job
+from app.state import (
+    AnalysisRunLost, create_job, delete_job, get_job, list_jobs, prepare_job_run,
+    start_job_run, update_job, update_job_for_worker, worker_status,
+)
 from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
@@ -31,17 +35,19 @@ from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
-    add_assignment, analysis_allowance, apply_checkout_event, consume_password_reset_token,
+    add_assignment, analysis_allowance, apply_checkout_event, consume_email_verification_token,
+    consume_password_reset_token,
     create_moderation_report, delete_account, delete_fight, delete_legal_acceptances_for_resource,
     get_account, get_account_by_email, get_annotations, get_fight, get_fight_review, get_profile,
     get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
     list_expired_fight_videos, list_fights, list_legal_acceptances, list_moderation_reports,
     list_outbound_messages, list_security_events, list_subscription_actions, mark_fight_video_deleted,
-    mark_outbound_message_sent,
+    mark_email_verified, mark_outbound_message_sent,
     queue_outbound_message, record_account_signup_acceptance, record_legal_acceptance,
     record_security_event, record_subscription_action, release_analysis, reserve_analysis,
     resolve_moderation_report, revoke_account_sessions, revoke_report_shares, save_annotation,
-    save_password_reset_token, save_report_share, set_account_status, set_annotation_sequence,
+    save_email_verification_token, save_password_reset_token, save_report_share,
+    set_account_status, set_annotation_sequence,
     set_fight_review_status, toggle_assignment, update_cookie_preferences,
     update_marketing_consent, update_password_hash, update_profile,
 )
@@ -52,6 +58,7 @@ from core.legal import LEGAL_DOCUMENTS, launch_readiness
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
+from core.upload_security import scan_upload
 from core.report import build_preliminary_scorecard, refresh_identity_integrity
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
@@ -75,7 +82,7 @@ COOKIE_PREFERENCES_COOKIE = "warrioriq_cookie_preferences"
 _last_guest_cleanup = 0.0
 _last_saved_video_cleanup = 0.0
 _rate_windows: dict[str, list[float]] = {}
-MAX_FIGHT_BYTES = 2 * 1024 * 1024 * 1024
+MAX_FIGHT_BYTES = SETTINGS.max_fight_bytes
 MAX_PROFILE_PHOTO_BYTES = 15 * 1024 * 1024
 MAX_PROFILE_VIDEO_BYTES = 500 * 1024 * 1024
 _progress_report_cache: dict[str, tuple[int, dict]] = {}
@@ -85,7 +92,7 @@ PUBLIC_INDEX_ROUTES = (
     "/", "/pricing", "/privacy", "/legal", "/terms", "/cookies",
     "/acceptable-use", "/refunds", "/video-upload-policy", "/sports-medical-disclaimer",
     "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
-    "/subprocessors", "/contact", "/copyright-report", "/login", "/signup",
+    "/subprocessors", "/contact",
 )
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
@@ -296,9 +303,12 @@ def _queue_transactional_notice(
     try:
         if send_transactional_email(recipient, subject, body):
             mark_outbound_message_sent(message_id)
-    except Exception:
+    except Exception as exc:
         # The durable queued record lets the production delivery worker retry.
-        pass
+        LOGGER.warning(
+            "transactional_notice_deferred message_id=%s type=%s error=%s",
+            message_id, message_type, type(exc).__name__,
+        )
     return message_id
 
 
@@ -401,6 +411,10 @@ def _analysis_quality_summary(report: dict) -> dict:
 
 
 def _save_upload_limited(upload: UploadFile, destination: Path, limit: int) -> None:
+    free_before = shutil.disk_usage(destination.parent).free
+    reserve = int(SETTINGS.minimum_free_storage_gb * 1024**3)
+    if free_before <= reserve:
+        raise HTTPException(507, "Fight uploads are temporarily paused while storage capacity is restored.")
     total = 0
     try:
         with destination.open("wb") as handle:
@@ -408,6 +422,8 @@ def _save_upload_limited(upload: UploadFile, destination: Path, limit: int) -> N
                 total += len(chunk)
                 if total > limit:
                     raise HTTPException(413, "The uploaded file exceeds the maximum allowed size.")
+                if free_before - total <= reserve:
+                    raise HTTPException(507, "This upload would exceed WarriorIQ's private storage safety reserve.")
                 handle.write(chunk)
     except Exception:
         destination.unlink(missing_ok=True)
@@ -417,6 +433,9 @@ def _save_upload_limited(upload: UploadFile, destination: Path, limit: int) -> N
 @app.middleware("http")
 async def viewer_context(request: Request, call_next):
     global _last_guest_cleanup, _last_saved_video_cleanup
+    request_started = time.perf_counter()
+    request_id = request.headers.get("x-request-id", "").strip()[:64] or uuid.uuid4().hex[:16]
+    request.state.request_id = request_id
     forwarded_scheme = _external_scheme(request)
     # Render may call the health probe over its private HTTP network. Keep that
     # endpoint directly reachable while redirecting public browser traffic.
@@ -448,6 +467,7 @@ async def viewer_context(request: Request, call_next):
         f"{SETTINGS.public_base_url}{request.url.path}"
         if SETTINGS.public_base_url and request.url.path in PUBLIC_INDEX_ROUTES else ""
     )
+    request.state.site_url = SETTINGS.public_base_url
     request.state.social_image_url = (
         f"{SETTINGS.public_base_url}/static/warrioriq-logo.png" if SETTINGS.public_base_url else ""
     )
@@ -496,6 +516,13 @@ async def viewer_context(request: Request, call_next):
             )
         _last_saved_video_cleanup = now
     response = await call_next(request)
+    duration_ms = (time.perf_counter() - request_started) * 1000.0
+    response.headers.setdefault("X-Request-ID", request_id)
+    response.headers.setdefault("Server-Timing", f"app;dur={duration_ms:.1f}")
+    LOGGER.info(
+        "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
+        request_id, request.method, request.url.path, response.status_code, duration_ms,
+    )
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
@@ -533,6 +560,7 @@ async def http_error_page(request: Request, exc: StarletteHTTPException):
         413: "That file is too large",
         429: "Analysis limit reached",
         503: "This feature is not launch-ready",
+        507: "Storage is temporarily full",
     }.get(exc.status_code, "WarriorIQ could not complete that request")
     return templates.TemplateResponse(
         request=request,
@@ -898,21 +926,38 @@ def _analysis_request(job_id: str, job: dict, fighter_a_box: list[float], fighte
     )
 
 
-def _run_job(job_id: str, req: AnalysisRequest):
+def _run_job(job_id: str, req: AnalysisRequest, analysis_run_id: str):
+    worker_id = f"inprocess-{os.getpid()}-{analysis_run_id[:8]}"
     try:
         def cb(patch: dict):
-            update_job(job_id, patch)
+            if not update_job_for_worker(job_id, worker_id, analysis_run_id, patch):
+                raise AnalysisRunLost(f"Analysis run {analysis_run_id} no longer owns {job_id}")
 
-        update_job(job_id, {"status": "running", "message": "Starting fight analysis"})
+        if not start_job_run(job_id, worker_id, analysis_run_id):
+            LOGGER.warning("analysis_run_not_started job_id=%s run_id=%s", job_id, analysis_run_id)
+            return
         report = _analyze(req, cb)
-        update_job(job_id, {"status": "complete", "report": report, "percent": 100.0, "message": "Complete"})
+        if not update_job_for_worker(job_id, worker_id, analysis_run_id, {
+            "status": "complete", "report": report, "percent": 100.0,
+            "message": "Complete", "worker_lease_expires_epoch": None,
+        }, renew_lease=False):
+            LOGGER.warning("analysis_completion_discarded job_id=%s run_id=%s", job_id, analysis_run_id)
+    except AnalysisRunLost:
+        # A newer run or recovery now owns this job. Never overwrite its state
+        # or refund its already-reserved account allowance.
+        LOGGER.warning("analysis_run_ownership_lost job_id=%s run_id=%s", job_id, analysis_run_id)
     except Exception as exc:
         job = get_job(job_id)
-        if job and job.get("usage_reserved") and job.get("account_id"):
+        still_owns_run = bool(job and job.get("analysis_run_id") == analysis_run_id)
+        if still_owns_run and job.get("usage_reserved") and job.get("account_id"):
             release_analysis(int(job["account_id"]), job_id)
             update_job(job_id, {"usage_reserved": False})
         LOGGER.exception("Analysis job %s failed", job_id, exc_info=exc)
-        update_job(job_id, {"status": "error", "message": _public_analysis_error(exc)})
+        if still_owns_run:
+            update_job(job_id, {
+                "status": "error", "message": _public_analysis_error(exc),
+                "worker_lease_expires_epoch": None,
+            })
 
 
 def _analysis_started_response(request: Request, job_id: str) -> JSONResponse:
@@ -931,6 +976,21 @@ def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/
         context={"request": request, "mode": mode, "error": error, "next_path": _safe_next(next_path)},
         status_code=400 if error else 200,
     )
+
+
+def _send_verification_email(request: Request, account: dict) -> bool:
+    token = session_token()
+    expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    save_email_verification_token(int(account["id"]), token_digest(token), expires)
+    base = SETTINGS.public_base_url or str(request.base_url).rstrip("/")
+    verify_url = f"{base}/verify-email/{token}"
+    try:
+        return send_transactional_email(
+            account["email"], "Verify your WarriorIQ email",
+            f"Verify your private WarriorIQ workspace within 24 hours:\n\n{verify_url}\n\nIf you did not create this account, ignore this message.",
+        )
+    except Exception:
+        return False
 
 
 @app.get("/signup", response_class=HTMLResponse)
@@ -977,6 +1037,14 @@ def signup(
             current_status=status,
         )
     record_security_event("account_created", account_id=int(account["id"]), metadata={"policy_version": SETTINGS.policy_version})
+    if SETTINGS.require_email_verification:
+        delivered = _send_verification_email(request, account)
+        record_security_event(
+            "email_verification_requested", account_id=int(account["id"]),
+            metadata={"email_delivery": "sent" if delivered else "unavailable"},
+        )
+        return RedirectResponse("/verify-email", status_code=303)
+    mark_email_verified(int(account["id"]))
     response = RedirectResponse(_safe_next(next_path), status_code=303)
     response.set_cookie(
         SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
@@ -1011,6 +1079,12 @@ def login(
     if not account:
         record_security_event("login_failed", severity="warning", metadata={"email_hash": token_digest(email.strip().lower())[:16]})
         return _auth_page(request, "login", "The email or password is incorrect.", next_path)
+    if SETTINGS.require_email_verification and not account.get("email_verified_at"):
+        return _auth_page(
+            request, "login",
+            "Verify your email before signing in. You can request a fresh verification link below.",
+            next_path,
+        )
     record_legal_acceptance(
         "account_signin_policies", SETTINGS.policy_version,
         profile_id=int(account["profile_id"]),
@@ -1023,6 +1097,39 @@ def login(
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
+
+
+@app.get("/verify-email", response_class=HTMLResponse)
+def verify_email_page(request: Request, message: str = ""):
+    return templates.TemplateResponse(
+        request=request, name="verify_email.html",
+        context={"request": request, "message": message},
+    )
+
+
+@app.get("/verify-email/{token}")
+def verify_email_token(request: Request, token: str):
+    account_id = consume_email_verification_token(token_digest(token))
+    if account_id is None:
+        raise HTTPException(410, "This email-verification link is invalid or expired.")
+    record_security_event("email_verified", account_id=account_id)
+    return RedirectResponse("/login?verified=1", status_code=303)
+
+
+@app.post("/verify-email", response_class=HTMLResponse)
+def resend_verification_email(request: Request, email: str = Form(...)):
+    _enforce_rate_limit(request, "email-verification", 5, 3600)
+    account = get_account_by_email(email.strip().lower()) if valid_email(email) else None
+    if account and not account.get("email_verified_at"):
+        delivered = _send_verification_email(request, account)
+        record_security_event(
+            "email_verification_resent", account_id=int(account["id"]),
+            metadata={"email_delivery": "sent" if delivered else "unavailable"},
+        )
+    return verify_email_page(
+        request,
+        "If an unverified account exists, a fresh verification link has been sent.",
+    )
 
 
 @app.post("/logout")
@@ -1153,8 +1260,20 @@ async def upload(
     video_path = UPLOADS / f"{job_id}{suffix}"
     _save_upload_limited(video, video_path, MAX_FIGHT_BYTES)
 
+    scan = scan_upload(video_path)
+    if not scan["clean"]:
+        video_path.unlink(missing_ok=True)
+        if scan["status"] == "infected":
+            record_security_event("malware_upload_blocked", severity="warning")
+            raise HTTPException(400, "This file did not pass the upload safety scan.")
+        raise HTTPException(503, "Fight uploads are paused because the safety scanner is unavailable.")
+
     try:
         info = get_video_info(video_path)
+        if info.duration > SETTINGS.max_video_duration_seconds:
+            raise HTTPException(413, "This video is longer than the configured analysis limit.")
+        if info.width * info.height > SETTINGS.max_video_pixels:
+            raise HTTPException(413, "This video's resolution exceeds the configured processing limit.")
         quality = inspect_video_quality(video_path, info)
     except Exception:
         video_path.unlink(missing_ok=True)
@@ -1163,12 +1282,18 @@ async def upload(
     end = None if not end_seconds.strip() else max(start, min(float(end_seconds), info.duration))
     count = max(1, min(20, int(round_count)))
     selection_frame = int(round(start * info.fps))
-    frame = read_frame(video_path, selection_frame)
-
     job_dir = OUTPUTS / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
     selection_path = job_dir / "selection.jpg"
-    cv2.imwrite(str(selection_path), frame)
+    try:
+        frame = read_frame(video_path, selection_frame)
+        job_dir.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(selection_path), frame):
+            raise OSError("OpenCV could not save the fighter-selection frame")
+    except Exception as exc:
+        video_path.unlink(missing_ok=True)
+        shutil.rmtree(job_dir, ignore_errors=True)
+        LOGGER.warning("upload_selection_frame_failed job_id=%s error=%s", job_id, type(exc).__name__)
+        raise HTTPException(422, "WarriorIQ could not prepare this video's fighter-selection frame.") from exc
 
     profile_id = int(account["profile_id"]) if account else 0
     if not account:
@@ -1197,6 +1322,7 @@ async def upload(
             "persist_result": bool(account),
             "owner_key": _owner_key(request),
             "quality": quality,
+            "upload_scan_status": scan["status"],
             "openai_identity_recovery": bool(openai_identity_recovery),
         },
     )
@@ -1384,12 +1510,12 @@ def start(request: Request, job_id: str, payload: StartPayload):
             plan = _request_plan(request)
             raise HTTPException(429, f"Your {plan['label']} plan includes {plan['limit_label'].lower()}. Your allowance will reset automatically.")
         update_job(job_id, {"usage_reserved": True})
-    update_job(job_id, {
-        "status": "queued", "message": "Queued for fight analysis", "percent": 0.0,
+    analysis_run_id = prepare_job_run(job_id, {
         "analysis_target": "BOTH", "focus_fighter": focus_fighter,
         "fighter_a_box": fighter_a_box, "fighter_b_box": fighter_b_box,
     })
-    executor.submit(_run_job, job_id, req)
+    if SETTINGS.analysis_worker_mode != "external":
+        executor.submit(_run_job, job_id, req, analysis_run_id)
     return _analysis_started_response(request, job_id)
 
 
@@ -1408,11 +1534,11 @@ def restart_interrupted_analysis(request: Request, job_id: str):
     if not isinstance(fighter_a_box, list) or len(fighter_a_box) != 4 or not isinstance(fighter_b_box, list) or len(fighter_b_box) != 4:
         raise HTTPException(409, "The saved session predates resumable analysis. Return to fighter selection once; your video is still available.")
     req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, focus_fighter)
-    update_job(job_id, {
-        "status": "queued", "message": "Restarting the preserved analysis session", "percent": 0.0,
-        "eta_seconds": None, "live_events": [], "provisional_stats": {}, "latest_observation": None,
+    analysis_run_id = prepare_job_run(job_id, {
+        "message": "Restarting the preserved analysis session",
     })
-    executor.submit(_run_job, job_id, req)
+    if SETTINGS.analysis_worker_mode != "external":
+        executor.submit(_run_job, job_id, req, analysis_run_id)
     return _analysis_started_response(request, job_id)
 
 
@@ -2405,6 +2531,15 @@ def health_check():
     return {"status": "ok", "service": "WarriorIQ"}
 
 
+@app.get("/ready", include_in_schema=False)
+def readiness_check():
+    """Operational readiness: database, private storage and analysis worker."""
+    from core.readiness import operational_readiness
+
+    readiness = operational_readiness(worker_status())
+    return JSONResponse(readiness, status_code=200 if readiness["ready"] else 503)
+
+
 @app.get("/sitemap.xml")
 def sitemap_xml():
     base = SETTINGS.public_base_url
@@ -2574,9 +2709,11 @@ def checkout(request: Request, plan_key: str, billing_acceptance: bool = Form(Fa
         return RedirectResponse(f"/login?next=/pricing", status_code=303)
     if not billing_acceptance:
         raise HTTPException(400, "Confirm the recurring price, renewal and cancellation terms before checkout.")
-    readiness = launch_readiness()
-    if not readiness["ready"]:
-        raise HTTPException(503, "Paid checkout is blocked until the real operator and legal contact details are configured.")
+    from core.readiness import release_readiness
+
+    readiness = release_readiness(worker_status())
+    if not readiness["release_ready"]:
+        raise HTTPException(503, "Paid checkout is blocked until WarriorIQ's real operator identity, email verification, storage, and analysis worker are ready.")
     if plan_key not in PLANS or plan_key == "free":
         raise HTTPException(400, "Choose a valid paid plan.")
     record_legal_acceptance(

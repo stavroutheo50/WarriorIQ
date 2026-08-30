@@ -31,6 +31,10 @@ This build consolidates the WarriorIQ requirements discussed across the project 
 - Skeleton overlay and skeleton-only replay; only Fighter A/B are drawn.
 - Saved local athlete profile/photo/notes, fight history, comparison and coach portal.
 - Private adult athlete accounts with salted password hashes, expiring local sessions and one-time password-reset tokens.
+- Optional enforced email verification with 24-hour one-time links and a rate-limited resend flow.
+- Durable analysis leases plus a separate claimable GPU worker process; local PyCharm keeps an automatic in-process worker.
+- Operational `/ready` checks for the database, storage reserve, queue and worker, while `/health` remains a minimal uptime probe.
+- Configurable upload malware scanning, duration/resolution limits, generated storage names and a minimum free-space reserve.
 - Temporary guest analyses that are excluded from history and removed after two hours.
 - Athlete progress trends that preserve missing/unavailable measurements.
 - Coach assignments with active/completed status.
@@ -66,6 +70,8 @@ Signup is currently 18+ and separately records Terms, Privacy, age and optional 
 
 Original signed-in videos are scheduled for deletion after `WARRIORIQ_VIDEO_RETENTION_DAYS` (30 by default), while reports can be retained separately. Guests expire after two hours, and abandoned processing artifacts are cleaned after `WARRIORIQ_FAILED_UPLOAD_RETENTION_HOURS`. See `COMPLIANCE_OPERATIONS.md` for the provider inventory and remaining operational launch blockers.
 
+Email verification is implemented but deliberately disabled until a real SMTP provider and monitored sender are configured. Set `WARRIORIQ_EMAIL_PROVIDER=smtp`, the SMTP variables, and then `WARRIORIQ_REQUIRE_EMAIL_VERIFICATION=true`. Enabling the requirement without working delivery would prevent new users from entering their workspace.
+
 Read `PRODUCTION_LAUNCH_CHECKLIST.md` before any public deployment. Passing the code-level gate does not replace legal, security, accessibility, payment, AI validation or operational sign-off.
 
 ## Render deployment
@@ -87,6 +93,18 @@ After each GitHub update, use cPanel Git Version Control to **Update from Remote
 This repository also remains compatible with hosts that provide `PORT` or `SERVER_PORT`. `run.py` binds to `0.0.0.0` in those environments, while Passenger uses the separate `passenger_wsgi.py` WSGI adapter.
 
 Shared hosting is suitable for serving and testing the web product, but the complete Torch/Ultralytics/SAM2 fight-analysis workload may exceed its memory, process-time or CPU limits. Confirm those limits with the hosting plan before enabling public uploads. If the analysis worker cannot finish a two-minute video reliably, keep the domain and web layer here and run analysis on a dedicated GPU worker instead of silently reducing analysis quality.
+
+### Durable GPU worker
+
+Local development uses `WARRIORIQ_WORKER_MODE=inprocess`. A production runtime with a shared private data mount can set `WARRIORIQ_WORKER_MODE=external` on the web process and run:
+
+```text
+python worker.py
+```
+
+Queued jobs remain persisted across web restarts. A worker claims one job at a time, renews a lease during progress, and leaves an interrupted job restartable if the lease expires. The web and worker must point `WARRIORIQ_DATA_DIR` at the same protected runtime storage. Do not claim that a remote GPU is connected merely because external mode is enabled; `/ready` returns 503 until a worker heartbeat is present.
+
+`/health` answers only whether the web process is alive. Use `/ready` for deployment readiness. Before backups, choose a protected destination outside the public web root and run `python tools/backup_runtime.py <destination>`. The command uses SQLite's online backup API, runs an integrity check and writes a SHA-256 manifest; it intentionally excludes original videos.
 
 ## Performance requirement
 

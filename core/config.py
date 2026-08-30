@@ -150,6 +150,23 @@ class Settings:
     default_profile_name: str = "My Athlete"
     payments_enabled: bool = env_bool("WARRIORIQ_PAYMENTS", False)
 
+    # Analysis jobs can run inside the web process for a local/PyCharm build,
+    # or be claimed by a separate GPU worker in production.  External mode is
+    # deliberately opt-in so existing local installs keep working unchanged.
+    analysis_worker_mode: str = os.getenv("WARRIORIQ_WORKER_MODE", "inprocess").strip().lower()
+    worker_poll_seconds: float = max(0.2, float(os.getenv("WARRIORIQ_WORKER_POLL_SECONDS", "1.0")))
+    worker_lease_seconds: int = max(30, int(os.getenv("WARRIORIQ_WORKER_LEASE_SECONDS", "180")))
+    worker_stale_seconds: int = max(60, int(os.getenv("WARRIORIQ_WORKER_STALE_SECONDS", "300")))
+    minimum_free_storage_gb: float = max(0.25, float(os.getenv("WARRIORIQ_MIN_FREE_STORAGE_GB", "2")))
+    max_fight_bytes: int = max(
+        50 * 1024 * 1024,
+        int(os.getenv("WARRIORIQ_MAX_FIGHT_BYTES", str(2 * 1024 * 1024 * 1024))),
+    )
+    max_video_duration_seconds: int = max(60, int(os.getenv("WARRIORIQ_MAX_VIDEO_SECONDS", "10800")))
+    max_video_pixels: int = max(640 * 360, int(os.getenv("WARRIORIQ_MAX_VIDEO_PIXELS", str(3840 * 2160))))
+    malware_scan_command: str = os.getenv("WARRIORIQ_MALWARE_SCAN_COMMAND", "").strip()
+    malware_scan_required: bool = env_bool("WARRIORIQ_MALWARE_SCAN_REQUIRED", False)
+
     # ------------------------------------------------------------
     # Public-launch and legal identity
     # ------------------------------------------------------------
@@ -175,6 +192,7 @@ class Settings:
         if email.strip()
     )
     email_provider: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER", "").strip()
+    require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 
 
 SETTINGS = Settings()

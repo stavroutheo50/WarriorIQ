@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Verify email · WarriorIQ{% endblock %}
+{% block content %}
+<section class="auth-layout compact-auth">
+  <div class="auth-copy"><div class="eyebrow">One quick check</div><h1>Verify your email.</h1><p>This protects your private fight library and makes password recovery reliable.</p></div>
+  <section class="hero-card auth-card">
+    <div class="eyebrow">Email verification</div><h2>Check your inbox</h2>
+    {% if message %}<div class="notice" role="status">{{message}}</div>{% endif %}
+    <p class="muted">Use the link in the WarriorIQ email. It expires after 24 hours.</p>
+    <details class="advanced-option"><summary><span><strong>Need another link?</strong><small>Enter the same account email</small></span><b aria-hidden="true">+</b></summary>
+      <form method="post" action="/verify-email"><div class="field"><label for="verifyEmail">Email</label><input id="verifyEmail" type="email" name="email" autocomplete="email" required></div><button class="btn" type="submit">Send a new link</button></form>
+    </details>
+    <p class="small"><a class="text-link" href="/login">Return to sign in</a></p>
+  </section>
+</section>
+{% endblock %}

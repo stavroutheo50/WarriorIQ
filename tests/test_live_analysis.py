@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -14,6 +15,61 @@ from core.analyzer import _live_event_payload, _provisional_stats
 
 
 class DurableAnalysisStateTests(TestCase):
+    def test_new_run_clears_stale_results_and_rejects_older_worker_updates(self):
+        with TemporaryDirectory() as temporary:
+            with patch.object(state, "OUTPUTS", Path(temporary)):
+                state.create_job("generation-job", {
+                    "owner_key": "guest:test",
+                    "status": "complete",
+                    "percent": 100.0,
+                    "video_path": "fight.mp4",
+                    "live_events": [{"id": "old-event"}],
+                    "provisional_stats": {"fighters": {"A": {"attempts": 99}}},
+                    "latest_observation": {"time_seconds": 88.0},
+                    "report": {"fight": "old"},
+                })
+
+                first_run = state.prepare_job_run("generation-job", {})
+                self.assertTrue(state.start_job_run("generation-job", "worker-old", first_run))
+                self.assertTrue(state.update_job_for_worker(
+                    "generation-job", "worker-old", first_run,
+                    {"live_events": [{"id": "first-run-event"}], "percent": 20.0},
+                ))
+
+                second_run = state.prepare_job_run("generation-job", {})
+                self.assertNotEqual(first_run, second_run)
+                self.assertFalse(state.update_job_for_worker(
+                    "generation-job", "worker-old", first_run,
+                    {"status": "complete", "percent": 100.0, "report": {"fight": "stale"}},
+                ))
+                current = state.get_job("generation-job")
+                self.assertEqual(current["analysis_run_id"], second_run)
+                self.assertEqual(current["status"], "queued")
+                self.assertEqual(current["percent"], 0.0)
+                self.assertEqual(current["live_events"], [])
+                self.assertEqual(current["provisional_stats"], {})
+                self.assertIsNone(current["latest_observation"])
+                self.assertIsNone(current.get("report"))
+                state.delete_job("generation-job")
+
+    def test_job_listing_refreshes_state_written_by_another_process(self):
+        with TemporaryDirectory() as temporary:
+            with patch.object(state, "OUTPUTS", Path(temporary)):
+                state.create_job("shared-job", {
+                    "owner_key": "guest:test",
+                    "status": "queued",
+                    "video_path": "fight.mp4",
+                })
+                path = Path(temporary) / "shared-job" / "analysis-session.json"
+                persisted = json.loads(path.read_text(encoding="utf-8"))
+                persisted.update({"status": "complete", "percent": 100.0})
+                path.write_text(json.dumps(persisted), encoding="utf-8")
+
+                listed = dict(state.list_jobs())["shared-job"]
+                self.assertEqual(listed["status"], "complete")
+                self.assertEqual(listed["percent"], 100.0)
+                state.delete_job("shared-job")
+
     def test_running_session_is_restored_as_interrupted_without_losing_setup(self):
         with TemporaryDirectory() as temporary:
             with patch.object(state, "OUTPUTS", Path(temporary)):
@@ -33,6 +89,38 @@ class DurableAnalysisStateTests(TestCase):
                 self.assertEqual(restored["fighter_a_box"], [1, 2, 3, 4])
                 self.assertTrue((Path(temporary) / "durable-job" / "analysis-session.json").exists())
                 state.delete_job("durable-job")
+
+    def test_queued_session_survives_restart_and_can_be_claimed_once(self):
+        with TemporaryDirectory() as temporary:
+            with patch.object(state, "OUTPUTS", Path(temporary)):
+                state.create_job("queued-job", {
+                    "owner_key": "guest:test",
+                    "status": "queued",
+                    "video_path": "fight.mp4",
+                })
+                state._jobs.clear()
+                restored = state.get_job("queued-job")
+                self.assertEqual(restored["status"], "queued")
+
+                claimed = state.claim_next_job("gpu-worker-test")
+                self.assertIsNotNone(claimed)
+                self.assertEqual(claimed[0], "queued-job")
+                self.assertEqual(claimed[1]["status"], "running")
+                self.assertIsNone(state.claim_next_job("second-worker"))
+                state.delete_job("queued-job")
+
+    def test_readiness_probe_checks_runtime_dependencies(self):
+        client = TestClient(app)
+        try:
+            response = client.get("/ready")
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(payload["ready"])
+            self.assertEqual(
+                set(payload["components"]), {"database", "storage", "analysis_worker"},
+            )
+        finally:
+            client.close()
 
     def test_live_template_is_video_first_and_never_claims_unvalidated_actions(self):
         template = (

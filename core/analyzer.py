@@ -384,10 +384,18 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame + 1)
     pose_pass_start = time.perf_counter()
 
+    # Continuous SAM guidance already provides the recovery path. Avoid a
+    # full-resolution copy of every decoded frame when that path is available;
+    # the fallback buffer is retained unchanged when continuous guidance is not.
+    fallback_buffer_enabled = bool(SETTINGS.sam_recovery_enabled and not sam_tracks)
     frame_buffer: deque[tuple[int, np.ndarray]] = deque(maxlen=max(SETTINGS.sam_buffer_frames + 4, 24))
-    frame_buffer.append((start_frame, first_frame.copy()))
+    if fallback_buffer_enabled:
+        frame_buffer.append((start_frame, first_frame.copy()))
     ai_history: deque[np.ndarray] = deque(maxlen=7)
-    ai_history.append(cv2.resize(first_frame, (640, max(1, round(first_frame.shape[0] * 640 / first_frame.shape[1])))))
+    # OpenAI recovery is opt-in. Resizing one frame per second for a disabled
+    # feature added CPU work without contributing to local analysis quality.
+    if identity_referee.enabled:
+        ai_history.append(cv2.resize(first_frame, (640, max(1, round(first_frame.shape[0] * 640 / first_frame.shape[1])))))
     next_ai_history_frame = start_frame + max(1, round(info.fps))
     next_ai_audit_seconds = req.start_seconds + SETTINGS.openai_identity_audit_seconds
 
@@ -428,8 +436,9 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                 current_frame = source_frame
                 pts_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC))
                 decoded_seconds = pts_ms / 1000.0 if pts_ms > 0.0 else source_frame / info.fps
-                frame_buffer.append((source_frame, frame.copy()))
-                if source_frame >= next_ai_history_frame:
+                if fallback_buffer_enabled:
+                    frame_buffer.append((source_frame, frame.copy()))
+                if identity_referee.enabled and source_frame >= next_ai_history_frame:
                     ai_history.append(cv2.resize(frame, (640, max(1, round(frame.shape[0] * 640 / frame.shape[1])))))
                     next_ai_history_frame = source_frame + max(1, round(info.fps))
 
@@ -706,6 +715,8 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "quality_mode": quality.mode,
         "pose_model": pose_tracker.model_path,
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
+        "unused_frame_copy_avoidance": not fallback_buffer_enabled,
+        "external_identity_history_enabled": identity_referee.enabled,
     }
     progress(
         "Building performance report", 98.3, analysis_seconds, segment_duration, manager, None, quality,

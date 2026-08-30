@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.annotations import accuracy_summary
+from core.regression_manifest import REGRESSION_MANIFEST_SCHEMA, validate_regression_manifest
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 
 
@@ -20,6 +21,8 @@ def _load_annotations(path: Path) -> list[dict]:
     if path.suffix.lower() == ".jsonl":
         return [json.loads(line) for line in text.splitlines() if line.strip()]
     payload = json.loads(text)
+    if isinstance(payload, dict) and payload.get("schema") == REGRESSION_MANIFEST_SCHEMA:
+        return validate_regression_manifest(payload)
     if isinstance(payload, dict):
         payload = payload.get("annotations")
     if not isinstance(payload, list):

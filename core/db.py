@@ -210,6 +210,16 @@ def init_db() -> None:
                 FOREIGN KEY(account_id) REFERENCES accounts(id)
             );
 
+            CREATE TABLE IF NOT EXISTS email_verification_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT,
+                FOREIGN KEY(account_id) REFERENCES accounts(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_analysis_usage_account_period
             ON analysis_usage(account_id, period_key);
 
@@ -249,6 +259,7 @@ def init_db() -> None:
             "subscription_status": "TEXT",
             "subscription_period_end": "TEXT",
             "subscription_cancelled_at": "TEXT",
+            "email_verified_at": "TEXT",
         }
         for column, definition in account_migrations.items():
             if column not in account_columns:
@@ -676,6 +687,45 @@ def consume_password_reset_token(token_hash: str) -> int | None:
         return int(row["account_id"])
 
 
+def save_email_verification_token(account_id: int, token_hash: str, expires_at: str) -> None:
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            "DELETE FROM email_verification_tokens WHERE account_id=? OR expires_at<=? OR used_at IS NOT NULL",
+            (int(account_id), now),
+        )
+        con.execute(
+            "INSERT INTO email_verification_tokens(account_id,token_hash,created_at,expires_at) VALUES(?,?,?,?)",
+            (int(account_id), token_hash, now, expires_at),
+        )
+
+
+def consume_email_verification_token(token_hash: str) -> int | None:
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        row = con.execute(
+            """SELECT id,account_id FROM email_verification_tokens
+               WHERE token_hash=? AND used_at IS NULL AND expires_at>?""",
+            (token_hash, now),
+        ).fetchone()
+        if not row:
+            return None
+        con.execute("UPDATE email_verification_tokens SET used_at=? WHERE id=?", (now, int(row["id"])))
+        con.execute("UPDATE accounts SET email_verified_at=? WHERE id=?", (now, int(row["account_id"])))
+        return int(row["account_id"])
+
+
+def mark_email_verified(account_id: int) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            "UPDATE accounts SET email_verified_at=COALESCE(email_verified_at,?) WHERE id=?",
+            (now, int(account_id)),
+        )
+
+
 def set_account_status(account_id: int, status: str) -> bool:
     if status not in {"active", "suspended", "disabled"}:
         raise ValueError("Invalid account status")
@@ -740,7 +790,8 @@ def account_for_session(token_hash: str) -> dict | None:
                accounts.marketing_consent_at,accounts.cookie_analytics,accounts.cookie_marketing,
                accounts.terms_version,accounts.privacy_version,accounts.policies_accepted_at,
                accounts.stripe_customer_id,accounts.stripe_subscription_id,accounts.subscription_status,
-               accounts.subscription_period_end,accounts.subscription_cancelled_at
+               accounts.subscription_period_end,accounts.subscription_cancelled_at,
+               accounts.email_verified_at
                FROM sessions JOIN accounts ON accounts.id=sessions.account_id
                WHERE sessions.token_hash=? AND sessions.expires_at>? AND accounts.account_status='active'""",
             (token_hash, now),
@@ -1127,6 +1178,7 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM subscription_actions WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM outbound_messages WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM password_reset_tokens WHERE account_id=?", (account_id,))
+        con.execute("DELETE FROM email_verification_tokens WHERE account_id=?", (account_id,))
         con.execute(
             "UPDATE security_events SET account_id=NULL,metadata_json='{}' WHERE account_id=?",
             (account_id,),

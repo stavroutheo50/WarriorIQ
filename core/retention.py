@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,6 +10,7 @@ from core.config import OUTPUTS, UPLOADS
 
 
 GUEST_RETENTION_HOURS = 2
+LOGGER = logging.getLogger("warrioriq.retention")
 
 
 def mark_guest_job(job_id: str, guest_id: str, video_path: str) -> dict:
@@ -75,7 +77,14 @@ def cleanup_expired_guest_jobs(protected_job_ids: set[str] | None = None) -> lis
                     # Keep the marker so the next cleanup can retry safely.
                     continue
         if job_dir.parent == outputs_root:
-            shutil.rmtree(job_dir, ignore_errors=True)
+            try:
+                shutil.rmtree(job_dir)
+            except OSError as exc:
+                LOGGER.warning(
+                    "guest_cleanup_deferred job_id=%s error=%s",
+                    marker.parent.name, type(exc).__name__,
+                )
+                continue
         removed.append(marker.parent.name)
     return removed
 
@@ -106,8 +115,13 @@ def cleanup_abandoned_processing_files(
             continue
         try:
             if folder.stat().st_mtime <= cutoff and folder.resolve().parent == outputs_root:
-                shutil.rmtree(folder, ignore_errors=True)
-                removed.add(folder.name)
-        except OSError:
+                shutil.rmtree(folder)
+                if not folder.exists():
+                    removed.add(folder.name)
+        except OSError as exc:
+            LOGGER.warning(
+                "abandoned_output_cleanup_deferred job_id=%s error=%s",
+                folder.name, type(exc).__name__,
+            )
             continue
     return sorted(removed)

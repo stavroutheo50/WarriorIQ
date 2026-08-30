@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import unittest
+import sqlite3
+import json
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import numpy as np
 
@@ -24,6 +28,7 @@ from core.scoring import deduplicate_scoring_events, event_legality, is_legal_ev
 from core.sam_recovery import nearest_guidance, sam_sampling_stride
 from core.types import PersonObservation, StrikeEvent
 from core.temporal_model import ACTION_CLASSES
+from tools import backup_runtime
 
 
 def _person(track_id: int, x1: float, x2: float, appearance_index: int) -> PersonObservation:
@@ -602,6 +607,28 @@ class AnnotationAccuracyTests(unittest.TestCase):
             "timing_mae_seconds": .25,
         })
         self.assertTrue(complete["passed"])
+
+
+class BackupRuntimeTests(unittest.TestCase):
+    def test_online_backup_writes_an_integrity_checked_manifest(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.sqlite3"
+            with closing(sqlite3.connect(source)) as con:
+                con.execute("CREATE TABLE proof(value TEXT NOT NULL)")
+                con.execute("INSERT INTO proof(value) VALUES('warrioriq')")
+                con.commit()
+            destination = root / "backups"
+            with patch.object(backup_runtime, "DB_PATH", source):
+                result = backup_runtime.backup_database(destination)
+
+            backup = Path(result["path"])
+            manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+            with closing(sqlite3.connect(backup)) as con:
+                self.assertEqual(con.execute("SELECT value FROM proof").fetchone()[0], "warrioriq")
+            self.assertEqual(manifest["integrity_check"], "ok")
+            self.assertEqual(len(manifest["sha256"]), 64)
+            self.assertFalse(manifest["contains_original_videos"])
 
 
 if __name__ == "__main__":

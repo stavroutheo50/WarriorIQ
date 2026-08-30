@@ -56,6 +56,8 @@ class PublicPageTests(unittest.TestCase):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok", "service": "WarriorIQ"})
+        self.assertTrue(response.headers.get("x-request-id"))
+        self.assertIn("app;dur=", response.headers.get("server-timing", ""))
         self.assertNotIn("gpu", response.text.lower())
 
     def test_render_entrypoint_binds_public_host_and_port(self):
@@ -177,6 +179,25 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("/result/", sitemap.text)
         self.assertNotIn("/media/", sitemap.text)
         self.assertIn('name="robots" content="noindex,nofollow"', self.client.get("/dashboard").text)
+
+    def test_public_search_metadata_uses_official_domain_and_keeps_auth_private(self):
+        original = SETTINGS.public_base_url
+        object.__setattr__(SETTINGS, "public_base_url", "https://warrioriq.eu")
+        try:
+            home = self.client.get("/")
+            sitemap = self.client.get("/sitemap.xml")
+            robots = self.client.get("/robots.txt")
+            login = self.client.get("/login")
+        finally:
+            object.__setattr__(SETTINGS, "public_base_url", original)
+        self.assertIn("WarriorIQ · AI Fight Analysis for Kickboxing", home.text)
+        self.assertIn('<link rel="canonical" href="https://warrioriq.eu/">', home.text)
+        self.assertIn('name="robots" content="index,follow,max-image-preview:large"', home.text)
+        self.assertIn('"@type":"WebSite"', home.text)
+        self.assertIn("https://warrioriq.eu/", sitemap.text)
+        self.assertIn("Sitemap: https://warrioriq.eu/sitemap.xml", robots.text)
+        self.assertIn('name="robots" content="noindex,nofollow"', login.text)
+        self.assertNotIn('<link rel="canonical"', login.text)
 
     def test_custom_404_is_useful_and_does_not_leak_details(self):
         response = self.client.get("/definitely-not-a-page")
@@ -778,7 +799,8 @@ class PublicPageTests(unittest.TestCase):
     def test_complete_report_exposes_every_supported_analysis_section(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
 
-        self.assertIn('class="report-deep-dive" open', template)
+        self.assertIn('class="report-deep-dive"', template)
+        self.assertNotIn('class="report-deep-dive" open', template)
         self.assertIn('id="report-strikes"', template)
         self.assertIn('id="report-combinations"', template)
         self.assertIn('id="report-key-moments"', template)

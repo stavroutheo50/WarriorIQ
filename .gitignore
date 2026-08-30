@@ -19,9 +19,13 @@ models/
 
 # Private and generated application data
 .env
+.env.local
+.env.production
+.env.*.local
 warrioriq.sqlite3
 uploads/
 outputs/
+dataset/regression/private/
 
 # Local logs and operating-system files
 *.log

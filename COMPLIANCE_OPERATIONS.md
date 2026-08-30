@@ -12,12 +12,13 @@ Complete this table with the contracted legal entity, region, agreement/DPA, ret
 
 | Function | Current implementation | Data that may be received | Launch requirement |
 |---|---|---|---|
-| Hosting | Local FastAPI process; public host not selected | HTTP requests, account and application data, depending on deployment | Select provider/region and document controls |
-| Database | Local SQLite; production database not selected | Account, consent, fight metadata, billing status, audit records | Managed encrypted database, backup/restore and access policy |
-| Authentication | WarriorIQ PBKDF2 password hashes and expiring digest-backed sessions | Email, password hash, sessions | Security review; transactional email for reset links |
+| Hosting | OuiHeberg cPanel currently serves `warrioriq.eu`; final processing architecture is not signed off | HTTP requests, account and application data | Record contracted entity, region, DPA, access and incident controls |
+| Database | SQLite is active for the beta runtime; managed production database not selected | Account, consent, fight metadata, billing status, audit records | Migrate to a managed encrypted database before paid scale; test backup/restore and access policy |
+| Authentication | WarriorIQ PBKDF2 password hashes, expiring digest-backed sessions, password reset and optional enforced email verification | Email, password hash, sessions | Configure SMTP, enable verification, test delivery and complete security review |
 | Video storage | Private server filesystem with owner-scoped routes | Original videos, selection frames, generated overlays | Private object storage, deny-by-default policy and signed URLs if used |
 | AI | Local Ultralytics/PyTorch/SAM; OpenAI recovery only after separate per-upload opt-in | Local models receive video; OpenAI may receive selected frames when enabled | Provider agreement, region/retention review, no training without opt-in |
-| Email | Not configured | Email and message content once configured | Configure `WARRIORIQ_EMAIL_PROVIDER` and delivery worker |
+| Email | SMTP adapter and verification/reset flows implemented; provider not configured | Email and transactional message content once configured | Select provider, configure monitored sender, DPA/region and delivery monitoring |
+| Analysis queue | Durable file-backed lease queue with local or external worker mode | Job metadata, private video paths and progress | Use only with a protected shared runtime mount; select a remotely durable queue/object store before multi-host scale |
 | Analytics | None installed | None | Do not add before consent gating and policy update |
 | Payments | Stripe integration disabled by default | Email, plan, checkout and payment metadata; Stripe processes card data | Configure lawful Stripe account, prices, signed webhook and tax settings |
 

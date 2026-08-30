@@ -2,23 +2,24 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#081226">
-  <meta name="description" content="{% block description %}WarriorIQ turns kickboxing video into evidence-backed coaching and training priorities.{% endblock %}">
+  <meta name="description" content="{% block description %}WarriorIQ analyzes kickboxing fight video into evidence-linked performance reports, coaching priorities and fighter-specific training plans.{% endblock %}">
   <meta name="application-name" content="WarriorIQ"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="WarriorIQ"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="robots" content="{% if request.state.noindex %}noindex,nofollow{% else %}index,follow,max-image-preview:large{% endif %}">
   {% if request.state.canonical_url %}<link rel="canonical" href="{{request.state.canonical_url}}">{% endif %}
-  <meta property="og:type" content="website"><meta property="og:site_name" content="WarriorIQ">
+  <meta property="og:type" content="website"><meta property="og:site_name" content="WarriorIQ"><meta property="og:locale" content="en_GB">
   <meta property="og:title" content="WarriorIQ · Evidence-backed kickboxing analysis">
   <meta property="og:description" content="Turn fight video into reviewable evidence, coaching priorities and a fighter-specific training plan.">
   {% if request.state.canonical_url %}<meta property="og:url" content="{{request.state.canonical_url}}">{% endif %}
   {% if request.state.social_image_url %}<meta property="og:image" content="{{request.state.social_image_url}}"><meta property="og:image:alt" content="WarriorIQ logo">{% endif %}
-  <meta name="twitter:card" content="summary"><meta name="twitter:title" content="WarriorIQ">
+  <meta name="twitter:card" content="summary"><meta name="twitter:title" content="WarriorIQ · AI fight analysis"><meta name="twitter:description" content="Evidence-linked kickboxing fight analysis for athletes and coaches.">
+  {% if request.state.social_image_url %}<meta name="twitter:image" content="{{request.state.social_image_url}}">{% endif %}
   <title>{% block title %}WarriorIQ{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/navigation.css">
   <link rel="stylesheet" href="/static/fixes.css?v=20260829-live4">
   <link rel="stylesheet" href="/static/product.css?v=20260828-polish3">
   <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" type="image/png" href="/static/warrioriq-logo.png"><link rel="apple-touch-icon" href="/static/warrioriq-logo.png">
-  {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-backed kickboxing video analysis for athletes and coaches.","url":"{{request.state.canonical_url}}"}</script>{% endif %}
+  {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"WarriorIQ","url":"{{request.state.site_url}}/"},{"@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-linked kickboxing fight analysis for athletes and coaches.","url":"{{request.state.site_url}}/"}]}</script>{% endif %}
   {% block head %}{% endblock %}
   <link rel="stylesheet" href="/static/motion.css?v=20260828-2">
 </head>

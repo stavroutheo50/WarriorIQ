@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block head %}<link rel="stylesheet" href="/static/components.css">{% endblock %}
-{% block title %}WarriorIQ · Analyze Fight{% endblock %}
+{% block title %}WarriorIQ · AI Fight Analysis for Kickboxing{% endblock %}
+{% block description %}Upload a kickboxing fight to WarriorIQ for evidence-linked analysis, performance insights, coaching priorities and a fighter-specific training plan.{% endblock %}
 {% block content %}
 <section class="hero">
   <div class="hero-copy">
@@ -21,10 +22,10 @@
         <div class="field"><label for="fightType">Video type</label><select id="fightType" name="fight_type"><option value="competition">Competition</option><option value="sparring">Sparring</option></select></div>
         <div class="field"><label for="fightRuleset">Ruleset</label><select id="fightRuleset" name="ruleset">{% for key,label in rulesets.items() %}<option value="{{key}}">{{label}}</option>{% endfor %}</select></div>
       </div>
-      <div class="row3">
-        <div class="field"><label for="roundCount">Rounds</label><input id="roundCount" name="round_count" type="number" min="1" max="20" value="3"></div>
-        <div class="field"><label for="roundSeconds">Round seconds</label><input id="roundSeconds" name="round_duration_seconds" type="number" min="10" value="120"></div>
-      </div>
+      <details class="advanced-option">
+        <summary><span><strong>Fight format</strong><small>Optional · defaults to 3 × 2 minutes</small></span><b aria-hidden="true">+</b></summary>
+        <div class="row"><div class="field"><label for="roundCount">Rounds</label><input id="roundCount" name="round_count" type="number" min="1" max="20" value="3"></div><div class="field"><label for="roundSeconds">Seconds per round</label><input id="roundSeconds" name="round_duration_seconds" type="number" min="10" value="120"></div></div>
+      </details>
       <details class="advanced-option">
         <summary><span><strong>Tracking recovery</strong><small>Optional · uses selected frames only when identity becomes uncertain</small></span><b aria-hidden="true">+</b></summary>
         <label class="check"><input type="checkbox" name="openai_identity_recovery" value="true"> <span><strong>Use assisted identity recovery</strong><br>When local tracking becomes uncertain, selected fight frames can be checked to recover Fighter A/B. Requires an API key and internet connection.</span></label>
