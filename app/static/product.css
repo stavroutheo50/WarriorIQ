@@ -177,8 +177,14 @@ body[data-page=home] .hero-card{border-radius:var(--wiq-radius-lg)}
 .advanced-option>summary b{color:#829ce8;font-size:17px;font-weight:500;transition:transform var(--wiq-fast) var(--wiq-ease)}
 .advanced-option[open]>summary b{transform:rotate(45deg)}
 .advanced-option>.check{margin:0;padding:13px;border-top:1px solid #263750;color:#aebbd0;font-size:11px;line-height:1.5}
+.advanced-option>.advanced-option-head{display:flex;min-height:52px;align-items:center;padding:10px 13px;color:#dce5f2}
+.advanced-option>.advanced-option-head span{display:flex;min-width:0;flex-direction:column;gap:2px}
+.advanced-option>.advanced-option-head strong{font-size:12px}
+.advanced-option>.advanced-option-head small{color:#8291a7;font-size:10px;font-weight:550;line-height:1.4}
+.advanced-option>.advanced-option-body{padding:13px 13px 0;border-top:1px solid #263750}
 .upload-consent{border-radius:var(--wiq-radius-sm);background:#091222}
 .upload-consent legend{padding-inline:7px;color:#bdc8d8;font-size:11px;font-weight:780}
+.minor-permission{padding-top:11px;border-top:1px solid #263750}.minor-permission>span{display:block;color:#aebbd0;font-size:11px;font-weight:780}.minor-permission .check{margin:9px 0;font-size:11px}
 
 /* Pricing: comparison-led rather than promo-led. */
 .pricing-hero{max-width:760px;padding:68px 0 42px}

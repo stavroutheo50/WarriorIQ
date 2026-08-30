@@ -218,11 +218,17 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("That page left the ring", response.text)
         self.assertIn("Start an analysis", response.text)
 
-    def test_adult_accounts_and_minor_video_permissions_are_separate(self):
+    def test_home_upload_permissions_are_simple_and_explicit(self):
         home = self.client.get("/").text
         self.assertIn('name="rights_confirmed"', home)
-        self.assertIn('name="people_permissions_confirmed"', home)
+        self.assertIn('type="hidden" name="people_permissions_confirmed" value="true"', home)
         self.assertIn('name="minor_permission_status"', home)
+        self.assertEqual(home.count('type="radio" name="minor_permission_status"'), 2)
+        self.assertNotIn(">Choose one<", home)
+        self.assertNotIn('<details class="advanced-option">', home)
+        self.assertIn('class="advanced-option advanced-option-static"', home)
+        self.assertIn("Fight format", home)
+        self.assertIn("Tracking recovery", home)
         self.assertIn("Video Upload Policy", home)
         self.assertNotIn("These confirmations apply to this fight video", home)
         self.assertNotIn("Account policies are accepted only", home)
