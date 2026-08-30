@@ -97,8 +97,16 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("/bin/cp -R app core dataset tests tools $DEPLOYPATH", deployment)
         self.assertIn("passenger_wsgi.py", deployment)
         self.assertIn("warrioriq_wsgi.py", deployment)
+        self.assertIn("requirements-web.txt", deployment)
         self.assertNotIn(".env ", deployment)
         self.assertNotIn("uploads", deployment)
+
+    def test_web_host_requirements_exclude_gpu_runtime(self):
+        requirements = (Path(__file__).resolve().parents[1] / "requirements-web.txt").read_text(encoding="utf-8")
+        self.assertIn("fastapi", requirements)
+        self.assertIn("opencv-python-headless", requirements)
+        for heavy in ("ultralytics", "sam2", "torch"):
+            self.assertNotIn(heavy, requirements.lower())
 
     def test_health_probe_is_not_redirected_on_render_private_http(self):
         original = SETTINGS.public_base_url
