@@ -4,4 +4,4 @@ deployment:
     - export DEPLOYPATH=/home/dchoodxm/warrioriq
     - /bin/mkdir -p $DEPLOYPATH
     - /bin/cp -R app core dataset tests tools $DEPLOYPATH
-    - /bin/cp .env.example .gitignore .wakatime-project COMPLIANCE_OPERATIONS.md PRODUCTION_LAUNCH_CHECKLIST.md README.md passenger_wsgi.py render.yaml requirements.txt run.py run_cli.py worker.py $DEPLOYPATH
+    - /bin/cp .env.example .gitignore .wakatime-project COMPLIANCE_OPERATIONS.md PRODUCTION_LAUNCH_CHECKLIST.md README.md passenger_wsgi.py warrioriq_wsgi.py render.yaml requirements.txt run.py run_cli.py worker.py $DEPLOYPATH

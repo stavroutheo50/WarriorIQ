@@ -79,12 +79,16 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("python-dotenv", requirements)
 
     def test_cpanel_passenger_entrypoint_is_valid_and_loads_environment_first(self):
-        passenger = (Path(__file__).resolve().parents[1] / "passenger_wsgi.py").read_text(encoding="utf-8")
+        root = Path(__file__).resolve().parents[1]
+        passenger = (root / "passenger_wsgi.py").read_text(encoding="utf-8")
+        cloudlinux = (root / "warrioriq_wsgi.py").read_text(encoding="utf-8")
 
         compile(passenger, "passenger_wsgi.py", "exec")
-        self.assertIn("from a2wsgi import ASGIMiddleware", passenger)
-        self.assertLess(passenger.index("load_dotenv()"), passenger.index("from app.main import app"))
-        self.assertIn("application = ASGIMiddleware(app", passenger)
+        compile(cloudlinux, "warrioriq_wsgi.py", "exec")
+        for entrypoint in (passenger, cloudlinux):
+            self.assertIn("from a2wsgi import ASGIMiddleware", entrypoint)
+            self.assertLess(entrypoint.index("load_dotenv()"), entrypoint.index("from app.main import app"))
+            self.assertIn("application = ASGIMiddleware(app", entrypoint)
 
     def test_cpanel_deployment_targets_the_stable_python_app_root(self):
         deployment = (Path(__file__).resolve().parents[1] / ".cpanel.yml").read_text(encoding="utf-8")
@@ -92,6 +96,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("DEPLOYPATH=/home/dchoodxm/warrioriq", deployment)
         self.assertIn("/bin/cp -R app core dataset tests tools $DEPLOYPATH", deployment)
         self.assertIn("passenger_wsgi.py", deployment)
+        self.assertIn("warrioriq_wsgi.py", deployment)
         self.assertNotIn(".env ", deployment)
         self.assertNotIn("uploads", deployment)
 
