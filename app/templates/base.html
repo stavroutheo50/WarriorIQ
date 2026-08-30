@@ -1,6 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
+{% set page_title %}{% block title %}WarriorIQ{% endblock %}{% endset %}
+{% set page_description %}{% block description %}WarriorIQ analyzes kickboxing fight video into evidence-linked performance reports, coaching priorities and fighter-specific training plans.{% endblock %}{% endset %}
 {%  if request.state.cookie_preferences.analytics %}
 
     <!-- Google tag (gtag.js) -->
@@ -14,24 +16,24 @@
 </script>
 {%  endif %}
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#081226">
-  <meta name="description" content="{% block description %}WarriorIQ analyzes kickboxing fight video into evidence-linked performance reports, coaching priorities and fighter-specific training plans.{% endblock %}">
+  <meta name="description" content="{{page_description|striptags|trim}}">
   <meta name="application-name" content="WarriorIQ"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="WarriorIQ"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="robots" content="{% if request.state.noindex %}noindex,nofollow{% else %}index,follow,max-image-preview:large{% endif %}">
   {% if request.state.canonical_url %}<link rel="canonical" href="{{request.state.canonical_url}}">{% endif %}
   <meta property="og:type" content="website"><meta property="og:site_name" content="WarriorIQ"><meta property="og:locale" content="en_GB">
-  <meta property="og:title" content="WarriorIQ · Evidence-backed kickboxing analysis">
-  <meta property="og:description" content="Turn fight video into reviewable evidence, coaching priorities and a fighter-specific training plan.">
+  <meta property="og:title" content="{{page_title|striptags|trim}}">
+  <meta property="og:description" content="{{page_description|striptags|trim}}">
   {% if request.state.canonical_url %}<meta property="og:url" content="{{request.state.canonical_url}}">{% endif %}
   {% if request.state.social_image_url %}<meta property="og:image" content="{{request.state.social_image_url}}"><meta property="og:image:alt" content="WarriorIQ logo">{% endif %}
-  <meta name="twitter:card" content="summary"><meta name="twitter:title" content="WarriorIQ · AI fight analysis"><meta name="twitter:description" content="Evidence-linked kickboxing fight analysis for athletes and coaches.">
+  <meta name="twitter:card" content="summary"><meta name="twitter:title" content="{{page_title|striptags|trim}}"><meta name="twitter:description" content="{{page_description|striptags|trim}}">
   {% if request.state.social_image_url %}<meta name="twitter:image" content="{{request.state.social_image_url}}">{% endif %}
-  <title>{% block title %}WarriorIQ{% endblock %}</title>
+  <title>{{page_title|striptags|trim}}</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/navigation.css">
   <link rel="stylesheet" href="/static/fixes.css?v=20260829-live4">
-  <link rel="stylesheet" href="/static/product.css?v=20260830-upload1">
-  <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" type="image/png" href="/static/warrioriq-logo.png"><link rel="apple-touch-icon" href="/static/warrioriq-logo.png">
-  {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"WarriorIQ","url":"{{request.state.site_url}}/"},{"@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-linked kickboxing fight analysis for athletes and coaches.","url":"{{request.state.site_url}}/"}]}</script>{% endif %}
+  <link rel="stylesheet" href="/static/product.css?v=20260830-mobile2">
+  <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" type="image/png" href="/static/warrioriq-logo-96.png"><link rel="apple-touch-icon" href="/static/warrioriq-logo.png">
+  {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/"},{"@type":"Organization","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/","logo":"{{request.state.social_image_url}}"},{"@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-linked kickboxing fight analysis for athletes and coaches.","url":"{{request.state.site_url}}/"}]}</script>{% endif %}
   {% block head %}{% endblock %}
   <link rel="stylesheet" href="/static/motion.css?v=20260828-2">
 </head>
@@ -42,7 +44,7 @@
   <button class="global-back" id="globalBack" type="button" aria-label="Go to the previous WarriorIQ page">← <span>Back</span></button>
   <div class="shell">
     <nav class="nav" aria-label="Main navigation">
-      <a class="brand" href="/"><img class="brand-logo" src="/static/warrioriq-logo.png" alt="WarriorIQ logo">WARRIOR<span>IQ</span></a>
+      <a class="brand" href="/"><img class="brand-logo" src="/static/warrioriq-logo-96.png" width="38" height="38" decoding="async" alt="WarriorIQ logo">WARRIOR<span>IQ</span></a>
       <div class="navlinks">
         <a data-nav="analyze" href="/#analyze">Analyze</a><a data-nav="library" href="/history">Fight library</a><a data-nav="progress" href="/dashboard">Progress</a><a data-nav="coach" href="/coach">Coach</a><a data-nav="plans" href="/pricing">Plans</a>
         <details class="nav-more" id="navMore"><summary>More <span aria-hidden="true">⌄</span></summary><div class="nav-more-panel"><a href="/compare">Compare fights<span>See changes over time</span></a><a href="/validation">Accuracy lab<span>Model validation</span></a></div></details>

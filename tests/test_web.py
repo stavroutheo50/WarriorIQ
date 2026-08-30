@@ -60,6 +60,60 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("app;dur=", response.headers.get("server-timing", ""))
         self.assertNotIn("gpu", response.text.lower())
 
+    def test_large_public_responses_are_compressed_for_mobile(self):
+        response = self.client.get("/", headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("content-encoding"), "gzip")
+        self.assertIn("Accept-Encoding", response.headers.get("vary", ""))
+
+    def test_navigation_uses_the_small_logo_asset(self):
+        root = Path(__file__).resolve().parents[1]
+        home = self.client.get("/").text
+        logo = root / "app" / "static" / "warrioriq-logo-96.png"
+        self.assertIn('src="/static/warrioriq-logo-96.png"', home)
+        self.assertLess(logo.stat().st_size, 25_000)
+
+    def test_search_guides_are_unique_indexable_and_in_the_sitemap(self):
+        paths = (
+            "/kickboxing-fight-analysis", "/k1-fight-analysis",
+            "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
+        )
+        titles = set()
+        original = SETTINGS.public_base_url
+        object.__setattr__(SETTINGS, "public_base_url", "https://warrioriq.eu")
+        try:
+            sitemap = self.client.get("/sitemap.xml").text
+            for path in paths:
+                with self.subTest(path=path):
+                    response = self.client.get(path)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertIn('name="robots" content="index,follow,max-image-preview:large"', response.text)
+                    self.assertIn('property="og:url"', response.text)
+                    self.assertIn('"FAQPage"', response.text)
+                    self.assertIn(f"https://warrioriq.eu{path}", sitemap)
+                    title = response.text.split("<title>", 1)[1].split("</title>", 1)[0]
+                    titles.add(title)
+        finally:
+            object.__setattr__(SETTINGS, "public_base_url", original)
+        self.assertEqual(len(titles), len(paths))
+
+    def test_www_host_redirects_to_the_canonical_domain(self):
+        original = SETTINGS.public_base_url
+        object.__setattr__(SETTINGS, "public_base_url", "https://warrioriq.eu")
+        try:
+            response = self.client.get(
+                "/kickboxing-fight-analysis?from=www",
+                headers={"host": "www.warrioriq.eu", "x-forwarded-proto": "https"},
+                follow_redirects=False,
+            )
+        finally:
+            object.__setattr__(SETTINGS, "public_base_url", original)
+        self.assertEqual(response.status_code, 308)
+        self.assertEqual(
+            response.headers["location"],
+            "https://warrioriq.eu/kickboxing-fight-analysis?from=www",
+        )
+
     def test_render_entrypoint_binds_public_host_and_port(self):
         from run import server_config
 
@@ -234,6 +288,8 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("Account policies are accepted only", home)
         self.assertIn("18 or older", home.lower())
         self.assertIn("parent or guardian", home.lower())
+        self.assertIn('id="uploadProgress"', home)
+        self.assertIn("request.upload.addEventListener('progress'", home)
         signup = self.client.get("/signup").text
         self.assertIn('name="accept_terms"', signup)
         self.assertIn('name="accept_policies"', self.client.get("/login").text)

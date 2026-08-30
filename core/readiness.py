@@ -42,6 +42,7 @@ def operational_readiness(worker: dict) -> dict:
     worker_public = {
         "ready": bool(worker.get("available")),
         "mode": worker.get("mode"),
+        "reason": worker.get("reason"),
         "queued_jobs": int(worker.get("queued_jobs", 0)),
         "running_jobs": int(worker.get("running_jobs", 0)),
     }

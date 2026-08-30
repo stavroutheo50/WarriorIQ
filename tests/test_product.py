@@ -502,6 +502,32 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         finally:
             other_browser.close()
 
+    def test_mobile_async_upload_returns_the_exact_next_step(self):
+        source = Path(self.temp.name) / "mobile-upload.mp4"
+        writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"), 24.0, (320, 240))
+        for index in range(24):
+            frame = np.full((240, 320, 3), 70 + index, dtype=np.uint8)
+            cv2.rectangle(frame, (35, 25), (120, 220), (220, 220, 220), -1)
+            cv2.rectangle(frame, (200, 25), (285, 220), (150, 180, 230), -1)
+            writer.write(frame)
+        writer.release()
+        with source.open("rb") as handle:
+            response = self.client.post(
+                "/upload",
+                headers={"Accept": "application/json", "User-Agent": "Mobile Safari"},
+                data={
+                    "rights_confirmed": "true", "people_permissions_confirmed": "true",
+                    "minor_permission_status": "no_minors",
+                },
+                files={"video": ("phone-fight.mp4", handle, "video/mp4")},
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertRegex(payload["job_id"], r"^[a-f0-9]{12}$")
+        self.assertEqual(payload["next_url"], f"/frame/{payload['job_id']}")
+        self.assertTrue(response.cookies.get("warrioriq_active_analysis"))
+
     def test_failed_selection_frame_creation_removes_partial_upload(self):
         source = Path(self.temp.name) / "selection-failure.mp4"
         writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"), 12.0, (320, 240))

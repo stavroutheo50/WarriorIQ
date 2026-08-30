@@ -122,6 +122,18 @@ class DurableAnalysisStateTests(TestCase):
         finally:
             client.close()
 
+    def test_inprocess_worker_is_not_ready_when_the_analysis_engine_is_missing(self):
+        real_find_spec = state.importlib.util.find_spec
+        with patch.object(
+            state.importlib.util,
+            "find_spec",
+            side_effect=lambda name: None if name == "ultralytics" else real_find_spec(name),
+        ):
+            status = state.worker_status()
+        self.assertFalse(status["available"])
+        self.assertEqual(status["reason"], "analysis_dependencies_missing")
+        self.assertIn("ultralytics", status["missing_dependencies"])
+
     def test_live_template_is_video_first_and_never_claims_unvalidated_actions(self):
         template = (
             Path(__file__).resolve().parents[1] / "app" / "templates" / "progress.html"

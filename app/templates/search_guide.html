@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{page.title}}{% endblock %}
+{% block description %}{{page.description}}{% endblock %}
+{% block head %}<script type="application/ld+json">{{schema|tojson}}</script>{% endblock %}
+{% block content %}
+<article class="search-guide">
+  <header class="search-guide-hero" data-reveal>
+    <div class="eyebrow">{{page.eyebrow}}</div>
+    <h1>{{page.heading}}</h1>
+    <p>{{page.intro}}</p>
+    <div class="hero-actions"><a class="btn" data-motion-primary href="/#analyze">Analyze a fight <span aria-hidden="true">→</span></a><a class="btn secondary" href="/pricing">See plans</a></div>
+  </header>
+  <div class="search-guide-layout">
+    <div class="search-guide-sections">
+      {% for section in page.sections %}
+      <section data-reveal>
+        <span class="guide-number">0{{loop.index}}</span>
+        <div><h2>{{section["title"]}}</h2><p>{{section["body"]}}</p>{% if section.get("items") %}<ul>{% for item in section["items"] %}<li>{{item}}</li>{% endfor %}</ul>{% endif %}</div>
+      </section>
+      {% endfor %}
+    </div>
+    <aside class="search-guide-aside">
+      <div class="card-inset"><strong>WarriorIQ review principle</strong><p>Evidence comes before claims. When the footage cannot support a conclusion, the report says so instead of filling the gap.</p></div>
+      <nav aria-label="Related fight-analysis guides"><strong>Keep learning</strong>{% for label,href in page.related %}<a href="{{href}}">{{label}} <span aria-hidden="true">→</span></a>{% endfor %}</nav>
+    </aside>
+  </div>
+  <section class="search-guide-faq" aria-labelledby="guideFaqTitle">
+    <div class="eyebrow">Questions</div><h2 id="guideFaqTitle">Useful answers before analysis</h2>
+    {% for item in page.faqs %}<details><summary>{{item.question}}</summary><p>{{item.answer}}</p></details>{% endfor %}
+  </section>
+  <section class="coach-callout final-cta" data-reveal><div><div class="eyebrow">Ready when the footage is</div><h2>Bring one fight. Leave with a clearer next step.</h2><p class="muted">Upload privately, select both fighters, and focus the detailed report on the athlete you want to improve.</p></div><a class="btn" data-motion-primary href="/#analyze">Start fight analysis</a></section>
+</article>
+{% endblock %}

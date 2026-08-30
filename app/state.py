@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import logging
 import os
 import shutil
@@ -307,11 +308,24 @@ def worker_status() -> dict:
         payload = {}
     heartbeat = float(payload.get("heartbeat_epoch", 0.0) or 0.0)
     age = max(0.0, time.time() - heartbeat) if heartbeat else None
+    missing_dependencies: list[str] = []
+    if SETTINGS.analysis_worker_mode == "inprocess":
+        required = ["torch", "ultralytics"]
+        if SETTINGS.sam_recovery_enabled or SETTINGS.sam_continuous_enabled:
+            required.append("sam2")
+        missing_dependencies = [name for name in required if importlib.util.find_spec(name) is None]
+    available = (
+        not missing_dependencies
+        if SETTINGS.analysis_worker_mode == "inprocess"
+        else age is not None and age <= SETTINGS.worker_stale_seconds
+    )
     return {
         "mode": SETTINGS.analysis_worker_mode,
-        "available": SETTINGS.analysis_worker_mode == "inprocess" or (
-            age is not None and age <= SETTINGS.worker_stale_seconds
+        "available": available,
+        "reason": None if available else (
+            "analysis_dependencies_missing" if missing_dependencies else "worker_heartbeat_missing"
         ),
+        "missing_dependencies": missing_dependencies,
         "heartbeat_age_seconds": age,
         "current_job_id": payload.get("current_job_id"),
         "queued_jobs": sum(job.get("status") == "queued" for _, job in list_jobs()),

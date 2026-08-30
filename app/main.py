@@ -21,6 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.state import (
     AnalysisRunLost, create_job, delete_job, get_job, list_jobs, prepare_job_run,
@@ -69,6 +71,7 @@ from core.types import AnalysisRequest, StrikeEvent
 from core.video import get_video_info, read_frame
 
 app = FastAPI(title="WarriorIQ")
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "app" / "templates"))
 executor = ThreadPoolExecutor(max_workers=1)
@@ -92,7 +95,8 @@ PUBLIC_INDEX_ROUTES = (
     "/", "/pricing", "/privacy", "/legal", "/terms", "/cookies",
     "/acceptable-use", "/refunds", "/video-upload-policy", "/sports-medical-disclaimer",
     "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
-    "/subprocessors", "/contact",
+    "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
+    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
 )
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
@@ -100,6 +104,77 @@ PRIVATE_ROUTE_PREFIXES = (
     "/compare", "/coach", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
 )
+
+SEARCH_GUIDES = {
+    "kickboxing-fight-analysis": {
+        "title": "Kickboxing Fight Analysis for Athletes & Coaches | WarriorIQ",
+        "description": "Learn how WarriorIQ turns kickboxing fight video into evidence-linked replay, measured performance insights and practical training priorities.",
+        "eyebrow": "Kickboxing fight analysis",
+        "heading": "Turn a full fight into a clearer next session.",
+        "intro": "WarriorIQ helps kickboxers and coaches review what the footage can actually support. It follows both selected fighters, separates measured observations from uncertain action labels, and links useful findings back to the video.",
+        "sections": [
+            {"title": "What a useful fight review should answer", "body": "A good review should show where the athlete was effective, where position or timing broke down, and which moments deserve another look. WarriorIQ keeps fighter identity, round context and evidence coverage visible so a number never appears without context.", "items": ["Movement, guard and balance observations", "Ruleset-aware supported actions", "Round-by-round performance context", "Evidence replay and fighter-specific training priorities"]},
+            {"title": "What happens when the footage is unclear", "body": "Fast exchanges, camera movement, obstructions and low light can limit any video model. WarriorIQ does not invent strikes to fill a report. Unsupported claims are withheld or presented as review candidates, while tracking and pose coverage remain visible."},
+            {"title": "Built for training, not official judging", "body": "The scorecard is an evidence-gated training estimate. It is designed to help athletes and coaches structure review; it does not replace licensed officials or the governing rules of an event."},
+        ],
+        "faqs": [
+            {"question": "Can WarriorIQ analyse sparring as well as competition footage?", "answer": "Yes. Choose the video type before upload so the report keeps the session context clear."},
+            {"question": "Does WarriorIQ analyse both fighters?", "answer": "Yes. Both fighters are tracked for identity and fight context, while the selected focus fighter receives the deeper coaching report and training plan."},
+        ],
+        "related": [("K-1 fight analysis", "/k1-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
+    },
+    "k1-fight-analysis": {
+        "title": "K-1 Fight Analysis and Video Review | WarriorIQ",
+        "description": "Review K-1 fight video with ruleset-aware evidence, fighter tracking, round context, coaching priorities and replayable key moments.",
+        "eyebrow": "K-1 video review",
+        "heading": "Review a K-1 fight with the ruleset in view.",
+        "intro": "K-1 review needs more than a generic strike counter. WarriorIQ keeps punches, kicks and permitted knee actions in the selected ruleset context while suppressing unsupported contact and scoring claims.",
+        "sections": [
+            {"title": "Ruleset-aware evidence", "body": "Select K-1 before analysis so legality checks and report wording use the correct style. The event promoter or federation remains the authority for the exact rules used in a particular bout.", "items": ["Separate fighter attribution", "Outcome labels only when supported", "Round and interruption context", "Illegal-action review kept separate from supported scoring evidence"]},
+            {"title": "A replay your coach can use", "body": "Supported moments link back to the contact time and replay begins just before the event, giving the coach enough context to see the setup, defensive response and exit."},
+            {"title": "Honest limits", "body": "A high tracking percentage is observation coverage, not proof that every action label is correct. WarriorIQ shows the difference and withholds a score when the available evidence is not strong enough."},
+        ],
+        "faqs": [
+            {"question": "Does the analysis replace a K-1 judge?", "answer": "No. It is a training and video-review tool, not an official judging system."},
+            {"question": "What camera angle works best?", "answer": "Use a stable, elevated ringside angle that keeps both fighters fully visible with minimal obstruction."},
+        ],
+        "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Fight analysis for coaches", "/fight-video-analysis-for-coaches")],
+    },
+    "fight-video-analysis-for-coaches": {
+        "title": "Fight Video Analysis for Kickboxing Coaches | WarriorIQ",
+        "description": "Use fight video to build evidence-linked coaching priorities, athlete-specific training plans and practical work between kickboxing sessions.",
+        "eyebrow": "For kickboxing coaches",
+        "heading": "Spend review time on the moments that change training.",
+        "intro": "WarriorIQ organises a fight into evidence, measured observations and coaching priorities so coaches can move from a long video to a focused conversation without pretending uncertain detections are facts.",
+        "sections": [
+            {"title": "From report to session plan", "body": "The focused athlete receives coaching priorities and a training plan derived from that fight's supported weaknesses. The plan is not copied between fighters and should be adapted by the coach to the athlete's level, health and competition calendar.", "items": ["Evidence-linked review moments", "Fighter-specific strengths and priorities", "Practical drill prescriptions", "Saved-fight progress context"]},
+            {"title": "Keep the athlete in context", "body": "Both fighters are followed because pressure, defence and positioning depend on the opponent. The selected athlete receives the detailed report; the opponent remains contextual rather than receiving an unnecessary duplicate plan."},
+            {"title": "Share carefully", "body": "Saved reports are private by default. Supported plans can share time-limited report links on eligible plans, while video permissions and athlete privacy remain the uploader's responsibility."},
+        ],
+        "faqs": [
+            {"question": "Can I compare an athlete across fights?", "answer": "Saved analyses can contribute to progress views when the same athlete profile is used and the underlying observations are available."},
+            {"question": "Will every report contain a scorecard?", "answer": "No. A scorecard is withheld when both fighters were not analysed or the evidence gates are not met."},
+        ],
+        "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
+    },
+    "how-to-record-a-fight-for-analysis": {
+        "title": "How to Record a Kickboxing Fight for Video Analysis | WarriorIQ",
+        "description": "Record clearer kickboxing footage for fighter tracking and fight analysis with practical advice on angle, lighting, framing and video quality.",
+        "eyebrow": "Better footage guide",
+        "heading": "Give fight analysis a clear view of both athletes.",
+        "intro": "The best analysis starts before upload. A stable view of both full bodies makes fighter identity, footwork, guard and contact timing easier to observe throughout the fight.",
+        "sections": [
+            {"title": "Use one stable, wide angle", "body": "Place the camera high enough to see the floor around both fighters and far enough back to keep heads, gloves and feet in frame. Avoid digital zoom and rapid panning.", "items": ["Keep both full bodies visible", "Use landscape orientation", "Prefer 1080p at 30 fps or higher", "Avoid filming through ropes, spectators or the referee when possible"]},
+            {"title": "Light and focus matter", "body": "Fast strikes need short exposure and clear focus. Use the brightest practical venue position, clean the lens and tap to focus on the ring before recording."},
+            {"title": "Choose a clear selection frame", "body": "After upload, pick a frame where Fighter A and Fighter B are separated and fully visible. Draw each box tightly around the complete athlete, not a referee or corner person."},
+        ],
+        "faqs": [
+            {"question": "Can I upload phone video?", "answer": "Yes. MP4 and MOV phone recordings are supported when the resolution, duration and file size stay within the upload limits."},
+            {"question": "Should I crop the video first?", "answer": "Only if the crop keeps both fighters visible for the entire analysed segment. Cutting out feet or exits can weaken tracking and movement evidence."},
+        ],
+        "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("K-1 fight analysis", "/k1-fight-analysis")],
+    },
+}
 
 
 class StartPayload(BaseModel):
@@ -437,6 +512,15 @@ async def viewer_context(request: Request, call_next):
     request_id = request.headers.get("x-request-id", "").strip()[:64] or uuid.uuid4().hex[:16]
     request.state.request_id = request_id
     forwarded_scheme = _external_scheme(request)
+    public_host = urlsplit(SETTINGS.public_base_url).netloc.lower()
+    forwarded_host = _forwarded_header(
+        request, "x-forwarded-host", request.headers.get("host", request.url.netloc)
+    ).lower()
+    if public_host and forwarded_host == f"www.{public_host}":
+        target = f"{SETTINGS.public_base_url}{request.url.path}"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=308)
     # Render may call the health probe over its private HTTP network. Keep that
     # endpoint directly reachable while redirecting public browser traffic.
     if request.url.path != "/health" and SETTINGS.public_base_url.startswith("https://") and forwarded_scheme != "https":
@@ -1258,7 +1342,9 @@ async def upload(
         raise HTTPException(400, "Unsupported video format.")
 
     video_path = UPLOADS / f"{job_id}{suffix}"
-    _save_upload_limited(video, video_path, MAX_FIGHT_BYTES)
+    # UploadFile uses a spooled file. Keep the blocking disk copy outside the
+    # event loop so one large phone upload cannot freeze every other request.
+    await run_in_threadpool(_save_upload_limited, video, video_path, MAX_FIGHT_BYTES)
 
     scan = scan_upload(video_path)
     if not scan["clean"]:
@@ -1352,7 +1438,11 @@ async def upload(
             metadata={"provider": "OpenAI", "purpose": "fighter_identity_recovery"},
             **acceptance_owner,
         )
-    response = RedirectResponse(f"/frame/{job_id}", status_code=303)
+    next_url = f"/frame/{job_id}"
+    if "application/json" in request.headers.get("accept", ""):
+        response = JSONResponse({"job_id": job_id, "next_url": next_url}, status_code=201)
+    else:
+        response = RedirectResponse(next_url, status_code=303)
     response.set_cookie(
         ACTIVE_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
         httponly=True, samesite="lax", secure=_request_is_secure(request),
@@ -1475,6 +1565,11 @@ def start(request: Request, job_id: str, payload: StartPayload):
         raise HTTPException(404)
     if job.get("status") in {"queued", "running"}:
         return _analysis_started_response(request, job_id)
+    if not worker_status().get("available"):
+        raise HTTPException(
+            503,
+            "The fight-analysis worker is temporarily unavailable. Your video and fighter selection are preserved.",
+        )
     video_width = float(job.get("video_width") or 0)
     video_height = float(job.get("video_height") or 0)
     if video_width <= 0 or video_height <= 0:
@@ -1526,6 +1621,11 @@ def restart_interrupted_analysis(request: Request, job_id: str):
         raise HTTPException(404)
     if job.get("status") in {"queued", "running"}:
         return _analysis_started_response(request, job_id)
+    if not worker_status().get("available"):
+        raise HTTPException(
+            503,
+            "The fight-analysis worker is temporarily unavailable. Your video and fighter selection are preserved.",
+        )
     if job.get("status") != "interrupted":
         raise HTTPException(409, "Only an analysis interrupted by a server restart can be resumed here.")
     fighter_a_box = job.get("fighter_a_box")
@@ -2547,6 +2647,8 @@ def sitemap_xml():
         "/", "/pricing", "/privacy", "/legal", "/terms", "/cookies", "/acceptable-use",
         "/refunds", "/video-upload-policy", "/sports-medical-disclaimer", "/eula", "/dmca",
         "/accessibility", "/ai-transparency", "/security", "/subprocessors", "/contact",
+        "/kickboxing-fight-analysis", "/k1-fight-analysis",
+        "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
     )
     urls = "" if not base else "".join(
         f"<url><loc>{html.escape(base + path)}</loc></url>" for path in routes
@@ -2554,6 +2656,45 @@ def sitemap_xml():
     return Response(
         f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
         media_type="application/xml",
+    )
+
+
+@app.get("/kickboxing-fight-analysis", response_class=HTMLResponse)
+@app.get("/k1-fight-analysis", response_class=HTMLResponse)
+@app.get("/fight-video-analysis-for-coaches", response_class=HTMLResponse)
+@app.get("/how-to-record-a-fight-for-analysis", response_class=HTMLResponse)
+def search_guide_page(request: Request):
+    slug = request.url.path.strip("/")
+    page = SEARCH_GUIDES.get(slug)
+    if page is None:
+        raise HTTPException(404)
+    schema = {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Article",
+                "headline": page["heading"],
+                "description": page["description"],
+                "mainEntityOfPage": f"{SETTINGS.public_base_url}/{slug}",
+                "publisher": {"@type": "Organization", "name": "WarriorIQ"},
+            },
+            {
+                "@type": "FAQPage",
+                "mainEntity": [
+                    {
+                        "@type": "Question",
+                        "name": item["question"],
+                        "acceptedAnswer": {"@type": "Answer", "text": item["answer"]},
+                    }
+                    for item in page["faqs"]
+                ],
+            },
+        ],
+    }
+    return templates.TemplateResponse(
+        request=request,
+        name="search_guide.html",
+        context={"request": request, "page": page, "schema": schema},
     )
 
 
