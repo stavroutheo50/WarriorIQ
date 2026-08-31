@@ -5,3 +5,7 @@ deployment:
     - /bin/mkdir -p $DEPLOYPATH
     - /bin/cp -R app core dataset tests tools $DEPLOYPATH
     - /bin/cp .env.example .gitignore .wakatime-project COMPLIANCE_OPERATIONS.md PRODUCTION_LAUNCH_CHECKLIST.md README.md install_web_dependencies.py passenger_wsgi.py warrioriq_wsgi.py render.yaml requirements.txt requirements-web.txt run.py run_cli.py worker.py $DEPLOYPATH
+    # Stamp the deployed commit so /health can prove which code is live. Code
+    # and environment variables deploy separately, so a restart can pick up new
+    # settings while still serving old code; this makes that visible.
+    - /usr/bin/git rev-parse --short HEAD > $DEPLOYPATH/DEPLOYED_COMMIT

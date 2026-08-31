@@ -1,0 +1,25 @@
+# Normalise line endings so a Linux checkout is never dirty.
+#
+# Files committed with CRLF appear modified the moment they are checked out on
+# the cPanel host, and cPanel refuses to run "Deploy HEAD Commit" while the
+# branch has uncommitted changes. Storing text as LF keeps the server clone
+# clean; Windows working copies are unaffected because Git converts on checkout.
+* text=auto eol=lf
+
+# Shell scripts and WSGI entrypoints must keep LF or the interpreter fails.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+passenger_wsgi.py text eol=lf
+warrioriq_wsgi.py text eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.mp4 binary
+*.mov binary
+*.pt binary
+*.engine binary
+*.sqlite3 binary

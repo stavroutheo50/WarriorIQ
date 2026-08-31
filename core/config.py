@@ -227,6 +227,10 @@ class Settings:
         for email in os.getenv("WARRIORIQ_ADMIN_EMAILS", "").split(",")
         if email.strip()
     )
+    # Google Analytics measurement ID (G-XXXXXXXXXX). The tag is rendered only
+    # for visitors who accept analytics cookies; leaving this empty disables
+    # analytics entirely and keeps the strict Content-Security-Policy.
+    analytics_measurement_id: str = os.getenv("WARRIORIQ_ANALYTICS_ID", "G-5V5Q4H30LD").strip()
     email_provider: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER", "").strip()
     require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 

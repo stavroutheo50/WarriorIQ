@@ -576,6 +576,7 @@ async def viewer_context(request: Request, call_next):
     request.state.minimum_account_age = SETTINGS.minimum_account_age
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
     request.state.cookie_preferences = _cookie_preferences(request)
+    request.state.analytics_measurement_id = SETTINGS.analytics_measurement_id
     request.state.is_admin = _is_admin(request)
     request.state.noindex = (
         not SETTINGS.public_base_url
@@ -653,10 +654,23 @@ async def viewer_context(request: Request, call_next):
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+    # The analytics tag is only rendered once a visitor accepts analytics
+    # cookies, so the policy only names Google's hosts for those visitors.
+    # Without this the browser blocks googletagmanager.com outright and no
+    # measurement ever reaches Google, however the tag is configured.
+    analytics_allowed = SETTINGS.analytics_measurement_id and request.state.cookie_preferences["analytics"]
+    script_src = "'self' 'unsafe-inline'"
+    connect_src = "'self'"
+    img_src = "'self' data:"
+    if analytics_allowed:
+        script_src += " https://www.googletagmanager.com"
+        connect_src += " https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com"
+        img_src += " https://*.google-analytics.com https://*.googletagmanager.com"
     response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'",
+        f"default-src 'self' data:; script-src {script_src}; style-src 'self' 'unsafe-inline'; "
+        f"img-src {img_src}; media-src 'self'; connect-src {connect_src}; "
+        "frame-ancestors 'none'; form-action 'self'",
     )
     if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/s/")):
         response.headers.setdefault("Cache-Control", "no-store")
@@ -3182,10 +3196,24 @@ def robots_txt():
     )
 
 
+def _deployed_commit() -> str:
+    """Read the commit stamped into the app root at deploy time.
+
+    Environment variables and code are deployed by separate cPanel steps, so a
+    restart can pick up new settings while still running old code. Reporting
+    the deployed commit makes that mismatch visible instead of leaving it to be
+    inferred from which routes happen to 404.
+    """
+    try:
+        return (ROOT / "DEPLOYED_COMMIT").read_text(encoding="utf-8").strip()[:40] or "unknown"
+    except OSError:
+        return "unknown"
+
+
 @app.get("/health", include_in_schema=False)
 def health_check():
     """Minimal deployment probe with no account, model or filesystem details."""
-    return {"status": "ok", "service": "WarriorIQ"}
+    return {"status": "ok", "service": "WarriorIQ", "commit": _deployed_commit()}
 
 
 @app.get("/ready", include_in_schema=False)

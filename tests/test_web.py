@@ -19,6 +19,45 @@ from core.evidence_trust import automated_evidence_trust
 from core.temporal_model import ACTION_CLASSES
 
 
+class AnalyticsPolicyTests(unittest.TestCase):
+    """The analytics tag and the policy that permits it must stay in step.
+
+    A strict script-src silently blocked googletagmanager.com, so the tag was
+    present on every page while no measurement ever reached Google.
+    """
+
+    def setUp(self):
+        from app.main import app
+
+        self.client = TestClient(app)
+
+    def test_declining_analytics_keeps_the_strict_policy_and_omits_the_tag(self):
+        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "essential"})
+        policy = response.headers["content-security-policy"]
+        self.assertIn("script-src 'self' 'unsafe-inline';", policy)
+        self.assertNotIn("googletagmanager", policy)
+        self.assertNotIn("googletagmanager", response.text)
+
+    def test_accepting_analytics_allows_the_tag_to_load(self):
+        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
+        policy = response.headers["content-security-policy"]
+        self.assertIn("https://www.googletagmanager.com", policy)
+        # The tag is useless if the script loads but its beacons are blocked.
+        connect = [part for part in policy.split(";") if part.strip().startswith("connect-src")][0]
+        self.assertIn("google-analytics.com", connect)
+        self.assertIn("googletagmanager.com/gtag/js", response.text)
+
+    def test_no_measurement_id_disables_analytics_entirely(self):
+        previous = SETTINGS.analytics_measurement_id
+        try:
+            object.__setattr__(SETTINGS, "analytics_measurement_id", "")
+            response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
+            self.assertNotIn("googletagmanager", response.headers["content-security-policy"])
+            self.assertNotIn("googletagmanager", response.text)
+        finally:
+            object.__setattr__(SETTINGS, "analytics_measurement_id", previous)
+
+
 class PublicPageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -55,7 +94,14 @@ class PublicPageTests(unittest.TestCase):
     def test_health_probe_is_minimal_and_available(self):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok", "service": "WarriorIQ"})
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["service"], "WarriorIQ")
+        # The deployed commit makes a settings-only deploy visible, but the probe
+        # must stay minimal: no account, model, path or worker detail.
+        self.assertEqual(set(payload), {"status", "service", "commit"})
+        self.assertNotIn("/", payload["commit"])
+        self.assertLessEqual(len(payload["commit"]), 40)
         self.assertTrue(response.headers.get("x-request-id"))
         self.assertIn("app;dur=", response.headers.get("server-timing", ""))
         self.assertNotIn("gpu", response.text.lower())
