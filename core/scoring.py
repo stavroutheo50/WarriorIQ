@@ -69,18 +69,40 @@ RULESETS: dict[str, RuleProfile] = {
     # scored in the sport and are not in the detector's vocabulary, so they are
     # declared unobserved rather than silently excluded from the count.
     "MUAY_THAI": RuleProfile(
-        "MUAY_THAI", "Muay Thai", True, True, True, True, False, frozenset({"spinning_backfist"}),
+        "MUAY_THAI", "Full rules (elbows allowed)", True, True, True, True, False, frozenset({"spinning_backfist"}),
         sport="muay_thai", sport_label="Muay Thai",
         family_value=(("punch", 0.9), ("kick", 1.25), ("knee", 1.25)),
         unobserved=("elbow strikes", "clinch control", "sweeps and dumps"),
+    ),
+    # Amateur and many promotional cards bar elbows outright. That is not a
+    # cosmetic variant: with elbows barred they stop being a scoring action the
+    # analysis is blind to, so banning them measurably improves what the report
+    # can honestly claim. It is the biggest coverage lever in this sport.
+    "MUAY_THAI_NO_ELBOWS": RuleProfile(
+        "MUAY_THAI_NO_ELBOWS", "No elbows", True, True, True, True, False, frozenset({"spinning_backfist"}),
+        sport="muay_thai", sport_label="Muay Thai",
+        family_value=(("punch", 0.9), ("kick", 1.25), ("knee", 1.25)),
+        unobserved=("clinch control", "sweeps and dumps"),
     ),
 
     # ---- WT Taekwondo -------------------------------------------------------
     # Kick-decided, and punches to the head are forbidden. Body punches score
     # but rarely decide a bout, which the weighting reflects. Electronic
     # scoring hardware is not something video can reproduce.
+    # ITF (International Taekwon-Do Federation) is the hand-and-foot federation:
+    # punches to the head are legal and score, contact is controlled rather than
+    # full, and points run 1 for a punch to any legal target, 2 for a kick to the
+    # body and 3 for a kick to the head. Jumping-kick bonuses vary between ITF
+    # bodies, so they are declared unobserved rather than guessed at.
+    "ITF_TAEKWONDO": RuleProfile(
+        "ITF_TAEKWONDO", "ITF · International Taekwon-Do Federation", False, False, False, False, False, frozenset(),
+        sport="taekwondo", sport_label="Taekwondo",
+        allow_head_punch=True,
+        family_value=(("punch", 1.0), ("kick", 2.0)),
+        unobserved=("organisation-specific jumping and spinning kick bonuses",),
+    ),
     "WT_TAEKWONDO": RuleProfile(
-        "WT_TAEKWONDO", "WT Taekwondo", False, False, False, True, False, frozenset(),
+        "WT_TAEKWONDO", "WT · World Taekwondo (Olympic)", False, False, False, True, False, frozenset(),
         sport="taekwondo", sport_label="Taekwondo",
         allow_head_punch=False,
         family_value=(("punch", 0.5), ("kick", 1.6)),
@@ -111,8 +133,8 @@ RULESETS: dict[str, RuleProfile] = {
 SPORTS: dict[str, tuple[str, ...]] = {
     "kickboxing": ("K1", "LOW_KICK", "FULL_CONTACT", "POINT_FIGHTING", "LIGHT_CONTACT", "KICK_LIGHT"),
     "boxing": ("BOXING",),
-    "muay_thai": ("MUAY_THAI",),
-    "taekwondo": ("WT_TAEKWONDO",),
+    "muay_thai": ("MUAY_THAI", "MUAY_THAI_NO_ELBOWS"),
+    "taekwondo": ("ITF_TAEKWONDO", "WT_TAEKWONDO"),
     "mma": ("MMA",),
 }
 
@@ -163,6 +185,10 @@ def normalize_ruleset(value: str) -> str:
         "WTF": "WT_TAEKWONDO",
         "WTF_TAEKWONDO": "WT_TAEKWONDO",
         "TKD": "WT_TAEKWONDO",
+        "ITF": "ITF_TAEKWONDO",
+        "ITF_TAEKWON_DO": "ITF_TAEKWONDO",
+        "MUAY_THAI_NO_ELBOW": "MUAY_THAI_NO_ELBOWS",
+        "NO_ELBOWS": "MUAY_THAI_NO_ELBOWS",
     }
     key = aliases.get(key, key)
     if key not in RULESETS:

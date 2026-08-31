@@ -310,9 +310,19 @@ RULESET_LABELS = {
     "LIGHT_CONTACT": "Light Contact",
     "KICK_LIGHT": "Kick Light",
     "BOXING": "Boxing",
-    "MUAY_THAI": "Muay Thai",
-    "WT_TAEKWONDO": "WT Taekwondo",
+    "MUAY_THAI": "Full rules (elbows allowed)",
+    "MUAY_THAI_NO_ELBOWS": "No elbows",
+    "ITF_TAEKWONDO": "ITF · International Taekwon-Do Federation",
+    "WT_TAEKWONDO": "WT · World Taekwondo (Olympic)",
     "MMA": "MMA (standing exchanges)",
+}
+
+RULESET_SHORT = {
+    "ITF_TAEKWONDO": "ITF",
+    "WT_TAEKWONDO": "WT",
+    "MUAY_THAI": "Full rules",
+    "MUAY_THAI_NO_ELBOWS": "No elbows",
+    "MMA": "Standing exchanges",
 }
 
 FIGHT_TYPES = ("competition", "sparring")

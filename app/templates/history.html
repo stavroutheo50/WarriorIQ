@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}History · WarriorIQ{% endblock %}
 {% block content %}
-<header class="archive-hero" data-reveal><div><div class="eyebrow">Private fight archive</div><h1>Your fight library.</h1><p>Every saved analysis, ready for the next review.</p></div><a class="btn" data-motion-primary href="/#analyze">Analyze another fight <span aria-hidden="true">→</span></a></header>
+<header class="archive-hero" data-reveal><div><div class="eyebrow">Private fight archive</div><h1>Your fight library.</h1><p>Every saved analysis, ready for the next review.</p></div><a class="btn" data-motion-primary href="/analyze">Analyze another fight <span aria-hidden="true">→</span></a></header>
 <section class="fight-archive" aria-label="Saved fight analyses">
 {% if not signed_in %}<div class="empty-workspace empty-state"><span class="empty-state-mark" aria-hidden="true">⌁</span><div><div class="eyebrow">Private by design</div><h2>Sign in to open your private fight library</h2><p>Guest analyses are temporary and never appear here.</p><div class="hero-actions"><a class="btn" href="/signup?next=/history">Create account</a><a class="btn secondary" href="/login?next=/history">Sign in</a></div></div></div>{% else %}
 {% if fights %}<div class="archive-tools" data-reveal><label class="archive-search" for="historySearch"><span aria-hidden="true">⌕</span><input id="historySearch" type="search" placeholder="Search ruleset or fight type" autocomplete="off"></label><div class="archive-filters" aria-label="Filter fights"><button type="button" data-history-filter="all" aria-pressed="true">All fights</button><button type="button" data-history-filter="competition" aria-pressed="false">Competition</button><button type="button" data-history-filter="sparring" aria-pressed="false">Sparring</button></div><label class="archive-sort">Sort <select id="historySort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label></div>
@@ -13,7 +13,7 @@
   <div class="fight-record-actions"><a class="btn" href="/result/{{f.job_id}}">View analysis</a><a class="text-link" href="/replay/{{f.job_id}}">Replay</a><form action="/delete/{{f.job_id}}" method="post" onsubmit="return confirm('Delete this saved fight and local analysis files?')"><button class="record-delete" type="submit">Delete</button></form></div>
 </article>{% endfor %}
 </div><p class="archive-no-results" id="historyNoResults" hidden>No saved fights match this search.</p>
-{% else %}<div class="empty-workspace empty-state"><span class="empty-state-mark" aria-hidden="true">＋</span><div><div class="eyebrow">Your archive is ready</div><h2>Your first fight starts the library</h2><p>Analyze a bout and WarriorIQ will keep the completed report here.</p><a class="btn" href="/#analyze">Analyze first fight</a></div></div>{% endif %}
+{% else %}<div class="empty-workspace empty-state"><span class="empty-state-mark" aria-hidden="true">＋</span><div><div class="eyebrow">Your archive is ready</div><h2>Your first fight starts the library</h2><p>Analyze a bout and WarriorIQ will keep the completed report here.</p><a class="btn" href="/analyze">Analyze first fight</a></div></div>{% endif %}
 {% endif %}
 </section>
 {% endblock %}

@@ -139,23 +139,64 @@ class PublicPageTests(unittest.TestCase):
         """Coverage is disclosed at the point of choice, not after the upload.
 
         The detector reads punches, kicks and knees. For boxing that is the
-        whole sport; for MMA it misses the ground entirely. Someone choosing
-        MMA has to learn that before spending an hour on an upload, so the
-        note ships with the picker rather than only inside the finished report.
+        whole sport; for MMA it misses the ground entirely. The chooser badges
+        every sport so the five can be compared at a glance, and each sport's
+        setup page names what it will be silent about in full - before an hour
+        is spent on an upload, rather than in the finished report.
         """
         from core.scoring import SPORTS, sport_unobserved
 
-        page = self.client.get("/").text
+        chooser = self.client.get("/analyze").text
         for sport in SPORTS:
             with self.subTest(sport=sport):
-                self.assertIn(f'data-sport="{sport}"', page)
+                self.assertIn(f'data-sport="{sport}"', chooser)
                 missing = sport_unobserved(sport)
+                setup = self.client.get(f"/analyze/{sport}")
+                self.assertEqual(setup.status_code, 200)
                 # Each unobserved action is named, not summarised away.
                 for action in missing:
-                    self.assertIn(action, page)
+                    self.assertIn(action, setup.text)
+                self.assertIn(
+                    'data-covered="no"' if missing else 'data-covered="yes"',
+                    setup.text,
+                )
         # A sport with gaps must not be presented as fully covered.
-        self.assertIn('data-covered="no"', page)
-        self.assertIn('data-covered="yes"', page)
+        self.assertIn('data-covered="no"', chooser)
+        self.assertIn('data-covered="yes"', chooser)
+
+    def test_choosing_a_sport_never_waits_on_an_animation(self):
+        """The five cards are the page, so they may not fade in on scroll.
+
+        They were built inside a motion sequence, which sets opacity to 0 until
+        an IntersectionObserver marks each one visible. The two below the fold
+        never got marked, so on a phone taekwondo and MMA could not be chosen at
+        all. Decoration may wait for a scroll; navigation may not.
+        """
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "sports.html").read_text(encoding="utf-8")
+        self.assertIn('class="sport-grid"', template)
+        self.assertNotIn("data-motion-sequence", template)
+        # Every sport must be reachable straight from the markup.
+        page = self.client.get("/analyze").text
+        for sport in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
+            self.assertIn(f'href="/analyze/{sport}"', page)
+
+    def test_an_unknown_sport_is_not_invented(self):
+        self.assertEqual(self.client.get("/analyze/sumo").status_code, 404)
+
+    def test_sports_with_one_ruleset_do_not_ask_which(self):
+        """Boxing and MMA have a single ruleset, so the select is not a choice.
+
+        The key still has to reach the scorer, so it posts as a hidden field
+        rather than being dropped along with the question.
+        """
+        for sport, expected in (("boxing", "BOXING"), ("mma", "MMA")):
+            with self.subTest(sport=sport):
+                page = self.client.get(f"/analyze/{sport}").text
+                self.assertNotIn('id="fightRuleset"', page)
+                self.assertIn(f'type="hidden" name="ruleset" value="{expected}"', page)
+        for sport in ("kickboxing", "muay_thai", "taekwondo"):
+            with self.subTest(sport=sport):
+                self.assertIn('id="fightRuleset"', self.client.get(f"/analyze/{sport}").text)
 
     def test_footer_exposes_compact_legal_navigation(self):
         page = self.client.get("/").text
@@ -390,8 +431,10 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("That page left the ring", response.text)
         self.assertIn("Start an analysis", response.text)
 
-    def test_home_upload_permissions_are_simple_and_explicit(self):
-        home = self.client.get("/").text
+    def test_upload_permissions_are_simple_and_explicit(self):
+        # The form lives on a sport's setup page now; kickboxing stands in for
+        # all five, which render from one template.
+        home = self.client.get("/analyze/kickboxing").text
         self.assertIn('name="rights_confirmed"', home)
         self.assertIn('type="hidden" name="people_permissions_confirmed" value="true"', home)
         self.assertIn('name="minor_permission_status"', home)
@@ -404,8 +447,12 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("Video Upload Policy", home)
         self.assertNotIn("These confirmations apply to this fight video", home)
         self.assertNotIn("Account policies are accepted only", home)
-        self.assertIn("18 or older", home.lower())
-        self.assertIn("parent or guardian", home.lower())
+        # The age and guardian statements belong to the home page's explainer;
+        # the form carries the consent controls themselves.
+        explainer = self.client.get("/").text.lower()
+        self.assertIn("18 or older", explainer)
+        self.assertIn("parent or guardian", explainer)
+        self.assertIn("parent/guardian permission", home.lower())
         self.assertIn('id="uploadProgress"', home)
         self.assertIn("request.upload.addEventListener('progress'", home)
         signup = self.client.get("/signup").text
@@ -543,7 +590,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("WonderIQ", page)
 
     def test_upload_never_displays_selected_filename(self):
-        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
         self.assertIn("fileButton.classList.toggle('uploaded',ready)", template)
         self.assertIn("Fight video uploaded", template)
         self.assertNotIn("file.name", template)
@@ -559,7 +606,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertGreater(len(response.content), 1000)
 
     def test_openai_identity_recovery_requires_explicit_opt_in(self):
-        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
         self.assertIn('name="openai_identity_recovery"', template)
         self.assertNotIn('name="openai_identity_recovery" value="true" checked', template)
 
@@ -625,9 +672,9 @@ class PublicPageTests(unittest.TestCase):
 
     def test_the_upload_page_promises_only_the_disclosure_that_exists(self):
         """Copy that overstates the product is a defect like any other."""
-        index = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("repeats this next to the score", index)
-        self.assertNotIn("says so on every page", index)
+        setup = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
+        self.assertIn("repeats this next to the score", setup)
+        self.assertNotIn("says so on every page", setup)
 
     def test_evidence_replay_starts_one_second_before_exact_timestamp(self):
         replay = (Path(__file__).resolve().parents[1] / "app" / "templates" / "replay.html").read_text(encoding="utf-8")
@@ -788,7 +835,7 @@ class PublicPageTests(unittest.TestCase):
 
     def test_history_new_analysis_button_targets_the_upload_card(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "history.html").read_text(encoding="utf-8")
-        self.assertIn('href="/#analyze">Analyze another fight', template)
+        self.assertIn('href="/analyze">Analyze another fight', template)
 
     def test_coach_workspace_uses_the_selected_fighter_and_one_click_plan(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "coach.html").read_text(encoding="utf-8")

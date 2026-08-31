@@ -98,7 +98,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         comparison = self.client.get("/compare")
         self.assertEqual(comparison.status_code, 200)
         self.assertIn("Two fights required", comparison.text)
-        self.assertIn('href="/#analyze">Analyze another fight', comparison.text)
+        self.assertIn('href="/analyze">Analyze another fight', comparison.text)
         self.assertNotIn('id="compareForm"', comparison.text)
 
     def test_signup_requires_account_manager_terms_and_privacy_acceptance(self):
@@ -382,7 +382,10 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertTrue(database.reserve_analysis(account["id"], "starter-2", today))
         self.assertTrue(database.reserve_analysis(account["id"], "starter-next-day", today + timedelta(days=1)))
         self.client.post("/login", data={"email": "athlete@example.com", "password": "Strong-Local-Password", "accept_policies": "true"})
-        home = self.client.get("/")
+        # The chooser warns before a sport is picked; the setup card still
+        # shows the exhausted state on the control itself.
+        self.assertIn("Limit reached", self.client.get("/analyze").text)
+        home = self.client.get("/analyze/kickboxing")
         self.assertIn("Limit reached", home.text)
         self.assertIn("Analysis allowance used", home.text)
 
@@ -539,11 +542,13 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
     def test_primary_actions_are_real_and_explain_their_state(self):
         self._sign_in("actions@example.com")
         home = self.client.get("/").text
-        self.assertIn('href="#analyze">Analyze a fight', home)
-        self.assertIn('id="uploadSubmit" type="submit"', home)
-        self.assertIn("Choose a video to continue", home)
+        self.assertIn('href="/analyze">Choose your sport', home)
         self.assertIn('class="nav-more"', home)
         self.assertIn('href="/history">Fight library', home)
+
+        setup = self.client.get("/analyze/kickboxing").text
+        self.assertIn('id="uploadSubmit" type="submit"', setup)
+        self.assertIn("Choose a video to continue", setup)
 
         pricing = self.client.get("/pricing").text
         self.assertNotIn("checkout disabled</span>", pricing)

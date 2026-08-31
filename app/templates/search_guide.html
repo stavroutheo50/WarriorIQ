@@ -8,7 +8,7 @@
     <div class="eyebrow">{{page.eyebrow}}</div>
     <h1>{{page.heading}}</h1>
     <p>{{page.intro}}</p>
-    <div class="hero-actions"><a class="btn" data-motion-primary href="/#analyze">Analyze a fight <span aria-hidden="true">→</span></a><a class="btn secondary" href="/pricing">See plans</a></div>
+    <div class="hero-actions"><a class="btn" data-motion-primary href="/analyze">Analyze a fight <span aria-hidden="true">→</span></a><a class="btn secondary" href="/pricing">See plans</a></div>
   </header>
   <div class="search-guide-layout">
     <div class="search-guide-sections">
@@ -28,6 +28,6 @@
     <div class="eyebrow">Questions</div><h2 id="guideFaqTitle">Useful answers before analysis</h2>
     {% for item in page.faqs %}<details><summary>{{item.question}}</summary><p>{{item.answer}}</p></details>{% endfor %}
   </section>
-  <section class="coach-callout final-cta" data-reveal><div><div class="eyebrow">Ready when the footage is</div><h2>Bring one fight. Leave with a clearer next step.</h2><p class="muted">Upload privately, select both fighters, and focus the detailed report on the athlete you want to improve.</p></div><a class="btn" data-motion-primary href="/#analyze">Start fight analysis</a></section>
+  <section class="coach-callout final-cta" data-reveal><div><div class="eyebrow">Ready when the footage is</div><h2>Bring one fight. Leave with a clearer next step.</h2><p class="muted">Upload privately, select both fighters, and focus the detailed report on the athlete you want to improve.</p></div><a class="btn" data-motion-primary href="/analyze">Start fight analysis</a></section>
 </article>
 {% endblock %}

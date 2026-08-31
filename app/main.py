@@ -39,7 +39,7 @@ from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
 )
-from core.config import DATASET, OUTPUTS, ROOT, RULESET_LABELS, RULESET_SPORTS, SETTINGS, UPLOADS
+from core.config import DATASET, OUTPUTS, ROOT, RULESET_LABELS, RULESET_SHORT, RULESET_SPORTS, SETTINGS, UPLOADS
 from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
@@ -1613,18 +1613,87 @@ def home(request: Request):
         name="index.html",
         context={
             "request": request,
-            "rulesets": RULESET_LABELS,
             "sports": RULESET_SPORTS,
-            "sport_rulesets": {sport: [(key, RULESET_LABELS[key]) for key in keys]
-                               for sport, keys in SPORTS.items()},
-            # What each sport scores but the analysis cannot see. Shown at the
-            # moment the sport is chosen, so nobody uploads an MMA bout decided
-            # on the ground expecting the report to account for it.
             "sport_unobserved": {sport: sport_unobserved(sport) for sport in SPORTS},
             "profile": profile,
             "version": SETTINGS.version,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
         },
+    )
+
+
+def _sport_context(request: Request, sport: str) -> dict:
+    """Everything a single sport's setup page needs to describe itself."""
+    account = _account(request)
+    keys = SPORTS[sport]
+    return {
+        "request": request,
+        "sport": sport,
+        "sport_label": RULESET_SPORTS[sport],
+        "sports": RULESET_SPORTS,
+        # Boxing and MMA each have exactly one ruleset, so asking which one is a
+        # question with a single answer. The page drops the field and posts the
+        # key instead of showing a select the reader cannot get wrong.
+        "rulesets": [(key, RULESET_LABELS[key]) for key in keys],
+        "only_ruleset": keys[0] if len(keys) == 1 else None,
+        "unobserved": sport_unobserved(sport),
+        "version": SETTINGS.version,
+        "allowance": analysis_allowance(int(account["id"])) if account else None,
+    }
+
+
+def _ruleset_summary(sport: str) -> list[str]:
+    """Short ruleset names for a chooser card.
+
+    Kickboxing has six disciplines and taekwondo two federations with long
+    formal names; a card five across cannot carry either in full. The complete
+    names are on the sport's own page, where the choice is actually made.
+    """
+    keys = SPORTS[sport]
+    if len(keys) == 1 and RULESET_LABELS[keys[0]] == RULESET_SPORTS[sport]:
+        # Boxing's one ruleset is named after the sport, so listing it says
+        # nothing. Say what is true of the sport instead.
+        return ["One unified ruleset"]
+    names = [RULESET_SHORT.get(key, RULESET_LABELS[key]) for key in keys]
+    if len(names) > 3:
+        names = names[:3] + [f"+{len(names) - 3} more"]
+    return names
+
+
+@app.get("/analyze", response_class=HTMLResponse)
+def choose_sport(request: Request):
+    """The five sports, as the first real decision in the flow.
+
+    Rules, legal targets and what the analysis can observe all follow from the
+    sport, so it is asked first and asked on its own rather than as one field
+    among ten on a form the reader has already started filling in.
+    """
+    account = _account(request)
+    return templates.TemplateResponse(
+        request=request,
+        name="sports.html",
+        context={
+            "request": request,
+            # An exhausted allowance is worth knowing before a sport is picked
+            # and a video chosen, not two pages later.
+            "allowance": analysis_allowance(int(account["id"])) if account else None,
+            "sports": RULESET_SPORTS,
+            # Boxing's single ruleset is named after the sport, so listing it
+            # tells the reader nothing; say what is actually true instead.
+            "sport_rulesets": {s: _ruleset_summary(s) for s in SPORTS},
+            "sport_unobserved": {sport: sport_unobserved(sport) for sport in SPORTS},
+            "version": SETTINGS.version,
+        },
+    )
+
+
+@app.get("/analyze/{sport}", response_class=HTMLResponse)
+def sport_setup(request: Request, sport: str):
+    key = (sport or "").strip().lower()
+    if key not in SPORTS:
+        raise HTTPException(status_code=404, detail="Unknown sport")
+    return templates.TemplateResponse(
+        request=request, name="analyze.html", context=_sport_context(request, key),
     )
 
 
