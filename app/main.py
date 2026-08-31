@@ -659,8 +659,12 @@ async def viewer_context(request: Request, call_next):
     # cookies, so the policy only names Google's hosts for those visitors.
     # Without this the browser blocks googletagmanager.com outright and no
     # measurement ever reaches Google, however the tag is configured.
-    measuring = SETTINGS.analytics_measurement_id or SETTINGS.gtm_container_id
-    analytics_allowed = measuring and request.state.cookie_preferences["analytics"]
+    # Consent Mode loads the tag on every page and denies storage until the
+    # visitor accepts, so the policy has to permit Google's hosts whenever a tag
+    # is configured. Consent controls what may be stored, not whether the script
+    # is reachable; gating the policy on consent hid the tag from Google's own
+    # detection and made a correct install look absent.
+    analytics_allowed = bool(SETTINGS.analytics_measurement_id or SETTINGS.gtm_container_id)
     script_src = "'self' 'unsafe-inline'"
     connect_src = "'self'"
     img_src = "'self' data:"

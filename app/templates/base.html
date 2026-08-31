@@ -6,22 +6,38 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#081226">
 {% set analytics_id = request.state.analytics_measurement_id %}
 {% set gtm_id = request.state.gtm_container_id %}
-{% if gtm_id and request.state.cookie_preferences.analytics %}
-  <!-- Google Tag Manager. Loaded only after a visitor accepts analytics
-       cookies, so the container cannot fire tags without consent. -->
+{% if analytics_id or gtm_id %}
+  <!-- Google Consent Mode v2.
+       The tag loads on every page but stores nothing until the visitor accepts
+       analytics cookies. Withholding the tag entirely until consent also hides
+       it from Google's own tag detection, which reports the site as having no
+       tag installed; denying storage instead keeps the install verifiable while
+       still setting no analytics cookie for anyone who has not agreed. -->
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('consent', 'default', {
+      'ad_storage': 'denied', 'ad_user_data': 'denied',
+      'ad_personalization': 'denied', 'analytics_storage': 'denied',
+      'wait_for_update': 500
+    });
+{% if request.state.cookie_preferences.analytics %}
+    gtag('consent', 'update', {'analytics_storage': 'granted'});
+{% endif %}
+  </script>
+{% endif %}
+{% if gtm_id %}
+  <!-- Google Tag Manager -->
   <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
   new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
   j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
   })(window,document,'script','dataLayer',{{gtm_id|tojson}});</script>
 {% endif %}
-{% if analytics_id and request.state.cookie_preferences.analytics %}
-  <!-- Google tag (gtag.js). Loaded only after a visitor accepts analytics
-       cookies; the Content-Security-Policy names Google's hosts only then. -->
+{% if analytics_id %}
+  <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id={{analytics_id}}"></script>
   <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
     gtag('js', new Date());
     gtag('config', {{analytics_id|tojson}}, {anonymize_ip: true});
   </script>
@@ -49,10 +65,9 @@
 </head>
 {% set page_key = request.url.path.strip('/').split('/')[0] if request.url.path.strip('/') else 'home' %}
 <body data-page="{{page_key}}">
-{% if request.state.gtm_container_id and request.state.cookie_preferences.analytics %}
-  <!-- Google Tag Manager (noscript). Must be the first thing inside <body>;
-       the Content-Security-Policy allows this frame only when analytics are
-       accepted. -->
+{% if request.state.gtm_container_id %}
+  <!-- Google Tag Manager (noscript). Must be the first thing inside <body>.
+       Consent Mode governs what this may store. -->
   <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{request.state.gtm_container_id}}"
   height="0" width="0" style="display:none;visibility:hidden" title="Google Tag Manager"></iframe></noscript>
 {% endif %}
