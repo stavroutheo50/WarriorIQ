@@ -116,7 +116,20 @@ class Settings:
     # SAM2 propagates the two user-selected identities through the segment.
     # YOLO pose/ReID must still confirm a person before metrics are accepted.
     sam_recovery_enabled: bool = env_bool("WARRIORIQ_SAM_RECOVERY", not IS_RENDER)
-    sam_continuous_enabled: bool = env_bool("WARRIORIQ_SAM_CONTINUOUS", not IS_RENDER)
+    # Continuous mode propagates SAM2 masks across the whole segment before the
+    # main pass, which doubles the work for guidance the tracker usually does
+    # not need. Measured on a real 480x220 WAKO bout, same 60-second segment:
+    #
+    #   continuous on   188.8s   coverage A 0.997  B 0.916
+    #   continuous off   62.6s   coverage A 0.985  B 0.987
+    #
+    # Identity trust and the initial-lock check were satisfied either way, and
+    # fighter B was tracked better without it. Recovery stays enabled, so the
+    # fallback buffer in analyzer.py still engages when continuous tracks are
+    # absent: the safety net for hard footage remains, only the unconditional
+    # second pass is gone. Set this true to force the exhaustive pass on footage
+    # where identities genuinely swap.
+    sam_continuous_enabled: bool = env_bool("WARRIORIQ_SAM_CONTINUOUS", False)
     sam_continuous_fps: float = float(os.getenv("WARRIORIQ_SAM_FPS", "4"))
     sam_continuous_max_frames: int = int(os.getenv("WARRIORIQ_SAM_MAX_FRAMES", "360"))
     # Keep the bounded two-minute guidance pass in one memory state. Short
