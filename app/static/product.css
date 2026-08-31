@@ -269,3 +269,36 @@ table td{font-size:12px}
 @media(prefers-reduced-motion:reduce){
   *,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* ---------------------------------------------------------------------------
+   Control refinement layer.
+   Selects previously fell back to the platform's native dropdown, which paints
+   light-on-dark and differs on every browser, so a form mixed styled inputs
+   with an unstyled control. These rules keep every control on one surface and
+   one radius using the existing tokens. Loaded last on purpose: earlier files
+   set the same selectors and this layer only adjusts the visual finish.
+   --------------------------------------------------------------------------- */
+.field select{
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  padding-right:40px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.75 6 6.5l5-4.75' fill='none' stroke='%2378869c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 15px center;background-size:11px 8px;
+  cursor:pointer;
+}
+.field select:hover,.field select:focus{
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.75 6 6.5l5-4.75' fill='none' stroke='%23c3d0e6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+/* The native option list is drawn by the OS; force a readable pair so the open
+   menu does not render dark-on-dark in browsers that inherit the field colour. */
+.field select option{background:var(--wiq-panel-strong);color:var(--wiq-text)}
+
+.field input,.field select,.field textarea{
+  transition:border-color var(--wiq-fast) var(--wiq-ease),box-shadow var(--wiq-fast) var(--wiq-ease),background-color var(--wiq-fast) var(--wiq-ease);
+}
+.field input:disabled,.field select:disabled,.field textarea:disabled{opacity:.5;cursor:not-allowed}
+.field input::placeholder,.field textarea::placeholder{color:var(--wiq-text-tertiary)}
+
+/* Firefox draws number spinners permanently; reveal them on interaction only so
+   the round/duration fields sit at the same visual weight as the other inputs. */
+.field input[type=number]{-moz-appearance:textfield}
+.field input[type=number]:hover,.field input[type=number]:focus{-moz-appearance:number-input}

@@ -3138,6 +3138,21 @@ def admin_delete_prohibited_video(request: Request, job_id: str = Form(...)):
     return RedirectResponse("/admin", status_code=303)
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Serve the icon from the site root.
+
+    Search engines request /favicon.ico directly rather than reading the page's
+    <link rel="icon">, so a 404 here is why WarriorIQ showed a blank icon in
+    search results even though the logo was declared in the template.
+    """
+    return FileResponse(
+        ROOT / "app" / "static" / "favicon.ico",
+        media_type="image/x-icon",
+        headers={"Cache-Control": "public, max-age=604800"},
+    )
+
+
 @app.get("/robots.txt", response_class=PlainTextResponse)
 def robots_txt():
     if not SETTINGS.public_base_url:
