@@ -577,6 +577,7 @@ async def viewer_context(request: Request, call_next):
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
     request.state.cookie_preferences = _cookie_preferences(request)
     request.state.analytics_measurement_id = SETTINGS.analytics_measurement_id
+    request.state.gtm_container_id = SETTINGS.gtm_container_id
     request.state.is_admin = _is_admin(request)
     request.state.noindex = (
         not SETTINGS.public_base_url
@@ -658,18 +659,24 @@ async def viewer_context(request: Request, call_next):
     # cookies, so the policy only names Google's hosts for those visitors.
     # Without this the browser blocks googletagmanager.com outright and no
     # measurement ever reaches Google, however the tag is configured.
-    analytics_allowed = SETTINGS.analytics_measurement_id and request.state.cookie_preferences["analytics"]
+    measuring = SETTINGS.analytics_measurement_id or SETTINGS.gtm_container_id
+    analytics_allowed = measuring and request.state.cookie_preferences["analytics"]
     script_src = "'self' 'unsafe-inline'"
     connect_src = "'self'"
     img_src = "'self' data:"
+    # Tag Manager's noscript fallback is an iframe, which default-src would
+    # block, so frame-src is only widened when a container is actually loaded.
+    frame_src = "'self'"
     if analytics_allowed:
         script_src += " https://www.googletagmanager.com"
         connect_src += " https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com"
         img_src += " https://*.google-analytics.com https://*.googletagmanager.com"
+        if SETTINGS.gtm_container_id:
+            frame_src += " https://www.googletagmanager.com"
     response.headers.setdefault(
         "Content-Security-Policy",
         f"default-src 'self' data:; script-src {script_src}; style-src 'self' 'unsafe-inline'; "
-        f"img-src {img_src}; media-src 'self'; connect-src {connect_src}; "
+        f"img-src {img_src}; media-src 'self'; connect-src {connect_src}; frame-src {frame_src}; "
         "frame-ancestors 'none'; form-action 'self'",
     )
     if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/s/")):

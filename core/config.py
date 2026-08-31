@@ -231,6 +231,12 @@ class Settings:
     # for visitors who accept analytics cookies; leaving this empty disables
     # analytics entirely and keeps the strict Content-Security-Policy.
     analytics_measurement_id: str = os.getenv("WARRIORIQ_ANALYTICS_ID", "G-5V5Q4H30LD").strip()
+    # Google Tag Manager container. GTM loads whatever tags the container holds,
+    # so if a GA4 tag inside it uses the same measurement ID as
+    # WARRIORIQ_ANALYTICS_ID, every page view is counted twice. Run one or the
+    # other: empty this to use the direct tag, or empty the measurement ID to
+    # let the container own analytics.
+    gtm_container_id: str = os.getenv("WARRIORIQ_GTM_ID", "GTM-PFCW27J2").strip()
     email_provider: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER", "").strip()
     require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 

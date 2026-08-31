@@ -47,15 +47,46 @@ class AnalyticsPolicyTests(unittest.TestCase):
         self.assertIn("google-analytics.com", connect)
         self.assertIn("googletagmanager.com/gtag/js", response.text)
 
-    def test_no_measurement_id_disables_analytics_entirely(self):
-        previous = SETTINGS.analytics_measurement_id
+    def test_tag_manager_ships_both_halves_and_a_frame_policy(self):
+        """GTM needs the head script, the noscript iframe, and frame-src.
+
+        The noscript fallback is an iframe, which the site's default-src would
+        block, so a container that loads but cannot frame is only half working.
+        """
+        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
+        self.assertIn(SETTINGS.gtm_container_id, response.text)
+        self.assertIn("googletagmanager.com/gtm.js", response.text)
+        self.assertIn("googletagmanager.com/ns.html", response.text)
+        policy = response.headers["content-security-policy"]
+        frame = [part for part in policy.split(";") if part.strip().startswith("frame-src")][0]
+        self.assertIn("https://www.googletagmanager.com", frame)
+
+    def test_declining_analytics_blocks_the_container_and_its_frame(self):
+        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "essential"})
+        self.assertNotIn(SETTINGS.gtm_container_id, response.text)
+        self.assertNotIn("ns.html", response.text)
+        policy = response.headers["content-security-policy"]
+        frame = [part for part in policy.split(";") if part.strip().startswith("frame-src")][0]
+        self.assertNotIn("googletagmanager", frame)
+
+    def test_clearing_both_ids_disables_analytics_entirely(self):
+        """Emptying one id must not silently leave the other measuring."""
+        previous_ga = SETTINGS.analytics_measurement_id
+        previous_gtm = SETTINGS.gtm_container_id
         try:
+            # The container alone still measures, so the policy must stay open.
             object.__setattr__(SETTINGS, "analytics_measurement_id", "")
+            response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
+            self.assertIn("googletagmanager", response.text)
+            self.assertNotIn("gtag/js", response.text)
+
+            object.__setattr__(SETTINGS, "gtm_container_id", "")
             response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
             self.assertNotIn("googletagmanager", response.headers["content-security-policy"])
             self.assertNotIn("googletagmanager", response.text)
         finally:
-            object.__setattr__(SETTINGS, "analytics_measurement_id", previous)
+            object.__setattr__(SETTINGS, "analytics_measurement_id", previous_ga)
+            object.__setattr__(SETTINGS, "gtm_container_id", previous_gtm)
 
 
 class PublicPageTests(unittest.TestCase):

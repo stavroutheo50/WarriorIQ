@@ -5,6 +5,16 @@
 {% set page_description %}{% block description %}WarriorIQ analyzes kickboxing fight video into evidence-linked performance reports, coaching priorities and fighter-specific training plans.{% endblock %}{% endset %}
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#081226">
 {% set analytics_id = request.state.analytics_measurement_id %}
+{% set gtm_id = request.state.gtm_container_id %}
+{% if gtm_id and request.state.cookie_preferences.analytics %}
+  <!-- Google Tag Manager. Loaded only after a visitor accepts analytics
+       cookies, so the container cannot fire tags without consent. -->
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer',{{gtm_id|tojson}});</script>
+{% endif %}
 {% if analytics_id and request.state.cookie_preferences.analytics %}
   <!-- Google tag (gtag.js). Loaded only after a visitor accepts analytics
        cookies; the Content-Security-Policy names Google's hosts only then. -->
@@ -39,6 +49,13 @@
 </head>
 {% set page_key = request.url.path.strip('/').split('/')[0] if request.url.path.strip('/') else 'home' %}
 <body data-page="{{page_key}}">
+{% if request.state.gtm_container_id and request.state.cookie_preferences.analytics %}
+  <!-- Google Tag Manager (noscript). Must be the first thing inside <body>;
+       the Content-Security-Policy allows this frame only when analytics are
+       accepted. -->
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{request.state.gtm_container_id}}"
+  height="0" width="0" style="display:none;visibility:hidden" title="Google Tag Manager"></iframe></noscript>
+{% endif %}
   <div class="page-scroll-progress" id="pageScrollProgress" aria-hidden="true"><i></i></div>
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <button class="global-back" id="globalBack" type="button" aria-label="Go to the previous WarriorIQ page">← <span>Back</span></button>
