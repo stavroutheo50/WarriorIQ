@@ -8,6 +8,15 @@ from core.config import RULESET_LABELS
 from core.types import KnockdownEvent, StrikeEvent
 
 
+# The detector's entire vocabulary is punches, kicks and knees. That is the
+# hard boundary on what any sport here can be told about, and it is why each
+# profile declares `unobserved`: a discipline whose scoring depends on actions
+# the model cannot see must say so in the report rather than quietly counting
+# only the part it happens to recognise. A ruleset is not a promise of
+# coverage; this field is what keeps the difference honest.
+OBSERVABLE_FAMILIES = frozenset({"punch", "kick", "knee"})
+
+
 @dataclass(frozen=True)
 class RuleProfile:
     key: str
@@ -18,16 +27,122 @@ class RuleProfile:
     allow_full_power: bool
     point_stop: bool
     allowed_backfists: frozenset[str]
+    sport: str = "kickboxing"
+    sport_label: str = "Kickboxing"
+    allow_punch: bool = True
+    allow_kick: bool = True
+    # Punches to the head are forbidden in WT taekwondo and central everywhere
+    # else, so it cannot be folded into allow_punch.
+    allow_head_punch: bool = True
+    # Per-family scoring emphasis. Taekwondo is decided by kicks; boxing has no
+    # other family to weigh against. Defaults match the kickboxing baseline.
+    family_value: tuple[tuple[str, float], ...] = (("punch", 1.0), ("kick", 1.15), ("knee", 1.15))
+    # Actions this discipline scores that the model cannot observe at all.
+    unobserved: tuple[str, ...] = ()
+
+
+def _weights(profile: RuleProfile) -> dict[str, float]:
+    return dict(profile.family_value)
 
 
 RULESETS: dict[str, RuleProfile] = {
+    # ---- Kickboxing (WAKO disciplines) -------------------------------------
     "K1": RuleProfile("K1", "K-1", True, True, True, True, False, frozenset({"spinning_backfist"})),
     "LOW_KICK": RuleProfile("LOW_KICK", "Low Kick", True, True, False, True, False, frozenset()),
     "FULL_CONTACT": RuleProfile("FULL_CONTACT", "Full Contact", True, False, False, True, False, frozenset()),
     "POINT_FIGHTING": RuleProfile("POINT_FIGHTING", "Point Fighting", False, False, False, False, True, frozenset({"backfist"})),
     "LIGHT_CONTACT": RuleProfile("LIGHT_CONTACT", "Light Contact", False, False, False, False, False, frozenset()),
     "KICK_LIGHT": RuleProfile("KICK_LIGHT", "Kick Light", False, True, False, False, False, frozenset()),
+
+    # ---- Boxing -------------------------------------------------------------
+    # The one discipline the model observes completely: its whole scoring
+    # vocabulary is punches, and every punch class is already detected.
+    "BOXING": RuleProfile(
+        "BOXING", "Boxing", True, False, False, True, False, frozenset(),
+        sport="boxing", sport_label="Boxing",
+        allow_kick=False,
+        family_value=(("punch", 1.0),),
+    ),
+
+    # ---- Muay Thai ----------------------------------------------------------
+    # Punches, kicks and knees are observed. Elbows, clinch work and sweeps are
+    # scored in the sport and are not in the detector's vocabulary, so they are
+    # declared unobserved rather than silently excluded from the count.
+    "MUAY_THAI": RuleProfile(
+        "MUAY_THAI", "Muay Thai", True, True, True, True, False, frozenset({"spinning_backfist"}),
+        sport="muay_thai", sport_label="Muay Thai",
+        family_value=(("punch", 0.9), ("kick", 1.25), ("knee", 1.25)),
+        unobserved=("elbow strikes", "clinch control", "sweeps and dumps"),
+    ),
+
+    # ---- WT Taekwondo -------------------------------------------------------
+    # Kick-decided, and punches to the head are forbidden. Body punches score
+    # but rarely decide a bout, which the weighting reflects. Electronic
+    # scoring hardware is not something video can reproduce.
+    "WT_TAEKWONDO": RuleProfile(
+        "WT_TAEKWONDO", "WT Taekwondo", False, False, False, True, False, frozenset(),
+        sport="taekwondo", sport_label="Taekwondo",
+        allow_head_punch=False,
+        family_value=(("punch", 0.5), ("kick", 1.6)),
+        unobserved=("electronic body and head protector scoring", "turning-kick rotation bonuses"),
+    ),
+
+    # ---- MMA ----------------------------------------------------------------
+    # Standing exchanges only. Takedowns, ground position, control time,
+    # ground-and-pound and submissions decide most MMA rounds and none of them
+    # are in the detector's vocabulary; the two-fighter pose model is built for
+    # upright athletes. This profile is deliberately explicit that a standing
+    # striking read is all it offers.
+    "MMA": RuleProfile(
+        "MMA", "MMA (standing exchanges)", True, True, True, True, False, frozenset({"spinning_backfist"}),
+        sport="mma", sport_label="MMA",
+        family_value=(("punch", 1.0), ("kick", 1.15), ("knee", 1.2)),
+        unobserved=(
+            "takedowns and takedown defence",
+            "ground position and control time",
+            "ground-and-pound",
+            "submission attempts",
+            "elbow strikes",
+        ),
+    ),
 }
+
+
+SPORTS: dict[str, tuple[str, ...]] = {
+    "kickboxing": ("K1", "LOW_KICK", "FULL_CONTACT", "POINT_FIGHTING", "LIGHT_CONTACT", "KICK_LIGHT"),
+    "boxing": ("BOXING",),
+    "muay_thai": ("MUAY_THAI",),
+    "taekwondo": ("WT_TAEKWONDO",),
+    "mma": ("MMA",),
+}
+
+
+def sport_of(ruleset: str) -> str:
+    return RULESETS[normalize_ruleset(ruleset)].sport
+
+
+def unobserved_actions(ruleset: str) -> tuple[str, ...]:
+    """Actions this discipline scores that the analysis cannot see at all.
+
+    Surfaced in the report so a coach reads a striking summary as exactly that,
+    rather than as a complete account of the round.
+    """
+    return RULESETS[normalize_ruleset(ruleset)].unobserved
+
+
+def sport_unobserved(sport: str) -> tuple[str, ...]:
+    """Everything a sport scores that the analysis cannot see, deduplicated.
+
+    A sport is only as covered as its least-covered discipline, so this unions
+    across the rulesets rather than picking one. The upload page reads it to
+    tell a visitor what the report will be silent about *before* they spend an
+    hour uploading a bout that is decided on the ground.
+    """
+    seen: dict[str, None] = {}
+    for key in SPORTS.get(sport, ()):
+        for action in RULESETS[key].unobserved:
+            seen[action] = None
+    return tuple(seen)
 
 
 def normalize_ruleset(value: str) -> str:
@@ -40,6 +155,14 @@ def normalize_ruleset(value: str) -> str:
         "POINT_FIGHT": "POINT_FIGHTING",
         "LIGHT": "LIGHT_CONTACT",
         "KICKLIGHT": "KICK_LIGHT",
+        "BOX": "BOXING",
+        "MUAYTHAI": "MUAY_THAI",
+        "THAI": "MUAY_THAI",
+        "TAEKWONDO": "WT_TAEKWONDO",
+        "WT": "WT_TAEKWONDO",
+        "WTF": "WT_TAEKWONDO",
+        "WTF_TAEKWONDO": "WT_TAEKWONDO",
+        "TKD": "WT_TAEKWONDO",
     }
     key = aliases.get(key, key)
     if key not in RULESETS:
@@ -50,29 +173,47 @@ def normalize_ruleset(value: str) -> str:
 def event_legality(event: StrikeEvent, ruleset: str) -> tuple[bool, str]:
     profile = RULESETS[normalize_ruleset(ruleset)]
     technique = event.technique.lower().replace("_", "")
+    # Whole families first: a sport that does not permit a family at all makes
+    # every technique in it illegal, whatever the target.
+    if event.family == "kick" and not profile.allow_kick:
+        return False, f"Kicks are not legal in {profile.label}."
+    if event.family == "punch" and not profile.allow_punch:
+        return False, f"Punches are not legal in {profile.label}."
     if "backfist" in technique:
         normalized = "spinning_backfist" if "spinning" in technique else "backfist"
         if normalized not in profile.allowed_backfists:
             return False, f"{event.technique.replace('_', ' ').title()} is not legal in {profile.label}."
     if event.family == "knee" and not profile.allow_knee:
         return False, f"Knee strikes are not legal in {profile.label}."
+    # WT taekwondo permits punches to the body only; a punch to the head is a
+    # penalty, not a score, so it must not be counted as one.
+    if event.family == "punch" and event.target == "head" and not profile.allow_head_punch:
+        return False, f"Punches to the head are not legal in {profile.label}."
     if event.target == "leg" and not profile.allow_low_kick:
         return False, f"Leg attacks are not legal in {profile.label}."
     if event.target == "leg" and event.family == "punch":
-        return False, "Punches to the legs are illegal in every supported WAKO discipline."
+        return False, f"Punches to the legs are illegal in {profile.label}."
     if event.target == "leg" and event.family == "kick" and any(name in technique for name in ("frontkick", "pushkick", "sidekick", "spinningbackkick")):
         return False, f"This kick may not target the thigh in {profile.label}."
-    return True, "Legal technique and target for the selected WAKO discipline."
+    return True, f"Legal technique and target for {profile.label}."
 
 
 def is_legal_event(event: StrikeEvent, ruleset: str) -> bool:
     return event_legality(event, ruleset)[0]
 
 
-def _effective_value(event: StrikeEvent) -> float:
+def _effective_value(event: StrikeEvent, profile: RuleProfile | None = None) -> float:
+    """Score one supported action, weighted for the discipline being judged.
+
+    A kick and a punch are not worth the same everywhere: taekwondo is decided
+    by kicks, boxing has nothing to weigh a punch against, and Muay Thai
+    rewards kicks and knees over hands. Using one table for every sport would
+    quietly score a taekwondo round as though it were kickboxing.
+    """
     if event.outcome not in {"clean", "likely_landed"}:
         return 0.0
-    base = {"punch": 1.0, "kick": 1.15, "knee": 1.15}.get(event.family, 1.0)
+    weights = _weights(profile) if profile else {"punch": 1.0, "kick": 1.15, "knee": 1.15}
+    base = weights.get(event.family, 1.0)
     target = {"head": 1.25, "body": 1.0, "leg": 0.95, None: 0.85}.get(event.target, 0.85)
     contact = max(0.45, float(event.contact_confidence))
     confidence = max(0.50, float(event.confidence))
@@ -194,6 +335,17 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
     result = {
         "ruleset": key,
         "ruleset_label": profile.label,
+        "sport": profile.sport,
+        "sport_label": profile.sport_label,
+        # What this discipline scores that the analysis cannot see at all. A
+        # striking read of an MMA round is not a read of the round, and the
+        # report has to say which one it is giving you.
+        "unobserved_actions": list(profile.unobserved),
+        "coverage_note": (
+            f"Observed striking only. {profile.sport_label} also scores "
+            + ", ".join(profile.unobserved)
+            + ", which this analysis cannot see."
+        ) if profile.unobserved else "",
         "mode": "estimated_10_point_must" if profile.ring_sport else "estimated_points",
         "rounds": [],
         "totals": {"A": 0, "B": 0},
@@ -215,8 +367,8 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
     if profile.ring_sport:
         total_a_rounds = total_b_rounds = 0
         for r in sorted(by_round):
-            a_value = sum(_effective_value(e) for e in by_round[r]["A"])
-            b_value = sum(_effective_value(e) for e in by_round[r]["B"])
+            a_value = sum(_effective_value(e, profile) for e in by_round[r]["A"])
+            b_value = sum(_effective_value(e, profile) for e in by_round[r]["B"])
             diff = a_value - b_value
             kd_a = kd_counts.get(r, {}).get("A", 0)
             kd_b = kd_counts.get(r, {}).get("B", 0)

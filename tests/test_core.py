@@ -137,6 +137,81 @@ class ProductFoundationTests(unittest.TestCase):
         self.assertFalse(verify_password("wrong-password", first))
         self.assertEqual(normalize_email(" Athlete@Example.COM "), "athlete@example.com")
 
+    def _strike(self, family, technique, target, fighter="A"):
+        from core.types import StrikeEvent
+
+        return StrikeEvent(
+            fighter=fighter, opponent="B" if fighter == "A" else "A", round_number=1,
+            start_frame=0, peak_frame=1, end_frame=2, start_time=0.0, peak_time=0.1, end_time=0.2,
+            technique=technique, family=family, limb="x", outcome="clean", target=target,
+            confidence=1.0, contact_confidence=1.0, model_source="test",
+        )
+
+    def test_each_sport_enforces_its_own_legal_techniques(self):
+        """A ruleset that shares one legality table scores every sport as kickboxing."""
+        from core.scoring import event_legality
+
+        # Boxing: hands only.
+        self.assertFalse(event_legality(self._strike("kick", "right_round_kick", "body"), "BOXING")[0])
+        self.assertFalse(event_legality(self._strike("knee", "right_knee", "body"), "BOXING")[0])
+        self.assertTrue(event_legality(self._strike("punch", "jab", "head"), "BOXING")[0])
+
+        # WT taekwondo: kicks decide it, and a punch to the head is a penalty.
+        self.assertFalse(event_legality(self._strike("punch", "cross", "head"), "WT_TAEKWONDO")[0])
+        self.assertTrue(event_legality(self._strike("punch", "cross", "body"), "WT_TAEKWONDO")[0])
+        self.assertTrue(event_legality(self._strike("kick", "right_round_kick", "head"), "WT_TAEKWONDO")[0])
+
+        # Muay Thai and MMA permit the full observed striking set.
+        for ruleset in ("MUAY_THAI", "MMA"):
+            self.assertTrue(event_legality(self._strike("knee", "right_knee", "body"), ruleset)[0], ruleset)
+            self.assertTrue(event_legality(self._strike("kick", "left_round_kick", "leg"), ruleset)[0], ruleset)
+
+    def test_taekwondo_scores_kicks_above_punches(self):
+        """One shared weighting would score a taekwondo round as kickboxing."""
+        from core.scoring import RULESETS, _effective_value
+
+        kick = self._strike("kick", "right_round_kick", "head")
+        punch = self._strike("punch", "cross", "body")
+        tkd, boxing = RULESETS["WT_TAEKWONDO"], RULESETS["BOXING"]
+        self.assertGreater(_effective_value(kick, tkd), 2 * _effective_value(punch, tkd))
+        # Boxing has no other family to weigh a punch against.
+        self.assertGreater(_effective_value(punch, boxing), 0)
+
+    def test_a_sport_declares_the_actions_it_cannot_observe(self):
+        """The detector sees punches, kicks and knees. Nothing else.
+
+        A striking read of an MMA round is not a read of the round, so the
+        report has to say which one it is giving you rather than presenting a
+        partial count as complete.
+        """
+        from core.scoring import score_fight, unobserved_actions
+
+        self.assertEqual(unobserved_actions("BOXING"), ())
+        for ruleset, expected in (
+            ("MMA", "takedowns"), ("MUAY_THAI", "elbow"), ("WT_TAEKWONDO", "electronic"),
+        ):
+            actions = " ".join(unobserved_actions(ruleset))
+            self.assertIn(expected, actions, ruleset)
+            card = score_fight([], ruleset, [1])
+            self.assertTrue(card["coverage_note"], ruleset)
+            self.assertIn("cannot see", card["coverage_note"])
+        # A fully observed sport must not manufacture a caveat.
+        self.assertEqual(score_fight([], "BOXING", [1])["coverage_note"], "")
+
+    def test_every_sport_resolves_from_what_a_person_would_type(self):
+        from core.scoring import RULESETS, SPORTS, normalize_ruleset
+
+        for typed, expected in (
+            ("boxing", "BOXING"), ("Muay Thai", "MUAY_THAI"), ("thai", "MUAY_THAI"),
+            ("wtf", "WT_TAEKWONDO"), ("WTF Taekwondo", "WT_TAEKWONDO"), ("tkd", "WT_TAEKWONDO"),
+            ("mma", "MMA"), ("k-1", "K1"),
+        ):
+            self.assertEqual(normalize_ruleset(typed), expected, typed)
+        # Every ruleset belongs to exactly one sport, and every listed one exists.
+        listed = [key for keys in SPORTS.values() for key in keys]
+        self.assertEqual(sorted(listed), sorted(RULESETS))
+        self.assertEqual(len(listed), len(set(listed)))
+
     def test_withdrawn_coach_plan_does_not_downgrade_existing_subscribers(self):
         """An unknown plan key falls back to free, which would strip paid access."""
         from core.payments import PLANS, plan_for_key

@@ -292,6 +292,16 @@ class Settings:
 SETTINGS = Settings()
 
 # Rule labels shown everywhere in the product.
+# Grouped by sport for the upload form. The key order here is the order a
+# visitor sees, so the discipline most people arrive for stays first.
+RULESET_SPORTS = {
+    "kickboxing": "Kickboxing",
+    "boxing": "Boxing",
+    "muay_thai": "Muay Thai",
+    "taekwondo": "Taekwondo",
+    "mma": "MMA",
+}
+
 RULESET_LABELS = {
     "K1": "K-1",
     "LOW_KICK": "Low Kick",
@@ -299,6 +309,10 @@ RULESET_LABELS = {
     "POINT_FIGHTING": "Point Fighting",
     "LIGHT_CONTACT": "Light Contact",
     "KICK_LIGHT": "Kick Light",
+    "BOXING": "Boxing",
+    "MUAY_THAI": "Muay Thai",
+    "WT_TAEKWONDO": "WT Taekwondo",
+    "MMA": "MMA (standing exchanges)",
 }
 
 FIGHT_TYPES = ("competition", "sparring")
