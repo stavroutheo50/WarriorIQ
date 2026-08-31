@@ -30,9 +30,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.base_client.errors import OAuthError
 
 from app.state import (
-    AnalysisRunLost, claim_next_job, create_job, delete_job, finalize_job_from_worker,
-    get_job, list_jobs, prepare_job_run, record_worker_heartbeat, start_job_run,
-    update_job, update_job_for_worker, worker_status,
+    AnalysisRunLost, AnalysisStateNotPersisted, claim_next_job, create_job, delete_job,
+    finalize_job_from_worker, get_job, list_jobs, prepare_job_run, record_worker_heartbeat,
+    start_job_run, update_job, update_job_for_worker, worker_status,
 )
 from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
@@ -2079,10 +2079,20 @@ def start(request: Request, job_id: str, payload: StartPayload):
             plan = _request_plan(request)
             raise HTTPException(429, f"Your {plan['label']} plan includes {plan['limit_label'].lower()}. Your allowance will reset automatically.")
         update_job(job_id, {"usage_reserved": True})
-    analysis_run_id = prepare_job_run(job_id, {
-        "analysis_target": "BOTH", "focus_fighter": focus_fighter,
-        "fighter_a_box": fighter_a_box, "fighter_b_box": fighter_b_box,
-    })
+    try:
+        analysis_run_id = prepare_job_run(job_id, {
+            "analysis_target": "BOTH", "focus_fighter": focus_fighter,
+            "fighter_a_box": fighter_a_box, "fighter_b_box": fighter_b_box,
+        })
+    except AnalysisStateNotPersisted as exc:
+        if job.get("account_id") and get_job(job_id).get("usage_reserved"):
+            release_analysis(int(job["account_id"]), job_id)
+            update_job(job_id, {"usage_reserved": False})
+        LOGGER.error("analysis_queue_not_persisted job_id=%s", job_id, exc_info=exc)
+        raise HTTPException(
+            503,
+            "WarriorIQ could not queue this analysis. Your video and fighter selection are preserved.",
+        ) from exc
     if SETTINGS.analysis_worker_mode == "inprocess":
         executor.submit(_run_job, job_id, req, analysis_run_id)
     return _analysis_started_response(request, job_id)
@@ -2108,9 +2118,16 @@ def restart_interrupted_analysis(request: Request, job_id: str):
     if not isinstance(fighter_a_box, list) or len(fighter_a_box) != 4 or not isinstance(fighter_b_box, list) or len(fighter_b_box) != 4:
         raise HTTPException(409, "The saved session predates resumable analysis. Return to fighter selection once; your video is still available.")
     req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, focus_fighter)
-    analysis_run_id = prepare_job_run(job_id, {
-        "message": "Restarting the preserved analysis session",
-    })
+    try:
+        analysis_run_id = prepare_job_run(job_id, {
+            "message": "Restarting the preserved analysis session",
+        })
+    except AnalysisStateNotPersisted as exc:
+        LOGGER.error("analysis_queue_not_persisted job_id=%s", job_id, exc_info=exc)
+        raise HTTPException(
+            503,
+            "WarriorIQ could not queue this analysis. Your video and fighter selection are preserved.",
+        ) from exc
     if SETTINGS.analysis_worker_mode == "inprocess":
         executor.submit(_run_job, job_id, req, analysis_run_id)
     return _analysis_started_response(request, job_id)

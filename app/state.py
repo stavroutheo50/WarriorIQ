@@ -28,6 +28,10 @@ class AnalysisRunLost(RuntimeError):
     """Raised when an older worker no longer owns an analysis run."""
 
 
+class AnalysisStateNotPersisted(RuntimeError):
+    """Raised when a queued run cannot be written for a detached worker to claim."""
+
+
 def _json_safe(value: Any) -> Any:
     if is_dataclass(value):
         return _json_safe(asdict(value))
@@ -48,7 +52,10 @@ def _session_path(job_id: str) -> Path:
 
 def _write_session(job_id: str, job: dict) -> bool:
     path = _session_path(job_id)
-    temporary = path.with_name(f"{path.name}.{os.getpid()}.{id(job)}.tmp")
+    # Keep the staging name close to the final name. A long suffix pushed the
+    # temporary file past the Windows 260-character path limit on deep project
+    # directories, so the session silently failed to persist.
+    temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {key: value for key, value in job.items() if key not in _TRANSIENT_KEYS}
@@ -108,17 +115,17 @@ def create_job(job_id: str, data: dict) -> None:
         _write_session(job_id, job)
 
 
-def update_job(job_id: str, patch: dict) -> None:
+def update_job(job_id: str, patch: dict) -> bool:
     with _lock:
         # Always re-read persisted state. In external-worker mode the web and
         # GPU processes have separate memories and the file is their contract.
         job = _read_session(job_id) or _jobs.get(job_id)
         if job is None:
-            return
+            return False
         job.update(patch)
         job["updated_at_epoch"] = time.time()
         _jobs[job_id] = job
-        _write_session(job_id, job)
+        return _write_session(job_id, job)
 
 
 def get_job(job_id: str) -> dict | None:
@@ -169,7 +176,11 @@ def prepare_job_run(job_id: str, patch: dict) -> str:
         "analysis_run_id": analysis_run_id,
         **patch,
     }
-    update_job(job_id, reset)
+    # A detached worker discovers queued work only through this file. If it
+    # cannot be written the analysis would sit at "Queued" forever, so fail the
+    # request instead of stranding the fight silently.
+    if not update_job(job_id, reset) and SETTINGS.analysis_worker_mode != "inprocess":
+        raise AnalysisStateNotPersisted(f"Queued analysis {job_id} could not be persisted for a worker to claim")
     return analysis_run_id
 
 

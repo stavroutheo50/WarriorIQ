@@ -112,6 +112,41 @@ class DurableAnalysisStateTests(TestCase):
                 self.assertIsNone(state.claim_next_job("second-worker"))
                 state.delete_job("queued-job")
 
+    def test_unpersisted_queue_fails_loudly_when_a_detached_worker_must_claim(self):
+        """A detached worker finds queued work only on disk.
+
+        When the session cannot be written the analysis would otherwise sit at
+        "Queued" forever, so queueing must raise instead of stranding the fight.
+        """
+        previous_mode = SETTINGS.analysis_worker_mode
+        with TemporaryDirectory() as temporary:
+            try:
+                with patch.object(state, "OUTPUTS", Path(temporary)):
+                    state.create_job("strand-job", {"owner_key": "guest:test", "video_path": "fight.mp4"})
+                    with patch.object(state, "_write_session", return_value=False):
+                        object.__setattr__(SETTINGS, "analysis_worker_mode", "remote")
+                        with self.assertRaises(state.AnalysisStateNotPersisted):
+                            state.prepare_job_run("strand-job", {})
+
+                        # In-process runs keep the job in memory, so a failed
+                        # write must not block a local PyCharm analysis.
+                        object.__setattr__(SETTINGS, "analysis_worker_mode", "inprocess")
+                        self.assertTrue(state.prepare_job_run("strand-job", {}))
+                    state.delete_job("strand-job")
+            finally:
+                object.__setattr__(SETTINGS, "analysis_worker_mode", previous_mode)
+
+    def test_session_staging_name_stays_close_to_the_final_name(self):
+        """A long staging suffix pushed the temp file past the Windows path limit."""
+        with TemporaryDirectory() as temporary:
+            with patch.object(state, "OUTPUTS", Path(temporary)):
+                state.create_job("path-job", {"owner_key": "guest:test", "video_path": "fight.mp4"})
+                final = state._session_path("path-job")
+                self.assertTrue(final.is_file())
+                staged = final.with_name(f"{final.name}.{'a' * 8}.tmp")
+                self.assertLessEqual(len(str(staged)) - len(str(final)), 16)
+                state.delete_job("path-job")
+
     def test_remote_gpu_worker_claims_downloads_updates_and_publishes_one_generation(self):
         client = TestClient(app)
         previous_mode = SETTINGS.analysis_worker_mode
