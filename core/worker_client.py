@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import shutil
+import socket
 import ssl
 import time
 import urllib.error
@@ -139,6 +141,32 @@ class RemoteWorkerClient:
             raise RemoteWorkerError(f"Artifact upload failed: {type(exc).__name__}") from exc
         finally:
             connection.close()
+
+
+def send_magic_packet(mac: str, host: str, port: int = 9, timeout: float = 4.0) -> bool:
+    """Wake a sleeping analysis machine over the network.
+
+    The analysis GPU lives on a home connection behind NAT, so the queue cannot
+    reach in and the machine cannot poll while it is asleep. A Wake-on-LAN magic
+    packet is the one thing a sleeping network card still listens for: six 0xFF
+    bytes followed by the target MAC repeated sixteen times, sent as UDP.
+
+    Best effort by design. The fight is already queued durably and the scheduled
+    drain still collects it, so a blocked port or a changed address must never
+    fail an upload -- it only costs the visitor the wait until the next drain.
+    """
+    digits = re.sub(r"[^0-9a-fA-F]", "", mac or "")
+    if len(digits) != 12 or not host:
+        return False
+    payload = b"\xff" * 6 + bytes.fromhex(digits) * 16
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.sendto(payload, (host, int(port)))
+        return True
+    except OSError:
+        return False
 
 
 def wake_remote_worker(wake_url: str, token: str, job_id: str, timeout: float = 8.0) -> bool:

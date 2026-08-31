@@ -1148,15 +1148,29 @@ def _require_analysis_capacity() -> dict:
 
 
 def _wake_analysis_worker(job_id: str) -> None:
-    """Start a scale-to-zero GPU in the background, never blocking the upload."""
-    if not SETTINGS.worker_wake_url:
+    """Rouse the analysis machine in the background, never blocking the upload.
+
+    Two mechanisms, either or both: a webhook that starts a scale-to-zero GPU,
+    and a Wake-on-LAN packet for a machine that sleeps between fights. Both are
+    accelerators only -- the fight is queued durably either way.
+    """
+    if not SETTINGS.worker_wake_url and not (SETTINGS.wol_mac and SETTINGS.wol_host):
         return
 
     def run() -> None:
-        from core.worker_client import wake_remote_worker
+        from core.worker_client import send_magic_packet, wake_remote_worker
 
-        woken = wake_remote_worker(SETTINGS.worker_wake_url, SETTINGS.worker_token, job_id)
-        LOGGER.info("analysis_worker_wake job_id=%s delivered=%s", job_id, woken)
+        if SETTINGS.wol_mac and SETTINGS.wol_host:
+            # Sent twice: a card waking from a cold sleep routinely misses the
+            # first packet, and a duplicate costs 102 bytes.
+            sent = any(
+                send_magic_packet(SETTINGS.wol_mac, SETTINGS.wol_host, SETTINGS.wol_port)
+                for _ in range(2)
+            )
+            LOGGER.info("analysis_worker_wol job_id=%s sent=%s", job_id, sent)
+        if SETTINGS.worker_wake_url:
+            woken = wake_remote_worker(SETTINGS.worker_wake_url, SETTINGS.worker_token, job_id)
+            LOGGER.info("analysis_worker_wake job_id=%s delivered=%s", job_id, woken)
 
     threading.Thread(target=run, name=f"wiq-wake-{job_id}", daemon=True).start()
 

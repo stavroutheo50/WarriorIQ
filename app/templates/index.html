@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block head %}<link rel="stylesheet" href="/static/components.css">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/components.css"><script src="/static/upload-compress.js" defer></script>{% endblock %}
 {% block title %}WarriorIQ · AI Fight Analysis for Kickboxing{% endblock %}
 {% block description %}Upload a kickboxing fight to WarriorIQ for evidence-linked analysis, performance insights, coaching priorities and a fighter-specific training plan.{% endblock %}
 {% block content %}
@@ -89,9 +89,21 @@
   const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
   const restore=(message)=>{progress.hidden=false;progress.dataset.tone='error';progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
   videoInput.addEventListener('change',setReady);
-  form.addEventListener('submit',event=>{
+  form.addEventListener('submit',async event=>{
     if(!videoInput.files[0]||!form.reportValidity())return;
     event.preventDefault();
+    let file=videoInput.files[0];
+    // Shrink oversized phone footage before it crosses a mobile uplink. The
+    // analyser infers at 1280 and samples at most 15fps, so a 4K source is
+    // bandwidth the analysis never reads. Any failure returns the original.
+    if(window.wiqShrinkVideo){
+      progress.hidden=false;progress.dataset.tone='active';uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');
+      progressText.textContent='Preparing video for upload…';
+      const smaller=await window.wiqShrinkVideo(file,f=>{const pct=Math.round(f*100);progressBar.style.width=`${pct}%`;progressText.textContent=`Preparing video · ${pct}% (this makes the upload much faster)`;uploadSubmit.textContent=`Preparing ${pct}%`;});
+      if(smaller){window.wiqToast(`Reduced to ${fmtMB(smaller.size)} for a faster upload.`,'success');file=smaller;}
+      progressBar.style.width='2%';
+    }
+    const body=new FormData(form);body.set('video',file);
     const request=new XMLHttpRequest();
     progress.hidden=false;progress.dataset.tone='active';progressBar.style.width='2%';progressText.textContent='Uploading fight video…';uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');uploadSubmit.textContent='Uploading 0%';
     request.open('POST',form.action,true);request.setRequestHeader('Accept','application/json');
@@ -112,7 +124,7 @@
     request.addEventListener('load',()=>{let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign('/signup?next=%2F%23analyze');return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';location.assign(payload.next_url);return}restore(payload.detail||'WarriorIQ could not prepare this video. Please try again.')});
     request.addEventListener('error',()=>restore('The upload connection stopped. Check your signal and try again.'));
     request.addEventListener('abort',()=>restore('The upload was cancelled. Your video is still selected.'));
-    request.send(new FormData(form));
+    request.send(body);
   });
 })();
 </script>{% endblock %}

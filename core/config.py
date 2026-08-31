@@ -216,6 +216,14 @@ class Settings:
     # drains the queue and shuts down again. Polling a GPU would bill idle time;
     # waking one on demand bills only the analysis itself.
     worker_wake_url: str = os.getenv("WARRIORIQ_WORKER_WAKE_URL", "").strip()
+    # Wake-on-LAN for an analysis machine that sleeps between fights. The queue
+    # cannot reach a sleeping PC and a sleeping PC cannot poll, so the web
+    # process sends a magic packet the network card still listens for. Needs the
+    # router to forward this UDP port to the LAN broadcast address. Purely an
+    # accelerator: the scheduled drain still collects the fight if it fails.
+    wol_mac: str = os.getenv("WARRIORIQ_WOL_MAC", "").strip()
+    wol_host: str = os.getenv("WARRIORIQ_WOL_HOST", "").strip()
+    wol_port: int = int(os.getenv("WARRIORIQ_WOL_PORT", "9"))
     worker_remote_url: str = os.getenv("WARRIORIQ_WORKER_REMOTE_URL", "").rstrip("/")
     worker_token: str = env_secret("WARRIORIQ_WORKER_TOKEN")
     worker_artifact_max_bytes: int = max(
