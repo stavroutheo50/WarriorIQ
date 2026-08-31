@@ -29,7 +29,7 @@
             so an MMA bout decided on the ground is never a surprise later. #}
         {% for sport, name in sports.items() %}
         <p class="sport-coverage" data-sport="{{sport}}" data-covered="{{ "no" if sport_unobserved[sport] else "yes" }}"{% if not loop.first %} hidden{% endif %}>
-          {% if sport_unobserved[sport] %}<b>Striking read only.</b> WarriorIQ scores the punches, kicks and knees it can see. It does not read {{ sport_unobserved[sport] | join(", ") }} — your report says so on every page.
+          {% if sport_unobserved[sport] %}<b>Striking read only.</b> WarriorIQ scores the punches, kicks and knees it can see. It does not read {{ sport_unobserved[sport] | join(", ") }} — your report repeats this next to the score.
           {% else %}<b>Full scoring coverage.</b> Every action that scores in {{name}} is one WarriorIQ observes directly.{% endif %}
         </p>
         {% endfor %}

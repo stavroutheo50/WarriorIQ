@@ -601,6 +601,34 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("requestVideoFrameCallback", template)
         self.assertIn("metadata.mediaTime", template)
 
+    def test_a_score_is_never_shown_without_the_limits_of_the_sport(self):
+        """The scorer computes a coverage note; the pages have to print it.
+
+        score_fight has emitted coverage_note and unobserved_actions since the
+        sports expansion, and for a while nothing read either one: the upload
+        page promised a disclosure the report never made. Both places that
+        show a number now carry it, and a shared link carries it too because
+        the person opening one never saw the upload page.
+        """
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        result = (templates / "result.html").read_text(encoding="utf-8")
+        shared = (templates / "shared.html").read_text(encoding="utf-8")
+
+        for page, source in (("result.html", result), ("shared.html", shared)):
+            with self.subTest(page=page):
+                self.assertIn("report.scorecard.coverage_note", source)
+
+        # The illegal-move panel named one federation's rules for every sport,
+        # which is wrong the moment a boxing or MMA bout is scored.
+        self.assertNotIn(">WAKO rules<", result)
+        self.assertIn("report.scorecard.sport_label", result)
+
+    def test_the_upload_page_promises_only_the_disclosure_that_exists(self):
+        """Copy that overstates the product is a defect like any other."""
+        index = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("repeats this next to the score", index)
+        self.assertNotIn("says so on every page", index)
+
     def test_evidence_replay_starts_one_second_before_exact_timestamp(self):
         replay = (Path(__file__).resolve().parents[1] / "app" / "templates" / "replay.html").read_text(encoding="utf-8")
         result = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")

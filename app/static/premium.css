@@ -425,3 +425,19 @@ p { max-width: 68ch; }
   .sport-rail { font-size: 11px; gap: 6px 8px; }
   .sport-rail b + b::before { margin-right: 8px; }
 }
+
+/* --- Coverage limit on the report ----------------------------------------
+   The same disclosure the picker makes, repeated where the number actually
+   appears. Amber rather than red: nothing here is wrong, the analysis is
+   simply answering a narrower question than the sport asks.
+   --------------------------------------------------------------------------- */
+.coverage-notice {
+  border-left-color: var(--wiq-warning);
+}
+
+.coverage-line {
+  margin-top: 8px;
+  padding-left: 11px;
+  border-left: 2px solid var(--wiq-warning);
+  color: var(--wiq-text-secondary);
+}
