@@ -172,6 +172,10 @@ class Settings:
     # Remote mode lets a GPU machine claim jobs over HTTPS instead of requiring
     # the web server and worker to share a filesystem. The token must be the
     # same high-entropy secret on both machines and is never sent to browsers.
+    # A detached worker keeps the queue durable, so a fight can be accepted while
+    # the analysis machine is switched off and claimed when it next connects.
+    # Turn this off to refuse uploads whenever no worker is currently online.
+    accept_deferred_analysis: bool = env_bool("WARRIORIQ_ACCEPT_DEFERRED_ANALYSIS", True)
     worker_remote_url: str = os.getenv("WARRIORIQ_WORKER_REMOTE_URL", "").rstrip("/")
     worker_token: str = os.getenv("WARRIORIQ_WORKER_TOKEN", "").strip()
     worker_artifact_max_bytes: int = max(

@@ -112,6 +112,45 @@ class DurableAnalysisStateTests(TestCase):
                 self.assertIsNone(state.claim_next_job("second-worker"))
                 state.delete_job("queued-job")
 
+    def test_fight_is_queued_while_the_analysis_machine_is_offline(self):
+        """A durable queue lets a fight wait for the GPU machine to reconnect.
+
+        Refusing here is what made the public site look broken whenever the
+        analysis machine was switched off.
+        """
+        from app.main import _analysis_queue_decision
+
+        previous_mode = SETTINGS.analysis_worker_mode
+        previous_deferred = SETTINGS.accept_deferred_analysis
+        try:
+            object.__setattr__(SETTINGS, "accept_deferred_analysis", True)
+            object.__setattr__(SETTINGS, "analysis_worker_mode", "remote")
+
+            offline = {"available": False, "reason": "worker_heartbeat_missing"}
+            with patch("app.main.worker_status", return_value=offline):
+                self.assertEqual(
+                    _analysis_queue_decision(), {"accepted": True, "deferred": True}
+                )
+
+            # Nothing would ever claim these, so they must still be refused.
+            for reason in ("analysis_dependencies_missing", "worker_token_missing", "worker_mode_invalid"):
+                with patch("app.main.worker_status", return_value={"available": False, "reason": reason}):
+                    self.assertFalse(_analysis_queue_decision()["accepted"], reason)
+
+            # An in-process server has no detached worker to wait for.
+            object.__setattr__(SETTINGS, "analysis_worker_mode", "inprocess")
+            with patch("app.main.worker_status", return_value=offline):
+                self.assertFalse(_analysis_queue_decision()["accepted"])
+
+            # The operator can switch deferred acceptance off entirely.
+            object.__setattr__(SETTINGS, "analysis_worker_mode", "remote")
+            object.__setattr__(SETTINGS, "accept_deferred_analysis", False)
+            with patch("app.main.worker_status", return_value=offline):
+                self.assertFalse(_analysis_queue_decision()["accepted"])
+        finally:
+            object.__setattr__(SETTINGS, "analysis_worker_mode", previous_mode)
+            object.__setattr__(SETTINGS, "accept_deferred_analysis", previous_deferred)
+
     def test_unpersisted_queue_fails_loudly_when_a_detached_worker_must_claim(self):
         """A detached worker finds queued work only on disk.
 

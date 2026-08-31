@@ -1083,8 +1083,47 @@ def _run_job(job_id: str, req: AnalysisRequest, analysis_run_id: str):
             })
 
 
-def _analysis_started_response(request: Request, job_id: str) -> JSONResponse:
-    response = JSONResponse({"ok": True, "progress_url": f"/progress/{job_id}"})
+DEFERRED_ANALYSIS_MESSAGE = (
+    "Waiting for the analysis machine to connect. Your fight is saved and starts automatically."
+)
+
+
+def _analysis_queue_decision() -> dict:
+    """Decide whether a fight can be queued now, later, or not at all.
+
+    A detached worker keeps queued work on disk, so a fight can wait for the
+    analysis machine to reconnect instead of being refused. A server that is
+    misconfigured or missing the vision stack would never process the fight,
+    so those cases must still be refused rather than queued forever.
+    """
+    status = worker_status()
+    if status.get("available"):
+        return {"accepted": True, "deferred": False}
+    deferrable = (
+        SETTINGS.accept_deferred_analysis
+        and SETTINGS.analysis_worker_mode in {"external", "remote"}
+        and status.get("reason") == "worker_heartbeat_missing"
+    )
+    return {"accepted": deferrable, "deferred": deferrable}
+
+
+def _require_analysis_capacity() -> dict:
+    decision = _analysis_queue_decision()
+    if not decision["accepted"]:
+        raise HTTPException(
+            503,
+            "The fight-analysis worker is temporarily unavailable. Your video and fighter selection are preserved.",
+        )
+    return decision
+
+
+def _analysis_started_response(request: Request, job_id: str, deferred: bool = False) -> JSONResponse:
+    response = JSONResponse({
+        "ok": True,
+        "progress_url": f"/progress/{job_id}",
+        "deferred": deferred,
+        **({"notice": DEFERRED_ANALYSIS_MESSAGE} if deferred else {}),
+    })
     response.set_cookie(
         ACTIVE_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
         httponly=True, samesite="lax", secure=_request_is_secure(request),
@@ -2039,11 +2078,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
         raise HTTPException(404)
     if job.get("status") in {"queued", "running"}:
         return _analysis_started_response(request, job_id)
-    if not worker_status().get("available"):
-        raise HTTPException(
-            503,
-            "The fight-analysis worker is temporarily unavailable. Your video and fighter selection are preserved.",
-        )
+    capacity = _require_analysis_capacity()
     video_width = float(job.get("video_width") or 0)
     video_height = float(job.get("video_height") or 0)
     if video_width <= 0 or video_height <= 0:
@@ -2083,6 +2118,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
         analysis_run_id = prepare_job_run(job_id, {
             "analysis_target": "BOTH", "focus_fighter": focus_fighter,
             "fighter_a_box": fighter_a_box, "fighter_b_box": fighter_b_box,
+            **({"message": DEFERRED_ANALYSIS_MESSAGE} if capacity["deferred"] else {}),
         })
     except AnalysisStateNotPersisted as exc:
         if job.get("account_id") and get_job(job_id).get("usage_reserved"):
@@ -2095,7 +2131,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
         ) from exc
     if SETTINGS.analysis_worker_mode == "inprocess":
         executor.submit(_run_job, job_id, req, analysis_run_id)
-    return _analysis_started_response(request, job_id)
+    return _analysis_started_response(request, job_id, capacity["deferred"])
 
 
 @app.post("/api/restart/{job_id}")
@@ -2105,11 +2141,7 @@ def restart_interrupted_analysis(request: Request, job_id: str):
         raise HTTPException(404)
     if job.get("status") in {"queued", "running"}:
         return _analysis_started_response(request, job_id)
-    if not worker_status().get("available"):
-        raise HTTPException(
-            503,
-            "The fight-analysis worker is temporarily unavailable. Your video and fighter selection are preserved.",
-        )
+    capacity = _require_analysis_capacity()
     if job.get("status") != "interrupted":
         raise HTTPException(409, "Only an analysis interrupted by a server restart can be resumed here.")
     fighter_a_box = job.get("fighter_a_box")
@@ -2120,7 +2152,7 @@ def restart_interrupted_analysis(request: Request, job_id: str):
     req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, focus_fighter)
     try:
         analysis_run_id = prepare_job_run(job_id, {
-            "message": "Restarting the preserved analysis session",
+            "message": DEFERRED_ANALYSIS_MESSAGE if capacity["deferred"] else "Restarting the preserved analysis session",
         })
     except AnalysisStateNotPersisted as exc:
         LOGGER.error("analysis_queue_not_persisted job_id=%s", job_id, exc_info=exc)
@@ -2130,7 +2162,7 @@ def restart_interrupted_analysis(request: Request, job_id: str):
         ) from exc
     if SETTINGS.analysis_worker_mode == "inprocess":
         executor.submit(_run_job, job_id, req, analysis_run_id)
-    return _analysis_started_response(request, job_id)
+    return _analysis_started_response(request, job_id, capacity["deferred"])
 
 
 @app.get("/progress/{job_id}", response_class=HTMLResponse)
