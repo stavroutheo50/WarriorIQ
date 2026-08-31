@@ -213,12 +213,33 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
                 return 1
             time.sleep(max(2.0, SETTINGS.worker_poll_seconds))
             continue
-        if claimed:
-            run_remote_claimed_job(client, claimed)
-        elif once:
-            return 0
-        else:
-            time.sleep(SETTINGS.worker_poll_seconds)
+        except Exception:
+            # A long-lived worker must outlive surprises. Only connection
+            # faults were handled above, so anything else -- a decode error, a
+            # transient filesystem failure, a bug in one job's payload -- ended
+            # the process and left the queue unattended until someone noticed
+            # and restarted it by hand. Log it and carry on; the job's own
+            # lease expires and the fight becomes claimable again.
+            LOGGER.exception("Unexpected worker failure; continuing to poll")
+            if once:
+                return 1
+            time.sleep(max(2.0, SETTINGS.worker_poll_seconds))
+            continue
+        try:
+            if claimed:
+                run_remote_claimed_job(client, claimed)
+            elif once:
+                return 0
+            else:
+                time.sleep(SETTINGS.worker_poll_seconds)
+        except AnalysisRunLost:
+            # A newer run or a recovery already owns this fight.
+            LOGGER.warning("Analysis run ownership lost; returning to the queue")
+        except Exception:
+            LOGGER.exception("Analysis failed unexpectedly; continuing to poll")
+            if once:
+                return 1
+            time.sleep(max(2.0, SETTINGS.worker_poll_seconds))
 
 
 if __name__ == "__main__":

@@ -112,6 +112,36 @@ class DurableAnalysisStateTests(TestCase):
                 self.assertIsNone(state.claim_next_job("second-worker"))
                 state.delete_job("queued-job")
 
+    def test_worker_outlives_faults_that_are_not_connection_errors(self):
+        """A long-lived worker must not die on a surprise.
+
+        Only RemoteWorkerError was handled, so any other exception ended the
+        process and left the queue unattended until someone noticed and
+        restarted it by hand -- which is exactly what happened in production.
+        """
+        import worker as worker_module
+        from core.worker_client import RemoteWorkerError
+
+        seen = {"n": 0}
+
+        def flaky(client):
+            seen["n"] += 1
+            if seen["n"] == 1:
+                raise ValueError("not a connection error")
+            if seen["n"] == 2:
+                raise RemoteWorkerError("server returned 500")
+            if seen["n"] == 3:
+                raise KeyError("malformed payload")
+            raise SystemExit(0)
+
+        with patch.object(worker_module, "retry_heartbeat", flaky), \
+             patch.object(worker_module.time, "sleep", lambda seconds: None):
+            with self.assertRaises(SystemExit):
+                worker_module.run_remote_worker("test-worker")
+
+        # Three distinct faults, and the loop was still polling after each.
+        self.assertEqual(seen["n"], 4)
+
     def test_wake_hook_never_blocks_or_breaks_the_upload(self):
         """The fight is already queued durably, so a failed wake must be harmless."""
         from core.worker_client import wake_remote_worker
