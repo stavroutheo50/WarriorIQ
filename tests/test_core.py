@@ -137,6 +137,27 @@ class ProductFoundationTests(unittest.TestCase):
         self.assertFalse(verify_password("wrong-password", first))
         self.assertEqual(normalize_email(" Athlete@Example.COM "), "athlete@example.com")
 
+    def test_pasted_secrets_survive_panel_wrapper_characters(self):
+        """A wrapped secret must authenticate, not fail as a wrong password.
+
+        Copying a token between a hosting panel and a .env file routinely picks
+        up angle brackets left from a <placeholder> or defensive quotes. The
+        wrapper is never part of the secret, but it produces a bare 401 that is
+        indistinguishable from a genuinely wrong token.
+        """
+        import os
+
+        from core.config import env_secret
+
+        for raw in ("<tok3n>", '"tok3n"', "'tok3n'", "  <tok3n>  ", "<<tok3n>>", "tok3n"):
+            os.environ["WIQ_TEST_SECRET"] = raw
+            self.assertEqual(env_secret("WIQ_TEST_SECRET"), "tok3n", raw)
+        # An empty or wrapper-only value must stay empty, never become a wrapper.
+        for raw in ("", "<>", '""'):
+            os.environ["WIQ_TEST_SECRET"] = raw
+            self.assertEqual(env_secret("WIQ_TEST_SECRET"), "", raw)
+        os.environ.pop("WIQ_TEST_SECRET", None)
+
     def test_small_sources_are_analysed_at_a_larger_inference_size(self):
         """Low-resolution footage carries very small fighters.
 

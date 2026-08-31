@@ -23,6 +23,22 @@ for path in (UPLOADS, OUTPUTS, MODELS, DATASET, ULTRALYTICS_CONFIG, HUGGINGFACE_
     path.mkdir(parents=True, exist_ok=True)
 
 
+def env_secret(name: str, default: str = "") -> str:
+    """Read a shared secret, tolerating how hosting panels mangle pasted values.
+
+    A secret is usually copied by hand from a control panel into a .env file or
+    back again, and it commonly arrives wrapped: angle brackets left over from a
+    placeholder like <token>, or quotes added to be safe. The wrapper is never
+    part of the secret, but it makes authentication fail with a bare 401 that
+    looks identical to a wrong password, so it is stripped here rather than
+    debugged again at every call site.
+    """
+    value = os.getenv(name, default).strip()
+    while len(value) >= 2 and value[0] in "<\"'" and value[-1] in ">\"'":
+        value = value[1:-1].strip()
+    return value
+
+
 def env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -188,7 +204,7 @@ class Settings:
     # waking one on demand bills only the analysis itself.
     worker_wake_url: str = os.getenv("WARRIORIQ_WORKER_WAKE_URL", "").strip()
     worker_remote_url: str = os.getenv("WARRIORIQ_WORKER_REMOTE_URL", "").rstrip("/")
-    worker_token: str = os.getenv("WARRIORIQ_WORKER_TOKEN", "").strip()
+    worker_token: str = env_secret("WARRIORIQ_WORKER_TOKEN")
     worker_artifact_max_bytes: int = max(
         10 * 1024 * 1024,
         int(os.getenv("WARRIORIQ_WORKER_ARTIFACT_MAX_BYTES", str(256 * 1024 * 1024))),
