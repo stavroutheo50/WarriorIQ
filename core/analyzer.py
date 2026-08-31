@@ -319,7 +319,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     action_engine = ActionEngine()
     defense_engine = DefenseEngine()
     metrics = MetricsAccumulator(info.width, info.height)
-    quality = QualityController(info.fps)
+    quality = QualityController(info.fps, info.width, info.height)
     classifier = {
         "action_classifier": "warrioriq_temporal_model" if action_engine.temporal.available else "multi_frame_temporal_rules",
         "custom_temporal_checkpoint_loaded": bool(action_engine.temporal.available),

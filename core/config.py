@@ -51,6 +51,12 @@ class Settings:
     device: str = os.getenv("WARRIORIQ_DEVICE", "auto")
     default_imgsz: int = int(os.getenv("WARRIORIQ_IMGSZ", "640"))
     min_imgsz: int = int(os.getenv("WARRIORIQ_MIN_IMGSZ", "512"))
+    # Fighters in a wide or low-resolution recording occupy very few pixels.
+    # Inferring a 480px-wide video at 640 barely upscales it and the athletes
+    # stay under the size the detector resolves reliably, so a small source is
+    # analysed at a larger inference size instead.
+    low_resolution_edge: int = int(os.getenv("WARRIORIQ_LOW_RES_EDGE", "960"))
+    low_resolution_imgsz: int = int(os.getenv("WARRIORIQ_LOW_RES_IMGSZ", "1280"))
     detection_conf: float = float(os.getenv("WARRIORIQ_DET_CONF", "0.20"))
     # Fighter drawing is fully manual. Candidate detection is only a visual
     # advisory, so free-tier web instances can skip loading YOLO on this page.

@@ -11,16 +11,30 @@ from core.identity import appearance_hist, pose_signature
 from core.types import PersonObservation
 
 
+def inference_size(source_width: int, source_height: int) -> int:
+    """Choose the detector input size for a source resolution.
+
+    A fighter in a wide ringside shot is only a few dozen pixels tall. Running a
+    small source at the standard size barely upscales it, so the athletes stay
+    below what pose estimation resolves and only the nearest person is found.
+    Large sources keep the tuned default, which already downscales them.
+    """
+    long_edge = max(int(source_width or 0), int(source_height or 0))
+    if 0 < long_edge < SETTINGS.low_resolution_edge:
+        return max(SETTINGS.default_imgsz, SETTINGS.low_resolution_imgsz)
+    return SETTINGS.default_imgsz
+
+
 class QualityController:
     """Adaptive analysis quality while respecting the <= video-length target."""
 
-    def __init__(self, source_fps: float):
+    def __init__(self, source_fps: float, source_width: int = 0, source_height: int = 0):
         self.source_fps = max(1.0, float(source_fps))
         self.target_fps = min(self.source_fps, SETTINGS.target_tracking_fps)
         self.min_fps = min(self.source_fps, SETTINGS.min_tracking_fps)
         self.max_fps = min(self.source_fps, SETTINGS.max_tracking_fps)
         self.stride = max(1, round(self.source_fps / self.target_fps))
-        self.imgsz = SETTINGS.default_imgsz
+        self.base_imgsz = self.imgsz = inference_size(source_width, source_height)
         self.mode = "balanced"
         self.last_adjust = 0
 
@@ -47,7 +61,9 @@ class QualityController:
             self.mode = "economy"
         elif speed > 1.65:
             fps = min(self.max_fps, fps * 1.12)
-            self.imgsz = min(SETTINGS.default_imgsz, self.imgsz + 32)
+            # Recover toward this source's own size, not the global default, so
+            # a low-resolution fight is not permanently capped at 640.
+            self.imgsz = min(self.base_imgsz, self.imgsz + 32)
             self.mode = "high"
         elif speed > 1.20:
             self.mode = "balanced"

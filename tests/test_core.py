@@ -137,6 +137,33 @@ class ProductFoundationTests(unittest.TestCase):
         self.assertFalse(verify_password("wrong-password", first))
         self.assertEqual(normalize_email(" Athlete@Example.COM "), "athlete@example.com")
 
+    def test_small_sources_are_analysed_at_a_larger_inference_size(self):
+        """Low-resolution footage carries very small fighters.
+
+        Measured on a real 480x220 WAKO bout: at the standard 640 the detector
+        found 1.6 people per frame and missed both athletes, resolving only the
+        referee. At 1280 it found 5.9 for 31% more time.
+        """
+        from core.config import SETTINGS
+        from core.pose_tracker import inference_size
+
+        self.assertEqual(inference_size(480, 220), SETTINGS.low_resolution_imgsz)
+        self.assertEqual(inference_size(854, 480), SETTINGS.low_resolution_imgsz)
+        # Large sources are downscaled anyway and keep the tuned default.
+        self.assertEqual(inference_size(1920, 1080), SETTINGS.default_imgsz)
+        self.assertEqual(inference_size(1280, 720), SETTINGS.default_imgsz)
+        # An unknown size must not silently upscale every analysis.
+        self.assertEqual(inference_size(0, 0), SETTINGS.default_imgsz)
+
+    def test_quality_controller_recovers_to_this_sources_own_size(self):
+        """Recovery must not cap a low-resolution fight back at the global default."""
+        from core.config import SETTINGS
+        from core.pose_tracker import QualityController
+
+        controller = QualityController(30.0, 480, 220)
+        self.assertEqual(controller.base_imgsz, SETTINGS.low_resolution_imgsz)
+        self.assertEqual(controller.imgsz, SETTINGS.low_resolution_imgsz)
+
     def test_quality_guardian_reports_measured_limitations(self):
         result = quality_summary(width=640, height=360, fps=15, brightness=22, sharpness=18)
         self.assertEqual(result["status"], "review")
