@@ -54,15 +54,16 @@
   <meta name="twitter:card" content="summary"><meta name="twitter:title" content="{{page_title|striptags|trim}}"><meta name="twitter:description" content="{{page_description|striptags|trim}}">
   {% if request.state.social_image_url %}<meta name="twitter:image" content="{{request.state.social_image_url}}">{% endif %}
   <title>{{page_title|striptags|trim}}</title>
+  <link rel="preload" href="/static/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/navigation.css">
-  <link rel="stylesheet" href="/static/fixes.css?v=20260831-ui6">
-  <link rel="stylesheet" href="/static/product.css?v=20260831-ui6">
+  <link rel="stylesheet" href="/static/fixes.css?v=20260831-ui7">
+  <link rel="stylesheet" href="/static/product.css?v=20260831-ui7">
   <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="96x96" href="/static/warrioriq-logo-96.png"><link rel="icon" type="image/png" sizes="192x192" href="/static/warrioriq-logo-192.png"><link rel="apple-touch-icon" sizes="180x180" href="/static/warrioriq-logo-180.png">
   {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/"},{"@type":"Organization","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/","logo":"{{request.state.social_image_url}}"},{"@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-linked kickboxing fight analysis for athletes and coaches.","url":"{{request.state.site_url}}/"}]}</script>{% endif %}
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/premium.css?v=20260831-ui6">
-  <link rel="stylesheet" href="/static/motion.css?v=20260831-ui6">
+  <link rel="stylesheet" href="/static/premium.css?v=20260831-ui7">
+  <link rel="stylesheet" href="/static/motion.css?v=20260831-ui7">
 </head>
 {% set page_key = request.url.path.strip('/').split('/')[0] if request.url.path.strip('/') else 'home' %}
 <body data-page="{{page_key}}">
@@ -107,5 +108,5 @@
     document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{if(event.defaultPrevented||form.dataset.async==='true')return;const submitter=event.submitter;if(!submitter||submitter.name||submitter.dataset.keepLabel==='true')return;submitter.dataset.originalLabel=submitter.textContent;submitter.textContent=submitter.dataset.loadingLabel||'Working…';submitter.setAttribute('aria-busy','true');submitter.disabled=true}));
   })();
   </script>
-  <script src="/static/motion.js?v=20260831-ui6" defer></script>
+  <script src="/static/motion.js?v=20260831-ui7" defer></script>
 </body></html>

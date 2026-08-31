@@ -165,3 +165,119 @@ html::after {
 @media (forced-colors: active) {
   html::before, html::after { display: none; }
 }
+
+/* ===========================================================================
+   Redesign layer.
+   =========================================================================== */
+
+/* --- The typeface ---------------------------------------------------------
+   The stylesheets asked for Inter and no webfont was ever served, so the whole
+   product fell back to Segoe UI or Arial. The design was drawn for a typeface
+   it never received, which is most of why it read as generic. Self-hosted
+   rather than loaded from Google Fonts: this is an EU product with a strict
+   privacy posture, and a third-party font request leaks every visitor's IP to
+   a US ad company before they have consented to anything. */
+@font-face {
+  font-family: "InterVar";
+  src: url("/static/fonts/inter-var.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --font-display: "InterVar", Inter, "Segoe UI", system-ui, sans-serif;
+  --font-body: "InterVar", Inter, "Segoe UI", system-ui, sans-serif;
+  /* Optical sizing and a slightly tighter tracking are what make Inter look
+     drawn rather than defaulted. */
+  --wiq-radius-lg: 22px;
+  --wiq-radius-md: 15px;
+}
+
+body {
+  font-family: var(--font-body);
+  font-feature-settings: "cv05" 1, "ss03" 1, "tnum" 0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* --- Rhythm ---------------------------------------------------------------
+   Expensive layouts are mostly space. The grid was tight enough that every
+   section fought its neighbour for attention; letting each one breathe is the
+   single largest change here and needs no markup edits. */
+.hero { padding-block: clamp(28px, 6vw, 76px); }
+.card, .hero-card { padding: clamp(22px, 2.6vw, 34px); }
+section + section, .pricing-grid, .grid3 { margin-top: clamp(28px, 5vw, 72px); }
+.pricing-grid, .grid3 { gap: clamp(14px, 1.6vw, 22px); }
+
+/* --- Hierarchy ------------------------------------------------------------
+   The eyebrow, heading and body were all competing at similar weight. Pulling
+   the eyebrow back to a quiet label and letting the heading carry the page is
+   what separates an editorial layout from a dense one. */
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: .16em;
+  font-weight: 650;
+  color: var(--wiq-text-tertiary);
+}
+
+h2 { letter-spacing: -.032em; text-wrap: balance; }
+h3 { letter-spacing: -.018em; }
+
+.muted, .small { color: var(--wiq-text-secondary); }
+p { max-width: 68ch; }
+
+/* Numerals in measurements should line up in a column, not wobble. */
+.plan-price, .allowance-strip strong, .console-allowance, [class*="metric"] {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+}
+
+/* --- Controls -------------------------------------------------------------
+   Larger targets and a softer radius. The 8px radius on 44px controls read as
+   utilitarian; matching the curve to the control height is what makes a form
+   feel considered. */
+.btn {
+  border-radius: 11px;
+  padding-inline: 20px;
+  letter-spacing: .004em;
+}
+
+.field input, .field select, .field textarea {
+  border-radius: 11px;
+  min-height: 46px;
+}
+
+.field label, .field > span:first-child {
+  letter-spacing: .1em;
+  font-size: 10.5px;
+}
+
+/* --- Restraint ------------------------------------------------------------
+   Accent colour was doing too many jobs at once. Reserving full-strength blue
+   for the primary action, and letting secondary surfaces sit quieter, is what
+   makes the one thing you want clicked actually stand out. */
+.btn.secondary {
+  background: rgba(255,255,255,.035);
+  border-color: var(--wiq-edge-strong);
+  box-shadow: none;
+}
+.btn.secondary:hover {
+  background: rgba(255,255,255,.06);
+  border-color: rgb(var(--wiq-aurora-a) / .34);
+}
+
+.pill, .check, .trust-checks span {
+  border-radius: 999px;
+  border-color: var(--wiq-edge);
+  background: rgba(255,255,255,.026);
+}
+
+/* --- Navigation -----------------------------------------------------------
+   A quiet bar that separates by tone rather than a hard rule. */
+.nav {
+  border-bottom: 1px solid var(--wiq-edge);
+  backdrop-filter: saturate(140%) blur(10px);
+}
+.navlinks a { letter-spacing: .002em; }
+.navlinks a[aria-current="page"] { color: var(--wiq-text); }
