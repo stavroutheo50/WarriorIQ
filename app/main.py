@@ -39,7 +39,7 @@ from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
 )
-from core.config import DATASET, OUTPUTS, ROOT, RULESET_LABELS, SETTINGS, UPLOADS
+from core.config import DATASET, OUTPUTS, ROOT, RULESET_LABELS, RULESET_SPORTS, SETTINGS, UPLOADS
 from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
@@ -75,7 +75,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid, mark_guest_job,
 )
-from core.scoring import deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight
+from core.scoring import SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_unobserved
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import get_video_info, read_frame
@@ -1614,6 +1614,13 @@ def home(request: Request):
         context={
             "request": request,
             "rulesets": RULESET_LABELS,
+            "sports": RULESET_SPORTS,
+            "sport_rulesets": {sport: [(key, RULESET_LABELS[key]) for key in keys]
+                               for sport, keys in SPORTS.items()},
+            # What each sport scores but the analysis cannot see. Shown at the
+            # moment the sport is chosen, so nobody uploads an MMA bout decided
+            # on the ground expecting the report to account for it.
+            "sport_unobserved": {sport: sport_unobserved(sport) for sport in SPORTS},
             "profile": profile,
             "version": SETTINGS.version,
             "allowance": analysis_allowance(int(account["id"])) if account else None,

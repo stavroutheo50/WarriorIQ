@@ -290,3 +290,138 @@ p { max-width: 68ch; }
 .file-status[data-tone="note"] { color: var(--wiq-text-secondary); }
 .file-status[data-tone="ok"]   { color: var(--wiq-success); }
 .upload-progress b { font-variant-numeric: tabular-nums; }
+
+/* --- Sport picker ---------------------------------------------------------
+   Five sports across ten disciplines. A flat select buries the one a visitor
+   came for, so the sport is chosen first as a visible set of choices and the
+   ruleset list narrows to it. Built from radio inputs so it is keyboard and
+   screen-reader native, and works with JavaScript off.
+   --------------------------------------------------------------------------- */
+/* A grid rather than a wrapping flex row. Five chips never fit on one line in
+   the upload column, and free wrapping leaves a single orphan on the second
+   row that reads as a mistake; auto-fit spreads them evenly instead (3 + 2 in
+   the card, one line where there is room for it). */
+.sport-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.sport-option { position: relative; cursor: pointer; }
+
+/* The input stays focusable and reachable; only its default box is hidden. */
+.sport-option input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.sport-option span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--wiq-edge);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .026);
+  color: var(--wiq-text-secondary);
+  font-size: 13px;
+  font-weight: 620;
+  /* .field label uppercases its contents, which is right for the field's own
+     caption and wrong for these: the sport names are choices, not labels, and
+     tracked-out capitals widen the row enough to push MMA onto a second line. */
+  text-transform: none;
+  letter-spacing: .004em;
+  transition: border-color var(--wiq-fast) var(--wiq-ease),
+              background-color var(--wiq-fast) var(--wiq-ease),
+              color var(--wiq-fast) var(--wiq-ease);
+}
+
+.sport-option:hover span { border-color: var(--wiq-edge-strong); color: var(--wiq-text); }
+
+.sport-option input:checked + span {
+  border-color: rgb(var(--wiq-aurora-a) / .55);
+  background: rgb(var(--wiq-aurora-a) / .16);
+  color: var(--wiq-text);
+}
+
+/* The focus ring has to follow the visible chip, not the hidden input. */
+.sport-option input:focus-visible + span {
+  outline: 2px solid #82a5ff;
+  outline-offset: 3px;
+}
+
+.sport-field { margin-bottom: 4px; }
+
+/* --- Coverage disclosure --------------------------------------------------
+   The picker offers five sports; the detector reads punches, kicks and knees.
+   For boxing and kickboxing those are the same set, for MMA they are nowhere
+   near it. This note is the honest half of the choice, so it is styled to be
+   read rather than skimmed past: it sits inside the field, tied to the sport
+   above it, and changes tone when coverage is partial.
+   --------------------------------------------------------------------------- */
+.sport-coverage {
+  margin: 10px 0 0;
+  padding: 11px 13px;
+  border: 1px solid var(--wiq-edge);
+  border-left: 2px solid var(--wiq-success);
+  border-radius: 0 10px 10px 0;
+  background: rgba(255, 255, 255, .022);
+  color: var(--wiq-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  /* The picker sets a max-width for prose elsewhere; this must fill its field. */
+  max-width: none;
+}
+
+.sport-coverage b { color: var(--wiq-text); font-weight: 700; }
+
+/* Partial coverage is not an error, so it is amber rather than red: the
+   analysis is still correct about what it saw. */
+.sport-coverage[data-covered="no"] {
+  border-left-color: var(--wiq-warning);
+}
+
+.sport-coverage[hidden] { display: none; }
+
+/* --- Hero sport rail ------------------------------------------------------
+   A pill reading "5 sports" asks the visitor to take the claim on trust and
+   tells a boxer nothing. Naming them is the whole message of this release, so
+   the hero states them outright.
+   --------------------------------------------------------------------------- */
+.sport-rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 10px;
+  margin-top: 16px;
+  color: var(--wiq-text-tertiary);
+  font-size: 12px;
+}
+
+.sport-rail b {
+  color: var(--wiq-text-secondary);
+  font-weight: 620;
+  letter-spacing: .003em;
+  white-space: nowrap;
+}
+
+/* Hairline separators drawn between names only, so the list reads as one line
+   of type rather than a row of buttons competing with the hero call to action. */
+.sport-rail b + b::before {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  height: 10px;
+  margin-right: 10px;
+  vertical-align: -1px;
+  background: var(--wiq-edge-strong);
+}
+
+@media (max-width: 620px) {
+  .sport-rail { font-size: 11px; gap: 6px 8px; }
+  .sport-rail b + b::before { margin-right: 8px; }
+}

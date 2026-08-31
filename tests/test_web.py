@@ -135,6 +135,28 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("Launch is blocked", self.client.get("/legal").text)
         self.assertIn("does not register", self.client.get("/dmca").text)
 
+    def test_every_sport_states_what_the_analysis_cannot_see(self):
+        """Coverage is disclosed at the point of choice, not after the upload.
+
+        The detector reads punches, kicks and knees. For boxing that is the
+        whole sport; for MMA it misses the ground entirely. Someone choosing
+        MMA has to learn that before spending an hour on an upload, so the
+        note ships with the picker rather than only inside the finished report.
+        """
+        from core.scoring import SPORTS, sport_unobserved
+
+        page = self.client.get("/").text
+        for sport in SPORTS:
+            with self.subTest(sport=sport):
+                self.assertIn(f'data-sport="{sport}"', page)
+                missing = sport_unobserved(sport)
+                # Each unobserved action is named, not summarised away.
+                for action in missing:
+                    self.assertIn(action, page)
+        # A sport with gaps must not be presented as fully covered.
+        self.assertIn('data-covered="no"', page)
+        self.assertIn('data-covered="yes"', page)
+
     def test_footer_exposes_compact_legal_navigation(self):
         page = self.client.get("/").text
         for path in ("/terms", "/privacy", "/cookies", "/video-upload-policy", "/refunds", "/acceptable-use", "/contact"):
@@ -353,7 +375,7 @@ class PublicPageTests(unittest.TestCase):
             login = self.client.get("/login")
         finally:
             object.__setattr__(SETTINGS, "public_base_url", original)
-        self.assertIn("WarriorIQ · AI Fight Analysis for Kickboxing", home.text)
+        self.assertIn("WarriorIQ · AI Fight Analysis for Combat Sports", home.text)
         self.assertIn('<link rel="canonical" href="https://warrioriq.eu/">', home.text)
         self.assertIn('name="robots" content="index,follow,max-image-preview:large"', home.text)
         self.assertIn('"@type":"WebSite"', home.text)

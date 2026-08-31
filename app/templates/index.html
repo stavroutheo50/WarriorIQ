@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block head %}<link rel="stylesheet" href="/static/components.css"><script src="/static/upload-compress.js" defer></script>{% endblock %}
-{% block title %}WarriorIQ · AI Fight Analysis for Kickboxing{% endblock %}
-{% block description %}Upload a kickboxing fight to WarriorIQ for evidence-linked analysis, performance insights, coaching priorities and a fighter-specific training plan.{% endblock %}
+{% block title %}WarriorIQ · AI Fight Analysis for Combat Sports{% endblock %}
+{% block description %}Upload a kickboxing, boxing, Muay Thai, taekwondo or MMA fight to WarriorIQ for evidence-linked analysis, coaching priorities and a fighter-specific training plan.{% endblock %}
 {% block content %}
 <section class="hero">
   <div class="hero-copy">
@@ -10,7 +10,7 @@
     <p>See the fight. Train what matters. WarriorIQ turns a bout into a focused review, evidence-linked replay, and practical work for the next session.</p>
     <div class="hero-actions"><a class="btn" data-motion-primary href="#analyze">Analyze a fight <span aria-hidden="true">→</span></a><a class="btn secondary" href="#how-it-works">How it works</a></div>
     <div class="fight-path" aria-label="WarriorIQ workflow"><span><b>01</b> Upload</span><i aria-hidden="true"></i><span><b>02</b> Review</span><i aria-hidden="true"></i><span><b>03</b> Train</span></div>
-    <div class="trust-row"><span class="status-dot"></span><span class="small muted">Private processing</span><span class="pill">6 rulesets</span><span class="pill">Evidence linked</span></div>
+    <div class="trust-row"><span class="status-dot"></span><span class="small muted">Private processing</span><span class="pill">Evidence linked</span></div><div class="sport-rail" aria-label="Sports analyzed">{% for sport, name in sports.items() %}<b>{{name}}</b>{% endfor %}</div>
   </div>
   <div class="hero-card" id="analyze" data-upload-state="empty">
     <div class="console-head"><div><div class="eyebrow">Step 1 of 3</div><h2>Drop in a fight</h2></div><span class="console-badge">{% if allowance and allowance.remaining == 0 %}Limit reached{% elif allowance and allowance.remaining is not none %}{{allowance.remaining}} left{% else %}Ready{% endif %}</span></div>
@@ -18,9 +18,25 @@
     {% set allowance_exhausted = allowance and allowance.remaining == 0 %}
     <form id="fightUploadForm" action="/upload" method="post" enctype="multipart/form-data">
       <div class="field upload-field"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="video/*" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}Resets automatically{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% else %}MP4, MOV, MKV, AVI, M4V or WEBM{% endif %}</div></div>
+      <div class="field sport-field"><label id="sportLabel">Sport</label>
+        <div class="sport-picker" role="radiogroup" aria-labelledby="sportLabel">
+          {% for sport, name in sports.items() %}
+          <label class="sport-option"><input type="radio" name="sport_filter" value="{{sport}}" {% if loop.first %}checked{% endif %}><span>{{name}}</span></label>
+          {% endfor %}
+        </div>
+        {#  A ruleset is not a promise of coverage. Each sport states what the
+            analysis reads and what it stays silent about, before the upload,
+            so an MMA bout decided on the ground is never a surprise later. #}
+        {% for sport, name in sports.items() %}
+        <p class="sport-coverage" data-sport="{{sport}}" data-covered="{{ "no" if sport_unobserved[sport] else "yes" }}"{% if not loop.first %} hidden{% endif %}>
+          {% if sport_unobserved[sport] %}<b>Striking read only.</b> WarriorIQ scores the punches, kicks and knees it can see. It does not read {{ sport_unobserved[sport] | join(", ") }} — your report says so on every page.
+          {% else %}<b>Full scoring coverage.</b> Every action that scores in {{name}} is one WarriorIQ observes directly.{% endif %}
+        </p>
+        {% endfor %}
+      </div>
       <div class="row">
         <div class="field"><label for="fightType">Video type</label><select id="fightType" name="fight_type"><option value="competition">Competition</option><option value="sparring">Sparring</option></select></div>
-        <div class="field"><label for="fightRuleset">Ruleset</label><select id="fightRuleset" name="ruleset">{% for key,label in rulesets.items() %}<option value="{{key}}">{{label}}</option>{% endfor %}</select></div>
+        <div class="field"><label for="fightRuleset">Ruleset</label><select id="fightRuleset" name="ruleset">{% for sport, key_labels in sport_rulesets.items() %}<optgroup label="{{sports[sport]}}" data-sport="{{sport}}">{% for key,label in key_labels %}<option value="{{key}}">{{label}}</option>{% endfor %}</optgroup>{% endfor %}</select></div>
       </div>
       <section class="advanced-option advanced-option-static" aria-labelledby="fightFormatTitle">
         <div class="advanced-option-head"><span><strong id="fightFormatTitle">Fight format</strong><small>Optional · defaults to 3 × 2 minutes</small></span></div>
@@ -88,6 +104,20 @@
     :{tone:'ok',text:`${fmtMB(b)} — ready for WarriorIQ analysis`};
   const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
   const restore=(message)=>{progress.hidden=false;progress.dataset.tone='error';progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
+  // The ruleset list spans five sports now. Showing all ten at once buries the
+  // one a visitor came for, so the sport chooser filters the select and the
+  // select keeps every option for anyone without JavaScript.
+  const rulesetSelect=document.getElementById('fightRuleset');
+  const applySport=sport=>{let first=null;
+    for(const group of rulesetSelect.querySelectorAll('optgroup')){
+      const match=group.dataset.sport===sport;group.hidden=!match;
+      for(const option of group.querySelectorAll('option')){option.hidden=!match;option.disabled=!match;if(match&&!first)first=option;}}
+    if(first)rulesetSelect.value=first.value;
+    for(const note of document.querySelectorAll(".sport-coverage"))note.hidden=note.dataset.sport!==sport;};
+  document.querySelectorAll('input[name="sport_filter"]').forEach(input=>{
+    input.addEventListener('change',()=>applySport(input.value));});
+  const checked=document.querySelector('input[name="sport_filter"]:checked');
+  if(checked)applySport(checked.value);
   videoInput.addEventListener('change',setReady);
   form.addEventListener('submit',async event=>{
     if(!videoInput.files[0]||!form.reportValidity())return;
