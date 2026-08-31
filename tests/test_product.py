@@ -416,12 +416,14 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertFalse(database.reserve_analysis(athlete["id"], "athlete-4", today))
         self.assertTrue(database.reserve_analysis(athlete["id"], "athlete-tomorrow", today + timedelta(days=1)))
 
-        coach = register("coach@example.com", "Strong-Local-Password")
-        database.apply_checkout_event("evt-coach", "checkout.session.completed", coach["id"], "coach", 30)
-        for index in range(30):
-            self.assertTrue(database.reserve_analysis(coach["id"], f"coach-{index}", today))
-        self.assertFalse(database.reserve_analysis(coach["id"], "coach-31", today))
-        self.assertTrue(database.reserve_analysis(coach["id"], "coach-next-month", datetime(2026, 9, 1, tzinfo=timezone.utc)))
+        # The Coach plan was withdrawn. A subscriber still carrying that key
+        # must keep equivalent access rather than dropping to the free tier,
+        # which is what an unrecognised plan would otherwise give them.
+        legacy = register("coach@example.com", "Strong-Local-Password")
+        database.apply_checkout_event("evt-coach", "checkout.session.completed", legacy["id"], "coach", 30)
+        for index in range(10):
+            self.assertTrue(database.reserve_analysis(legacy["id"], f"legacy-{index}", today))
+        self.assertFalse(database.reserve_analysis(legacy["id"], "legacy-11", today))
 
         gym = register("gym@example.com", "Strong-Local-Password")
         database.apply_checkout_event("evt-gym", "checkout.session.completed", gym["id"], "gym", 0)
@@ -535,6 +537,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
                 self.assertIn("WARRIOR", response.text)
 
     def test_primary_actions_are_real_and_explain_their_state(self):
+        self._sign_in("actions@example.com")
         home = self.client.get("/").text
         self.assertIn('href="#analyze">Analyze a fight', home)
         self.assertIn('id="uploadSubmit" type="submit"', home)
@@ -548,12 +551,24 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertIn("1 analysis per day", pricing)
         self.assertIn("3 analyses per day", pricing)
         self.assertIn("10 analyses per day", pricing)
-        self.assertIn("30 analyses per month", pricing)
         self.assertIn("Unlimited fight analyses", pricing)
         self.assertIn("€89.99", pricing)
         self.assertIn('class="plan-banner">Most flexible', pricing)
 
-    def test_guest_upload_is_temporary_private_and_not_saved_to_library(self):
+    def _sign_in(self, email="uploader@example.com"):
+        """Analysis is account-only, so upload tests need a signed-in browser."""
+        register(email, "Strong-Local-Password")
+        self.client.post("/login", data={
+            "email": email, "password": "Strong-Local-Password", "accept_policies": "true",
+        })
+
+    def test_anonymous_upload_is_refused_and_no_footage_is_stored(self):
+        """Analysis is account-only.
+
+        The refusal has to happen before the file is written: fight footage
+        shows identifiable athletes, so an anonymous browser session must not
+        leave a video on disk that no account is answerable for.
+        """
         source = Path(self.temp.name) / "source.mp4"
         writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"), 24.0, (640, 480))
         for index in range(30):
@@ -562,6 +577,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             cv2.rectangle(frame, (410, 80), (520, 420), (150, 180, 230), -1)
             writer.write(frame)
         writer.release()
+        before = {path.name for path in webapp.UPLOADS.glob("*")}
         with source.open("rb") as handle:
             response = self.client.post(
                 "/upload",
@@ -572,24 +588,13 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
                 files={"video": ("private-fight-name.mp4", handle, "video/mp4")},
                 follow_redirects=False,
             )
-        self.assertEqual(response.status_code, 303)
-        job_id = response.headers["location"].split("/")[-1]
-        job = webapp.get_job(job_id)
-        self.assertFalse(job["persist_result"])
-        self.assertTrue(job["owner_key"].startswith("guest:"))
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("sign in", response.text.lower())
+        self.assertEqual({path.name for path in webapp.UPLOADS.glob("*")}, before)
         self.assertEqual(database.list_fights(1), [])
-        frame_page = self.client.get(f"/frame/{job_id}")
-        self.assertEqual(frame_page.status_code, 200)
-        self.assertNotIn("private-fight-name", frame_page.text)
-        status = self.client.get(f"/api/status/{job_id}")
-        self.assertNotIn("original_name", status.json())
-        other_browser = TestClient(app)
-        try:
-            self.assertEqual(other_browser.get(f"/frame/{job_id}").status_code, 404)
-        finally:
-            other_browser.close()
 
     def test_mobile_async_upload_returns_the_exact_next_step(self):
+        self._sign_in("mobile@example.com")
         source = Path(self.temp.name) / "mobile-upload.mp4"
         writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"), 24.0, (320, 240))
         for index in range(24):
@@ -616,6 +621,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertTrue(response.cookies.get("warrioriq_active_analysis"))
 
     def test_failed_selection_frame_creation_removes_partial_upload(self):
+        self._sign_in("partial@example.com")
         source = Path(self.temp.name) / "selection-failure.mp4"
         writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"), 12.0, (320, 240))
         for _ in range(12):

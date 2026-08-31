@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -251,6 +251,17 @@ class Settings:
     minimum_account_age: int = int(os.getenv("WARRIORIQ_MINIMUM_AGE", "18"))
     saved_video_retention_days: int = max(1, int(os.getenv("WARRIORIQ_VIDEO_RETENTION_DAYS", "30")))
     failed_upload_retention_hours: int = max(1, int(os.getenv("WARRIORIQ_FAILED_UPLOAD_RETENTION_HOURS", "24")))
+    # Complimentary plan grants as "email:plan_key" pairs, comma separated.
+    # Recorded here rather than as a row edit on the live database so the grant
+    # is visible, reviewable and survives a restore.
+    complimentary_plans: dict[str, str] = field(default_factory=lambda: {
+        email.strip().lower(): plan.strip().lower()
+        for entry in os.getenv(
+            "WARRIORIQ_COMPLIMENTARY_PLANS", "stavroutheo50@gmail.com:gym",
+        ).split(",")
+        if entry.strip() and ":" in entry
+        for email, plan in [entry.split(":", 1)]
+    })
     admin_emails: tuple[str, ...] = tuple(
         email.strip().lower()
         for email in os.getenv("WARRIORIQ_ADMIN_EMAILS", "").split(",")

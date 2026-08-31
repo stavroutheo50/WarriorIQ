@@ -70,27 +70,6 @@ PLANS = {
         "stripe_price_id": os.getenv("STRIPE_PRICE_ATHLETE_PRO", os.getenv("STRIPE_PRICE_PRO", "")),
         "mode": "subscription",
     },
-    "coach": {
-        "label": "Coach",
-        "price": "€59.99",
-        "period": "per month",
-        "description": "For coaches turning complete fight evidence into athlete work.",
-        "limit_label": "30 analyses every month",
-        "report_label": "Complete report",
-        "features": ["30 analyses per month", "Complete performance analysis", "Coach assignments", "Athlete-ready private sharing", "Fight library and comparisons"],
-        "daily_limit": None,
-        "monthly_limit": 30,
-        "unlimited": False,
-        "report_tier": "full",
-        "evidence_limit": None,
-        "coaching_items": None,
-        "training_items": None,
-        "can_share": True,
-        "can_correct": True,
-        "credits": 30,
-        "stripe_price_id": os.getenv("STRIPE_PRICE_COACH", ""),
-        "mode": "subscription",
-    },
     "gym": {
         "label": "Gym",
         "price": "€89.99",
@@ -98,7 +77,7 @@ PLANS = {
         "description": "The unlimited WarriorIQ suite for busy gyms and fight teams.",
         "limit_label": "Unlimited analyses",
         "report_label": "Complete report",
-        "features": ["Unlimited fight analyses", "Everything in the Coach plan", "Complete reports for every fight", "Coach assignments and private sharing", "Saved fight library and comparisons", "Priority gym onboarding"],
+        "features": ["Unlimited fight analyses", "Everything in Athlete Pro", "Complete reports for every fight", "Coach assignments and private sharing", "Saved fight library and comparisons", "Priority gym onboarding"],
         "daily_limit": None,
         "monthly_limit": None,
         "unlimited": True,
@@ -116,9 +95,30 @@ PLANS = {
 }
 
 
+# The Coach plan was withdrawn. Anyone already carrying that key keeps
+# equivalent access rather than silently dropping to the free tier, which is
+# what an unknown key would otherwise do.
+LEGACY_PLAN_ALIASES = {"coach": "athlete_pro"}
+
+
 def plan_for_key(plan_key: str | None) -> dict:
     """Return a complete, safe entitlement contract for an account plan."""
-    return PLANS.get(str(plan_key or "free").lower(), PLANS["free"])
+    key = str(plan_key or "free").lower()
+    return PLANS.get(LEGACY_PLAN_ALIASES.get(key, key), PLANS["free"])
+
+
+def effective_plan_key(plan: str | None, plan_override: str | None, email: str | None = None) -> str:
+    """Resolve the plan an account actually holds.
+
+    A complimentary grant is an operator decision recorded in configuration
+    rather than in the accounts table, so it survives a database restore and
+    needs no manual row edit on the live host. It outranks the stored plan
+    because it is issued deliberately.
+    """
+    granted = SETTINGS.complimentary_plans.get(str(email or "").strip().lower())
+    if granted and granted in PLANS:
+        return granted
+    return str(plan_override or plan or "free")
 
 
 def create_checkout(plan_key: str, success_url: str, cancel_url: str, account_id: int, email: str) -> str:

@@ -137,6 +137,29 @@ class ProductFoundationTests(unittest.TestCase):
         self.assertFalse(verify_password("wrong-password", first))
         self.assertEqual(normalize_email(" Athlete@Example.COM "), "athlete@example.com")
 
+    def test_withdrawn_coach_plan_does_not_downgrade_existing_subscribers(self):
+        """An unknown plan key falls back to free, which would strip paid access."""
+        from core.payments import PLANS, plan_for_key
+
+        self.assertNotIn("coach", PLANS)
+        self.assertEqual(plan_for_key("coach")["label"], "Athlete Pro")
+        self.assertEqual(plan_for_key("Coach")["label"], "Athlete Pro")
+        # A genuinely unknown key must still land on free, not on the alias.
+        self.assertEqual(plan_for_key("nonsense")["label"], "Starter")
+
+    def test_complimentary_grant_outranks_the_stored_plan(self):
+        from core.config import SETTINGS
+        from core.payments import effective_plan_key
+
+        granted = next(iter(SETTINGS.complimentary_plans), None)
+        self.assertIsNotNone(granted, "expected at least one complimentary grant")
+        self.assertEqual(effective_plan_key("free", None, granted), "gym")
+        # Case and spacing in the stored email must not defeat the grant.
+        self.assertEqual(effective_plan_key("free", None, f"  {granted.upper()} "), "gym")
+        # Everyone else keeps exactly what they hold.
+        self.assertEqual(effective_plan_key("free", None, "other@example.com"), "free")
+        self.assertEqual(effective_plan_key("free", "athlete", "other@example.com"), "athlete")
+
     def test_pasted_secrets_survive_panel_wrapper_characters(self):
         """A wrapped secret must authenticate, not fail as a wrong password.
 

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Plans · WarriorIQ{% endblock %}
-{% block description %}Compare WarriorIQ Starter, Athlete, Athlete Pro, Coach and Gym fight-analysis plans.{% endblock %}
+{% block description %}Compare WarriorIQ Starter, Athlete, Athlete Pro and Gym fight-analysis plans.{% endblock %}
 {% block content %}
 <header class="pricing-hero">
   <div class="eyebrow">WarriorIQ plans</div>
   <h1>Pick your pace.<br><em>Keep improving.</em></h1>
   <p>Every plan uses the same fight-analysis engine. Higher plans unlock more daily analyses and a deeper performance report.</p>
-  <div class="pricing-promise"><span>✓ No video filename shown</span><span>✓ Guest files stay temporary</span><span>✓ Upgrade when you need more</span></div>
+  <div class="pricing-promise"><span>✓ No video filename shown</span><span>✓ Your footage stays private</span><span>✓ Upgrade when you need more</span></div>
 </header>
 
 {% if not request.state.launch.ready %}<div class="notice"><strong>Paid checkout is safely locked.</strong> Real operator and legal contact details have not all been configured, so this build cannot collect subscriptions yet. <a class="text-link" href="/legal">Open launch readiness</a>.</div>{% endif %}

@@ -64,7 +64,7 @@ from core.db import (
 )
 from core.evidence_trust import report_evidence_trust
 from core.coaching import build_coaching, build_training_plan
-from core.payments import PLANS, cancel_subscription_at_period_end, create_checkout, plan_for_key, verify_webhook
+from core.payments import PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
@@ -289,7 +289,11 @@ def _profile_id(request: Request) -> int | None:
 
 def _request_plan(request: Request) -> dict:
     account = _account(request)
-    return plan_for_key((account.get("plan_override") or account.get("plan")) if account else "free")
+    if not account:
+        return plan_for_key("free")
+    return plan_for_key(effective_plan_key(
+        account.get("plan"), account.get("plan_override"), account.get("email"),
+    ))
 
 
 def _owner_key(request: Request) -> str:
@@ -1633,10 +1637,15 @@ async def upload(
             "Confirm your footage rights, permission for people shown, and the minor/guardian status before upload.",
         )
     account = _account(request)
-    if account:
-        allowance = analysis_allowance(int(account["id"]))
-        if allowance["remaining"] == 0:
-            raise HTTPException(429, f"Your {allowance['plan']['label']} allowance is used for this period. It will reset automatically.")
+    if not account:
+        # Analysis is account-only. Fight footage carries identifiable athletes
+        # and a per-plan allowance, neither of which can be attached to an
+        # anonymous browser session; the 401 lets the upload form send the
+        # visitor to sign-in without losing what they filled in.
+        raise HTTPException(401, "Create a free account or sign in to analyse a fight.")
+    allowance = analysis_allowance(int(account["id"]))
+    if allowance["remaining"] == 0:
+        raise HTTPException(429, f"Your {allowance['plan']['label']} allowance is used for this period. It will reset automatically.")
     if not video.filename:
         raise HTTPException(400, "Choose a fight video.")
     job_id = uuid.uuid4().hex[:12]

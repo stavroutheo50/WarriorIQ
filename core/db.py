@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.config import DATASET, DB_PATH, SETTINGS
-from core.payments import PLANS, plan_for_key
+from core.payments import PLANS, effective_plan_key, plan_for_key
 
 
 @contextmanager
@@ -862,7 +862,8 @@ def set_plan_override(account_id: int, plan: str | None) -> bool:
 def _effective_plan_key(account) -> str:
     if not account:
         return "free"
-    return str(account["plan_override"] or account["plan"] or "free")
+    email = account["email"] if "email" in account.keys() else None
+    return effective_plan_key(account["plan"], account["plan_override"], email)
 
 
 def save_session(account_id: int, token_hash: str, expires_at: str) -> None:
@@ -1126,7 +1127,7 @@ def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None) 
         ).fetchone()
         if existing:
             return int(existing["account_id"]) == int(account_id)
-        account = con.execute("SELECT plan,plan_override FROM accounts WHERE id=?", (account_id,)).fetchone()
+        account = con.execute("SELECT plan,plan_override,email FROM accounts WHERE id=?", (account_id,)).fetchone()
         if not account:
             return False
         plan = plan_for_key(_effective_plan_key(account))
@@ -1160,7 +1161,7 @@ def analysis_allowance(account_id: int, now: datetime | None = None) -> dict:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     with connection() as con:
-        account = con.execute("SELECT plan,plan_override FROM accounts WHERE id=?", (account_id,)).fetchone()
+        account = con.execute("SELECT plan,plan_override,email FROM accounts WHERE id=?", (account_id,)).fetchone()
         plan = plan_for_key(_effective_plan_key(account))
         period_key, limit = _usage_period(plan, moment)
         used = int(con.execute(
