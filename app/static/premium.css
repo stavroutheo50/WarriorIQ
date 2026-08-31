@@ -1,0 +1,167 @@
+/* ===========================================================================
+   WarriorIQ premium surface layer.
+
+   Loaded last, additive only: it introduces no new markup requirements and
+   overrides nothing structural, so a failure here degrades to the existing
+   design rather than breaking a page.
+
+   The flat single-tone canvas is what made the product read as cheap. Depth
+   here comes from three things real high-end interfaces use and this build had
+   none of: a coloured atmosphere behind the content, a grain layer that stops
+   large dark gradients banding on cheap panels, and light-catching edges on the
+   surfaces that matter. All of it is drawn from the existing token palette.
+   =========================================================================== */
+
+:root {
+  --wiq-aurora-a: 92 130 239;   /* --wiq-blue  */
+  --wiq-aurora-b: 85 198 223;   /* --wiq-cyan  */
+  --wiq-aurora-c: 160 138 232;  /* --wiq-b     */
+  --wiq-edge: rgba(255, 255, 255, .07);
+  --wiq-edge-strong: rgba(255, 255, 255, .14);
+  --wiq-lift: 0 1px 0 rgba(255,255,255,.05) inset, 0 24px 60px -28px rgba(0,0,0,.85);
+}
+
+/* The canvas gradient moves to <html> and body goes transparent. body paints
+   an opaque background over its own root, which would bury the atmosphere
+   layers below; hoisting it one level up lets them sit between the canvas and
+   the content instead of behind everything. */
+html {
+  background:
+    radial-gradient(780px 420px at 82% -12%, rgba(65,109,195,.18), transparent 66%),
+    linear-gradient(180deg, #080d17 0, var(--wiq-canvas) 42%, #080c15 100%);
+  background-attachment: fixed;
+  min-height: 100%;
+}
+body { background: transparent; }
+
+/* Content sits above the decoration without either needing a negative index,
+   which is what put these layers behind the canvas in the first place. Only the
+   shell needs a position; the overlays are already fixed and must keep that, so
+   they are raised by z-index alone. */
+.shell { position: relative; z-index: 1; }
+.cookie-notice, .app-toast, .global-back, .page-scroll-progress { z-index: 40; }
+
+/* --- Atmosphere -----------------------------------------------------------
+   Three oversized, heavily feathered colour fields behind everything. Fixed so
+   they behave like a lit room rather than a background image that scrolls, and
+   pointer-events:none so they can never intercept a click. Drawn on <html>
+   because body::before already carries the existing grid overlay, which this
+   layer sits behind rather than replaces. */
+html::before {
+  content: "";
+  position: fixed;
+  inset: -20vmax;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(38vmax 30vmax at 18% 8%,  rgb(var(--wiq-aurora-a) / .20), transparent 60%),
+    radial-gradient(32vmax 26vmax at 88% 2%,  rgb(var(--wiq-aurora-c) / .16), transparent 62%),
+    radial-gradient(34vmax 24vmax at 62% 42%, rgb(var(--wiq-aurora-b) / .10), transparent 64%);
+  filter: blur(24px) saturate(115%);
+  animation: wiq-aurora 44s ease-in-out infinite alternate;
+}
+
+@keyframes wiq-aurora {
+  0%   { transform: translate3d(0,0,0) scale(1); }
+  50%  { transform: translate3d(-2.5%, 1.5%, 0) scale(1.06); }
+  100% { transform: translate3d(2%, -2%, 0) scale(1.02); }
+}
+
+/* --- Grain ----------------------------------------------------------------
+   Large dark gradients band badly on 6-bit and mid-range phone panels, which is
+   most of the audience. A faint noise field breaks the ramp and is the single
+   cheapest thing that makes a dark interface look finished. */
+html::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: .032;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* --- Surfaces -------------------------------------------------------------
+   A hairline of light along the top edge reads as a physical bevel and is what
+   separates a "card" from a rectangle with a border. */
+.card,
+.hero-card,
+.pricing-card,
+.analysis-process-card,
+.trust-panel {
+  position: relative;
+  border-color: var(--wiq-edge);
+  box-shadow: 0 1px 0 rgba(255,255,255,.05) inset, 0 24px 60px -28px rgba(0,0,0,.85);
+  background-image: linear-gradient(180deg, rgba(255,255,255,.028), transparent 42%);
+}
+
+.card::before,
+.hero-card::before,
+.pricing-card::before {
+  content: "";
+  position: absolute;
+  inset-inline: 12%;
+  top: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--wiq-edge-strong), transparent);
+}
+
+.card:hover,
+.pricing-card:hover {
+  border-color: rgb(var(--wiq-aurora-a) / .38);
+}
+
+/* The featured plan earns a lit edge rather than only a louder colour. */
+.pricing-card.featured,
+.pricing-card.gym-featured {
+  background-image:
+    linear-gradient(180deg, rgb(var(--wiq-aurora-a) / .10), transparent 46%),
+    linear-gradient(180deg, rgba(255,255,255,.03), transparent 40%);
+  box-shadow: 0 1px 0 rgba(255,255,255,.07) inset, 0 30px 70px -30px rgba(24,48,120,.75);
+}
+
+/* --- Type -----------------------------------------------------------------
+   Display type at this size needs negative tracking and a tighter leading; the
+   default spacing is what makes a headline look like body copy scaled up. */
+.hero h1,
+.pricing-hero h1,
+.workflow-heading h1 {
+  letter-spacing: -.028em;
+  line-height: .96;
+  text-wrap: balance;
+}
+
+.hero-copy p,
+.pricing-hero p {
+  text-wrap: pretty;
+}
+
+/* --- Primary action -------------------------------------------------------
+   A flat fill reads as a default button. A vertical gradient plus a lit top
+   edge is what separates a product's primary action from a form control. */
+.btn:not(.secondary) {
+  background-image: linear-gradient(180deg, rgba(255,255,255,.16), transparent 58%);
+  box-shadow: 0 1px 0 rgba(255,255,255,.22) inset, 0 12px 26px -12px rgba(41,75,158,.9);
+}
+
+.btn:not(.secondary):hover {
+  box-shadow: 0 1px 0 rgba(255,255,255,.28) inset, 0 16px 32px -12px rgba(41,75,158,1);
+}
+
+/* Respect the system preference: the atmosphere stays, the drift stops. */
+@media (prefers-reduced-motion: reduce) {
+  html::before { animation: none; }
+}
+
+/* Keep the effect affordable on small screens, where the blur is the most
+   expensive part of the frame and the least visible. */
+@media (max-width: 720px) {
+  html::before { filter: blur(18px) saturate(110%); animation: none; }
+  html::after { opacity: .026; }
+}
+
+/* A forced-colours user has asked the OS to drop decoration entirely. */
+@media (forced-colors: active) {
+  html::before, html::after { display: none; }
+}
