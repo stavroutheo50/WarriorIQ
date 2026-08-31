@@ -117,6 +117,16 @@ python worker.py
 
 Queued jobs remain persisted across web restarts. A worker claims one job at a time, renews a lease during progress, and leaves an interrupted job restartable if the lease expires. Because that queue is durable, `external` and `remote` modes accept a fight while the analysis machine is switched off and start it automatically when the worker next connects; the uploader is told the fight is waiting rather than being refused. Set `WARRIORIQ_ACCEPT_DEFERRED_ANALYSIS=false` to refuse uploads whenever no worker is online. A server that could never process the fight at all — missing vision dependencies, no worker token, an invalid mode — still refuses immediately instead of queueing work forever. The web and worker must point `WARRIORIQ_DATA_DIR` at the same protected runtime storage. Do not claim that a remote GPU is connected merely because external mode is enabled; `/ready` returns 503 until a worker heartbeat is present.
 
+### Scale-to-zero GPU (analysis without a machine left running)
+
+A fight needs a GPU for the few minutes it is actually being analysed, not for the rest of the day. Serverless GPU platforms (Modal, RunPod Serverless, Beam and similar) bill per second and scale to zero, so the cost of an idle service is nothing.
+
+Set `WARRIORIQ_WORKER_WAKE_URL` on the web server to the endpoint that starts your worker container. When a fight is queued, the web process pings that URL with the same `WARRIORIQ_WORKER_TOKEN` bearer token, the container starts, runs `python worker.py --once` against `WARRIORIQ_WORKER_REMOTE_URL` until the queue is empty, and exits. Nothing polls a running GPU, so nothing bills idle time.
+
+The wake call is best effort and runs off the request thread: the fight is already queued durably, so a slow or failed wake never fails the upload and the worker still claims the fight on its next start. Leave the variable empty when a machine polls continuously, such as a PC running `worker.py`.
+
+Bake the model weights into the container image or a persistent volume. Downloading YOLO and SAM2 on every cold start would dominate both the wait and the bill. Confirm current per-second pricing with the platform before relying on any cost estimate.
+
 When the GPU is on a different machine, set `WARRIORIQ_WORKER_MODE=remote` and a high-entropy `WARRIORIQ_WORKER_TOKEN` on the web server. On the GPU machine, install the full requirements and model assets, then set `WARRIORIQ_WORKER_REMOTE_URL=https://warrioriq.eu` plus the same token and run `python worker.py`. The worker downloads only its claimed video over authenticated HTTPS, streams genuine progress, and uploads a bounded report/tracking archive. Keep the token server-side, rotate it if exposed, and confirm `/ready` is healthy before accepting public analyses.
 
 `/health` answers only whether the web process is alive. Use `/ready` for deployment readiness. Before backups, choose a protected destination outside the public web root and run `python tools/backup_runtime.py <destination>`. The command uses SQLite's online backup API, runs an integrity check and writes a SHA-256 manifest; it intentionally excludes original videos.

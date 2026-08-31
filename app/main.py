@@ -6,6 +6,7 @@ import hmac
 import logging
 import math
 import shutil
+import threading
 import time
 import uuid
 import os
@@ -1117,6 +1118,20 @@ def _require_analysis_capacity() -> dict:
     return decision
 
 
+def _wake_analysis_worker(job_id: str) -> None:
+    """Start a scale-to-zero GPU in the background, never blocking the upload."""
+    if not SETTINGS.worker_wake_url:
+        return
+
+    def run() -> None:
+        from core.worker_client import wake_remote_worker
+
+        woken = wake_remote_worker(SETTINGS.worker_wake_url, SETTINGS.worker_token, job_id)
+        LOGGER.info("analysis_worker_wake job_id=%s delivered=%s", job_id, woken)
+
+    threading.Thread(target=run, name=f"wiq-wake-{job_id}", daemon=True).start()
+
+
 def _analysis_started_response(request: Request, job_id: str, deferred: bool = False) -> JSONResponse:
     response = JSONResponse({
         "ok": True,
@@ -2131,6 +2146,8 @@ def start(request: Request, job_id: str, payload: StartPayload):
         ) from exc
     if SETTINGS.analysis_worker_mode == "inprocess":
         executor.submit(_run_job, job_id, req, analysis_run_id)
+    else:
+        _wake_analysis_worker(job_id)
     return _analysis_started_response(request, job_id, capacity["deferred"])
 
 
@@ -2162,6 +2179,8 @@ def restart_interrupted_analysis(request: Request, job_id: str):
         ) from exc
     if SETTINGS.analysis_worker_mode == "inprocess":
         executor.submit(_run_job, job_id, req, analysis_run_id)
+    else:
+        _wake_analysis_worker(job_id)
     return _analysis_started_response(request, job_id, capacity["deferred"])
 
 

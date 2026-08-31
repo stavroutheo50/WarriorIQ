@@ -112,6 +112,37 @@ class DurableAnalysisStateTests(TestCase):
                 self.assertIsNone(state.claim_next_job("second-worker"))
                 state.delete_job("queued-job")
 
+    def test_wake_hook_never_blocks_or_breaks_the_upload(self):
+        """The fight is already queued durably, so a failed wake must be harmless."""
+        from core.worker_client import wake_remote_worker
+
+        # No hook configured is the normal PC-worker case.
+        self.assertFalse(wake_remote_worker("", "token", "job-1"))
+
+        # An unreachable or failing endpoint must return False, never raise.
+        self.assertFalse(
+            wake_remote_worker("http://127.0.0.1:9/wake", "token", "job-1", timeout=1.0)
+        )
+
+        sent = {}
+
+        class _Response:
+            status = 202
+            def __enter__(self): return self
+            def __exit__(self, *exc): return False
+
+        def _capture(request, timeout=None):
+            sent["url"] = request.full_url
+            sent["auth"] = request.get_header("Authorization")
+            sent["body"] = json.loads(request.data)
+            return _Response()
+
+        with patch("urllib.request.urlopen", _capture):
+            self.assertTrue(wake_remote_worker("https://gpu.example/wake", "secret", "job-9"))
+        self.assertEqual(sent["url"], "https://gpu.example/wake")
+        self.assertEqual(sent["auth"], "Bearer secret")
+        self.assertEqual(sent["body"], {"job_id": "job-9"})
+
     def test_fight_is_queued_while_the_analysis_machine_is_offline(self):
         """A durable queue lets a fight wait for the GPU machine to reconnect.
 

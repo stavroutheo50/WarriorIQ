@@ -176,6 +176,11 @@ class Settings:
     # the analysis machine is switched off and claimed when it next connects.
     # Turn this off to refuse uploads whenever no worker is currently online.
     accept_deferred_analysis: bool = env_bool("WARRIORIQ_ACCEPT_DEFERRED_ANALYSIS", True)
+    # Optional wake hook for a scale-to-zero GPU. When a fight is queued with no
+    # worker online, the web process pings this URL so a serverless GPU starts,
+    # drains the queue and shuts down again. Polling a GPU would bill idle time;
+    # waking one on demand bills only the analysis itself.
+    worker_wake_url: str = os.getenv("WARRIORIQ_WORKER_WAKE_URL", "").strip()
     worker_remote_url: str = os.getenv("WARRIORIQ_WORKER_REMOTE_URL", "").rstrip("/")
     worker_token: str = os.getenv("WARRIORIQ_WORKER_TOKEN", "").strip()
     worker_artifact_max_bytes: int = max(

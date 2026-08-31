@@ -141,6 +141,32 @@ class RemoteWorkerClient:
             connection.close()
 
 
+def wake_remote_worker(wake_url: str, token: str, job_id: str, timeout: float = 8.0) -> bool:
+    """Ask a scale-to-zero GPU to start and drain the queue.
+
+    Best effort by design. The fight is already queued durably, so a failed or
+    slow wake must never fail the uploader's request; the worker still picks the
+    fight up on its next start either way.
+    """
+    if not wake_url:
+        return False
+    request = urllib.request.Request(
+        wake_url,
+        data=json.dumps({"job_id": job_id}, separators=(",", ":")).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return 200 <= response.status < 300
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
 def retry_heartbeat(client: RemoteWorkerClient, attempts: int = 3) -> None:
     for attempt in range(attempts):
         try:
