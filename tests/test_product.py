@@ -6,11 +6,12 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import cv2
 import numpy as np
 from fastapi.testclient import TestClient
+from starlette.responses import RedirectResponse
 
 import app.main as webapp
 import core.db as database
@@ -19,6 +20,15 @@ from app.main import GUEST_COOKIE, SESSION_COOKIE, app
 from app.state import create_job, delete_job
 from core.auth import register
 from core.payments import PLANS
+from core.social_auth import SocialIdentity
+
+
+class _FakeSocialClient:
+    async def authorize_redirect(self, request, redirect_uri, **kwargs):
+        return RedirectResponse("https://identity.example/authorize?state=test-state")
+
+    async def authorize_access_token(self, request):
+        return {"access_token": "discarded-by-warrioriq"}
 
 
 class AccountAndProductIntegrationTests(unittest.TestCase):
@@ -222,6 +232,83 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertIn(SESSION_COOKIE, self.client.cookies)
         acceptances = database.list_legal_acceptances(profile_id=account["profile_id"])
         self.assertEqual(acceptances[0]["kind"], "account_signin_policies")
+
+    def test_social_signup_links_stable_identity_without_enabling_password_login(self):
+        social_client = TestClient(app, base_url="https://warrioriq.eu")
+        identity = SocialIdentity(
+            provider="google", subject="provider-user-123",
+            email="social@example.com", display_name="Social Athlete", email_verified=True,
+        )
+        try:
+            with (
+                patch.object(webapp.SOCIAL_AUTH, "client", return_value=_FakeSocialClient()),
+                patch.object(
+                    webapp.SOCIAL_AUTH, "identity_from_token",
+                    new=AsyncMock(return_value=identity),
+                ),
+            ):
+                started = social_client.post(
+                    "/auth/google/start",
+                    data={
+                        "mode": "signup", "next_path": "/dashboard",
+                        "accept_terms": "true", "age_confirmed": "true",
+                    },
+                    follow_redirects=False,
+                )
+                self.assertEqual(started.status_code, 307)
+                self.assertIn("state=test-state", started.headers["location"])
+                completed = social_client.get(
+                    "/auth/google/callback?state=test-state", follow_redirects=False,
+                )
+            self.assertEqual(completed.status_code, 303)
+            self.assertEqual(completed.headers["location"], "/dashboard")
+            self.assertIn(SESSION_COOKIE, social_client.cookies)
+            account = database.get_account_by_email("social@example.com")
+            self.assertEqual(account["password_login_enabled"], 0)
+            self.assertIsNotNone(account["email_verified_at"])
+            self.assertIsNone(webapp.authenticate("social@example.com", "any-password"))
+            identities = database.list_oauth_identities(int(account["id"]))
+            self.assertEqual(
+                [(item["provider"], item["subject"]) for item in identities],
+                [("google", "provider-user-123")],
+            )
+            self.assertNotIn("access_token", json.dumps(identities))
+        finally:
+            social_client.close()
+
+    def test_social_signup_never_auto_links_an_existing_email(self):
+        register("existing@example.com", "Strong-Local-Password")
+        social_client = TestClient(app, base_url="https://warrioriq.eu")
+        identity = SocialIdentity(
+            provider="google", subject="different-provider-user",
+            email="existing@example.com", display_name="Existing Athlete",
+        )
+        try:
+            with (
+                patch.object(webapp.SOCIAL_AUTH, "client", return_value=_FakeSocialClient()),
+                patch.object(
+                    webapp.SOCIAL_AUTH, "identity_from_token",
+                    new=AsyncMock(return_value=identity),
+                ),
+            ):
+                social_client.post(
+                    "/auth/google/start",
+                    data={
+                        "mode": "signup", "accept_terms": "true",
+                        "age_confirmed": "true",
+                    },
+                    follow_redirects=False,
+                )
+                completed = social_client.get(
+                    "/auth/google/callback?state=test-state", follow_redirects=False,
+                )
+            self.assertEqual(completed.status_code, 400)
+            self.assertIn("Sign in with its password first", completed.text)
+            account = database.get_account_by_email("existing@example.com")
+            self.assertEqual(database.list_oauth_identities(int(account["id"])), [])
+            self.assertNotIn(SESSION_COOKIE, social_client.cookies)
+        finally:
+            social_client.close()
 
     def test_cross_site_state_change_is_blocked(self):
         response = self.client.post(

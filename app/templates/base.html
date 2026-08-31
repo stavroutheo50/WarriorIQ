@@ -30,12 +30,12 @@
   <title>{{page_title|striptags|trim}}</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/navigation.css">
-  <link rel="stylesheet" href="/static/fixes.css?v=20260829-live4">
-  <link rel="stylesheet" href="/static/product.css?v=20260830-mobile2">
-  <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" type="image/png" href="/static/warrioriq-logo-96.png"><link rel="apple-touch-icon" href="/static/warrioriq-logo.png">
+  <link rel="stylesheet" href="/static/fixes.css?v=20260831-mobile1">
+  <link rel="stylesheet" href="/static/product.css?v=20260831-mobile1">
+  <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" type="image/png" href="/static/warrioriq-logo-96.png"><link rel="apple-touch-icon" sizes="180x180" href="/static/warrioriq-logo-180.png">
   {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/"},{"@type":"Organization","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/","logo":"{{request.state.social_image_url}}"},{"@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-linked kickboxing fight analysis for athletes and coaches.","url":"{{request.state.site_url}}/"}]}</script>{% endif %}
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/motion.css?v=20260828-2">
+  <link rel="stylesheet" href="/static/motion.css?v=20260831-mobile1">
 </head>
 {% set page_key = request.url.path.strip('/').split('/')[0] if request.url.path.strip('/') else 'home' %}
 <body data-page="{{page_key}}">
@@ -74,5 +74,5 @@
     document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{if(event.defaultPrevented||form.dataset.async==='true')return;const submitter=event.submitter;if(!submitter||submitter.name||submitter.dataset.keepLabel==='true')return;submitter.dataset.originalLabel=submitter.textContent;submitter.textContent=submitter.dataset.loadingLabel||'Working…';submitter.setAttribute('aria-busy','true');submitter.disabled=true}));
   })();
   </script>
-  <script src="/static/motion.js?v=20260828-2" defer></script>
+  <script src="/static/motion.js?v=20260831-mobile1" defer></script>
 </body></html>

@@ -4,5 +4,7 @@ python-multipart>=0.0.12
 python-dotenv>=1.0
 pydantic>=2.8
 a2wsgi>=1.10,<2
+authlib>=1.6,<2
+itsdangerous>=2.2,<3
 numpy>=1.26,<3
 opencv-python-headless>=4.10

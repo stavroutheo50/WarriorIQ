@@ -17,7 +17,7 @@
   window.addEventListener('resize',scheduleScroll,{passive:true});
   paintScroll();
 
-  const revealTargets=[...document.querySelectorAll('[data-reveal],.trust-panel,.analysis-quality,.performance-card,#report-scorecard,#report-coaching>*,#report-training>*,.replay-callout')];
+  const revealTargets=[...document.querySelectorAll('[data-reveal],.trust-panel,.analysis-quality,.performance-card,#report-scorecard,#report-coaching>*,#report-training>*,.replay-callout,.fighter-comparison,.tactical-performance,.outcome-evidence,.simple-rounds')];
   document.querySelectorAll('[data-motion-sequence]').forEach(sequence=>{
     [...sequence.children].forEach((element,index)=>{
       element.dataset.motionSequenceItem='true';
@@ -77,7 +77,7 @@
     element.dataset.wiqCounted='true';
     countTo(element,stat.value,{from:0,suffix:stat.suffix,decimals:stat.decimals,duration:520,impact:true});
   };
-  const statTargets=[...document.querySelectorAll('body[data-page=result] .analysis-quality-grid strong,body[data-page=result] .performance-stat>strong,body[data-page=result] .metric .value,body[data-page=result] .score,body[data-page=result] #report-scorecard tbody td:nth-child(2),body[data-page=result] #report-scorecard tbody td:nth-child(3),body[data-page=dashboard] .metric .value')];
+  const statTargets=[...document.querySelectorAll('body[data-page=result] [data-count-up],body[data-page=result] .analysis-quality-grid strong,body[data-page=result] .performance-stat>strong,body[data-page=result] .metric .value,body[data-page=result] .score,body[data-page=result] #report-scorecard tbody td:nth-child(2),body[data-page=result] #report-scorecard tbody td:nth-child(3),body[data-page=dashboard] .metric .value')];
   if('IntersectionObserver'in window&&!reduced){
     const statObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{
       if(!entry.isIntersecting)return;

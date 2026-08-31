@@ -104,6 +104,17 @@ def init_db() -> None:
                 FOREIGN KEY(account_id) REFERENCES accounts(id)
             );
 
+            CREATE TABLE IF NOT EXISTS oauth_identities (
+                provider TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                account_id INTEGER NOT NULL,
+                email_at_link TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(provider, subject),
+                FOREIGN KEY(account_id) REFERENCES accounts(id)
+            );
+
             CREATE TABLE IF NOT EXISTS coach_assignments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 profile_id INTEGER NOT NULL,
@@ -231,6 +242,9 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_subscription_actions_account_time
             ON subscription_actions(account_id, requested_at);
+
+            CREATE INDEX IF NOT EXISTS idx_oauth_identities_account
+            ON oauth_identities(account_id);
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -260,6 +274,7 @@ def init_db() -> None:
             "subscription_period_end": "TEXT",
             "subscription_cancelled_at": "TEXT",
             "email_verified_at": "TEXT",
+            "password_login_enabled": "INTEGER NOT NULL DEFAULT 1",
         }
         for column, definition in account_migrations.items():
             if column not in account_columns:
@@ -584,6 +599,62 @@ def create_account(email: str, password_hash: str) -> dict:
     return get_account(account_id) or {}
 
 
+def create_oauth_account(
+    provider: str,
+    subject: str,
+    email: str,
+    password_hash: str,
+    display_name: str | None = None,
+) -> dict:
+    """Atomically create a social-only account and bind its stable provider ID."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        linked = con.execute(
+            """SELECT oauth_identities.account_id,accounts.account_status
+               FROM oauth_identities JOIN accounts ON accounts.id=oauth_identities.account_id
+               WHERE oauth_identities.provider=? AND oauth_identities.subject=?""",
+            (provider, subject),
+        ).fetchone()
+        if linked:
+            if linked["account_status"] != "active":
+                raise ValueError("This WarriorIQ account is not currently available.")
+            account_id = int(linked["account_id"])
+        else:
+            if con.execute("SELECT id FROM accounts WHERE email=?", (email,)).fetchone():
+                raise ValueError(
+                    "A WarriorIQ account already uses this email. Sign in with its password first to protect that account."
+                )
+            first_account = con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0
+            if first_account:
+                profile_id = int(con.execute("SELECT id FROM profiles ORDER BY id LIMIT 1").fetchone()[0])
+                if display_name:
+                    con.execute(
+                        "UPDATE profiles SET display_name=?,updated_at=? WHERE id=?",
+                        (display_name, now, profile_id),
+                    )
+            else:
+                cursor = con.execute(
+                    "INSERT INTO profiles(display_name,photo_path,video_path,notes,default_fighter,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                    (display_name or "My Athlete", None, None, "", "A", now, now),
+                )
+                profile_id = int(cursor.lastrowid)
+            cursor = con.execute(
+                """INSERT INTO accounts(
+                       email,password_hash,password_login_enabled,profile_id,plan,credits,created_at
+                   ) VALUES(?,?,?,?,?,?,?)""",
+                (email, password_hash, 0, profile_id, "free", 1, now),
+            )
+            account_id = int(cursor.lastrowid)
+            con.execute(
+                """INSERT INTO oauth_identities(
+                       provider,subject,account_id,email_at_link,created_at,updated_at
+                   ) VALUES(?,?,?,?,?,?)""",
+                (provider, subject, account_id, email, now, now),
+            )
+    return get_account(account_id) or {}
+
+
 def get_account(account_id: int) -> dict | None:
     init_db()
     with connection() as con:
@@ -596,6 +667,30 @@ def get_account_by_email(email: str) -> dict | None:
     with connection() as con:
         row = con.execute("SELECT * FROM accounts WHERE email=?", (email,)).fetchone()
     return dict(row) if row else None
+
+
+def get_account_for_oauth_identity(provider: str, subject: str) -> dict | None:
+    init_db()
+    with connection() as con:
+        row = con.execute(
+            """SELECT accounts.* FROM oauth_identities
+               JOIN accounts ON accounts.id=oauth_identities.account_id
+               WHERE oauth_identities.provider=? AND oauth_identities.subject=?
+               AND accounts.account_status='active'""",
+            (provider, subject),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_oauth_identities(account_id: int) -> list[dict]:
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            """SELECT provider,subject,email_at_link,created_at,updated_at
+               FROM oauth_identities WHERE account_id=? ORDER BY created_at""",
+            (int(account_id),),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def record_account_signup_acceptance(
@@ -654,7 +749,8 @@ def revoke_account_sessions(account_id: int, keep_token_hash: str | None = None)
 def update_password_hash(account_id: int, password_hash: str) -> bool:
     with connection() as con:
         cursor = con.execute(
-            "UPDATE accounts SET password_hash=? WHERE id=? AND account_status='active'",
+            """UPDATE accounts SET password_hash=?,password_login_enabled=1
+               WHERE id=? AND account_status='active'""",
             (password_hash, int(account_id)),
         )
         if cursor.rowcount:
@@ -791,7 +887,7 @@ def account_for_session(token_hash: str) -> dict | None:
                accounts.terms_version,accounts.privacy_version,accounts.policies_accepted_at,
                accounts.stripe_customer_id,accounts.stripe_subscription_id,accounts.subscription_status,
                accounts.subscription_period_end,accounts.subscription_cancelled_at,
-               accounts.email_verified_at
+               accounts.email_verified_at,accounts.password_login_enabled
                FROM sessions JOIN accounts ON accounts.id=sessions.account_id
                WHERE sessions.token_hash=? AND sessions.expires_at>? AND accounts.account_status='active'""",
             (token_hash, now),
@@ -1179,6 +1275,7 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM outbound_messages WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM password_reset_tokens WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM email_verification_tokens WHERE account_id=?", (account_id,))
+        con.execute("DELETE FROM oauth_identities WHERE account_id=?", (account_id,))
         con.execute(
             "UPDATE security_events SET account_id=NULL,metadata_json='{}' WHERE account_id=?",
             (account_id,),

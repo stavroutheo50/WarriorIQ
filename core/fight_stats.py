@@ -172,8 +172,10 @@ def summarize_fight_events(
         own = [item for item in strikes if item.get("fighter") == fighter]
         punches = [item for item in own if item.get("family") == "punch"]
         kicks = [item for item in own if item.get("family") == "kick"]
+        knees = [item for item in own if item.get("family") == "knee"]
         punch = _family_summary(punches, trusted)
         kick = _family_summary(kicks, trusted)
+        knee = _family_summary(knees, trusted)
         overall = _family_summary(own, trusted)
         sequences = combinations[fighter]
         successful_combinations = sum(sequence["landed"] >= 2 for sequence in sequences) if trusted else None
@@ -208,6 +210,12 @@ def summarize_fight_events(
             "kicks_blocked": kick["blocked"],
             "kicks_evaded": kick["evaded"],
             "kicks_uncertain": kick["uncertain"],
+            "knee_attempts": knee["attempts"],
+            "knees_landed": knee["landed"],
+            "knees_missed": knee["missed"],
+            "knees_blocked": knee["blocked"],
+            "knees_evaded": knee["evaded"],
+            "knees_uncertain": knee["uncertain"],
             "total_strikes": overall["attempts"],
             "total_landed": overall["landed"],
             "total_defended": (
@@ -228,13 +236,33 @@ def summarize_fight_events(
             "technique_breakdown": _technique_breakdown(own, trusted),
             "best_weapon": best_weapon,
             "observation_coverage": coverage[fighter],
-            "families": {"punch": punch, "kick": kick},
+            "families": {"punch": punch, "kick": kick, "knee": knee},
             "evidence": overall["evidence"],
             # Compatibility names used by the earlier report surfaces.
             "clean": overall["landed"],
             "blocked_or_checked": overall["blocked"],
         }
         fighters[fighter] = item
+
+    combined_attempts = sum(int(fighters[fighter]["attempts"] or 0) for fighter in ("A", "B"))
+    for fighter, opponent in (("A", "B"), ("B", "A")):
+        own = fighters[fighter]
+        against = fighters[opponent]
+        own_attempts = int(own["attempts"] or 0)
+        against_attempts = int(against["attempts"] or 0)
+        own["initiative_share"] = own_attempts / combined_attempts if combined_attempts else None
+        own["attack_mix"] = {
+            family: (int(own["families"][family]["attempts"] or 0) / own_attempts if own_attempts else None)
+            for family in ("punch", "kick", "knee")
+        }
+        outcomes_complete = trusted and against_attempts > 0 and int(against["uncertain"] or 0) == 0
+        own["defensive_denial_rate"] = (
+            (int(against["blocked"] or 0) + int(against["evaded"] or 0)) / against_attempts
+            if outcomes_complete else None
+        )
+        own["clean_exposure_rate"] = (
+            int(against["landed"] or 0) / against_attempts if outcomes_complete else None
+        )
 
     rounds: list[dict] = []
     round_numbers = sorted({_round(item) for item in strikes if _round(item) is not None})
@@ -248,13 +276,50 @@ def summarize_fight_events(
                 family: _family_summary(
                     [item for item in own_round if item.get("family") == family], trusted
                 )
-                for family in ("punch", "kick")
+                for family in ("punch", "kick", "knee")
             }
             round_fighters[fighter] = summary
         rounds.append({
             "round": number,
             "fighters": round_fighters,
         })
+
+    for fighter in ("A", "B"):
+        fighter_rounds = [
+            {"round": item["round"], **item["fighters"][fighter]}
+            for item in rounds
+        ]
+        trusted_rounds = [item for item in fighter_rounds if trusted and item["landed"] is not None]
+        peak = max(
+            trusted_rounds,
+            key=lambda item: (int(item["landed"] or 0), int(item["attempts"] or 0), -int(item["round"])),
+            default=None,
+        )
+        first = fighter_rounds[0] if len(fighter_rounds) >= 2 else None
+        last = fighter_rounds[-1] if len(fighter_rounds) >= 2 else None
+        fighters[fighter]["round_profile"] = {
+            "peak_landed_round": None if peak is None else int(peak["round"]),
+            "peak_round_landed": None if peak is None else int(peak["landed"] or 0),
+            "opening_round": None if first is None else int(first["round"]),
+            "closing_round": None if last is None else int(last["round"]),
+            "attempt_change": None if first is None else int(last["attempts"] or 0) - int(first["attempts"] or 0),
+            "landed_change": (
+                None if first is None or first["landed"] is None or last["landed"] is None
+                else int(last["landed"] or 0) - int(first["landed"] or 0)
+            ),
+        }
+
+    comparison = {
+        "combined_attempts": combined_attempts,
+        "initiative_margin": (
+            None if not combined_attempts
+            else fighters["A"]["initiative_share"] - fighters["B"]["initiative_share"]
+        ),
+        "landed_margin": (
+            None if not trusted
+            else int(fighters["A"]["landed"] or 0) - int(fighters["B"]["landed"] or 0)
+        ),
+    }
 
     return {
         "action_labels_available": bool(trusted),
@@ -268,4 +333,5 @@ def summarize_fight_events(
         ),
         "fighters": fighters,
         "rounds": rounds,
+        "comparison": comparison,
     }

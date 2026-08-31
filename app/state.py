@@ -275,6 +275,60 @@ def update_job_for_worker(
         return _write_session(job_id, job)
 
 
+def finalize_job_from_worker(
+    job_id: str,
+    worker_id: str,
+    analysis_run_id: str,
+    report: dict,
+    artifacts: dict[str, Path],
+) -> bool:
+    """Publish one remote worker generation atomically enough for readers.
+
+    Remote uploads are first written to run-specific staging files by the web
+    process. Only the worker that still owns the live generation may replace
+    the canonical report/tracking artifacts and mark the job complete.
+    """
+    with _lock:
+        job = _read_session(job_id)
+        if (
+            not job
+            or job.get("status") != "running"
+            or job.get("worker_id") != worker_id
+            or job.get("analysis_run_id") != analysis_run_id
+        ):
+            return False
+        job_dir = _session_path(job_id).parent
+        temporary_report = job_dir / f"report.json.{analysis_run_id}.tmp"
+        try:
+            temporary_report.write_text(
+                json.dumps(_json_safe(report), separators=(",", ":")),
+                encoding="utf-8",
+            )
+            for name, source in artifacts.items():
+                os.replace(source, job_dir / name)
+            os.replace(temporary_report, job_dir / "report.json")
+            now = time.time()
+            job.update({
+                "status": "complete",
+                "report": report,
+                "percent": 100.0,
+                "message": "Complete",
+                "stage": "complete",
+                "worker_heartbeat_epoch": now,
+                "worker_lease_expires_epoch": None,
+                "updated_at_epoch": now,
+            })
+            _jobs[job_id] = job
+            return _write_session(job_id, job)
+        except OSError as exc:
+            temporary_report.unlink(missing_ok=True)
+            LOGGER.error(
+                "remote_worker_finalize_failed job_id=%s worker_id=%s error=%s",
+                job_id, worker_id, type(exc).__name__,
+            )
+            return False
+
+
 def renew_job_lease(job_id: str, worker_id: str, analysis_run_id: str | None = None) -> bool:
     job = _read_session(job_id)
     if not job:
@@ -314,17 +368,32 @@ def worker_status() -> dict:
         if SETTINGS.sam_recovery_enabled or SETTINGS.sam_continuous_enabled:
             required.append("sam2")
         missing_dependencies = [name for name in required if importlib.util.find_spec(name) is None]
-    available = (
-        not missing_dependencies
-        if SETTINGS.analysis_worker_mode == "inprocess"
-        else age is not None and age <= SETTINGS.worker_stale_seconds
+    mode = SETTINGS.analysis_worker_mode
+    remote_configured = bool(SETTINGS.worker_token) if mode == "remote" else True
+    known_mode = mode in {"inprocess", "external", "remote"}
+    available = bool(
+        known_mode
+        and remote_configured
+        and (
+            not missing_dependencies
+            if mode == "inprocess"
+            else age is not None and age <= SETTINGS.worker_stale_seconds
+        )
     )
+    if available:
+        reason = None
+    elif not known_mode:
+        reason = "worker_mode_invalid"
+    elif mode == "remote" and not remote_configured:
+        reason = "worker_token_missing"
+    elif missing_dependencies:
+        reason = "analysis_dependencies_missing"
+    else:
+        reason = "worker_heartbeat_missing"
     return {
-        "mode": SETTINGS.analysis_worker_mode,
+        "mode": mode,
         "available": available,
-        "reason": None if available else (
-            "analysis_dependencies_missing" if missing_dependencies else "worker_heartbeat_missing"
-        ),
+        "reason": reason,
         "missing_dependencies": missing_dependencies,
         "heartbeat_age_seconds": age,
         "current_job_id": payload.get("current_job_id"),

@@ -72,6 +72,19 @@ Original signed-in videos are scheduled for deletion after `WARRIORIQ_VIDEO_RETE
 
 Email verification is implemented but deliberately disabled until a real SMTP provider and monitored sender are configured. Set `WARRIORIQ_EMAIL_PROVIDER=smtp`, the SMTP variables, and then `WARRIORIQ_REQUIRE_EMAIL_VERIFICATION=true`. Enabling the requirement without working delivery would prevent new users from entering their workspace.
 
+### Optional social sign-in
+
+Google, Apple, Facebook and Microsoft sign-in use the authorization-code flow and stay hidden until `WARRIORIQ_OAUTH_STATE_SECRET` plus that provider's client ID and secret are configured. Generate a long, private state secret and register only these exact production callbacks:
+
+```text
+https://warrioriq.eu/auth/google/callback
+https://warrioriq.eu/auth/apple/callback
+https://warrioriq.eu/auth/facebook/callback
+https://warrioriq.eu/auth/microsoft/callback
+```
+
+Use the provider's web-application configuration, keep secrets server-side, and add separate localhost callbacks only for controlled development. Apple requires a Services ID associated with the website and a signed client-secret JWT; rotate that JWT before its configured expiry. WarriorIQ stores the provider name and stable subject identifier but not provider access tokens. It deliberately does not auto-link an unconnected provider to an existing password account solely because the email matches.
+
 Read `PRODUCTION_LAUNCH_CHECKLIST.md` before any public deployment. Passing the code-level gate does not replace legal, security, accessibility, payment, AI validation or operational sign-off.
 
 ## Render deployment
@@ -103,6 +116,8 @@ python worker.py
 ```
 
 Queued jobs remain persisted across web restarts. A worker claims one job at a time, renews a lease during progress, and leaves an interrupted job restartable if the lease expires. The web and worker must point `WARRIORIQ_DATA_DIR` at the same protected runtime storage. Do not claim that a remote GPU is connected merely because external mode is enabled; `/ready` returns 503 until a worker heartbeat is present.
+
+When the GPU is on a different machine, set `WARRIORIQ_WORKER_MODE=remote` and a high-entropy `WARRIORIQ_WORKER_TOKEN` on the web server. On the GPU machine, install the full requirements and model assets, then set `WARRIORIQ_WORKER_REMOTE_URL=https://warrioriq.eu` plus the same token and run `python worker.py`. The worker downloads only its claimed video over authenticated HTTPS, streams genuine progress, and uploads a bounded report/tracking archive. Keep the token server-side, rotate it if exposed, and confirm `/ready` is healthy before accepting public analyses.
 
 `/health` answers only whether the web process is alive. Use `/ready` for deployment readiness. Before backups, choose a protected destination outside the public web root and run `python tools/backup_runtime.py <destination>`. The command uses SQLite's online backup API, runs an integrity check and writes a SHA-256 manifest; it intentionally excludes original videos.
 

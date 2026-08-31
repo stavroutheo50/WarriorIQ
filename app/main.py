@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import json
 import html
+import hmac
 import logging
 import math
 import shutil
 import time
 import uuid
 import os
+import secrets
+import zipfile
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import cv2
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -23,10 +26,13 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+from authlib.integrations.base_client.errors import OAuthError
 
 from app.state import (
-    AnalysisRunLost, create_job, delete_job, get_job, list_jobs, prepare_job_run,
-    start_job_run, update_job, update_job_for_worker, worker_status,
+    AnalysisRunLost, claim_next_job, create_job, delete_job, finalize_job_from_worker,
+    get_job, list_jobs, prepare_job_run, record_worker_heartbeat, start_job_run,
+    update_job, update_job_for_worker, worker_status,
 )
 from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
@@ -39,16 +45,18 @@ from core.release_validation import assess_end_to_end_validation, end_to_end_met
 from core.db import (
     add_assignment, analysis_allowance, apply_checkout_event, consume_email_verification_token,
     consume_password_reset_token,
-    create_moderation_report, delete_account, delete_fight, delete_legal_acceptances_for_resource,
-    get_account, get_account_by_email, get_annotations, get_fight, get_fight_review, get_profile,
+    create_moderation_report, create_oauth_account, delete_account, delete_fight,
+    delete_legal_acceptances_for_resource, get_account, get_account_by_email,
+    get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, get_profile,
     get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
     list_expired_fight_videos, list_fights, list_legal_acceptances, list_moderation_reports,
+    list_oauth_identities,
     list_outbound_messages, list_security_events, list_subscription_actions, mark_fight_video_deleted,
     mark_email_verified, mark_outbound_message_sent,
     queue_outbound_message, record_account_signup_acceptance, record_legal_acceptance,
     record_security_event, record_subscription_action, release_analysis, reserve_analysis,
     resolve_moderation_report, revoke_account_sessions, revoke_report_shares, save_annotation,
-    save_email_verification_token, save_password_reset_token, save_report_share,
+    save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
     set_account_status, set_annotation_sequence,
     set_fight_review_status, toggle_assignment, update_cookie_preferences,
     update_marketing_consent, update_password_hash, update_profile,
@@ -67,11 +75,21 @@ from core.retention import (
     guest_job_valid, mark_guest_job,
 )
 from core.scoring import deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight
+from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import get_video_info, read_frame
 
 app = FastAPI(title="WarriorIQ")
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
+_oauth_cookie_secure = SETTINGS.public_base_url.lower().startswith("https://")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SETTINGS.oauth_state_secret or secrets.token_urlsafe(48),
+    session_cookie="warrioriq_oauth",
+    max_age=600,
+    same_site="none" if _oauth_cookie_secure else "lax",
+    https_only=_oauth_cookie_secure,
+)
 app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "app" / "templates"))
 executor = ThreadPoolExecutor(max_workers=1)
@@ -103,6 +121,7 @@ PRIVATE_ROUTE_PREFIXES = (
     "/media/", "/fighter-portrait/", "/selection-image/", "/dashboard", "/history",
     "/compare", "/coach", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
+    "/auth/",
 )
 
 SEARCH_GUIDES = {
@@ -201,6 +220,20 @@ class AnnotationPayload(BaseModel):
     target: str
     outcome: str
     manual: bool = False
+
+
+class WorkerIdentityPayload(BaseModel):
+    worker_id: str
+
+
+class WorkerProgressPayload(WorkerIdentityPayload):
+    analysis_run_id: str
+    patch: dict
+
+
+class WorkerFailurePayload(WorkerIdentityPayload):
+    analysis_run_id: str
+    error_code: str = "analysis_failed"
 
 
 def _analyze(req: AnalysisRequest, progress_callback):
@@ -540,6 +573,7 @@ async def viewer_context(request: Request, call_next):
     request.state.active_analysis = request.state.analysis_navigation["display"]
     request.state.launch = launch_readiness()
     request.state.minimum_account_age = SETTINGS.minimum_account_age
+    request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
     request.state.cookie_preferences = _cookie_preferences(request)
     request.state.is_admin = _is_admin(request)
     request.state.noindex = (
@@ -555,7 +589,12 @@ async def viewer_context(request: Request, call_next):
     request.state.social_image_url = (
         f"{SETTINGS.public_base_url}/static/warrioriq-logo.png" if SETTINGS.public_base_url else ""
     )
-    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path != "/stripe/webhook":
+    oauth_callback = request.url.path.startswith("/auth/") and request.url.path.endswith("/callback")
+    if (
+        request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.url.path != "/stripe/webhook"
+        and not oauth_callback
+    ):
         expected_origin = _external_origin(request)
         source = request.headers.get("origin") or request.headers.get("referer")
         if source:
@@ -1062,6 +1101,191 @@ def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/
     )
 
 
+def _oauth_redirect_uri(request: Request, provider: str) -> str:
+    base = SETTINGS.public_base_url or _external_origin(request)
+    return f"{base}/auth/{provider}/callback"
+
+
+async def _oauth_callback_state(request: Request) -> str:
+    if request.method == "GET":
+        return str(request.query_params.get("state") or "")
+    form = await request.form()
+    return str(form.get("state") or "")
+
+
+def _social_auth_error(request: Request, intent: dict | None, message: str):
+    intent = intent or {}
+    return _auth_page(
+        request,
+        str(intent.get("mode") or "login"),
+        message,
+        str(intent.get("next_path") or "/dashboard"),
+    )
+
+
+@app.post("/auth/{provider}/start")
+async def social_auth_start(
+    request: Request,
+    provider: str,
+    mode: str = Form("login"),
+    next_path: str = Form("/dashboard"),
+    accept_terms: bool = Form(False),
+    age_confirmed: bool = Form(False),
+    accept_policies: bool = Form(False),
+    marketing_consent: bool = Form(False),
+):
+    _enforce_rate_limit(request, "social-auth-start", 30, 300)
+    if _account(request):
+        return RedirectResponse(_safe_next(next_path), status_code=303)
+    if mode not in {"signup", "login"}:
+        raise HTTPException(400, "Choose sign in or account creation.")
+    client = SOCIAL_AUTH.client(provider)
+    if not client:
+        raise HTTPException(404, "This sign-in provider is not configured.")
+    if mode == "signup" and (not accept_terms or not age_confirmed):
+        return _auth_page(
+            request,
+            "signup",
+            f"Confirm that you are at least {SETTINGS.minimum_account_age} and accept the Terms of Service and Privacy Policy.",
+            next_path,
+        )
+    if mode == "login" and not accept_policies:
+        return _auth_page(
+            request,
+            "login",
+            "Confirm the Terms, Privacy Policy, and Acceptable Use Policy to sign in.",
+            next_path,
+        )
+    authorize_options = {"response_mode": "form_post"} if provider == "apple" else {}
+    response = await client.authorize_redirect(
+        request, _oauth_redirect_uri(request, provider), **authorize_options,
+    )
+    state = str((parse_qs(urlsplit(response.headers.get("location", "")).query).get("state") or [""])[0])
+    if not state:
+        LOGGER.error("social_auth_state_missing provider=%s", provider)
+        return _auth_page(request, mode, "Secure sign-in could not start. Please try again.", next_path)
+    request.session[f"wiq_social_intent:{state}"] = {
+        "provider": provider,
+        "mode": mode,
+        "next_path": _safe_next(next_path),
+        "marketing_consent": bool(marketing_consent),
+        "created_at_epoch": time.time(),
+    }
+    return response
+
+
+@app.api_route("/auth/{provider}/callback", methods=["GET", "POST"])
+async def social_auth_callback(request: Request, provider: str):
+    _enforce_rate_limit(request, "social-auth-callback", 40, 300)
+    state = await _oauth_callback_state(request)
+    intent = request.session.pop(f"wiq_social_intent:{state}", None) if state else None
+    if (
+        not isinstance(intent, dict)
+        or intent.get("provider") != provider
+        or time.time() - float(intent.get("created_at_epoch", 0.0) or 0.0) > 600
+    ):
+        return _social_auth_error(
+            request, intent, "This secure sign-in attempt expired or was already used. Please start again."
+        )
+    client = SOCIAL_AUTH.client(provider)
+    if not client:
+        return _social_auth_error(request, intent, "This sign-in provider is not available.")
+    try:
+        token = await client.authorize_access_token(request)
+        identity = await SOCIAL_AUTH.identity_from_token(provider, client, token)
+    except (OAuthError, ValueError) as exc:
+        LOGGER.warning("social_auth_rejected provider=%s error=%s", provider, type(exc).__name__)
+        return _social_auth_error(request, intent, "The identity provider could not verify this sign-in.")
+    except Exception as exc:
+        LOGGER.warning("social_auth_unavailable provider=%s error=%s", provider, type(exc).__name__)
+        return _social_auth_error(request, intent, "Secure sign-in is temporarily unavailable. Please try again.")
+
+    account = get_account_for_oauth_identity(identity.provider, identity.subject)
+    created = False
+    if not account:
+        if intent["mode"] != "signup":
+            return _social_auth_error(
+                request, intent,
+                f"No WarriorIQ account is connected to this {provider.title()} identity yet. Choose Create account first.",
+            )
+        if not identity.email or not valid_email(identity.email):
+            return _social_auth_error(
+                request, intent,
+                "The identity provider did not share a usable email address. Allow email access or use email signup.",
+            )
+        try:
+            account = create_oauth_account(
+                identity.provider,
+                identity.subject,
+                identity.email,
+                hash_password(session_token() + session_token()),
+                identity.display_name,
+            )
+        except ValueError as exc:
+            return _social_auth_error(request, intent, str(exc))
+        created = True
+        record_account_signup_acceptance(
+            int(account["id"]),
+            terms_version=SETTINGS.policy_version,
+            privacy_version=SETTINGS.policy_version,
+            marketing_consent=bool(intent.get("marketing_consent")),
+        )
+        for kind, status in (
+            ("terms_acceptance", "accepted"),
+            ("privacy_acknowledgement", "accepted"),
+            ("age_18_plus_confirmation", "accepted"),
+            ("marketing_consent", "accepted" if intent.get("marketing_consent") else "declined"),
+        ):
+            record_legal_acceptance(
+                kind,
+                SETTINGS.policy_version,
+                profile_id=int(account["profile_id"]),
+                metadata={
+                    "source": "social_signup",
+                    "provider": identity.provider,
+                    "enabled": bool(intent.get("marketing_consent")) if kind == "marketing_consent" else True,
+                },
+                current_status=status,
+            )
+        record_security_event(
+            "account_created",
+            account_id=int(account["id"]),
+            metadata={"policy_version": SETTINGS.policy_version, "provider": identity.provider},
+        )
+    else:
+        record_legal_acceptance(
+            "account_signin_policies",
+            SETTINGS.policy_version,
+            profile_id=int(account["profile_id"]),
+            metadata={"source": "social_login", "provider": identity.provider},
+        )
+    if identity.email_verified and not account.get("email_verified_at"):
+        mark_email_verified(int(account["id"]))
+        account = get_account(int(account["id"])) or account
+    if SETTINGS.require_email_verification and not account.get("email_verified_at"):
+        delivered = _send_verification_email(request, account)
+        record_security_event(
+            "email_verification_requested", account_id=int(account["id"]),
+            metadata={"email_delivery": "sent" if delivered else "unavailable", "provider": identity.provider},
+        )
+        return RedirectResponse("/verify-email", status_code=303)
+    record_security_event(
+        "social_login_succeeded",
+        account_id=int(account["id"]),
+        metadata={"provider": identity.provider, "created": created},
+    )
+    response = RedirectResponse(_safe_next(str(intent.get("next_path"))), status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE,
+        issue_session(int(account["id"])),
+        max_age=60 * 60 * 24 * 30,
+        httponly=True,
+        samesite="lax",
+        secure=_request_is_secure(request),
+    )
+    return response
+
+
 def _send_verification_email(request: Request, account: dict) -> bool:
     token = session_token()
     expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
@@ -1346,7 +1570,7 @@ async def upload(
     # event loop so one large phone upload cannot freeze every other request.
     await run_in_threadpool(_save_upload_limited, video, video_path, MAX_FIGHT_BYTES)
 
-    scan = scan_upload(video_path)
+    scan = await run_in_threadpool(scan_upload, video_path)
     if not scan["clean"]:
         video_path.unlink(missing_ok=True)
         if scan["status"] == "infected":
@@ -1355,12 +1579,12 @@ async def upload(
         raise HTTPException(503, "Fight uploads are paused because the safety scanner is unavailable.")
 
     try:
-        info = get_video_info(video_path)
+        info = await run_in_threadpool(get_video_info, video_path)
         if info.duration > SETTINGS.max_video_duration_seconds:
             raise HTTPException(413, "This video is longer than the configured analysis limit.")
         if info.width * info.height > SETTINGS.max_video_pixels:
             raise HTTPException(413, "This video's resolution exceeds the configured processing limit.")
-        quality = inspect_video_quality(video_path, info)
+        quality = await run_in_threadpool(inspect_video_quality, video_path, info)
     except Exception:
         video_path.unlink(missing_ok=True)
         raise
@@ -1371,9 +1595,9 @@ async def upload(
     job_dir = OUTPUTS / job_id
     selection_path = job_dir / "selection.jpg"
     try:
-        frame = read_frame(video_path, selection_frame)
+        frame = await run_in_threadpool(read_frame, video_path, selection_frame)
         job_dir.mkdir(parents=True, exist_ok=True)
-        if not cv2.imwrite(str(selection_path), frame):
+        if not await run_in_threadpool(cv2.imwrite, str(selection_path), frame):
             raise OSError("OpenCV could not save the fighter-selection frame")
     except Exception as exc:
         video_path.unlink(missing_ok=True)
@@ -1557,6 +1781,256 @@ def _validated_fighter_box(box: list[float], width: float, height: float, label:
     return [x1, y1, x2, y2]
 
 
+_WORKER_PROGRESS_FIELDS = {
+    "percent", "message", "stage", "elapsed_seconds", "eta_seconds",
+    "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
+    "fighter_b_confidence", "current_round", "quality_mode", "live_event_mode",
+    "live_events", "provisional_stats", "latest_observation",
+}
+_WORKER_ARCHIVE_FILES = {"report.json", "tracking.jsonl", "events.json"}
+_WORKER_REPORT_KEYS = {
+    "video", "setup", "performance", "tracking", "classifier", "metrics",
+    "scorecard", "coaching", "training_plan", "integrity", "statistics",
+}
+
+
+def _require_remote_worker(request: Request) -> None:
+    if SETTINGS.analysis_worker_mode != "remote" or not SETTINGS.worker_token:
+        raise HTTPException(503, "Remote analysis workers are not configured.")
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(token, SETTINGS.worker_token):
+        raise HTTPException(401, "Worker authentication failed.", headers={"WWW-Authenticate": "Bearer"})
+
+
+def _validated_worker_id(value: str) -> str:
+    worker_id = str(value or "").strip()
+    if not 3 <= len(worker_id) <= 128 or any(
+        not (character.isalnum() or character in "-_.") for character in worker_id
+    ):
+        raise HTTPException(400, "Invalid worker identity.")
+    return worker_id
+
+
+def _owned_worker_job(job_id: str, worker_id: str, analysis_run_id: str) -> dict:
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Analysis job not found.")
+    if (
+        job.get("status") != "running"
+        or job.get("worker_id") != worker_id
+        or job.get("analysis_run_id") != analysis_run_id
+    ):
+        raise HTTPException(409, "This worker no longer owns the analysis generation.")
+    return job
+
+
+def _remote_job_payload(job_id: str, job: dict) -> dict:
+    return {
+        "job_id": job_id,
+        "analysis_run_id": str(job.get("analysis_run_id") or ""),
+        "video_extension": Path(str(job.get("video_path") or "fight.mp4")).suffix.lower() or ".mp4",
+        "fighter_a_box": list(job["fighter_a_box"]),
+        "fighter_b_box": list(job["fighter_b_box"]),
+        "analysis_target": "BOTH",
+        "focus_fighter": job.get("focus_fighter") or "A",
+        "fight_type": job["fight_type"],
+        "ruleset": job["ruleset"],
+        "start_seconds": float(job.get("start_seconds", 0.0)),
+        "end_seconds": job.get("end_seconds"),
+        "round_count": int(job.get("round_count", 1)),
+        "round_duration_seconds": float(job.get("round_duration_seconds", 120.0)),
+        "break_duration_seconds": float(job.get("break_duration_seconds", 60.0)),
+        "selected_rounds": job.get("selected_rounds"),
+        "openai_identity_recovery": bool(job.get("openai_identity_recovery", False)),
+    }
+
+
+def _prepare_worker_archive(archive_path: Path, job_dir: Path, analysis_run_id: str) -> tuple[dict, dict[str, Path]]:
+    staged: dict[str, Path] = {}
+    try:
+        with zipfile.ZipFile(archive_path) as bundle:
+            files = [info for info in bundle.infolist() if not info.is_dir()]
+            names = [info.filename for info in files]
+            if len(names) != len(set(names)) or set(names) - _WORKER_ARCHIVE_FILES:
+                raise ValueError("The worker archive contains unsupported files.")
+            if not {"report.json", "tracking.jsonl"}.issubset(names):
+                raise ValueError("The worker archive is missing the report or skeleton tracking data.")
+            if sum(info.file_size for info in files) > SETTINGS.worker_artifact_max_bytes:
+                raise ValueError("The worker archive expands beyond the configured safety limit.")
+            report = json.loads(bundle.read("report.json"))
+            if not isinstance(report, dict) or not _WORKER_REPORT_KEYS.issubset(report):
+                raise ValueError("The worker report is incomplete.")
+            for name in ("tracking.jsonl", "events.json"):
+                if name not in names:
+                    continue
+                destination = job_dir / f"{name}.{analysis_run_id}.worker"
+                with bundle.open(name) as source, destination.open("wb") as output:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+                staged[name] = destination
+        return report, staged
+    except Exception:
+        for path in staged.values():
+            path.unlink(missing_ok=True)
+        raise
+
+
+def _save_remote_fight(job_id: str, job: dict, report: dict) -> None:
+    if not job.get("persist_result"):
+        return
+    performance = report.get("performance", {})
+    tracking = report.get("tracking", {})
+    scorecard = report.get("scorecard", {})
+    summary = {
+        "winner_estimate": scorecard.get("winner_estimate"),
+        "score_totals": scorecard.get("totals", {"A": None, "B": None}),
+        "analysis_seconds": performance.get("analysis_seconds"),
+        "video_seconds": performance.get("segment_duration_seconds"),
+        "within_budget": performance.get("within_video_length_budget"),
+        "fighter_A_coverage": tracking.get("fighter_A_coverage", 0.0),
+        "fighter_B_coverage": tracking.get("fighter_B_coverage", 0.0),
+        "progress_report": {
+            key: report.get(key, {})
+            for key in ("video", "setup", "integrity", "metrics", "statistics", "coaching", "training_plan")
+        },
+    }
+    save_fight(
+        job_id=job_id,
+        profile_id=int(job.get("profile_id", 0)),
+        original_name=str(job.get("original_name") or "Fight video"),
+        video_path=str(job["video_path"]),
+        report_path=str(OUTPUTS / job_id / "report.json"),
+        fight_type=str(job["fight_type"]),
+        ruleset=str(job["ruleset"]),
+        analysis_target=str(job.get("focus_fighter") or "A"),
+        summary=summary,
+        video_delete_after=(
+            datetime.now(timezone.utc) + timedelta(days=SETTINGS.saved_video_retention_days)
+        ).isoformat(),
+    )
+
+
+@app.post("/api/worker/heartbeat")
+def remote_worker_heartbeat(request: Request, payload: WorkerIdentityPayload):
+    _require_remote_worker(request)
+    worker_id = _validated_worker_id(payload.worker_id)
+    record_worker_heartbeat(worker_id)
+    return {"ok": True}
+
+
+@app.post("/api/worker/claim")
+def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
+    _require_remote_worker(request)
+    worker_id = _validated_worker_id(payload.worker_id)
+    record_worker_heartbeat(worker_id)
+    claimed = claim_next_job(worker_id)
+    if not claimed:
+        return {"job": None}
+    job_id, job = claimed
+    record_worker_heartbeat(worker_id, job_id)
+    return {"job": _remote_job_payload(job_id, job)}
+
+
+@app.get("/api/worker/jobs/{job_id}/video")
+def remote_worker_video(request: Request, job_id: str, worker_id: str, analysis_run_id: str):
+    _require_remote_worker(request)
+    worker_id = _validated_worker_id(worker_id)
+    job = _owned_worker_job(job_id, worker_id, analysis_run_id)
+    video_path = Path(str(job.get("video_path") or ""))
+    if not video_path.is_file() or video_path.parent.resolve() != UPLOADS.resolve():
+        raise HTTPException(404, "Fight video not found.")
+    record_worker_heartbeat(worker_id, job_id)
+    return FileResponse(video_path, filename=f"{job_id}{video_path.suffix.lower()}", media_type="video/mp4")
+
+
+@app.post("/api/worker/jobs/{job_id}/progress")
+def remote_worker_progress(request: Request, job_id: str, payload: WorkerProgressPayload):
+    _require_remote_worker(request)
+    worker_id = _validated_worker_id(payload.worker_id)
+    _owned_worker_job(job_id, worker_id, payload.analysis_run_id)
+    if len(json.dumps(payload.patch, separators=(",", ":"))) > 2 * 1024 * 1024:
+        raise HTTPException(413, "Worker progress payload is too large.")
+    patch = {key: value for key, value in payload.patch.items() if key in _WORKER_PROGRESS_FIELDS}
+    if "percent" in patch:
+        patch["percent"] = max(0.0, min(99.9, float(patch["percent"])))
+    if not update_job_for_worker(job_id, worker_id, payload.analysis_run_id, patch):
+        raise HTTPException(409, "This worker no longer owns the analysis generation.")
+    record_worker_heartbeat(worker_id, job_id)
+    return {"ok": True}
+
+
+@app.post("/api/worker/jobs/{job_id}/complete", status_code=201)
+async def remote_worker_complete(
+    request: Request,
+    job_id: str,
+    archive: UploadFile = File(...),
+    worker_id: str = Form(...),
+    analysis_run_id: str = Form(...),
+):
+    _require_remote_worker(request)
+    worker_id = _validated_worker_id(worker_id)
+    existing = get_job(job_id)
+    if (
+        existing
+        and existing.get("status") == "complete"
+        and existing.get("worker_id") == worker_id
+        and existing.get("analysis_run_id") == analysis_run_id
+        and (OUTPUTS / job_id / "report.json").is_file()
+    ):
+        # A worker may retry after the web server committed the result but the
+        # success response was lost. Treat that exact generation as complete;
+        # never re-run it or turn a successful analysis into an error.
+        record_worker_heartbeat(worker_id)
+        return {"ok": True, "job_id": job_id, "already_complete": True}
+    job = _owned_worker_job(job_id, worker_id, analysis_run_id)
+    job_dir = OUTPUTS / job_id
+    archive_path = job_dir / f"worker-result.{analysis_run_id}.zip"
+    try:
+        await run_in_threadpool(
+            _save_upload_limited, archive, archive_path, SETTINGS.worker_artifact_max_bytes,
+        )
+        try:
+            report, staged = await run_in_threadpool(
+                _prepare_worker_archive, archive_path, job_dir, analysis_run_id,
+            )
+        except (OSError, ValueError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
+            raise HTTPException(400, str(exc) or "Invalid worker artifact archive.") from exc
+        if not finalize_job_from_worker(job_id, worker_id, analysis_run_id, report, staged):
+            for path in staged.values():
+                path.unlink(missing_ok=True)
+            raise HTTPException(409, "This worker no longer owns the analysis generation.")
+        try:
+            _save_remote_fight(job_id, job, report)
+        except Exception as exc:
+            LOGGER.exception("remote_worker_fight_persist_failed job_id=%s", job_id, exc_info=exc)
+        record_worker_heartbeat(worker_id)
+        record_security_event(
+            "remote_analysis_completed", account_id=job.get("account_id"),
+            resource_type="fight", resource_id=job_id,
+        )
+        return {"ok": True, "job_id": job_id}
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+
+@app.post("/api/worker/jobs/{job_id}/failed")
+def remote_worker_failed(request: Request, job_id: str, payload: WorkerFailurePayload):
+    _require_remote_worker(request)
+    worker_id = _validated_worker_id(payload.worker_id)
+    job = _owned_worker_job(job_id, worker_id, payload.analysis_run_id)
+    if job.get("usage_reserved") and job.get("account_id"):
+        release_analysis(int(job["account_id"]), job_id)
+        update_job(job_id, {"usage_reserved": False})
+    if not update_job_for_worker(job_id, worker_id, payload.analysis_run_id, {
+        "status": "error",
+        "message": "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again.",
+        "worker_lease_expires_epoch": None,
+        "worker_error_code": str(payload.error_code or "analysis_failed")[:80],
+    }, renew_lease=False):
+        raise HTTPException(409, "This worker no longer owns the analysis generation.")
+    record_worker_heartbeat(worker_id)
+    return {"ok": True}
+
+
 @app.post("/api/start/{job_id}")
 def start(request: Request, job_id: str, payload: StartPayload):
     _enforce_rate_limit(request, "analysis-start", 12, 600)
@@ -1609,7 +2083,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
         "analysis_target": "BOTH", "focus_fighter": focus_fighter,
         "fighter_a_box": fighter_a_box, "fighter_b_box": fighter_b_box,
     })
-    if SETTINGS.analysis_worker_mode != "external":
+    if SETTINGS.analysis_worker_mode == "inprocess":
         executor.submit(_run_job, job_id, req, analysis_run_id)
     return _analysis_started_response(request, job_id)
 
@@ -1637,7 +2111,7 @@ def restart_interrupted_analysis(request: Request, job_id: str):
     analysis_run_id = prepare_job_run(job_id, {
         "message": "Restarting the preserved analysis session",
     })
-    if SETTINGS.analysis_worker_mode != "external":
+    if SETTINGS.analysis_worker_mode == "inprocess":
         executor.submit(_run_job, job_id, req, analysis_run_id)
     return _analysis_started_response(request, job_id)
 
@@ -2264,8 +2738,8 @@ async def save_profile(
         if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
             raise HTTPException(400, "Profile photo must be JPG, PNG or WEBP.")
         file_path = folder / f"profile_{profile_id}{suffix}"
-        _save_upload_limited(photo, file_path, MAX_PROFILE_PHOTO_BYTES)
-        if cv2.imread(str(file_path)) is None:
+        await run_in_threadpool(_save_upload_limited, photo, file_path, MAX_PROFILE_PHOTO_BYTES)
+        if await run_in_threadpool(cv2.imread, str(file_path)) is None:
             file_path.unlink(missing_ok=True)
             raise HTTPException(400, "The profile photo could not be decoded as a safe image.")
         photo_path = f"/static/profile/{file_path.name}"
@@ -2278,9 +2752,9 @@ async def save_profile(
         if suffix not in {".mp4", ".mov", ".m4v", ".webm"}:
             raise HTTPException(400, "Profile video must be MP4, MOV, M4V or WEBM.")
         file_path = folder / f"profile_video_{profile_id}{suffix}"
-        _save_upload_limited(profile_video, file_path, MAX_PROFILE_VIDEO_BYTES)
+        await run_in_threadpool(_save_upload_limited, profile_video, file_path, MAX_PROFILE_VIDEO_BYTES)
         try:
-            get_video_info(file_path)
+            await run_in_threadpool(get_video_info, file_path)
         except Exception:
             file_path.unlink(missing_ok=True)
             raise HTTPException(400, "The profile video could not be decoded as a supported video.")
@@ -2800,6 +3274,7 @@ def export_account_data(request: Request, password: str = Form(...)):
         "fights": fights,
         "annotations": annotations,
         "coach_assignments": list_assignments(profile_id),
+        "connected_sign_in_identities": list_oauth_identities(int(account["id"])),
         "legal_acceptances": list_legal_acceptances(profile_id=profile_id),
     }
     return JSONResponse(

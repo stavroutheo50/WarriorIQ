@@ -11,8 +11,14 @@
   "categories": ["sports", "fitness", "productivity"],
   "icons": [
     {
+      "src": "/static/warrioriq-logo-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
       "src": "/static/warrioriq-logo.png",
-      "sizes": "any",
+      "sizes": "1254x1254",
       "type": "image/png",
       "purpose": "any maskable"
     }

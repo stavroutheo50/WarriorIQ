@@ -74,6 +74,7 @@ def authenticate(email: str, password: str) -> dict | None:
     if (
         not account
         or account.get("account_status", "active") != "active"
+        or not bool(account.get("password_login_enabled", 1))
         or not verify_password(password, account.get("password_hash", ""))
     ):
         return None

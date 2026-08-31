@@ -2,17 +2,27 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import socket
+import tempfile
+import threading
 import time
 import uuid
+import zipfile
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from app.state import (
     AnalysisRunLost, claim_next_job, get_job, record_worker_heartbeat,
     update_job, update_job_for_worker,
 )
-from core.config import SETTINGS
+from core.config import OUTPUTS, SETTINGS
 from core.db import release_analysis
 from core.types import AnalysisRequest
+from core.worker_client import RemoteWorkerClient, RemoteWorkerError, retry_heartbeat
 
 
 LOGGER = logging.getLogger("warrioriq.worker")
@@ -77,6 +87,11 @@ def run_claimed_job(worker_id: str, job_id: str, job: dict) -> None:
 
 def run_worker(*, once: bool = False) -> int:
     worker_id = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
+    if SETTINGS.worker_remote_url:
+        if not SETTINGS.worker_token:
+            LOGGER.error("WARRIORIQ_WORKER_TOKEN is required with WARRIORIQ_WORKER_REMOTE_URL")
+            return 2
+        return run_remote_worker(worker_id, once=once)
     while True:
         record_worker_heartbeat(worker_id)
         claimed = claim_next_job(worker_id)
@@ -85,6 +100,121 @@ def run_worker(*, once: bool = False) -> int:
             record_worker_heartbeat(worker_id, job_id)
             run_claimed_job(worker_id, job_id, job)
             record_worker_heartbeat(worker_id)
+        elif once:
+            return 0
+        else:
+            time.sleep(SETTINGS.worker_poll_seconds)
+
+
+def _remote_request(job: dict, video_path: Path) -> AnalysisRequest:
+    payload = dict(job)
+    payload.update({
+        "video_path": str(video_path),
+        "original_name": "Fight video",
+        "profile_id": 0,
+        "persist_result": False,
+    })
+    return _request_from_job(str(job["job_id"]), payload)
+
+
+def _worker_result_archive(job_id: str, destination: Path) -> None:
+    job_dir = OUTPUTS / job_id
+    required = (job_dir / "report.json", job_dir / "tracking.jsonl")
+    if any(not path.is_file() for path in required):
+        raise RuntimeError("Analysis completed without the report or skeleton tracking artifact")
+    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
+        for name in ("report.json", "tracking.jsonl", "events.json"):
+            path = job_dir / name
+            if path.is_file():
+                bundle.write(path, arcname=name)
+
+
+def _keep_remote_lease(
+    client: RemoteWorkerClient,
+    job_id: str,
+    analysis_run_id: str,
+    stop: threading.Event,
+    ownership_lost: threading.Event,
+) -> None:
+    """Renew ownership while downloads or model startup have no progress events."""
+    interval = max(10.0, min(30.0, SETTINGS.worker_lease_seconds / 3.0))
+    while not stop.wait(interval):
+        try:
+            client.progress(job_id, analysis_run_id, {})
+        except AnalysisRunLost:
+            ownership_lost.set()
+            return
+        except RemoteWorkerError as exc:
+            # A brief network problem should not stop local inference. The next
+            # heartbeat or normal progress update can still renew the lease.
+            LOGGER.warning("Remote lease renewal failed for job %s: %s", job_id, exc)
+
+
+def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
+    from core.analyzer import analyze
+
+    job_id = str(job["job_id"])
+    analysis_run_id = str(job["analysis_run_id"])
+    output_dir = OUTPUTS / job_id
+    stop_keepalive = threading.Event()
+    ownership_lost = threading.Event()
+    keepalive = threading.Thread(
+        target=_keep_remote_lease,
+        args=(client, job_id, analysis_run_id, stop_keepalive, ownership_lost),
+        name=f"warrioriq-lease-{job_id}",
+        daemon=True,
+    )
+    keepalive.start()
+    try:
+        with tempfile.TemporaryDirectory(prefix=f"warrioriq-{job_id}-") as temporary:
+            video_path = Path(temporary) / f"fight{job.get('video_extension') or '.mp4'}"
+            archive_path = Path(temporary) / "worker-result.zip"
+            client.download_video(job, video_path)
+            if ownership_lost.is_set():
+                raise AnalysisRunLost(f"Analysis run {analysis_run_id} no longer owns {job_id}")
+            if output_dir.parent.resolve() != OUTPUTS.resolve():
+                raise RuntimeError("Unsafe worker output path")
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+            def progress(patch: dict) -> None:
+                if ownership_lost.is_set():
+                    raise AnalysisRunLost(f"Analysis run {analysis_run_id} no longer owns {job_id}")
+                client.progress(job_id, analysis_run_id, patch)
+
+            analyze(_remote_request(job, video_path), progress)
+            if ownership_lost.is_set():
+                raise AnalysisRunLost(f"Analysis run {analysis_run_id} no longer owns {job_id}")
+            _worker_result_archive(job_id, archive_path)
+            client.complete(job_id, analysis_run_id, archive_path)
+    except AnalysisRunLost:
+        LOGGER.warning("Remote worker lost ownership of job %s; output was discarded", job_id)
+    except Exception as exc:
+        LOGGER.exception("Remote analysis job %s failed", job_id, exc_info=exc)
+        try:
+            client.failed(job_id, analysis_run_id, type(exc).__name__)
+        except (AnalysisRunLost, RemoteWorkerError):
+            LOGGER.warning("Could not report remote failure for job %s", job_id)
+    finally:
+        stop_keepalive.set()
+        keepalive.join(timeout=2.0)
+        if output_dir.parent.resolve() == OUTPUTS.resolve():
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+
+def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
+    client = RemoteWorkerClient(SETTINGS.worker_remote_url, SETTINGS.worker_token, worker_id)
+    while True:
+        try:
+            retry_heartbeat(client)
+            claimed = client.claim()
+        except RemoteWorkerError as exc:
+            LOGGER.warning("Remote worker connection unavailable: %s", exc)
+            if once:
+                return 1
+            time.sleep(max(2.0, SETTINGS.worker_poll_seconds))
+            continue
+        if claimed:
+            run_remote_claimed_job(client, claimed)
         elif once:
             return 0
         else:

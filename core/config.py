@@ -150,6 +150,18 @@ class Settings:
     default_profile_name: str = "My Athlete"
     payments_enabled: bool = env_bool("WARRIORIQ_PAYMENTS", False)
 
+    # Social sign-in is opt-in per provider. A provider is exposed only when
+    # both credentials and a stable state-signing secret are configured.
+    oauth_state_secret: str = os.getenv("WARRIORIQ_OAUTH_STATE_SECRET", "").strip()
+    google_client_id: str = os.getenv("WARRIORIQ_GOOGLE_CLIENT_ID", "").strip()
+    google_client_secret: str = os.getenv("WARRIORIQ_GOOGLE_CLIENT_SECRET", "").strip()
+    apple_client_id: str = os.getenv("WARRIORIQ_APPLE_CLIENT_ID", "").strip()
+    apple_client_secret: str = os.getenv("WARRIORIQ_APPLE_CLIENT_SECRET", "").strip()
+    facebook_client_id: str = os.getenv("WARRIORIQ_FACEBOOK_CLIENT_ID", "").strip()
+    facebook_client_secret: str = os.getenv("WARRIORIQ_FACEBOOK_CLIENT_SECRET", "").strip()
+    microsoft_client_id: str = os.getenv("WARRIORIQ_MICROSOFT_CLIENT_ID", "").strip()
+    microsoft_client_secret: str = os.getenv("WARRIORIQ_MICROSOFT_CLIENT_SECRET", "").strip()
+
     # Analysis jobs can run inside the web process for a local/PyCharm build,
     # or be claimed by a separate GPU worker in production.  External mode is
     # deliberately opt-in so existing local installs keep working unchanged.
@@ -157,6 +169,15 @@ class Settings:
     worker_poll_seconds: float = max(0.2, float(os.getenv("WARRIORIQ_WORKER_POLL_SECONDS", "1.0")))
     worker_lease_seconds: int = max(30, int(os.getenv("WARRIORIQ_WORKER_LEASE_SECONDS", "180")))
     worker_stale_seconds: int = max(60, int(os.getenv("WARRIORIQ_WORKER_STALE_SECONDS", "300")))
+    # Remote mode lets a GPU machine claim jobs over HTTPS instead of requiring
+    # the web server and worker to share a filesystem. The token must be the
+    # same high-entropy secret on both machines and is never sent to browsers.
+    worker_remote_url: str = os.getenv("WARRIORIQ_WORKER_REMOTE_URL", "").rstrip("/")
+    worker_token: str = os.getenv("WARRIORIQ_WORKER_TOKEN", "").strip()
+    worker_artifact_max_bytes: int = max(
+        10 * 1024 * 1024,
+        int(os.getenv("WARRIORIQ_WORKER_ARTIFACT_MAX_BYTES", str(256 * 1024 * 1024))),
+    )
     minimum_free_storage_gb: float = max(0.25, float(os.getenv("WARRIORIQ_MIN_FREE_STORAGE_GB", "2")))
     max_fight_bytes: int = max(
         50 * 1024 * 1024,

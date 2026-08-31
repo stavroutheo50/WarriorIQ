@@ -1,4 +1,6 @@
+import io
 import json
+import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -12,6 +14,7 @@ from app import state
 from app import main as webapp
 from app.main import GUEST_COOKIE, app
 from core.analyzer import _live_event_payload, _provisional_stats
+from core.config import SETTINGS
 
 
 class DurableAnalysisStateTests(TestCase):
@@ -108,6 +111,88 @@ class DurableAnalysisStateTests(TestCase):
                 self.assertEqual(claimed[1]["status"], "running")
                 self.assertIsNone(state.claim_next_job("second-worker"))
                 state.delete_job("queued-job")
+
+    def test_remote_gpu_worker_claims_downloads_updates_and_publishes_one_generation(self):
+        client = TestClient(app)
+        previous_mode = SETTINGS.analysis_worker_mode
+        previous_token = SETTINGS.worker_token
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            uploads = root / "uploads"
+            outputs = root / "outputs"
+            uploads.mkdir()
+            outputs.mkdir()
+            video = uploads / "remote-job.mp4"
+            video.write_bytes(b"synthetic-video")
+            object.__setattr__(SETTINGS, "analysis_worker_mode", "remote")
+            object.__setattr__(SETTINGS, "worker_token", "test-worker-token")
+            headers = {"Authorization": "Bearer test-worker-token"}
+            try:
+                with patch.object(state, "OUTPUTS", outputs), patch.object(webapp, "OUTPUTS", outputs), patch.object(webapp, "UPLOADS", uploads):
+                    state.create_job("remote-job", {
+                        "owner_key": "guest:test", "status": "selecting",
+                        "video_path": str(video), "fighter_a_box": [1, 2, 30, 80],
+                        "fighter_b_box": [40, 2, 70, 80], "focus_fighter": "A",
+                        "fight_type": "competition", "ruleset": "K1", "round_count": 1,
+                        "round_duration_seconds": 120.0, "break_duration_seconds": 60.0,
+                        "start_seconds": 0.0, "end_seconds": 20.0, "persist_result": False,
+                    })
+                    run_id = state.prepare_job_run("remote-job", {})
+
+                    unauthorized = client.post("/api/worker/claim", json={"worker_id": "gpu-test"})
+                    self.assertEqual(unauthorized.status_code, 401)
+                    claimed = client.post(
+                        "/api/worker/claim", headers=headers, json={"worker_id": "gpu-test"},
+                    )
+                    self.assertEqual(claimed.status_code, 200)
+                    job = claimed.json()["job"]
+                    self.assertEqual(job["job_id"], "remote-job")
+                    self.assertEqual(job["analysis_run_id"], run_id)
+                    self.assertNotIn("video_path", job)
+
+                    downloaded = client.get(
+                        "/api/worker/jobs/remote-job/video",
+                        params={"worker_id": "gpu-test", "analysis_run_id": run_id},
+                        headers=headers,
+                    )
+                    self.assertEqual(downloaded.status_code, 200)
+                    self.assertEqual(downloaded.content, b"synthetic-video")
+                    progressed = client.post(
+                        "/api/worker/jobs/remote-job/progress", headers=headers,
+                        json={"worker_id": "gpu-test", "analysis_run_id": run_id,
+                              "patch": {"percent": 45, "message": "Tracking fighters", "status": "complete"}},
+                    )
+                    self.assertEqual(progressed.status_code, 200)
+                    self.assertEqual(state.get_job("remote-job")["status"], "running")
+
+                    report = {key: {} for key in webapp._WORKER_REPORT_KEYS}
+                    report["scorecard"] = {"totals": {"A": None, "B": None}}
+                    archive = io.BytesIO()
+                    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+                        bundle.writestr("report.json", json.dumps(report))
+                        bundle.writestr("tracking.jsonl", '{"fighter":"A"}\n')
+                        bundle.writestr("events.json", "[]")
+                    completed = client.post(
+                        "/api/worker/jobs/remote-job/complete", headers=headers,
+                        data={"worker_id": "gpu-test", "analysis_run_id": run_id},
+                        files={"archive": ("worker-result.zip", archive.getvalue(), "application/zip")},
+                    )
+                    self.assertEqual(completed.status_code, 201)
+                    self.assertEqual(state.get_job("remote-job")["status"], "complete")
+                    self.assertTrue((outputs / "remote-job" / "report.json").is_file())
+                    self.assertTrue((outputs / "remote-job" / "tracking.jsonl").is_file())
+                    repeated = client.post(
+                        "/api/worker/jobs/remote-job/complete", headers=headers,
+                        data={"worker_id": "gpu-test", "analysis_run_id": run_id},
+                        files={"archive": ("worker-result.zip", archive.getvalue(), "application/zip")},
+                    )
+                    self.assertEqual(repeated.status_code, 201)
+                    self.assertTrue(repeated.json()["already_complete"])
+            finally:
+                state.delete_job("remote-job")
+                object.__setattr__(SETTINGS, "analysis_worker_mode", previous_mode)
+                object.__setattr__(SETTINGS, "worker_token", previous_token)
+                client.close()
 
     def test_readiness_probe_checks_runtime_dependencies(self):
         client = TestClient(app)
@@ -365,6 +450,35 @@ class DurableAnalysisStateTests(TestCase):
         self.assertEqual(round_a["blocked"], 1)
         self.assertEqual(round_a["families"]["punch"]["attempts"], 2)
         self.assertEqual(round_a["families"]["kick"]["attempts"], 1)
+
+    def test_tactical_performance_is_derived_from_supported_fight_events(self):
+        events = [
+            {"id": "a1", "fighter": "A", "family": "punch", "technique": "jab", "outcome": "landed", "time_seconds": 1.0, "round_number": 1},
+            {"id": "b1", "fighter": "B", "family": "punch", "technique": "cross", "outcome": "landed", "time_seconds": 1.4, "round_number": 1},
+            {"id": "a2", "fighter": "A", "family": "kick", "technique": "right_low_kick", "outcome": "blocked", "time_seconds": 2.0, "round_number": 1},
+            {"id": "b2", "fighter": "B", "family": "kick", "technique": "left_body_kick", "outcome": "evaded", "time_seconds": 3.0, "round_number": 1},
+            {"id": "a3", "fighter": "A", "family": "knee", "technique": "right_knee", "outcome": "landed", "time_seconds": 61.0, "round_number": 2},
+            {"id": "b3", "fighter": "B", "family": "knee", "technique": "left_knee", "outcome": "blocked", "time_seconds": 61.5, "round_number": 2},
+            {"id": "a4", "fighter": "A", "family": "punch", "technique": "cross", "outcome": "missed", "time_seconds": 62.0, "round_number": 2},
+            {"id": "a5", "fighter": "A", "family": "kick", "technique": "left_body_kick", "outcome": "landed", "time_seconds": 63.0, "round_number": 2},
+            {"id": "b4", "fighter": "B", "family": "punch", "technique": "jab", "outcome": "missed", "time_seconds": 64.0, "round_number": 2},
+        ]
+
+        stats = _provisional_stats(events, {"A": 100, "B": 100}, 100, True, 120.0)
+        fighter = stats["fighters"]["A"]
+
+        self.assertEqual(fighter["knee_attempts"], 1)
+        self.assertEqual(fighter["knees_landed"], 1)
+        self.assertAlmostEqual(fighter["initiative_share"], 5 / 9)
+        self.assertEqual(fighter["attack_mix"], {"punch": .4, "kick": .4, "knee": .2})
+        self.assertAlmostEqual(fighter["defensive_denial_rate"], .5)
+        self.assertAlmostEqual(fighter["clean_exposure_rate"], .25)
+        self.assertEqual(fighter["round_profile"]["peak_landed_round"], 2)
+        self.assertEqual(fighter["round_profile"]["peak_round_landed"], 2)
+        self.assertEqual(fighter["round_profile"]["attempt_change"], 1)
+        self.assertEqual(stats["comparison"]["combined_attempts"], 9)
+        self.assertAlmostEqual(stats["comparison"]["initiative_margin"], 1 / 9)
+        self.assertEqual(stats["comparison"]["landed_margin"], 2)
 
     def test_unvalidated_live_pipeline_emits_only_generic_observed_attempts(self):
         candidate = SimpleNamespace(

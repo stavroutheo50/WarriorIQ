@@ -378,8 +378,10 @@ class PublicPageTests(unittest.TestCase):
         page = self.client.get("/")
         self.assertNotIn('/static/athletic.css', page.text)
         self.assertIn('data-page="home"', page.text)
-        self.assertIn('href="/static/motion.css?v=20260828-2"', page.text)
-        self.assertIn('src="/static/motion.js?v=20260828-2"', page.text)
+        # The cache-busting version changes on every asset release, so assert the
+        # shared motion layer is linked rather than pinning one version string.
+        self.assertRegex(page.text, r'href="/static/motion\.css\?v=[\w-]+"')
+        self.assertRegex(page.text, r'src="/static/motion\.js\?v=[\w-]+"')
         self.assertIn('id="pageScrollProgress"', page.text)
         css = self.client.get("/static/motion.css")
         self.assertEqual(css.status_code, 200)
@@ -603,6 +605,24 @@ class PublicPageTests(unittest.TestCase):
             self.assertIn(f'href="{path}"', auth)
         self.assertNotIn("Uploading is subject to", upload)
         self.assertNotIn("Account policies are accepted only when creating an account or signing in", upload)
+
+    def test_social_sign_in_is_configured_not_decorative(self):
+        auth = (Path(__file__).resolve().parents[1] / "app" / "templates" / "auth.html").read_text(encoding="utf-8")
+        registry = (Path(__file__).resolve().parents[1] / "core" / "social_auth.py").read_text(encoding="utf-8")
+        self.assertIn("request.state.oauth_providers", auth)
+        for provider in ("google", "apple", "facebook", "microsoft"):
+            self.assertIn(f'"{provider}"', registry)
+        self.assertIn('formaction="/auth/{{provider.key}}/start"', auth)
+        self.assertNotIn("Sign in with X", auth)
+
+    def test_performance_report_motion_targets_real_values_and_respects_reduced_motion(self):
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
+        motion_js = self.client.get("/static/motion.js").text
+        motion_css = self.client.get("/static/motion.css").text
+        self.assertIn("data-count-up", template)
+        self.assertIn("[data-count-up]", motion_js)
+        self.assertIn(".tactical-performance.is-visible .attack-mix b", motion_css)
+        self.assertIn("prefers-reduced-motion", motion_css)
 
     def test_report_carries_ai_scoring_and_medical_limits(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
@@ -865,6 +885,10 @@ class PublicPageTests(unittest.TestCase):
 
         self.assertIn('class="numbers-first-report"', template)
         self.assertIn("Fighter comparison", template)
+        self.assertIn('class="tactical-performance"', template)
+        self.assertIn("Defensive denial", template)
+        self.assertIn("Clean exposure", template)
+        self.assertIn("Knees landed", template)
         self.assertIn("Watch moments", template)
         self.assertIn("report.statistics", template)
         self.assertIn('class="report-deep-dive"', template)

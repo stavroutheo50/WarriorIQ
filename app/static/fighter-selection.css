@@ -3,6 +3,22 @@
   touch-action: none;
 }
 
+.start-feedback {
+  grid-column: 1 / -1;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #70404b;
+  border-radius: 10px;
+  background: #24131a;
+  color: #ffc3ca;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.start-feedback[hidden] {
+  display: none;
+}
+
 .selection-edit-actions {
   display: flex;
   justify-content: flex-end;

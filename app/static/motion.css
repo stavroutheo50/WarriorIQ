@@ -131,6 +131,10 @@ body[data-page=result] .performance-stat.is-stat-impact,body[data-page=result] .
 body[data-page=result] .report-details[open],body[data-page=result] .report-technical[open]{border-color:#425984}
 body[data-page=result] table tbody tr{transition:background-color var(--wiq-motion-fast) ease}
 body[data-page=result] table tbody tr:hover{background:rgba(105,127,204,.07)}
+body[data-page=result] .attack-mix b{transform:scaleX(0);transform-origin:left;transition:transform 720ms var(--wiq-ease-out)}
+body[data-page=result] .tactical-performance.is-visible .attack-mix b{transform:scaleX(1)}
+body[data-page=result] .comparison-table .is-better{transition:color var(--wiq-motion-base) ease,text-shadow var(--wiq-motion-base) ease}
+body[data-page=result] .comparison-table .is-better[data-wiq-counted=true]{text-shadow:0 0 18px rgba(95,213,168,.16)}
 
 @keyframes wiq-page-enter{from{opacity:.78;transform:translateY(3px)}to{opacity:1;transform:none}}
 @keyframes wiq-copy-in{from{opacity:.2;transform:translateY(9px)}to{opacity:1;transform:none}}
