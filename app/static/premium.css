@@ -281,3 +281,12 @@ p { max-width: 68ch; }
 }
 .navlinks a { letter-spacing: .002em; }
 .navlinks a[aria-current="page"] { color: var(--wiq-text); }
+
+/* --- Upload feedback ------------------------------------------------------
+   The size line changes tone with the file, because a 700 MB phone video and a
+   40 MB clip are not the same decision and the old interface said the same
+   thing for both. */
+.file-status[data-tone="warn"] { color: var(--wiq-warning); }
+.file-status[data-tone="note"] { color: var(--wiq-text-secondary); }
+.file-status[data-tone="ok"]   { color: var(--wiq-success); }
+.upload-progress b { font-variant-numeric: tabular-nums; }

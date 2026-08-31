@@ -33,7 +33,7 @@
       <fieldset class="upload-consent card-inset"><legend>Upload permission</legend><input type="hidden" name="people_permissions_confirmed" value="true"><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>I have the right to upload and process this video, including any permission required for people shown.</span></label><div class="minor-permission" role="group" aria-labelledby="minorPermissionLabel"><span id="minorPermissionLabel">Does the footage contain a minor?</span><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No minors appear</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes — I have appropriate parent/guardian permission</span></label></div><p class="small muted">Broadcast footage still requires permission. See the <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
       <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Preparing video…" data-motion-primary disabled>Choose a video to continue</button>
       <div class="upload-progress" id="uploadProgress" role="status" aria-live="polite" hidden><span><i id="uploadProgressBar"></i></span><b id="uploadProgressText">Uploading fight video…</b><small>Keep this page open. WarriorIQ will continue automatically.</small></div>
-      {% if request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Guest analysis is temporary and automatically removed after two hours. <a class="text-link" href="/signup">Create an account to save progress.</a></p>{% endif %}
+      {% if request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Analysis needs a free account, so your fights stay private to you. <a class="text-link" href="/signup">Create one in a moment.</a></p>{% endif %}
     </form>
   </div>
 </section>
@@ -78,7 +78,15 @@
 {% block scripts %}<script>
 (()=>{
   const form=document.getElementById('fightUploadForm'),videoInput=document.getElementById('fightVideo'),fileStatus=document.getElementById('fileStatus'),fileButton=document.getElementById('fileButton'),fileButtonText=document.getElementById('fileButtonText'),uploadSubmit=document.getElementById('uploadSubmit'),uploadCard=document.getElementById('analyze'),progress=document.getElementById('uploadProgress'),progressBar=document.getElementById('uploadProgressBar'),progressText=document.getElementById('uploadProgressText');
-  const setReady=()=>{const ready=Boolean(videoInput.files[0]);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?'Ready for WarriorIQ analysis':'MP4, MOV, MKV, AVI, M4V or WEBM';fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
+  const fmtMB=b=>b>=1073741824?`${(b/1073741824).toFixed(2)} GB`:`${Math.round(b/1048576)} MB`;
+  const fmtLeft=s=>s>=90?`about ${Math.round(s/60)} min left`:`about ${Math.max(5,Math.round(s/5)*5)}s left`;
+  // A phone films at 1080p or 4K; a fight at that size is hundreds of megabytes
+  // over a mobile uplink. Saying so before the upload starts is the difference
+  // between a considered choice and six minutes staring at a stalled bar.
+  const sizeAdvice=b=>b>629145600?{tone:'warn',text:`${fmtMB(b)} — this will take a while on mobile data. Trimming to the rounds you need, or filming at 1080p instead of 4K, uploads far faster and does not reduce analysis quality.`}
+    :b>209715200?{tone:'note',text:`${fmtMB(b)} — large but fine. Wi-Fi will be much quicker than mobile data.`}
+    :{tone:'ok',text:`${fmtMB(b)} — ready for WarriorIQ analysis`};
+  const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
   const restore=(message)=>{progress.hidden=false;progress.dataset.tone='error';progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
   videoInput.addEventListener('change',setReady);
   form.addEventListener('submit',event=>{
@@ -87,7 +95,20 @@
     const request=new XMLHttpRequest();
     progress.hidden=false;progress.dataset.tone='active';progressBar.style.width='2%';progressText.textContent='Uploading fight video…';uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');uploadSubmit.textContent='Uploading 0%';
     request.open('POST',form.action,true);request.setRequestHeader('Accept','application/json');
-    request.upload.addEventListener('progress',upload=>{if(!upload.lengthComputable)return;const percent=Math.min(99,Math.max(1,Math.round(upload.loaded/upload.total*100)));progressBar.style.width=`${percent}%`;progressText.textContent=`Uploading fight video · ${percent}%`;uploadSubmit.textContent=`Uploading ${percent}%`});
+    let started=Date.now(),lastLoaded=0,lastMoved=Date.now(),stallTimer=null;
+    // A bare percentage is why a slow upload feels broken: at 89% there is no
+    // way to tell thirty seconds from ten minutes. Show the bytes, the rate and
+    // the estimate, and say so plainly when the connection stops moving.
+    stallTimer=setInterval(()=>{if(Date.now()-lastMoved>20000)progressText.textContent='Upload paused — waiting for your connection. It resumes on its own.';},5000);
+    request.upload.addEventListener('progress',upload=>{if(!upload.lengthComputable)return;
+      if(upload.loaded>lastLoaded){lastLoaded=upload.loaded;lastMoved=Date.now();}
+      const percent=Math.min(99,Math.max(1,Math.round(upload.loaded/upload.total*100)));
+      const secs=(Date.now()-started)/1000,rate=secs>1?upload.loaded/secs:0;
+      const left=rate>0?(upload.total-upload.loaded)/rate:0;
+      progressBar.style.width=`${percent}%`;
+      progressText.textContent=rate>0?`${fmtMB(upload.loaded)} of ${fmtMB(upload.total)} · ${(rate/1048576).toFixed(1)} MB/s · ${fmtLeft(left)}`:`Uploading ${fmtMB(upload.total)}…`;
+      uploadSubmit.textContent=`Uploading ${percent}%`});
+    request.addEventListener('loadend',()=>clearInterval(stallTimer));
     request.addEventListener('load',()=>{let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign('/signup?next=%2F%23analyze');return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';location.assign(payload.next_url);return}restore(payload.detail||'WarriorIQ could not prepare this video. Please try again.')});
     request.addEventListener('error',()=>restore('The upload connection stopped. Check your signal and try again.'));
     request.addEventListener('abort',()=>restore('The upload was cancelled. Your video is still selected.'));

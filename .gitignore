@@ -33,3 +33,4 @@ dataset/regression/private/
 Thumbs.db
 .DS_Store
 DEPLOYED_COMMIT
+logs/
