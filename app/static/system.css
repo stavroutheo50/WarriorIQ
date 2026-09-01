@@ -168,3 +168,175 @@ summary:focus-visible,
   .sport-switch { padding: 0 7px; gap: 0; }
   .sport-switch-name, .sport-switch-caret { display: none; }
 }
+
+/* ===========================================================================
+   Dashboard hierarchy.
+
+   The screen used to open with five identical metric tiles, which asks the
+   reader to work out what matters. One number leads now - the trend WarriorIQ
+   actually tracks for this athlete - and the rest support it at a smaller
+   weight. Recent fights became a scannable list; the eight-column table is
+   still there, one disclosure away, for anyone who wants the whole grid.
+   =========================================================================== */
+
+.athlete-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: clamp(16px, 4vw, 40px);
+  flex-wrap: wrap;
+  margin: clamp(22px, 4vh, 40px) 0 clamp(18px, 3vh, 28px);
+}
+
+.athlete-id { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.athlete-id h1 { margin: 4px 0 0; font-size: var(--wiq-text-2xl); letter-spacing: var(--wiq-tracking-tight); }
+
+.athlete-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border: 1px solid rgb(var(--sport-accent) / .4);
+  border-radius: 16px;
+  background: linear-gradient(150deg, rgb(var(--sport-accent) / .26), rgb(var(--sport-accent) / .08));
+  color: rgb(var(--sport-accent-soft));
+  font-size: var(--wiq-text-lg);
+  font-weight: 800;
+}
+
+.athlete-sub { margin: 5px 0 0; color: var(--wiq-text-secondary); font-size: var(--wiq-text-sm); }
+.athlete-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* --- One number, then the supporting cast -------------------------------- */
+.stat-band {
+  display: grid;
+  grid-template-columns: minmax(0, .8fr) minmax(0, 2fr);
+  gap: clamp(16px, 3vw, 32px);
+  align-items: center;
+  padding: clamp(20px, 3vw, 30px);
+  border: 1px solid var(--wiq-edge);
+  border-radius: 18px;
+  background: linear-gradient(150deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
+  box-shadow: var(--wiq-lift);
+}
+
+.stat-lead { display: grid; gap: 6px; }
+
+.stat-lead strong {
+  display: block;
+  color: var(--wiq-text);
+  font-size: clamp(46px, 6vw, 68px);
+  font-weight: 800;
+  line-height: var(--wiq-leading-tight);
+  letter-spacing: -.045em;
+}
+
+/* The unit rides at a smaller weight so the figure itself carries the row. */
+.stat-lead strong em {
+  font-style: normal;
+  font-size: .42em;
+  font-weight: 650;
+  color: var(--wiq-text-tertiary);
+  margin-left: .06em;
+}
+
+.stat-delta { font-size: var(--wiq-text-xs); font-weight: 650; }
+.stat-delta.up { color: var(--wiq-success); }
+.stat-delta.down { color: var(--wiq-warning); }
+.stat-delta.flat { color: var(--wiq-text-tertiary); }
+
+.stat-support {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1px;
+  background: var(--wiq-line-soft);
+  border: 1px solid var(--wiq-line-soft);
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.stat {
+  display: grid;
+  gap: 3px;
+  padding: 15px 16px;
+  background: var(--wiq-canvas-raised);
+}
+
+.stat .label {
+  color: var(--wiq-text-tertiary);
+  font-size: var(--wiq-text-micro);
+  font-weight: 750;
+  letter-spacing: var(--wiq-tracking-label);
+  text-transform: uppercase;
+}
+
+.stat b { color: var(--wiq-text); font-size: var(--wiq-text-lg); font-weight: 750; }
+.stat i { font-style: normal; font-size: var(--wiq-text-micro); font-weight: 650; }
+.stat i.up { color: var(--wiq-success); }
+.stat i.down { color: var(--wiq-warning); }
+.stat i.quiet { color: var(--wiq-text-tertiary); font-weight: 500; }
+
+.action-band { margin-top: 12px; }
+
+/* --- Recent fights -------------------------------------------------------- */
+.fight-list { margin: 18px 0 0; padding: 0; list-style: none; }
+
+.fight-list a {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto 20px;
+  gap: 18px;
+  align-items: center;
+  padding: 14px 10px 14px 4px;
+  border-top: 1px solid var(--wiq-line-soft);
+  border-radius: var(--wiq-radius-sm);
+  transition: background-color var(--wiq-motion-quick) var(--wiq-motion-ease);
+}
+
+.fight-list a:hover { background: rgba(255, 255, 255, .035); }
+.fight-list a:hover .fight-go { transform: translateX(3px); color: var(--wiq-text); }
+
+.fight-date { color: var(--wiq-text-secondary); font-size: var(--wiq-text-sm); }
+.fight-ruleset { color: var(--wiq-text); font-size: var(--wiq-text-sm); font-weight: 650; }
+
+.fight-figures { display: flex; align-items: baseline; gap: 6px 14px; flex-wrap: wrap; }
+.fight-figures b { color: var(--wiq-text); font-size: var(--wiq-text-base); font-weight: 750; }
+.fight-figures small { color: var(--wiq-text-tertiary); font-size: var(--wiq-text-micro); margin-right: 6px; }
+
+.fight-go {
+  color: var(--wiq-text-tertiary);
+  text-align: right;
+  transition: transform var(--wiq-motion-quick) var(--wiq-motion-ease),
+              color var(--wiq-motion-quick) var(--wiq-motion-ease);
+}
+
+.full-history { margin-top: 20px; }
+
+@media (max-width: 860px) {
+  .stat-band { grid-template-columns: 1fr; }
+  .stat-lead strong { font-size: 48px; }
+}
+
+@media (max-width: 620px) {
+  .athlete-head { align-items: flex-start; }
+  .athlete-actions { width: 100%; }
+  .athlete-actions .btn { flex: 1; }
+}
+
+/* The shared disclosure styles its summary's <span> as one small grey run, so
+   a title and a subtitle inside it collide. This one stacks them. */
+.full-history summary span { display: grid; gap: 2px; }
+.full-history summary strong { color: var(--wiq-text); font-size: var(--wiq-text-sm); font-weight: 700; }
+.full-history summary small { color: var(--wiq-text-tertiary); font-size: var(--wiq-text-micro); font-weight: 500; }
+
+@media (max-width: 780px) {
+  .fight-list a {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "date go" "rules rules" "figs figs";
+    gap: 6px 12px;
+  }
+  .fight-date { grid-area: date; }
+  .fight-go { grid-area: go; }
+  .fight-ruleset { grid-area: rules; }
+  .fight-figures { grid-area: figs; }
+}
