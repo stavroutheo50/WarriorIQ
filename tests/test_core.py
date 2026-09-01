@@ -926,3 +926,69 @@ class EngagementRangeTests(unittest.TestCase):
         from core.config import SETTINGS
 
         self.assertGreaterEqual(SETTINGS.max_engagement_body_lengths, 2.0)
+
+
+class FederationPointTableTests(unittest.TestCase):
+    """Where a federation publishes a point value, WarriorIQ uses that value.
+
+    ITF taekwondo scores a hand technique to any legal target 1, a kick to the
+    mid section 2 and a kick to the high section 3. WT scores a punch to the
+    trunk 1, a kick to the trunk 2 and a kick to the head 3, and forbids punches
+    to the head entirely. Both were scored off one shared table that gave a body
+    kick 1 and a head kick 2, which is neither federation's rules.
+    """
+
+    @staticmethod
+    def _land(family, target, seconds, fighter="A"):
+        from core.types import StrikeEvent
+
+        return StrikeEvent(
+            fighter=fighter, opponent="B" if fighter == "A" else "A", round_number=1,
+            start_frame=0, peak_frame=1, end_frame=2, start_time=seconds,
+            peak_time=seconds, end_time=seconds + .1, technique="x", family=family,
+            limb="lead", outcome="clean", landed=True, target=target,
+            confidence=.9, contact_confidence=.9,
+        )
+
+    def test_itf_scores_its_own_published_table(self):
+        from core.scoring import score_fight
+
+        card = score_fight([
+            self._land("kick", "head", 1),    # 3
+            self._land("kick", "body", 3),    # 2
+            self._land("punch", "body", 5),   # 1
+            self._land("punch", "head", 7),   # 1 - hands to the head are legal
+        ], "ITF_TAEKWONDO", [1])
+        self.assertEqual(card["rounds"][0]["fighter_A"], 7)
+
+    def test_wt_scores_its_own_table_and_ignores_the_illegal_head_punch(self):
+        from core.scoring import score_fight
+
+        card = score_fight([
+            self._land("kick", "head", 1),    # 3
+            self._land("kick", "body", 3),    # 2
+            self._land("punch", "body", 5),   # 1
+            self._land("punch", "head", 7),   # 0 - illegal in WT
+        ], "WT_TAEKWONDO", [1])
+        self.assertEqual(card["rounds"][0]["fighter_A"], 6)
+
+    def test_a_kick_to_the_leg_scores_nothing_in_either_federation(self):
+        """Neither federation lists the legs as a scoring target."""
+        from core.scoring import score_fight
+
+        for ruleset in ("ITF_TAEKWONDO", "WT_TAEKWONDO"):
+            with self.subTest(ruleset=ruleset):
+                card = score_fight([self._land("kick", "leg", 1)], ruleset, [1])
+                self.assertEqual(card["rounds"][0]["fighter_A"], 0)
+
+    def test_sports_judged_round_by_round_keep_no_table(self):
+        """A ten-point-must sport has no per-strike value to publish.
+
+        Muay Thai, kickboxing, boxing and MMA are judged on the round, so a
+        fixed table would be inventing a rule the federation does not have.
+        """
+        from core.scoring import RULESETS
+
+        for key in ("K1", "BOXING", "MUAY_THAI", "MMA"):
+            with self.subTest(ruleset=key):
+                self.assertEqual(RULESETS[key].point_table, ())

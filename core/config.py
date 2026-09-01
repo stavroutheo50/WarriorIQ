@@ -166,6 +166,14 @@ class Settings:
     # counted "attempts" were thrown at nobody and dragged every accuracy figure
     # down with them. A kick reaches roughly 1.5-2 body lengths; 2.5 is generous.
     max_engagement_body_lengths: float = float(os.getenv("WARRIORIQ_MAX_ENGAGEMENT", "2.5"))
+    # The fighters being close is not the same as the strike reaching. Measured
+    # on real footage: strikes labelled kick-to-leg finished a median 2.46 body
+    # lengths from any target, and punches with no target at all made up a
+    # quarter of what was counted - leg movement and feints read as strikes.
+    # An arm reaches about 0.5 body lengths and a kick about 0.8, so 1.0 is
+    # generous. This removes non-strikes from the denominator; it never turns a
+    # miss into a landed strike.
+    max_strike_reach_body_lengths: float = float(os.getenv("WARRIORIQ_MAX_STRIKE_REACH", "1.0"))
     contact_threshold_body_lengths: float = 0.24
     likely_contact_threshold_body_lengths: float = 0.33
     contact_confirmation_frames: int = 2

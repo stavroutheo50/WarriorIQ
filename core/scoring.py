@@ -37,6 +37,12 @@ class RuleProfile:
     # Per-family scoring emphasis. Taekwondo is decided by kicks; boxing has no
     # other family to weigh against. Defaults match the kickboxing baseline.
     family_value: tuple[tuple[str, float], ...] = (("punch", 1.0), ("kick", 1.15), ("knee", 1.15))
+    # Federations that publish a fixed point value per technique and target get
+    # that table verbatim, as (family, target, points). Sports judged round by
+    # round on a ten-point-must basis have no such table and keep the weighted
+    # comparison instead - that is a difference in how the sport is scored, not
+    # a gap in the data.
+    point_table: tuple[tuple[str, str | None, int], ...] = ()
     # Actions this discipline scores that the model cannot observe at all.
     unobserved: tuple[str, ...] = ()
 
@@ -99,6 +105,11 @@ RULESETS: dict[str, RuleProfile] = {
         sport="taekwondo", sport_label="Taekwondo",
         allow_head_punch=True,
         family_value=(("punch", 1.0), ("kick", 2.0)),
+        point_table=(
+            ("punch", "head", 1), ("punch", "body", 1),
+            ("kick", "body", 2), ("kick", "head", 3),
+            ("kick", "leg", 0),          # legs are not a legal ITF target
+        ),
         unobserved=("organisation-specific jumping and spinning kick bonuses",),
     ),
     "WT_TAEKWONDO": RuleProfile(
@@ -106,6 +117,11 @@ RULESETS: dict[str, RuleProfile] = {
         sport="taekwondo", sport_label="Taekwondo",
         allow_head_punch=False,
         family_value=(("punch", 0.5), ("kick", 1.6)),
+        point_table=(
+            ("punch", "body", 1),        # head punches are illegal, so score 0
+            ("kick", "body", 2), ("kick", "head", 3),
+            ("kick", "leg", 0),
+        ),
         unobserved=("electronic body and head protector scoring", "turning-kick rotation bonuses"),
     ),
 
@@ -306,6 +322,24 @@ def deduplicate_scoring_events(events: Iterable[StrikeEvent], window_seconds: fl
     return sorted(kept, key=lambda event: event.peak_time), removed
 
 
+def _table_points(event: StrikeEvent, profile: RuleProfile) -> int | None:
+    """The federation's own value for this technique and target, if it has one.
+
+    Returns None when the ruleset publishes no table, so the caller falls back
+    to the generic scorer rather than inventing a value.
+    """
+    if not profile.point_table:
+        return None
+    if event.outcome not in {"clean", "likely_landed"}:
+        return 0
+    for family, target, points in profile.point_table:
+        if event.family == family and event.target == target:
+            return int(points)
+    # A legal family landing on a target the table does not list scores
+    # nothing: the table is the sport's complete account of what counts.
+    return 0
+
+
 def _point_fighting_points(event: StrikeEvent) -> int:
     """Conservative point-fighting mapping.
 
@@ -428,7 +462,11 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
             result["totals"]["B"] += b_score
         result["rounds_won"] = {"A": total_a_rounds, "B": total_b_rounds}
     else:
-        scorer = _point_fighting_points if key == "POINT_FIGHTING" else _continuous_tatami_points
+        generic = _point_fighting_points if key == "POINT_FIGHTING" else _continuous_tatami_points
+
+        def scorer(event, _profile=profile, _generic=generic):
+            table = _table_points(event, _profile)
+            return _generic(event) if table is None else table
         for r in sorted(by_round):
             a_points = sum(scorer(e) for e in by_round[r]["A"])
             b_points = sum(scorer(e) for e in by_round[r]["B"])

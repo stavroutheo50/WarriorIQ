@@ -147,11 +147,21 @@ def opponent_separation(event: StrikeEvent) -> float | None:
 
 
 def thrown_at_opponent(event: StrikeEvent) -> bool:
-    """False when the opponent was too far away to be a target at all."""
+    """False when this was not an attempt at the opponent.
+
+    Two separate ways an action fails to be one, and both are needed. The
+    fighters can be far enough apart that nothing could reach; or they can be
+    close while this particular action finishes nowhere near a legal target,
+    which is what stepping, checking and feinting look like to the detector.
+    """
     separation = opponent_separation(event)
-    if separation is None:
-        return True
-    return separation <= SETTINGS.max_engagement_body_lengths
+    if separation is not None and separation > SETTINGS.max_engagement_body_lengths:
+        return False
+    reach = (event.evidence or {}).get("contact_distance_body_lengths")
+    if isinstance(reach, (int, float)):
+        return float(reach) <= SETTINGS.max_strike_reach_body_lengths
+    # No measurement is not evidence of a miss; keep the action.
+    return True
 
 
 def classify_contact(event: StrikeEvent) -> StrikeEvent:
