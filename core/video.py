@@ -61,12 +61,19 @@ def build_round_schedule(req: AnalysisRequest, info: VideoInfo) -> list[RoundSpe
         if cursor >= info.duration or (req.end_seconds is not None and cursor >= req.end_seconds):
             break
 
-    # If the declared rounds do not cover the video and the user asked for a
-    # single generic round, cover the requested segment instead of silently
-    # dropping footage.
-    if len(rounds) == 1 and req.round_count == 1:
+    # Never analyse less of the video than the person uploaded. The round
+    # numbers are a guess about the fight's shape, and when they fall short the
+    # tail was simply dropped without saying so: a nine-minute bout entered as
+    # 3 x 2 min had three of its nine minutes thrown away, and nothing in the
+    # report mentioned it. Rounds decide where the round lines fall; they do
+    # not decide how much footage is worth looking at.
+    #
+    # Only when every round is selected. Someone who deliberately asked for
+    # round 2 of 5 means it, and their choice is left exactly as entered.
+    if rounds and all(spec.selected for spec in rounds):
         end = info.duration if req.end_seconds is None else min(info.duration, req.end_seconds)
-        rounds[0].end_seconds = max(rounds[0].start_seconds, end)
+        if rounds[-1].end_seconds < end:
+            rounds[-1].end_seconds = max(rounds[-1].start_seconds, end)
 
     return rounds
 

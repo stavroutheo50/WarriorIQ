@@ -927,6 +927,57 @@ class EngagementRangeTests(unittest.TestCase):
 
         self.assertGreaterEqual(SETTINGS.max_engagement_body_lengths, 2.0)
 
+    def test_declared_rounds_never_cost_you_footage(self):
+        """A nine-minute bout entered as 3 x 2 min lost three of its minutes.
+
+        The schedule stopped at 3 x 120s and the tail was dropped in silence -
+        no note in the report, no warning on the page. Round numbers describe
+        the fight's shape; they must not decide how much of the upload is worth
+        looking at.
+        """
+        from core.types import AnalysisRequest, VideoInfo
+        from core.video import build_round_schedule
+
+        for duration, rounds_entered, seconds_each in (
+            (540.0, 3, 120.0),   # nine-minute fight, standard three-round entry
+            (270.0, 2, 120.0),
+            (900.0, 5, 120.0),
+            (94.0, 1, 94.0),
+        ):
+            with self.subTest(duration=duration):
+                req = AnalysisRequest(
+                    video_path="x", fighter_a_box=[0, 0, 1, 1], fighter_b_box=[0, 0, 1, 1],
+                    fight_type="competition", ruleset="K1", start_seconds=0.0,
+                    round_count=rounds_entered, round_duration_seconds=seconds_each,
+                    break_duration_seconds=0.0, selected_rounds=None, end_seconds=None,
+                    analysis_target="BOTH", focus_fighter="A", job_id="j",
+                )
+                info = VideoInfo(path="x", width=480, height=220, fps=30.0,
+                                 duration=duration, frame_count=int(duration * 30))
+                schedule = build_round_schedule(req, info)
+                covered = sum(r.end_seconds - r.start_seconds for r in schedule if r.selected)
+                self.assertAlmostEqual(covered, duration, places=3)
+
+    def test_asking_for_one_round_of_five_still_gets_exactly_that(self):
+        """Covering the whole video must not override a deliberate choice."""
+        from core.types import AnalysisRequest, VideoInfo
+        from core.video import build_round_schedule
+
+        req = AnalysisRequest(
+            video_path="x", fighter_a_box=[0, 0, 1, 1], fighter_b_box=[0, 0, 1, 1],
+            fight_type="competition", ruleset="K1", start_seconds=0.0, round_count=5,
+            round_duration_seconds=120.0, break_duration_seconds=0.0,
+            selected_rounds=[2], end_seconds=None, analysis_target="BOTH",
+            focus_fighter="A", job_id="j",
+        )
+        info = VideoInfo(path="x", width=480, height=220, fps=30.0,
+                         duration=600.0, frame_count=18000)
+        schedule = build_round_schedule(req, info)
+        selected = [r for r in schedule if r.selected]
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0].number, 2)
+        self.assertAlmostEqual(selected[0].end_seconds - selected[0].start_seconds, 120.0, places=3)
+
     def test_no_correctly_picked_fight_is_ever_accused(self):
         """The three real fights, each seeded with its actual two fighters.
 

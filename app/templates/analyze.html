@@ -33,7 +33,7 @@
         <summary><strong>Fight settings</strong><small id="fightSettingsSummary">Set automatically from your video</small></summary>
         {% if only_ruleset %}<input type="hidden" name="ruleset" value="{{only_ruleset}}">{% endif %}
         <div class="row">
-          <div class="field"><label for="fightType">Real fight or sparring?</label><select id="fightType" name="fight_type"><option value="competition">Real fight</option><option value="sparring">Sparring</option></select></div>
+          <div class="field"><label for="fightType">Tag for your fight library</label><select id="fightType" name="fight_type"><option value="competition">Real fight</option><option value="sparring">Sparring</option></select></div>
           {% if not only_ruleset %}<div class="field"><label for="fightRuleset">Rules</label><select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}">{{label}}</option>{% endfor %}</select></div>{% endif %}
         </div>
         <div class="row">
