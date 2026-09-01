@@ -56,7 +56,16 @@ RULESETS: dict[str, RuleProfile] = {
     "K1": RuleProfile("K1", "K-1", True, True, True, True, False, frozenset({"spinning_backfist"})),
     "LOW_KICK": RuleProfile("LOW_KICK", "Low Kick", True, True, False, True, False, frozenset()),
     "FULL_CONTACT": RuleProfile("FULL_CONTACT", "Full Contact", True, False, False, True, False, frozenset()),
-    "POINT_FIGHTING": RuleProfile("POINT_FIGHTING", "Point Fighting", False, False, False, False, True, frozenset({"backfist"})),
+    "POINT_FIGHTING": RuleProfile(
+        "POINT_FIGHTING", "Point Fighting", False, False, False, False, True,
+        frozenset({"backfist"}),
+        point_table=(
+            ("punch", "head", 1), ("punch", "body", 1),
+            ("kick", "body", 1), ("kick", "head", 2),
+            ("kick", "leg", 1),          # foot sweeps score 1
+        ),
+        unobserved=("jumping-kick bonuses, which score 2 to the body and 3 to the head",),
+    ),
     "LIGHT_CONTACT": RuleProfile("LIGHT_CONTACT", "Light Contact", False, False, False, False, False, frozenset()),
     "KICK_LIGHT": RuleProfile("KICK_LIGHT", "Kick Light", False, True, False, False, False, frozenset()),
 

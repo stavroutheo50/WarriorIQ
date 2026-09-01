@@ -1797,10 +1797,26 @@ async def upload(
 
     try:
         info = await run_in_threadpool(get_video_info, video_path)
+    except HTTPException:
+        video_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        video_path.unlink(missing_ok=True)
+        LOGGER.info("upload_not_decodable job_id=%s reason=%s", job_id, type(exc).__name__)
+        raise HTTPException(
+            400,
+            "WarriorIQ could not read this file as a video. It may be corrupted, "
+            "still uploading, or saved in a format this build cannot decode. "
+            "Try MP4 or MOV exported straight from your phone or camera.",
+        ) from exc
+
+    try:
         if info.duration > SETTINGS.max_video_duration_seconds:
             raise HTTPException(413, "This video is longer than the configured analysis limit.")
         if info.width * info.height > SETTINGS.max_video_pixels:
             raise HTTPException(413, "This video's resolution exceeds the configured processing limit.")
+        if info.duration <= 0 or info.fps <= 0:
+            raise HTTPException(400, "This video has no readable playing time. Please re-export it and try again.")
         quality = await run_in_threadpool(inspect_video_quality, video_path, info)
     except Exception:
         video_path.unlink(missing_ok=True)

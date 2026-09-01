@@ -99,6 +99,16 @@ class Settings:
     # Low-overlap, center-near candidates are commonly referees.
     min_initial_iou: float = 0.35
     track_id_bonus: float = 0.34
+    # How much a candidate must still resemble the fighter the user selected.
+    # Real footage puts three to eleven people in frame - referees, corners,
+    # crowd - at sizes close enough that position alone cannot separate them.
+    # Measured on a busy ring: the same fighter across frames scores 0.67 at
+    # worst and 0.94 typically; two different people score 0.56 typically and
+    # 0.48 at the low end. A threshold of 0.30 sat below every pair in the ring
+    # and could never fire. This sits under the worst same-person score with
+    # margin, and still refuses roughly half of the impostors outright.
+    min_anchor_appearance_similarity: float = float(
+        os.getenv("WARRIORIQ_MIN_ANCHOR_SIMILARITY", "0.55"))
     # Fighter motion between sampled frames is often larger than generic
     # pedestrian motion. These values still reject distant bystanders, while
     # allowing a fighter to be recovered after a tracker-ID reset.

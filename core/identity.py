@@ -125,6 +125,8 @@ class IdentityManager:
             last_keypoints=None if initial_a.keypoints is None else initial_a.keypoints.copy(),
             appearance=None if initial_a.appearance is None else initial_a.appearance.copy(),
             pose_signature=pose_signature(initial_a.keypoints, initial_a.box),
+            anchor_appearance=None if initial_a.appearance is None else initial_a.appearance.copy(),
+            anchor_pose=pose_signature(initial_a.keypoints, initial_a.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
         )
@@ -135,6 +137,8 @@ class IdentityManager:
             last_keypoints=None if initial_b.keypoints is None else initial_b.keypoints.copy(),
             appearance=None if initial_b.appearance is None else initial_b.appearance.copy(),
             pose_signature=pose_signature(initial_b.keypoints, initial_b.box),
+            anchor_appearance=None if initial_b.appearance is None else initial_b.appearance.copy(),
+            anchor_pose=pose_signature(initial_b.keypoints, initial_b.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
         )
@@ -171,14 +175,30 @@ class IdentityManager:
         candidate_sig = candidate.pose_signature if candidate.pose_signature is not None else pose_signature(candidate.keypoints, candidate.box)
         pose = pose_similarity(state.pose_signature, candidate_sig)
         det = float(candidate.confidence)
+        # Similarity to the originally selected fighter, which never updates.
+        # Without this every term above is relative to the previous frame, so a
+        # gradual slide onto another person in the ring is invisible: each step
+        # looks like a small, plausible move.
+        anchor = appearance_similarity(state.anchor_appearance, candidate.appearance)
+        anchor_pose_match = pose_similarity(state.anchor_pose, candidate_sig)
         score = (
-            0.22 * iou
-            + 0.26 * position
-            + 0.12 * size
-            + 0.20 * appearance
-            + 0.12 * pose
-            + 0.08 * det
+            0.18 * iou
+            + 0.22 * position
+            + 0.10 * size
+            + 0.14 * appearance
+            + 0.10 * pose
+            + 0.06 * det
+            + 0.14 * anchor
+            + 0.06 * anchor_pose_match
         )
+        # A candidate that matches where the fighter should be but looks nothing
+        # like the fighter the user picked is the exact shape of a referee walking
+        # through. Refusing is correct here: this manager's rule is that missing
+        # briefly beats tracking the wrong human.
+        if state.anchor_appearance is not None and candidate.appearance is not None:
+            if anchor < SETTINGS.min_anchor_appearance_similarity:
+                state.switches_rejected += 1
+                return -999.0
         if keep_id_bonus and candidate.track_id is not None and candidate.track_id == state.current_track_id:
             score += SETTINGS.track_id_bonus
         return float(score)

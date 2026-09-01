@@ -73,6 +73,14 @@ class FighterState:
     recovery_count: int = 0
     sam_recovery_count: int = 0
     last_sam_attempt_analyzed_frame: int = -10_000
+    # What the fighter looked like in the frame the user drew the box on, kept
+    # unchanged for the whole fight. `appearance` above is a rolling average and
+    # therefore drifts: if tracking slides onto a referee for a few frames the
+    # average becomes the referee and the swap is permanent, with confidence
+    # still reading high because it is scored against the drifted template.
+    # The anchor is the only thing that still remembers the real fighter.
+    anchor_appearance: np.ndarray | None = None
+    anchor_pose: np.ndarray | None = None
     switches_rejected: int = 0
 
 
