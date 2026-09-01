@@ -14,9 +14,12 @@
 
   <div class="sport-grid">
     {% for sport, name in sports.items() %}
-    <a class="sport-card" href="/analyze/{{sport}}" data-sport="{{sport}}">
+    <a class="sport-card" href="/analyze/{{sport}}" data-sport="{{sport}}"
+       style="--sport-accent:{{identities[sport].accent}};--sport-accent-soft:{{identities[sport].accent_soft}}">
       <span class="sport-card-mark" aria-hidden="true"></span>
+      <span class="sport-crest" aria-hidden="true">{{identities[sport].mark}}</span>
       <h2>{{name}}</h2>
+      <p class="sport-card-decided">{{identities[sport].decided_by}}</p>
       <p class="sport-card-rules">{{ sport_rulesets[sport] | join(" · ") }}</p>
       {# Coverage is the honest half of the choice and belongs on the card, not
          behind it: a reader comparing sports should see which ones WarriorIQ

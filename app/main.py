@@ -76,6 +76,7 @@ from core.retention import (
     guest_job_valid, mark_guest_job,
 )
 from core.scoring import SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_unobserved
+from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import get_video_info, read_frame
@@ -1630,6 +1631,7 @@ def _sport_context(request: Request, sport: str) -> dict:
         "request": request,
         "sport": sport,
         "sport_label": RULESET_SPORTS[sport],
+        "identity": sport_identity(sport),
         "sports": RULESET_SPORTS,
         # Boxing and MMA each have exactly one ruleset, so asking which one is a
         # question with a single answer. The page drops the field and posts the
@@ -1681,6 +1683,7 @@ def choose_sport(request: Request):
             # Boxing's single ruleset is named after the sport, so listing it
             # tells the reader nothing; say what is actually true instead.
             "sport_rulesets": {s: _ruleset_summary(s) for s in SPORTS},
+            "identities": SPORT_IDENTITIES,
             "sport_unobserved": {sport: sport_unobserved(sport) for sport in SPORTS},
             "version": SETTINGS.version,
         },
@@ -2418,6 +2421,7 @@ def result_page(request: Request, job_id: str):
         request.state.active_analysis = request.state.analysis_navigation.get("active")
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
+        "identity": sport_identity(report.get("scorecard", {}).get("sport", "kickboxing")),
         "report_access": report_access,
         "analysis_quality": _analysis_quality_summary(report),
         "can_share": bool(_account(request) and report_access.get("can_share")),
@@ -3071,6 +3075,7 @@ def coach_page(request: Request):
         request=request, name="coach.html",
         context={
             "request": request, "fights": fights, "latest": latest,
+            "identity": sport_identity((latest or {}).get("scorecard", {}).get("sport", "kickboxing")) if latest else None,
             "assignments": list_assignments(profile_id) if profile_id is not None else [],
             "signed_in": profile_id is not None,
             "focus": focus,

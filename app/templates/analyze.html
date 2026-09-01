@@ -7,7 +7,9 @@
   <header class="setup-head" data-reveal>
     <a class="quiet-back" href="/analyze">← All sports</a>
     <div class="eyebrow">Step 2 of 3 · {{sport_label}}</div>
-    <h1>Set up your {{sport_label}} fight.</h1>
+    <div class="setup-title"><span class="sport-crest" aria-hidden="true">{{identity.mark}}</span>
+      <h1>Set up your {{sport_label}} fight.</h1></div>
+    <p class="setup-decided">{{identity.decided_by}}</p>
     {% if unobserved %}
     <p class="setup-coverage" data-covered="no"><b>Striking read only.</b>
       WarriorIQ scores the punches, kicks and knees it can see. {{sport_label}} also scores

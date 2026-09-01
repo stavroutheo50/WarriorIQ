@@ -779,3 +779,95 @@ class BackupRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SportSpecificCoachingTests(unittest.TestCase):
+    """A weapon mix is only meaningful against what the ruleset pays for."""
+
+    @staticmethod
+    def _strike(family, seconds, fighter="A"):
+        from core.types import StrikeEvent
+
+        return StrikeEvent(
+            fighter=fighter, opponent="B", round_number=1, start_frame=0, peak_frame=1,
+            end_frame=2, start_time=seconds, peak_time=seconds, end_time=seconds + .1,
+            technique="cross", family=family, limb="lead", outcome="clean", landed=True,
+        )
+
+    def test_reward_shares_come_from_the_ruleset_not_a_second_opinion(self):
+        """Scoring weights have one home; the coaching reads them, not a copy."""
+        from core.scoring import RULESETS
+        from core.sport_profiles import reward_shares
+
+        for key in ("BOXING", "WT_TAEKWONDO", "MUAY_THAI", "MMA"):
+            with self.subTest(ruleset=key):
+                shares = reward_shares(key)
+                self.assertAlmostEqual(sum(shares.values()), 1.0, places=6)
+                # A family the ruleset forbids carries none of its value.
+                profile = RULESETS[key]
+                if not profile.allow_kick:
+                    self.assertNotIn("kick", shares)
+                if not profile.allow_knee:
+                    self.assertNotIn("knee", shares)
+
+        # Taekwondo is decided on kicks, and the split has to say so.
+        self.assertGreater(reward_shares("WT_TAEKWONDO")["kick"], .7)
+        # ITF pays the hands more than WT does, because head punches score.
+        self.assertGreater(reward_shares("ITF_TAEKWONDO")["punch"],
+                           reward_shares("WT_TAEKWONDO")["punch"])
+
+    def test_a_boxer_in_a_kicking_sport_is_told_what_it_cost(self):
+        from core.sport_profiles import build_sport_coaching
+
+        events = [self._strike("punch", i * 3.0) for i in range(15)]
+        events += [self._strike("kick", 52.0), self._strike("kick", 61.0)]
+        metrics = {"A": {"attacks": {"families": {"punch": 15, "kick": 2}}}}
+        result = build_sport_coaching("A", metrics, events, "WT_TAEKWONDO")
+
+        self.assertFalse(result["insufficient_evidence"])
+        kick = [o for o in result["observations"] if "kick" in o["title"]]
+        self.assertTrue(kick, "under-used kick should be reported in taekwondo")
+        self.assertEqual(kick[0]["tone"], "improvement")
+        # The finding is linked to the footage that produced it.
+        self.assertEqual(kick[0]["evidence_times"], [52.0, 61.0])
+
+    def test_an_action_the_sport_does_not_score_is_named_on_one_occurrence(self):
+        """A kick in boxing is not a style choice, so no threshold applies."""
+        from core.sport_profiles import build_sport_coaching
+
+        events = [self._strike("punch", i * 3.0) for i in range(15)] + [self._strike("kick", 52.0)]
+        metrics = {"A": {"attacks": {"families": {"punch": 15, "kick": 1}}}}
+        result = build_sport_coaching("A", metrics, events, "BOXING")
+
+        illegal = [o for o in result["observations"] if "do not score" in o["title"]]
+        self.assertTrue(illegal)
+        self.assertIn("Kicks", illegal[0]["title"])
+        self.assertEqual(illegal[0]["evidence_times"], [52.0])
+
+    def test_too_few_attempts_reads_no_tendency_at_all(self):
+        """Three attempts is not a weapon mix, and pretending otherwise lies."""
+        from core.sport_profiles import build_sport_coaching
+
+        events = [self._strike("punch", 1.0), self._strike("punch", 4.0), self._strike("punch", 9.0)]
+        metrics = {"A": {"attacks": {"families": {"punch": 3}}}}
+        result = build_sport_coaching("A", metrics, events, "WT_TAEKWONDO")
+
+        self.assertTrue(result["insufficient_evidence"])
+        self.assertEqual([o for o in result["observations"] if "Under-using" in o["title"]], [])
+
+    def test_each_sport_has_a_distinct_identity(self):
+        """Five sports that look identical are one sport with five labels."""
+        from core.scoring import SPORTS
+        from core.sport_profiles import SPORT_IDENTITIES, family_plural, sport_identity
+
+        self.assertEqual(set(SPORT_IDENTITIES), set(SPORTS))
+        accents = [i.accent for i in SPORT_IDENTITIES.values()]
+        marks = [i.mark for i in SPORT_IDENTITIES.values()]
+        self.assertEqual(len(set(accents)), len(accents), "accents must be distinct")
+        self.assertEqual(len(set(marks)), len(marks), "crests must be distinct")
+        for sport, identity in SPORT_IDENTITIES.items():
+            with self.subTest(sport=sport):
+                self.assertEqual(sport_identity(sport).key, sport)
+                self.assertTrue(identity.decided_by.endswith("."))
+        # "Punchs" is not a word, and the report says it a dozen times a page.
+        self.assertEqual(family_plural("punch"), "Punches")

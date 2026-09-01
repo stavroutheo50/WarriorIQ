@@ -5,6 +5,7 @@ from html import escape
 from pathlib import Path
 
 from core.coaching import build_coaching, build_pose_coaching, build_training_plan
+from core.sport_profiles import build_sport_coaching
 from core.config import SETTINGS
 from core.evidence_trust import automated_evidence_trust
 from core.scoring import event_legality, is_legal_event, is_verified_scoring_event, score_fight
@@ -299,6 +300,17 @@ def build_report(
             coaching[fighter]["note"] = "Coaching withheld because this fighter did not pass the identity-integrity gate."
     coaching_a, coaching_b = coaching["A"], coaching["B"]
 
+    # Reading a weapon mix against what the ruleset rewards needs the family
+    # counts, so it rides the same gate as the rest of the action coaching: no
+    # trusted actions, no sport-specific reading.
+    sport_coaching = {
+        fighter: (
+            build_sport_coaching(fighter, metrics, events, req.ruleset)
+            if action_metrics_trusted and identity_ready[fighter] else None
+        )
+        for fighter in ("A", "B")
+    }
+
     report = {
         "product": {"name": "WarriorIQ", "version": "1.0"},
         "video": {
@@ -337,6 +349,7 @@ def build_report(
         "illegal_moves": illegal_events,
         "defenses": [d.to_dict() for d in defenses],
         "coaching": {"A": coaching_a, "B": coaching_b},
+        "sport_coaching": sport_coaching,
         "training_plan": {
             "A": build_training_plan(coaching_a, "A", metrics["A"]),
             "B": build_training_plan(coaching_b, "B", metrics["B"]),

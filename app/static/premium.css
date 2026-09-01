@@ -631,3 +631,228 @@ p { max-width: 68ch; }
   font-size: 12.5px;
 }
 .chooser-limit b { color: var(--wiq-text); }
+
+/* ===========================================================================
+   Sport identity.
+
+   Five sports that share a chassis but must not feel interchangeable. Each
+   carries an accent and a two-letter crest, set as custom properties on the
+   element by the server from core/sport_profiles.py — so the palette has one
+   source and cannot drift from the coaching built on the same data.
+
+   Everything below falls back to the house blue, so a page that does not know
+   its sport is styled, not broken.
+   =========================================================================== */
+:root { --sport-accent: var(--wiq-aurora-a); --sport-accent-soft: 150 178 255; }
+
+/* --- Crest ---------------------------------------------------------------- */
+.sport-crest {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgb(var(--sport-accent) / .42);
+  border-radius: 13px;
+  background: linear-gradient(150deg, rgb(var(--sport-accent) / .24), rgb(var(--sport-accent) / .07));
+  color: rgb(var(--sport-accent-soft));
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  /* Optical centring: the tracking above pushes the pair right by half a step. */
+  text-indent: .06em;
+}
+
+/* --- Chooser cards, in their own colour ----------------------------------- */
+.sport-card-mark {
+  background: radial-gradient(circle, rgb(var(--sport-accent) / .34), transparent 66%);
+}
+
+.sport-card { gap: 9px; }
+.sport-card .sport-crest { width: 38px; height: 38px; border-radius: 11px; font-size: 12px; }
+.sport-card:hover { border-color: rgb(var(--sport-accent) / .5); }
+.sport-card:hover h2 { color: rgb(var(--sport-accent-soft)); }
+.sport-card h2 { transition: color var(--wiq-fast) var(--wiq-ease); }
+
+.sport-card-decided {
+  margin: 0;
+  color: var(--wiq-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.sport-card-rules {
+  margin: 0;
+  padding-top: 2px;
+  color: var(--wiq-text-tertiary);
+  font-size: 11px;
+  letter-spacing: .012em;
+}
+
+.sport-card-go { color: rgb(var(--sport-accent-soft)); opacity: .55; }
+.sport-card:hover .sport-card-go { opacity: 1; }
+
+/* --- Setup page ----------------------------------------------------------- */
+.setup-title { display: flex; align-items: center; gap: 14px; }
+.setup-title h1 { margin: 0; }
+.setup-head .eyebrow { color: rgb(var(--sport-accent-soft)); }
+.setup-head .eyebrow::before { background: rgb(var(--sport-accent)); }
+
+.setup-decided {
+  margin: 14px 0 18px;
+  max-width: 46ch;
+  color: var(--wiq-text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.setup-card { border-top: 2px solid rgb(var(--sport-accent) / .5); }
+
+/* --- The sport panel on a report ------------------------------------------ */
+.sport-panel { border-top: 2px solid rgb(var(--sport-accent) / .5); }
+.sport-panel-head { display: flex; align-items: flex-start; gap: 15px; }
+.sport-panel-head h2 { margin: 6px 0 0; }
+.sport-panel-head .eyebrow { color: rgb(var(--sport-accent-soft)); }
+
+.sport-panel-frame {
+  margin: 8px 0 0;
+  max-width: 62ch;
+  color: var(--wiq-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Two bars per family: what the ruleset pays for, and what was thrown. Reading
+   them as a pair is the point, so they share a track and sit flush. */
+.weapon-mix { margin: 26px 0 4px; }
+
+.weapon-mix-caption {
+  margin: 0 0 18px;
+  max-width: 64ch;
+  color: var(--wiq-text-tertiary);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.weapon-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid var(--wiq-line-soft);
+}
+
+.weapon-row > b {
+  color: var(--wiq-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.weapon-bars { display: grid; gap: 7px; min-width: 0; }
+
+/* Series name, track, value. Fixed columns, so a label never has to dodge its
+   own fill and the two rows stay comparable at every width. */
+.weapon-bar {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr) 42px;
+  gap: 12px;
+  align-items: center;
+}
+
+.weapon-bar small {
+  color: var(--wiq-text-tertiary);
+  font-size: 10.5px;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.weapon-bar i {
+  display: block;
+  height: 12px;
+  width: 100%;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .05);
+  /* The fill is drawn with a gradient stop rather than a nested element, so the
+     track keeps its full width and the rows stay aligned. */
+  background-image: linear-gradient(90deg,
+    rgb(var(--sport-accent) / .34) 0 var(--w, 0%),
+    transparent var(--w, 0%) 100%);
+  background-repeat: no-repeat;
+}
+
+.weapon-bar.thrown i {
+  background-image: linear-gradient(90deg,
+    rgb(var(--sport-accent)) 0 var(--w, 0%),
+    transparent var(--w, 0%) 100%);
+}
+
+.weapon-bar > b {
+  color: var(--wiq-text);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.weapon-bar.reward > b { color: var(--wiq-text-secondary); font-weight: 600; }
+
+.sport-observations { margin: 24px 0 0; padding: 0; list-style: none; }
+
+.sport-observations li {
+  display: grid;
+  gap: 4px;
+  padding: 15px 0 15px 15px;
+  border-top: 1px solid var(--wiq-line-soft);
+  border-left: 2px solid var(--wiq-success);
+}
+
+.sport-observations li[data-tone="improvement"] { border-left-color: var(--wiq-warning); }
+.sport-observations strong { font-size: 13.5px; }
+.sport-observations span { color: var(--wiq-text-secondary); font-size: 12.5px; line-height: 1.6; }
+
+.sport-panel-limit {
+  margin: 22px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--wiq-line-soft);
+  color: var(--wiq-text-tertiary);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.sport-panel-limit b { color: var(--wiq-text-secondary); }
+
+@media (max-width: 620px) {
+  .setup-title { gap: 11px; }
+  .sport-crest { width: 36px; height: 36px; border-radius: 10px; font-size: 11px; }
+  .weapon-row { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .weapon-row > b { font-size: 12.5px; }
+  .weapon-bar {
+    grid-template-columns: minmax(0, 1fr) 46px;
+    grid-template-areas: "label value" "track track";
+    gap: 4px 10px;
+  }
+  .weapon-bar small { grid-area: label; }
+  .weapon-bar i { grid-area: track; }
+  .weapon-bar > b { grid-area: value; }
+}
+
+/* --- Interaction floor ----------------------------------------------------
+   From the UI/UX audit: every control a finger has to hit needs 44x44px, and
+   nothing interactive should be reachable only by hover. These are the few
+   places in the new flow that were under the line.
+   --------------------------------------------------------------------------- */
+.sport-option span { min-height: 44px; }
+.sport-option, .sport-card, .file-button { cursor: pointer; }
+
+/* The crest is decorative; the whole card is the target, so the card carries
+   the focus ring rather than anything inside it. */
+.sport-card:focus-visible { outline-offset: 4px; }
+
+/* Motion stays inside the 200-300ms band the style guidance calls for, and
+   stops entirely when the reader has asked for that. */
+@media (prefers-reduced-motion: reduce) {
+  .sport-card, .sport-card-mark, .sport-card-go, .sport-option span { transition: none; }
+  .sport-card:hover { transform: none; }
+}
