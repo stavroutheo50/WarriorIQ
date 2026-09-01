@@ -1041,13 +1041,18 @@ class PublicPageTests(unittest.TestCase):
             "family": "kick", "limb": "left_leg", "target": "head",
             "outcome": "clean", "confidence": .92, "contact_confidence": .90,
         }
+        candidates = [
+            {**candidate, "peak_time": 4.2 + i * 3, "start_time": 4.0 + i * 3, "end_time": 4.4 + i * 3,
+             "fighter": "A" if i % 2 == 0 else "B"}
+            for i in range(SETTINGS.min_verified_actions_for_score + 1)
+        ]
         report = {
             "classifier": {"custom_temporal_checkpoint_loaded": False},
             "integrity": {}, "setup": {"ruleset": "K1"},
             "video": {"analysis_target": "BOTH"},
             "tracking": {"fighter_A_coverage": .87, "fighter_B_coverage": .94},
             "rounds": [{"number": 1, "selected": True}],
-            "events": [candidate], "key_moments": [candidate], "illegal_moves": [], "metrics": {},
+            "events": candidates, "key_moments": candidates, "illegal_moves": [], "metrics": {},
         }
         _apply_report_annotations(report, [])
         self.assertTrue(report["scorecard"]["available"])
@@ -1056,6 +1061,44 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("verified_scoring_actions", report["scorecard"]["evidence"])
         self.assertEqual(report["key_moments"], [])
         self.assertFalse(report["integrity"]["action_metrics_trusted"])
+
+    def test_a_round_is_not_scored_from_a_couple_of_actions(self):
+        """Found by running a real fight, not by a fixture.
+
+        135 seconds of real tournament footage produced 244 detected actions,
+        two of which passed the evidence thresholds - and the scorer published
+        a 9-10 round with a named winner and one fighter on exactly zero. A
+        ten-point-must round is a judgement about who controlled the round, and
+        two actions cannot support it. The score is withheld; every movement
+        measurement the fight did support is kept.
+        """
+        candidate = {
+            "peak_time": 4.2, "start_time": 4.0, "end_time": 4.4,
+            "round_number": 1, "fighter": "A", "technique": "cross",
+            "family": "punch", "limb": "right_hand", "target": "head",
+            "outcome": "clean", "confidence": .92, "contact_confidence": .90,
+        }
+        thin = [{**candidate, "peak_time": 4.2 + i * 3} for i in range(2)]
+        report = {
+            "classifier": {"custom_temporal_checkpoint_loaded": False},
+            "integrity": {}, "setup": {"ruleset": "K1"},
+            "video": {"analysis_target": "BOTH"},
+            # Coverage is excellent; the footage simply did not contain enough
+            # verifiable scoring action, which is a different failure.
+            "tracking": {"fighter_A_coverage": .978, "fighter_B_coverage": .983},
+            "rounds": [{"number": 1, "selected": True}],
+            "events": thin, "key_moments": thin, "illegal_moves": [], "metrics": {},
+        }
+        _apply_report_annotations(report, [])
+        card = report["scorecard"]
+        self.assertFalse(card["available"])
+        self.assertEqual(card["status"], "insufficient_scoring_actions")
+        self.assertIsNone(card["totals"]["A"])
+        self.assertEqual(card["rounds"], [])
+        self.assertIsNone(card["winner_estimate"])
+        # The reason is stated with the actual count, not as a generic refusal.
+        self.assertIn(str(SETTINGS.min_verified_actions_for_score), card["disclaimer"])
+        self.assertIn("Movement, coverage", card["disclaimer"])
 
     def test_scorecard_only_review_unlocks_human_score_without_claiming_coaching_trust(self):
         candidate = {

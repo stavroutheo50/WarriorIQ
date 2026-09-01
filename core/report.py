@@ -168,14 +168,21 @@ def build_preliminary_scorecard(
             f"A preliminary score requires at least {SETTINGS.min_tracking_coverage_for_score*100:.0f}% observation coverage "
             f"for both fighters. This analysis produced A {coverage_a*100:.1f}% and B {coverage_b*100:.1f}%."
         )
-    elif candidate_count < 1:
+    elif candidate_count < SETTINGS.min_verified_actions_for_score:
         scorecard.update({
             "available": False,
             "totals": {"A": None, "B": None},
             "rounds": [],
             "winner_estimate": None,
-            "status": "no_scoring_candidates",
-            "disclaimer": "No preliminary score is shown because the automatic action engine found no scoring candidates with enough evidence.",
+            "status": "insufficient_scoring_actions",
+            "disclaimer": (
+                "No score is shown. A round estimate needs at least "
+                f"{SETTINGS.min_verified_actions_for_score} scoring actions with enough evidence, and this "
+                f"analysis verified {candidate_count}. Movement, coverage and the detected "
+                "action timeline below are unaffected."
+                if candidate_count
+                else "No preliminary score is shown because the automatic action engine found no scoring candidates with enough evidence."
+            ),
         })
     else:
         scorecard["available"] = True

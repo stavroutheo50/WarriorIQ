@@ -172,6 +172,12 @@ class Settings:
     # both fighters is sufficient when each counted action also passes the
     # stricter technique/contact evidence thresholds in scoring.py.
     min_tracking_coverage_for_score: float = float(os.getenv("WARRIORIQ_SCORE_COVERAGE", "0.85"))
+    # A ten-point-must round is a judgement about who controlled a round, and
+    # two detected actions cannot support one. Measured on real 480x220
+    # tournament footage: 244 actions detected, 2 of them verified, and the
+    # scorer still published a 9-10 round with a named winner. The score is
+    # withheld below this; every movement measurement is kept.
+    min_verified_actions_for_score: int = int(os.getenv("WARRIORIQ_MIN_SCORING_ACTIONS", "6"))
     evidence_pre_seconds: float = 1.0
     evidence_post_seconds: float = 1.0
     save_tracking_jsonl: bool = True
