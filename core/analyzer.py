@@ -229,6 +229,48 @@ def _buffer_since_last_seen(buffer: deque, last_seen_source_frame: int) -> list[
     return [frame for _, frame in items[start:]]
 
 
+class _Travel:
+    """How far a tracked person actually went, in their own body lengths.
+
+    Measured in body lengths rather than pixels so it means the same thing
+    whether the camera is at the ring apron or the back of a sports hall.
+    """
+
+    __slots__ = ("_last", "_distance", "_heights", "_first_time", "_last_time")
+
+    def __init__(self) -> None:
+        self._last: tuple[float, float] | None = None
+        self._distance = 0.0
+        self._heights: list[float] = []
+        self._first_time: float | None = None
+        self._last_time: float | None = None
+
+    def add(self, seconds: float, observation) -> None:
+        box = getattr(observation, "box", None) if observation is not None else None
+        if box is None:
+            self._last = None          # a gap is not travel; do not bridge it
+            return
+        box = [float(value) for value in box]
+        centre = ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
+        height = max(1.0, box[3] - box[1])
+        self._heights.append(height)
+        if self._first_time is None:
+            self._first_time = seconds
+        self._last_time = seconds
+        if self._last is not None:
+            self._distance += math.hypot(centre[0] - self._last[0], centre[1] - self._last[1])
+        self._last = centre
+
+    def body_lengths_per_minute(self) -> float | None:
+        if not self._heights or self._first_time is None or self._last_time is None:
+            return None
+        span = self._last_time - self._first_time
+        if span < 20.0:                # too short a look to judge anyone by
+            return None
+        median_height = sorted(self._heights)[len(self._heights) // 2]
+        return round(self._distance / median_height / (span / 60.0), 1)
+
+
 def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None) -> dict:
     info = get_video_info(req.video_path)
     _validate_request(req, info.duration)
@@ -430,6 +472,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
 
     out_of_range_actions = 0
     observed_separations: list[float] = []
+    travel = {"A": _Travel(), "B": _Travel()}
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
 
     try:
@@ -577,6 +620,12 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                         event.metadata["defense"] = defense.defense
                         event.metadata["defense_confidence"] = float(defense.confidence)
                         defenses.append(defense)
+
+            # Fighters move. Someone at ringside does not, and that is the
+            # difference a separation test cannot see when the wrong two
+            # people happen to be standing next to each other.
+            travel["A"].add(seconds, fighter_a)
+            travel["B"].add(seconds, fighter_b)
 
             if tracking_file is not None:
                 record = {
@@ -761,6 +810,9 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             1 for event in report_events
             if getattr(event, "outcome", None) in {"clean", "likely_landed"}
         ),
+        travel_per_minute={
+            fighter: travel[fighter].body_lengths_per_minute() for fighter in ("A", "B")
+        },
     )
     progress(
         "Finalizing coaching priorities", 99.2, time.perf_counter() - wall_start, segment_duration,

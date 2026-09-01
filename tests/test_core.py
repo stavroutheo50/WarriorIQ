@@ -999,6 +999,53 @@ class EngagementRangeTests(unittest.TestCase):
                 self.assertTrue(verdict["looks_like_a_fight"])
                 self.assertIsNone(verdict["warning"])
 
+    def test_someone_standing_at_ringside_is_caught_even_when_close(self):
+        """A live job (69511cc2c1cc) tracked two people at the edge of the mat.
+
+        The separation test could not see it: the pair stood 0.48 body lengths
+        apart, closer than the correctly picked fighters on 2.mp4. What gave it
+        away was movement - "fighter A" covered 41 body lengths in 255 seconds,
+        about 9.6 a minute, while every correctly tracked person measured so far
+        covers 24 to 65. Someone who barely moves for four minutes is not
+        fighting, however close they are standing to anyone else.
+        """
+        from core.contact import assess_selection
+
+        verdict = assess_selection(
+            [0.48] * 300, kept=24, discarded=50, landed=2,
+            travel_per_minute={"A": 9.6, "B": 44.7},
+        )
+        self.assertFalse(verdict["looks_like_a_fight"])
+        self.assertEqual(verdict["verdict"], "fighter_barely_moved")
+        self.assertIn("barely moved", verdict["warning"])
+
+    def test_real_fighters_are_never_called_stationary(self):
+        """Every tracked pair measured on real footage, correct picks included."""
+        from core.contact import assess_selection
+
+        for name, a, b in (
+            ("2.mp4 correct", 31.0, 26.0),
+            ("3.mp4", 54.0, 34.0),
+            ("0-02-05", 26.0, 28.0),
+            ("slowest real pair seen", 25.0, 32.0),
+        ):
+            with self.subTest(run=name):
+                verdict = assess_selection(
+                    [0.8] * 200, kept=100, discarded=100, landed=10,
+                    travel_per_minute={"A": a, "B": b},
+                )
+                self.assertTrue(verdict["looks_like_a_fight"])
+
+    def test_a_clip_too_short_to_judge_movement_is_left_alone(self):
+        """Under twenty seconds of tracking, _Travel reports nothing at all."""
+        from core.contact import assess_selection
+
+        verdict = assess_selection(
+            [0.8] * 200, kept=100, discarded=100, landed=10,
+            travel_per_minute={"A": None, "B": None},
+        )
+        self.assertTrue(verdict["looks_like_a_fight"])
+
     def test_a_fighter_paired_with_a_ringside_coach_is_caught(self):
         """The real failure that started this: on 2.mp4 the automatic pick took
         a crouching coach as fighter B. The pair sat 2.84 body lengths apart for

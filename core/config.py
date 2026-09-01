@@ -208,6 +208,16 @@ class Settings:
     min_actions_to_judge_selection: int = int(
         os.getenv("WARRIORIQ_MIN_SELECTION_ACTIONS", "12")
     )
+    # Fighters move; ringside does not. Measured in body lengths travelled per
+    # minute, so it means the same at any camera distance. Across every real run
+    # recorded so far - correct pairs and mis-picked ones alike - both tracked
+    # people covered 24 to 65 per minute. A live job that had latched onto
+    # someone standing at the edge of the mat covered 9.6. This sits below every
+    # real observation and well above that, and it catches the case a separation
+    # test cannot: two wrong people who happen to stand near each other.
+    min_fighter_travel_per_minute: float = float(
+        os.getenv("WARRIORIQ_MIN_TRAVEL_PER_MINUTE", "15")
+    )
     contact_threshold_body_lengths: float = 0.24
     likely_contact_threshold_body_lengths: float = 0.33
     contact_confirmation_frames: int = 2

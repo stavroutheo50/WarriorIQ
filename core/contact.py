@@ -165,7 +165,8 @@ def thrown_at_opponent(event: StrikeEvent) -> bool:
 
 
 def assess_selection(
-    separations: list[float], kept: int, discarded: int, landed: int
+    separations: list[float], kept: int, discarded: int, landed: int,
+    travel_per_minute: dict[str, float | None] | None = None,
 ) -> dict:
     """Were the two people picked actually the two fighters?
 
@@ -182,14 +183,38 @@ def assess_selection(
     on the wrong people is worse than staying quiet.
     """
     total = kept + discarded
+    travel_per_minute = travel_per_minute or {}
     result = {
         "actions_observed": total,
         "actions_in_range": kept,
         "landed": landed,
         "median_separation_body_lengths": None,
+        "travel_per_minute": dict(travel_per_minute),
         "looks_like_a_fight": True,
         "warning": None,
     }
+
+    # Checked before anything else, because it needs no actions at all. Someone
+    # who barely moves for minutes is not fighting, however close they happen to
+    # be standing to the other person picked.
+    stationary = sorted(
+        (name for name, value in travel_per_minute.items()
+         if isinstance(value, (int, float))
+         and value < SETTINGS.min_fighter_travel_per_minute),
+    )
+    if stationary:
+        moved = ", ".join(
+            f"{name} moved {travel_per_minute[name]:.0f}" for name in stationary
+        )
+        result["looks_like_a_fight"] = False
+        result["verdict"] = "fighter_barely_moved"
+        result["warning"] = (
+            f"Fighter {' and '.join(stationary)} barely moved the whole video "
+            f"({moved} body lengths a minute; a fighter covers about 35). "
+            "That is someone standing at the side, not fighting - the box is "
+            "probably on a coach or someone watching."
+        )
+        return result
     if not separations or total < SETTINGS.min_actions_to_judge_selection:
         result["verdict"] = "not_enough_to_judge"
         return result
