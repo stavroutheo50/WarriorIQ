@@ -245,8 +245,6 @@ class Settings:
     oauth_state_secret: str = os.getenv("WARRIORIQ_OAUTH_STATE_SECRET", "").strip()
     google_client_id: str = os.getenv("WARRIORIQ_GOOGLE_CLIENT_ID", "").strip()
     google_client_secret: str = os.getenv("WARRIORIQ_GOOGLE_CLIENT_SECRET", "").strip()
-    apple_client_id: str = os.getenv("WARRIORIQ_APPLE_CLIENT_ID", "").strip()
-    apple_client_secret: str = os.getenv("WARRIORIQ_APPLE_CLIENT_SECRET", "").strip()
     facebook_client_id: str = os.getenv("WARRIORIQ_FACEBOOK_CLIENT_ID", "").strip()
     facebook_client_secret: str = os.getenv("WARRIORIQ_FACEBOOK_CLIENT_SECRET", "").strip()
     microsoft_client_id: str = os.getenv("WARRIORIQ_MICROSOFT_CLIENT_ID", "").strip()

@@ -25,22 +25,26 @@
     <form id="fightUploadForm" action="/upload" method="post" enctype="multipart/form-data" data-sport="{{sport}}">
       <div class="field upload-field"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="video/*" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}Resets automatically{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% else %}MP4, MOV, MKV, AVI, M4V or WEBM{% endif %}</div></div>
 
-      {# Everything below here has a sensible default, so it is folded into one
-         disclosure. A first-timer picks a video and presses the button. The
-         summary line always states the current settings, so nothing is hidden -
-         it is only folded away, and one tap opens it. #}
-      <details class="setup-extra" id="fightSettings">
-        <summary><strong>Fight settings</strong><small id="fightSettingsSummary">Set automatically from your video</small></summary>
-        {% if only_ruleset %}<input type="hidden" name="ruleset" value="{{only_ruleset}}">{% endif %}
-        <div class="row">
-          <div class="field"><label for="fightType">Tag for your fight library</label><select id="fightType" name="fight_type"><option value="competition">Real fight</option><option value="sparring">Sparring</option></select></div>
-          {% if not only_ruleset %}<div class="field"><label for="fightRuleset">Rules</label><select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}">{{label}}</option>{% endfor %}</select></div>{% endif %}
-        </div>
-        <div class="row">
-          <div class="field"><label for="roundCount">Rounds</label><input id="roundCount" name="round_count" type="number" min="1" max="20" value="3"></div>
-          <div class="field"><label for="roundSeconds">Seconds per round</label><input id="roundSeconds" name="round_duration_seconds" type="number" min="10" value="120"></div>
-        </div>
-      </details>
+      {# The ruleset is the only thing a person has to decide, because it is the
+         only one WarriorIQ cannot work out for itself: it changes what counts
+         as a point. Everything else is derived and posted hidden.
+
+         Rounds come from the video's own duration (see the script below), and
+         since build_round_schedule extends the final round to the end of the
+         footage, a wrong guess can no longer cost anyone a second of analysis -
+         it only moves where the round lines fall. The library tag defaults to a
+         real fight, which is what almost every upload is. #}
+      <input type="hidden" name="fight_type" value="competition">
+      <input type="hidden" id="roundCount" name="round_count" value="1">
+      <input type="hidden" id="roundSeconds" name="round_duration_seconds" value="120">
+      {% if only_ruleset %}
+      <input type="hidden" name="ruleset" value="{{only_ruleset}}">
+      {% else %}
+      <div class="field">
+        <label for="fightRuleset">Which rules?</label>
+        <select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}">{{label}}</option>{% endfor %}</select>
+      </div>
+      {% endif %}
       <details class="setup-extra">
         <summary><strong id="trackingRecoveryTitle">Extra help telling the fighters apart</strong><small>Most fights do not need this</small></summary>
         <label class="check"><input type="checkbox" name="openai_identity_recovery" value="true"> <span><strong>Turn this on if the two fighters look very alike</strong><br>If WarriorIQ loses track of who is who, it sends a few still frames to an outside service to check. Leave it off unless you have set up a key for that service.</span></label>
@@ -67,21 +71,12 @@
     :{tone:'ok',text:`${fmtMB(b)} — ready for WarriorIQ analysis`};
   const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
   const restore=(message)=>{progress.hidden=false;progress.dataset.tone='error';progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
-  // Rounds decide how the fight is cut up for scoring, and a blind "3 x 2 min"
-  // default is simply wrong for most clips people upload - a 94-second round
-  // was being scored as three rounds of two minutes. The browser already knows
-  // the real duration, so read it and set the fields from that. One less
-  // question to answer, and a more accurate segmentation than the old default.
-  const roundCount=document.getElementById('roundCount'),roundSeconds=document.getElementById('roundSeconds'),
-        settingsSummary=document.getElementById('fightSettingsSummary'),
-        fightRuleset=document.getElementById('fightRuleset');
-  const mmss=s=>{const m=Math.floor(s/60),r=Math.round(s%60);return m?(r?`${m} min ${r}s`:`${m} min`):`${r}s`};
-  const describeSettings=()=>{
-    if(!settingsSummary)return;
-    const rules=fightRuleset?fightRuleset.selectedOptions[0].textContent.trim():'';
-    const n=Number(roundCount.value)||1,secs=Number(roundSeconds.value)||120;
-    settingsSummary.textContent=`${rules?rules+' · ':''}${n} round${n===1?'':'s'} × ${mmss(secs)}`;
-  };
+  // Rounds are no longer asked for, but they still decide where the round
+  // lines fall for per-round scoring, so they are derived rather than guessed.
+  // The browser already knows the video's duration; read it and fill the
+  // hidden fields. A wrong guess costs nothing now that build_round_schedule
+  // extends the last round to the end of the footage.
+  const roundCount=document.getElementById('roundCount'),roundSeconds=document.getElementById('roundSeconds');
   const readDuration=file=>new Promise(resolve=>{
     const el=document.createElement('video'),url=URL.createObjectURL(file);
     let settled=false;
@@ -94,20 +89,13 @@
   });
   const applyDuration=async file=>{
     const seconds=await readDuration(file);
-    if(seconds&&seconds>5){
-      // Under about two and a half minutes is one round or a clip; longer
-      // footage keeps the usual three-round shape.
-      if(seconds<=150){roundCount.value=1;roundSeconds.value=Math.ceil(seconds)}
-      // Longer footage: assume the usual two-minute round with a one-minute
-      // break between, which is what most amateur rulesets run. Still a guess,
-      // which is why the summary states it and one tap opens the fields.
-      else{roundCount.value=Math.max(1,Math.min(12,Math.round((seconds+60)/180)));roundSeconds.value=120}
-    }
-    describeSettings();
+    if(!seconds||seconds<=5)return;    // unreadable: leave the one-round default
+    if(seconds<=150){roundCount.value=1;roundSeconds.value=Math.ceil(seconds)}
+    // Longer footage: assume the usual two-minute round with a one-minute break
+    // between, which is what most amateur rulesets run.
+    else{roundCount.value=Math.max(1,Math.min(12,Math.round((seconds+60)/180)));roundSeconds.value=120}
   };
-  [roundCount,roundSeconds,fightRuleset].forEach(el=>el&&el.addEventListener('change',describeSettings));
-  videoInput.addEventListener('change',()=>{setReady();const file=videoInput.files[0];if(file)applyDuration(file);else describeSettings()});
-  describeSettings();
+  videoInput.addEventListener('change',()=>{setReady();const file=videoInput.files[0];if(file)applyDuration(file)});
   form.addEventListener('submit',async event=>{
     if(!videoInput.files[0]||!form.reportValidity())return;
     event.preventDefault();

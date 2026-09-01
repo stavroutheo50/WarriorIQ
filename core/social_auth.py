@@ -17,9 +17,13 @@ class SocialIdentity:
     email_verified: bool = False
 
 
+# Apple is deliberately absent. Sign in with Apple needs the Apple Developer
+# Program ($99/year, and enrolment requires the legal age of majority), and its
+# "client secret" is a JWT that expires within six months, so it would fail
+# silently twice a year unless minted on every request. Re-adding it means
+# restoring this label, the registration block, and the icon in auth.html.
 PROVIDER_LABELS = {
     "google": "Google",
-    "apple": "Apple",
     "facebook": "Facebook",
     "microsoft": "Microsoft",
 }
@@ -41,19 +45,6 @@ class SocialAuthRegistry:
             "microsoft", SETTINGS.microsoft_client_id, SETTINGS.microsoft_client_secret,
             "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
         )
-        if SETTINGS.apple_client_id and SETTINGS.apple_client_secret:
-            self.oauth.register(
-                name="apple",
-                client_id=SETTINGS.apple_client_id,
-                client_secret=SETTINGS.apple_client_secret,
-                server_metadata_url="https://appleid.apple.com/.well-known/openid-configuration",
-                client_kwargs={
-                    "scope": "openid email name",
-                    "token_endpoint_auth_method": "client_secret_post",
-                    "code_challenge_method": "S256",
-                },
-            )
-            self._enabled.add("apple")
         if SETTINGS.facebook_client_id and SETTINGS.facebook_client_secret:
             self.oauth.register(
                 name="facebook",

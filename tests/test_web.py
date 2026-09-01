@@ -530,12 +530,16 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('name="minor_permission_status"', home)
         self.assertEqual(home.count('type="radio" name="minor_permission_status"'), 2)
         self.assertNotIn(">Choose one<", home)
+        # Rounds are no longer asked for. They still post, derived from the
+        # video's real duration, so per-round scoring keeps working without
+        # putting two more questions in front of a first-time user.
         self.assertIn('id="roundCount"', home)
         self.assertIn('id="roundSeconds"', home)
-        # Folded away, but never silent: the summary states the settings, and
-        # they are derived from the video rather than left at a blind default.
-        self.assertIn('id="fightSettingsSummary"', home)
         self.assertIn("readDuration", home)
+        self.assertIn('name="fight_type" value="competition"', home)
+        # The ruleset is the one thing WarriorIQ cannot infer, so it stays.
+        self.assertIn('name="ruleset"', home)
+        self.assertNotIn('id="fightSettings"', home)
         self.assertIn('id="trackingRecoveryTitle"', home)
         self.assertIn("Video Upload Policy", home)
         self.assertNotIn("These confirmations apply to this fight video", home)
@@ -572,8 +576,8 @@ class PublicPageTests(unittest.TestCase):
         history_template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "history.html").read_text(encoding="utf-8")
 
         self.assertIn('/static/product.css', shell)
-        self.assertIn("Your fight.", home)
-        self.assertIn("Frame by frame.", home)
+        self.assertIn("See every shot.", home)
+        self.assertIn("Know what to fix.", home)
         self.assertIn('class="product-preview"', home)
         self.assertIn('class="workflow-track"', home)
         self.assertIn('class="fight-archive"', history)
@@ -678,10 +682,14 @@ class PublicPageTests(unittest.TestCase):
 
     def test_home_copy_uses_the_warrioriq_combat_sports_voice(self):
         page = self.client.get("/").text
-        self.assertIn("Fight intelligence for athletes and coaches", page)
-        self.assertIn("See the fight.", page)
-        self.assertIn("Train what matters.", page)
+        self.assertIn("For fighters and coaches", page)
+        self.assertIn("See every shot.", page)
+        self.assertIn("Know what to fix.", page)
         self.assertNotIn("WonderIQ", page)
+        # "Frame by frame" is industry shorthand a fighter does not read as a
+        # promise. The headline says what they get instead.
+        self.assertNotIn("Frame by frame", page)
+        self.assertNotIn("Fight intelligence", page)
 
     def test_upload_never_displays_selected_filename(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
@@ -957,7 +965,12 @@ class PublicPageTests(unittest.TestCase):
         auth = (Path(__file__).resolve().parents[1] / "app" / "templates" / "auth.html").read_text(encoding="utf-8")
         registry = (Path(__file__).resolve().parents[1] / "core" / "social_auth.py").read_text(encoding="utf-8")
         self.assertIn("request.state.oauth_providers", auth)
-        for provider in ("google", "apple", "facebook", "microsoft"):
+        for provider in ("google", "facebook", "microsoft"):
+            self.assertIn(f'"{provider}"', registry)
+        # Apple was removed: the Developer Program needs age 18 and $99/year,
+        # and its client secret expires within six months.
+        self.assertNotIn('"apple"', registry)
+        for provider in ("google",):
             self.assertIn(f'"{provider}"', registry)
         self.assertIn('formaction="/auth/{{provider.key}}/start"', auth)
         self.assertNotIn("Sign in with X", auth)

@@ -107,7 +107,7 @@
     const active=path==='/'||/^\/(frame|select|progress)\//.test(path)?'analyze':/^\/(history|result|replay|review)\b/.test(path)?'library':/^\/(dashboard|compare)\b/.test(path)?'progress':path.startsWith('/coach')?'coach':path.startsWith('/pricing')?'plans':'';
     const activeLink=document.querySelector(`[data-nav="${active}"]`);if(activeLink)activeLink.setAttribute('aria-current','page');
     let toastTimer;window.wiqToast=(message,tone='info')=>{clearTimeout(toastTimer);toast.textContent=message;toast.dataset.tone=tone;toast.hidden=false;requestAnimationFrame(()=>toast.classList.add('show'));toastTimer=setTimeout(()=>{toast.classList.remove('show');setTimeout(()=>toast.hidden=true,180)},2800)};
-    document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{if(event.defaultPrevented||form.dataset.async==='true')return;const submitter=event.submitter;if(!submitter||submitter.name||submitter.dataset.keepLabel==='true')return;submitter.dataset.originalLabel=submitter.textContent;submitter.textContent=submitter.dataset.loadingLabel||'Working…';submitter.setAttribute('aria-busy','true');submitter.disabled=true}));
+    document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{if(event.defaultPrevented||form.dataset.async==='true')return;const submitter=event.submitter;if(!submitter||submitter.name||submitter.dataset.keepLabel==='true')return;submitter.dataset.originalLabel=submitter.textContent;submitter.textContent=submitter.dataset.loadingLabel||'Working…';submitter.setAttribute('aria-busy','true');setTimeout(()=>{submitter.disabled=true},0)}));
   })();
   </script>
   <script src="/static/motion.js?v=20260906-simple1" defer></script>

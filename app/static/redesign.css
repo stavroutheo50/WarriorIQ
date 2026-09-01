@@ -361,9 +361,14 @@ h1 em, h2 em {
 /* --- Last of the navy -----------------------------------------------------
    The header still painted itself a translucent blue-black, and the upload
    target's dashed edge was set by a more specific rule than the one above, so
-   both kept the old palette against the new canvas. */
+   both kept the old palette against the new canvas.
+
+   Transparent was the wrong cure. The bar is sticky, so the page scrolled
+   visibly underneath it and headings slid through the logo. It needs to be
+   opaque and the same colour as the canvas - the old navy goes, the solidity
+   stays. */
 .nav, .site-header, header.nav {
-  background: transparent !important;
+  background: var(--wiq-canvas) !important;
   backdrop-filter: none;
 }
 
@@ -665,4 +670,44 @@ h1 em, h2 em {
      upload button - the one control the page exists to offer - sat behind the
      banner on a 375px screen and could not be reached at all. */
   body:has(.cookie-notice:not([hidden])) main { padding-bottom: 300px; }
+}
+
+/* --- Social sign-in -------------------------------------------------------
+   Was a two-column grid with hardcoded blues, so a single Google button sat
+   half-width in the wrong palette. One column, and the same geometry as the
+   email and password fields directly below it, so the card reads as one form
+   rather than two. Content stays left-aligned with the icon. */
+.social-auth-grid { grid-template-columns: 1fr; gap: 8px; }
+
+.social-auth-button {
+  width: 100%;
+  min-height: var(--wiq-control-height, 44px);
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: 3px;
+  border: 1px solid var(--wiq-line);
+  background: var(--wiq-panel);
+  color: var(--wiq-text);
+  font-size: var(--wiq-text-sm);
+  font-weight: 650;
+}
+.social-auth-button:hover:not(:disabled) {
+  border-color: #4a4a52;
+  background: var(--wiq-canvas-raised);
+  transform: none;                 /* the lift fought the square field styling */
+}
+/* The consent box is enforced on click, not by disabling: a greyed-out button
+   reads as broken, and the reason it cannot be used is out of view. */
+.social-auth-gate[data-state="asking"] { color: var(--wiq-warning); }
+.check.needs-attention {
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px var(--wiq-warning);
+  transition: box-shadow 160ms var(--wiq-motion-ease, ease);
+}
+
+.social-auth-gate {
+  margin: 8px 0 0;
+  color: var(--wiq-text-tertiary);
+  font-size: var(--wiq-text-xs);
 }

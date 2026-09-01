@@ -80,7 +80,6 @@ Google, Apple, Facebook and Microsoft sign-in use the authorization-code flow an
 
 ```text
 https://warrioriq.eu/auth/google/callback
-https://warrioriq.eu/auth/apple/callback
 https://warrioriq.eu/auth/facebook/callback
 https://warrioriq.eu/auth/microsoft/callback
 ```
