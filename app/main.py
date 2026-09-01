@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 import os
+import hashlib
 import secrets
 import zipfile
 from copy import deepcopy
@@ -94,6 +95,34 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "app" / "templates"))
+
+
+def _asset_version() -> str:
+    """A cache key that changes whenever a stylesheet or script changes.
+
+    base.html used to carry a hand-typed "?v=20260906-simple1". It never
+    changed, so every CSS and JS deploy was invisible to anyone who had already
+    visited: their browser kept serving the old stylesheet against the new
+    markup, which looks like the site broke rather than like a stale cache.
+
+    Hashing the files themselves means the token moves on its own with every
+    real change and stays put when nothing changed, so caches still do their
+    job between deploys.
+    """
+    digest = hashlib.sha256()
+    static_dir = ROOT / "app" / "static"
+    for path in sorted(static_dir.glob("*.css")) + sorted(static_dir.glob("*.js")):
+        try:
+            digest.update(path.name.encode())
+            digest.update(str(path.stat().st_mtime_ns).encode())
+            digest.update(str(path.stat().st_size).encode())
+        except OSError:
+            continue
+    return digest.hexdigest()[:12]
+
+
+ASSET_VERSION = _asset_version()
+templates.env.globals["asset_version"] = ASSET_VERSION
 executor = ThreadPoolExecutor(max_workers=1)
 init_db()
 
