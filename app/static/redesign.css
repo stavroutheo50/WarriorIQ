@@ -386,3 +386,113 @@ h1 em, h2 em {
   backdrop-filter: none;
   box-shadow: none;
 }
+
+/* ===========================================================================
+   Depth, second pass.
+
+   Stripping the gradient wash was right; replacing it with nothing was not.
+   Flat grey on flat black reads as unstyled, not restrained. A dark interface
+   earns its quality from three things the last pass left out: a real step
+   between surfaces, a lit top edge so a panel looks like an object rather than
+   a hole, and one accent used with conviction instead of none at all.
+   =========================================================================== */
+
+:root {
+  /* Championship gold. Warm against a cold canvas, distinct from all five
+     sport accents (blue, red, orange, cyan, violet), and it reads as sport
+     rather than software. Used on one thing per screen. */
+  --wiq-accent: 214 176 96;
+}
+
+/* Panels become objects: a lit top edge, a real fill, and a hairline that is
+   actually visible against the canvas. */
+.card, .hero-card, .setup-card, .stat-band, .sport-card,
+.empty-workspace, .pricing-card, .preview-screen {
+  background: var(--wiq-canvas-raised) !important;
+  border: 1px solid var(--wiq-line-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .045) !important;
+}
+
+.sport-card:hover, .card:hover {
+  border-color: var(--wiq-line);
+  background: var(--wiq-panel) !important;
+}
+
+/* --- The accent, used sparingly -------------------------------------------
+   The eyebrow above a section title and the active nav item. That is the whole
+   budget; anything more and it stops meaning "look here". */
+.eyebrow { color: rgb(var(--wiq-accent)); }
+.eyebrow::before { background: rgb(var(--wiq-accent)); width: 22px; height: 2px; }
+
+.navlinks a[aria-current="page"] {
+  color: var(--wiq-text);
+  box-shadow: inset 0 -2px 0 rgb(var(--wiq-accent));
+  border-radius: 0;
+}
+
+/* The primary button keeps white for contrast, but gains a warm edge so it
+   belongs to the palette instead of floating on top of it. */
+.btn { box-shadow: inset 0 -1px 0 rgba(0, 0, 0, .25) !important; }
+
+/* --- Rhythm ---------------------------------------------------------------
+   Section spacing was uniform, so every band had the same weight. The hero
+   breathes, sections settle, and the gap between a heading and its content is
+   deliberately tighter than the gap between sections. */
+.product-section { padding-top: clamp(56px, 8vh, 104px); }
+.section-intro { max-width: 620px; margin-bottom: clamp(24px, 4vh, 40px); }
+.section-intro h2 { margin: 10px 0 12px; font-size: clamp(26px, 3.4vw, 40px); }
+.section-intro p { color: var(--wiq-text-secondary); line-height: 1.65; }
+
+/* --- Section titles -------------------------------------------------------
+   A rule under the heading row gives each section a top edge without boxing it. */
+.section-title {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--wiq-line-soft);
+  margin-bottom: 22px;
+}
+
+/* --- Hero, given something to look at -------------------------------------
+   Moving the upload card to the sport pages left the hero as type alone on
+   black, which is why the page read as unfinished. The product illustration
+   moves up beside the headline: the hero now shows what WarriorIQ does instead
+   of only asserting it, and the two columns give the page a centre of gravity.
+   --------------------------------------------------------------------------- */
+@media (min-width: 981px) {
+  .hero-centered { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .92fr); gap: 64px; align-items: center; }
+  .hero-centered .hero-copy { max-width: none; }
+  /* The illustration is pulled out of the section below and parked in the
+     hero's second column, so no markup has to move. */
+  .product-preview { grid-column: 2; grid-row: 1; padding-top: 0; border-top: 0; }
+  .product-preview .preview-copy { display: none; }
+  .hero-centered + .product-preview { display: none; }
+}
+
+/* The mock itself: a real instrument panel rather than two empty outlines. */
+.preview-screen { padding: 14px; border-radius: 5px; }
+.preview-screen-head { color: var(--wiq-text-tertiary); }
+.preview-screen-head b { color: rgb(var(--wiq-accent)); }
+.preview-fight-stage {
+  background: linear-gradient(180deg, #101014, #0b0b0d);
+  border-color: var(--wiq-line-soft);
+  aspect-ratio: 16 / 9.6;
+}
+.preview-fighter { border-width: 1.5px; border-radius: 3px; }
+.preview-timeline i { background: rgb(var(--wiq-accent)); }
+.preview-timeline span { border-radius: 2px; }
+
+/* The illustration has to fill the column it was given, or it reads as a
+   thumbnail floating in empty space rather than the hero's second half. */
+.product-preview { display: block; width: 100%; }
+.preview-visual { width: 100%; max-width: none; }
+.preview-screen { width: 100%; }
+
+/* Its header row was sized for a wider band and wrapped into four words. */
+.preview-screen-head {
+  gap: 12px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  font-size: var(--wiq-text-micro);
+  letter-spacing: .07em;
+}
+
+.preview-fighter { font-size: clamp(14px, 2.4vw, 26px); }

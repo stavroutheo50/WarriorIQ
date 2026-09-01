@@ -1,11 +1,11 @@
 /* WarriorIQ product polish — shared editorial sports interface */
 :root{
-  --wiq-canvas:#0a0a0b;
-  --wiq-canvas-raised:#101012;
-  --wiq-panel:#141416;
-  --wiq-panel-strong:#1a1a1d;
-  --wiq-line:#2a2a2e;
-  --wiq-line-soft:#1e1e21;
+  --wiq-canvas:#09090b;
+  --wiq-canvas-raised:#151518;
+  --wiq-panel:#1c1c21;
+  --wiq-panel-strong:#232329;
+  --wiq-line:#33333a;
+  --wiq-line-soft:#242429;
   --wiq-text:#f5f5f6;
   --wiq-text-secondary:#a1a1a8;
   --wiq-text-tertiary:#82828b;
