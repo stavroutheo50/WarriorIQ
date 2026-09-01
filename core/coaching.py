@@ -110,10 +110,9 @@ def build_pose_coaching(fighter: str, own: dict) -> dict:
     weakest = sorted(measured, key=lambda item: item[0])[:2]
     strongest_value, _, strongest_label, _, _ = strongest
     strengths = [{
-        "title": f"Highest pose baseline · {strongest_label} {_pct(strongest_value)}%",
+        "title": f"Best: {strongest_label} {_pct(strongest_value)}%",
         "detail": (
-            f"For Fighter {fighter}, {strongest_label.lower()} was the strongest of the available "
-            "pose-derived baselines. This is a movement measurement, not a verified strike label."
+            f"Your strongest movement number. It measures how you moved, not strikes."
         ),
         "evidence_times": [],
     }]
@@ -121,10 +120,9 @@ def build_pose_coaching(fighter: str, own: dict) -> dict:
     drills = []
     for rank, (value, _, label, drill, prescription) in enumerate(weakest, start=1):
         improvements.append({
-            "title": f"Pose priority {rank} · {label} {_pct(value)}%",
+            "title": f"Work on: {label} {_pct(value)}%",
             "detail": (
-                f"Fighter {fighter}'s {label.lower()} was {_pct(value)}% across identity-safe pose frames, "
-                "making it one of this fighter's two lowest measured pose baselines."
+                f"{_pct(value)}% — one of your two lowest movement numbers."
             ),
             "evidence_times": [],
         })

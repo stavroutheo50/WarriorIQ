@@ -645,3 +645,24 @@ h1 em, h2 em {
 .setup-extra > summary strong { color: var(--wiq-text); font-size: var(--wiq-text-sm); font-weight: 650; }
 .setup-extra > summary small { color: var(--wiq-text-tertiary); font-size: var(--wiq-text-micro); }
 .setup-extra > .check { display: block; padding: 0 15px 15px; }
+
+/* The consent notice is required, but on a phone it was covering the upload
+   button - the one thing the page exists to offer. Cap it to a slim bar at the
+   very bottom so the primary action stays reachable, and keep the three
+   choices on one row so "Reject Non-Essential" is exactly as easy as "Accept
+   All". Nothing is removed; it simply stops being a half-screen wall. */
+@media (max-width: 560px) {
+  .cookie-notice {
+    bottom: 8px;
+    padding: 10px 12px;
+    gap: 8px;
+    max-height: 42vh;
+    overflow-y: auto;
+  }
+  .cookie-notice p { font-size: 11px; line-height: 1.4; }
+  .cookie-notice .btn { padding: 9px 4px; font-size: 11px; }
+  /* Reserve room underneath the page for the fixed notice. Without this the
+     upload button - the one control the page exists to offer - sat behind the
+     banner on a 375px screen and could not be reached at all. */
+  body:has(.cookie-notice:not([hidden])) main { padding-bottom: 300px; }
+}

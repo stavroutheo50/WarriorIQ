@@ -11,14 +11,10 @@
       <h1>Set up your {{sport_label}} fight.</h1></div>
     <p class="setup-decided">{{identity.decided_by}}</p>
     {% if unobserved %}
-    <p class="setup-coverage" data-covered="no"><b>Striking read only.</b>
-      WarriorIQ scores the punches, kicks and knees it can see.
-      {% if unobserved_is_sport_wide %}{{sport_label}} also scores{% else %}Depending on the rules you pick, {{sport_label}} can also score{% endif %}
-      {{ unobserved | join(", ") }}, which the analysis cannot observe.
-      Your report repeats this next to the score.</p>
+    <p class="setup-coverage" data-covered="no"><b>We count punches, kicks and knees.</b>
+      Not {{ unobserved | join(", ") }}. Your report says so too.</p>
     {% else %}
-    <p class="setup-coverage" data-covered="yes"><b>Full scoring coverage.</b>
-      Every action that scores in {{sport_label}} is one WarriorIQ observes directly.</p>
+    <p class="setup-coverage" data-covered="yes"><b>We count everything that scores in {{sport_label}}.</b></p>
     {% endif %}
   </header>
 
@@ -29,27 +25,27 @@
     <form id="fightUploadForm" action="/upload" method="post" enctype="multipart/form-data" data-sport="{{sport}}">
       <div class="field upload-field"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="video/*" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}Resets automatically{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% else %}MP4, MOV, MKV, AVI, M4V or WEBM{% endif %}</div></div>
 
-      {# Boxing and MMA have one ruleset each, so the select would be a question
-         with a single answer. The key still posts, as a hidden field. #}
-      {% if only_ruleset %}
-      <input type="hidden" name="ruleset" value="{{only_ruleset}}">
-      <div class="field"><label for="fightType">Is this a real fight or sparring?</label><select id="fightType" name="fight_type"><option value="competition">Competition</option><option value="sparring">Sparring</option></select></div>
-      {% else %}
-      <div class="row">
-        <div class="field"><label for="fightType">Is this a real fight or sparring?</label><select id="fightType" name="fight_type"><option value="competition">Competition</option><option value="sparring">Sparring</option></select></div>
-        <div class="field"><label for="fightRuleset">Which rules?</label><select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}">{{label}}</option>{% endfor %}</select></div>
-      </div>
-      {% endif %}
-
-      <section class="advanced-option advanced-option-static" aria-labelledby="fightFormatTitle">
-        <div class="advanced-option-head"><span><strong id="fightFormatTitle">How long was the fight?</strong><small>Leave it alone for 3 rounds of 2 minutes</small></span></div>
-        <div class="row advanced-option-body"><div class="field"><label for="roundCount">How many rounds</label><input id="roundCount" name="round_count" type="number" min="1" max="20" value="3"></div><div class="field"><label for="roundSeconds">Seconds in each round</label><input id="roundSeconds" name="round_duration_seconds" type="number" min="10" value="120"></div></div>
-      </section>
+      {# Everything below here has a sensible default, so it is folded into one
+         disclosure. A first-timer picks a video and presses the button. The
+         summary line always states the current settings, so nothing is hidden -
+         it is only folded away, and one tap opens it. #}
+      <details class="setup-extra" id="fightSettings">
+        <summary><strong>Fight settings</strong><small id="fightSettingsSummary">Set automatically from your video</small></summary>
+        {% if only_ruleset %}<input type="hidden" name="ruleset" value="{{only_ruleset}}">{% endif %}
+        <div class="row">
+          <div class="field"><label for="fightType">Real fight or sparring?</label><select id="fightType" name="fight_type"><option value="competition">Real fight</option><option value="sparring">Sparring</option></select></div>
+          {% if not only_ruleset %}<div class="field"><label for="fightRuleset">Rules</label><select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}">{{label}}</option>{% endfor %}</select></div>{% endif %}
+        </div>
+        <div class="row">
+          <div class="field"><label for="roundCount">Rounds</label><input id="roundCount" name="round_count" type="number" min="1" max="20" value="3"></div>
+          <div class="field"><label for="roundSeconds">Seconds per round</label><input id="roundSeconds" name="round_duration_seconds" type="number" min="10" value="120"></div>
+        </div>
+      </details>
       <details class="setup-extra">
         <summary><strong id="trackingRecoveryTitle">Extra help telling the fighters apart</strong><small>Most fights do not need this</small></summary>
         <label class="check"><input type="checkbox" name="openai_identity_recovery" value="true"> <span><strong>Turn this on if the two fighters look very alike</strong><br>If WarriorIQ loses track of who is who, it sends a few still frames to an outside service to check. Leave it off unless you have set up a key for that service.</span></label>
       </details>
-      <fieldset class="upload-consent card-inset"><legend>Before you upload</legend><input type="hidden" name="people_permissions_confirmed" value="true"><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>This is my video to upload, and the people in it are fine with it.</span></label><div class="minor-permission" role="group" aria-labelledby="minorPermissionLabel"><span id="minorPermissionLabel">Is anyone in the video under 18?</span><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No, everyone is 18 or over</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes, and I have a parent or guardian’s permission</span></label></div><p class="small muted">Broadcast footage still requires permission. See the <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
+      <fieldset class="upload-consent card-inset"><legend>Before you upload</legend><input type="hidden" name="people_permissions_confirmed" value="true"><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>This is my video, and the people in it are OK with it.</span></label><div class="minor-permission" role="group" aria-labelledby="minorPermissionLabel"><span id="minorPermissionLabel">Anyone under 18 in it?</span><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No, all 18 or over</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes, and a parent or guardian said OK</span></label></div><p class="small muted">TV footage still needs permission. <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
       <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Preparing video…" data-motion-primary disabled>Choose a video to continue</button>
       <div class="upload-progress" id="uploadProgress" role="status" aria-live="polite" hidden><span><i id="uploadProgressBar"></i></span><b id="uploadProgressText">Uploading fight video…</b><small>Keep this page open. WarriorIQ will continue automatically.</small></div>
       {% if request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Analysis needs a free account, so your fights stay private to you. <a class="text-link" href="/signup?next=/analyze/{{sport}}">Create one in a moment.</a></p>{% endif %}
@@ -71,7 +67,47 @@
     :{tone:'ok',text:`${fmtMB(b)} — ready for WarriorIQ analysis`};
   const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
   const restore=(message)=>{progress.hidden=false;progress.dataset.tone='error';progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
-  videoInput.addEventListener('change',setReady);
+  // Rounds decide how the fight is cut up for scoring, and a blind "3 x 2 min"
+  // default is simply wrong for most clips people upload - a 94-second round
+  // was being scored as three rounds of two minutes. The browser already knows
+  // the real duration, so read it and set the fields from that. One less
+  // question to answer, and a more accurate segmentation than the old default.
+  const roundCount=document.getElementById('roundCount'),roundSeconds=document.getElementById('roundSeconds'),
+        settingsSummary=document.getElementById('fightSettingsSummary'),
+        fightRuleset=document.getElementById('fightRuleset');
+  const mmss=s=>{const m=Math.floor(s/60),r=Math.round(s%60);return m?(r?`${m} min ${r}s`:`${m} min`):`${r}s`};
+  const describeSettings=()=>{
+    if(!settingsSummary)return;
+    const rules=fightRuleset?fightRuleset.selectedOptions[0].textContent.trim():'';
+    const n=Number(roundCount.value)||1,secs=Number(roundSeconds.value)||120;
+    settingsSummary.textContent=`${rules?rules+' · ':''}${n} round${n===1?'':'s'} × ${mmss(secs)}`;
+  };
+  const readDuration=file=>new Promise(resolve=>{
+    const el=document.createElement('video'),url=URL.createObjectURL(file);
+    let settled=false;
+    const done=value=>{if(settled)return;settled=true;URL.revokeObjectURL(url);resolve(value)};
+    el.preload='metadata';
+    el.onloadedmetadata=()=>done(Number.isFinite(el.duration)?el.duration:null);
+    el.onerror=()=>done(null);
+    setTimeout(()=>done(null),5000);   // never block the upload on a codec the browser cannot parse
+    el.src=url;
+  });
+  const applyDuration=async file=>{
+    const seconds=await readDuration(file);
+    if(seconds&&seconds>5){
+      // Under about two and a half minutes is one round or a clip; longer
+      // footage keeps the usual three-round shape.
+      if(seconds<=150){roundCount.value=1;roundSeconds.value=Math.ceil(seconds)}
+      // Longer footage: assume the usual two-minute round with a one-minute
+      // break between, which is what most amateur rulesets run. Still a guess,
+      // which is why the summary states it and one tap opens the fields.
+      else{roundCount.value=Math.max(1,Math.min(12,Math.round((seconds+60)/180)));roundSeconds.value=120}
+    }
+    describeSettings();
+  };
+  [roundCount,roundSeconds,fightRuleset].forEach(el=>el&&el.addEventListener('change',describeSettings));
+  videoInput.addEventListener('change',()=>{setReady();const file=videoInput.files[0];if(file)applyDuration(file);else describeSettings()});
+  describeSettings();
   form.addEventListener('submit',async event=>{
     if(!videoInput.files[0]||!form.reportValidity())return;
     event.preventDefault();

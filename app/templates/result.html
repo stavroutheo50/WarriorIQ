@@ -18,7 +18,7 @@
 {% set focus=report.video.focus_fighter|default(report.video.analysis_target|default('BOTH'), true) %}{% set analysis_target=report.video.analysis_target|default('BOTH') %}{% set action_ready=report.integrity.action_metrics_trusted|default(false) %}
 {% set selection=report.selection_check|default({}, true) %}
 {% if selection and selection.looks_like_a_fight is defined and not selection.looks_like_a_fight %}<div class="notice bad"><strong>These may not be the two fighters.</strong> 0 of {{selection.actions_observed}} moves landed, and they stayed about {{'%.1f'|format(selection.median_separation_body_lengths)}} body lengths apart all video &mdash; never close enough to hit. Two fighters trade. A referee or a coach does not. <a class="text-link" href="/select/{{job_id}}">Pick the fighters again</a>.</div>{% endif %}
-{% if not report.integrity.identity_evidence_trusted|default(true) %}<div class="notice bad"><strong>Fighter identity check failed.</strong> This result is not safe to use because at least one selected fighter was not tracked reliably. <a class="text-link" href="/select/{{job_id}}">Choose the fighters again</a>.</div>{% elif not action_ready %}<div class="notice automatic-notice"><strong>Fully automatic movement report ready.</strong> Identity-safe pose measurements power the performance cards, coach report, and training plan. Strike labels stay hidden while the action model is in calibration, and a visible score remains preliminary. You do not need to label, verify, or correct anything.</div>{% else %}<div class="notice good automatic-notice"><strong>Fully automatic evidence report ready.</strong> Every displayed action passed the active model and evidence gates. No manual scorecard work is required.</div>{% endif %}
+{% if not report.integrity.identity_evidence_trusted|default(true) %}<div class="notice bad"><strong>Fighter identity check failed.</strong> This result is not safe to use because at least one selected fighter was not tracked reliably. <a class="text-link" href="/select/{{job_id}}">Choose the fighters again</a>.</div>{% elif not action_ready %}<div class="notice automatic-notice"><strong>Movement report ready.</strong> Nothing for you to do.</div>{% else %}<div class="notice good automatic-notice"><strong>Evidence report ready.</strong> Every action shown passed the model and evidence checks.</div>{% endif %}
 {% set stats=report.statistics|default({}, true) %}{% set fighter_stats=stats.fighters|default({}) %}{% set stats_ready=stats.action_labels_available|default(false) %}{% set primary=focus if focus in ['A','B'] else 'A' %}{% set opponent='B' if primary == 'A' else 'A' %}{% set p=fighter_stats.get(primary,{}) %}{% set o=fighter_stats.get(opponent,{}) %}{% set evidence=p.evidence|default({}) %}
 {% set sc = report.sport_coaching[primary] if report.sport_coaching else None %}
 {% if sc %}
@@ -89,9 +89,8 @@
   </div>
 
   {% if not stats_ready %}
-  <p class="vitals-note">Strike counts are off. WarriorIQ shows punches and kicks only once its
-    action model passes validation, and it is not trained yet, so it would miss shots you can see
-    landed. The movement numbers above are measured directly and are real.</p>
+  <p class="vitals-note"><b>Strike counts are off.</b> The action model is not trained yet, so it
+    would miss shots you saw land. The movement numbers above are measured, and real.</p>
   {% endif %}
 
   {% if stats_ready %}
@@ -153,10 +152,10 @@
   </section>
   {% endif %}
   {% else %}
-  <div class="numbers-unavailable"><div><span>Fighter A attempts</span><strong>{{fighter_stats.get('A',{}).attempts|default('—')}}</strong></div><div><span>Fighter B attempts</span><strong>{{fighter_stats.get('B',{}).attempts|default('—')}}</strong></div><p>Strike outcomes stay hidden until the action model passes WarriorIQ’s release validation. No landed, missed, blocked, evaded, accuracy, or combination number is guessed.</p></div>
+  <div class="numbers-unavailable"><div><span>Fighter A attempts</span><strong>{{fighter_stats.get('A',{}).attempts|default('—')}}</strong></div><div><span>Fighter B attempts</span><strong>{{fighter_stats.get('B',{}).attempts|default('—')}}</strong></div><p>Hidden until the action model is trained. Nothing here is guessed.</p></div>
   {% endif %}
   <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'Keep the measured baseline'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Build the next clean sample'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% endif %}</article></div>
-  {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary"><div class="eyebrow">Final coaching summary · Fighter {{primary}}</div><h2>What this fight says to work on next</h2><div class="performance-insights"><article><span>What worked</span><strong>{{keep[0].title if keep else 'No supported strength yet'}}</strong><p>{{keep[0].detail if keep else 'The report needs more usable evidence before naming a strength.'}}</p></article><article><span>What hurt performance</span><strong>{{fix[0].title if fix else 'No supported weakness yet'}}</strong><p>{{fix[0].detail if fix else 'The report does not invent a weakness without evidence.'}}</p></article>{% set plan=report.training_plan[primary]|default([]) %}<article><span>Next training priority</span><strong>{{plan[0].focus if plan else 'Collect a cleaner sample'}}</strong><p>{{plan[0].work if plan else 'Use a clear full-body camera angle and keep both fighters visible.'}}</p></article><article><span>Success target</span><strong>{{plan[0].goal if plan else 'Improve usable evidence'}}</strong><p>This target comes from Fighter {{primary}}’s measured report, not a generic template.</p></article></div></section>{% endif %}
+  {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary"><div class="eyebrow">Final coaching summary · Fighter {{primary}}</div><h2>What this fight says to work on next</h2><div class="performance-insights">{% set worked = keep[1] if keep|length > 1 else (keep[0] if keep else None) %}<article><span>What worked</span><strong>{{worked.title if worked else 'No supported strength yet'}}</strong><p>{{worked.detail if worked else 'The report needs more evidence before naming a strength.'}}</p></article><article><span>What hurt performance</span><strong>{{fix[0].title if fix else 'No supported weakness yet'}}</strong><p>{{fix[0].detail if fix else 'The report does not invent a weakness without evidence.'}}</p></article>{% set plan=report.training_plan[primary]|default([]) %}<article><span>Next training priority</span><strong>{{plan[0].focus if plan else 'Collect a cleaner sample'}}</strong><p>{{plan[0].work if plan else 'Use a clear full-body camera angle and keep both fighters visible.'}}</p></article><article><span>Success target</span><strong>{{plan[0].goal if plan else 'Improve usable evidence'}}</strong><p>This target comes from Fighter {{primary}}’s measured report, not a generic template.</p></article></div></section>{% endif %}
 </section>
 <details class="report-deep-dive"><summary><span><strong>Complete performance report and training plan</strong><small>Open the full movement, scoring, coaching, and integrity detail</small></span><b aria-hidden="true">＋</b></summary><div class="report-deep-dive-body">
 <nav class="report-path" aria-label="Fight report sections" data-reveal><div><span class="eyebrow">Fighter {{focus}} report</span><strong>Complete evidence path</strong></div><a href="#report-strikes">Strikes</a><a href="#report-combinations">Combinations</a><a href="#report-key-moments">Key moments</a><a href="#report-performance">Movement</a><a href="#report-scorecard">Scorecard</a><a href="#report-coaching">Coach advice</a><a href="#report-training">Training plan</a><a href="#report-summary">Summary</a></nav>
@@ -194,7 +193,7 @@
   </div>{% endif %}
   {% set ns=namespace(items=[]) %}{% for key,item in m.availability.items() %}{% if not item.available and not (key == 'round_consistency' and report.setup.round_count < 2) %}{% set ns.items=ns.items+[item] %}{% endif %}{% endfor %}{% set unavailable=ns.items %}
   {% if unavailable %}<div class="notice"><strong>Evidence limitations</strong><ul class="list-clean">{% set limitation_count = 3 if report_access.report_tier == 'full' else 2 if report_access.report_tier == 'expanded' else 1 %}{% for item in unavailable[:limitation_count] %}<li>{{item.reason}}</li>{% endfor %}</ul></div>{% endif %}
-  <details class="report-details" {% if report_access.report_tier == 'full' %}open{% endif %}>
+  <details class="report-details">
   <summary>More performance details <span>Open the deeper numbers only when you need them</span></summary>
   <div class="report-details-body">
   <div class="performance-insights">
@@ -336,7 +335,7 @@
 </section>
 {% endif %}
 
-{% if report_access.report_tier == 'full' %}<details class="card report-technical" open><summary><span><strong>Technical analysis details</strong><small>Tracking, timing and model information</small></span><b aria-hidden="true">＋</b></summary><div class="report-technical-body"><div class="eyebrow">Performance integrity</div><div class="metric-grid">
+{% if report_access.report_tier == 'full' %}<details class="card report-technical"><summary><span><strong>Technical analysis details</strong><small>Tracking, timing and model information</small></span><b aria-hidden="true">＋</b></summary><div class="report-technical-body"><div class="eyebrow">Performance integrity</div><div class="metric-grid">
   <div class="metric"><div class="value">{{'%.1f'|format(report.performance.analysis_seconds)}}s</div><div class="label">Analysis time</div></div>
   <div class="metric"><div class="value">{{'%.1f'|format(report.performance.segment_duration_seconds)}}s</div><div class="label">Video analyzed</div></div>
   <div class="metric"><div class="value">{{'%.1f'|format(report.tracking.fighter_A_coverage*100)}}%</div><div class="label">A observation coverage</div></div>

@@ -530,9 +530,12 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('name="minor_permission_status"', home)
         self.assertEqual(home.count('type="radio" name="minor_permission_status"'), 2)
         self.assertNotIn(">Choose one<", home)
-        self.assertNotIn('<details class="advanced-option">', home)
-        self.assertIn('class="advanced-option advanced-option-static"', home)
-        self.assertIn('id="fightFormatTitle"', home)
+        self.assertIn('id="roundCount"', home)
+        self.assertIn('id="roundSeconds"', home)
+        # Folded away, but never silent: the summary states the settings, and
+        # they are derived from the video rather than left at a blind default.
+        self.assertIn('id="fightSettingsSummary"', home)
+        self.assertIn("readDuration", home)
         self.assertIn('id="trackingRecoveryTitle"', home)
         self.assertIn("Video Upload Policy", home)
         self.assertNotIn("These confirmations apply to this fight video", home)
@@ -824,7 +827,7 @@ class PublicPageTests(unittest.TestCase):
     def test_the_upload_page_promises_only_the_disclosure_that_exists(self):
         """Copy that overstates the product is a defect like any other."""
         setup = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
-        self.assertIn("repeats this next to the score", setup)
+        self.assertIn("Your report says so too", setup)
         self.assertNotIn("says so on every page", setup)
 
     def test_evidence_replay_starts_one_second_before_exact_timestamp(self):
@@ -917,7 +920,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("/api/annotations/{{job_id}}", template)
         self.assertNotIn("Save ground truth", template)
         self.assertNotIn("Verify scorecard", template)
-        self.assertIn("Fully automatic", template)
+        self.assertIn("Nothing for you to do", template)
 
     def test_result_guides_people_through_only_the_core_training_path(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
@@ -995,13 +998,19 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("One-click suggestions", template)
         self.assertIn("Mark complete", template)
 
-    def test_advanced_report_diagnostics_stay_structured_but_open_for_full_reports(self):
+    def test_advanced_report_diagnostics_stay_available_but_folded_away(self):
+        """Deep diagnostics remain, one tap away, but do not greet a first-timer.
+
+        SAM2 propagation counts and ReID tracker names are exactly what a coach
+        may want and exactly what makes a fighter close the page. They stay in
+        the report; they no longer open by default.
+        """
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
         self.assertIn('<details class="report-details"', template)
-        self.assertIn("report_access.report_tier == 'full' %}open", template)
         self.assertIn("More performance details", template)
-        self.assertIn('<details class="card report-technical" open>', template)
+        self.assertIn('<details class="card report-technical">', template)
         self.assertIn("Technical analysis details", template)
+        self.assertNotIn('<details class="card report-technical" open>', template)
         self.assertNotIn('<section class="card"><div class="eyebrow">Performance integrity</div>', template)
 
     def test_mobile_navigation_keeps_the_primary_product_actions_only(self):
