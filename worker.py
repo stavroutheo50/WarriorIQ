@@ -11,6 +11,10 @@ import uuid
 import zipfile
 from pathlib import Path
 
+import contextlib
+import ctypes
+import sys
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -83,6 +87,41 @@ def run_claimed_job(worker_id: str, job_id: str, job: dict) -> None:
                 "message": "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again.",
                 "worker_lease_expires_epoch": None,
             })
+
+
+@contextlib.contextmanager
+def _keep_machine_awake():
+    """Stop Windows sleeping mid-analysis, and only mid-analysis.
+
+    A worker that runs all the time must not also keep the machine awake all
+    the time - the whole design depends on the PC sleeping between fights and
+    being woken by a magic packet. So the hold is taken when a job starts and
+    released the moment it finishes: the analysis can never be suspended
+    halfway, and an idle worker never blocks sleep.
+
+    Sleeping does not kill the process. The worker is suspended with the
+    machine and resumes polling the instant it wakes, which is why a queued
+    fight starts seconds after the wake rather than waiting for a timer.
+    """
+    if sys.platform != "win32":
+        yield
+        return
+    ES_CONTINUOUS = 0x80000000
+    ES_SYSTEM_REQUIRED = 0x00000001
+    try:
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+    except Exception:
+        LOGGER.debug("Could not take a sleep hold; continuing without one")
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+        except Exception:
+            LOGGER.debug("Could not release the sleep hold")
 
 
 def run_worker(*, once: bool = False) -> int:
@@ -227,7 +266,8 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
             continue
         try:
             if claimed:
-                run_remote_claimed_job(client, claimed)
+                with _keep_machine_awake():
+                    run_remote_claimed_job(client, claimed)
             elif once:
                 return 0
             else:
