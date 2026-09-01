@@ -16,7 +16,7 @@ import torch
 
 from core.action import ActionEngine
 from core.config import OUTPUTS, SETTINGS
-from core.contact import classify_contact
+from core.contact import classify_contact, opponent_separation, thrown_at_opponent
 from core.db import save_fight
 from core.defense import DefenseEngine
 from core.evidence_trust import automated_evidence_trust
@@ -326,6 +326,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "temporal_architecture": action_engine.temporal.architecture,
         "temporal_validation": action_engine.temporal.validation,
         "contact_classifier": "pose_geometry_temporal_contact",
+        "max_engagement_body_lengths": SETTINGS.max_engagement_body_lengths,
         "uncertainty_policy": "No single-frame strike events, temporal support for contact, and no identity reassignment when recovery evidence is ambiguous.",
     }
     live_action_trusted = bool(automated_evidence_trust(classifier)["automated_evidence_trusted"])
@@ -422,6 +423,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     # same downstream path before entering the read loop.
     pending = [(start_frame, first_frame, first_people, initial_a, initial_b)]
 
+    out_of_range_actions = 0
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
 
     try:
@@ -554,6 +556,9 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
 
                 for event in new_events:
                     event = classify_contact(event)
+                    if not thrown_at_opponent(event):
+                        out_of_range_actions += 1
+                        continue
                     events.append(event)
                     defense = defense_engine.classify(event)
                     if defense is not None:
@@ -644,6 +649,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         ]
         if live_action_trusted else events
     )
+    classifier["actions_discarded_out_of_range"] = out_of_range_actions
     metric_data = metrics.finalize(report_events, defenses, segment_duration)
     signature_payload = {
         "video_segment": [start_frame, end_frame, round(info.fps, 6)],

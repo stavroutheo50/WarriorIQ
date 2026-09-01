@@ -127,6 +127,33 @@ def _evaluate_snapshot(event: StrikeEvent, attacker_raw, defender_raw, defender_
     }
 
 
+def opponent_separation(event: StrikeEvent) -> float | None:
+    """How far apart the two fighters were, in the opponent's body lengths.
+
+    A strike is only an attempt at someone if they were reachable. Separation
+    is measured centre to centre from the boxes already stored on the event, so
+    this needs no extra inference.
+    """
+    evidence = event.evidence or {}
+    attacker, opponent = evidence.get("peak_attacker_box"), evidence.get("peak_opponent_box")
+    if not attacker or not opponent:
+        return None
+    ax = (float(attacker[0]) + float(attacker[2])) / 2.0
+    ay = (float(attacker[1]) + float(attacker[3])) / 2.0
+    ox = (float(opponent[0]) + float(opponent[2])) / 2.0
+    oy = (float(opponent[1]) + float(opponent[3])) / 2.0
+    body = max(20.0, float(opponent[3]) - float(opponent[1]))
+    return float(np.hypot(ax - ox, ay - oy)) / body
+
+
+def thrown_at_opponent(event: StrikeEvent) -> bool:
+    """False when the opponent was too far away to be a target at all."""
+    separation = opponent_separation(event)
+    if separation is None:
+        return True
+    return separation <= SETTINGS.max_engagement_body_lengths
+
+
 def classify_contact(event: StrikeEvent) -> StrikeEvent:
     """Classify strike outcome from a short temporal contact trajectory.
 

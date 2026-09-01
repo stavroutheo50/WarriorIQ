@@ -159,6 +159,13 @@ class Settings:
     # ------------------------------------------------------------
     # Contact / outcome
     # ------------------------------------------------------------
+    # Beyond this separation the opponent simply cannot be reached, so an action
+    # fired here was not thrown at them. Measured across four real fights: the
+    # two tracked fighters were a median 2.78 body lengths apart when a strike
+    # was detected, and only 18% of detections happened inside 1.5 - so most
+    # counted "attempts" were thrown at nobody and dragged every accuracy figure
+    # down with them. A kick reaches roughly 1.5-2 body lengths; 2.5 is generous.
+    max_engagement_body_lengths: float = float(os.getenv("WARRIORIQ_MAX_ENGAGEMENT", "2.5"))
     contact_threshold_body_lengths: float = 0.24
     likely_contact_threshold_body_lengths: float = 0.33
     contact_confirmation_frames: int = 2

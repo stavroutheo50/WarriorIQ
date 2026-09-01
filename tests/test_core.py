@@ -871,3 +871,58 @@ class SportSpecificCoachingTests(unittest.TestCase):
                 self.assertTrue(identity.decided_by.endswith("."))
         # "Punchs" is not a word, and the report says it a dozen times a page.
         self.assertEqual(family_plural("punch"), "Punches")
+
+
+class EngagementRangeTests(unittest.TestCase):
+    """A strike is only an attempt at someone who could be hit.
+
+    Found by running four real fights: the two tracked fighters were a median
+    2.78 body lengths apart when an action fired, and only 18% of detections
+    happened inside 1.5. One fight logged a cross while the opponent was a
+    28x48px figure 9.5 body lengths away at the far edge of frame. Those cannot
+    land, so every one of them counted as a miss and dragged the landed rate to
+    2% - against 11% among strikes actually thrown in range.
+    """
+
+    @staticmethod
+    def _event(attacker_box, opponent_box):
+        from core.types import StrikeEvent
+
+        event = StrikeEvent(
+            fighter="A", opponent="B", round_number=1, start_frame=0, peak_frame=1,
+            end_frame=2, start_time=1.0, peak_time=1.0, end_time=1.1,
+            technique="cross", family="punch", limb="right_hand",
+        )
+        event.evidence["peak_attacker_box"] = attacker_box
+        event.evidence["peak_opponent_box"] = opponent_box
+        return event
+
+    def test_a_strike_across_the_ring_is_not_an_attempt(self):
+        from core.contact import opponent_separation, thrown_at_opponent
+
+        # The real case: opponent 28x48px at the far edge, attacker at the near
+        # edge. Separation is many body lengths; nothing can reach.
+        far = self._event([20.0, 40.0, 48.0, 88.0], [371.5, 39.8, 399.2, 87.6])
+        self.assertGreater(opponent_separation(far), 5.0)
+        self.assertFalse(thrown_at_opponent(far))
+
+    def test_a_strike_in_range_is_kept(self):
+        from core.contact import opponent_separation, thrown_at_opponent
+
+        close = self._event([189.0, 42.0, 216.0, 119.0], [232.0, 27.0, 267.0, 104.0])
+        self.assertLess(opponent_separation(close), 1.5)
+        self.assertTrue(thrown_at_opponent(close))
+
+    def test_an_event_without_boxes_is_never_discarded(self):
+        """Missing evidence is not evidence of absence: keep the action."""
+        from core.contact import opponent_separation, thrown_at_opponent
+
+        bare = self._event(None, None)
+        self.assertIsNone(opponent_separation(bare))
+        self.assertTrue(thrown_at_opponent(bare))
+
+    def test_the_limit_is_generous_enough_for_a_real_kick(self):
+        """A kick reaches roughly 1.5-2 body lengths; the gate must clear that."""
+        from core.config import SETTINGS
+
+        self.assertGreaterEqual(SETTINGS.max_engagement_body_lengths, 2.0)

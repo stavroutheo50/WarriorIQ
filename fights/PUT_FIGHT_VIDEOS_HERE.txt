@@ -1,0 +1,7 @@
+Drop 2-3 different fight videos in this folder.
+
+Any format (MP4, MOV, MKV), any size - there is no upload limit here because
+these never leave your PC. Different fights, not the same one, ideally from
+different events or camera angles.
+
+Then tell Claude "the fights are in", and the analysis runs on your own GPU.
