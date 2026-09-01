@@ -184,6 +184,30 @@ class Settings:
     # generous. This removes non-strikes from the denominator; it never turns a
     # miss into a landed strike.
     max_strike_reach_body_lengths: float = float(os.getenv("WARRIORIQ_MAX_STRIKE_REACH", "1.0"))
+    # Whether the two people picked are actually the two fighters. Measured on
+    # three real tournament fights, each analysed twice - once with the real
+    # pair and once with a plausible mistake (a ringside coach, or the referee):
+    #
+    #   fight       correct pair   mistaken pair
+    #   2.mp4          0.76           2.84 (coach)
+    #   3.mp4          2.55           3.25 (referee)
+    #   0-02-05        1.90           2.71 (coach)
+    #
+    # The mistaken pair always sits further apart, but correct tops out at 2.55
+    # and mistaken starts at 2.71, so there is no room to separate them on
+    # distance alone. This threshold therefore sits above every correct pair
+    # measured and is paired with "nothing landed at all" below. That catches
+    # the unmissable case - a fighter matched with someone who never fights
+    # back - and stays silent otherwise. It is deliberately not tuned to catch
+    # every mistake: a false accusation on a real fight is the worse error.
+    max_median_separation_body_lengths: float = float(
+        os.getenv("WARRIORIQ_MAX_MEDIAN_SEPARATION", "2.6")
+    )
+    # Below this many observed actions there is nothing to judge, and a quiet
+    # fight must not be accused of being the wrong two people.
+    min_actions_to_judge_selection: int = int(
+        os.getenv("WARRIORIQ_MIN_SELECTION_ACTIONS", "12")
+    )
     contact_threshold_body_lengths: float = 0.24
     likely_contact_threshold_body_lengths: float = 0.33
     contact_confirmation_frames: int = 2

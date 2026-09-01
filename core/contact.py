@@ -164,6 +164,54 @@ def thrown_at_opponent(event: StrikeEvent) -> bool:
     return True
 
 
+def assess_selection(
+    separations: list[float], kept: int, discarded: int, landed: int
+) -> dict:
+    """Were the two people picked actually the two fighters?
+
+    Two fighters trade. A referee, a coach or someone in the crowd does not, so
+    whoever was picked by mistake stays at a distance all bout and nothing ever
+    lands on them. Both halves are needed. Distance alone does not separate the
+    cases: measured across three fights, a correctly picked pair ranged up to
+    2.55 body lengths apart while a mistaken pair started at 2.71, which is far
+    too thin a margin to accuse anyone on.
+
+    So this fires only on the unmistakable version - far apart *and* nothing
+    landed at all - and says nothing otherwise. It will miss real mistakes.
+    That is the intended trade: telling someone their real fight was analysed
+    on the wrong people is worse than staying quiet.
+    """
+    total = kept + discarded
+    result = {
+        "actions_observed": total,
+        "actions_in_range": kept,
+        "landed": landed,
+        "median_separation_body_lengths": None,
+        "looks_like_a_fight": True,
+        "warning": None,
+    }
+    if not separations or total < SETTINGS.min_actions_to_judge_selection:
+        result["verdict"] = "not_enough_to_judge"
+        return result
+
+    median = float(np.median(separations))
+    result["median_separation_body_lengths"] = round(median, 2)
+    too_far = median > SETTINGS.max_median_separation_body_lengths
+    if not (too_far and landed == 0):
+        result["verdict"] = "consistent_with_a_fight"
+        return result
+
+    result["looks_like_a_fight"] = False
+    result["verdict"] = "selection_probably_wrong"
+    result["warning"] = (
+        f"Nothing landed in {total} actions, and these two stayed about "
+        f"{median:.1f} body lengths apart the whole video. One of them is "
+        "probably not a fighter - the referee and the coaches stand close to "
+        "the action and are easy to pick by mistake."
+    )
+    return result
+
+
 def classify_contact(event: StrikeEvent) -> StrikeEvent:
     """Classify strike outcome from a short temporal contact trajectory.
 

@@ -927,6 +927,60 @@ class EngagementRangeTests(unittest.TestCase):
 
         self.assertGreaterEqual(SETTINGS.max_engagement_body_lengths, 2.0)
 
+    def test_no_correctly_picked_fight_is_ever_accused(self):
+        """The three real fights, each seeded with its actual two fighters.
+
+        Median separation varies hugely with camera distance - 0.76, 2.55 and
+        1.90 body lengths - which is exactly why distance alone cannot decide
+        this. None of them may be accused.
+        """
+        from core.contact import assess_selection
+
+        for name, median, kept, discarded, landed in (
+            ("2.mp4", 0.76, 153, 127, 24),
+            ("3.mp4", 2.55, 68, 354, 2),
+            ("0-02-05", 1.90, 48, 230, 4),
+        ):
+            with self.subTest(fight=name):
+                verdict = assess_selection(
+                    [median] * (kept + discarded), kept, discarded, landed
+                )
+                self.assertTrue(verdict["looks_like_a_fight"])
+                self.assertIsNone(verdict["warning"])
+
+    def test_a_fighter_paired_with_a_ringside_coach_is_caught(self):
+        """The real failure that started this: on 2.mp4 the automatic pick took
+        a crouching coach as fighter B. The pair sat 2.84 body lengths apart for
+        the whole bout and not one of 175 actions landed."""
+        from core.contact import assess_selection
+
+        verdict = assess_selection([2.84] * 175, kept=12, discarded=163, landed=0)
+        self.assertFalse(verdict["looks_like_a_fight"])
+        self.assertEqual(verdict["verdict"], "selection_probably_wrong")
+        self.assertIn("body lengths apart", verdict["warning"])
+
+    def test_picking_the_referee_is_a_known_miss(self):
+        """Documents a real limitation rather than pretending it is covered.
+
+        The referee stands between the fighters, so strikes aimed at the
+        opponent pass close to him and register as contact - on 3.mp4 the
+        referee pick produced more apparent scoring than the real fighters.
+        Distance plus nothing-landed cannot see that, and this guard stays
+        silent rather than guess.
+        """
+        from core.contact import assess_selection
+
+        verdict = assess_selection([3.25] * 342, kept=73, discarded=269, landed=7)
+        self.assertTrue(verdict["looks_like_a_fight"])
+
+    def test_a_quiet_fight_is_never_accused(self):
+        """Too few actions is not evidence that the wrong people were picked."""
+        from core.contact import assess_selection
+
+        verdict = assess_selection([3.5] * 4, kept=1, discarded=3, landed=0)
+        self.assertTrue(verdict["looks_like_a_fight"])
+        self.assertEqual(verdict["verdict"], "not_enough_to_judge")
+
 
 class FederationPointTableTests(unittest.TestCase):
     """Where a federation publishes a point value, WarriorIQ uses that value.

@@ -16,7 +16,12 @@ import torch
 
 from core.action import ActionEngine
 from core.config import OUTPUTS, SETTINGS
-from core.contact import classify_contact, opponent_separation, thrown_at_opponent
+from core.contact import (
+    assess_selection,
+    classify_contact,
+    opponent_separation,
+    thrown_at_opponent,
+)
 from core.db import save_fight
 from core.defense import DefenseEngine
 from core.evidence_trust import automated_evidence_trust
@@ -424,6 +429,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     pending = [(start_frame, first_frame, first_people, initial_a, initial_b)]
 
     out_of_range_actions = 0
+    observed_separations: list[float] = []
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
 
     try:
@@ -556,6 +562,12 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
 
                 for event in new_events:
                     event = classify_contact(event)
+                    # Recorded before the range gate, so the record covers every
+                    # action seen - including the ones thrown at nobody, which
+                    # are exactly the evidence that the wrong person was picked.
+                    separation = opponent_separation(event)
+                    if separation is not None:
+                        observed_separations.append(separation)
                     if not thrown_at_opponent(event):
                         out_of_range_actions += 1
                         continue
@@ -740,6 +752,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         tracking=tracking,
         performance=performance,
         classifier=classifier,
+    )
+    report["selection_check"] = assess_selection(
+        observed_separations,
+        len(report_events),
+        out_of_range_actions,
+        landed=sum(
+            1 for event in report_events
+            if getattr(event, "outcome", None) in {"clean", "likely_landed"}
+        ),
     )
     progress(
         "Finalizing coaching priorities", 99.2, time.perf_counter() - wall_start, segment_duration,
