@@ -83,7 +83,7 @@
 
 <section class="card class-coverage">
   <div class="accuracy-card-head"><div><div class="eyebrow">Balance check</div><h2>Action-class coverage</h2></div><span class="pill">{{dataset.development.covered_classes}} / {{dataset.development.total_classes}}</span></div>
-  <div class="class-support-grid">{% for name,count in dataset.development.class_support.items() %}<div class="{% if not count %}missing{% endif %}"><span>{{name.replace('_',' ')}}</span><strong>{{count}}</strong></div>{% endfor %}</div>
+  <div class="class-support-grid">{% for name,count in dataset.development.class_support.items() %}<div class="{% if not count %}missing{% endif %}"><span>{% if name == 'none' %}No action{% else %}{{name.replace('_',' ')}}{% endif %}</span><strong>{{count}}</strong></div>{% endfor %}</div>
 </section>
 
 <section class="card per-class-validation">

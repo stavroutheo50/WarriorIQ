@@ -234,6 +234,44 @@
 {% endfor %}
 </div>
 
+{# Momentum. The scorer already weighs every verified action for the ruleset
+   and stores the result per round as effective_action_A/B; it was computed on
+   every fight and never shown. Each round is drawn from the centre: the wider
+   side controlled it, and by how much. Nothing here is estimated separately
+   from the score above - it is the same numbers, laid out so the shape of the
+   fight is visible instead of implied by a column of 10-9s. #}
+{% if report.scorecard.available and report.scorecard.rounds %}
+<section class="card momentum-card" id="report-momentum" aria-labelledby="momentumTitle">
+  <div class="section-title" style="margin-top:0">
+    <div><div class="eyebrow">How the fight swung</div><h2 id="momentumTitle">Round momentum</h2></div>
+    {% if report.scorecard.rounds_won %}<span class="momentum-tally"><small>Rounds won</small><b class="wiq-num">A {{report.scorecard.rounds_won.A}}</b><i aria-hidden="true"></i><b class="wiq-num">B {{report.scorecard.rounds_won.B}}</b></span>{% endif %}
+  </div>
+
+  <ol class="momentum-list">
+    {% for r in report.scorecard.rounds %}
+    {% set av = r.effective_action_A if r.effective_action_A is defined else r.fighter_A %}
+    {% set bv = r.effective_action_B if r.effective_action_B is defined else r.fighter_B %}
+    {% set total = (av + bv) if (av + bv) > 0 else 1 %}
+    {% set ashare = (av / total * 100) | round | int %}
+    <li data-winner="{{r.winner}}">
+      <span class="momentum-round">R{{r.round}}</span>
+      <span class="momentum-bar" role="img" aria-label="Round {{r.round}}: Fighter A {{ashare}} percent of measured scoring pressure">
+        <i class="momentum-a" style="--share:{{ashare}}%"></i><i class="momentum-b" style="--share:{{100 - ashare}}%"></i>
+      </span>
+      <span class="momentum-score wiq-num">{{r.fighter_A}}<em>-</em>{{r.fighter_B}}</span>
+      <span class="momentum-flags">
+        {% if r.knockdowns_A %}<b class="kd">KD A x{{r.knockdowns_A}}</b>{% endif %}
+        {% if r.knockdowns_B %}<b class="kd">KD B x{{r.knockdowns_B}}</b>{% endif %}
+        {% if r.winner == 'EVEN' %}<b class="even">Even</b>{% else %}<b>Fighter {{r.winner}}</b>{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <p class="momentum-note small muted">Width is each fighter's share of the measured scoring pressure that round - every verified action weighted by what it is worth under {{report.scorecard.ruleset_label}}. Rounds with no verified action are drawn even.</p>
+</section>
+{% endif %}
+
 <section class="card" id="report-scorecard">
   <div class="section-title" style="margin-top:0"><h2>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary automatic scorecard{% else %}Automatic estimated scorecard{% endif %}</h2><span class="pill">{{report.scorecard.ruleset_label}}</span></div>
   {% if report.scorecard.available %}<div class="grid">

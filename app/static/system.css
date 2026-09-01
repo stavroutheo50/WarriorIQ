@@ -340,3 +340,113 @@ summary:focus-visible,
   .fight-ruleset { grid-area: rules; }
   .fight-figures { grid-area: figs; }
 }
+
+/* ===========================================================================
+   Round momentum.
+
+   The scorer weighs every verified action for the ruleset and stores the
+   result per round. Drawing each round out from the centre turns a column of
+   10-9s into the shape of the fight: who controlled it, by how much, and where
+   it turned. The two fighters keep the colours the rest of the report uses.
+   =========================================================================== */
+.momentum-tally {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--wiq-text-secondary);
+  font-size: var(--wiq-text-micro);
+}
+.momentum-tally b { color: var(--wiq-text); font-size: var(--wiq-text-lg); font-weight: 800; }
+.momentum-tally i { width: 1px; height: 14px; background: var(--wiq-line); align-self: center; }
+
+.momentum-list { margin: 22px 0 0; padding: 0; list-style: none; }
+
+.momentum-list li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 62px 128px;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 0;
+  border-top: 1px solid var(--wiq-line-soft);
+}
+
+.momentum-round {
+  color: var(--wiq-text-tertiary);
+  font-size: var(--wiq-text-micro);
+  font-weight: 800;
+  letter-spacing: .06em;
+}
+
+/* One track, two fills meeting at the share boundary. A single flex row keeps
+   the meeting point exact without arithmetic in the template. */
+.momentum-bar {
+  display: flex;
+  height: 16px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, .05);
+}
+
+.momentum-bar i { display: block; width: var(--share, 50%); height: 100%; }
+.momentum-b { border-left: 1px solid rgba(8, 12, 20, .85); }
+.momentum-a { background: linear-gradient(90deg, rgb(var(--wiq-aurora-b) / .45), rgb(var(--wiq-aurora-b) / .9)); }
+.momentum-b { background: linear-gradient(90deg, rgb(var(--wiq-aurora-c) / .9), rgb(var(--wiq-aurora-c) / .45)); }
+
+.momentum-score { color: var(--wiq-text); font-size: var(--wiq-text-base); font-weight: 750; text-align: center; }
+.momentum-score em { font-style: normal; color: var(--wiq-text-tertiary); margin: 0 2px; }
+
+.momentum-flags { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+
+.momentum-flags b {
+  padding: 3px 8px;
+  border: 1px solid var(--wiq-edge);
+  border-radius: 999px;
+  color: var(--wiq-text-secondary);
+  font-size: var(--wiq-text-micro);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.momentum-flags b.kd { border-color: rgba(239, 120, 145, .5); color: var(--wiq-danger); }
+.momentum-flags b.even { color: var(--wiq-text-tertiary); }
+
+.momentum-note { margin: 18px 0 0; max-width: 72ch; }
+
+@media (max-width: 720px) {
+  .momentum-list li {
+    grid-template-columns: 34px minmax(0, 1fr) 58px;
+    grid-template-areas: "round bar score" "flags flags flags";
+    gap: 8px 12px;
+  }
+  .momentum-round { grid-area: round; }
+  .momentum-bar { grid-area: bar; }
+  .momentum-score { grid-area: score; }
+  .momentum-flags { grid-area: flags; justify-content: flex-start; }
+}
+
+/* The athlete profile shares the dashboard's identity band so the same person
+   is presented the same way in both places. */
+.profile-head-band { margin-top: clamp(18px, 3vh, 34px); }
+.athlete-photo { object-fit: cover; padding: 0; }
+
+.athlete-facts {
+  display: flex;
+  gap: 7px 14px;
+  flex-wrap: wrap;
+  margin: 6px 0 0;
+  color: var(--wiq-text-secondary);
+  font-size: var(--wiq-text-sm);
+}
+
+/* Hairline separators between facts, drawn only between them. */
+.athlete-facts span + span { position: relative; padding-left: 15px; }
+.athlete-facts span + span::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1px;
+  height: 11px;
+  transform: translateY(-50%);
+  background: var(--wiq-line);
+}

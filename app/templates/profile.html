@@ -4,7 +4,25 @@
 {% if not profile %}
 <section class="empty-workspace card"><div class="eyebrow">Athlete profile</div><h1>Save progress in a private workspace</h1><p class="muted">Create an account before adding profile media or saving fight analyses.</p><div class="hero-actions"><a class="btn" href="/signup?next=/profile">Create account</a><a class="btn secondary" href="/login?next=/profile">Sign in</a></div></section>
 {% else %}
-<div class="section-title"><div><div class="eyebrow">Athlete profile</div><h2>{{profile.display_name}}</h2></div><a class="btn secondary" href="/settings/privacy">Settings &amp; privacy</a></div>
+<header class="athlete-head profile-head-band">
+  <div class="athlete-id">
+    {% if profile.photo_path %}<img class="athlete-avatar athlete-photo" src="{{profile.photo_path}}" width="56" height="56" alt="" decoding="async">
+    {% else %}<span class="athlete-avatar" aria-hidden="true">{{profile.display_name[:1]|upper}}</span>{% endif %}
+    <div>
+      <div class="eyebrow">Athlete profile</div>
+      <h1>{{profile.display_name}}</h1>
+      <p class="athlete-facts">
+        <span>Fighter {{profile.default_fighter|default('A', true)}} corner</span>
+        {% if request.state.active_sport %}<span>{{request.state.active_sport.label}}</span>{% endif %}
+        <span>{{fights|length}} saved fight{{'' if fights|length == 1 else 's'}}</span>
+      </p>
+    </div>
+  </div>
+  <div class="athlete-actions">
+    <a class="btn secondary" href="/settings/privacy">Settings &amp; privacy</a>
+    <a class="btn" href="/dashboard">View performance <span aria-hidden="true">&#8594;</span></a>
+  </div>
+</header>
 <div class="grid">
 <section class="card">
   <div class="profile-head">
