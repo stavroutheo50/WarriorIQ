@@ -75,7 +75,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid, mark_guest_job,
 )
-from core.scoring import SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_unobserved
+from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_unobserved
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
@@ -1668,6 +1668,14 @@ def _sport_context(request: Request, sport: str) -> dict:
         "rulesets": [(key, RULESET_LABELS[key]) for key in keys],
         "only_ruleset": keys[0] if len(keys) == 1 else None,
         "unobserved": sport_unobserved(sport),
+        # True when every ruleset in the sport shares the same blind spot. When
+        # only one does - jumping-kick bonuses exist in Point Fighting and
+        # nowhere else in kickboxing - the page has to say "depending on the
+        # rules" instead of blaming the whole sport.
+        "unobserved_is_sport_wide": all(
+            set(RULESETS[key].unobserved) == set(sport_unobserved(sport))
+            for key in SPORTS[sport]
+        ),
         "version": SETTINGS.version,
         "allowance": analysis_allowance(int(account["id"])) if account else None,
     }

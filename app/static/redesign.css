@@ -619,3 +619,29 @@ h1 em, h2 em {
   .fight-vitals b { font-size: 32px; }
   .fight-vitals article { padding: 16px 14px; }
 }
+
+/* --- The one genuinely advanced setting ----------------------------------
+   Collapsed, because it needs a key for an outside service and almost no
+   fight needs it. Fight format stays open: getting the rounds wrong segments
+   the analysis wrongly, so that one is not something to tuck away. */
+.setup-extra {
+  margin: 4px 0 14px;
+  border: 1px solid var(--wiq-line-soft);
+  border-radius: 4px;
+  background: var(--wiq-canvas-raised);
+}
+.setup-extra > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 13px 15px;
+  cursor: pointer;
+  list-style: none;
+}
+.setup-extra > summary::-webkit-details-marker { display: none; }
+.setup-extra > summary::after { content: "+"; margin-left: auto; color: var(--wiq-text-tertiary); }
+.setup-extra[open] > summary::after { content: "\2212"; }
+.setup-extra > summary strong { color: var(--wiq-text); font-size: var(--wiq-text-sm); font-weight: 650; }
+.setup-extra > summary small { color: var(--wiq-text-tertiary); font-size: var(--wiq-text-micro); }
+.setup-extra > .check { display: block; padding: 0 15px 15px; }
