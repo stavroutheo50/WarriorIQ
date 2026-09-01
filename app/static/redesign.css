@@ -186,8 +186,17 @@ tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 .field input, .field select, .field textarea {
   border-radius: 3px;
   border-color: var(--wiq-line);
-  background: #0d0d0f;
+  background-color: #0d0d0f;
   padding: 11px 12px;
+}
+
+/* Restated after the colour so the chevron keeps its geometry whatever else
+   touches the background. */
+.field select {
+  background-repeat: no-repeat;
+  background-position: right 15px center;
+  background-size: 11px 8px;
+  padding-right: 40px;
 }
 .field input:focus, .field select:focus, .field textarea:focus {
   border-color: #4a4a52;
