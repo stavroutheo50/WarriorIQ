@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -699,6 +700,66 @@ class PublicPageTests(unittest.TestCase):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
         self.assertIn('name="openai_identity_recovery"', template)
         self.assertNotIn('name="openai_identity_recovery" value="true" checked', template)
+
+    def _render_result(self, selection_check):
+        """Actually render result.html, rather than grepping its source.
+
+        Every other check on this template matches text in the file, which
+        cannot catch a bad expression - a broken one only fails when Jinja
+        evaluates it, and by then it is a 500 on the report page.
+        """
+        from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
+        from app.main import _analysis_quality_summary, sport_identity
+
+        class Stub:
+            def __init__(self, **kw): self.__dict__.update(kw)
+            def __getattr__(self, key): return Stub()
+            def __getitem__(self, key): return Stub()
+            def __str__(self): return ""
+            def __bool__(self): return False
+            def __iter__(self): return iter(())
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        env = Environment(loader=FileSystemLoader(str(templates)), undefined=ChainableUndefined)
+        # A real report, trimmed of its bulk arrays. Hand-built dicts kept
+        # failing on fields the page reaches for, which is the point: only a
+        # genuine report shape proves the template renders.
+        fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
+        report = json.loads(fixture.read_text(encoding="utf-8"))
+        report["selection_check"] = selection_check
+        request = Stub(url=Stub(path="/report/abc"), state=Stub(account=None), cookies={}, headers={})
+        return env.get_template("result.html").render(
+            request=request, job_id="abc", report=report,
+            identity=sport_identity("kickboxing"),
+            report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
+            analysis_quality=_analysis_quality_summary(report), can_share=False, unavailable=[],
+        )
+
+    def test_the_report_warns_when_the_wrong_two_people_were_picked(self):
+        """The measured coach mis-pick on 2.mp4: 175 actions, none landed."""
+        page = self._render_result({
+            "actions_observed": 175, "actions_in_range": 12, "landed": 0,
+            "median_separation_body_lengths": 2.84, "looks_like_a_fight": False,
+            "warning": "...", "verdict": "selection_probably_wrong",
+        })
+        self.assertIn("These may not be the two fighters", page)
+        self.assertIn("0 of 175 moves landed", page)
+        self.assertIn("2.8 body lengths", page)
+
+    def test_a_normal_report_carries_no_such_warning(self):
+        page = self._render_result({
+            "actions_observed": 280, "actions_in_range": 153, "landed": 24,
+            "median_separation_body_lengths": 0.76, "looks_like_a_fight": True,
+            "warning": None, "verdict": "consistent_with_a_fight",
+        })
+        self.assertNotIn("These may not be the two fighters", page)
+
+    def test_an_older_report_without_the_check_still_renders(self):
+        """Reports analysed before this existed must not break the page."""
+        page = self._render_result(None)
+        self.assertNotIn("These may not be the two fighters", page)
+        self.assertGreater(len(page), 1000)
 
     def test_training_plan_is_separate_from_coach_card(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")

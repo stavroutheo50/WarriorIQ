@@ -1,0 +1,2541 @@
+{
+ "product": {
+  "name": "WarriorIQ",
+  "version": "1.0"
+ },
+ "video": {
+  "label": "Fight analysis",
+  "fight_type": "competition",
+  "analysis_target": "BOTH",
+  "focus_fighter": "A",
+  "original_name": "sample-fight.mp4"
+ },
+ "setup": {
+  "ruleset": "K1",
+  "round_count": 1,
+  "round_duration_seconds": 94.3,
+  "break_duration_seconds": 0.0,
+  "selected_rounds": [
+   1
+  ],
+  "start_seconds": 0.0,
+  "end_seconds": null,
+  "fighter_a_box": [
+   164.87,
+   40.49,
+   201.53,
+   121.91
+  ],
+  "fighter_b_box": [
+   291.6,
+   19.5,
+   316.6,
+   89.1
+  ]
+ },
+ "rounds": [
+  {
+   "number": 1,
+   "start_seconds": 0.0,
+   "end_seconds": 94.3,
+   "selected": true
+  }
+ ],
+ "performance": {
+  "segment_duration_seconds": 94.3,
+  "analysis_seconds": 91.6465241999831,
+  "realtime_speed": 1.028953370825354,
+  "within_video_length_budget": true,
+  "final_analysis_fps": 15.0,
+  "final_imgsz": 1280,
+  "quality_mode": "balanced",
+  "pose_model": "C:\\Users\\User\\Documents\\Codex\\2026-08-21\\since-we-have-codex-now-let\\outputs\\WarriorIQ_V4_Professional\\models\\yolo26m-pose.engine",
+  "gpu": "NVIDIA GeForce RTX 5060",
+  "unused_frame_copy_avoidance": false,
+  "external_identity_history_enabled": false
+ },
+ "tracking": {
+  "metric_definition": "Observation coverage: accepted fighter observations divided by analyzed frames. This is not ground-truth identity accuracy.",
+  "selection_source_frame": 0,
+  "selection_source_seconds": 0.0,
+  "requested_fighter_A_box": [
+   164.87,
+   40.49,
+   201.53,
+   121.91
+  ],
+  "requested_fighter_B_box": [
+   291.6,
+   19.5,
+   316.6,
+   89.1
+  ],
+  "canonical_fighter_A_box": [
+   164.87307739257812,
+   40.490108489990234,
+   201.53079223632812,
+   121.9078369140625
+  ],
+  "canonical_fighter_B_box": [
+   291.5978088378906,
+   19.539718627929688,
+   316.6260681152344,
+   89.08290100097656
+  ],
+  "fighter_A_seed_source": "pose_detector",
+  "fighter_B_seed_source": "pose_detector",
+  "analysis_signature": "493509ae70e248a2",
+  "coverage_windows": [
+   {
+    "start_seconds": 0,
+    "end_seconds": 10,
+    "fighter_A_coverage": 0.9866666666666667,
+    "fighter_B_coverage": 0.9466666666666667,
+    "analyzed_frames": 150
+   },
+   {
+    "start_seconds": 10,
+    "end_seconds": 20,
+    "fighter_A_coverage": 0.82,
+    "fighter_B_coverage": 0.78,
+    "analyzed_frames": 150
+   },
+   {
+    "start_seconds": 20,
+    "end_seconds": 30,
+    "fighter_A_coverage": 0.8933333333333333,
+    "fighter_B_coverage": 0.7333333333333333,
+    "analyzed_frames": 150
+   },
+   {
+    "start_seconds": 30,
+    "end_seconds": 40,
+    "fighter_A_coverage": 1.0,
+    "fighter_B_coverage": 0.96,
+    "analyzed_frames": 150
+   }
+  ],
+  "initial_iou_A": 0.9998663609940532,
+  "initial_iou_B": 0.9980564235145747,
+  "analyzed_frames": 1415,
+  "active_round_analyzed_frames": 1415,
+  "fighter_A_coverage": 0.8925795053003533,
+  "fighter_B_coverage": 0.8650176678445229,
+  "fighter_A_missing_frames": 152,
+  "fighter_B_missing_frames": 191,
+  "fighter_A_recoveries": 52,
+  "fighter_B_recoveries": 44,
+  "fighter_A_sam_recoveries": 6,
+  "fighter_B_sam_recoveries": 4,
+  "sam_continuous_enabled": false,
+  "sam_continuous_frames": 0,
+  "fighter_A_sam_guided_frames": 0,
+  "fighter_B_sam_guided_frames": 0,
+  "fighter_A_guided_pose_recoveries": 0,
+  "fighter_B_guided_pose_recoveries": 0,
+  "sam_continuous_failure_reason": null,
+  "fighter_A_rejected_switches": 1355,
+  "fighter_B_rejected_switches": 2948,
+  "sam_available": null,
+  "sam_failure_reason": null,
+  "openai_identity_enabled": false,
+  "openai_identity_attempts": 0,
+  "openai_identity_recoveries": 0,
+  "openai_identity_failure_reason": "OpenAI recovery disabled or OPENAI_API_KEY is not configured",
+  "fighter_A_initial_lock_safe": true,
+  "fighter_B_initial_lock_safe": true
+ },
+ "classifier": {
+  "action_classifier": "multi_frame_temporal_rules",
+  "custom_temporal_checkpoint_loaded": false,
+  "temporal_architecture": null,
+  "temporal_validation": {},
+  "contact_classifier": "pose_geometry_temporal_contact",
+  "max_engagement_body_lengths": 2.5,
+  "uncertainty_policy": "No single-frame strike events, temporal support for contact, and no identity reassignment when recovery evidence is ambiguous.",
+  "actions_discarded_out_of_range": 127
+ },
+ "metrics": {
+  "A": {
+   "pose_coverage": 0.8925795053003533,
+   "advanced_metrics_available": true,
+   "attacks": {
+    "attempts": 72,
+    "landed": 15,
+    "missed": 40,
+    "blocked": 1,
+    "checked": 1,
+    "uncertain": 15,
+    "accuracy": 0.20833333333333334,
+    "techniques": {
+     "jab": 20,
+     "left_front_kick": 6,
+     "right_round_kick": 1,
+     "right_knee": 2,
+     "left_uppercut": 5,
+     "right_hook": 3,
+     "cross": 12,
+     "left_low_kick": 3,
+     "right_front_kick": 5,
+     "left_hook": 2,
+     "right_push_kick": 3,
+     "left_push_kick": 6,
+     "left_round_kick": 2,
+     "left_knee": 1,
+     "right_body_kick": 1
+    },
+    "landed_techniques": {
+     "right_knee": 1,
+     "left_uppercut": 3,
+     "left_low_kick": 2,
+     "jab": 3,
+     "cross": 4,
+     "left_front_kick": 1,
+     "left_push_kick": 1
+    },
+    "targets_landed": {
+     "leg": 5,
+     "head": 7,
+     "body": 3
+    },
+    "families": {
+     "punch": 42,
+     "kick": 27,
+     "knee": 3
+    }
+   },
+   "combinations": {
+    "count": 15,
+    "max_length": 10,
+    "evidence": []
+   },
+   "counters": {
+    "count": 46,
+    "times": [
+     1.8,
+     8.933,
+     17.0,
+     21.8
+    ]
+   },
+   "defenses": {
+    "evade": 18,
+    "block": 3,
+    "check": 1,
+    "slip": 14,
+    "parry": 3
+   },
+   "strongest_weapon": "cross",
+   "vulnerability_targets": {
+    "head": 4,
+    "leg": 3,
+    "body": 2
+   },
+   "vulnerability_techniques": {
+    "jab": 3,
+    "cross": 3,
+    "left_front_kick": 2,
+    "right_low_kick": 1
+   },
+   "footwork_body_lengths_per_second": 1.1736286200051405,
+   "pressure_index": 0.11667661610891156,
+   "ring_center_control": 0.7691748323714606,
+   "guard_index": 0.12488772216004265,
+   "balance_index": 0.7556980718826181,
+   "dashboard": {
+    "technique_execution_confidence": 0.8504734739603127,
+    "defense_response_rate": 0.48148148148148145,
+    "footwork_body_lengths_per_second": 1.1736286200051405,
+    "accuracy": 0.20833333333333334,
+    "activity_attempts_per_minute": 45.81124072110287,
+    "ring_center_control": 0.7691748323714606,
+    "combinations_per_minute": 9.544008483563097,
+    "round_to_round_consistency": null,
+    "availability_note": null
+   },
+   "availability": {
+    "accuracy": {
+     "available": true,
+     "reason": null,
+     "samples": 72
+    },
+    "movement": {
+     "available": true,
+     "reason": null,
+     "samples": 1263
+    },
+    "guard": {
+     "available": true,
+     "reason": null,
+     "samples": 1263
+    },
+    "balance": {
+     "available": true,
+     "reason": null,
+     "samples": 1263
+    },
+    "defense_response": {
+     "available": true,
+     "reason": null,
+     "samples": 81
+    },
+    "technique_execution": {
+     "available": true,
+     "reason": null,
+     "samples": 15
+    },
+    "round_consistency": {
+     "available": false,
+     "reason": "At least two analyzed rounds containing verified attacks are required.",
+     "samples": 1
+    }
+   }
+  },
+  "B": {
+   "pose_coverage": 0.8650176678445229,
+   "advanced_metrics_available": true,
+   "attacks": {
+    "attempts": 81,
+    "landed": 9,
+    "missed": 48,
+    "blocked": 3,
+    "checked": 1,
+    "uncertain": 20,
+    "accuracy": 0.1111111111111111,
+    "techniques": {
+     "jab": 20,
+     "cross": 25,
+     "left_front_kick": 8,
+     "left_push_kick": 2,
+     "right_push_kick": 3,
+     "right_front_kick": 6,
+     "right_knee": 2,
+     "right_low_kick": 3,
+     "left_hook": 2,
+     "left_knee": 2,
+     "right_body_kick": 1,
+     "right_hook": 4,
+     "left_low_kick": 1,
+     "right_uppercut": 1,
+     "left_round_kick": 1
+    },
+    "landed_techniques": {
+     "jab": 3,
+     "cross": 3,
+     "left_front_kick": 2,
+     "right_low_kick": 1
+    },
+    "targets_landed": {
+     "head": 4,
+     "leg": 3,
+     "body": 2
+    },
+    "families": {
+     "punch": 52,
+     "kick": 25,
+     "knee": 4
+    }
+   },
+   "combinations": {
+    "count": 16,
+    "max_length": 17,
+    "evidence": []
+   },
+   "counters": {
+    "count": 47,
+    "times": [
+     2.2,
+     2.2,
+     16.333,
+     16.533
+    ]
+   },
+   "defenses": {
+    "slip": 7,
+    "evade": 8,
+    "parry": 4,
+    "check": 1,
+    "block": 1
+   },
+   "strongest_weapon": "jab",
+   "vulnerability_targets": {
+    "leg": 5,
+    "head": 7,
+    "body": 3
+   },
+   "vulnerability_techniques": {
+    "right_knee": 1,
+    "left_uppercut": 3,
+    "left_low_kick": 2,
+    "jab": 3,
+    "cross": 4,
+    "left_front_kick": 1,
+    "left_push_kick": 1
+   },
+   "footwork_body_lengths_per_second": 1.044095453377379,
+   "pressure_index": -0.05701706755687209,
+   "ring_center_control": 0.7711239385427487,
+   "guard_index": 0.2358621899106537,
+   "balance_index": 0.714912399418247,
+   "dashboard": {
+    "technique_execution_confidence": 0.8403693807962136,
+    "defense_response_rate": 0.2916666666666667,
+    "footwork_body_lengths_per_second": 1.044095453377379,
+    "accuracy": 0.1111111111111111,
+    "activity_attempts_per_minute": 51.53764581124072,
+    "ring_center_control": 0.7711239385427487,
+    "combinations_per_minute": 10.180275715800637,
+    "round_to_round_consistency": null,
+    "availability_note": null
+   },
+   "availability": {
+    "accuracy": {
+     "available": true,
+     "reason": null,
+     "samples": 81
+    },
+    "movement": {
+     "available": true,
+     "reason": null,
+     "samples": 1224
+    },
+    "guard": {
+     "available": true,
+     "reason": null,
+     "samples": 1224
+    },
+    "balance": {
+     "available": true,
+     "reason": null,
+     "samples": 1224
+    },
+    "defense_response": {
+     "available": true,
+     "reason": null,
+     "samples": 72
+    },
+    "technique_execution": {
+     "available": true,
+     "reason": null,
+     "samples": 9
+    },
+    "round_consistency": {
+     "available": false,
+     "reason": "At least two analyzed rounds containing verified attacks are required.",
+     "samples": 1
+    }
+   }
+  },
+  "round_pose_coverage": {
+   "1": {
+    "A": 0.8925795053003533,
+    "B": 0.8650176678445229
+   }
+  }
+ },
+ "scorecard": {
+  "ruleset": "K1",
+  "ruleset_label": "K-1",
+  "sport": "kickboxing",
+  "sport_label": "Kickboxing",
+  "unobserved_actions": [],
+  "coverage_note": "",
+  "mode": "estimated_10_point_must",
+  "rounds": [
+   {
+    "round": 1,
+    "fighter_A": 10,
+    "fighter_B": 9,
+    "winner": "A",
+    "effective_action_A": 9.413,
+    "effective_action_B": 5.321,
+    "knockdowns_A": 0,
+    "knockdowns_B": 0
+   }
+  ],
+  "totals": {
+   "A": 10,
+   "B": 9
+  },
+  "illegal_or_non_scoring_events": [
+   {
+    "fighter": "A",
+    "opponent": "B",
+    "round_number": 1,
+    "start_frame": 2276,
+    "peak_frame": 2282,
+    "end_frame": 2284,
+    "start_time": 75.86666666666667,
+    "peak_time": 76.06666666666668,
+    "end_time": 76.13333333333334,
+    "technique": "left_front_kick",
+    "family": "kick",
+    "limb": "left_leg",
+    "attempted": true,
+    "outcome": "likely_landed",
+    "landed": true,
+    "target": "leg",
+    "confidence": 0.8891955310106278,
+    "contact_confidence": 0.74,
+    "model_source": "temporal_rules",
+    "evidence": {
+     "peak_attacker_box": [
+      256.2319641113281,
+      35.094276428222656,
+      289.27227783203125,
+      127.01940155029297
+     ],
+     "peak_attacker_keypoints": [],
+     "peak_attacker_conf": [
+      0.20477992296218872,
+      0.089731864631176,
+      0.15950796008110046,
+      0.17646874487400055
+     ],
+     "peak_opponent_box": [
+      256.2319641113281,
+      35.094276428222656,
+      289.27227783203125,
+      127.01940155029297
+     ],
+     "peak_opponent_keypoints": [],
+     "peak_opponent_conf": [
+      0.20477992296218872,
+      0.089731864631176,
+      0.15950796008110046,
+      0.17646874487400055
+     ],
+     "contact_samples": [
+      {
+       "frame": 2276,
+       "time": 75.86666666666667,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.04096706956624985,
+        0.0066312141716480255,
+        0.04002126678824425,
+        0.21053849160671234
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": null,
+       "opponent_keypoints": null,
+       "opponent_conf": null,
+       "opponent_identity_confidence": 0.0
+      },
+      {
+       "frame": 2278,
+       "time": 75.93333333333334,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.048660434782505035,
+        0.010064810514450073,
+        0.037309810519218445,
+        0.2506575584411621
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": null,
+       "opponent_keypoints": null,
+       "opponent_conf": null,
+       "opponent_identity_confidence": 0.0
+      },
+      {
+       "frame": 2280,
+       "time": 76.0,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.10717487335205078,
+        0.032438311725854874,
+        0.0913369208574295,
+        0.279225617647171
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": null,
+       "opponent_keypoints": null,
+       "opponent_conf": null,
+       "opponent_identity_confidence": 0.0
+      },
+      {
+       "frame": 2282,
+       "time": 76.06666666666668,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.20477992296218872,
+        0.089731864631176,
+        0.15950796008110046,
+        0.17646874487400055
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": [
+        256.2319641113281,
+        35.094276428222656,
+        289.27227783203125,
+        127.01940155029297
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.20477992296218872,
+        0.089731864631176,
+        0.15950796008110046,
+        0.17646874487400055
+       ],
+       "opponent_identity_confidence": 0.55
+      }
+     ],
+     "max_speed_body_lengths_per_s": 1.795854091644287,
+     "extension_gain": 0.12602180242538452,
+     "contact_distance_body_lengths": 0.0,
+     "contact_target_distances_over_time": [
+      0.0
+     ],
+     "contact_exact_frames": 1,
+     "contact_support_frames": 1,
+     "contact_temporally_confirmed": false,
+     "contact_best_frame": 2282,
+     "contact_best_time": 76.06666666666668,
+     "contact_attacker_conf": [
+      0.20477992296218872,
+      0.089731864631176,
+      0.15950796008110046,
+      0.17646874487400055
+     ],
+     "target_distances": {
+      "head": 1.2711468901426288,
+      "body": 0.6935885900799202,
+      "leg": 0.0
+     },
+     "defender_guard_distance": 1.0977053667555992,
+     "action_peak_frame": 2282,
+     "action_peak_time": 76.06666666666668
+    },
+    "metadata": {
+     "attacker_identity_confidence": 1.0,
+     "opponent_identity_confidence": 0.55
+    },
+    "legality_reason": "This kick may not target the thigh in K-1."
+   },
+   {
+    "fighter": "A",
+    "opponent": "B",
+    "round_number": 1,
+    "start_frame": 2406,
+    "peak_frame": 2428,
+    "end_frame": 2436,
+    "start_time": 80.2,
+    "peak_time": 80.93333333333334,
+    "end_time": 81.2,
+    "technique": "left_push_kick",
+    "family": "kick",
+    "limb": "left_leg",
+    "attempted": true,
+    "outcome": "likely_landed",
+    "landed": true,
+    "target": "leg",
+    "confidence": 0.94,
+    "contact_confidence": 0.74,
+    "model_source": "temporal_rules",
+    "evidence": {
+     "peak_attacker_box": [
+      211.70521545410156,
+      12.812999725341797,
+      233.11453247070312,
+      72.5133056640625
+     ],
+     "peak_attacker_keypoints": [],
+     "peak_attacker_conf": [
+      0.774666965007782,
+      0.7206210494041443,
+      0.7315983176231384,
+      0.43236544728279114
+     ],
+     "peak_opponent_box": [
+      142.62203979492188,
+      42.86795425415039,
+      181.62509155273438,
+      119.07350158691406
+     ],
+     "peak_opponent_keypoints": [],
+     "peak_opponent_conf": [
+      0.28194472193717957,
+      0.12069612741470337,
+      0.23967057466506958,
+      0.08162594586610794
+     ],
+     "contact_samples": [
+      {
+       "frame": 2406,
+       "time": 80.2,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.12422440946102142,
+        0.10806585848331451,
+        0.013049690052866936,
+        0.3360365927219391
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": null,
+       "opponent_keypoints": null,
+       "opponent_conf": null,
+       "opponent_identity_confidence": 0.0
+      },
+      {
+       "frame": 2428,
+       "time": 80.93333333333334,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.3153553903102875,
+        0.1426296979188919,
+        0.3521665930747986,
+        0.0727413073182106
+       ],
+       "attacker_identity_confidence": 0.5926577715683885,
+       "opponent_box": [
+        166.37600708007812,
+        39.88234329223633,
+        205.83450317382812,
+        117.49523162841797
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.2240913361310959,
+        0.15954633057117462,
+        0.0820562094449997,
+        0.37058570981025696
+       ],
+       "opponent_identity_confidence": 0.9807817136934853
+      },
+      {
+       "frame": 2432,
+       "time": 81.06666666666668,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.795411229133606,
+        0.7640944719314575,
+        0.7608680725097656,
+        0.4801294207572937
+       ],
+       "attacker_identity_confidence": 0.5062447471213711,
+       "opponent_box": [
+        143.04954528808594,
+        42.37641525268555,
+        180.20114135742188,
+        117.55772399902344
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.15998172760009766,
+        0.021313972771167755,
+        0.1769055873155594,
+        0.05228138715028763
+       ],
+       "opponent_identity_confidence": 0.9478282741427773
+      },
+      {
+       "frame": 2434,
+       "time": 81.13333333333334,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.774666965007782,
+        0.7206210494041443,
+        0.7315983176231384,
+        0.43236544728279114
+       ],
+       "attacker_identity_confidence": 0.7730579450851902,
+       "opponent_box": [
+        142.62203979492188,
+        42.86795425415039,
+        181.62509155273438,
+        119.07350158691406
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.28194472193717957,
+        0.12069612741470337,
+        0.23967057466506958,
+        0.08162594586610794
+       ],
+       "opponent_identity_confidence": 0.9836531466656324
+      }
+     ],
+     "max_speed_body_lengths_per_s": 19.417221069335938,
+     "extension_gain": 0.36451274156570435,
+     "contact_distance_body_lengths": 0.02928713435940958,
+     "contact_target_distances_over_time": [
+      0.02928713435940958,
+      1.2772727796094916,
+      1.2020416054261749,
+      0.49580158779213
+     ],
+     "contact_exact_frames": 1,
+     "contact_support_frames": 1,
+     "contact_temporally_confirmed": false,
+     "contact_best_frame": 2428,
+     "contact_best_time": 80.93333333333334,
+     "contact_attacker_conf": [
+      0.3153553903102875,
+      0.1426296979188919,
+      0.3521665930747986,
+      0.0727413073182106
+     ],
+     "target_distances": {
+      "head": 1.160808663507234,
+      "body": 0.6376305743092128,
+      "leg": 0.02928713435940958
+     },
+     "defender_guard_distance": 0.7491041253811657,
+     "action_peak_frame": 2434,
+     "action_peak_time": 81.13333333333334
+    },
+    "metadata": {
+     "attacker_identity_confidence": 0.5926577715683885,
+     "opponent_identity_confidence": 0.9807817136934853
+    },
+    "legality_reason": "This kick may not target the thigh in K-1."
+   },
+   {
+    "fighter": "B",
+    "opponent": "A",
+    "round_number": 1,
+    "start_frame": 2460,
+    "peak_frame": 2464,
+    "end_frame": 2466,
+    "start_time": 82.0,
+    "peak_time": 82.13333333333334,
+    "end_time": 82.2,
+    "technique": "left_front_kick",
+    "family": "kick",
+    "limb": "left_leg",
+    "attempted": true,
+    "outcome": "clean",
+    "landed": true,
+    "target": "leg",
+    "confidence": 0.9244742745161056,
+    "contact_confidence": 0.94,
+    "model_source": "temporal_rules",
+    "evidence": {
+     "peak_attacker_box": [
+      151.07049560546875,
+      35.363346099853516,
+      204.05992126464844,
+      110.3919448852539
+     ],
+     "peak_attacker_keypoints": [],
+     "peak_attacker_conf": [
+      0.20053403079509735,
+      0.14991380274295807,
+      0.12481214106082916,
+      0.3155759274959564
+     ],
+     "peak_opponent_box": [
+      179.37876892089844,
+      30.307199478149414,
+      208.54461669921875,
+      96.2768783569336
+     ],
+     "peak_opponent_keypoints": [],
+     "peak_opponent_conf": [
+      0.8666759133338928,
+      0.9052442908287048,
+      0.6881612539291382,
+      0.7637074589729309
+     ],
+     "contact_samples": [
+      {
+       "frame": 2460,
+       "time": 82.0,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.03670632094144821,
+        0.022188277915120125,
+        0.025579648092389107,
+        0.3661116659641266
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": [
+        179.07044982910156,
+        32.61051940917969,
+        206.03677368164062,
+        98.20539093017578
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.8067446947097778,
+        0.8711623549461365,
+        0.6593732237815857,
+        0.7787886261940002
+       ],
+       "opponent_identity_confidence": 0.9898156541574288
+      },
+      {
+       "frame": 2462,
+       "time": 82.06666666666668,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.4275723695755005,
+        0.3071514666080475,
+        0.27400603890419006,
+        0.3293110430240631
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": null,
+       "opponent_keypoints": null,
+       "opponent_conf": null,
+       "opponent_identity_confidence": 0.0
+      },
+      {
+       "frame": 2464,
+       "time": 82.13333333333334,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.20053403079509735,
+        0.14991380274295807,
+        0.12481214106082916,
+        0.3155759274959564
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": [
+        179.37876892089844,
+        30.307199478149414,
+        208.54461669921875,
+        96.2768783569336
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.8666759133338928,
+        0.9052442908287048,
+        0.6881612539291382,
+        0.7637074589729309
+       ],
+       "opponent_identity_confidence": 1.0
+      },
+      {
+       "frame": 2466,
+       "time": 82.2,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.12863251566886902,
+        0.08730855584144592,
+        0.07117240130901337,
+        0.20077142119407654
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": [
+        179.24539184570312,
+        27.561830520629883,
+        209.6494140625,
+        92.7475814819336
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.8233492374420166,
+        0.8598518371582031,
+        0.665155827999115,
+        0.697715699672699
+       ],
+       "opponent_identity_confidence": 1.0
+      }
+     ],
+     "max_speed_body_lengths_per_s": 2.2007126808166504,
+     "extension_gain": 0.09849792718887329,
+     "contact_distance_body_lengths": 0.014390115796039259,
+     "contact_target_distances_over_time": [
+      0.283589302254892,
+      0.014390115796039259,
+      0.0538595024482275
+     ],
+     "contact_exact_frames": 2,
+     "contact_support_frames": 3,
+     "contact_temporally_confirmed": true,
+     "contact_best_frame": 2464,
+     "contact_best_time": 82.13333333333334,
+     "contact_attacker_conf": [
+      0.20053403079509735,
+      0.14991380274295807,
+      0.12481214106082916,
+      0.3155759274959564
+     ],
+     "target_distances": {
+      "head": 1.3737208404178118,
+      "body": 0.7399510416018752,
+      "leg": 0.014390115796039259
+     },
+     "defender_guard_distance": 0.9295186091250149,
+     "action_peak_frame": 2464,
+     "action_peak_time": 82.13333333333334
+    },
+    "metadata": {
+     "attacker_identity_confidence": 1.0,
+     "opponent_identity_confidence": 1.0
+    },
+    "legality_reason": "This kick may not target the thigh in K-1."
+   },
+   {
+    "fighter": "B",
+    "opponent": "A",
+    "round_number": 1,
+    "start_frame": 2716,
+    "peak_frame": 2718,
+    "end_frame": 2722,
+    "start_time": 90.53333333333335,
+    "peak_time": 90.60000000000001,
+    "end_time": 90.73333333333333,
+    "technique": "left_front_kick",
+    "family": "kick",
+    "limb": "left_leg",
+    "attempted": true,
+    "outcome": "likely_landed",
+    "landed": true,
+    "target": "leg",
+    "confidence": 0.94,
+    "contact_confidence": 0.7014785593320324,
+    "model_source": "temporal_rules",
+    "evidence": {
+     "peak_attacker_box": [
+      173.21775817871094,
+      42.22773361206055,
+      236.36257934570312,
+      119.1167221069336
+     ],
+     "peak_attacker_keypoints": [],
+     "peak_attacker_conf": [
+      0.02249518409371376,
+      0.014945091679692268,
+      0.007788510527461767,
+      0.4195190966129303
+     ],
+     "peak_opponent_box": [
+      146.13970947265625,
+      35.07466125488281,
+      182.61720275878906,
+      124.31106567382812
+     ],
+     "peak_opponent_keypoints": [],
+     "peak_opponent_conf": [
+      0.6006675958633423,
+      0.2751035690307617,
+      0.47674161195755005,
+      0.14804595708847046
+     ],
+     "contact_samples": [
+      {
+       "frame": 2716,
+       "time": 90.53333333333335,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.0412113256752491,
+        0.023386701941490173,
+        0.005970149300992489,
+        0.4284377098083496
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": [
+        149.24746704101562,
+        36.18876266479492,
+        183.8622589111328,
+        123.712158203125
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.7745683789253235,
+        0.2836294174194336,
+        0.7033944725990295,
+        0.06124459207057953
+       ],
+       "opponent_identity_confidence": 1.0
+      },
+      {
+       "frame": 2718,
+       "time": 90.60000000000001,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.02249518409371376,
+        0.014945091679692268,
+        0.007788510527461767,
+        0.4195190966129303
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": [
+        146.13970947265625,
+        35.07466125488281,
+        182.61720275878906,
+        124.31106567382812
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.6006675958633423,
+        0.2751035690307617,
+        0.47674161195755005,
+        0.14804595708847046
+       ],
+       "opponent_identity_confidence": 1.0
+      },
+      {
+       "frame": 2720,
+       "time": 90.66666666666667,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.021586591377854347,
+        0.011646823026239872,
+        0.007989752106368542,
+        0.37262386083602905
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": [
+        142.1380157470703,
+        35.00703048706055,
+        184.51068115234375,
+        124.61141967773438
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.8673928380012512,
+        0.4032527804374695,
+        0.8451216220855713,
+        0.06139548867940903
+       ],
+       "opponent_identity_confidence": 1.0
+      },
+      {
+       "frame": 2722,
+       "time": 90.73333333333333,
+       "attacker_keypoints": [],
+       "attacker_conf": [
+        0.03164759650826454,
+        0.0196001585572958,
+        0.015870453789830208,
+        0.43961063027381897
+       ],
+       "attacker_identity_confidence": 1.0,
+       "opponent_box": [
+        135.65464782714844,
+        36.28654861450195,
+        178.8461456298828,
+        123.67488098144531
+       ],
+       "opponent_keypoints": [],
+       "opponent_conf": [
+        0.8717412948608398,
+        0.5297973155975342,
+        0.828168511390686,
+        0.15402527153491974
+       ],
+       "opponent_identity_confidence": 1.0
+      }
+     ],
+     "max_speed_body_lengths_per_s": 5.19044303894043,
+     "extension_gain": 0.2366962432861328,
+     "contact_distance_body_lengths": 0.2573346483005854,
+     "contact_target_distances_over_time": [
+      0.5194506059291103,
+      0.2573346483005854,
+      0.33095286555869613,
+      0.4396904600657228
+     ],
+     "contact_exact_frames": 0,
+     "contact_support_frames": 1,
+     "contact_temporally_confirmed": false,
+     "contact_best_frame": 2718,
+     "contact_best_time": 90.60000000000001,
+     "contact_attacker_conf": [
+      0.02249518409371376,
+      0.014945091679692268,
+      0.007788510527461767,
+      0.4195190966129303
+     ],
+     "target_distances": {
+      "head": 1.24121836835007,
+      "body": 0.7574147972981907,
+      "leg": 0.2573346483005854
+     },
+     "defender_guard_distance": 0.973835025038151,
+     "action_peak_frame": 2718,
+     "action_peak_time": 90.60000000000001
+    },
+    "metadata": {
+     "attacker_identity_confidence": 1.0,
+     "opponent_identity_confidence": 1.0
+    },
+    "legality_reason": "This kick may not target the thigh in K-1."
+   }
+  ],
+  "disclaimer": "Preliminary computer estimate from high-confidence action candidates. The actions are not verified fight facts; the report does not ask you to label or correct them. This is not an official judges' score.",
+  "available": true,
+  "status": "preliminary_unvalidated",
+  "verified_actions_counted": 14,
+  "duplicate_action_candidates_removed": 3,
+  "rounds_won": {
+   "A": 1,
+   "B": 0
+  },
+  "winner_estimate": "A",
+  "evidence": {
+   "required_tracking_coverage_each": 0.85,
+   "fighter_A_tracking_coverage": 0.8925795053003533,
+   "fighter_B_tracking_coverage": 0.8650176678445229,
+   "scoring_action_candidates": 14,
+   "duplicate_action_candidates_removed": 3,
+   "action_confidence_required": 0.72,
+   "contact_confidence_required": 0.62,
+   "evidence_source": "unvalidated_action_candidates"
+  }
+ },
+ "events": [
+  {
+   "fighter": "B",
+   "opponent": "A",
+   "round_number": 1,
+   "start_frame": 32,
+   "peak_frame": 40,
+   "end_frame": 40,
+   "start_time": 1.0666666666666667,
+   "peak_time": 1.3333333333333335,
+   "end_time": 1.3333333333333335,
+   "technique": "jab",
+   "family": "punch",
+   "limb": "right_hand",
+   "attempted": true,
+   "outcome": "likely_landed",
+   "landed": true,
+   "target": "head",
+   "confidence": 0.9204013028740883,
+   "contact_confidence": 0.6864703795353011,
+   "model_source": "temporal_rules",
+   "evidence": {
+    "peak_attacker_box": [
+     268.38031005859375,
+     22.784202575683594,
+     289.859375,
+     102.01231384277344
+    ],
+    "peak_attacker_keypoints": [],
+    "peak_attacker_conf": [
+     0.47215405106544495,
+     0.5591898560523987,
+     0.08268577605485916,
+     0.5895736813545227
+    ],
+    "peak_opponent_box": [
+     183.93809509277344,
+     38.87064743041992,
+     207.13002014160156,
+     121.03871154785156
+    ],
+    "peak_opponent_keypoints": [],
+    "peak_opponent_conf": [
+     0.13507221639156342,
+     0.02231350913643837,
+     0.11952711641788483,
+     0.11147256195545197
+    ],
+    "contact_samples": [
+     {
+      "frame": 32,
+      "time": 1.0666666666666667,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.4753898084163666,
+       0.5518176555633545,
+       0.04422202706336975,
+       0.6722524762153625
+      ],
+      "attacker_identity_confidence": 1.0,
+      "opponent_box": [
+       183.38565063476562,
+       38.74659729003906,
+       206.24685668945312,
+       121.02717590332031
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.15137901902198792,
+       0.022385019809007645,
+       0.12632429599761963,
+       0.09882523864507675
+      ],
+      "opponent_identity_confidence": 1.0
+     },
+     {
+      "frame": 34,
+      "time": 1.1333333333333333,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.5713151097297668,
+       0.6562397480010986,
+       0.06738552451133728,
+       0.7437860369682312
+      ],
+      "attacker_identity_confidence": 1.0,
+      "opponent_box": [
+       183.59194946289062,
+       38.719242095947266,
+       206.42872619628906,
+       121.0945053100586
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.10206153988838196,
+       0.014367468655109406,
+       0.08803477883338928,
+       0.13770586252212524
+      ],
+      "opponent_identity_confidence": 1.0
+     },
+     {
+      "frame": 36,
+      "time": 1.2000000000000002,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.47215405106544495,
+       0.5591898560523987,
+       0.08268577605485916,
+       0.5895736813545227
+      ],
+      "attacker_identity_confidence": 1.0,
+      "opponent_box": [
+       183.93809509277344,
+       38.87064743041992,
+       207.13002014160156,
+       121.03871154785156
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.13507221639156342,
+       0.02231350913643837,
+       0.11952711641788483,
+       0.11147256195545197
+      ],
+      "opponent_identity_confidence": 1.0
+     },
+     {
+      "frame": 38,
+      "time": 1.2666666666666668,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.8809964060783386,
+       0.8948577046394348,
+       0.5568562150001526,
+       0.9095664024353027
+      ],
+      "attacker_identity_confidence": 0.5636678121684194,
+      "opponent_box": [
+       184.35272216796875,
+       38.72334289550781,
+       208.15025329589844,
+       120.68207550048828
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.1766604781150818,
+       0.025422686710953712,
+       0.15337800979614258,
+       0.0912671908736229
+      ],
+      "opponent_identity_confidence": 1.0
+     }
+    ],
+    "max_speed_body_lengths_per_s": 21.67551612854004,
+    "extension_gain": 0.08686086535453796,
+    "contact_distance_body_lengths": 0.2730883292091145,
+    "contact_target_distances_over_time": [
+     1.6921911752172156,
+     1.659869450517283,
+     1.6547445390567694,
+     0.308933457136998
+    ],
+    "contact_exact_frames": 0,
+    "contact_support_frames": 2,
+    "contact_temporally_confirmed": false,
+    "contact_best_frame": 40,
+    "contact_best_time": 1.3333333333333335,
+    "contact_attacker_conf": [
+     0.8370402455329895,
+     0.8530635237693787,
+     0.41539672017097473,
+     0.8965524435043335
+    ],
+    "target_distances": {
+     "head": 0.2730883292091145,
+     "body": 0.33981873969531917,
+     "leg": 0.8133940653185971
+    },
+    "defender_guard_distance": 0.5155355215731484,
+    "action_peak_frame": 36,
+    "action_peak_time": 1.2000000000000002
+   },
+   "metadata": {
+    "attacker_identity_confidence": 0.8282979561943853,
+    "opponent_identity_confidence": 1.0
+   }
+  },
+  {
+   "fighter": "A",
+   "opponent": "B",
+   "round_number": 1,
+   "start_frame": 48,
+   "peak_frame": 54,
+   "end_frame": 54,
+   "start_time": 1.6,
+   "peak_time": 1.8,
+   "end_time": 1.8,
+   "technique": "jab",
+   "family": "punch",
+   "limb": "left_hand",
+   "attempted": true,
+   "outcome": "missed",
+   "landed": false,
+   "target": "body",
+   "confidence": 0.9184745961427688,
+   "contact_confidence": 0.6489193263172723,
+   "model_source": "temporal_rules",
+   "evidence": {
+    "peak_attacker_box": [
+     190.18934631347656,
+     36.16170883178711,
+     217.47097778320312,
+     120.83516693115234
+    ],
+    "peak_attacker_keypoints": [],
+    "peak_attacker_conf": [
+     0.3032149076461792,
+     0.07216949760913849,
+     0.2733566164970398,
+     0.12067267298698425
+    ],
+    "peak_opponent_box": [
+     206.38856506347656,
+     29.408702850341797,
+     249.31541442871094,
+     105.21066284179688
+    ],
+    "peak_opponent_keypoints": [],
+    "peak_opponent_conf": [
+     0.8227552175521851,
+     0.8548179268836975,
+     0.4045853614807129,
+     0.9064594507217407
+    ],
+    "contact_samples": [
+     {
+      "frame": 48,
+      "time": 1.6,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.16232886910438538,
+       0.03317350149154663,
+       0.16132140159606934,
+       0.07244138419628143
+      ],
+      "attacker_identity_confidence": 1.0,
+      "opponent_box": [
+       204.3834991455078,
+       29.456722259521484,
+       249.23915100097656,
+       105.05101013183594
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.84806227684021,
+       0.8760373592376709,
+       0.4288786053657532,
+       0.9148063659667969
+      ],
+      "opponent_identity_confidence": 1.0
+     },
+     {
+      "frame": 50,
+      "time": 1.6666666666666667,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.2308649718761444,
+       0.04826827347278595,
+       0.2288428395986557,
+       0.09621181339025497
+      ],
+      "attacker_identity_confidence": 1.0,
+      "opponent_box": [
+       205.39837646484375,
+       29.465042114257812,
+       249.2902374267578,
+       105.19184112548828
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.8499897122383118,
+       0.8768801093101501,
+       0.4281740188598633,
+       0.9147840142250061
+      ],
+      "opponent_identity_confidence": 1.0
+     },
+     {
+      "frame": 52,
+      "time": 1.7333333333333334,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.3032149076461792,
+       0.07216949760913849,
+       0.2733566164970398,
+       0.12067267298698425
+      ],
+      "attacker_identity_confidence": 1.0,
+      "opponent_box": [
+       206.38856506347656,
+       29.408702850341797,
+       249.31541442871094,
+       105.21066284179688
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.8227552175521851,
+       0.8548179268836975,
+       0.4045853614807129,
+       0.9064594507217407
+      ],
+      "opponent_identity_confidence": 1.0
+     },
+     {
+      "frame": 54,
+      "time": 1.8,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.3363384008407593,
+       0.08222828805446625,
+       0.2991204857826233,
+       0.12855900824069977
+      ],
+      "attacker_identity_confidence": 1.0,
+      "opponent_box": [
+       207.89479064941406,
+       29.449129104614258,
+       249.24502563476562,
+       105.19593048095703
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.8521384596824646,
+       0.879446268081665,
+       0.4077988266944885,
+       0.9183050990104675
+      ],
+      "opponent_identity_confidence": 1.0
+     }
+    ],
+    "max_speed_body_lengths_per_s": 4.909108638763428,
+    "extension_gain": 0.0813559889793396,
+    "contact_distance_body_lengths": 0.4589193263172723,
+    "contact_target_distances_over_time": [
+     0.5439329149454765,
+     0.5391096458965631,
+     0.5021677703034773,
+     0.4589193263172723
+    ],
+    "contact_exact_frames": 0,
+    "contact_support_frames": 0,
+    "contact_temporally_confirmed": false,
+    "contact_best_frame": 54,
+    "contact_best_time": 1.8,
+    "contact_attacker_conf": [
+     0.3363384008407593,
+     0.08222828805446625,
+     0.2991204857826233,
+     0.12855900824069977
+    ],
+    "target_distances": {
+     "head": 0.6375404064106066,
+     "body": 0.4589193263172723,
+     "leg": 0.726473155591645
+    },
+    "defender_guard_distance": 0.20104236773155001,
+    "action_peak_frame": 52,
+    "action_peak_time": 1.7333333333333334
+   },
+   "metadata": {
+    "attacker_identity_confidence": 1.0,
+    "opponent_identity_confidence": 1.0
+   }
+  },
+  {
+   "fighter": "B",
+   "opponent": "A",
+   "round_number": 1,
+   "start_frame": 64,
+   "peak_frame": 66,
+   "end_frame": 74,
+   "start_time": 2.1333333333333333,
+   "peak_time": 2.2,
+   "end_time": 2.466666666666667,
+   "technique": "cross",
+   "family": "punch",
+   "limb": "right_hand",
+   "attempted": true,
+   "outcome": "uncertain",
+   "landed": false,
+   "target": null,
+   "confidence": 0.94,
+   "contact_confidence": 0.0,
+   "model_source": "temporal_rules",
+   "evidence": {
+    "peak_attacker_box": [
+     191.5542755126953,
+     35.72638702392578,
+     216.9766387939453,
+     120.84428405761719
+    ],
+    "peak_attacker_keypoints": [],
+    "peak_attacker_conf": [
+     0.3517928421497345,
+     0.05366048961877823,
+     0.38144180178642273,
+     0.05312878638505936
+    ],
+    "peak_opponent_box": [
+     214.15708923339844,
+     29.43677520751953,
+     249.38526916503906,
+     105.43411254882812
+    ],
+    "peak_opponent_keypoints": [],
+    "peak_opponent_conf": [
+     0.899971067905426,
+     0.47292983531951904,
+     0.9151255488395691,
+     0.06272207200527191
+    ],
+    "contact_samples": [
+     {
+      "frame": 64,
+      "time": 2.1333333333333333,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.3256070613861084,
+       0.15976591408252716,
+       0.35113799571990967,
+       0.15567262470722198
+      ],
+      "attacker_identity_confidence": 0.9431150692215288,
+      "opponent_box": [
+       191.3961181640625,
+       35.52665710449219,
+       216.9622802734375,
+       120.86175537109375
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.3872721493244171,
+       0.08460941910743713,
+       0.38254600763320923,
+       0.07630041241645813
+      ],
+      "opponent_identity_confidence": 1.0
+     },
+     {
+      "frame": 66,
+      "time": 2.2,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.3517928421497345,
+       0.05366048961877823,
+       0.38144180178642273,
+       0.05312878638505936
+      ],
+      "attacker_identity_confidence": 0.6535329517947924,
+      "opponent_box": [
+       214.15708923339844,
+       29.43677520751953,
+       249.38526916503906,
+       105.43411254882812
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.899971067905426,
+       0.47292983531951904,
+       0.9151255488395691,
+       0.06272207200527191
+      ],
+      "opponent_identity_confidence": 0.6272847452083682
+     },
+     {
+      "frame": 72,
+      "time": 2.4000000000000004,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.04855053871870041,
+       0.05387423560023308,
+       0.0038300033193081617,
+       0.3491676151752472
+      ],
+      "attacker_identity_confidence": 0.5779467252378292,
+      "opponent_box": [
+       191.40972900390625,
+       35.61761474609375,
+       217.14671325683594,
+       120.79756927490234
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.36257100105285645,
+       0.0443999357521534,
+       0.4000861644744873,
+       0.04371517151594162
+      ],
+      "opponent_identity_confidence": 0.778595935336738
+     },
+     {
+      "frame": 74,
+      "time": 2.466666666666667,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.19376638531684875,
+       0.11885161697864532,
+       0.06112811341881752,
+       0.26196354627609253
+      ],
+      "attacker_identity_confidence": 0.8727463247062395,
+      "opponent_box": [
+       190.5753173828125,
+       35.58249282836914,
+       217.3887481689453,
+       120.84020233154297
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.2394518107175827,
+       0.025057045742869377,
+       0.25786086916923523,
+       0.05445193871855736
+      ],
+      "opponent_identity_confidence": 1.0
+     }
+    ],
+    "max_speed_body_lengths_per_s": 24.971506118774414,
+    "extension_gain": 0.3037821352481842,
+    "contact_distance_body_lengths": 0.7053002576093039,
+    "contact_target_distances_over_time": [
+     1.710217174161374,
+     0.7053002576093039,
+     1.729876886673492,
+     1.6692348673012884
+    ],
+    "contact_exact_frames": 0,
+    "contact_support_frames": 0,
+    "contact_temporally_confirmed": false,
+    "contact_best_frame": 66,
+    "contact_best_time": 2.2,
+    "contact_attacker_conf": [
+     0.3517928421497345,
+     0.05366048961877823,
+     0.38144180178642273,
+     0.05312878638505936
+    ],
+    "target_distances": {
+     "head": 1.1514856563607627,
+     "body": 0.7277174137324783,
+     "leg": 0.7053002576093039
+    },
+    "defender_guard_distance": 0.5494495074918202,
+    "rejected_contact_reason": "punch_endpoint_in_leg_zone"
+   },
+   "metadata": {}
+  },
+  {
+   "fighter": "B",
+   "opponent": "A",
+   "round_number": 1,
+   "start_frame": 66,
+   "peak_frame": 66,
+   "end_frame": 76,
+   "start_time": 2.2,
+   "peak_time": 2.2,
+   "end_time": 2.5333333333333337,
+   "technique": "left_front_kick",
+   "family": "kick",
+   "limb": "left_leg",
+   "attempted": true,
+   "outcome": "missed",
+   "landed": false,
+   "target": "leg",
+   "confidence": 0.9291834318637848,
+   "contact_confidence": 0.7667633470963087,
+   "model_source": "temporal_rules",
+   "evidence": {
+    "peak_attacker_box": [
+     270.4234313964844,
+     21.570653915405273,
+     291.5089416503906,
+     105.01818084716797
+    ],
+    "peak_attacker_keypoints": [],
+    "peak_attacker_conf": [
+     0.19376638531684875,
+     0.11885161697864532,
+     0.06112811341881752,
+     0.26196354627609253
+    ],
+    "peak_opponent_box": [
+     190.5753173828125,
+     35.58249282836914,
+     217.3887481689453,
+     120.84020233154297
+    ],
+    "peak_opponent_keypoints": [],
+    "peak_opponent_conf": [
+     0.2394518107175827,
+     0.025057045742869377,
+     0.25786086916923523,
+     0.05445193871855736
+    ],
+    "contact_samples": [
+     {
+      "frame": 66,
+      "time": 2.2,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.3517928421497345,
+       0.05366048961877823,
+       0.38144180178642273,
+       0.05312878638505936
+      ],
+      "attacker_identity_confidence": 0.6535329517947924,
+      "opponent_box": [
+       214.15708923339844,
+       29.43677520751953,
+       249.38526916503906,
+       105.43411254882812
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.899971067905426,
+       0.47292983531951904,
+       0.9151255488395691,
+       0.06272207200527191
+      ],
+      "opponent_identity_confidence": 0.6272847452083682
+     },
+     {
+      "frame": 72,
+      "time": 2.4000000000000004,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.04855053871870041,
+       0.05387423560023308,
+       0.0038300033193081617,
+       0.3491676151752472
+      ],
+      "attacker_identity_confidence": 0.5779467252378292,
+      "opponent_box": [
+       191.40972900390625,
+       35.61761474609375,
+       217.14671325683594,
+       120.79756927490234
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.36257100105285645,
+       0.0443999357521534,
+       0.4000861644744873,
+       0.04371517151594162
+      ],
+      "opponent_identity_confidence": 0.778595935336738
+     },
+     {
+      "frame": 74,
+      "time": 2.466666666666667,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.19376638531684875,
+       0.11885161697864532,
+       0.06112811341881752,
+       0.26196354627609253
+      ],
+      "attacker_identity_confidence": 0.8727463247062395,
+      "opponent_box": [
+       190.5753173828125,
+       35.58249282836914,
+       217.3887481689453,
+       120.84020233154297
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.2394518107175827,
+       0.025057045742869377,
+       0.25786086916923523,
+       0.05445193871855736
+      ],
+      "opponent_identity_confidence": 1.0
+     },
+     {
+      "frame": 76,
+      "time": 2.5333333333333337,
+      "attacker_keypoints": [],
+      "attacker_conf": [
+       0.46582818031311035,
+       0.23436270654201508,
+       0.3029070794582367,
+       0.2192443311214447
+      ],
+      "attacker_identity_confidence": 0.9435280424771755,
+      "opponent_box": [
+       189.3907928466797,
+       35.74054718017578,
+       217.02944946289062,
+       120.93571472167969
+      ],
+      "opponent_keypoints": [],
+      "opponent_conf": [
+       0.3451819121837616,
+       0.04127860814332962,
+       0.337701678276062,
+       0.05311169847846031
+      ],
+      "opponent_identity_confidence": 1.0
+     }
+    ],
+    "max_speed_body_lengths_per_s": 9.403942108154297,
+    "extension_gain": 0.11195266246795654,
+    "contact_distance_body_lengths": 0.5767633470963086,
+    "contact_target_distances_over_time": [
+     0.5767633470963086,
+     1.626397866989153,
+     1.5216172352568345,
+     1.6735449154907371
+    ],
+    "contact_exact_frames": 0,
+    "contact_support_frames": 0,
+    "contact_temporally_confirmed": false,
+    "contact_best_frame": 66,
+    "contact_best_time": 2.2,
+    "contact_attacker_conf": [
+     0.3517928421497345,
+     0.05366048961877823,
+     0.38144180178642273,
+     0.05312878638505936
+    ],
+    "target_distances": {
+     "head": 1.7341678289285858,
+     "body": 1.1141494208536509,
+     "leg": 0.5767633470963086
+    },
+    "defender_guard_distance": 1.1316845888977136,
+    "action_peak_frame": 74,
+    "action_peak_time": 2.466666666666667
+   },
+   "metadata": {
+    "attacker_identity_confidence": 0.6535329517947924,
+    "opponent_identity_confidence": 0.6272847452083682,
+    "defense": "evade",
+    "defense_confidence": 0.85
+   }
+  }
+ ],
+ "key_moments": [],
+ "illegal_moves": [],
+ "defenses": [
+  {
+   "fighter": "A",
+   "opponent": "B",
+   "round_number": 1,
+   "time_seconds": 2.2,
+   "source_frame": 66,
+   "defense": "evade",
+   "confidence": 0.85,
+   "against_technique": "left_front_kick",
+   "metadata": {}
+  },
+  {
+   "fighter": "A",
+   "opponent": "B",
+   "round_number": 1,
+   "time_seconds": 9.066666666666666,
+   "source_frame": 272,
+   "defense": "evade",
+   "confidence": 0.85,
+   "against_technique": "jab",
+   "metadata": {}
+  },
+  {
+   "fighter": "A",
+   "opponent": "B",
+   "round_number": 1,
+   "time_seconds": 13.0,
+   "source_frame": 390,
+   "defense": "evade",
+   "confidence": 0.6995133054256439,
+   "against_technique": "right_front_kick",
+   "metadata": {}
+  },
+  {
+   "fighter": "A",
+   "opponent": "B",
+   "round_number": 1,
+   "time_seconds": 16.066666666666666,
+   "source_frame": 482,
+   "defense": "evade",
+   "confidence": 0.85,
+   "against_technique": "right_push_kick",
+   "metadata": {}
+  }
+ ],
+ "coaching": {
+  "A": {
+   "strengths": [
+    {
+     "title": "Highest pose baseline \u00b7 Ring-center position 76.9%",
+     "detail": "For Fighter A, ring-center position was the strongest of the available pose-derived baselines. This is a movement measurement, not a verified strike label.",
+     "evidence_times": []
+    }
+   ],
+   "improvements": [
+    {
+     "title": "Pose priority 1 \u00b7 Guard position 12.5%",
+     "detail": "Fighter A's guard position was 12.5% across identity-safe pose frames, making it one of this fighter's two lowest measured pose baselines.",
+     "evidence_times": []
+    },
+    {
+     "title": "Pose priority 2 \u00b7 Post-action balance 75.6%",
+     "detail": "Fighter A's post-action balance was 75.6% across identity-safe pose frames, making it one of this fighter's two lowest measured pose baselines.",
+     "evidence_times": []
+    }
+   ],
+   "drills": [
+    {
+     "name": "Fighter A \u00b7 Guard-return audit",
+     "prescription": "4 x 90 sec: after every exchange, freeze in stance and confirm both hands have returned before the partner counters.",
+     "why": "Targets Fighter A's measured guard position baseline of 12.5%."
+    },
+    {
+     "name": "Fighter A \u00b7 Balanced-finish rounds",
+     "prescription": "4 x 90 sec: finish each legal technique in stance, hold for one count, then move without crossing the feet.",
+     "why": "Targets Fighter A's measured post-action balance baseline of 75.6%."
+    }
+   ],
+   "evidence_type": "pose_only",
+   "baseline_summary": "guard position 12.5%, post-action balance 75.6%, ring-center position 76.9%",
+   "note": "Pose-only coaching is shown while automatic action labels remain unvalidated."
+  },
+  "B": {
+   "strengths": [
+    {
+     "title": "Highest pose baseline \u00b7 Ring-center position 77.1%",
+     "detail": "For Fighter B, ring-center position was the strongest of the available pose-derived baselines. This is a movement measurement, not a verified strike label.",
+     "evidence_times": []
+    }
+   ],
+   "improvements": [
+    {
+     "title": "Pose priority 1 \u00b7 Guard position 23.6%",
+     "detail": "Fighter B's guard position was 23.6% across identity-safe pose frames, making it one of this fighter's two lowest measured pose baselines.",
+     "evidence_times": []
+    },
+    {
+     "title": "Pose priority 2 \u00b7 Post-action balance 71.5%",
+     "detail": "Fighter B's post-action balance was 71.5% across identity-safe pose frames, making it one of this fighter's two lowest measured pose baselines.",
+     "evidence_times": []
+    }
+   ],
+   "drills": [
+    {
+     "name": "Fighter B \u00b7 Guard-return audit",
+     "prescription": "4 x 90 sec: after every exchange, freeze in stance and confirm both hands have returned before the partner counters.",
+     "why": "Targets Fighter B's measured guard position baseline of 23.6%."
+    },
+    {
+     "name": "Fighter B \u00b7 Balanced-finish rounds",
+     "prescription": "4 x 90 sec: finish each legal technique in stance, hold for one count, then move without crossing the feet.",
+     "why": "Targets Fighter B's measured post-action balance baseline of 71.5%."
+    }
+   ],
+   "evidence_type": "pose_only",
+   "baseline_summary": "guard position 23.6%, post-action balance 71.5%, ring-center position 77.1%",
+   "note": "Pose-only coaching is shown while automatic action labels remain unvalidated."
+  }
+ },
+ "sport_coaching": {
+  "A": null,
+  "B": null
+ },
+ "training_plan": {
+  "A": [
+   {
+    "session_block": 1,
+    "focus": "Block 1: Fighter A \u00b7 Guard-return audit",
+    "work": "Fighter A: 4 x 90 sec: after every exchange, freeze in stance and confirm both hands have returned before the partner counters.",
+    "goal": "Raise guard position from 12.5% toward 20.5% on the next fight. Targets Fighter A's measured guard position baseline of 12.5%.",
+    "baseline": "guard position 12.5%, post-action balance 75.6%, ring-center position 76.9%"
+   },
+   {
+    "session_block": 2,
+    "focus": "Block 2: Fighter A \u00b7 Balanced-finish rounds",
+    "work": "Fighter A: 4 x 90 sec: finish each legal technique in stance, hold for one count, then move without crossing the feet.",
+    "goal": "Raise balanced movement frames from 75.6% toward 83.6%. Targets Fighter A's measured post-action balance baseline of 75.6%.",
+    "baseline": "guard position 12.5%, post-action balance 75.6%, ring-center position 76.9%"
+   }
+  ],
+  "B": [
+   {
+    "session_block": 1,
+    "focus": "Block 1: Fighter B \u00b7 Guard-return audit",
+    "work": "Fighter B: 4 x 90 sec: after every exchange, freeze in stance and confirm both hands have returned before the partner counters.",
+    "goal": "Raise guard position from 23.6% toward 31.6% on the next fight. Targets Fighter B's measured guard position baseline of 23.6%.",
+    "baseline": "guard position 23.6%, post-action balance 71.5%, ring-center position 77.1%"
+   },
+   {
+    "session_block": 2,
+    "focus": "Block 2: Fighter B \u00b7 Balanced-finish rounds",
+    "work": "Fighter B: 4 x 90 sec: finish each legal technique in stance, hold for one count, then move without crossing the feet.",
+    "goal": "Raise balanced movement frames from 71.5% toward 79.5%. Targets Fighter B's measured post-action balance baseline of 71.5%.",
+    "baseline": "guard position 23.6%, post-action balance 71.5%, ring-center position 77.1%"
+   }
+  ]
+ },
+ "integrity": {
+  "automated_evidence_trusted": false,
+  "action_evidence_status": "candidate_only",
+  "action_evidence_reason": "The current action model has not yet passed release validation. WarriorIQ shows its score only as a preliminary estimate and provides a video-check workflow; unreviewed action labels are never presented as facts.",
+  "end_to_end_gate": {
+   "passed": false,
+   "failures": [
+    "fights is missing",
+    "action_labels is missing",
+    "timing_samples is missing",
+    "fighter_identity_accuracy is missing"
+   ],
+   "measured": {
+    "fights": null,
+    "action_labels": null,
+    "timing_samples": null,
+    "fighter_identity_accuracy": null,
+    "target_accuracy": null,
+    "outcome_accuracy": null,
+    "legality_accuracy": null,
+    "timing_mae_seconds": null
+   },
+   "requirements": {
+    "fights": {
+     "value": 5,
+     "direction": "minimum"
+    },
+    "action_labels": {
+     "value": 100,
+     "direction": "minimum"
+    },
+    "timing_samples": {
+     "value": 50,
+     "direction": "minimum"
+    },
+    "fighter_identity_accuracy": {
+     "value": 0.95,
+     "direction": "minimum"
+    },
+    "target_accuracy": {
+     "value": 0.9,
+     "direction": "minimum"
+    },
+    "outcome_accuracy": {
+     "value": 0.85,
+     "direction": "minimum"
+    },
+    "legality_accuracy": {
+     "value": 0.95,
+     "direction": "minimum"
+    },
+    "timing_mae_seconds": {
+     "value": 0.25,
+     "direction": "maximum"
+    }
+   }
+  },
+  "release_gate": {
+   "minimum_validation_accuracy": 0.9,
+   "minimum_held_out_fights": 3,
+   "minimum_untouched_test_accuracy": 0.9,
+   "minimum_per_class_test_accuracy": 0.8,
+   "minimum_per_class_test_f1": 0.75,
+   "minimum_tested_action_classes": 17,
+   "required_action_classes": [
+    "none",
+    "jab",
+    "cross",
+    "left_hook"
+   ],
+   "dataset_version_required": true
+  },
+  "identity_evidence_trusted": true,
+  "fighter_identity_trusted": {
+   "A": true,
+   "B": true
+  },
+  "action_metrics_trusted": false,
+  "coaching_evidence_mode": "pose_only",
+  "human_review_complete": false,
+  "no_demo_statistics": true,
+  "uncertainty_policy": "WarriorIQ leaves a fighter/action unavailable or uncertain when evidence is insufficient rather than inventing a result.",
+  "scoring_status": "Preliminary computer estimate from high-confidence action candidates. The actions are not verified fight facts; the report does not ask you to label or correct them. This is not an official judges' score.",
+  "minimum_fighter_coverage_for_score": 0.85,
+  "model_validation_status": "A custom WarriorIQ temporal checkpoint is used only when present. Otherwise the multi-frame deterministic classifier is labeled as fallback.",
+  "rules_reference": "WAKO Rules revision 25.10.2022; K-1 2026 amendment takes effect 01.01.2027 and is not applied before that date."
+ },
+ "statistics": {
+  "action_labels_available": false,
+  "attempt_counts_available": true,
+  "event_mode": "observed_attempts",
+  "outcome_invariant": "attempts = landed + missed + blocked + evaded + uncertain",
+  "accuracy_definition": "landed / attempts; withheld when attempts are zero or any outcome is uncertain",
+  "combination_definition": "Two or more supported attempts by the same fighter, in the same round, no more than 1.20 seconds apart, with no opponent attempt between them.",
+  "fighters": {
+   "A": {
+    "attempts": 50,
+    "landed": null,
+    "missed": null,
+    "blocked": null,
+    "evaded": null,
+    "uncertain": null,
+    "accuracy": null,
+    "punch_accuracy": null,
+    "kick_accuracy": null,
+    "punch_attempts": 33,
+    "punches_landed": null,
+    "punches_missed": null,
+    "punches_blocked": null,
+    "punches_evaded": null,
+    "punches_uncertain": null,
+    "kick_attempts": 17,
+    "kicks_landed": null,
+    "kicks_missed": null,
+    "kicks_blocked": null,
+    "kicks_evaded": null,
+    "kicks_uncertain": null,
+    "knee_attempts": 0,
+    "knees_landed": null,
+    "knees_missed": null,
+    "knees_blocked": null,
+    "knees_evaded": null,
+    "knees_uncertain": null,
+    "total_strikes": 50,
+    "total_landed": null,
+    "total_defended": null,
+    "activity_rate": 31.813361611876992,
+    "combinations": null,
+    "successful_combinations": null,
+    "failed_combinations": null,
+    "combination_success_rate": null,
+    "longest_combination": null,
+    "combination_sequences": [],
+    "technique_breakdown": {},
+    "best_weapon": null,
+    "observation_coverage": 0.8925795053003533,
+    "families": {
+     "punch": {
+      "attempts": 33,
+      "landed": null,
+      "missed": null,
+      "blocked": null,
+      "evaded": null,
+      "uncertain": null,
+      "accuracy": null,
+      "evidence": {}
+     },
+     "kick": {
+      "attempts": 17,
+      "landed": null,
+      "missed": null,
+      "blocked": null,
+      "evaded": null,
+      "uncertain": null,
+      "accuracy": null,
+      "evidence": {}
+     },
+     "knee": {
+      "attempts": 0,
+      "landed": null,
+      "missed": null,
+      "blocked": null,
+      "evaded": null,
+      "uncertain": null,
+      "accuracy": null,
+      "evidence": {}
+     }
+    },
+    "evidence": {},
+    "clean": null,
+    "blocked_or_checked": null,
+    "initiative_share": 0.49019607843137253,
+    "attack_mix": {
+     "punch": 0.66,
+     "kick": 0.34,
+     "knee": 0.0
+    },
+    "defensive_denial_rate": null,
+    "clean_exposure_rate": null,
+    "round_profile": {
+     "peak_landed_round": null,
+     "peak_round_landed": null,
+     "opening_round": null,
+     "closing_round": null,
+     "attempt_change": null,
+     "landed_change": null
+    }
+   },
+   "B": {
+    "attempts": 52,
+    "landed": null,
+    "missed": null,
+    "blocked": null,
+    "evaded": null,
+    "uncertain": null,
+    "accuracy": null,
+    "punch_accuracy": null,
+    "kick_accuracy": null,
+    "punch_attempts": 37,
+    "punches_landed": null,
+    "punches_missed": null,
+    "punches_blocked": null,
+    "punches_evaded": null,
+    "punches_uncertain": null,
+    "kick_attempts": 15,
+    "kicks_landed": null,
+    "kicks_missed": null,
+    "kicks_blocked": null,
+    "kicks_evaded": null,
+    "kicks_uncertain": null,
+    "knee_attempts": 0,
+    "knees_landed": null,
+    "knees_missed": null,
+    "knees_blocked": null,
+    "knees_evaded": null,
+    "knees_uncertain": null,
+    "total_strikes": 52,
+    "total_landed": null,
+    "total_defended": null,
+    "activity_rate": 33.08589607635207,
+    "combinations": null,
+    "successful_combinations": null,
+    "failed_combinations": null,
+    "combination_success_rate": null,
+    "longest_combination": null,
+    "combination_sequences": [],
+    "technique_breakdown": {},
+    "best_weapon": null,
+    "observation_coverage": 0.8650176678445229,
+    "families": {
+     "punch": {
+      "attempts": 37,
+      "landed": null,
+      "missed": null,
+      "blocked": null,
+      "evaded": null,
+      "uncertain": null,
+      "accuracy": null,
+      "evidence": {}
+     },
+     "kick": {
+      "attempts": 15,
+      "landed": null,
+      "missed": null,
+      "blocked": null,
+      "evaded": null,
+      "uncertain": null,
+      "accuracy": null,
+      "evidence": {}
+     },
+     "knee": {
+      "attempts": 0,
+      "landed": null,
+      "missed": null,
+      "blocked": null,
+      "evaded": null,
+      "uncertain": null,
+      "accuracy": null,
+      "evidence": {}
+     }
+    },
+    "evidence": {},
+    "clean": null,
+    "blocked_or_checked": null,
+    "initiative_share": 0.5098039215686274,
+    "attack_mix": {
+     "punch": 0.7115384615384616,
+     "kick": 0.28846153846153844,
+     "knee": 0.0
+    },
+    "defensive_denial_rate": null,
+    "clean_exposure_rate": null,
+    "round_profile": {
+     "peak_landed_round": null,
+     "peak_round_landed": null,
+     "opening_round": null,
+     "closing_round": null,
+     "attempt_change": null,
+     "landed_change": null
+    }
+   }
+  },
+  "rounds": [
+   {
+    "round": 1,
+    "fighters": {
+     "A": {
+      "attempts": 50,
+      "landed": null,
+      "missed": null,
+      "blocked": null,
+      "evaded": null,
+      "uncertain": null,
+      "accuracy": null,
+      "evidence": {},
+      "families": {
+       "punch": {
+        "attempts": 33,
+        "landed": null,
+        "missed": null,
+        "blocked": null,
+        "evaded": null,
+        "uncertain": null,
+        "accuracy": null,
+        "evidence": {}
+       },
+       "kick": {
+        "attempts": 17,
+        "landed": null,
+        "missed": null,
+        "blocked": null,
+        "evaded": null,
+        "uncertain": null,
+        "accuracy": null,
+        "evidence": {}
+       },
+       "knee": {
+        "attempts": 0,
+        "landed": null,
+        "missed": null,
+        "blocked": null,
+        "evaded": null,
+        "uncertain": null,
+        "accuracy": null,
+        "evidence": {}
+       }
+      }
+     },
+     "B": {
+      "attempts": 52,
+      "landed": null,
+      "missed": null,
+      "blocked": null,
+      "evaded": null,
+      "uncertain": null,
+      "accuracy": null,
+      "evidence": {},
+      "families": {
+       "punch": {
+        "attempts": 37,
+        "landed": null,
+        "missed": null,
+        "blocked": null,
+        "evaded": null,
+        "uncertain": null,
+        "accuracy": null,
+        "evidence": {}
+       },
+       "kick": {
+        "attempts": 15,
+        "landed": null,
+        "missed": null,
+        "blocked": null,
+        "evaded": null,
+        "uncertain": null,
+        "accuracy": null,
+        "evidence": {}
+       },
+       "knee": {
+        "attempts": 0,
+        "landed": null,
+        "missed": null,
+        "blocked": null,
+        "evaded": null,
+        "uncertain": null,
+        "accuracy": null,
+        "evidence": {}
+       }
+      }
+     }
+    }
+   }
+  ],
+  "comparison": {
+   "combined_attempts": 102,
+   "initiative_margin": -0.019607843137254888,
+   "landed_margin": null
+  },
+  "diagnostics": {
+   "candidate_events_seen": 153,
+   "identity_safe_attempts": 117,
+   "verified_events": 29,
+   "events_emitted": 111,
+   "event_mode": "observed_attempts"
+  }
+ },
+ "event_feed": [
+  {
+   "id": "B-40-punch",
+   "kind": "strike",
+   "fighter": "B",
+   "round_number": 1,
+   "start_time": 1.0666666666666667,
+   "time_seconds": 1.3333333333333335,
+   "end_time": 1.3333333333333335,
+   "technique": null,
+   "family": "punch",
+   "limb": null,
+   "target": null,
+   "outcome": "unclassified",
+   "confidence": 0.9204013028740883,
+   "verification": "observed"
+  },
+  {
+   "id": "A-54-punch",
+   "kind": "strike",
+   "fighter": "A",
+   "round_number": 1,
+   "start_time": 1.6,
+   "time_seconds": 1.8,
+   "end_time": 1.8,
+   "technique": null,
+   "family": "punch",
+   "limb": null,
+   "target": null,
+   "outcome": "unclassified",
+   "confidence": 0.9184745961427688,
+   "verification": "observed"
+  },
+  {
+   "id": "B-66-punch",
+   "kind": "strike",
+   "fighter": "B",
+   "round_number": 1,
+   "start_time": 2.1333333333333333,
+   "time_seconds": 2.2,
+   "end_time": 2.466666666666667,
+   "technique": null,
+   "family": "punch",
+   "limb": null,
+   "target": null,
+   "outcome": "unclassified",
+   "confidence": 0.94,
+   "verification": "observed"
+  },
+  {
+   "id": "B-256-kick",
+   "kind": "strike",
+   "fighter": "B",
+   "round_number": 1,
+   "start_time": 8.4,
+   "time_seconds": 8.533333333333333,
+   "end_time": 8.600000000000001,
+   "technique": null,
+   "family": "kick",
+   "limb": null,
+   "target": null,
+   "outcome": "unclassified",
+   "confidence": 0.9157451862096787,
+   "verification": "observed"
+  }
+ ]
+}
