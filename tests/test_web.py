@@ -180,6 +180,52 @@ class PublicPageTests(unittest.TestCase):
         for sport in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
             self.assertIn(f'href="/analyze/{sport}"', page)
 
+    def test_a_sleeping_machine_promises_a_time_it_can_keep(self):
+        """The wait is quoted from the mechanism that cannot fail.
+
+        A magic packet may or may not cross the uploader's router, so before the
+        machine has a track record the promise is the scheduled drain interval -
+        the ceiling - and only once enough real wakes have been observed does it
+        narrow to the measured median.
+        """
+        from unittest.mock import patch
+
+        import app.main as webapp
+
+        with patch.object(webapp, "wake_status", return_value={
+                "observations": 0, "median_seconds": None}):
+            fallback = webapp._wake_expectation()
+        self.assertIn("at the latest", fallback)
+        self.assertIn("5 minutes", fallback)
+
+        # Two observations is not a track record; the ceiling still stands.
+        with patch.object(webapp, "wake_status", return_value={
+                "observations": 2, "median_seconds": 18.0}):
+            self.assertIn("at the latest", webapp._wake_expectation())
+
+        with patch.object(webapp, "wake_status", return_value={
+                "observations": 9, "median_seconds": 22.0}):
+            measured = webapp._wake_expectation()
+        self.assertIn("usually", measured)
+        self.assertIn("20 seconds", measured)
+
+        message = None
+        with patch.object(webapp, "wake_status", return_value={
+                "observations": 0, "median_seconds": None}):
+            message = webapp._deferred_analysis_message()
+        self.assertIn("asleep", message)
+        self.assertIn("saved", message)
+
+    def test_readiness_reports_whether_the_wake_is_actually_working(self):
+        """Observed latency is the only evidence that a magic packet arrives."""
+        payload = self.client.get("/ready").json()
+        self.assertIn("wake", payload)
+        wake = payload["wake"]
+        for key in ("observations", "median_seconds", "drain_interval_seconds",
+                    "magic_packet_configured"):
+            self.assertIn(key, wake)
+        self.assertEqual(wake["drain_interval_seconds"], SETTINGS.wake_drain_interval_seconds)
+
     def test_an_unknown_sport_is_not_invented(self):
         self.assertEqual(self.client.get("/analyze/sumo").status_code, 404)
 

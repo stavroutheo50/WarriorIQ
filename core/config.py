@@ -224,6 +224,11 @@ class Settings:
     wol_mac: str = os.getenv("WARRIORIQ_WOL_MAC", "").strip()
     wol_host: str = os.getenv("WARRIORIQ_WOL_HOST", "").strip()
     wol_port: int = int(os.getenv("WARRIORIQ_WOL_PORT", "9"))
+    # How often deploy/drain-queue.ps1 is scheduled to wake the machine. This is
+    # the guaranteed ceiling on how long a fight waits when the magic packet
+    # never arrives, and it is what the uploader is promised before any real
+    # wake latency has been observed.
+    wake_drain_interval_seconds: int = int(os.getenv("WARRIORIQ_DRAIN_INTERVAL", "300"))
     worker_remote_url: str = os.getenv("WARRIORIQ_WORKER_REMOTE_URL", "").rstrip("/")
     worker_token: str = env_secret("WARRIORIQ_WORKER_TOKEN")
     worker_artifact_max_bytes: int = max(

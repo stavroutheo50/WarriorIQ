@@ -33,7 +33,7 @@ from authlib.integrations.base_client.errors import OAuthError
 from app.state import (
     AnalysisRunLost, AnalysisStateNotPersisted, claim_next_job, create_job, delete_job,
     finalize_job_from_worker, get_job, list_jobs, prepare_job_run, record_worker_heartbeat,
-    start_job_run, update_job, update_job_for_worker, worker_status,
+    start_job_run, update_job, update_job_for_worker, wake_status, worker_status,
 )
 from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
@@ -1114,9 +1114,33 @@ def _run_job(job_id: str, req: AnalysisRequest, analysis_run_id: str):
             })
 
 
-DEFERRED_ANALYSIS_MESSAGE = (
-    "Waiting for the analysis machine to connect. Your fight is saved and starts automatically."
-)
+def _wake_expectation() -> str:
+    """How long this fight will actually wait, from what the machine has done before.
+
+    The analysis GPU sleeps between fights. A magic packet may or may not cross
+    the visitor's router, so the honest promise is the scheduled drain - the one
+    mechanism that cannot fail - narrowed to the real median once the machine
+    has answered enough wakes to have a track record.
+    """
+    observed = wake_status()
+    seconds = observed["median_seconds"] if observed["observations"] >= 3 else None
+    if seconds is None:
+        seconds = SETTINGS.wake_drain_interval_seconds
+        basis = "at the latest"
+    else:
+        basis = "usually"
+    if seconds < 90:
+        window = f"{max(10, int(round(seconds / 10) * 10))} seconds"
+    else:
+        window = f"{max(1, int(round(seconds / 60)))} minutes"
+    return f"starts {basis} within {window}"
+
+
+def _deferred_analysis_message() -> str:
+    return (
+        "The analysis machine is asleep and is being woken now. Your fight is "
+        f"saved and {_wake_expectation()} - you can close this page."
+    )
 
 
 def _analysis_queue_decision() -> dict:
@@ -1158,6 +1182,8 @@ def _wake_analysis_worker(job_id: str) -> None:
     if not SETTINGS.worker_wake_url and not (SETTINGS.wol_mac and SETTINGS.wol_host):
         return
 
+    update_job(job_id, {"wake_requested_at_epoch": time.time()})
+
     def run() -> None:
         from core.worker_client import send_magic_packet, wake_remote_worker
 
@@ -1181,7 +1207,7 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
         "ok": True,
         "progress_url": f"/progress/{job_id}",
         "deferred": deferred,
-        **({"notice": DEFERRED_ANALYSIS_MESSAGE} if deferred else {}),
+        **({"notice": _deferred_analysis_message()} if deferred else {}),
     })
     response.set_cookie(
         ACTIVE_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
@@ -3337,6 +3363,11 @@ def readiness_check():
     from core.readiness import operational_readiness
 
     readiness = operational_readiness(worker_status())
+    readiness["wake"] = {
+        **wake_status(),
+        "drain_interval_seconds": SETTINGS.wake_drain_interval_seconds,
+        "magic_packet_configured": bool(SETTINGS.wol_mac and SETTINGS.wol_host),
+    }
     return JSONResponse(readiness, status_code=200 if readiness["ready"] else 503)
 
 

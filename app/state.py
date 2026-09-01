@@ -237,6 +237,8 @@ def claim_next_job(worker_id: str) -> tuple[str, dict] | None:
             if not job or job.get("status") != "queued":
                 continue
             now = time.time()
+            requested = job.get("wake_requested_at_epoch")
+            wake_latency = round(now - float(requested), 2) if requested else None
             analysis_run_id = str(job.get("analysis_run_id") or uuid.uuid4().hex)
             job.update({
                 "status": "running",
@@ -244,6 +246,7 @@ def claim_next_job(worker_id: str) -> tuple[str, dict] | None:
                 "worker_id": worker_id,
                 "analysis_run_id": analysis_run_id,
                 "worker_started_at_epoch": now,
+                "wake_latency_seconds": wake_latency,
                 "worker_heartbeat_epoch": now,
                 "worker_lease_expires_epoch": now + SETTINGS.worker_lease_seconds,
                 "updated_at_epoch": now,
@@ -256,6 +259,48 @@ def claim_next_job(worker_id: str) -> tuple[str, dict] | None:
         finally:
             shutil.rmtree(claim_path, ignore_errors=True)
     return None
+
+
+def wake_observations(limit: int = 40) -> list[float]:
+    """Observed seconds between asking the machine to wake and it claiming work.
+
+    Read from the jobs themselves rather than a separate counter, so the record
+    cannot drift from what actually happened.
+    """
+    seen: list[tuple[float, float]] = []
+    for path in OUTPUTS.glob(f"*/{_SESSION_FILE}"):
+        try:
+            job = _read_session(path.parent.name)
+        except Exception:
+            continue
+        if not job:
+            continue
+        latency = job.get("wake_latency_seconds")
+        started = job.get("worker_started_at_epoch")
+        if latency is None or started is None:
+            continue
+        try:
+            seen.append((float(started), float(latency)))
+        except (TypeError, ValueError):
+            continue
+    seen.sort(reverse=True)
+    return [latency for _, latency in seen[:limit]]
+
+
+def wake_status() -> dict:
+    """What the wake path is actually achieving, as a number rather than a hope."""
+    latencies = wake_observations()
+    if not latencies:
+        return {"observations": 0, "median_seconds": None, "fastest_seconds": None,
+                "slowest_seconds": None}
+    ordered = sorted(latencies)
+    middle = ordered[len(ordered) // 2]
+    return {
+        "observations": len(ordered),
+        "median_seconds": round(middle, 1),
+        "fastest_seconds": round(ordered[0], 1),
+        "slowest_seconds": round(ordered[-1], 1),
+    }
 
 
 def update_job_for_worker(
