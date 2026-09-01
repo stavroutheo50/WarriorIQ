@@ -250,7 +250,7 @@ p { max-width: 68ch; }
 
 .field label, .field > span:first-child {
   letter-spacing: .1em;
-  font-size: 10.5px;
+  font-size: var(--wiq-text-micro);
 }
 
 /* --- Restraint ------------------------------------------------------------
@@ -762,7 +762,7 @@ p { max-width: 68ch; }
 
 .weapon-bar small {
   color: var(--wiq-text-tertiary);
-  font-size: 10.5px;
+  font-size: var(--wiq-text-micro);
   letter-spacing: .01em;
   white-space: nowrap;
   overflow: hidden;
