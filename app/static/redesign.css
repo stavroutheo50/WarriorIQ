@@ -1,0 +1,388 @@
+/* ===========================================================================
+   WarriorIQ visual system - broadcast graphics for an analysis tool.
+
+   The previous look was a blue-violet gradient wash behind glowing, heavily
+   rounded cards, with the headline set in gradient text. It read as a template.
+
+   Three decisions drive everything here.
+
+   1. The chrome carries no brand hue. Canvas, panels, type and rules are all
+      neutral graphite. Colour is spent only on the sport a fight belongs to and
+      on status - which is what makes five sports read as one product rather
+      than five themes fighting each other.
+   2. Depth comes from hairlines and type weight, never from coloured glow.
+      A 1px rule at the right value separates two surfaces more convincingly
+      than a 55px shadow, and it survives on a cheap panel.
+   3. Corners are nearly square. 19px radius reads as a consumer app; 3-6px
+      reads as an instrument.
+
+   Loaded last so it settles the argument with the older surface layers.
+   =========================================================================== */
+
+/* --- Canvas --------------------------------------------------------------- */
+html, body { background: var(--wiq-canvas); }
+
+/* --- Structure ------------------------------------------------------------
+   A single measure for the whole product, and generous air around it. The old
+   1280px shell with 36px gutters made every page feel like a settings screen. */
+.shell { width: min(1180px, calc(100% - 48px)); }
+
+/* --- Navigation -----------------------------------------------------------
+   A rule under the bar instead of a floating translucent panel, so the header
+   reads as part of the page rather than hovering over it. */
+.nav {
+  height: 68px;
+  border-bottom: 1px solid var(--wiq-line-soft);
+}
+
+.brand { font-size: 19px; font-weight: 800; letter-spacing: -.03em; }
+.brand span { color: var(--wiq-text); }          /* the logo carries the colour */
+.brand-mark { display: none; }
+
+.navlinks a {
+  padding: 8px 11px;
+  border-radius: 3px;
+  color: var(--wiq-text-tertiary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .002em;
+}
+.navlinks a:hover { background: transparent; color: var(--wiq-text); }
+.navlinks a[aria-current="page"] { color: var(--wiq-text); }
+
+/* --- Buttons --------------------------------------------------------------
+   One loud button per screen. Solid white on graphite is the highest contrast
+   available and needs no glow to be found; everything else is a hairline ghost. */
+.btn {
+  border-radius: 3px;
+  padding: 11px 18px;
+  background: #f5f5f6;
+  color: #0a0a0b;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: .004em;
+  box-shadow: none;
+  transition: background-color 140ms var(--wiq-motion-ease, ease),
+              border-color 140ms var(--wiq-motion-ease, ease);
+}
+.btn:hover { background: #ffffff; transform: none; filter: none; }
+
+.btn.secondary, .nav-cta {
+  background: transparent;
+  border: 1px solid var(--wiq-line) !important;
+  color: var(--wiq-text) !important;
+}
+.btn.secondary:hover { background: rgba(255, 255, 255, .04); border-color: #3a3a40 !important; }
+
+.btn.danger { background: transparent; border: 1px solid #5b2b33; color: #ff9aa8; }
+.nav-signup { background: #f5f5f6; color: #0a0a0b; }
+
+/* --- Surfaces -------------------------------------------------------------
+   Cards stop being the default container. Where one is still a card it is a
+   flat panel with a hairline, not a lifted, glowing, rounded box. */
+.card, .hero-card, .setup-card, .stat-band, .sport-card, .empty-workspace {
+  border-radius: 4px;
+  background: var(--wiq-canvas-raised);
+  border: 1px solid var(--wiq-line-soft);
+  box-shadow: none;
+}
+.card:hover { border-color: var(--wiq-line-soft); }
+
+/* --- Type -----------------------------------------------------------------
+   Tighter, heavier, and never in a gradient. The headline is the loudest thing
+   on the page because it is large and solid, not because it glows. */
+h1, h2, h3 { letter-spacing: -.03em; }
+.hero h1 {
+  font-size: clamp(44px, 6.2vw, 82px);
+  line-height: .94;
+  letter-spacing: -.045em;
+  font-weight: 800;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--wiq-text-tertiary);
+  -webkit-text-stroke: 0;
+}
+.hero h1 span { color: var(--wiq-text); }
+
+.eyebrow { color: var(--wiq-text-tertiary); }
+.eyebrow::before { background: var(--wiq-text-tertiary); }
+
+/* --- Hero -----------------------------------------------------------------
+   Left aligned and set against a rule. Centring made a product page read as a
+   landing page for something that does not exist yet. */
+.hero-centered { text-align: left; padding: clamp(64px, 12vh, 132px) 0 clamp(52px, 9vh, 96px); }
+.hero-centered .hero-copy { align-items: flex-start; margin: 0; max-width: 780px; }
+.hero-centered .hero-actions,
+.hero-centered .fight-path,
+.hero-centered .trust-row,
+.hero-centered .sport-rail { justify-content: flex-start; }
+.hero-centered .hero-copy > p { margin-inline: 0; font-size: 17px; color: var(--wiq-text-secondary); }
+.hero-centered .eyebrow::before { display: inline-block; }
+
+.btn-lead { min-height: 48px; padding-inline: 24px; font-size: 14px; }
+
+/* The sport rail becomes a measured strip against a rule, not a row of words. */
+.sport-rail {
+  gap: 0;
+  margin-top: 34px;
+  padding-top: 18px;
+  border-top: 1px solid var(--wiq-line-soft);
+  width: 100%;
+}
+.sport-rail b {
+  padding-right: 22px;
+  color: var(--wiq-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+.sport-rail b + b::before { display: none; }
+
+/* --- Sport chooser --------------------------------------------------------
+   The five cards are the page. Square, flat, and separated by rules; the sport
+   only shows its colour on the crest and on hover. */
+.sport-card {
+  gap: 8px;
+  padding: 26px 24px 24px;
+  border-radius: 4px;
+  background: var(--wiq-canvas-raised);
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.sport-card:hover { transform: none; background: #141416; border-color: var(--wiq-line); }
+.sport-card-mark { display: none; }             /* the radial wash goes */
+.sport-crest { border-radius: 3px; }
+.sport-card h2 { font-size: 22px; font-weight: 750; }
+
+/* --- Statistics -----------------------------------------------------------
+   Numbers are the product. They get size, tabular figures and a rule above,
+   and they are not put inside boxes. */
+.stat-band { border-radius: 4px; }
+.stat-support { border-radius: 3px; gap: 1px; background: var(--wiq-line-soft); border-color: var(--wiq-line-soft); }
+.stat { background: var(--wiq-canvas-raised); }
+.stat-lead strong { letter-spacing: -.05em; font-weight: 800; }
+
+.metric {
+  border-radius: 3px;
+  border-color: var(--wiq-line-soft);
+  background: var(--wiq-canvas-raised);
+}
+.metric .value { letter-spacing: -.04em; font-weight: 800; }
+.score { color: var(--wiq-text); letter-spacing: -.05em; }
+
+/* --- Tables ---------------------------------------------------------------
+   A real table: ruled rows, tabular figures, a quiet header. */
+table { border-collapse: collapse; }
+th {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--wiq-line);
+  color: var(--wiq-text-tertiary);
+  background: transparent;
+}
+td { padding: 12px; border-bottom: 1px solid var(--wiq-line-soft); }
+tbody tr:hover td { background: rgba(255, 255, 255, .02); }
+
+/* --- Inputs ---------------------------------------------------------------
+   Square fields on the panel colour, with the focus ring doing the work. */
+.field input, .field select, .field textarea {
+  border-radius: 3px;
+  border-color: var(--wiq-line);
+  background: #0d0d0f;
+  padding: 11px 12px;
+}
+.field input:focus, .field select:focus, .field textarea:focus {
+  border-color: #4a4a52;
+  box-shadow: none;
+}
+
+.pill {
+  border-radius: 3px;
+  border-color: var(--wiq-line);
+  background: transparent;
+  color: var(--wiq-text-secondary);
+}
+
+/* --- Notices --------------------------------------------------------------
+   A left rule and flat ground rather than a tinted rounded box. */
+.notice {
+  border-radius: 0 3px 3px 0;
+  border: 1px solid var(--wiq-line-soft);
+  border-left: 2px solid var(--wiq-line);
+  background: var(--wiq-canvas-raised);
+  color: var(--wiq-text-secondary);
+}
+
+/* --- Footer --------------------------------------------------------------- */
+.footer { border-top: 1px solid var(--wiq-line-soft); }
+
+/* --- Responsive -----------------------------------------------------------
+   The measure tightens before the layout collapses, so the tablet width is a
+   designed state rather than a squeezed desktop. */
+@media (max-width: 1024px) {
+  .shell { width: min(100%, calc(100% - 40px)); }
+}
+
+@media (max-width: 620px) {
+  .shell { width: calc(100% - 32px); }
+  .nav { height: 60px; }
+  .hero-centered { padding: 44px 0 36px; }
+  .hero h1 { font-size: 40px; letter-spacing: -.035em; }
+  .hero-centered .hero-copy > p { font-size: 15px; }
+  .btn { width: auto; }
+  .sport-rail { display: flex; flex-wrap: wrap; row-gap: 6px; }
+  .sport-rail b { padding-right: 16px; font-size: 12px; }
+}
+
+/* --- Gradient text, removed -----------------------------------------------
+   The display lines were painted with a clipped linear-gradient. Setting a
+   colour does not undo that: the fill has to be reset too, or the gradient
+   keeps showing through. A headline earns attention by size and weight. */
+.hero h1 em,
+.pricing-hero h1 em,
+.workflow-heading h1 em,
+.archive-hero h1 em,
+h1 em, h2 em {
+  background: none !important;
+  -webkit-background-clip: border-box !important;
+  background-clip: border-box !important;
+  -webkit-text-fill-color: currentColor !important;
+  color: var(--wiq-text-tertiary) !important;
+}
+
+/* Decorative glow blobs behind the hero and cards. */
+.hero-copy::before,
+.hero-card::before,
+.pricing-hero::before { display: none !important; }
+
+.hero-card, .card, .pricing-card {
+  background: var(--wiq-canvas-raised) !important;
+  box-shadow: none !important;
+}
+
+/* --- The three-step path --------------------------------------------------
+   Numbered chips in brand blue were the only colour left in the chrome. They
+   become quiet counters against a rule, which is what they are. */
+.fight-path { gap: 0; color: var(--wiq-text-tertiary); font-size: 13px; }
+.fight-path span { display: inline-flex; align-items: center; gap: 9px; padding-right: 26px; }
+.fight-path b {
+  width: auto;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--wiq-text-tertiary);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.fight-path i { display: none; }
+
+.status-dot { box-shadow: none; }
+
+/* --- Remaining colour leaks ------------------------------------------------
+   A blue glow was reapplied to primary buttons by the motion layer, and two
+   decorative washes survived on section backgrounds. The chrome carries no hue,
+   so they go; the button is already the highest-contrast element on the page. */
+.btn, .btn:hover, .nav-signup, .wiq-primary-motion { box-shadow: none !important; }
+
+.coach-callout, .final-cta, .trust-panel, .product-preview {
+  background-image: none !important;
+  background-color: transparent;
+}
+
+/* Section rules replace section tints: a hairline says "new section" without
+   painting a coloured field behind it. */
+.product-section, .trust-panel {
+  border-top: 1px solid var(--wiq-line-soft);
+  padding-top: clamp(48px, 7vh, 84px);
+}
+
+.final-cta {
+  border: 1px solid var(--wiq-line-soft);
+  border-radius: 4px;
+  padding: clamp(28px, 4vw, 44px);
+}
+
+/* The preview mock keeps its two fighter colours - that is data, not chrome. */
+.preview-screen { border-color: var(--wiq-line-soft); box-shadow: none; background: var(--wiq-canvas-raised); }
+.preview-fight-stage { background: #0d0d0f; border-color: var(--wiq-line-soft); }
+.preview-scan { display: none; }
+
+/* --- Upload target --------------------------------------------------------
+   The primary action on a sport's page, so it wears that sport rather than a
+   brand blue that belongs to nothing. Square, ruled, and quiet until it has a
+   file - the dashed edge already says "drop something here". */
+.file-button {
+  border-radius: 4px;
+  border: 1px dashed var(--wiq-line);
+  background: transparent;
+  color: var(--wiq-text) !important;
+  min-height: 96px;
+  flex-direction: column;
+  gap: 4px;
+}
+.file-button:hover {
+  transform: none;
+  border-color: rgb(var(--sport-accent) / .55);
+  background: rgb(var(--sport-accent) / .05);
+}
+.file-button span {
+  color: rgb(var(--sport-accent-soft));
+  background: none;
+  font-size: 18px;
+}
+.file-button b { font-size: 14px; font-weight: 700; }
+.file-button small { color: var(--wiq-text-tertiary); }
+.file-button.uploaded { border-style: solid; border-color: rgb(var(--sport-accent) / .5); }
+
+.console-badge {
+  border-radius: 3px;
+  border: 1px solid var(--wiq-line);
+  background: transparent;
+  color: var(--wiq-text-secondary);
+}
+
+/* The step eyebrow on a sport page carries the sport, which is the only place
+   colour is doing identification rather than decoration. */
+.setup-head .eyebrow { color: rgb(var(--sport-accent-soft)); }
+.setup-head .eyebrow::before { background: rgb(var(--sport-accent)); }
+
+.upload-progress span { border-radius: 2px; background: var(--wiq-line-soft); }
+.upload-progress i { background: rgb(var(--sport-accent)); border-radius: 2px; }
+
+/* --- Last of the navy -----------------------------------------------------
+   The header still painted itself a translucent blue-black, and the upload
+   target's dashed edge was set by a more specific rule than the one above, so
+   both kept the old palette against the new canvas. */
+.nav, .site-header, header.nav {
+  background: transparent !important;
+  backdrop-filter: none;
+}
+
+.upload-field .file-button,
+.field .file-button,
+.file-button { border-color: var(--wiq-line) !important; }
+
+.upload-field .file-button:hover,
+.field .file-button:hover,
+.file-button:hover { border-color: rgb(var(--sport-accent) / .6) !important; }
+
+.file-button.uploaded { border-color: rgb(var(--sport-accent) / .55) !important; }
+
+/* The global back control and toast belong to the same neutral chrome. */
+.global-back {
+  border-radius: 3px;
+  border-color: var(--wiq-line);
+  background: var(--wiq-canvas-raised);
+  color: var(--wiq-text-secondary);
+  backdrop-filter: none;
+  box-shadow: none;
+}
+.global-back:hover { background: var(--wiq-panel); border-color: #3a3a40; color: var(--wiq-text); transform: none; }
+
+.app-toast, .cookie-notice {
+  border-radius: 4px;
+  border-color: var(--wiq-line);
+  background: var(--wiq-canvas-raised);
+  backdrop-filter: none;
+  box-shadow: none;
+}

@@ -1,6 +1,8 @@
-# WarriorIQ — consolidated build
+# WarriorIQ — evidence-linked combat sports analysis
 
-This build consolidates the WarriorIQ requirements discussed across the project instead of continuing the old patch-on-patch test scripts.
+WarriorIQ turns fight video into an evidence-linked performance report. It analyses five sports —
+kickboxing, boxing, Muay Thai, taekwondo and MMA — each scored under its own ruleset, and it
+withholds any claim the footage cannot support.
 
 ## What is included
 
@@ -143,6 +145,6 @@ The responsive website can be used from a phone or computer. Analysis runs on th
 
 ## What code alone cannot truthfully guarantee
 
-A custom kickboxing classifier cannot become “best in the market” merely by writing a neural-network class. It needs a large, correctly labeled kickboxing dataset, held-out complete-fight validation, and a separate untouched test set. Until a checkpoint passes those release gates, WarriorIQ treats automatic detections as private review candidates and exposes only human-confirmed actions as evidence.
+A custom combat-sports classifier cannot become “best in the market” merely by writing a neural-network class. It needs a large, correctly labeled dataset spanning the sports it claims, held-out complete-fight validation, and a separate untouched test set. Until a checkpoint passes those release gates, WarriorIQ treats automatic detections as private review candidates and exposes only human-confirmed actions as evidence.
 
 The acceptance benchmark remains: complete unseen fights end-to-end, no manual correction after initial A/B selection, referee/no-referee footage, stable identities, attacks/outcomes, ruleset scoring, statistics and useful evidence-linked reports — while meeting the real-time budget.

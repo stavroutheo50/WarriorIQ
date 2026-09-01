@@ -1,14 +1,14 @@
 /* WarriorIQ product polish — shared editorial sports interface */
 :root{
-  --wiq-canvas:#070b13;
-  --wiq-canvas-raised:#0a101c;
-  --wiq-panel:#0e1726;
-  --wiq-panel-strong:#121d2f;
-  --wiq-line:#26364f;
-  --wiq-line-soft:#1b293d;
-  --wiq-text:#f3f6fb;
-  --wiq-text-secondary:#a8b4c6;
-  --wiq-text-tertiary:#78869c;
+  --wiq-canvas:#0a0a0b;
+  --wiq-canvas-raised:#101012;
+  --wiq-panel:#141416;
+  --wiq-panel-strong:#1a1a1d;
+  --wiq-line:#2a2a2e;
+  --wiq-line-soft:#1e1e21;
+  --wiq-text:#f5f5f6;
+  --wiq-text-secondary:#a1a1a8;
+  --wiq-text-tertiary:#82828b;
   --wiq-blue:#5c82ef;
   --wiq-cyan:#55c6df;
   --wiq-a:#55c6df;
@@ -16,16 +16,16 @@
   --wiq-success:#5fd5a6;
   --wiq-warning:#edb966;
   --wiq-danger:#ef7891;
-  --wiq-radius-sm:8px;
-  --wiq-radius-md:13px;
-  --wiq-radius-lg:19px;
+  --wiq-radius-sm:3px;
+  --wiq-radius-md:4px;
+  --wiq-radius-lg:6px;
   --wiq-space-1:6px;
   --wiq-space-2:10px;
   --wiq-space-3:16px;
   --wiq-space-4:24px;
   --wiq-space-5:36px;
   --wiq-space-6:56px;
-  --wiq-shadow:0 18px 55px rgba(0,0,0,.28);
+  --wiq-shadow:0 1px 0 rgba(255,255,255,.03);
 }
 
 .settings-tabs{display:flex;gap:8px;margin:18px 0 24px;border-bottom:1px solid var(--line)}
@@ -40,7 +40,7 @@
 @media(max-width:720px){.privacy-fight-list article,.settings-data>div{align-items:flex-start;flex-direction:column}.settings-data dd{text-align:left}.settings-tabs a{flex:1;text-align:center}}
 
 html{background:var(--wiq-canvas)}
-body{background:radial-gradient(780px 420px at 82% -12%,rgba(65,109,195,.18),transparent 66%),linear-gradient(180deg,#080d17 0,var(--wiq-canvas) 42%,#080c15 100%);color:var(--wiq-text)}
+body{background:var(--wiq-canvas);color:var(--wiq-text)}
 body:before{opacity:.045;background-size:64px 64px}
 ::selection{background:#557ee8;color:#fff}
 main{min-height:55vh}
