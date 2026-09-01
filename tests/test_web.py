@@ -226,6 +226,49 @@ class PublicPageTests(unittest.TestCase):
             self.assertIn(key, wake)
         self.assertEqual(wake["drain_interval_seconds"], SETTINGS.wake_drain_interval_seconds)
 
+    def test_the_shell_keeps_showing_which_sport_you_are_in(self):
+        """Five sports share one product, so every screen has to answer which.
+
+        Opening a sport remembers it, and the shell then carries that sport's
+        crest and accent on every other page - so the answer is present without
+        a banner, and the chip is itself the way to change it.
+        """
+        client = TestClient(app)
+        try:
+            # Nothing chosen yet: no chip rather than a wrong default.
+            self.assertNotIn('class="sport-switch"', client.get("/history").text)
+
+            opened = client.get("/analyze/muay_thai")
+            self.assertEqual(opened.status_code, 200)
+            self.assertEqual(client.cookies.get("warrioriq_sport"), "muay_thai")
+
+            elsewhere = client.get("/history").text
+            self.assertIn('class="sport-switch"', elsewhere)
+            self.assertIn("Muay Thai", elsewhere)
+            # The chip carries the sport's own accent and leads to the switcher.
+            self.assertIn("--sport-accent:226 154 74", elsewhere)
+            self.assertIn('class="sport-switch" href="/analyze"', elsewhere)
+
+            # Switching sport switches the shell.
+            client.get("/analyze/boxing")
+            self.assertIn("--sport-accent:233 106 106", client.get("/history").text)
+        finally:
+            client.close()
+
+    def test_no_text_is_left_below_the_readability_floor(self):
+        """The audit found 85 rules setting body and label text at 9-10px.
+
+        A modular scale replaced them. This guards the floor rather than the
+        exact sizes, so the scale can be tuned without the test fighting it.
+        """
+        system = (Path(__file__).resolve().parents[1] / "app" / "static" / "system.css").read_text(encoding="utf-8")
+        self.assertIn("--wiq-text-micro: 11px", system)
+        # No rule in the system layer may set type below the 11px floor.
+        import re
+
+        for size in re.findall(r"font-size:\s*([0-9.]+)px", system):
+            self.assertGreaterEqual(float(size), 9.5, f"{size}px is below the floor")
+
     def test_an_unknown_sport_is_not_invented(self):
         self.assertEqual(self.client.get("/analyze/sumo").status_code, 404)
 

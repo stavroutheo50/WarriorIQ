@@ -100,6 +100,7 @@ init_db()
 SESSION_COOKIE = "warrioriq_session"
 GUEST_COOKIE = "warrioriq_guest"
 ACTIVE_ANALYSIS_COOKIE = "warrioriq_active_analysis"
+ACTIVE_SPORT_COOKIE = "warrioriq_sport"
 LAST_COMPLETED_ANALYSIS_COOKIE = "warrioriq_last_completed_analysis"
 COOKIE_PREFERENCES_COOKIE = "warrioriq_cookie_preferences"
 _last_guest_cleanup = 0.0
@@ -577,6 +578,8 @@ async def viewer_context(request: Request, call_next):
         request.cookies.get(LAST_COMPLETED_ANALYSIS_COOKIE),
     )
     request.state.active_analysis = request.state.analysis_navigation["display"]
+    chosen_sport = (request.cookies.get(ACTIVE_SPORT_COOKIE) or "").strip().lower()
+    request.state.active_sport = sport_identity(chosen_sport) if chosen_sport in SPORTS else None
     request.state.launch = launch_readiness()
     request.state.minimum_account_age = SETTINGS.minimum_account_age
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
@@ -1721,9 +1724,16 @@ def sport_setup(request: Request, sport: str):
     key = (sport or "").strip().lower()
     if key not in SPORTS:
         raise HTTPException(status_code=404, detail="Unknown sport")
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request=request, name="analyze.html", context=_sport_context(request, key),
     )
+    # Remembered so the shell can keep showing which sport this session is in,
+    # and so returning to the product lands where the visitor left off.
+    response.set_cookie(
+        ACTIVE_SPORT_COOKIE, key, max_age=60 * 60 * 24 * 180,
+        httponly=False, samesite="lax", secure=_request_is_secure(request),
+    )
+    return response
 
 
 @app.post("/upload")

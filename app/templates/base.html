@@ -57,13 +57,14 @@
   <link rel="preload" href="/static/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/navigation.css">
-  <link rel="stylesheet" href="/static/fixes.css?v=20260902-sportid2">
-  <link rel="stylesheet" href="/static/product.css?v=20260902-sportid2">
+  <link rel="stylesheet" href="/static/fixes.css?v=20260903-system2">
+  <link rel="stylesheet" href="/static/product.css?v=20260903-system2">
+  <link rel="stylesheet" href="/static/system.css?v=20260903-system2">
   <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="96x96" href="/static/warrioriq-logo-96.png"><link rel="icon" type="image/png" sizes="192x192" href="/static/warrioriq-logo-192.png"><link rel="apple-touch-icon" sizes="180x180" href="/static/warrioriq-logo-180.png">
   {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/"},{"@type":"Organization","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/","logo":"{{request.state.social_image_url}}"},{"@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-linked fight analysis for kickboxing, boxing, Muay Thai, taekwondo and MMA.","url":"{{request.state.site_url}}/"}]}</script>{% endif %}
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/premium.css?v=20260902-sportid2">
-  <link rel="stylesheet" href="/static/motion.css?v=20260902-sportid2">
+  <link rel="stylesheet" href="/static/premium.css?v=20260903-system2">
+  <link rel="stylesheet" href="/static/motion.css?v=20260903-system2">
 </head>
 {% set page_key = request.url.path.strip('/').split('/')[0] if request.url.path.strip('/') else 'home' %}
 <body data-page="{{page_key}}"{% if identity %} data-sport="{{identity.key}}" style="--sport-accent:{{identity.accent}};--sport-accent-soft:{{identity.accent_soft}}"{% endif %}>
@@ -80,7 +81,7 @@
     <nav class="nav" aria-label="Main navigation">
       <a class="brand" href="/"><img class="brand-logo" src="/static/warrioriq-logo-96.png" width="38" height="38" decoding="async" alt="WarriorIQ logo">WARRIOR<span>IQ</span></a>
       <div class="navlinks">
-        <a data-nav="analyze" href="/analyze">Analyze</a><a data-nav="library" href="/history">Fight library</a><a data-nav="progress" href="/dashboard">Progress</a><a data-nav="coach" href="/coach">Coach</a><a data-nav="plans" href="/pricing">Plans</a>
+        {% if request.state.active_sport %}<a class="sport-switch" href="/analyze" style="--sport-accent:{{request.state.active_sport.accent}};--sport-accent-soft:{{request.state.active_sport.accent_soft}}" title="Change sport"><span class="sport-switch-mark" aria-hidden="true">{{request.state.active_sport.mark}}</span><span class="sport-switch-name">{{request.state.active_sport.label}}</span><span class="sport-switch-caret" aria-hidden="true">⌄</span></a>{% endif %}<a data-nav="analyze" href="/analyze">Analyze</a><a data-nav="library" href="/history">Fight library</a><a data-nav="progress" href="/dashboard">Progress</a><a data-nav="coach" href="/coach">Coach</a><a data-nav="plans" href="/pricing">Plans</a>
         <details class="nav-more" id="navMore"><summary>More <span aria-hidden="true">⌄</span></summary><div class="nav-more-panel"><a href="/compare">Compare fights<span>See changes over time</span></a><a href="/validation">Accuracy lab<span>Model validation</span></a></div></details>
       </div>
       <div class="account-nav">{% if request.state.active_analysis %}<a class="active-analysis-chip" id="activeAnalysisLink" data-analysis-id="{{request.state.active_analysis.job_id}}" data-analysis-status="{{request.state.active_analysis.status}}" href="/{% if request.state.active_analysis.status == 'complete' %}result{% else %}progress{% endif %}/{{request.state.active_analysis.job_id}}"><i aria-hidden="true"></i><span id="activeAnalysisLabel">{% if request.state.active_analysis.status == 'complete' %}Results ready{% elif request.state.active_analysis.status == 'interrupted' %}Analysis paused{% elif request.state.active_analysis.status == 'error' %}Analysis needs attention{% else %}Analyzing {{'%.0f'|format(request.state.active_analysis.percent or 0)}}%{% endif %}</span></a>{% endif %}{% if request.state.account %}<details class="profile-menu"><summary aria-label="Open account menu"><span class="profile-initial" aria-hidden="true">{{request.state.account.email[:1]|upper}}</span><span class="profile-email">{{request.state.account.email}}</span><span aria-hidden="true">⌄</span></summary><div class="profile-menu-panel"><a href="/profile"><strong>Athlete profile</strong><span>Account and fighter details</span></a><a href="/history"><strong>Fight library</strong><span>Saved analyses</span></a><form action="/logout" method="post"><button type="submit">Sign out</button></form></div></details>{% else %}<a href="/login">Sign in</a><a class="btn nav-signup" href="/signup">Create account</a>{% endif %}</div>
@@ -108,5 +109,5 @@
     document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{if(event.defaultPrevented||form.dataset.async==='true')return;const submitter=event.submitter;if(!submitter||submitter.name||submitter.dataset.keepLabel==='true')return;submitter.dataset.originalLabel=submitter.textContent;submitter.textContent=submitter.dataset.loadingLabel||'Working…';submitter.setAttribute('aria-busy','true');submitter.disabled=true}));
   })();
   </script>
-  <script src="/static/motion.js?v=20260902-sportid2" defer></script>
+  <script src="/static/motion.js?v=20260903-system2" defer></script>
 </body></html>
