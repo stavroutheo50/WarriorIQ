@@ -684,6 +684,61 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(saved["video_path"], "")
         self.assertIsNotNone(saved["video_deleted_at"])
 
+    def test_starting_a_fight_while_the_machine_sleeps_queues_it(self):
+        """The deferred path is the normal one, and it was never exercised.
+
+        When the analysis machine is asleep the queue accepts the fight and
+        stamps a message explaining the wait. Every earlier test ran the
+        in-process path, so a name that only this branch referenced could go
+        missing and the suite stayed green while the live button returned 500
+        for exactly the case the product is built around.
+        """
+        self.client.get("/")
+        guest_id = self.client.cookies.get(GUEST_COOKIE)
+        job_id = "deferredfight1"
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        cv2.imwrite(str(job_dir / "selection.jpg"), np.full((360, 640, 3), 90, dtype=np.uint8))
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"video-placeholder")
+        create_job(job_id, {
+            "owner_key": f"guest:{guest_id}", "status": "selection",
+            "video_path": str(video_path), "original_name": "hidden.mp4",
+            "fight_type": "competition", "ruleset": "K1", "start_seconds": 0.0,
+            "round_count": 1, "round_duration_seconds": 120.0,
+            "break_duration_seconds": 60.0, "selected_rounds": [1], "end_seconds": None,
+            "profile_id": 0, "persist_result": False, "openai_identity_recovery": False,
+        })
+        previous_mode = webapp.SETTINGS.analysis_worker_mode
+        previous_defer = webapp.SETTINGS.accept_deferred_analysis
+        try:
+            object.__setattr__(webapp.SETTINGS, "analysis_worker_mode", "remote")
+            object.__setattr__(webapp.SETTINGS, "accept_deferred_analysis", True)
+            with (
+                patch.object(webapp, "worker_status", return_value={
+                    "available": False, "reason": "worker_heartbeat_missing"}),
+                patch.object(webapp, "_wake_analysis_worker") as wake,
+            ):
+                response = self.client.post(f"/api/start/{job_id}", json={
+                    "fighter_a_box": [80, 40, 250, 340],
+                    "fighter_b_box": [390, 40, 560, 340],
+                    "focus_fighter": "A",
+                })
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            self.assertTrue(payload["deferred"])
+            self.assertIn("asleep", payload["notice"])
+            wake.assert_called_once_with(job_id)
+            # The queued job carries the same explanation, which is the line
+            # that referenced the deleted constant.
+            saved = webapp.get_job(job_id)
+            self.assertEqual(saved["status"], "queued")
+            self.assertIn("asleep", saved["message"])
+        finally:
+            object.__setattr__(webapp.SETTINGS, "analysis_worker_mode", previous_mode)
+            object.__setattr__(webapp.SETTINGS, "accept_deferred_analysis", previous_defer)
+            delete_job(job_id)
+
     def test_selected_fighter_is_report_focus_while_engine_analyzes_both(self):
         self.client.get("/")
         guest_id = self.client.cookies.get(GUEST_COOKIE)

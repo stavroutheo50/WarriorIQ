@@ -2286,7 +2286,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
         analysis_run_id = prepare_job_run(job_id, {
             "analysis_target": "BOTH", "focus_fighter": focus_fighter,
             "fighter_a_box": fighter_a_box, "fighter_b_box": fighter_b_box,
-            **({"message": DEFERRED_ANALYSIS_MESSAGE} if capacity["deferred"] else {}),
+            **({"message": _deferred_analysis_message()} if capacity["deferred"] else {}),
         })
     except AnalysisStateNotPersisted as exc:
         if job.get("account_id") and get_job(job_id).get("usage_reserved"):
@@ -2322,7 +2322,7 @@ def restart_interrupted_analysis(request: Request, job_id: str):
     req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, focus_fighter)
     try:
         analysis_run_id = prepare_job_run(job_id, {
-            "message": DEFERRED_ANALYSIS_MESSAGE if capacity["deferred"] else "Restarting the preserved analysis session",
+            "message": _deferred_analysis_message() if capacity["deferred"] else "Restarting the preserved analysis session",
         })
     except AnalysisStateNotPersisted as exc:
         LOGGER.error("analysis_queue_not_persisted job_id=%s", job_id, exc_info=exc)
