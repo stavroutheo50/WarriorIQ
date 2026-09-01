@@ -35,6 +35,13 @@
   </form>
 </section>
 
+<div class="review-keys" aria-label="Keyboard shortcuts">
+  <span><kbd>Space</kbd> replay</span>
+  <span><kbd>Enter</kbd> correct</span>
+  <span><kbd>X</kbd> not an action</span>
+  <span><kbd>J</kbd> / <kbd>K</kbd> next / previous</span>
+  <span><kbd>E</kbd> edit fields</span>
+</div>
 <div class="review-list">
 {% for e in candidates %}
 {% set key='%.3f'|format(e.peak_time) %}{% set saved=annotations.get(key) %}{% set answer=saved.corrected if saved else e %}
@@ -75,4 +82,73 @@ document.getElementById('cancelManual').onclick=()=>manual.hidden=true;
 document.querySelectorAll('.capture-contact-time').forEach(button=>button.onclick=()=>{const input=button.closest('form').querySelector('[name="contact_time"]');input.value=video.currentTime.toFixed(3);input.focus()});
 document.querySelectorAll('.reject-action').forEach(button=>button.onclick=()=>{const form=button.closest('form');form.querySelector('[name="technique"]').value='none';form.querySelector('[name="target"]').value='none';form.querySelector('[name="outcome"]').value='uncertain';form.requestSubmit(form.querySelector('[type="submit"]'))});
 document.querySelectorAll('.review-form').forEach(form=>form.onsubmit=async event=>{event.preventDefault();const status=form.querySelector('.form-status'),button=event.submitter,data=new FormData(form),manualLabel=form.dataset.manual==='true',card=form.closest('.review-candidate'),wasReviewed=card?.classList.contains('reviewed');if(button){button.disabled=true;button.setAttribute('aria-busy','true')}status.textContent='Saving private correction…';const predicted=manualLabel?{}:{fighter:form.dataset.predictedFighter,technique:form.dataset.predictedTechnique,target:form.dataset.predictedTarget==='none'?null:form.dataset.predictedTarget,outcome:form.dataset.predictedOutcome,family:form.dataset.predictedFamily,limb:form.dataset.predictedLimb};const payload={event_time:Number(data.get('event_time')),contact_time:Number(data.get('contact_time')),predicted,fighter:data.get('fighter'),technique:data.get('technique'),target:data.get('target'),outcome:data.get('outcome'),manual:manualLabel};try{const response=await fetch('/api/annotations/{{job_id}}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),result=await response.json();if(!response.ok)throw new Error(result.detail||'Could not save label');status.textContent=result.sequence_exported?'Saved · opt-in training sequence exported':'Saved privately · model-training export off';status.className='small good form-status';card?.classList.add('reviewed');if(button){button.disabled=false;button.removeAttribute('aria-busy');button.textContent='Save changes'}if(manualLabel){manual.hidden=true;form.reset()}else if(!wasReviewed){const reviewed=document.getElementById('reviewedCount'),remaining=document.getElementById('remainingCount'),complete=document.getElementById('completeReview');if(reviewed)reviewed.textContent=String(Number(reviewed.textContent)+1);if(remaining){const left=Math.max(0,Number(remaining.textContent)-1);remaining.textContent=String(left);if(left===0&&complete){complete.disabled=false;complete.removeAttribute('title');complete.textContent=complete.dataset.readyLabel}}}}catch(error){status.textContent=error.message;status.className='small bad form-status';if(button){button.disabled=false;button.removeAttribute('aria-busy')}}});
+
+/* --- Keyboard review -------------------------------------------------------
+   Labelling was four mouse actions per candidate: click to play, watch, click
+   to judge, scroll to find the next card. At a thousand labels that is the
+   whole reason a dataset never gets built. One key per candidate instead - the
+   clip plays itself, a keypress judges it, and the next one starts.
+   --------------------------------------------------------------------------- */
+(()=>{
+  const cards=[...document.querySelectorAll('.review-candidate')];
+  if(!cards.length) return;
+  let active=Math.max(0, cards.findIndex(c=>!c.classList.contains('reviewed')));
+  const typing=el=>el&&/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+
+  const playClip=card=>{
+    const jump=card.querySelector('.jump-candidate');
+    if(!jump) return;
+    video.currentTime=Math.max(0, parseFloat(jump.dataset.time||'0')-1);
+    video.play().catch(()=>{});
+    // Stop shortly after the action so the next keypress is not racing the
+    // rest of the round.
+    clearTimeout(playClip._t);
+    playClip._t=setTimeout(()=>video.pause(), 2200);
+  };
+
+  const focus=(index,opts)=>{
+    if(index<0||index>=cards.length) return;
+    cards[active]&&cards[active].classList.remove('is-active');
+    active=index;
+    const card=cards[active];
+    card.classList.add('is-active');
+    card.scrollIntoView({block:'center', behavior:'smooth'});
+    if(!opts||opts.play!==false) playClip(card);
+  };
+
+  const advance=()=>{
+    const next=cards.findIndex((c,i)=>i>active&&!c.classList.contains('reviewed'));
+    focus(next===-1?Math.min(active+1,cards.length-1):next);
+  };
+
+  // Saving is async, so the next candidate waits for this one to be recorded.
+  const submit=card=>{
+    const form=card.querySelector('.review-form');
+    if(!form) return;
+    form.requestSubmit(form.querySelector('button[type="submit"]'));
+    setTimeout(advance, 260);
+  };
+
+  document.addEventListener('keydown',event=>{
+    if(event.metaKey||event.ctrlKey||event.altKey) return;
+    if(typing(document.activeElement)){
+      if(event.key==='Escape') document.activeElement.blur();
+      return;
+    }
+    const card=cards[active];
+    const key=event.key.toLowerCase();
+    if(event.key===' '){ event.preventDefault(); playClip(card); }
+    else if(event.key==='Enter'){ event.preventDefault(); submit(card); }
+    else if(key==='x'){ event.preventDefault(); const r=card.querySelector('.reject-action'); if(r) r.click(); submit(card); }
+    else if(key==='j'){ event.preventDefault(); focus(active+1); }
+    else if(key==='k'){ event.preventDefault(); focus(active-1); }
+    else if(key==='e'){
+      event.preventDefault();
+      const details=card.querySelector('.review-details');
+      if(details){ details.open=true; const sel=details.querySelector('select'); if(sel) sel.focus(); }
+    }
+  });
+
+  focus(active,{play:false});
+})();
 </script>{% endblock %}

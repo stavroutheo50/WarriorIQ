@@ -496,3 +496,43 @@ h1 em, h2 em {
 }
 
 .preview-fighter { font-size: clamp(14px, 2.4vw, 26px); }
+
+/* --- Keyboard review ------------------------------------------------------
+   Building a training set means judging a thousand candidates, so the active
+   one has to be obvious at a glance and the shortcuts have to be visible
+   rather than folklore. */
+.review-keys {
+  display: flex;
+  gap: 8px 20px;
+  flex-wrap: wrap;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--wiq-line-soft);
+  border-radius: 4px;
+  background: var(--wiq-canvas-raised);
+  color: var(--wiq-text-tertiary);
+  font-size: var(--wiq-text-xs);
+}
+
+.review-keys kbd {
+  display: inline-block;
+  min-width: 20px;
+  margin-right: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--wiq-line);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: var(--wiq-panel);
+  color: var(--wiq-text);
+  font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* The candidate under the cursor is marked on the accent, not by a colour
+   change to the whole card, so a reviewed card still reads as reviewed. */
+.review-candidate { border-left: 2px solid transparent; }
+.review-candidate.is-active {
+  border-left-color: rgb(var(--wiq-accent));
+  background: var(--wiq-panel) !important;
+}
+.review-candidate.reviewed { opacity: .62; }
+.review-candidate.reviewed.is-active { opacity: 1; }
