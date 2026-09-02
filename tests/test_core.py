@@ -930,6 +930,40 @@ class EngagementRangeTests(unittest.TestCase):
 
         self.assertGreaterEqual(SETTINGS.max_engagement_body_lengths, 2.0)
 
+    def test_the_plan_targets_the_number_its_drill_was_chosen_for(self):
+        """Goals used to be picked by matching words in the drill's name.
+
+        There was no branch for pressure or footwork, so the two dimensions
+        that separate fighters most got a generic "improve on your measured
+        baseline" line. Each drill now carries its own metric.
+        """
+        from core.coaching import build_pose_coaching, build_training_plan
+
+        a = dict(guard_index=0.125, balance_index=0.756, ring_center_control=0.505,
+                 pressure_index=0.117, footwork_body_lengths_per_second=1.174)
+        b = dict(guard_index=0.236, balance_index=0.715, ring_center_control=0.548,
+                 pressure_index=-0.057, footwork_body_lengths_per_second=1.044)
+        plan_b = build_training_plan(build_pose_coaching("B", b, a), "B", b)
+        goals = " ".join(block["goal"] for block in plan_b)
+
+        # B is behind on pressure and footwork, so both must get real targets.
+        self.assertIn("pressure", goals)
+        self.assertIn("body lengths a second", goals)
+        self.assertNotIn("measured baseline", goals)
+        # And each goal names what the opponent managed, as the benchmark.
+        for block in plan_b:
+            self.assertIn("Your opponent was at", block["goal"])
+
+    def test_the_plan_states_each_number_once(self):
+        """The goal appended the drill's rationale, which repeated the same
+        figure in a second format: "from 22.0% toward 30.0% ... Measured at 22%"."""
+        from core.coaching import build_pose_coaching, build_training_plan
+
+        own = dict(guard_index=0.22, balance_index=0.81, ring_center_control=0.63)
+        plan = build_training_plan(build_pose_coaching("A", own), "A", own)
+        self.assertTrue(plan)
+        self.assertNotIn("Measured at", plan[0]["goal"])
+
     def test_coaching_differs_between_the_two_fighters_in_a_bout(self):
         """Every fighter used to get the same advice, in every fight.
 

@@ -215,6 +215,13 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
             "name": f"Fighter {fighter} · {drill}",
             "prescription": prescription,
             "why": detail,
+            # Carried through so the training plan reads the number off the
+            # measurement instead of matching words in the drill's name - which
+            # silently gave the pressure and footwork drills a generic goal.
+            "metric": _key,
+            "label": label,
+            "measured": _mine,
+            "opponent": opponent.get(_key),
         })
     return {
         "strengths": strengths,
@@ -392,28 +399,40 @@ def build_training_plan(coaching: dict, fighter: str, own: dict) -> list[dict]:
         if accuracy is not None:
             baseline += f", {_pct(accuracy)}% conversion"
     def measured_goal(drill: dict) -> str:
-        """Give each drill a target tied to this fighter's own weakest signal."""
-        name = drill.get("name", "").lower()
-        if "guard" in name and own.get("guard_index") is not None:
-            current = float(own["guard_index"])
-            return f"Raise guard position from {_pct(current)}% toward {_pct(min(.95, current + .08))}% on the next fight."
-        if any(word in name for word in ("balance", "stance", "balanced-finish")) and own.get("balance_index") is not None:
-            current = float(own["balance_index"])
-            return f"Raise balanced movement frames from {_pct(current)}% toward {_pct(min(.95, current + .08))}%."
-        if any(word in name for word in ("center", "lane")) and own.get("ring_center_control") is not None:
-            current = float(own["ring_center_control"])
-            return f"Raise ring-center positioning from {_pct(current)}% toward {_pct(min(.95, current + .08))}%."
-        attacks = own.get("attacks", {})
-        if any(word in name for word in ("accuracy", "conversion", "miss")) and attacks.get("accuracy") is not None:
-            current = float(attacks["accuracy"])
-            return f"Raise action conversion from {_pct(current)}% toward {_pct(min(.95, current + .08))}%."
-        if "combination" in name:
-            current = int(own.get("combinations", {}).get("count", 0))
-            return f"Build at least {current + 2} clean combinations next time, above this fight's {current}."
-        if any(word in name for word in ("defend", "defense", "protect")):
-            current = sum(own.get("defenses", {}).values())
-            return f"Record at least {current + 2} controlled defend-and-return repetitions, above the {current} detected here."
-        return f"Improve on Fighter {fighter}'s measured baseline ({baseline}) without sacrificing the strongest measured area."
+        """A target tied to the number the drill was chosen for.
+
+        Reads the metric off the drill rather than matching words in its name.
+        The old string matching had no branch for pressure or footwork, so the
+        two dimensions that separate fighters most got a generic sentence.
+        """
+        key = drill.get("metric")
+        current = drill.get("measured")
+        theirs = drill.get("opponent")
+        if key is None or current is None:
+            return (
+                f"Improve on Fighter {fighter}'s measured baseline ({baseline}) "
+                "without sacrificing the strongest measured area."
+            )
+        current = float(current)
+        if key == "pressure_index":
+            now = (current + 1) / 2 * 100
+            target = min(75.0, now + 6)
+            goal = f"Move your pressure from {now:.0f} to {target:.0f} out of 100."
+        elif key == "footwork_body_lengths_per_second":
+            target = current + 0.25
+            goal = f"Move your feet more: {current:.1f} to {target:.1f} body lengths a second."
+        else:
+            target = min(0.95, current + 0.08)
+            goal = f"Raise {drill.get('label', 'this number').lower()} from {_pct(current)}% to {_pct(target)}%."
+        if theirs is not None:
+            if key == "pressure_index":
+                theirs_shown = f"{(float(theirs) + 1) / 2 * 100:.0f}"
+            elif key == "footwork_body_lengths_per_second":
+                theirs_shown = f"{float(theirs):.1f}"
+            else:
+                theirs_shown = f"{_pct(float(theirs))}%"
+            goal += f" Your opponent was at {theirs_shown}."
+        return goal
 
     plan = []
     for index, drill in enumerate(drills[:4], start=1):
@@ -421,7 +440,7 @@ def build_training_plan(coaching: dict, fighter: str, own: dict) -> list[dict]:
             "session_block": index,
             "focus": f"Block {index}: {drill['name']}",
             "work": f"Fighter {fighter}: {drill['prescription']}",
-            "goal": f"{measured_goal(drill)} {drill['why']}",
+            "goal": measured_goal(drill),
             "baseline": baseline,
         })
     return plan
