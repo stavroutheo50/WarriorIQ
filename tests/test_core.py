@@ -927,6 +927,44 @@ class EngagementRangeTests(unittest.TestCase):
 
         self.assertGreaterEqual(SETTINGS.max_engagement_body_lengths, 2.0)
 
+    def test_centre_control_measures_the_fight_not_the_camera(self):
+        """Two fighters standing together must not both score as in control.
+
+        The old measure took distance from the middle of the picture. A
+        tournament camera covers a whole hall, so the mat is a fraction of the
+        frame and frame-centre is not ring-centre: on one real bout it gave the
+        two fighters 0.769 and 0.771, which describes the camera rather than
+        either of them.
+        """
+        from core.metrics import MetricsAccumulator
+
+        metrics = MetricsAccumulator(width=1920, height=1080)
+        # Both fighters work in the same small area, far from the frame centre.
+        for step in range(40):
+            metrics.positions["A"].append(np.asarray([300.0 + step, 900.0], dtype=np.float32))
+            metrics.positions["B"].append(np.asarray([340.0 - step, 900.0], dtype=np.float32))
+        a = metrics._center_control("A")
+        b = metrics._center_control("B")
+        self.assertIsNotNone(a)
+        self.assertIsNotNone(b)
+        # Judged against the spread of the fight, both are near its middle.
+        for value in (a, b):
+            self.assertGreater(value, 0.3)
+
+    def test_a_fighter_worked_to_the_outside_scores_lower(self):
+        from core.metrics import MetricsAccumulator
+
+        metrics = MetricsAccumulator(width=1920, height=1080)
+        for step in range(60):
+            # A holds one spot; B circles far out around it.
+            metrics.positions["A"].append(np.asarray([500.0, 500.0], dtype=np.float32))
+            angle = step / 60.0 * 6.28318
+            metrics.positions["B"].append(
+                np.asarray([500.0 + 400.0 * np.cos(angle), 500.0 + 400.0 * np.sin(angle)],
+                           dtype=np.float32)
+            )
+        self.assertGreater(metrics._center_control("A"), metrics._center_control("B"))
+
     def test_declared_rounds_never_cost_you_footage(self):
         """A nine-minute bout entered as 3 x 2 min lost three of its minutes.
 

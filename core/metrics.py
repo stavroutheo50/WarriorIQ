@@ -50,7 +50,10 @@ class MetricsAccumulator:
         self.last_time = {"A": None, "B": None}
         self.movement = {"A": 0.0, "B": 0.0}
         self.pressure_samples = {"A": [], "B": []}
-        self.center_control = {"A": [], "B": []}
+        # Where each fighter actually stood, so the middle of the fight can be
+        # worked out from the fight rather than assumed to be the middle of the
+        # camera frame.
+        self.positions = {"A": [], "B": []}
         self.guard_samples = {"A": [], "B": []}
         self.balance_samples = {"A": [], "B": []}
         self.round_frames = defaultdict(lambda: {"A": 0, "B": 0})
@@ -80,9 +83,7 @@ class MetricsAccumulator:
                 if nd > 1e-6 and nv > 1e-6:
                     self.pressure_samples[fighter].append(float(np.dot(delta / nv, to_opp / nd)))
 
-        frame_center = np.asarray([self.width / 2, self.height / 2], dtype=np.float32)
-        diag = max(1.0, float(np.hypot(self.width, self.height)))
-        self.center_control[fighter].append(1.0 - min(1.0, float(np.linalg.norm(center - frame_center)) / (diag * 0.5)))
+        self.positions[fighter].append(np.asarray(center, dtype=np.float32))
 
         kp = obs.keypoints
         nose, lw, rw = _p(kp, NOSE), _p(kp, L_WRIST), _p(kp, R_WRIST)
@@ -105,6 +106,30 @@ class MetricsAccumulator:
 
         self.last_center[fighter] = center
         self.last_time[fighter] = seconds
+
+    def _center_control(self, fighter: str) -> float | None:
+        """How much of the fight this fighter spent in the middle of it.
+
+        The middle is taken from where the two fighters actually went, not from
+        the centre of the picture. A tournament camera covers a whole hall, so
+        the mat is only part of the frame and frame-centre is not ring-centre:
+        measured that way both fighters on one bout scored 0.769 and 0.771,
+        which says nothing about either of them.
+
+        Scored against the spread of the fight itself, so it means the same on
+        a tight ring shot and a wide hall shot.
+        """
+        mine = self.positions.get(fighter) or []
+        everyone = [point for side in ("A", "B") for point in (self.positions.get(side) or [])]
+        if not mine or len(everyone) < 10:
+            return None
+        middle = np.mean(np.stack(everyone), axis=0)
+        spread = float(np.mean(np.linalg.norm(np.stack(everyone) - middle, axis=1)))
+        if spread < 1e-6:
+            return None
+        distances = np.linalg.norm(np.stack(mine) - middle, axis=1)
+        # 1.0 is dead centre of the action; 0.0 is a full spread away from it.
+        return float(np.mean(np.clip(1.0 - distances / (spread * 2.0), 0.0, 1.0)))
 
     @staticmethod
     def _attack_stats(fighter: str, events: list[StrikeEvent]) -> dict:
@@ -179,7 +204,7 @@ class MetricsAccumulator:
             if advanced_available:
                 footwork = self.movement[fighter] / max(1.0, segment_duration)
                 pressure = float(np.mean(self.pressure_samples[fighter])) if self.pressure_samples[fighter] else None
-                ring_control = float(np.mean(self.center_control[fighter])) if self.center_control[fighter] else None
+                ring_control = self._center_control(fighter)
                 guard = float(np.mean(self.guard_samples[fighter])) if self.guard_samples[fighter] else None
                 balance = float(np.mean(self.balance_samples[fighter])) if self.balance_samples[fighter] else None
             else:
