@@ -1623,3 +1623,102 @@ def test_selection_frame_skips_the_static_opening(tmp_path):
     assert picked >= 30, f"picked frame {picked} is still inside the static opening"
     # And it stays inside the budget, because everything before it is dropped.
     assert picked / info.fps <= 20.0
+
+
+def _kick_sample(shoulder_angle_deg, supporting_foot_y, frame=0):
+    """A minimal pose: shoulders at a given angle, both ankles placed."""
+    import numpy as np
+
+    from core.action import Sample
+
+    kp = np.zeros((17, 2), dtype=np.float32)
+    half = 20.0
+    radians = np.radians(shoulder_angle_deg)
+    centre = np.array([100.0, 100.0], dtype=np.float32)
+    offset = np.array([np.cos(radians), np.sin(radians)], dtype=np.float32) * half
+    kp[5] = centre - offset          # left shoulder
+    kp[6] = centre + offset          # right shoulder
+    # Hips far enough below the shoulders that _body_length clears the
+    # minimum height airtime needs; a small figure is deliberately unreadable.
+    kp[11] = [90.0, 190.0]
+    kp[12] = [110.0, 190.0]
+    kp[15] = [95.0, supporting_foot_y]
+    kp[16] = [105.0, supporting_foot_y]
+    return Sample(
+        frame=frame, time=frame / 30.0, round_number=1,
+        box=np.array([80.0, 60.0, 120.0, 200.0], dtype=np.float32),
+        keypoints=kp, conf=None, opponent_box=None, opponent_keypoints=None,
+        opponent_conf=None, identity_confidence=1.0, opponent_identity_confidence=1.0,
+    )
+
+
+def test_a_turning_kick_is_told_apart_from_a_square_one():
+    from core.action import _is_spinning
+
+    square = (_kick_sample(0.0, 290.0), _kick_sample(25.0, 290.0, frame=6))
+    turning = (_kick_sample(0.0, 290.0), _kick_sample(170.0, 290.0, frame=6))
+    assert not _is_spinning(*square), "a square kick was read as a spin"
+    assert _is_spinning(*turning), "a turning kick was not detected"
+
+
+def test_a_jump_needs_the_supporting_foot_to_leave_the_floor():
+    """One foot always leaves the floor on a kick; that is not a jump."""
+    from core.action import _is_jumping
+
+    grounded = (_kick_sample(0.0, 290.0), _kick_sample(0.0, 289.0, frame=6))
+    airborne = (_kick_sample(0.0, 290.0), _kick_sample(0.0, 230.0, frame=6))
+    assert not _is_jumping(*grounded)
+    assert _is_jumping(*airborne)
+
+
+def test_world_taekwondo_pays_more_for_a_turning_kick():
+    """WT scores a turning head kick 5 and a square one 3."""
+    from core.scoring import RULESETS, _table_points
+    from core.types import StrikeEvent
+
+    def kick(target, spinning):
+        return StrikeEvent(
+            fighter="A", opponent="B", round_number=1,
+            start_frame=0, peak_frame=1, end_frame=2,
+            start_time=0.0, peak_time=0.1, end_time=0.2,
+            technique="right_round_kick", family="kick", limb="right_leg",
+            confidence=0.9, outcome="clean", target=target,
+            evidence={"spinning": spinning},
+        )
+
+    profile = RULESETS["WT_TAEKWONDO"]
+    assert _table_points(kick("head", False), profile) == 3
+    assert _table_points(kick("head", True), profile) == 5
+    assert _table_points(kick("body", False), profile) == 2
+    assert _table_points(kick("body", True), profile) == 4
+    # A ruleset with no turning distinction is untouched by the spin flag.
+    k1 = RULESETS["K1"]
+    assert _table_points(kick("head", True), k1) == _table_points(kick("head", False), k1)
+
+
+def test_airtime_is_not_claimed_on_a_distant_fighter():
+    """Tournament footage is the case this has to get right.
+
+    On 3.mp4 the athletes stand about eighty pixels tall, so the airborne
+    threshold works out at nine pixels - ankle jitter. Every airborne call at
+    that size was wrong, and one of them was a fighter walking past the referee
+    between rounds. Too far away has to mean "cannot tell", not "jumped".
+    """
+    import numpy as np
+
+    from core.action import _is_jumping, Sample
+
+    def tiny(foot_y, frame=0):
+        kp = np.zeros((17, 2), dtype=np.float32)
+        kp[5], kp[6] = [95.0, 100.0], [115.0, 100.0]
+        kp[11], kp[12] = [98.0, 118.0], [112.0, 118.0]   # ~80px body length
+        kp[15], kp[16] = [100.0, foot_y], [110.0, foot_y]
+        return Sample(
+            frame=frame, time=frame / 30.0, round_number=1,
+            box=np.array([90.0, 90.0, 120.0, 170.0], dtype=np.float32),
+            keypoints=kp, conf=None, opponent_box=None, opponent_keypoints=None,
+            opponent_conf=None, identity_confidence=1.0, opponent_identity_confidence=1.0,
+        )
+
+    # A lift that would clear the ratio on a close-up fighter, at a distance.
+    assert not _is_jumping(tiny(170.0), tiny(150.0, frame=6))

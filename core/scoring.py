@@ -43,6 +43,12 @@ class RuleProfile:
     # comparison instead - that is a difference in how the sport is scored, not
     # a gap in the data.
     point_table: tuple[tuple[str, str | None, int], ...] = ()
+    # What a kick is worth when the athlete turned their back into it. Several
+    # federations pay a turning kick more than the same kick thrown square -
+    # WT taekwondo scores a turning head kick 5 against 3 - so it is a separate
+    # value per target rather than a multiplier. Empty means this ruleset does
+    # not distinguish them, and the ordinary table applies.
+    turning_kick_points: tuple[tuple[str, int], ...] = ()
     # Actions this discipline scores that the model cannot observe at all.
     unobserved: tuple[str, ...] = ()
 
@@ -131,7 +137,8 @@ RULESETS: dict[str, RuleProfile] = {
             ("kick", "body", 2), ("kick", "head", 3),
             ("kick", "leg", 0),
         ),
-        unobserved=("electronic body and head protector scoring", "turning-kick rotation bonuses"),
+        turning_kick_points=(("body", 4), ("head", 5)),
+        unobserved=("electronic body and head protector scoring",),
     ),
 
     # ---- MMA ----------------------------------------------------------------
@@ -331,6 +338,17 @@ def deduplicate_scoring_events(events: Iterable[StrikeEvent], window_seconds: fl
     return sorted(kept, key=lambda event: event.peak_time), removed
 
 
+def _turned_into_it(event: StrikeEvent) -> bool:
+    """Was this kick thrown with the athlete's back turning through it?
+
+    Read from the pose evidence recorded when the action was detected, not
+    from the technique name: "right_round_kick" is the same label whether it
+    was thrown square or off a full spin, and the two are worth different
+    numbers of points.
+    """
+    return bool((event.evidence or {}).get("spinning"))
+
+
 def _table_points(event: StrikeEvent, profile: RuleProfile) -> int | None:
     """The federation's own value for this technique and target, if it has one.
 
@@ -341,6 +359,10 @@ def _table_points(event: StrikeEvent, profile: RuleProfile) -> int | None:
         return None
     if event.outcome not in {"clean", "likely_landed"}:
         return 0
+    if event.family == "kick" and profile.turning_kick_points and _turned_into_it(event):
+        for target, points in profile.turning_kick_points:
+            if event.target == target:
+                return int(points)
     for family, target, points in profile.point_table:
         if event.family == family and event.target == target:
             return int(points)

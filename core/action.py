@@ -188,6 +188,78 @@ def _classify_punch(start: Sample, peak: Sample, limb: str) -> str:
     return "jab" if limb == _lead_hand(peak) else "cross"
 
 
+# How far the shoulder line must swing for a kick to count as turning. A round
+# kick thrown square moves it well under this; a turning kick puts the back to
+# the opponent and takes it past a right angle.
+_SPIN_DEGREES = 100.0
+# How far the supporting foot must climb, as a share of the athlete's own body
+# length, before both feet are treated as off the floor.
+_JUMP_BODY_SHARE = 0.12
+# ...and how big the athlete has to be on screen before that share is worth
+# more than the noise. Rotation and airtime do not survive low resolution
+# equally. A turning kick swings the shoulder line past a right angle, and with
+# shoulders twenty pixels apart a couple of pixels of keypoint jitter is about
+# six degrees of angle error - nowhere near the threshold. Airtime is a
+# translation: on the tournament footage this is built for, fighters stand
+# about eighty pixels tall, so twelve percent of body length is nine pixels,
+# which is ankle jitter. Measured on 3.mp4, every airborne call at that size
+# was wrong - one was a fighter walking past the referee between rounds. Below
+# this height WarriorIQ does not claim to see a jump, which is the honest
+# answer rather than a bonus point awarded to a footstep.
+_MIN_BODY_PIXELS_FOR_AIRTIME = 110.0
+
+
+def _shoulder_angle(kp) -> float | None:
+    ls, rs = _point(kp, L_SHOULDER), _point(kp, R_SHOULDER)
+    if ls is None or rs is None:
+        return None
+    delta = rs - ls
+    if float(np.hypot(float(delta[0]), float(delta[1]))) < 4.0:
+        return None                      # shoulders on top of each other: no angle to read
+    return float(np.degrees(np.arctan2(float(delta[1]), float(delta[0]))))
+
+
+def _is_spinning(start: Sample, peak: Sample) -> bool:
+    """Did the athlete turn their back into the technique?
+
+    A turning kick rotates the whole torso, and the anatomical shoulder vector
+    turns with it, because COCO keypoints follow the body rather than the
+    image: left shoulder stays the left shoulder after the athlete has spun.
+    A kick thrown square barely moves that vector, so the two separate on how
+    far the shoulder line travelled between the start of the action and its
+    peak.
+    """
+    before, after = _shoulder_angle(start.keypoints), _shoulder_angle(peak.keypoints)
+    if before is None or after is None:
+        return False
+    swing = abs((after - before + 180.0) % 360.0 - 180.0)
+    return swing >= _SPIN_DEGREES
+
+
+def _is_jumping(start: Sample, peak: Sample) -> bool:
+    """Did both feet leave the floor?
+
+    Every kick lifts one foot, so a raised ankle proves nothing on its own.
+    The supporting foot is the evidence: follow the lower of the two ankles -
+    the one still carrying the athlete - and see whether it climbed as well.
+    Measured against the athlete's own body length so it reads the same at any
+    camera distance.
+    """
+    def supporting_foot(sample: Sample) -> float | None:
+        left, right = _point(sample.keypoints, L_ANKLE), _point(sample.keypoints, R_ANKLE)
+        if left is None or right is None:
+            return None
+        return max(float(left[1]), float(right[1]))    # image y grows downward
+
+    before, after = supporting_foot(start), supporting_foot(peak)
+    if before is None or after is None:
+        return False
+    body = _body_length(start.keypoints, start.box)
+    if body < _MIN_BODY_PIXELS_FOR_AIRTIME:
+        return False
+    return (before - after) >= _JUMP_BODY_SHARE * body
+
+
 def _classify_kick(start: Sample, peak: Sample, limb: str) -> str:
     hip_i, knee_i, ankle_i = _limb_indices(limb)
     start_ankle, peak_ankle = _point(start.keypoints, ankle_i), _point(peak.keypoints, ankle_i)
@@ -427,6 +499,9 @@ class ActionEngine:
                     else:
                         technique = _classify_knee(peak_sample, event_limb)
 
+                    spinning = family in {"kick", "knee"} and _is_spinning(start_sample, peak_sample)
+                    jumping = family in {"kick", "knee"} and _is_jumping(start_sample, peak_sample)
+
                     model_source = "temporal_rules"
                     confidence = min(
                         CONFIDENCE_CEILING,
@@ -500,6 +575,16 @@ class ActionEngine:
                             "contact_samples": contact_samples,
                             "max_speed_body_lengths_per_s": float(active.max_speed),
                             "extension_gain": float(extension_gain),
+                            # Turning and jumping are separately scored actions
+                            # in several rulesets - a turning kick to the head
+                            # is worth 5 in WT taekwondo against 3 for the same
+                            # kick thrown square - so they are recorded as
+                            # properties of the technique rather than folded
+                            # into its name. Only kicks and knees can carry
+                            # them; a spinning punch is a backfist and is
+                            # already classified as one.
+                            "spinning": spinning,
+                            "jumping": jumping,
                         },
                     )
                     events.append(event)
