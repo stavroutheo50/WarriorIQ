@@ -711,3 +711,12 @@ h1 em, h2 em {
   color: var(--wiq-text-tertiary);
   font-size: var(--wiq-text-xs);
 }
+
+/* The score line is not the headline while strike scoring is untrained. It
+   said "Withheld" in the largest type on the page, so the most prominent thing
+   in a fighter's report was a refusal. */
+.result-scoreline .score-muted {
+  font-size: var(--wiq-text-lg, 20px);
+  color: var(--wiq-text-tertiary);
+  font-weight: 600;
+}
