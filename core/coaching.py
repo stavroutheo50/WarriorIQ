@@ -64,38 +64,74 @@ def _measured_baseline_drills(fighter: str, own: dict) -> list[dict]:
     ]
 
 
-def build_pose_coaching(fighter: str, own: dict) -> dict:
+def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -> dict:
     """Build useful coaching only from identity-safe pose measurements.
 
     This path deliberately ignores action attempts, contacts and technique
     labels.  It keeps the report useful while the temporal action model is not
     release-validated without laundering its candidates into fight facts.
     """
+    # Pressure and footwork are the two that actually differ between fighters
+    # on real footage, and both were missing from coaching entirely.
     dimensions = [
         (
-            "guard_index",
-            "Guard position",
+            "guard_index", "Guard", (0.17, 0.10),
             "Guard-return audit",
             "4 x 90 sec: after every exchange, freeze in stance and confirm both hands have returned before the partner counters.",
         ),
         (
-            "balance_index",
-            "Post-action balance",
+            "balance_index", "Balance", (0.72, 0.08),
             "Balanced-finish rounds",
             "4 x 90 sec: finish each legal technique in stance, hold for one count, then move without crossing the feet.",
         ),
         (
-            "ring_center_control",
-            "Ring-center position",
+            "ring_center_control", "Holding the middle", (0.50, 0.15),
             "Center-line movement rounds",
             "3 x 2 min: use a marked center lane; exit every exchange at an angle and recover the lane before restarting.",
         ),
+        (
+            "pressure_index", "Walking them down", (0.03, 0.10),
+            "Forward-pressure rounds",
+            "4 x 2 min: every time your partner steps back, take the space. Reset if you circle away instead of closing.",
+        ),
+        (
+            "footwork_body_lengths_per_second", "Moving your feet", (1.00, 0.30),
+            "Step-count rounds",
+            "4 x 2 min: no more than two strikes without changing position. Feet before hands, every exchange.",
+        ),
     ]
-    measured = [
-        (float(own[key]), key, label, drill, prescription)
-        for key, label, drill, prescription in dimensions
-        if own.get(key) is not None
-    ]
+
+    # Ranked by how each number compares with the opponent's same number, not
+    # against the fighter's other numbers. Guard sits near 0.15 on real footage
+    # and balance near 0.70, so ranking raw values across metrics handed every
+    # fighter in every fight the same verdict: balance is your strength, guard
+    # and centre are your weaknesses. It said nothing about anybody.
+    def _relative_gap(mine: float, theirs: float | None) -> float | None:
+        if theirs is None:
+            return None
+        scale = abs(mine) + abs(theirs)
+        if scale < 1e-6:
+            return 0.0
+        return (mine - theirs) / scale
+
+    opponent = opponent or {}
+    measured = []
+    for key, label, reference, drill, prescription in dimensions:
+        mine = own.get(key)
+        if mine is None:
+            continue
+        gap = _relative_gap(float(mine), opponent.get(key))
+        if gap is None:
+            # No opponent to compare against, so compare with the band these
+            # numbers sit in on real footage. Drawn from four fighters across
+            # two bouts - thin, and only used to order a single fighter's own
+            # numbers, never shown as a claim about anyone else.
+            midpoint, spread = reference
+            gap = (float(mine) - midpoint) / max(1e-6, spread)
+            measured.append((None, float(mine), key, label, drill, prescription, gap))
+            continue
+        measured.append((gap, float(mine), key, label, drill, prescription, gap))
+
     if not measured:
         return {
             "strengths": [],
@@ -106,30 +142,79 @@ def build_pose_coaching(fighter: str, own: dict) -> dict:
             "note": "No identity-safe pose measurement was available for coaching.",
         }
 
-    strongest = max(measured, key=lambda item: item[0])
-    weakest = sorted(measured, key=lambda item: item[0])[:2]
-    strongest_value, _, strongest_label, _, _ = strongest
+    comparable = [item for item in measured if item[0] is not None]
+    # Ranked on the comparison that exists: against the opponent when there is
+    # one, against the reference band when there is not.
+    ranked = sorted(measured, key=lambda item: item[6], reverse=True)
+    if comparable:
+        ordered = sorted(comparable, key=lambda item: item[0], reverse=True)
+        strongest = ordered[0]
+        # Only things the fighter is actually behind on. Taking the bottom two
+        # regardless told a fighter who led on nearly everything to work on a
+        # number they were winning, which reads as though nobody looked.
+        behind = [item for item in ordered if item[0] < 0]
+        weakest = behind[-2:][::-1]
+    else:
+        # Only one fighter was analysed. Rank against the reference band.
+        strongest = ranked[0]
+        weakest = ranked[-2:][::-1]
+
+    def _phrase(item) -> tuple[str, str]:
+        gap, mine, key, label, _drill, _prescription, _rank = item
+        if key == "pressure_index":
+            shown = f"{(mine + 1) / 2 * 100:.0f}"
+            unit = " of 100 (50 is neither forward nor back)"
+        elif key == "footwork_body_lengths_per_second":
+            shown = f"{mine:.1f}"
+            unit = " body lengths a second"
+        else:
+            shown = f"{mine * 100:.0f}%"
+            unit = ""
+        if gap is None:
+            return f"{label} {shown}", f"Measured at {shown}{unit}."
+        theirs = opponent.get(key)
+        if key == "pressure_index":
+            theirs_shown = f"{(float(theirs) + 1) / 2 * 100:.0f}"
+        elif key == "footwork_body_lengths_per_second":
+            theirs_shown = f"{float(theirs):.1f}"
+        else:
+            theirs_shown = f"{float(theirs) * 100:.0f}%"
+        side = "better than" if gap > 0 else ("level with" if abs(gap) < 0.02 else "behind")
+        return (
+            f"{label} {shown}",
+            f"You {shown}{unit}, them {theirs_shown} - {side} your opponent here.",
+        )
+
+    strength_title, strength_detail = _phrase(strongest)
     strengths = [{
-        "title": f"Best: {strongest_label} {_pct(strongest_value)}%",
-        "detail": (
-            f"Your strongest movement number. It measures how you moved, not strikes."
-        ),
+        "title": strength_title,
+        "detail": strength_detail,
         "evidence_times": [],
     }]
     improvements = []
     drills = []
-    for rank, (value, _, label, drill, prescription) in enumerate(weakest, start=1):
+    if comparable and not weakest:
         improvements.append({
-            "title": f"Work on: {label} {_pct(value)}%",
+            "title": "Nothing behind your opponent",
             "detail": (
-                f"{_pct(value)}% — one of your two lowest movement numbers."
+                "On every movement number measured you matched or beat them. "
+                "The next gain is in the striking, which WarriorIQ cannot "
+                "score yet."
             ),
+            "evidence_times": [],
+        })
+    for item in weakest:
+        _gap, _mine, _key, label, drill, prescription, _rank = item
+        title, detail = _phrase(item)
+        improvements.append({
+            "title": f"Work on: {title}",
+            "detail": detail,
             "evidence_times": [],
         })
         drills.append({
             "name": f"Fighter {fighter} · {drill}",
             "prescription": prescription,
-            "why": f"Targets Fighter {fighter}'s measured {label.lower()} baseline of {_pct(value)}%.",
+            "why": detail,
         })
     return {
         "strengths": strengths,
@@ -137,7 +222,7 @@ def build_pose_coaching(fighter: str, own: dict) -> dict:
         "drills": drills,
         "evidence_type": "pose_only",
         "baseline_summary": ", ".join(
-            f"{label.lower()} {_pct(value)}%" for value, _, label, _, _ in measured
+            _phrase(item)[0].lower() for item in measured
         ),
         "note": "Pose-only coaching is shown while automatic action labels remain unvalidated.",
     }

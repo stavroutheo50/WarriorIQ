@@ -97,7 +97,7 @@ def refresh_identity_integrity(report: dict) -> dict:
         metrics = report.get("metrics", {})
         for fighter in ("A", "B"):
             if identity_ready[fighter] and fighter in metrics:
-                pose_coaching = build_pose_coaching(fighter, metrics[fighter])
+                pose_coaching = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"))
                 report.setdefault("coaching", {})[fighter] = pose_coaching
                 report.setdefault("training_plan", {})[fighter] = build_training_plan(
                     pose_coaching, fighter, metrics[fighter]
@@ -116,7 +116,7 @@ def refresh_identity_integrity(report: dict) -> dict:
         for fighter in required:
             if fighter not in metrics:
                 continue
-            pose_coaching = build_pose_coaching(fighter, metrics[fighter])
+            pose_coaching = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"))
             report.setdefault("coaching", {})[fighter] = pose_coaching
             report.setdefault("training_plan", {})[fighter] = build_training_plan(
                 pose_coaching, fighter, metrics[fighter]
@@ -301,7 +301,7 @@ def build_report(
         if action_metrics_trusted and identity_ready[fighter]:
             coaching[fighter] = build_coaching(fighter, metrics, events)
         elif identity_ready[fighter]:
-            coaching[fighter] = build_pose_coaching(fighter, metrics[fighter])
+            coaching[fighter] = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"))
         else:
             coaching[fighter] = dict(insufficient_coaching)
             coaching[fighter]["note"] = "Coaching withheld because this fighter did not pass the identity-integrity gate."

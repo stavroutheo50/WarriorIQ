@@ -79,8 +79,11 @@ class ProductFoundationTests(unittest.TestCase):
         plan_b = build_training_plan(coaching_b, "B", own_b)
 
         self.assertEqual(coaching_a["evidence_type"], "pose_only")
-        self.assertIn("Guard position 22.0%", coaching_a["improvements"][0]["title"])
-        self.assertIn("Post-action balance 44.0%", coaching_b["improvements"][0]["title"])
+        # Labels are plainer now, and each fighter's weakest number is found by
+        # ranking against the band these metrics sit in rather than comparing a
+        # guard percentage against a balance percentage.
+        self.assertIn("Guard 22%", coaching_a["improvements"][0]["title"])
+        self.assertIn("Balance 44%", coaching_b["improvements"][0]["title"])
         self.assertTrue(plan_a)
         self.assertTrue(plan_b)
         self.assertNotEqual(plan_a, plan_b)
@@ -926,6 +929,54 @@ class EngagementRangeTests(unittest.TestCase):
         from core.config import SETTINGS
 
         self.assertGreaterEqual(SETTINGS.max_engagement_body_lengths, 2.0)
+
+    def test_coaching_differs_between_the_two_fighters_in_a_bout(self):
+        """Every fighter used to get the same advice, in every fight.
+
+        Strength and weakness were picked by comparing raw values across
+        different metrics. On real footage guard sits near 0.15 and balance
+        near 0.70, so balance was always the strength and guard always a
+        weakness - four fighters across two bouts all received "your strength
+        is post-action balance, work on guard and ring-centre". Ranking is now
+        against the opponent's same number.
+        """
+        from core.coaching import build_pose_coaching
+
+        a = dict(guard_index=0.125, balance_index=0.756, ring_center_control=0.505,
+                 pressure_index=0.117, footwork_body_lengths_per_second=1.174)
+        b = dict(guard_index=0.236, balance_index=0.715, ring_center_control=0.548,
+                 pressure_index=-0.057, footwork_body_lengths_per_second=1.044)
+        coach_a = build_pose_coaching("A", a, b)
+        coach_b = build_pose_coaching("B", b, a)
+
+        self.assertNotEqual(coach_a["strengths"][0]["title"], coach_b["strengths"][0]["title"])
+        # A walked forward and B gave ground, so that is A's strength.
+        self.assertIn("Walking them down", coach_a["strengths"][0]["title"])
+        # B kept a better guard than A, so that is B's.
+        self.assertIn("Guard", coach_b["strengths"][0]["title"])
+
+    def test_nobody_is_told_to_fix_something_they_are_winning(self):
+        """A fighter ahead on everything but one thing gets one thing to fix."""
+        from core.coaching import build_pose_coaching
+
+        ahead = dict(guard_index=0.50, balance_index=0.80, ring_center_control=0.70,
+                     pressure_index=0.30, footwork_body_lengths_per_second=1.50)
+        behind = dict(guard_index=0.20, balance_index=0.60, ring_center_control=0.40,
+                      pressure_index=0.40, footwork_body_lengths_per_second=1.00)
+        coaching = build_pose_coaching("A", ahead, behind)
+        for improvement in coaching["improvements"]:
+            self.assertNotIn("better than your opponent", improvement["detail"])
+
+    def test_a_fighter_ahead_everywhere_is_told_so(self):
+        from core.coaching import build_pose_coaching
+
+        ahead = dict(guard_index=0.50, balance_index=0.80, ring_center_control=0.70,
+                     pressure_index=0.30, footwork_body_lengths_per_second=1.50)
+        behind = dict(guard_index=0.20, balance_index=0.60, ring_center_control=0.40,
+                      pressure_index=0.10, footwork_body_lengths_per_second=1.00)
+        coaching = build_pose_coaching("A", ahead, behind)
+        self.assertEqual(len(coaching["improvements"]), 1)
+        self.assertIn("Nothing behind your opponent", coaching["improvements"][0]["title"])
 
     def test_centre_control_measures_the_fight_not_the_camera(self):
         """Two fighters standing together must not both score as in control.
