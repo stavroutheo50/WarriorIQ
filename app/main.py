@@ -1807,7 +1807,12 @@ async def upload(
     round_duration_seconds: float = Form(120.0),
     break_duration_seconds: float = Form(60.0),
     selected_rounds: str = Form("ALL"),
-    openai_identity_recovery: bool = Form(False),
+    # Always on. This used to be a checkbox on the setup page, which asked
+    # someone uploading their first fight to make a call about an external
+    # service before they had seen a single result. It is a no-op unless
+    # OPENAI_API_KEY is configured, so the choice that actually matters is the
+    # operator's, and it is made once in the environment rather than per fight.
+    openai_identity_recovery: bool = Form(True),
     rights_confirmed: bool = Form(False),
     people_permissions_confirmed: bool = Form(False),
     minor_permission_status: str = Form(""),
