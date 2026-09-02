@@ -1368,3 +1368,55 @@ class PublicPageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SocialAuthResilienceTests(unittest.TestCase):
+    """Pressing a social sign-in button must always answer."""
+
+    def test_unreachable_provider_reports_instead_of_hanging(self):
+        """The button spun for ever in production instead of failing.
+
+        Starting an OIDC sign-in makes the web server fetch the provider's
+        discovery document. On a shared host whose outbound HTTPS is blocked
+        that call never completes, so the POST never answered and the button
+        showed a loading state indefinitely with nothing explaining why.
+        """
+        import httpx
+
+        import app.main as webapp
+        from app.main import app
+
+        class Unreachable:
+            async def authorize_redirect(self, *args, **kwargs):
+                raise httpx.ConnectTimeout("outbound HTTPS blocked")
+
+        client = TestClient(app)
+        with patch.object(webapp.SOCIAL_AUTH, "client", return_value=Unreachable()):
+            response = client.post(
+                "/auth/google/start",
+                data={"mode": "login", "next_path": "/dashboard", "accept_policies": "true"},
+                follow_redirects=False,
+            )
+        # The point is that it answers at all, and says why. _auth_page uses
+        # 400 for a rejected attempt; what must never happen is no reply.
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("could not reach", response.text.lower())
+        self.assertIn("email and password", response.text.lower())
+
+    def test_every_configured_provider_has_a_label_and_an_icon(self):
+        """A provider with no icon renders the Microsoft squares by mistake."""
+        from core.social_auth import PROVIDER_LABELS
+
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "auth.html").read_text(encoding="utf-8")
+        for key in PROVIDER_LABELS:
+            if key == "microsoft":
+                continue                      # the else-branch icon
+            self.assertIn(f"provider.key == '{key}'", template, f"{key} has no icon branch")
+
+    def test_outbound_calls_carry_a_timeout(self):
+        from core.social_auth import OUTBOUND_TIMEOUT_SECONDS
+
+        source = (Path(__file__).resolve().parents[1] / "core" / "social_auth.py").read_text(encoding="utf-8")
+        self.assertGreater(OUTBOUND_TIMEOUT_SECONDS, 0)
+        # Every registered client, OIDC or not, has to carry the ceiling.
+        self.assertEqual(source.count('"timeout": OUTBOUND_TIMEOUT_SECONDS'), 3)

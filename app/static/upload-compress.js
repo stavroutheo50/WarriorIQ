@@ -23,6 +23,19 @@
   var MIN_BYTES = 60 * 1024 * 1024;   // below this the wait is not worth a re-encode
   var BITRATE = 3200000;              // ample for 720p-class fight footage
 
+  /* This re-encode runs at PLAYBACK SPEED: it plays the file and captures the
+   * canvas, so preparing a five-minute fight costs five minutes before the
+   * upload even starts, and the page just says "Preparing video". That is the
+   * "uploading takes forever on mobile" report, and on a long file it is not
+   * even a win - five minutes of encoding to save a couple of minutes of
+   * transfer is worse than simply sending the original and showing real
+   * progress. It also cannot survive the phone being backgrounded: playback
+   * and requestAnimationFrame both stop, and the recording is truncated.
+   *
+   * So it is capped by duration. Short high-resolution clips still get the
+   * benefit; anything longer uploads as filmed. */
+  var MAX_SECONDS = 100;
+
   function supported() {
     return typeof window.MediaRecorder === "function" &&
       typeof HTMLCanvasElement.prototype.captureStream === "function" &&
@@ -76,6 +89,8 @@
       // Already at or below what the analyser wants: leave it completely alone.
       if (!longEdge || longEdge <= TARGET_LONG_EDGE) return null;
       if (!isFinite(video.duration) || video.duration <= 0) return null;
+      // Long footage: send it as filmed. See MAX_SECONDS above.
+      if (video.duration > MAX_SECONDS) return null;
 
       var scale = TARGET_LONG_EDGE / longEdge;
       var canvas = document.createElement("canvas");
@@ -112,6 +127,13 @@
       drawing = false;
       if (recorder.state !== "inactive") recorder.stop();
       await stopped;
+
+      // Did the playback actually finish? If the phone locked or the browser
+      // was backgrounded, playback and rAF both stopped, the timeout above
+      // fired, and these chunks are a fragment of the fight. Uploading that
+      // would silently analyse the first minute of someone's bout and report
+      // it as the whole thing, which is far worse than a slower upload.
+      if (video.duration && video.currentTime < video.duration * 0.98) return null;
 
       if (!chunks.length) return null;
       var blob = new Blob(chunks, { type: mime.split(";")[0] });

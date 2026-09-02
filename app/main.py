@@ -1334,9 +1334,25 @@ async def social_auth_start(
             next_path,
         )
     authorize_options = {"response_mode": "form_post"} if provider == "apple" else {}
-    response = await client.authorize_redirect(
-        request, _oauth_redirect_uri(request, provider), **authorize_options,
-    )
+    try:
+        response = await client.authorize_redirect(
+            request, _oauth_redirect_uri(request, provider), **authorize_options,
+        )
+    except Exception as exc:                            # noqa: BLE001
+        # Starting an OIDC sign-in makes this server fetch the provider's
+        # discovery document first. When that call cannot complete - a shared
+        # host with outbound HTTPS blocked, a provider having a bad day - the
+        # button used to spin for ever because nothing ever answered the POST.
+        # Say so instead. The client timeout keeps this to a few seconds.
+        LOGGER.error(
+            "social_auth_start_failed provider=%s error=%s", provider, type(exc).__name__,
+        )
+        return _auth_page(
+            request, mode,
+            f"WarriorIQ could not reach {provider.title()} to start sign-in. "
+            "Please try again, or use your email and password.",
+            next_path,
+        )
     state = str((parse_qs(urlsplit(response.headers.get("location", "")).query).get("state") or [""])[0])
     if not state:
         LOGGER.error("social_auth_state_missing provider=%s", provider)
@@ -1900,7 +1916,21 @@ async def upload(
     job_dir = OUTPUTS / job_id
     selection_path = job_dir / "selection.jpg"
     try:
-        frame = await run_in_threadpool(read_frame, video_path, selection_frame)
+        try:
+            frame = await run_in_threadpool(read_frame, video_path, selection_frame)
+        except Exception:
+            # Choosing a livelier frame is an optimisation, and an optimisation
+            # must never cost someone their upload. Somebody on a phone waited
+            # out the whole transfer before this raised, and the handler below
+            # then deleted the video and told them to try again - which would
+            # fail the same way every time. Frame 0 is the one frame that reads
+            # on any file OpenCV opened at all.
+            LOGGER.warning(
+                "selection_frame_unreadable job_id=%s frame=%s falling back to 0",
+                job_id, selection_frame,
+            )
+            selection_frame, start = 0, 0.0
+            frame = await run_in_threadpool(read_frame, video_path, 0)
         job_dir.mkdir(parents=True, exist_ok=True)
         if not await run_in_threadpool(cv2.imwrite, str(selection_path), frame):
             raise OSError("OpenCV could not save the fighter-selection frame")

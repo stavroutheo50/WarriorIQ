@@ -106,12 +106,31 @@ def read_frame(path: str | Path, frame_index: int):
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise RuntimeError(f"Could not open video: {path}")
-    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(frame_index)))
-    ok, frame = cap.read()
-    cap.release()
-    if not ok or frame is None:
-        raise RuntimeError(f"Could not read frame {frame_index} from {path}")
-    return frame
+    target = max(0, int(frame_index))
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            return frame
+
+        # Seeking by frame index is unreliable on exactly the files people
+        # upload from a phone: WebM written by the browser's MediaRecorder, and
+        # variable-frame-rate camera footage. The seek reports success, lands
+        # nowhere, and the read fails. Walking the file always works, so fall
+        # back to that rather than losing the upload. Only reached when a seek
+        # actually failed, so the cost is paid by broken files alone.
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        frame = None
+        for _ in range(target + 1):
+            ok, candidate = cap.read()
+            if not ok or candidate is None:
+                break
+            frame = candidate
+        if frame is None:
+            raise RuntimeError(f"Could not read frame {frame_index} from {path}")
+        return frame
+    finally:
+        cap.release()
 
 
 def build_round_schedule(req: AnalysisRequest, info: VideoInfo) -> list[RoundSpec]:
