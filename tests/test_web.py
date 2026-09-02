@@ -766,20 +766,31 @@ class PublicPageTests(unittest.TestCase):
         # The scored one still sorts to the front.
         self.assertEqual(candidates[0]["technique"], "cross")
 
-    def test_the_report_warns_when_the_wrong_two_people_were_picked(self):
-        """The measured coach mis-pick on 2.mp4: 175 actions, none landed."""
+    def test_the_wrong_people_check_still_runs_even_though_it_is_not_shown(self):
+        """The banner was removed at the owner's request.
+
+        A report that announces it analysed the wrong people does not help
+        anyone read their own fight, and the answer to bad tracking is better
+        tracking. The measurement still runs and still lands in the report, so
+        the evidence is there for a future decision - it is only not printed.
+        """
         page = self._render_result({
             "actions_observed": 175, "actions_in_range": 12, "landed": 0,
             "median_separation_body_lengths": 2.84, "looks_like_a_fight": False,
-            "warning": "Nothing landed in 175 actions, and these two stayed about "
-                       "2.8 body lengths apart the whole video.",
-            "verdict": "selection_probably_wrong",
+            "warning": "...", "verdict": "selection_probably_wrong",
         })
-        self.assertIn("These may not be the two fighters", page)
-        # The banner prints whichever reason the check produced, so a new
-        # verdict cannot ship with a stale explanation baked into the markup.
-        self.assertIn("Nothing landed in 175 actions", page)
-        self.assertIn("Pick the fighters again", page)
+        self.assertNotIn("These may not be the two fighters", page)
+        self.assertGreater(len(page), 1000)
+
+    def test_the_selection_check_is_still_produced(self):
+        from core.contact import assess_selection
+
+        verdict = assess_selection(
+            [2.84] * 175, kept=12, discarded=163, landed=0,
+            travel_per_minute={"A": 9.6, "B": 44.7},
+        )
+        self.assertFalse(verdict["looks_like_a_fight"])
+        self.assertTrue(verdict["warning"])
 
     def test_a_normal_report_carries_no_such_warning(self):
         page = self._render_result({
@@ -951,7 +962,6 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("/api/annotations/{{job_id}}", template)
         self.assertNotIn("Save ground truth", template)
         self.assertNotIn("Verify scorecard", template)
-        self.assertIn("Nothing for you to do", template)
 
     def test_result_guides_people_through_only_the_core_training_path(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
