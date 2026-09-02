@@ -540,7 +540,7 @@ class PublicPageTests(unittest.TestCase):
         # The ruleset is the one thing WarriorIQ cannot infer, so it stays.
         self.assertIn('name="ruleset"', home)
         self.assertNotIn('id="fightSettings"', home)
-        self.assertIn('id="trackingRecoveryTitle"', home)
+        self.assertNotIn('id="trackingRecoveryTitle"', home)
         self.assertIn("Video Upload Policy", home)
         self.assertNotIn("These confirmations apply to this fight video", home)
         self.assertNotIn("Account policies are accepted only", home)
@@ -707,10 +707,25 @@ class PublicPageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertGreater(len(response.content), 1000)
 
-    def test_openai_identity_recovery_requires_explicit_opt_in(self):
+    def test_identity_recovery_is_not_a_question_on_the_setup_page(self):
+        """The setup page must not ask about external identity recovery.
+
+        It is a no-op without OPENAI_API_KEY, so the decision belongs to
+        whoever configures the server, not to someone uploading their first
+        fight. The endpoint therefore defaults it on and the checkbox is gone.
+        """
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
-        self.assertIn('name="openai_identity_recovery"', template)
-        self.assertNotIn('name="openai_identity_recovery" value="true" checked', template)
+        self.assertNotIn("openai_identity_recovery", template)
+        self.assertNotIn("setup-extra", template)
+
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn("openai_identity_recovery: bool = Form(True)", source)
+
+        # Sending frames to a third party on every analysis has to be what the
+        # privacy policy actually says, or the policy is wrong.
+        privacy = (Path(__file__).resolve().parents[1] / "app" / "templates" / "privacy.html").read_text(encoding="utf-8")
+        self.assertNotIn("only when external recovery is explicitly enabled", privacy)
+        self.assertIn("rather than being chosen per upload", privacy)
 
     def _render_result(self, selection_check):
         """Actually render result.html, rather than grepping its source.

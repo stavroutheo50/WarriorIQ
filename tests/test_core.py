@@ -1531,3 +1531,35 @@ def test_attempt_gate_sits_inside_the_producible_confidence_range():
     # A strike carrying half the available evidence must survive the gate; a
     # threshold above that is rejecting ordinary technique, not noise.
     assert ATTEMPT_CONFIDENCE <= CONFIDENCE_FLOOR + 0.5 * span
+
+
+def test_detected_rounds_can_carry_every_round_number_for_scoring():
+    """A detected structure has to reach scoring, not just the report.
+
+    RoundDetector found the rounds for a while before anything used them: the
+    schedule still came from the setup page, so a ten-round bout entered as one
+    span scored as round 1 throughout. The analyser now rebuilds the schedule
+    from what was detected, and report.py derives its round_numbers from that,
+    so this checks the shape that hand-off depends on.
+    """
+    from core.round_detect import RoundDetector
+    from core.types import RoundSpec
+    from core.video import round_at_time
+
+    detector = RoundDetector()
+    for second in range(0, 60):
+        detector.observe(second, 1.0)          # round 1
+    for second in range(60, 100):
+        detector.observe(second, 6.0)          # break: apart and staying apart
+    for second in range(100, 160):
+        detector.observe(second, 1.2)          # round 2
+    detected = detector.rounds()
+    self_rounds = [RoundSpec(r.number, r.start_seconds, r.end_seconds, True) for r in detected]
+
+    # Every round is selected, so per-round scoring sees the whole fight.
+    assert [r.number for r in self_rounds if r.selected] == [1, 2]
+    # A strike after the break belongs to round 2, not to round 1.
+    assert round_at_time(self_rounds, 30.0).number == 1
+    assert round_at_time(self_rounds, 140.0).number == 2
+    # Nothing is scored inside the break itself.
+    assert round_at_time(self_rounds, 80.0) is None

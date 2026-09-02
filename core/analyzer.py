@@ -51,7 +51,7 @@ from core.report import build_report, write_report
 from core.sam_recovery import SamRecovery, nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
 from core.scoring import is_legal_event, normalize_ruleset
-from core.types import AnalysisProgress, AnalysisRequest, PersonObservation, PoseFrame
+from core.types import AnalysisProgress, AnalysisRequest, PersonObservation, PoseFrame, RoundSpec
 from core.video import build_round_schedule, get_video_info, requested_segment_end, round_at_time
 
 ProgressCallback = Callable[[dict], None]
@@ -751,6 +751,33 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     realtime_speed = segment_duration / analysis_seconds if analysis_seconds > 0 else 0.0
     within_budget = analysis_seconds <= segment_duration
 
+    # Round structure comes from the fight, not from the setup page.
+    #
+    # The page guessed "two-minute rounds, one minute between", so a 3:17 bout
+    # became a single 2:00 round and the remaining 77 seconds only survived
+    # because build_round_schedule extends the last round to the end of the
+    # footage. A guess also cannot know that this fight ran three-minute
+    # rounds, or ten of them, or that it stopped for an injury or for the
+    # referee to give a count. RoundDetector reads that out of the video: a
+    # sustained stretch where the fighters are apart and staying apart is a
+    # break, and everything between breaks is a round. Whatever it finds
+    # replaces the schedule here, so round numbers, per-round scoring and the
+    # scorecard all describe the fight that actually happened.
+    #
+    # Only when the whole video was asked for. Someone who requested round 2 of
+    # 5 meant it, and re-cutting the fight underneath them would be wrong.
+    detected_round_spans = round_detector.rounds()
+    rounds_from_footage = bool(detected_round_spans) and all(spec.selected for spec in rounds)
+    if rounds_from_footage:
+        rounds = [
+            RoundSpec(item.number, item.start_seconds, item.end_seconds, True)
+            for item in detected_round_spans
+        ]
+        for event in events:
+            spec = round_at_time(rounds, float(event.peak_time))
+            if spec is not None:
+                event.round_number = spec.number
+
     all_final_live_events = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
     final_live_stats = _provisional_stats(
         all_final_live_events, found, analyzed_frames, live_action_trusted, segment_duration,
@@ -859,7 +886,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         performance=performance,
         classifier=classifier,
     )
-    report["detected_rounds"] = round_detector.summary()
+    report["detected_rounds"] = round_detector.summary() | {"applied": rounds_from_footage}
     report["selection_check"] = assess_selection(
         observed_separations,
         len(report_events),
