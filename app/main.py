@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import html
 import hmac
@@ -2210,6 +2211,40 @@ def remote_worker_video(request: Request, job_id: str, worker_id: str, analysis_
         raise HTTPException(404, "Fight video not found.")
     record_worker_heartbeat(worker_id, job_id)
     return FileResponse(video_path, filename=f"{job_id}{video_path.suffix.lower()}", media_type="video/mp4")
+
+
+@app.get("/api/worker/dataset")
+def remote_worker_dataset(request: Request):
+    """Hand the labelled training set to the machine that does the training.
+
+    Labels are made in the browser and land on the web server; the model is
+    trained on the GPU box. Nothing connected the two, so a labelling session
+    was stranded server-side with no way to reach the trainer short of a file
+    manager this host does not provide.
+
+    Worker token, not a login: the puller runs on the same machine as the
+    worker and already holds it, and it keeps a training corpus off a
+    cookie-authenticated path.
+    """
+    _require_remote_worker(request)
+    folder = DATASET / "sequences"
+    files = sorted(folder.glob("*.npz")) if folder.exists() else []
+    if not files:
+        raise HTTPException(404, "No labelled sequences have been recorded yet.")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
+        for path in files:
+            bundle.write(path, arcname=path.name)
+    payload = buffer.getvalue()
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="warrioriq-dataset.zip"',
+            "X-WarriorIQ-Sequence-Count": str(len(files)),
+        },
+    )
 
 
 @app.post("/api/worker/jobs/{job_id}/progress")
