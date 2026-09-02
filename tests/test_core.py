@@ -1588,3 +1588,38 @@ def test_per_round_evidence_follows_the_detected_rounds():
     assert metrics.round_frames[2]["A"] == 80         # 100-179s
     # The break and the tail past the last round belong to no round at all.
     assert sum(v["A"] for v in metrics.round_frames.values()) == 140
+
+
+def test_selection_frame_skips_the_static_opening(tmp_path):
+    """The picker must not hand back frame 0 when nothing is happening there.
+
+    Frame 0 of a fight is the round start: the referee stands between the two
+    fighters with both arms out, the biggest and most confident person on the
+    mat, and a selection box drawn there lands on the referee. Measured on real
+    footage, seeding from frame 0 tracked the referee for a whole bout.
+    """
+    import cv2
+    import numpy as np
+
+    from core.video import get_video_info, pick_selection_frame
+
+    path = tmp_path / "clip.mp4"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+    assert writer.isOpened(), "no mp4v encoder available to build the fixture"
+    # 30 still frames, then movement in the middle of the mat. The still part
+    # stays inside the window the picker searches, so this is a fair test of
+    # it preferring action over the opening.
+    for index in range(900):
+        frame = np.full((240, 320, 3), 40, dtype=np.uint8)
+        if index >= 30:
+            x = 120 + (index % 20) * 3
+            cv2.rectangle(frame, (x, 100), (x + 30, 170), (230, 230, 230), -1)
+        writer.write(frame)
+    writer.release()
+
+    info = get_video_info(path)
+    picked = pick_selection_frame(path, info)
+    assert picked > 0, "picker returned the static opening frame"
+    assert picked >= 30, f"picked frame {picked} is still inside the static opening"
+    # And it stays inside the budget, because everything before it is dropped.
+    assert picked / info.fps <= 20.0

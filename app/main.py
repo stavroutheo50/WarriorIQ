@@ -81,7 +81,7 @@ from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_leg
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
-from core.video import get_video_info, read_frame
+from core.video import get_video_info, pick_selection_frame, read_frame
 
 app = FastAPI(title="WarriorIQ")
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
@@ -1887,7 +1887,16 @@ async def upload(
     start = max(0.0, min(float(start_seconds), max(0.0, info.duration - 0.001)))
     end = None if not end_seconds.strip() else max(start, min(float(end_seconds), info.duration))
     count = max(1, min(20, int(round_count)))
+    # Frame 0 is where a round starts, which is where the referee stands
+    # between the fighters with both arms out - the biggest, most central,
+    # highest-confidence person on the mat. Seeding there picks the referee,
+    # which is exactly the "it analysed the referee" failure people report. So
+    # when no explicit start was asked for, open the picker on a moment where
+    # the two are actually working. The uploader can still scrub anywhere.
     selection_frame = int(round(start * info.fps))
+    if start <= 0.0:
+        selection_frame = await run_in_threadpool(pick_selection_frame, video_path, info)
+        start = selection_frame / info.fps if info.fps > 0 else 0.0
     job_dir = OUTPUTS / job_id
     selection_path = job_dir / "selection.jpg"
     try:

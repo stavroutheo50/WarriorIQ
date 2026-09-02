@@ -27,6 +27,81 @@ def get_video_info(path: str | Path) -> VideoInfo:
     return VideoInfo(str(path), fps, frame_count, width, height, duration)
 
 
+# How far into a fight the automatic frame pick may reach. Everything before
+# the chosen frame goes unanalysed, so this is a budget, not a preference.
+_MAX_SELECTION_SECONDS = 20.0
+
+
+def pick_selection_frame(path: str | Path, info: VideoInfo, search_share: float = 0.25,
+                         samples: int = 28) -> int:
+    """Pick an opening frame where the two fighters are working, not posed.
+
+    Frame 0 was the default, and it is the worst frame in a fight video. A
+    round starts with the referee standing between the fighters with both arms
+    out: the largest, most central, highest-confidence person on the mat. A
+    selection box drawn there lands on the referee. Measured on 3.mp4 frame 0,
+    the referee detects at 0.87 confidence and fighter A at 0.37, and seeding
+    from that frame tracked the referee for the whole bout - 81.6% coverage on
+    a person who never threw a strike, while the real fighters track at 96%.
+
+    Motion is the proxy for "the referee has stepped away and these two are
+    fighting". No model is involved: this runs on the web host, which has no
+    GPU. Only the middle of the mat is measured, so a crowd shifting in their
+    seats and a scoreboard ticking over do not outvote the fight.
+
+    The frame chosen here is also where the analysis begins, so a later pick
+    costs real footage. The search is therefore capped at both a share of the
+    video and a hard twenty seconds - on a four-minute bout the quarter-share
+    alone chose 56s, which would have thrown away most of a round. Twenty
+    seconds of a fight's opening is walk-on, glove touch and instructions;
+    past that the cost outweighs a marginally cleaner frame.
+
+    Returns a frame index; frame 0 on anything it cannot read, which is no
+    worse than the behaviour this replaces.
+    """
+    if info.fps <= 0 or info.frame_count <= 2:
+        return 0
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return 0
+    try:
+        first = max(1, int(info.frame_count * 0.02))
+        last = max(first + 2, min(int(info.frame_count * search_share),
+                                  int(_MAX_SELECTION_SECONDS * info.fps)))
+        step = max(1, (last - first) // max(1, samples))
+        scored: list[tuple[int, float]] = []
+        for index in range(first, last, step):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, index)
+            ok_a, frame_a = cap.read()
+            ok_b, frame_b = cap.read()
+            if not ok_a or not ok_b or frame_a is None or frame_b is None:
+                continue
+            height, width = frame_a.shape[:2]
+            top, bottom = int(height * 0.30), int(height * 0.75)
+            left, right = int(width * 0.25), int(width * 0.75)
+            if bottom <= top or right <= left:
+                continue
+            crop_a = cv2.cvtColor(frame_a[top:bottom, left:right], cv2.COLOR_BGR2GRAY)
+            crop_b = cv2.cvtColor(frame_b[top:bottom, left:right], cv2.COLOR_BGR2GRAY)
+            # Blur first: block noise in a compressed 480p stream is the same
+            # order of magnitude as a hand moving, and it is everywhere.
+            crop_a = cv2.GaussianBlur(crop_a, (5, 5), 0)
+            crop_b = cv2.GaussianBlur(crop_b, (5, 5), 0)
+            scored.append((index, float(cv2.absdiff(crop_a, crop_b).mean())))
+        if not scored:
+            return 0
+        # The earliest moment that is clearly action, not the busiest one.
+        # Everything before the pick goes unanalysed, so a frame at 17s that
+        # is marginally livelier than one at 6s is a bad trade: it costs ten
+        # seconds of a fight to gain nothing the seeding can use.
+        best = max(score for _, score in scored)
+        return next(index for index, score in scored if score >= best * 0.70)
+    except cv2.error:
+        return 0
+    finally:
+        cap.release()
+
+
 def read_frame(path: str | Path, frame_index: int):
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
