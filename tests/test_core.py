@@ -981,6 +981,42 @@ class EngagementRangeTests(unittest.TestCase):
         self.assertTrue(plan)
         self.assertNotIn("Measured at", plan[0]["goal"])
 
+    def test_the_worker_reloads_itself_without_needing_a_supervisor(self):
+        """It restarts in place rather than exiting.
+
+        Exiting assumed something was supervising the process. When nothing
+        was, the worker vanished the moment the code changed and a queued fight
+        sat with nobody to claim it - which is exactly what happened. Re-exec
+        needs no supervisor and cannot leave a hole, so this checks the
+        mechanism actually replaces the process on this platform.
+        """
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+        from pathlib import Path
+
+        import worker
+
+        source = Path(worker.__file__).read_text(encoding="utf-8")
+        self.assertIn("os.execv", source, "the worker must restart in place")
+        self.assertNotIn("exiting so a restart picks it up", source)
+
+        script = textwrap.dedent("""
+            import os, sys
+            generation = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+            if generation < 2:
+                os.execv(sys.executable, [sys.executable, __file__, str(generation + 1)])
+            print("chain completed")
+        """)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "execv_probe.py"
+            path.write_text(script, encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(path)], capture_output=True, text=True, timeout=60,
+            )
+        self.assertIn("chain completed", result.stdout)
+
     def test_the_worker_notices_when_its_own_code_changes(self):
         """The analysis runs on the GPU box, not the web server.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import hashlib
 import logging
 import shutil
@@ -276,11 +277,18 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
         # Checked between jobs, never during one. Exiting hands the queue back
         # cleanly and whatever supervises this restarts it on the new code.
         if _code_changed_since(running_code):
+            # Restart in place rather than exiting. Exiting assumed something
+            # was supervising this process; when nothing was, the worker simply
+            # vanished the moment the code changed and a queued fight sat there
+            # with no one to claim it. Re-exec needs no supervisor and cannot
+            # leave a hole.
             LOGGER.warning(
-                "Analysis code changed on disk (was %s, now %s); exiting so a "
-                "restart picks it up", running_code, _source_fingerprint(),
+                "Analysis code changed on disk (was %s, now %s); restarting on it",
+                running_code, _source_fingerprint(),
             )
-            return 0
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.execv(sys.executable, [sys.executable, *sys.argv])
         try:
             retry_heartbeat(client)
             claimed = client.claim()
