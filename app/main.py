@@ -2614,6 +2614,17 @@ def _review_candidates(report: dict, mode: str = "dataset") -> list[dict]:
                 selected[-1] = item
             continue
         selected.append(item)
+    # Highest confidence first. The page shows 40 at a time, and chronological
+    # order made that a random-quality sample - on a real session 27 of 30 were
+    # rejected. Confidence only became worth sorting on once it stopped
+    # saturating at 0.94 for nearly every candidate; now it spreads across
+    # 0.44-0.91, so the strongest hypotheses get the labelling time.
+    selected.sort(
+        key=lambda item: (
+            float(item.get("confidence", 0.0)) + float(item.get("contact_confidence", 0.0) or 0.0)
+        ),
+        reverse=True,
+    )
     return selected
 
 

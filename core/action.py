@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import acos, degrees
 
 import numpy as np
@@ -46,6 +46,26 @@ class ActiveLimb:
     start_extension: float
     peak_extension: float
     frames_active: int = 1
+    # Every frame's speed, so the action can be judged on sustained movement
+    # rather than its single fastest frame.
+    speeds: list[float] = field(default_factory=list)
+
+    def sustained_speed(self) -> float:
+        """Median frame speed across the action.
+
+        A strike is fast for several frames together. A mislabelled keypoint is
+        fast for exactly one, and taking the maximum let that one frame define
+        the whole event - which is how a limb came to be travelling at 47 body
+        lengths a second.
+        """
+        if len(self.speeds) < 3:
+            # A median over one or two frames is not a median. It also matters
+            # for the side-correction path: when the pose model swaps ankle
+            # labels the tracked limb is the still one, and judging a real kick
+            # by that limb's speed would throw the kick away.
+            return self.max_speed
+        ordered = sorted(self.speeds)
+        return ordered[len(ordered) // 2]
 
 
 def _point(kp: np.ndarray | None, idx: int) -> np.ndarray | None:
@@ -323,8 +343,10 @@ class ActionEngine:
             else:
                 knee_shape_ok = True
 
+            plausible = speed <= SETTINGS.max_plausible_limb_speed_body_lengths_per_s
             start_condition = (
-                speed >= SETTINGS.min_strike_speed_body_lengths_per_s
+                plausible
+                and speed >= SETTINGS.min_strike_speed_body_lengths_per_s
                 and toward >= 0.12
                 and ext - prev_ext >= SETTINGS.min_extension_gain * 0.35
                 and knee_shape_ok
@@ -340,6 +362,7 @@ class ActionEngine:
                         start_sample=previous,
                         peak_sample=sample,
                         max_speed=speed,
+                        speeds=[speed],
                         start_extension=prev_ext,
                         peak_extension=ext,
                     )
@@ -347,6 +370,7 @@ class ActionEngine:
 
             active.frames_active += 1
             active.max_speed = max(active.max_speed, speed)
+            active.speeds.append(speed)
             if ext > active.peak_extension:
                 active.peak_extension = ext
                 active.peak_sample = sample
@@ -359,14 +383,15 @@ class ActionEngine:
                 start_sample = active.start_sample
                 peak_sample = active.peak_sample
 
+                sustained = active.sustained_speed()
                 valid = (
                     active.frames_active >= 3
-                    and active.max_speed >= SETTINGS.min_strike_speed_body_lengths_per_s
+                    and sustained >= SETTINGS.min_strike_speed_body_lengths_per_s
                     and extension_gain >= SETTINGS.min_extension_gain
                 )
                 if family == "knee":
                     # Knees naturally have less endpoint extension.
-                    valid = active.frames_active >= 3 and active.max_speed >= SETTINGS.min_strike_speed_body_lengths_per_s * 0.82
+                    valid = active.frames_active >= 3 and sustained >= SETTINGS.min_strike_speed_body_lengths_per_s * 0.82
 
                 if valid:
                     # Pose models occasionally swap left/right ankle labels for
@@ -392,7 +417,12 @@ class ActionEngine:
                         technique = _classify_knee(peak_sample, event_limb)
 
                     model_source = "temporal_rules"
-                    confidence = min(0.94, 0.45 + 0.22 * min(2.0, active.max_speed) + 0.35 * min(0.45, extension_gain))
+                    confidence = min(
+                        0.94,
+                        0.30
+                        + 0.30 * min(1.0, sustained / 6.0)
+                        + 0.34 * min(1.0, extension_gain / 0.45),
+                    )
 
                     # Optional trained model gets a vote only when a complete
                     # sequence is available and its confidence is strong.

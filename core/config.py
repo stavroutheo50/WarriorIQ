@@ -163,6 +163,15 @@ class Settings:
     action_window: int = 12
     min_event_gap_seconds: float = 0.22
     min_strike_speed_body_lengths_per_s: float = 0.90
+    # A limb cannot move this fast. Measured on one real fight, candidate peak
+    # speeds ran to 47.6 body lengths a second - roughly 80 m/s - because the
+    # trigger read a single frame-to-frame displacement, and one jittery
+    # keypoint is indistinguishable from a strike. A human limb peaks around
+    # 6-9, so anything past this is tracking noise and the frame is ignored
+    # rather than allowed to start or define an action.
+    max_plausible_limb_speed_body_lengths_per_s: float = float(
+        os.getenv("WARRIORIQ_MAX_LIMB_SPEED", "12.0")
+    )
     min_extension_gain: float = 0.07
     temporal_probability_threshold: float = 0.60
 
