@@ -2700,12 +2700,20 @@ def _review_candidates(report: dict, mode: str = "dataset") -> list[dict]:
     # rejected. Confidence only became worth sorting on once it stopped
     # saturating at 0.94 for nearly every candidate; now it spreads across
     # 0.44-0.91, so the strongest hypotheses get the labelling time.
-    selected.sort(
-        key=lambda item: (
-            float(item.get("confidence", 0.0)) + float(item.get("contact_confidence", 0.0) or 0.0)
-        ),
-        reverse=True,
-    )
+    def _rank(item: dict) -> float:
+        # A null confidence is not a zero-confidence event, it is an event
+        # nobody scored - a manually added label carries no confidence at all.
+        # float(None) raised here and took the whole labelling page with it.
+        total = 0.0
+        for key in ("confidence", "contact_confidence"):
+            try:
+                value = item.get(key)
+                total += float(value) if value is not None else 0.0
+            except (TypeError, ValueError):
+                continue
+        return total
+
+    selected.sort(key=_rank, reverse=True)
     return selected
 
 

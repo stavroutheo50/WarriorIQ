@@ -747,6 +747,25 @@ class PublicPageTests(unittest.TestCase):
             analysis_quality=_analysis_quality_summary(report), can_share=False, unavailable=[],
         )
 
+    def test_the_labelling_list_survives_events_without_a_confidence(self):
+        """Sorting candidates by confidence crashed on a null one.
+
+        A manually added label carries no confidence at all, and float(None)
+        raised a TypeError that took the whole labelling page with it - the one
+        page the training data depends on.
+        """
+        from app.main import _review_candidates
+
+        events = [
+            {"peak_time": 1.0, "technique": "jab", "fighter": "A", "confidence": None},
+            {"peak_time": 5.0, "technique": "cross", "fighter": "B", "confidence": 0.9},
+            {"peak_time": 9.0, "technique": "hook", "fighter": "A", "confidence": "junk"},
+        ]
+        candidates = _review_candidates({"events": events}, "dataset")
+        self.assertEqual(len(candidates), 3)
+        # The scored one still sorts to the front.
+        self.assertEqual(candidates[0]["technique"], "cross")
+
     def test_the_report_warns_when_the_wrong_two_people_were_picked(self):
         """The measured coach mis-pick on 2.mp4: 175 actions, none landed."""
         page = self._render_result({
