@@ -16,6 +16,7 @@ import torch
 
 from core.action import ActionEngine
 from core.config import OUTPUTS, SETTINGS
+from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
 from core.contact import (
     assess_selection,
     classify_contact,
@@ -271,6 +272,26 @@ class _Travel:
         return round(self._distance / median_height / (span / 60.0), 1)
 
 
+def _observed_fighter_mismatch(finder) -> dict | None:
+    """Who actually fought, and whether the analysis was watching them.
+
+    Returns None when there is nothing to say - too little footage, or nobody
+    in frame cleared the movement floor. Saying nothing is the right answer far
+    more often than guessing.
+    """
+    best = finder.best_pair()
+    if not best:
+        return None
+    followed = best.get("followed_share")
+    return {
+        "centres": best["centres"],
+        "travel_per_minute": best["travel"],
+        "share_within_range": best["close_share"],
+        "followed_share": followed,
+        "disagrees_with_selection": analysis_missed_the_fight(followed),
+    }
+
+
 def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None) -> dict:
     info = get_video_info(req.video_path)
     _validate_request(req, info.duration)
@@ -473,6 +494,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     out_of_range_actions = 0
     observed_separations: list[float] = []
     travel = {"A": _Travel(), "B": _Travel()}
+    fighter_finder = FighterFinder()
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
 
     try:
@@ -626,6 +648,8 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             # people happen to be standing next to each other.
             travel["A"].add(seconds, fighter_a)
             travel["B"].add(seconds, fighter_b)
+            fighter_finder.observe(seconds, people)
+            fighter_finder.observe_selected(fighter_a, fighter_b)
 
             if tracking_file is not None:
                 record = {
@@ -813,6 +837,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         travel_per_minute={
             fighter: travel[fighter].body_lengths_per_minute() for fighter in ("A", "B")
         },
+        observed_fighters=_observed_fighter_mismatch(fighter_finder),
     )
     progress(
         "Finalizing coaching priorities", 99.2, time.perf_counter() - wall_start, segment_duration,

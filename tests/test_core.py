@@ -999,6 +999,61 @@ class EngagementRangeTests(unittest.TestCase):
                 self.assertTrue(verdict["looks_like_a_fight"])
                 self.assertIsNone(verdict["warning"])
 
+    def test_watching_the_wrong_fighter_is_caught_by_the_followed_share(self):
+        """Measured end to end by running analyze() twice on the same fight.
+
+        Scores are per fighter, because the failure is asymmetric: seeding one
+        real fighter and one coach still follows half the fight. Asking "was
+        either box on this fighter?" scored a bad run 0.936 against 0.994 for a
+        good one and separated nothing. Per fighter, the one nobody watched
+        drops to 0.283.
+        """
+        from core.contact import assess_selection
+
+        verdict = assess_selection(
+            [1.2] * 200, kept=48, discarded=190, landed=4,
+            travel_per_minute={"A": 26.0, "B": 24.0},
+            observed_fighters={
+                "centres": ((255.0, 74.0), (272.0, 65.0)),
+                "travel_per_minute": (31.0, 26.0),
+                "share_within_range": 1.0,
+                "followed_share": (0.698, 0.283),
+                "disagrees_with_selection": True,
+            },
+        )
+        self.assertFalse(verdict["looks_like_a_fight"])
+        self.assertEqual(verdict["verdict"], "another_pair_did_the_fighting")
+
+    def test_correctly_seeded_fights_survive_the_followed_share(self):
+        """Both real fights, measured. The lower of the two is 0.713."""
+        from core.config import SETTINGS
+        from core.contact import assess_selection
+        from core.fighter_suggest import analysis_missed_the_fight
+
+        for name, shares in (("2.mp4", (0.992, 0.995)), ("0-02-05", (0.713, 0.978))):
+            with self.subTest(fight=name):
+                self.assertFalse(analysis_missed_the_fight(shares))
+                verdict = assess_selection(
+                    [0.8] * 200, kept=150, discarded=120, landed=20,
+                    travel_per_minute={"A": 31.0, "B": 26.0},
+                    observed_fighters={
+                        "centres": ((250.0, 70.0), (270.0, 68.0)),
+                        "travel_per_minute": (31.0, 26.0),
+                        "share_within_range": 1.0,
+                        "followed_share": shares,
+                        "disagrees_with_selection": analysis_missed_the_fight(shares),
+                    },
+                )
+                self.assertTrue(verdict["looks_like_a_fight"])
+        # Margin on both sides of the measured spread, not a fitted number.
+        self.assertLess(SETTINGS.min_followed_share, 0.713)
+        self.assertGreater(SETTINGS.min_followed_share, 0.283)
+
+    def test_no_pair_found_means_no_accusation(self):
+        from core.fighter_suggest import analysis_missed_the_fight
+
+        self.assertFalse(analysis_missed_the_fight(None))
+
     def test_someone_standing_at_ringside_is_caught_even_when_close(self):
         """A live job (69511cc2c1cc) tracked two people at the edge of the mat.
 

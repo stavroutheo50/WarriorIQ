@@ -218,6 +218,18 @@ class Settings:
     min_fighter_travel_per_minute: float = float(
         os.getenv("WARRIORIQ_MIN_TRAVEL_PER_MINUTE", "15")
     )
+    # How often the analysis was looking at one of the two people who actually
+    # fought. Set once measured on real runs; a correct run loses its fighters
+    # to occlusion and pans, so this only has to separate "followed the fight"
+    # from "followed somebody else entirely".
+    min_followed_share: float = float(os.getenv("WARRIORIQ_MIN_FOLLOWED_SHARE", "0.35"))
+    # Who the pair-finder will consider at all. Lower than the warning floor
+    # above on purpose: this only decides who is eligible to be one of the two
+    # fighters, and the pairing does the real work. Set equal to the warning
+    # floor, whole fights produced no candidate pair and the check said nothing.
+    min_candidate_travel_per_minute: float = float(
+        os.getenv("WARRIORIQ_MIN_CANDIDATE_TRAVEL", "8")
+    )
     contact_threshold_body_lengths: float = 0.24
     likely_contact_threshold_body_lengths: float = 0.33
     contact_confirmation_frames: int = 2

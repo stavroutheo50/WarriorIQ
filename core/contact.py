@@ -167,6 +167,7 @@ def thrown_at_opponent(event: StrikeEvent) -> bool:
 def assess_selection(
     separations: list[float], kept: int, discarded: int, landed: int,
     travel_per_minute: dict[str, float | None] | None = None,
+    observed_fighters: dict | None = None,
 ) -> dict:
     """Were the two people picked actually the two fighters?
 
@@ -190,9 +191,24 @@ def assess_selection(
         "landed": landed,
         "median_separation_body_lengths": None,
         "travel_per_minute": dict(travel_per_minute),
+        "observed_fighters": observed_fighters,
         "looks_like_a_fight": True,
         "warning": None,
     }
+
+    # Strongest evidence first: two other people in the frame moved like
+    # fighters and stayed in range of each other for the bout, and neither of
+    # them is who was analysed. That is not an inference about behaviour - it
+    # is a different pair, measured.
+    if observed_fighters and observed_fighters.get("disagrees_with_selection"):
+        result["looks_like_a_fight"] = False
+        result["verdict"] = "another_pair_did_the_fighting"
+        result["warning"] = (
+            "Two other people in this video moved like fighters and stayed in "
+            "range of each other the whole time, and neither of them is who was "
+            "analysed. The boxes are almost certainly on the wrong people."
+        )
+        return result
 
     # Checked before anything else, because it needs no actions at all. Someone
     # who barely moves for minutes is not fighting, however close they happen to

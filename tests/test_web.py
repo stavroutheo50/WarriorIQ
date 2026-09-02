@@ -752,11 +752,15 @@ class PublicPageTests(unittest.TestCase):
         page = self._render_result({
             "actions_observed": 175, "actions_in_range": 12, "landed": 0,
             "median_separation_body_lengths": 2.84, "looks_like_a_fight": False,
-            "warning": "...", "verdict": "selection_probably_wrong",
+            "warning": "Nothing landed in 175 actions, and these two stayed about "
+                       "2.8 body lengths apart the whole video.",
+            "verdict": "selection_probably_wrong",
         })
         self.assertIn("These may not be the two fighters", page)
-        self.assertIn("0 of 175 moves landed", page)
-        self.assertIn("2.8 body lengths", page)
+        # The banner prints whichever reason the check produced, so a new
+        # verdict cannot ship with a stale explanation baked into the markup.
+        self.assertIn("Nothing landed in 175 actions", page)
+        self.assertIn("Pick the fighters again", page)
 
     def test_a_normal_report_carries_no_such_warning(self):
         page = self._render_result({
