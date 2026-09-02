@@ -1563,3 +1563,28 @@ def test_detected_rounds_can_carry_every_round_number_for_scoring():
     assert round_at_time(self_rounds, 140.0).number == 2
     # Nothing is scored inside the break itself.
     assert round_at_time(self_rounds, 80.0) is None
+
+
+def test_per_round_evidence_follows_the_detected_rounds():
+    """Two numbers worked out at different times must still agree.
+
+    Round numbers reach MetricsAccumulator.update while the fight is being
+    watched, from the schedule it started with. The real structure is only
+    known afterwards. Before rebucketing, a fight detected as two rounds
+    showed two rounds on the scorecard and one in the evidence table.
+    """
+    from core.metrics import MetricsAccumulator
+    from core.types import RoundSpec
+
+    metrics = MetricsAccumulator(640, 360)
+    for second in range(0, 200):
+        for fighter in ("A", "B"):
+            # Round number 1 throughout, exactly as the loop would supply it.
+            metrics.update(fighter, float(second), 1, None, None)
+
+    metrics.rebucket_rounds([RoundSpec(1, 0.0, 60.0, True), RoundSpec(2, 100.0, 180.0, True)])
+    assert sorted(metrics.round_frames) == [1, 2]
+    assert metrics.round_frames[1]["A"] == 60         # 0-59s
+    assert metrics.round_frames[2]["A"] == 80         # 100-179s
+    # The break and the tail past the last round belong to no round at all.
+    assert sum(v["A"] for v in metrics.round_frames.values()) == 140

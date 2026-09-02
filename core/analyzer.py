@@ -777,6 +777,9 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             spec = round_at_time(rounds, float(event.peak_time))
             if spec is not None:
                 event.round_number = spec.number
+        # Per-round pose evidence was bucketed against the old schedule while
+        # the loop ran, so rebuild it against the rounds that were found.
+        metrics.rebucket_rounds(rounds)
 
     all_final_live_events = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
     final_live_stats = _provisional_stats(

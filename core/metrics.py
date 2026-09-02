@@ -58,9 +58,38 @@ class MetricsAccumulator:
         self.balance_samples = {"A": [], "B": []}
         self.round_frames = defaultdict(lambda: {"A": 0, "B": 0})
         self.round_visible = defaultdict(lambda: {"A": 0, "B": 0})
+        # When each fighter was and was not visible, so per-round evidence can
+        # be rebuilt once the real round structure is known. See rebucket_rounds.
+        self._presence: list[tuple[float, str, bool]] = []
+
+    def rebucket_rounds(self, rounds) -> None:
+        """Re-assign per-round pose evidence after the rounds are detected.
+
+        The round number passed to update() comes from the schedule the fight
+        started with, and the real structure is only known once the whole fight
+        has been watched. Without rebuilding here, a fight detected as two
+        rounds reported two rounds on the scorecard and one in the evidence
+        table, which reads as a bug in the report rather than a difference in
+        when two numbers were worked out.
+
+        Samples inside a detected break belong to no round and are dropped:
+        coverage during a break says nothing about how well the fight was seen.
+        """
+        from core.video import round_at_time
+
+        self.round_frames = defaultdict(lambda: {"A": 0, "B": 0})
+        self.round_visible = defaultdict(lambda: {"A": 0, "B": 0})
+        for seconds, fighter, visible in self._presence:
+            spec = round_at_time(rounds, seconds)
+            if spec is None:
+                continue
+            self.round_frames[spec.number][fighter] += 1
+            if visible:
+                self.round_visible[spec.number][fighter] += 1
 
     def update(self, fighter: str, seconds: float, round_number: int | None, obs: PersonObservation | None, opponent: PersonObservation | None):
         self.frames[fighter] += 1
+        self._presence.append((float(seconds), fighter, obs is not None))
         if round_number is not None:
             self.round_frames[round_number][fighter] += 1
         if obs is None:
