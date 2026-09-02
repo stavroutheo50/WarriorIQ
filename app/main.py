@@ -333,11 +333,29 @@ def _owner_key(request: Request) -> str:
     return f"account:{account['id']}" if account else f"guest:{request.state.guest_id}"
 
 
+# A fight that has not moved in this long is not being analysed any more. The
+# worker reports progress continuously and its lease is three minutes, so
+# silence for hours means the run died - the machine slept, the worker was
+# killed, the process crashed. Without this the job sat in the top bar for ever:
+# one real user carried "Analysis paused" at 39.9% from days earlier and had no
+# way to clear it.
+_STALE_PROCESSING_SECONDS = 2 * 60 * 60
+
+
+def _is_live_processing_job(job: dict) -> bool:
+    if job.get("status") not in {"queued", "running", "interrupted"}:
+        return False
+    updated = float(job.get("updated_at_epoch", 0) or 0)
+    if updated <= 0:
+        return False
+    return (time.time() - updated) <= _STALE_PROCESSING_SECONDS
+
+
 def _active_job_for_owner(owner_key: str) -> dict | None:
     jobs = [
         {"job_id": job_id, **job}
         for job_id, job in list_jobs()
-        if job.get("owner_key") == owner_key and job.get("status") in {"queued", "running", "interrupted"}
+        if job.get("owner_key") == owner_key and _is_live_processing_job(job)
     ]
     if not jobs:
         return None
@@ -371,6 +389,8 @@ def _analysis_navigation_state(
     """
     processing_statuses = {"queued", "running", "interrupted"}
     active = _owned_job(owner_key, active_job_id, processing_statuses)
+    if active is not None and not _is_live_processing_job(active):
+        active = None
     if active is None:
         active = _active_job_for_owner(owner_key)
 
