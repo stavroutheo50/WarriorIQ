@@ -17,6 +17,7 @@ import torch
 from core.action import ActionEngine
 from core.config import OUTPUTS, SETTINGS
 from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
+from core.round_detect import RoundDetector
 from core.contact import (
     assess_selection,
     classify_contact,
@@ -272,6 +273,20 @@ class _Travel:
         return round(self._distance / median_height / (span / 60.0), 1)
 
 
+def _pair_separation(fighter_a, fighter_b) -> float | None:
+    """How far apart the two fighters are, in body lengths, this frame."""
+    box_a = getattr(fighter_a, "box", None) if fighter_a is not None else None
+    box_b = getattr(fighter_b, "box", None) if fighter_b is not None else None
+    if box_a is None or box_b is None:
+        return None
+    ax = (float(box_a[0]) + float(box_a[2])) / 2.0
+    ay = (float(box_a[1]) + float(box_a[3])) / 2.0
+    bx = (float(box_b[0]) + float(box_b[2])) / 2.0
+    by = (float(box_b[1]) + float(box_b[3])) / 2.0
+    body = max(20.0, (float(box_a[3]) - float(box_a[1]) + float(box_b[3]) - float(box_b[1])) / 2.0)
+    return math.hypot(ax - bx, ay - by) / body
+
+
 def _observed_fighter_mismatch(finder) -> dict | None:
     """Who actually fought, and whether the analysis was watching them.
 
@@ -495,6 +510,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     observed_separations: list[float] = []
     travel = {"A": _Travel(), "B": _Travel()}
     fighter_finder = FighterFinder()
+    round_detector = RoundDetector()
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
 
     try:
@@ -650,6 +666,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             travel["B"].add(seconds, fighter_b)
             fighter_finder.observe(seconds, people)
             fighter_finder.observe_selected(fighter_a, fighter_b)
+            round_detector.observe(seconds, _pair_separation(fighter_a, fighter_b))
 
             if tracking_file is not None:
                 record = {
@@ -826,6 +843,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         performance=performance,
         classifier=classifier,
     )
+    report["detected_rounds"] = round_detector.summary()
     report["selection_check"] = assess_selection(
         observed_separations,
         len(report_events),

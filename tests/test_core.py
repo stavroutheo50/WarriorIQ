@@ -981,6 +981,53 @@ class EngagementRangeTests(unittest.TestCase):
         self.assertTrue(plan)
         self.assertNotIn("Measured at", plan[0]["goal"])
 
+    def test_rounds_are_read_from_the_fight_not_typed_in(self):
+        """Two rounds with a break between them are found without being told."""
+        from core.round_detect import RoundDetector
+
+        detector = RoundDetector()
+        for second in range(0, 60):
+            detector.observe(second, 1.0)        # engaged
+        for second in range(60, 100):
+            detector.observe(second, 6.0)        # corners, far apart
+        for second in range(100, 160):
+            detector.observe(second, 1.2)        # engaged again
+        summary = detector.summary()
+        self.assertEqual(summary["rounds_detected"], 2)
+        self.assertAlmostEqual(summary["rounds"][0]["end_seconds"], 60.0, places=0)
+        self.assertAlmostEqual(summary["rounds"][1]["start_seconds"], 100.0, places=0)
+
+    def test_a_continuous_fight_is_not_carved_into_rounds(self):
+        """Saying nothing is a real answer.
+
+        A single continuous round and a video the detector could not read look
+        identical from here, and both are served correctly by analysing the
+        whole thing as one round.
+        """
+        from core.round_detect import RoundDetector
+
+        detector = RoundDetector()
+        for second in range(0, 180):
+            detector.observe(second, 1.0)
+        self.assertIsNone(detector.summary()["rounds_detected"])
+
+    def test_resets_inside_a_round_are_not_mistaken_for_breaks(self):
+        """Fighters break off constantly. A break is long, and it holds."""
+        from core.round_detect import RoundDetector
+
+        detector = RoundDetector()
+        for second in range(0, 180):
+            detector.observe(second, 1.0 if second % 7 else 5.0)
+        self.assertIsNone(detector.summary()["rounds_detected"])
+
+    def test_a_fight_nobody_could_be_located_in_claims_nothing(self):
+        from core.round_detect import RoundDetector
+
+        detector = RoundDetector()
+        for second in range(0, 180):
+            detector.observe(second, None)
+        self.assertIsNone(detector.summary()["rounds_detected"])
+
     def test_the_worker_reloads_itself_without_needing_a_supervisor(self):
         """It restarts in place rather than exiting.
 
