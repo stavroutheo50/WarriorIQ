@@ -981,6 +981,35 @@ class EngagementRangeTests(unittest.TestCase):
         self.assertTrue(plan)
         self.assertNotIn("Measured at", plan[0]["goal"])
 
+    def test_the_worker_notices_when_its_own_code_changes(self):
+        """The analysis runs on the GPU box, not the web server.
+
+        Deploying the website changes nothing about how a fight is analysed, so
+        a worker started before a fix keeps running the old code silently. One
+        ran five hours across fourteen commits: every analysis fix of the day
+        sat on disk loaded by nothing, and the fights it was meant to fix came
+        back unchanged.
+        """
+        import io as _io
+        import time
+
+        import worker
+
+        before = worker._source_fingerprint()
+        self.assertEqual(before, worker._source_fingerprint(), "must be stable")
+        self.assertFalse(worker._code_changed_since(before))
+
+        path = "core/metrics.py"
+        original = _io.open(path, encoding="utf-8").read()
+        try:
+            _io.open(path, "w", encoding="utf-8").write(original + "
+# touched by a test
+")
+            time.sleep(0.05)
+            self.assertTrue(worker._code_changed_since(before))
+        finally:
+            _io.open(path, "w", encoding="utf-8").write(original)
+
     def test_a_fighter_is_never_handed_to_someone_standing_still(self):
         """The reported failure: one fighter tracked, the other lost to a coach.
 

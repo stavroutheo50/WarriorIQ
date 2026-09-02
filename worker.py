@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import shutil
 import socket
@@ -240,9 +241,46 @@ def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
             shutil.rmtree(output_dir, ignore_errors=True)
 
 
+def _source_fingerprint() -> str:
+    """A fingerprint of the code this worker is running.
+
+    The analysis runs here, on the GPU machine, not on the web server. So
+    deploying the website changes nothing about how a fight is analysed, and a
+    worker started before a fix keeps running the old code with no sign that it
+    is doing so. One worker ran for five hours across fourteen commits - every
+    analysis fix of the day sat on disk, loaded by nothing, while the fights it
+    was supposed to fix came back unchanged.
+    """
+    root = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(root.glob("core/*.py")) + [root / "worker.py"]:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        digest.update(path.name.encode())
+        digest.update(str(stat.st_mtime_ns).encode())
+        digest.update(str(stat.st_size).encode())
+    return digest.hexdigest()[:12]
+
+
+def _code_changed_since(fingerprint: str) -> bool:
+    return _source_fingerprint() != fingerprint
+
+
 def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
     client = RemoteWorkerClient(SETTINGS.worker_remote_url, SETTINGS.worker_token, worker_id)
+    running_code = _source_fingerprint()
+    LOGGER.info("Worker running analysis code %s", running_code)
     while True:
+        # Checked between jobs, never during one. Exiting hands the queue back
+        # cleanly and whatever supervises this restarts it on the new code.
+        if _code_changed_since(running_code):
+            LOGGER.warning(
+                "Analysis code changed on disk (was %s, now %s); exiting so a "
+                "restart picks it up", running_code, _source_fingerprint(),
+            )
+            return 0
         try:
             retry_heartbeat(client)
             claimed = client.claim()
