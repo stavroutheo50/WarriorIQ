@@ -26,7 +26,13 @@ PROVIDER_LABELS = {
     "google": "Google",
     "facebook": "Facebook",
     "microsoft": "Microsoft",
+    "github": "GitHub",
 }
+
+# Every outbound call to a provider is made while somebody waits on a button.
+# Without a ceiling, a host that cannot reach the provider turns that button
+# into an infinite spinner instead of an error.
+OUTBOUND_TIMEOUT_SECONDS = 10.0
 
 
 class SocialAuthRegistry:
@@ -53,9 +59,24 @@ class SocialAuthRegistry:
                 access_token_url="https://graph.facebook.com/oauth/access_token",
                 authorize_url="https://www.facebook.com/dialog/oauth",
                 api_base_url="https://graph.facebook.com/",
-                client_kwargs={"scope": "email"},
+                client_kwargs={"scope": "email", "timeout": OUTBOUND_TIMEOUT_SECONDS},
             )
             self._enabled.add("facebook")
+        # GitHub is not an OpenID Connect provider: there is no id_token and no
+        # discovery document, so the identity is read from its own user API.
+        # Its endpoints are fixed, which means pressing this button needs no
+        # network call before the redirect at all.
+        if SETTINGS.github_client_id and SETTINGS.github_client_secret:
+            self.oauth.register(
+                name="github",
+                client_id=SETTINGS.github_client_id,
+                client_secret=SETTINGS.github_client_secret,
+                access_token_url="https://github.com/login/oauth/access_token",
+                authorize_url="https://github.com/login/oauth/authorize",
+                api_base_url="https://api.github.com/",
+                client_kwargs={"scope": "read:user user:email", "timeout": OUTBOUND_TIMEOUT_SECONDS},
+            )
+            self._enabled.add("github")
 
     def _register_oidc(self, name: str, client_id: str, client_secret: str, metadata_url: str) -> None:
         if not client_id or not client_secret:
@@ -65,7 +86,20 @@ class SocialAuthRegistry:
             client_id=client_id,
             client_secret=client_secret,
             server_metadata_url=metadata_url,
-            client_kwargs={"scope": "openid email profile", "code_challenge_method": "S256"},
+            # The scope and PKCE method are the provider's contract. The
+            # timeout is ours, and it is the important one: pressing this
+            # button makes the web server fetch the provider's discovery
+            # document, and the web server is a shared host whose outbound
+            # HTTPS can be blocked or slow. Without a timeout that fetch never
+            # returns, the POST never answers, and the button spins for ever
+            # with nothing shown to the person pressing it - which is exactly
+            # how this failed in production. Ten seconds is far longer than a
+            # reachable provider needs and short enough to report as an error.
+            client_kwargs={
+                "scope": "openid email profile",
+                "code_challenge_method": "S256",
+                "timeout": OUTBOUND_TIMEOUT_SECONDS,
+            },
         )
         self._enabled.add(name)
 
@@ -92,6 +126,29 @@ class SocialAuthRegistry:
             email = payload.get("email")
             name = payload.get("name")
             email_verified = False
+        elif provider == "github":
+            response = await client.get("user", token=token)
+            response.raise_for_status()
+            payload = response.json()
+            subject = str(payload.get("id") or "")
+            name = payload.get("name") or payload.get("login")
+            email = payload.get("email")
+            email_verified = False
+            if not email:
+                # A GitHub profile email is public only if the account chose to
+                # publish it, so the primary address usually has to be asked
+                # for separately. Failing that, the account is still usable -
+                # it just has no address attached.
+                try:
+                    listing = await client.get("user/emails", token=token)
+                    listing.raise_for_status()
+                    for entry in listing.json():
+                        if entry.get("primary"):
+                            email = entry.get("email")
+                            email_verified = bool(entry.get("verified"))
+                            break
+                except Exception:                       # noqa: BLE001
+                    email = None
         else:
             payload = dict(token.get("userinfo") or {})
             if not payload:

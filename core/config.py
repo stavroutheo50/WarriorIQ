@@ -288,6 +288,8 @@ class Settings:
     facebook_client_secret: str = os.getenv("WARRIORIQ_FACEBOOK_CLIENT_SECRET", "").strip()
     microsoft_client_id: str = os.getenv("WARRIORIQ_MICROSOFT_CLIENT_ID", "").strip()
     microsoft_client_secret: str = os.getenv("WARRIORIQ_MICROSOFT_CLIENT_SECRET", "").strip()
+    github_client_id: str = os.getenv("WARRIORIQ_GITHUB_CLIENT_ID", "").strip()
+    github_client_secret: str = os.getenv("WARRIORIQ_GITHUB_CLIENT_SECRET", "").strip()
 
     # Analysis jobs can run inside the web process for a local/PyCharm build,
     # or be claimed by a separate GPU worker in production.  External mode is
