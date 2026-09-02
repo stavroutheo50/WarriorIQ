@@ -7,6 +7,17 @@ from math import acos, degrees
 import numpy as np
 
 from core.config import SETTINGS
+
+# The range the rule-based confidence above can actually produce. FLOOR is a
+# trigger that fired with no corroborating speed or extension; CEILING is the
+# most any rule-based event is allowed to claim, reserving certainty for a
+# trained model. Anything gating on this confidence must derive its threshold
+# from these two numbers rather than hard-coding one: a fixed 0.86 gate
+# outlived a rescale of this formula and silently hid all but 5 of 309 real
+# detections across six fights.
+CONFIDENCE_FLOOR = 0.30
+CONFIDENCE_CEILING = 0.94
+
 from core.temporal_model import TemporalModel
 from core.types import PersonObservation, StrikeEvent
 
@@ -418,8 +429,8 @@ class ActionEngine:
 
                     model_source = "temporal_rules"
                     confidence = min(
-                        0.94,
-                        0.30
+                        CONFIDENCE_CEILING,
+                        CONFIDENCE_FLOOR
                         + 0.30 * min(1.0, sustained / 6.0)
                         + 0.34 * min(1.0, extension_gain / 0.45),
                     )

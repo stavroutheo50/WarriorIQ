@@ -28,6 +28,22 @@ from core.db import save_fight
 from core.defense import DefenseEngine
 from core.evidence_trust import automated_evidence_trust
 from core.fight_stats import normalize_outcome, summarize_fight_events
+from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
+
+# How much of the confidence range an attempt must clear to be shown.
+#
+# An attempt is the low-information tier: this fighter, at this second, threw a
+# punch or a kick. No contact, no target, no scoring - those stay withheld
+# until the action classifier is validated. So the bar is deliberately low, and
+# only has to reject a trigger that fired with essentially no evidence behind
+# it. Precision belongs on the verified tier, which _live_event_reliable gates
+# separately and far harder.
+#
+# Expressed as a share of the range rather than a constant, because the last
+# constant here was calibrated against an older formula, survived a rescale of
+# it, and left six real fights showing 5 attempts out of 309 detections.
+ATTEMPT_CONFIDENCE = CONFIDENCE_FLOOR + 0.25 * (CONFIDENCE_CEILING - CONFIDENCE_FLOOR)
+
 from core.identity import IdentityManager
 from core.metrics import MetricsAccumulator
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
@@ -66,7 +82,7 @@ def _live_attempt_reliable(event) -> bool:
         and getattr(event, "family", None) in {"punch", "kick"}
         and math.isfinite(float(getattr(event, "peak_time", -1.0)))
         and float(getattr(event, "peak_time", -1.0)) >= 0.0
-        and float(getattr(event, "confidence", 0.0)) >= 0.86
+        and float(getattr(event, "confidence", 0.0)) >= ATTEMPT_CONFIDENCE
         and float(event.metadata.get("attacker_identity_confidence", 1.0)) >= 0.76
         and float(event.metadata.get("opponent_identity_confidence", 1.0)) >= 0.76
     )

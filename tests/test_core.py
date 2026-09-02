@@ -1513,3 +1513,21 @@ class FederationPointTableTests(unittest.TestCase):
         for key in ("K1", "BOXING", "MUAY_THAI", "MMA"):
             with self.subTest(ruleset=key):
                 self.assertEqual(RULESETS[key].point_table, ())
+
+
+def test_attempt_gate_sits_inside_the_producible_confidence_range():
+    """A gate above what the confidence formula emits hides every attempt.
+
+    This happened. The gate was a hard-coded 0.86 while the rule-based
+    confidence ran from 0.30 to 0.94 with a median near 0.50, so six real
+    fights produced 309 detections and five visible attempts - reported from
+    the field as "zero attempts for both fighters".
+    """
+    from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
+    from core.analyzer import ATTEMPT_CONFIDENCE
+
+    span = CONFIDENCE_CEILING - CONFIDENCE_FLOOR
+    assert CONFIDENCE_FLOOR < ATTEMPT_CONFIDENCE < CONFIDENCE_CEILING
+    # A strike carrying half the available evidence must survive the gate; a
+    # threshold above that is rejecting ordinary technique, not noise.
+    assert ATTEMPT_CONFIDENCE <= CONFIDENCE_FLOOR + 0.5 * span
