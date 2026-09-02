@@ -2213,6 +2213,52 @@ def remote_worker_video(request: Request, job_id: str, worker_id: str, analysis_
     return FileResponse(video_path, filename=f"{job_id}{video_path.suffix.lower()}", media_type="video/mp4")
 
 
+@app.post("/api/worker/dataset/backfill")
+def remote_worker_dataset_backfill(request: Request):
+    """Write the pose windows for labels that were saved without one.
+
+    The label endpoint only exports a training sequence when the owning profile
+    has allow_model_training switched on, which is off by default and correct -
+    nobody's fights should train a model unasked. The cost is that turning it on
+    afterwards leaves earlier labels as verdicts with no data attached, and a
+    labelling session is thirty minutes of someone's evening.
+
+    This regenerates them from the tracking file the worker uploaded, for
+    annotations whose owner has since consented. It can only fill gaps: a label
+    with a sequence already is left alone, and a fight whose tracking file has
+    aged out simply cannot be recovered and is reported as skipped.
+    """
+    _require_remote_worker(request)
+
+    filled = skipped_no_consent = skipped_no_tracking = already = 0
+    for annotation in list_annotations():
+        if annotation.get("sequence_path"):
+            already += 1
+            continue
+        job_id = annotation["job_id"]
+        fight = get_fight(job_id)
+        profile = get_profile(int(fight["profile_id"])) if fight else None
+        if not profile or not profile.get("allow_model_training"):
+            skipped_no_consent += 1
+            continue
+        corrected = annotation.get("corrected") or {}
+        path = export_sequence(
+            job_id, int(annotation["id"]), corrected, float(annotation["event_time"]),
+        )
+        if path:
+            set_annotation_sequence(int(annotation["id"]), path)
+            filled += 1
+        else:
+            skipped_no_tracking += 1
+
+    return {
+        "filled": filled,
+        "already_had_sequences": already,
+        "skipped_without_consent": skipped_no_consent,
+        "skipped_tracking_missing": skipped_no_tracking,
+    }
+
+
 @app.get("/api/worker/dataset")
 def remote_worker_dataset(request: Request):
     """Hand the labelled training set to the machine that does the training.
