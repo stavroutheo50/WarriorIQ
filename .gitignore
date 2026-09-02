@@ -34,3 +34,9 @@ Thumbs.db
 .DS_Store
 DEPLOYED_COMMIT
 logs/
+
+# Labelled training sequences. These are pose measurements of real, identifiable
+# athletes - youth competitors in the footage this was built on - which makes
+# them personal data under GDPR, and this repository is public. They live on the
+# server and are fetched with tools/pull_dataset.py; they must never be a commit.
+dataset/sequences/
