@@ -1002,9 +1002,9 @@ class EngagementRangeTests(unittest.TestCase):
         path = "core/metrics.py"
         original = _io.open(path, encoding="utf-8").read()
         try:
-            _io.open(path, "w", encoding="utf-8").write(original + "
-# touched by a test
-")
+            _io.open(path, "w", encoding="utf-8").write(
+                original + chr(10) + "# touched by a test" + chr(10)
+            )
             time.sleep(0.05)
             self.assertTrue(worker._code_changed_since(before))
         finally:
