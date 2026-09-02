@@ -155,7 +155,7 @@ class IdentityManager:
         for person in people:
             if person.track_id is None or person.box is None:
                 continue
-            history = self._track_history.setdefault(int(person.track_id), deque(maxlen=90))
+            history = self._track_history.setdefault(int(person.track_id), deque(maxlen=450))
             box = person.box
             history.append((
                 source_frame,
@@ -253,7 +253,19 @@ class IdentityManager:
         # One-directional on purpose. This can block a switch to a new track; it
         # can never drop the track already being followed, so a fighter who
         # pauses between exchanges is never given away.
-        if candidate.track_id is not None and candidate.track_id != state.current_track_id:
+        #
+        # Only while the fighter is actually in hand. Applying this during a
+        # recovery was the bug: a fighter briefly lost to an occlusion comes
+        # back on a track that has been standing still for the last few seconds
+        # - because they were waiting to restart - and the veto refused to give
+        # them their own identity back. They were never re-acquired, the two
+        # fighters were never in frame together again, and a whole bout came
+        # back with one action in it.
+        if (
+            state.missing_frames == 0
+            and candidate.track_id is not None
+            and candidate.track_id != state.current_track_id
+        ):
             travel = self._recent_travel(candidate.track_id, self.source_fps)
             if travel is not None and travel < SETTINGS.min_switch_travel_per_minute:
                 state.switches_rejected += 1

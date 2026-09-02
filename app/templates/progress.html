@@ -101,7 +101,46 @@ function exactResultUrl(d){const expected=`/result/${encodeURIComponent(jobId)}`
 function finishNavigation(d){const resultUrl=exactResultUrl(d),link=$('activeAnalysisLink'),label=$('activeAnalysisLabel'),mobile=$('activeAnalysisMobile');if(link?.dataset.analysisId===String(jobId)){link.href=resultUrl;link.dataset.analysisStatus='complete';if(label)label.textContent='✓ Results ready'}if(mobile?.dataset.analysisId===String(jobId)){mobile.href=resultUrl;mobile.textContent='✓ Open completed results'}$('viewResults').href=resultUrl;return resultUrl;}
 function scheduleReportTransition(resultUrl){if(completionTimer)return;$('completeTransition').hidden=false;completionTimer=setTimeout(()=>{if(location.pathname===`/progress/${jobId}`)location.assign(resultUrl)},1100);}
 function analysisPlaybackReady(d){return d.status==='running'&&d.stage==='analysis';}
-function startPlaybackWhenAnalysisStarts(d){const ready=analysisPlaybackReady(d);video.controls=ready||autoplayStarted;if(!ready||autoplayStarted||video.readyState<1)return;const start=Math.max(0,Number(d.analysis_start_seconds)||0);if(video.currentTime<start-.25)video.currentTime=start;video.muted=true;video.play().then(()=>{autoplayStarted=true;video.controls=true}).catch(()=>{$('playbackAhead').hidden=false;$('playbackAhead').textContent='Analysis has started. Press play to watch the fight; your browser blocked automatic playback.'});}
+// Keep the video with the analysis instead of racing ahead of it.
+//
+// The video played at its own speed while the analysis crawled behind, so what
+// you watched had nothing to do with what was being read. Overlays lagged, the
+// feed named moments already gone, and the page said "playback can continue"
+// as though that were a feature. If the analysis is behind, the video waits.
+let heldForAnalysis=false;
+function analysisFrontierSeconds(d){
+  if(!d)return null;
+  const processed=Number(d.processed_video_seconds);
+  if(!Number.isFinite(processed))return null;
+  return (Number(d.analysis_start_seconds)||0)+processed;
+}
+function holdVideoAtFrontier(){
+  const d=latestData;
+  if(!d)return;
+  // Once the analysis is done there is nothing to wait for.
+  if(d.status!=='running'){
+    if(heldForAnalysis){heldForAnalysis=false;$('playbackAhead').hidden=true;video.play().catch(()=>{});}
+    return;
+  }
+  const frontier=analysisFrontierSeconds(d);
+  if(frontier===null)return;
+  const ahead=video.currentTime>frontier-0.15;
+  if(ahead&&!video.paused){
+    video.pause();
+    heldForAnalysis=true;
+    $('playbackAhead').hidden=false;
+    $('playbackAhead').textContent='Waiting for the analysis to catch up… the video is paused so both stay at the same moment.';
+  }else if(heldForAnalysis&&!ahead){
+    // The analysis has passed this moment, so the video may run again. Only
+    // resumes what this code paused, so a deliberate pause is left alone.
+    heldForAnalysis=false;
+    $('playbackAhead').hidden=true;
+    video.play().catch(()=>{});
+  }
+}
+video.addEventListener('timeupdate',holdVideoAtFrontier);
+video.addEventListener('play',()=>{if(heldForAnalysis)holdVideoAtFrontier();});
+function startPlaybackWhenAnalysisStarts(d){holdVideoAtFrontier();const ready=analysisPlaybackReady(d);video.controls=ready||autoplayStarted;if(!ready||autoplayStarted||video.readyState<1)return;const start=Math.max(0,Number(d.analysis_start_seconds)||0);if(video.currentTime<start-.25)video.currentTime=start;video.muted=true;video.play().then(()=>{autoplayStarted=true;video.controls=true}).catch(()=>{$('playbackAhead').hidden=false;$('playbackAhead').textContent='Analysis has started. Press play to watch the fight; your browser blocked automatic playback.'});}
 function render(d){latestData=d;const backendPercent=clamp(d.percent,0,100),percent=d.status==='complete'?100:Math.min(99.9,backendPercent),analysisDuration=Number(d.analysis_duration_seconds||d.video_duration_seconds||1),warmupVisible=!['analysis','report','complete'].includes(d.stage)&&!['error','interrupted','complete'].includes(d.status);$('percent').textContent=`${percent.toFixed(1)}%`;$('bar').style.width=`${percent}%`;progressShell.setAttribute('aria-valuenow',percent.toFixed(1));$('message').textContent=d.message||d.status||'Analysis running';$('timing').textContent=d.status==='complete'?`Analysis finished in ${fmtTime(d.elapsed_seconds)}`:`Analysis running ${fmtTime(d.elapsed_seconds)} · ETA ${d.eta_seconds===null||d.eta_seconds===undefined?'calculating…':fmtTime(d.eta_seconds)}`;$('quality').textContent=d.stage==='report'?'Full fight processed · Building report':`Round ${d.current_round??'—'} · ${words(d.quality_mode||'balanced')} quality`;$('videoStage').textContent=words(d.stage||d.status||'Preparing');$('analysisCursor').textContent=d.stage==='report'?`Full selected footage analyzed · ${clock(analysisDuration)}`:d.processed_video_seconds===undefined?'Waiting for the first analyzed frame':`Analyzed through ${clock(d.processed_video_seconds)} / ${clock(analysisDuration)}`;$('analysisFrontier').style.width=`${clamp(Number(d.processed_video_seconds||0)/analysisDuration)*100}%`;$('analysisWarmup').hidden=!warmupVisible;$('videoWrap').classList.toggle('is-warming',warmupVisible);if(warmupVisible)$('warmupStep').textContent=d.status==='queued'?'Waiting for the analysis worker':d.stage==='tracking'?'Locking Fighter A and Fighter B':'Loading the analysis models';setStages(d);renderEvents(d);renderStats(d);renderOverlay();startPlaybackWhenAnalysisStarts(d);if(d.status==='complete'){stopped=true;page.classList.add('analysis-complete');$('liveLabel').textContent='Analysis complete ✓';$('completeActions').hidden=false;scheduleReportTransition(finishNavigation(d));}else if(d.status==='error'||d.status==='interrupted'){stopped=true;page.classList.add('analysis-error');$('liveLabel').textContent=d.status==='interrupted'?'Analysis paused safely':'Analysis needs attention';$('errorActions').hidden=false;$('restartAnalysis').hidden=d.status!=='interrupted';}else{$('liveLabel').textContent=d.status==='queued'?'Waiting for analysis worker':'Analysis running';}}
 async function poll(){if(stopped)return;try{const response=await fetch(`/api/status/${jobId}`,{cache:'no-store'}),data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not read analysis status');retryDelay=900;render(data);}catch(error){$('liveLabel').textContent='Reconnecting…';$('message').textContent=`Connection lost. WarriorIQ is retrying automatically. ${error.message}`;retryDelay=Math.min(8000,retryDelay*1.6);}if(!stopped)setTimeout(poll,document.hidden?2500:retryDelay);}
 $('restartAnalysis').addEventListener('click',async()=>{const button=$('restartAnalysis');button.disabled=true;button.textContent='Restarting…';try{const response=await fetch(`/api/restart/${jobId}`,{method:'POST'}),data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not restart analysis');stopped=false;$('errorActions').hidden=true;page.classList.remove('analysis-error');retryDelay=300;poll();}catch(error){button.disabled=false;button.textContent='Restart preserved analysis';$('message').textContent=error.message;}});
