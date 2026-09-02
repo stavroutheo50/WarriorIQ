@@ -349,13 +349,15 @@ class Settings:
     saved_video_retention_days: int = max(1, int(os.getenv("WARRIORIQ_VIDEO_RETENTION_DAYS", "30")))
     failed_upload_retention_hours: int = max(1, int(os.getenv("WARRIORIQ_FAILED_UPLOAD_RETENTION_HOURS", "24")))
     # Complimentary plan grants as "email:plan_key" pairs, comma separated.
-    # Recorded here rather than as a row edit on the live database so the grant
-    # is visible, reviewable and survives a restore.
+    # Kept in configuration rather than as a row edit on the live database so a
+    # grant is visible, reviewable and survives a restore.
+    #
+    # No default. The owner's own address was hardcoded here, which published a
+    # personal email in a public repository and named the account holding a free
+    # plan. Grants belong in the server's environment, not in source.
     complimentary_plans: dict[str, str] = field(default_factory=lambda: {
         email.strip().lower(): plan.strip().lower()
-        for entry in os.getenv(
-            "WARRIORIQ_COMPLIMENTARY_PLANS", "stavroutheo50@gmail.com:gym",
-        ).split(",")
+        for entry in os.getenv("WARRIORIQ_COMPLIMENTARY_PLANS", "").split(",")
         if entry.strip() and ":" in entry
         for email, plan in [entry.split(":", 1)]
     })

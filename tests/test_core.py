@@ -226,11 +226,28 @@ class ProductFoundationTests(unittest.TestCase):
         self.assertEqual(plan_for_key("nonsense")["label"], "Starter")
 
     def test_complimentary_grant_outranks_the_stored_plan(self):
+        """The grant mechanism, not whichever address happens to be configured.
+
+        This used to read the first entry of the live setting, which passed only
+        because the owner's own email was hardcoded as the default - publishing a
+        personal address in a public repository. Grants now come from the
+        server's environment, so the test supplies its own.
+        """
         from core.config import SETTINGS
         from core.payments import effective_plan_key
 
-        granted = next(iter(SETTINGS.complimentary_plans), None)
-        self.assertIsNotNone(granted, "expected at least one complimentary grant")
+        # SETTINGS is frozen, so the mapping is edited in place and restored.
+        granted = "granted@example.com"
+        original = dict(SETTINGS.complimentary_plans)
+        SETTINGS.complimentary_plans.clear()
+        SETTINGS.complimentary_plans[granted] = "gym"
+        try:
+            self._assert_grant_behaviour(effective_plan_key, granted)
+        finally:
+            SETTINGS.complimentary_plans.clear()
+            SETTINGS.complimentary_plans.update(original)
+
+    def _assert_grant_behaviour(self, effective_plan_key, granted):
         self.assertEqual(effective_plan_key("free", None, granted), "gym")
         # Case and spacing in the stored email must not defeat the grant.
         self.assertEqual(effective_plan_key("free", None, f"  {granted.upper()} "), "gym")
