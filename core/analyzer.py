@@ -422,7 +422,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         first_people,
         first_frame,
     )
-    manager = IdentityManager(initial_a, initial_b, start_frame)
+    manager = IdentityManager(initial_a, initial_b, start_frame, source_fps=info.fps)
     canonical_a_box = [float(value) for value in initial_a.box]
     canonical_b_box = [float(value) for value in initial_b.box]
     identity_referee = OpenAIIdentityReferee(req.openai_identity_recovery, first_frame, canonical_a_box, canonical_b_box)

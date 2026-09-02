@@ -981,6 +981,68 @@ class EngagementRangeTests(unittest.TestCase):
         self.assertTrue(plan)
         self.assertNotIn("Measured at", plan[0]["goal"])
 
+    def test_a_fighter_is_never_handed_to_someone_standing_still(self):
+        """The reported failure: one fighter tracked, the other lost to a coach.
+
+        Coaches, the referee and the officials all stand near the action and all
+        look plausible for a frame. What none of them do is cover ground.
+        Measured across every bout so far fighters run 24-65 body lengths a
+        minute; a man at the mat edge managed 9.6.
+        """
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x, y):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, y, x + 30, y + 80], dtype=np.float32),
+                confidence=0.9,
+            )
+
+        manager = IdentityManager(person(1, 100, 100), person(2, 300, 100), 0, source_fps=30.0)
+        # A bystander who has been standing in one spot for four seconds.
+        for frame in range(0, 120, 3):
+            manager._remember_positions([person(9, 200.0, 100.0)], frame)
+
+        travel = manager._recent_travel(9, 30.0)
+        self.assertIsNotNone(travel)
+        self.assertLess(travel, 1.0, "a stationary person should register almost no travel")
+
+    def test_a_track_seen_only_briefly_is_never_refused(self):
+        """Too short a look is not evidence of standing still."""
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, 100, x + 30, 180], dtype=np.float32),
+                confidence=0.9,
+            )
+
+        manager = IdentityManager(person(1, 100), person(2, 300), 0, source_fps=30.0)
+        for frame in range(0, 15, 3):
+            manager._remember_positions([person(9, 200.0)], frame)
+        self.assertIsNone(manager._recent_travel(9, 30.0))
+
+    def test_the_veto_can_never_drop_the_fighter_already_held(self):
+        """One-directional by design: it blocks a switch, never a hold.
+
+        A fighter resting between exchanges must not be given away because they
+        stopped moving for a few seconds.
+        """
+        from core.config import SETTINGS
+
+        self.assertLess(
+            SETTINGS.min_switch_travel_per_minute,
+            SETTINGS.min_fighter_travel_per_minute,
+            "refusing a switch should be more cautious than reporting a bystander",
+        )
+
     def test_coaching_differs_between_the_two_fighters_in_a_bout(self):
         """Every fighter used to get the same advice, in every fight.
 

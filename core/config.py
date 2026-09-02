@@ -227,6 +227,14 @@ class Settings:
     min_fighter_travel_per_minute: float = float(
         os.getenv("WARRIORIQ_MIN_TRAVEL_PER_MINUTE", "15")
     )
+    # Below this, a track is not allowed to take a fighter's identity from
+    # another track. Lower than the reporting floor above because refusing a
+    # switch is cheap and being wrong about it is not: a fighter resting in a
+    # corner should still never be handed to the referee. Only blocks moving
+    # onto a new track, never drops the one already held.
+    min_switch_travel_per_minute: float = float(
+        os.getenv("WARRIORIQ_MIN_SWITCH_TRAVEL", "12")
+    )
     # How often the analysis was looking at one of the two people who actually
     # fought. Set once measured on real runs; a correct run loses its fighters
     # to occlusion and pans, so this only has to separate "followed the fight"

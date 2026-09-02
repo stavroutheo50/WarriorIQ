@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import cv2
+from collections import deque
+
 import numpy as np
 
 from core.config import SETTINGS
@@ -117,7 +119,7 @@ class IdentityManager:
     better than tracking the wrong human.
     """
 
-    def __init__(self, initial_a: PersonObservation, initial_b: PersonObservation, source_frame: int = 0):
+    def __init__(self, initial_a: PersonObservation, initial_b: PersonObservation, source_frame: int = 0, source_fps: float = 30.0):
         self.a = FighterState(
             name="A",
             current_track_id=initial_a.track_id,
@@ -142,6 +144,49 @@ class IdentityManager:
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
         )
+        # Recent path of every tracked person, so a candidate can be asked the
+        # one question that separates a fighter from the people around the mat:
+        # did you move? Measured across every fight so far, fighters cover 24 to
+        # 65 body lengths a minute; a man standing at the mat edge covered 9.6.
+        self._track_history: dict[int, deque] = {}
+        self.source_fps = max(1.0, float(source_fps))
+
+    def _remember_positions(self, people: list[PersonObservation], source_frame: int) -> None:
+        for person in people:
+            if person.track_id is None or person.box is None:
+                continue
+            history = self._track_history.setdefault(int(person.track_id), deque(maxlen=90))
+            box = person.box
+            history.append((
+                source_frame,
+                float((box[0] + box[2]) / 2.0),
+                float((box[1] + box[3]) / 2.0),
+                max(1.0, float(box[3] - box[1])),
+            ))
+
+    def _recent_travel(self, track_id: int | None, fps: float) -> float | None:
+        """Body lengths a minute over this track's recent history.
+
+        None when there is not enough of a look to judge - a track seen for a
+        moment must never be refused for standing still.
+        """
+        if track_id is None or fps <= 0:
+            return None
+        history = self._track_history.get(int(track_id))
+        if not history or len(history) < 20:
+            return None
+        span_frames = history[-1][0] - history[0][0]
+        if span_frames <= 0:
+            return None
+        seconds = span_frames / fps
+        if seconds < 3.0:
+            return None
+        distance = sum(
+            float(np.hypot(b[1] - a[1], b[2] - a[2]))
+            for a, b in zip(history, list(history)[1:])
+        )
+        body = sorted(item[3] for item in history)[len(history) // 2]
+        return distance / body / (seconds / 60.0)
 
     @staticmethod
     def _by_track_id(people: list[PersonObservation], track_id: int | None) -> PersonObservation | None:
@@ -197,6 +242,20 @@ class IdentityManager:
         # briefly beats tracking the wrong human.
         if state.anchor_appearance is not None and candidate.appearance is not None:
             if anchor < SETTINGS.min_anchor_appearance_similarity:
+                state.switches_rejected += 1
+                return -999.0
+        # Refuse to move onto somebody who has been standing still. Coaches,
+        # the referee and the officials at the table all sit near the action
+        # and all look plausible for a frame; what none of them do is cover
+        # ground. Fighters measured 24 to 65 body lengths a minute across every
+        # bout so far, a man at the mat edge 9.6.
+        #
+        # One-directional on purpose. This can block a switch to a new track; it
+        # can never drop the track already being followed, so a fighter who
+        # pauses between exchanges is never given away.
+        if candidate.track_id is not None and candidate.track_id != state.current_track_id:
+            travel = self._recent_travel(candidate.track_id, self.source_fps)
+            if travel is not None and travel < SETTINGS.min_switch_travel_per_minute:
                 state.switches_rejected += 1
                 return -999.0
         if keep_id_bonus and candidate.track_id is not None and candidate.track_id == state.current_track_id:
@@ -272,6 +331,7 @@ class IdentityManager:
         occlude frequently. Joint assignment prioritizes the selected clothing
         appearance plus motion and rejects an ambiguous A/B permutation.
         """
+        self._remember_positions(people, source_frame)
         if not people:
             self.a.missing_frames += 1
             self.b.missing_frames += 1
