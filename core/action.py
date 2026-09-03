@@ -60,6 +60,9 @@ class ActiveLimb:
     # Every frame's speed, so the action can be judged on sustained movement
     # rather than its single fastest frame.
     speeds: list[float] = field(default_factory=list)
+    # The shoulder line's angle on every frame of the action, so a turn can be
+    # told from a relabelling. See _is_spinning.
+    shoulder_angles: list[float] = field(default_factory=list)
 
     def sustained_speed(self) -> float:
         """Median frame speed across the action.
@@ -192,6 +195,10 @@ def _classify_punch(start: Sample, peak: Sample, limb: str) -> str:
 # kick thrown square moves it well under this; a turning kick puts the back to
 # the opponent and takes it past a right angle.
 _SPIN_DEGREES = 100.0
+# A body cannot rotate further than this between two frames at 15fps or more.
+# Anything larger is the pose model swapping left and right shoulders, which it
+# does whenever a fighter turns away from the camera.
+_MAX_DEGREES_PER_FRAME = 45.0
 # How far the supporting foot must climb, as a share of the athlete's own body
 # length, before both feet are treated as off the floor.
 _JUMP_BODY_SHARE = 0.12
@@ -219,21 +226,34 @@ def _shoulder_angle(kp) -> float | None:
     return float(np.degrees(np.arctan2(float(delta[1]), float(delta[0]))))
 
 
-def _is_spinning(start: Sample, peak: Sample) -> bool:
+def _is_spinning(angles: list[float]) -> bool:
     """Did the athlete turn their back into the technique?
 
-    A turning kick rotates the whole torso, and the anatomical shoulder vector
-    turns with it, because COCO keypoints follow the body rather than the
-    image: left shoulder stays the left shoulder after the athlete has spun.
-    A kick thrown square barely moves that vector, so the two separate on how
-    far the shoulder line travelled between the start of the action and its
-    peak.
+    A turning kick rotates the torso, and the anatomical shoulder vector turns
+    with it, because COCO keypoints follow the body: the left shoulder is still
+    the left shoulder after the athlete has spun.
+
+    Comparing only the first and last frame does not work, and measuring it
+    that way called a third of the kicks in a taekwondo bout "turning". Pose
+    estimators swap left and right shoulders when someone faces away from the
+    camera, which is most of a taekwondo exchange, and that swap flips the
+    vector by 180 degrees in a single frame - identical to a spin if the frames
+    between are never looked at.
+
+    So the rotation has to add up smoothly. A real turn passes through the
+    angles on the way round, a few degrees per frame; a relabelling jumps the
+    whole way at once. Any step too large to be a body is treated as the
+    artefact it is and does not count towards the total.
     """
-    before, after = _shoulder_angle(start.keypoints), _shoulder_angle(peak.keypoints)
-    if before is None or after is None:
+    if len(angles) < 4:
         return False
-    swing = abs((after - before + 180.0) % 360.0 - 180.0)
-    return swing >= _SPIN_DEGREES
+    travelled = 0.0
+    for before, after in zip(angles, angles[1:]):
+        step = (after - before + 180.0) % 360.0 - 180.0
+        if abs(step) > _MAX_DEGREES_PER_FRAME:
+            continue                     # a keypoint swap, not a hip turn
+        travelled += step                # signed: a turn goes one way
+    return abs(travelled) >= _SPIN_DEGREES
 
 
 def _is_jumping(start: Sample, peak: Sample) -> bool:
@@ -454,6 +474,9 @@ class ActionEngine:
             active.frames_active += 1
             active.max_speed = max(active.max_speed, speed)
             active.speeds.append(speed)
+            angle = _shoulder_angle(sample.keypoints)
+            if angle is not None:
+                active.shoulder_angles.append(angle)
             if ext > active.peak_extension:
                 active.peak_extension = ext
                 active.peak_sample = sample
@@ -499,7 +522,7 @@ class ActionEngine:
                     else:
                         technique = _classify_knee(peak_sample, event_limb)
 
-                    spinning = family in {"kick", "knee"} and _is_spinning(start_sample, peak_sample)
+                    spinning = family in {"kick", "knee"} and _is_spinning(active.shoulder_angles)
                     jumping = family in {"kick", "knee"} and _is_jumping(start_sample, peak_sample)
 
                     model_source = "temporal_rules"

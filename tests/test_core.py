@@ -1655,10 +1655,26 @@ def _kick_sample(shoulder_angle_deg, supporting_foot_y, frame=0):
 def test_a_turning_kick_is_told_apart_from_a_square_one():
     from core.action import _is_spinning
 
-    square = (_kick_sample(0.0, 290.0), _kick_sample(25.0, 290.0, frame=6))
-    turning = (_kick_sample(0.0, 290.0), _kick_sample(170.0, 290.0, frame=6))
-    assert not _is_spinning(*square), "a square kick was read as a spin"
-    assert _is_spinning(*turning), "a turning kick was not detected"
+    # A kick thrown square: the torso opens a little and stops.
+    assert not _is_spinning([0.0, 6.0, 13.0, 19.0, 25.0]), "a square kick was read as a spin"
+    # A real turn passes through the angles on the way round.
+    assert _is_spinning([0.0, 30.0, 62.0, 95.0, 128.0, 158.0]), "a turning kick was not detected"
+
+
+def test_a_swapped_shoulder_label_is_not_a_spin():
+    """The failure this replaced, and the reason spin is measured per frame.
+
+    Pose estimators swap left and right shoulders when someone faces away from
+    the camera, which is most of a taekwondo exchange, and that flips the
+    shoulder vector 180 degrees in one frame. Comparing only the first and last
+    frame of an action called 13 of 38 kicks in a real bout "turning".
+    """
+    from core.action import _is_spinning
+
+    # Barely moving, then one frame where the labels swap, then barely moving.
+    assert not _is_spinning([0.0, 4.0, 184.0, 188.0, 191.0])
+    # And the same swap in the middle of a genuinely square kick.
+    assert not _is_spinning([10.0, 14.0, 196.0, 200.0, 203.0, 206.0])
 
 
 def test_a_jump_needs_the_supporting_foot_to_leave_the_floor():
