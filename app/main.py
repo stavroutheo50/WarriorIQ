@@ -1774,6 +1774,9 @@ def _sport_context(request: Request, sport: str) -> dict:
             list_fighters(int(_account(request)["profile_id"]))
             if _account(request) else []
         ),
+        # A workspace with one seat has one fighter, so it is told rather than
+        # asked which one this fight is about.
+        "single_fighter": (_request_plan(request) or {}).get("roster_limit") == 1,
         "unobserved": sport_unobserved(sport),
         # True when every ruleset in the sport shares the same blind spot. When
         # only one does - jumping-kick bonuses exist in Point Fighting and
@@ -1861,7 +1864,11 @@ async def upload(
     start_seconds: float = Form(0.0),
     end_seconds: str = Form(""),
     round_count: int = Form(3),
-    round_duration_seconds: float = Form(120.0),
+    # 0 means "the whole video, however long it is". A number here was a
+    # standard round length, and there is no such thing: rounds run two
+    # minutes, three, five, and a fight can be one continuous span. The real
+    # structure is read from the footage by RoundDetector afterwards.
+    round_duration_seconds: float = Form(0.0),
     break_duration_seconds: float = Form(60.0),
     selected_rounds: str = Form("ALL"),
     # Always on. This used to be a checkbox on the setup page, which asked
@@ -2043,7 +2050,9 @@ async def upload(
             "start_seconds": start,
             "end_seconds": end,
             "round_count": count,
-            "round_duration_seconds": float(round_duration_seconds),
+            "round_duration_seconds": (
+                float(round_duration_seconds) if round_duration_seconds > 0 else float(info.duration)
+            ),
             "break_duration_seconds": float(break_duration_seconds),
             "selected_rounds": _parse_rounds(selected_rounds, count),
             "video_width": info.width,
@@ -3835,31 +3844,24 @@ def search_guide_page(request: Request):
 
 
 @app.get("/pricing", response_class=HTMLResponse)
-def pricing_page(request: Request, audience: str = ""):
-    """Two ladders, one page.
+def pricing_page(request: Request):
+    """Every plan on one page.
 
-    An athlete analyses one person and a coach analyses a squad, so they are
-    buying different things: seats on a roster versus reports on themselves.
-    Showing both catalogues at once made each side read half a page that did
-    not apply to them. The workspace's own kind decides which is shown, and
-    the other stays one link away for anyone who is on the wrong one.
+    This was split into an athlete tab and a coach tab, on the theory that each
+    side should only see what applies to them. In practice a coach had to find
+    a tab before finding a plan, and anyone landing on the wrong one concluded
+    the other plans did not exist. The seat count on each card already says who
+    it is for.
     """
     account = _account(request)
-    profile = get_profile(int(account["profile_id"])) if account else None
-    chosen = (audience or (profile or {}).get("account_type") or "athlete").strip().lower()
-    if chosen not in {"athlete", "coach"}:
-        chosen = "athlete"
     return templates.TemplateResponse(
         request=request,
         name="pricing.html",
         context={
             "request": request, "plans": PLANS,
-            "audience": chosen,
-            "audience_plans": plans_for(chosen),
             # So a plan too small for this roster says so on the card, rather
             # than failing after somebody has committed to buying it.
             "roster_held": len(list_fighters(int(account["profile_id"]))) if account else 0,
-            "other_audience": "coach" if chosen == "athlete" else "athlete",
             "payments_enabled": SETTINGS.payments_enabled, "account": account,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
         },

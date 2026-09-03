@@ -556,14 +556,14 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertIn("1 analysis per day", pricing)
         self.assertIn("3 analyses per day", pricing)
         self.assertIn("10 analyses per day", pricing)
-        # The page shows one ladder at a time now: an athlete buys reports on
-        # themselves, a coach buys seats on a roster. Unlimited analyses is a
-        # coach plan, so it lives on the coach side.
-        self.assertIn("For a coach with a squad", pricing)
-        coach_pricing = self.client.get("/pricing?audience=coach").text
-        self.assertIn("Unlimited fight analyses", coach_pricing)
-        self.assertIn("Unlimited fighters", coach_pricing)
-        self.assertIn("€89.99", coach_pricing)   # the Gym price lives on the coach ladder
+        # Every plan is on one page: two tabs meant a coach had to find a tab
+        # before finding a plan, and anyone on the wrong one thought the rest
+        # did not exist.
+        self.assertIn("Unlimited fight analyses", pricing)
+        self.assertIn("Unlimited fighters", pricing)
+        for key in ("free", "athlete", "athlete_pro", "coach_5", "coach_15", "coach_30", "gym"):
+            self.assertIn(f'data-plan="{key}"', pricing)
+        self.assertIn("€89.99", pricing)
         self.assertIn('class="plan-banner">Most flexible', pricing)
 
     def _sign_in(self, email="uploader@example.com"):
@@ -1028,6 +1028,12 @@ class FighterRosterTests(unittest.TestCase):
         self.addCleanup(self.client.close)
 
     def test_the_setup_page_offers_the_roster_and_a_way_to_add(self):
+        """Only where there is a choice to make.
+
+        A workspace with one seat has one fighter, so the picker is replaced by
+        a hidden field - a select with a single option is a question with one
+        answer.
+        """
         self.client.post("/signup", data={
             "email": "coach@example.com", "password": "Strong-Local-Password",
             "accept_terms": "true", "age_confirmed": "true"}, follow_redirects=False)
@@ -1035,13 +1041,19 @@ class FighterRosterTests(unittest.TestCase):
         database.create_fighter(profile, "Theodoulos")
         database.create_fighter(profile, "Maria")
 
-        page = self.client.get("/analyze/kickboxing").text
+        with patch.object(webapp, "_request_plan", return_value=dict(webapp.PLANS["coach_15"])):
+            page = self.client.get("/analyze/kickboxing").text
         self.assertIn('name="fighter_id"', page)
         self.assertIn("Theodoulos", page)
         self.assertIn("Maria", page)
-        # Adding one without leaving the page.
         self.assertIn('name="fighter_name"', page)
         self.assertIn("Add a new fighter", page)
+
+        # On a one-seat plan the same page asks nothing and posts the fighter.
+        single = self.client.get("/analyze/kickboxing").text
+        self.assertNotIn("Which fighter?", single)
+        self.assertNotIn("Add a new fighter", single)
+        self.assertIn('type="hidden" name="fighter_id"', single)
 
     def test_a_guest_is_not_asked_which_fighter(self):
         """A guest has no workspace, so there is no roster to file against."""
@@ -1304,17 +1316,17 @@ class AccountTypeChoiceTests(unittest.TestCase):
         self.assertEqual(database.get_profile(self.profile)["account_type"], "athlete")
         self.assertIn("Just me", self.client.get("/profile").text)
 
-    def test_choosing_coach_switches_the_pricing_ladder(self):
+    def test_choosing_coach_sets_the_workspace_kind(self):
+        """The kind decides seats, not which plans are visible.
+
+        Pricing used to switch ladders on it and that was worse: every plan is
+        on one page now, and the seat count on each card says who it is for.
+        """
         self._save("coach")
         self.assertEqual(database.get_profile(self.profile)["account_type"], "coach")
-        # The pricing page follows the workspace without being asked.
         pricing = self.client.get("/pricing").text
-        self.assertIn('data-plan="coach_5"', pricing)
-        self.assertIn('data-plan="gym"', pricing)
-        # No athlete card. Checked on the card rather than the words, because
-        # "Everything in Athlete Pro" is a feature line on the Gym plan.
-        self.assertNotIn('data-plan="athlete_pro"', pricing)
-        self.assertNotIn('data-plan="free"', pricing)
+        for key in ("free", "athlete_pro", "coach_5", "gym"):
+            self.assertIn(f'data-plan="{key}"', pricing)
 
     def test_switching_back_keeps_the_roster(self):
         """A coach dropping to an athlete account does not lose their fighters.

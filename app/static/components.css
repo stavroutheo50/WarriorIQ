@@ -91,3 +91,12 @@
    untouched. */
 .fighter-assign [data-assign-save][hidden] { display: none; }
 .fighter-assign[data-saving="true"] select { opacity: .55; pointer-events: none; }
+
+/* Every plan card the same height, with its button on the same line.
+   Cards sized by their own content made the ladder look like a bar chart of
+   how much copy each plan happened to have, and put the four buttons at four
+   different heights. */
+.pricing-grid { align-items: stretch; }
+.pricing-card { display: flex; flex-direction: column; height: 100%; }
+.pricing-card .plan-features { flex: 1 1 auto; }
+.pricing-card > :last-child { margin-top: auto; }

@@ -1602,3 +1602,51 @@ class ComponentStylesReachTheirPagesTests(unittest.TestCase):
 
         undefined = used - defined - {"btn"}
         self.assertFalse(undefined, f"button variants with no CSS: {sorted(undefined)}")
+
+
+class UploadHandoffTests(unittest.TestCase):
+    """The upload must hand off to the frame picker without a prompt."""
+
+    def setUp(self):
+        from pathlib import Path
+        self.page = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                     / "analyze.html").read_text(encoding="utf-8")
+
+    def test_the_leave_guard_is_released_before_navigating(self):
+        """'load' fires before 'loadend', and every branch of it navigates.
+
+        Releasing in loadend meant WarriorIQ's own redirect tripped its own
+        beforeunload guard: the bar stopped at 99% and a "Leave site?" prompt
+        stood between the upload and the analysis.
+        """
+        load = self.page.index("request.addEventListener('load'")
+        loadend = self.page.index("request.addEventListener('loadend'")
+        self.assertIn("request.addEventListener('load',()=>{releasePage();", self.page)
+        # And the release must not be only in loadend, which runs afterwards.
+        self.assertLess(load, loadend + len(self.page), "sanity")
+
+    def test_a_finished_transfer_does_not_sit_at_99(self):
+        """The cap exists so the bar is not full while the server answers.
+
+        That is a state to name, not a number to freeze on.
+        """
+        self.assertIn("request.upload.addEventListener('load'", self.page)
+        self.assertIn("Upload complete", self.page)
+
+    def test_the_estimate_is_not_presented_as_a_countdown(self):
+        """It rises when a connection slows, which is true and not a fault.
+
+        Labelled as a countdown it read as the timer running backwards, so it
+        says what it is and rounds coarsely enough not to tick.
+        """
+        self.assertIn("at this speed", self.page)
+        self.assertNotIn("s left`", self.page)
+        # Rate comes from a trailing window, not the average since the start.
+        self.assertIn("samples.shift()", self.page)
+
+    def test_no_two_minute_round_default_can_truncate_a_fight(self):
+        from pathlib import Path
+
+        self.assertIn('name="round_duration_seconds" value="0"', self.page)
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn("round_duration_seconds: float = Form(0.0)", source)
