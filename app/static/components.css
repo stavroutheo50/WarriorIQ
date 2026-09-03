@@ -1,51 +1,93 @@
 .file-native{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none}.file-button{display:flex!important;align-items:center;justify-content:center;gap:10px;width:100%;min-height:52px;border:1px dashed #315ea8;border-radius:13px;background:#101a2f;color:var(--lime)!important;font-size:13px!important;letter-spacing:.2px!important;text-transform:none!important;cursor:pointer;transition:.2s}.file-button:hover{background:#14233e;border-color:var(--lime);transform:translateY(-1px)}.file-button span{font-size:20px}.file-status{min-height:18px;color:var(--muted);font-size:12px}.file-status.uploaded{color:var(--green);font-weight:750}.analysis-choice{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;margin-top:18px}.analysis-choice .btn{grid-column:1/-1}.analysis-choice h3{margin:7px 0 2px}.target-options{display:flex;gap:8px;flex-wrap:wrap}.target-options input{position:absolute;opacity:0;pointer-events:none}.target-options span{display:block;padding:11px 14px;border:1px solid var(--line);border-radius:11px;background:#0b0e0c;color:#aeb4af;font-size:12px;font-weight:850;cursor:pointer}.target-options input:checked+span{border-color:var(--lime);background:#2f6fed12;color:var(--lime);box-shadow:inset 0 0 0 1px #2f6fed33}@media(max-width:700px){.analysis-choice{grid-template-columns:1fr}.target-options label{flex:1}.target-options span{text-align:center}}
 
 
+/* ---------------------------------------------------------------------------
+   Roster, squad view, movement scorecard and the plan ladders.
+   Written against the tokens the rest of the site uses rather than fresh
+   values: the first pass invented its own radii, greens and reds, so the new
+   panels read as bolted on next to everything around them.
+   --------------------------------------------------------------------------- */
+
 /* Coach squad view. A fight the analysis could not watch properly is shown but
    dimmed - never hidden, because a coach making selection decisions has to be
    able to tell a tracking failure from a bad week. */
-.trend-cell { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
-.trend-cell strong { font-size: 22px; }
-.trend-cell[data-direction="up"] strong { color: var(--green, #55d18b); }
-.trend-cell[data-direction="down"] strong { color: #ff7a90; }
-.row-muted { opacity: .55; }
+.trend-cell {
+  display: grid;
+  gap: 3px;
+  padding: 13px 15px;
+  border: 1px solid var(--wiq-edge);
+  border-radius: var(--wiq-radius-md);
+  background: rgba(255, 255, 255, .022);
+}
+.trend-cell strong { font-size: 25px; font-variant-numeric: tabular-nums; letter-spacing: -.4px; }
+.trend-cell small { color: var(--wiq-text-tertiary); font-size: var(--wiq-text-micro); }
+.trend-cell[data-direction="up"] strong { color: var(--wiq-success); }
+.trend-cell[data-direction="down"] strong { color: var(--wiq-warning); }
+.row-muted { opacity: .5; }
 
-/* The upload runs while the page stays readable.
-   It used to sit inline in the form as the one thing on screen, so a
-   twenty-minute mobile upload looked like a page that had frozen. Once it is
-   actually running it lifts out to a strip pinned to the bottom of the window:
-   still visible while scrolling, still exact about bytes and time left, but no
-   longer the thing you are made to sit and watch. */
-.upload-progress[data-tone="active"],
-.upload-progress[data-tone="error"] {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 14px;
-  width: min(560px, calc(100vw - 28px));
-  z-index: 60;
-  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
-}
-@media (max-width: 620px) {
-  .upload-progress[data-tone="active"],
-  .upload-progress[data-tone="error"] { bottom: 8px; }
-}
 /* Filing a past fight against a fighter, inline in the squad table. */
 .fighter-assign { display: flex; gap: 6px; align-items: center; }
-.fighter-assign select { min-width: 120px; padding: 5px 8px; font-size: var(--wiq-text-micro); }
-.btn.tiny { padding: 5px 10px; min-height: 0; font-size: var(--wiq-text-micro); }
+.fighter-assign select {
+  min-width: 118px;
+  padding: 6px 9px;
+  font-size: var(--wiq-text-micro);
+  border-radius: 3px;
+  border: 1px solid var(--wiq-line);
+  background-color: #0d0d0f;
+  color: var(--wiq-text);
+}
+.btn.tiny { padding: 6px 12px; min-height: 0; font-size: var(--wiq-text-micro); }
+
+/* Adding a fighter without analysing a fight first. */
+.add-fighter { display: grid; gap: 6px; margin: 4px 0 10px; }
+.add-fighter-row { display: flex; gap: 9px; flex-wrap: wrap; }
+.add-fighter-row input {
+  flex: 1 1 220px;
+  border-radius: 3px;
+  border: 1px solid var(--wiq-line);
+  background-color: #0d0d0f;
+  color: var(--wiq-text);
+  padding: 11px 12px;
+}
+.add-fighter-row input:focus { border-color: #4a4a52; outline: none; }
+
 /* Athlete and coach ladders are different products, so the page picks one. */
-.audience-switch { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.audience-switch {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 4px;
+  border: 1px solid var(--wiq-edge);
+  border-radius: calc(var(--wiq-radius-md) + 4px);
+  background: rgba(255, 255, 255, .022);
+}
+.audience-switch .btn { min-height: 40px; padding: 9px 18px; border-radius: var(--wiq-radius-md); }
+.audience-switch .btn.secondary { border-color: transparent; background: transparent; }
+.audience-switch .btn.secondary:hover { background: rgba(255, 255, 255, .05); }
 .audience-switch .btn.is-current { pointer-events: none; }
-.audience-note { margin: 0 0 18px; }
-.plan-seats { font-size: var(--wiq-text-micro); letter-spacing: .4px; text-transform: uppercase;
-              color: var(--wiq-text-tertiary); margin-bottom: 4px; }
+.audience-note { margin: 0 0 22px; max-width: 58ch; }
+
 /* A plan smaller than the roster it would have to hold. Shown rather than
    hidden: a coach comparing plans should see why one is unavailable, not
-   wonder where it went. */
-.plan-blocked { font-size: var(--wiq-text-micro); line-height: 1.4; padding: 7px 9px; margin-bottom: 8px;
-                border-radius: 8px; background: #3a1f2a; color: #ffb3c0; border: 1px solid #6d3247; }
-/* Adding a fighter without analysing a fight first. */
-.add-fighter { display: grid; gap: 5px; margin: 14px 0 6px; }
-.add-fighter-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.add-fighter-row input { flex: 1 1 200px; }
+   wonder where it went. Uses the site's warning colour rather than a new red. */
+.plan-blocked {
+  font-size: var(--wiq-text-micro);
+  line-height: 1.45;
+  padding: 9px 11px;
+  margin-bottom: 10px;
+  border-radius: var(--wiq-radius-md);
+  /* --wiq-warning is a hex colour, not an "R G B" triplet, so it cannot go
+     through rgb(... / alpha). A literal fallback first for anything without
+     color-mix, then the token so the two never drift apart. */
+  background: rgba(237, 185, 102, .10);
+  background: color-mix(in srgb, var(--wiq-warning) 11%, transparent);
+  color: var(--wiq-warning);
+  border: 1px solid rgba(237, 185, 102, .32);
+  border-color: color-mix(in srgb, var(--wiq-warning) 34%, transparent);
+}
+/* The Save button is only for browsers without JavaScript; with it, choosing a
+   fighter is the whole action. Hidden via the attribute so the no-JS path is
+   untouched. */
+.fighter-assign [data-assign-save][hidden] { display: none; }
+.fighter-assign[data-saving="true"] select { opacity: .55; pointer-events: none; }

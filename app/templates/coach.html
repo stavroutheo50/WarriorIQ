@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
 {% block title %}Coach Portal · WarriorIQ{% endblock %}
 {% block content %}
 <div class="section-title"><div><div class="eyebrow">Coach portal</div><h2>Evidence, mistakes and training priorities</h2></div></div>
@@ -18,7 +19,7 @@
     <div class="add-fighter-row">
       <input id="newFighter" name="name" type="text" maxlength="80" required
              placeholder="Fighter's name" autocomplete="off">
-      <button class="btn ghost" type="submit">Add</button>
+      <button class="btn secondary" type="submit">Add</button>
     </div>
   </form>
 
@@ -71,7 +72,7 @@
               <option value="">{% if f.fighter_name %}Unfile{% else %}Not filed{% endif %}</option>
               {% for r in roster %}<option value="{{r.id}}" {% if f.fighter_id == r.id %}selected{% endif %}>{{r.name}}</option>{% endfor %}
             </select>
-            <button class="btn ghost tiny" type="submit">Save</button>
+            <button class="btn secondary tiny" type="submit" data-assign-save>Save</button>
           </form>
           {% elif f.fighter_name %}<b>{{f.fighter_name}}</b>
           {% else %}<span class="muted">Not filed</span>{% endif %}
@@ -108,3 +109,19 @@
 <section class="card"><div class="eyebrow">Saved evidence</div><h3>Fight library</h3><ul class="list-clean">{% for f in fights[:12] %}<li><a class="text-link" href="/result/{{f.job_id}}"><strong>Fight analysis</strong></a> · <span class="muted">{{f.ruleset}}</span></li>{% else %}<li class="muted">No fights saved.</li>{% endfor %}</ul></section>
 {% endif %}
 {% endblock %}
+{% block scripts %}<script>
+(()=>{
+  // Choosing a fighter is the whole action, so it saves itself. The button
+  // stays in the markup for anyone without JavaScript and is hidden here,
+  // rather than leaving a Save on every row of the table to wrap under each
+  // dropdown.
+  document.querySelectorAll('.fighter-assign').forEach(form=>{
+    const save=form.querySelector('[data-assign-save]');
+    if(save)save.hidden=true;
+    form.querySelector('select')?.addEventListener('change',()=>{
+      form.dataset.saving='true';
+      form.requestSubmit?form.requestSubmit():form.submit();
+    });
+  });
+})();
+</script>{% endblock %}

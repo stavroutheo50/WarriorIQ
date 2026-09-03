@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import json
 import os
 import subprocess
@@ -1539,3 +1540,65 @@ class UploadProgressStripTests(unittest.TestCase):
     def test_the_in_page_picker_is_gone(self):
         for absent in ("inline-picker.js", "wiqInlinePicker", 'id="inlinePicker"'):
             self.assertNotIn(absent, self.page)
+
+
+class ComponentStylesReachTheirPagesTests(unittest.TestCase):
+    """Styles are only styles if the page that needs them loads the file.
+
+    components.css was linked by analyze, frame and select alone, so every rule
+    written into it for the roster, the squad table, the movement scorecard and
+    the plan ladders was inert on the pages that used those classes. The visible
+    symptom was a select and a button stacking instead of sitting in a row.
+    """
+
+    def setUp(self):
+        self.client = TestClient(app)
+
+    def test_every_page_using_component_classes_loads_them(self):
+        """Checked against the template source, because several of these
+        classes only render for a signed-in account with fights."""
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1] / "app" / "templates"
+        component_classes = ("fighter-assign", "add-fighter", "audience-switch",
+                             "trend-cell", "plan-blocked", "file-button")
+        for template in root.glob("*.html"):
+            text = template.read_text(encoding="utf-8")
+            used = [name for name in component_classes if name in text]
+            if not used:
+                continue
+            self.assertIn(
+                "components.css", text,
+                f"{template.name} uses {used} but never loads components.css",
+            )
+
+    def test_component_styles_are_cache_busted_everywhere(self):
+        for path in ("/coach", "/pricing", "/analyze/kickboxing"):
+            page = self.client.get(path).text
+            self.assertNotIn('href="/static/components.css"', page)
+            self.assertRegex(page, r'components\.css\?v=[0-9a-f]+')
+
+    def test_no_button_uses_a_variant_that_does_not_exist(self):
+        """.btn.ghost was never defined, so those rendered as primary buttons.
+
+        A Save on every table row and an Add box both competing with the page's
+        real call to action.
+        """
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        defined = set()
+        for sheet in (root / "app" / "static").glob("*.css"):
+            defined.update(re.findall(r"\.btn\.([a-z-]+)", sheet.read_text(encoding="utf-8")))
+
+        used = set()
+        for template in (root / "app" / "templates").glob("*.html"):
+            text = template.read_text(encoding="utf-8")
+            # Jinja inside a class attribute would otherwise contribute words
+            # like "endif" and "audience" as if they were CSS classes.
+            text = re.sub(r"\{%.*?%\}|\{\{.*?\}\}", " ", text, flags=re.S)
+            for match in re.findall(r'class="btn ([^"]*)"', text):
+                used.update(word for word in match.split() if word.isalpha())
+
+        undefined = used - defined - {"btn"}
+        self.assertFalse(undefined, f"button variants with no CSS: {sorted(undefined)}")

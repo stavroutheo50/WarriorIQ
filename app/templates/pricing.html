@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
 {% block title %}Plans · WarriorIQ{% endblock %}
 {% block description %}Compare WarriorIQ Starter, Athlete, Athlete Pro and Gym fight-analysis plans.{% endblock %}
 {% block content %}
@@ -23,9 +24,9 @@
    seats on a roster. Showing both at once made each side read half a page that
    did not apply to them. #}
 <div class="audience-switch" role="group" aria-label="Who are these plans for">
-  <a class="btn {% if audience == 'athlete' %}is-current{% else %}ghost{% endif %}" href="/pricing?audience=athlete"
+  <a class="btn {% if audience == 'athlete' %}is-current{% else %}secondary{% endif %}" href="/pricing?audience=athlete"
      {% if audience == 'athlete' %}aria-current="true"{% endif %}>For one fighter</a>
-  <a class="btn {% if audience == 'coach' %}is-current{% else %}ghost{% endif %}" href="/pricing?audience=coach"
+  <a class="btn {% if audience == 'coach' %}is-current{% else %}secondary{% endif %}" href="/pricing?audience=coach"
      {% if audience == 'coach' %}aria-current="true"{% endif %}>For a coach with a squad</a>
 </div>
 <p class="small muted audience-note">
@@ -38,8 +39,6 @@
   <section class="card pricing-card {% if key == 'athlete_pro' %}featured{% elif key == 'gym' %}gym-featured{% endif %}" data-plan="{{key}}">
     {% if plan.highlight %}<div class="plan-banner">{{plan.highlight}}</div>{% endif %}
     {% set too_small = plan.roster_limit and roster_held and roster_held > plan.roster_limit %}
-    {% if plan.roster_limit %}<div class="plan-seats">{{plan.roster_limit}} fighter{{'s' if plan.roster_limit != 1 else ''}}</div>
-    {% elif plan.audience == 'coach' %}<div class="plan-seats">Unlimited fighters</div>{% endif %}
     {# Refused rather than sold and reconciled afterwards: making the numbers
        fit would mean archiving somebody's fighters for them. #}
     {% if too_small %}<div class="plan-blocked">Too small — you have {{roster_held}} fighters. Archive {{roster_held - plan.roster_limit}} first.</div>{% endif %}
