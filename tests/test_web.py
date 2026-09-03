@@ -1431,3 +1431,13 @@ class SocialAuthResilienceTests(unittest.TestCase):
         self.assertGreater(OUTBOUND_TIMEOUT_SECONDS, 0)
         # Every registered client, OIDC or not, has to carry the ceiling.
         self.assertEqual(source.count('"timeout": OUTBOUND_TIMEOUT_SECONDS'), 3)
+
+
+class UndecodableUploadTests(unittest.TestCase):
+    """A file the server cannot decode must be refused clearly and early."""
+
+    def test_the_browser_encoder_only_emits_mp4(self):
+        """WebM produced here is a file this server cannot read."""
+        source = (Path(__file__).resolve().parents[1] / "app" / "static" / "upload-compress.js").read_text(encoding="utf-8")
+        self.assertNotIn('"video/webm', source)
+        self.assertIn('"video/mp4;codecs=avc1"', source)

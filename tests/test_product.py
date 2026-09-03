@@ -956,3 +956,50 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UndecodableUploadTests(unittest.TestCase):
+    """A file the server cannot decode is refused clearly, before it costs more."""
+
+    def setUp(self):
+        import uuid
+
+        self.client = TestClient(app)
+        # A fresh address every run: the suite shares a database, so a fixed
+        # one is already taken by the time the whole suite runs and the signup
+        # silently fails, leaving this test unauthenticated.
+        response = self.client.post(
+            "/signup",
+            data={"email": f"decode-{uuid.uuid4().hex[:10]}@example.com",
+                  "password": "Strong-Local-Password", "next_path": "/dashboard",
+                  "accept_terms": "true", "age_confirmed": "true"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303, "could not create the test account")
+
+    def test_zero_dimension_video_is_refused_with_a_useful_message(self):
+        """The phone-upload failure, reproduced.
+
+        The browser re-encoder fell back to VP9 WebM when a phone's
+        MediaRecorder could not produce MP4. This build's OpenCV reports such a
+        file as 0x0 pixels with -1 frames rather than refusing it, so it passed
+        every upload guard - a zero pixel count is not "too large" - and failed
+        much later on the fighter-selection frame, telling the uploader
+        WarriorIQ could not prepare their video.
+        """
+        from core.types import VideoInfo
+
+        undecodable = VideoInfo("f.webm", 30.0, -1, 0, 0, 12.0)
+        with patch.object(webapp, "get_video_info", return_value=undecodable), \
+             patch.object(webapp, "scan_upload", return_value={"clean": True, "status": "clean"}):
+            response = self.client.post(
+                "/upload",
+                data={"rights_confirmed": "true", "people_permissions_confirmed": "true",
+                      "minor_permission_status": "no_minors"},
+                files={"video": ("fight.webm", b"0" * 4096, "video/webm")},
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("could not decode", response.text.lower())
+        # Not the old message, which blamed a stage the file never reached.
+        self.assertNotIn("could not prepare", response.text.lower())

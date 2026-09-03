@@ -1923,6 +1923,24 @@ async def upload(
             raise HTTPException(413, "This video's resolution exceeds the configured processing limit.")
         if info.duration <= 0 or info.fps <= 0:
             raise HTTPException(400, "This video has no readable playing time. Please re-export it and try again.")
+        if info.width <= 0 or info.height <= 0 or info.frame_count <= 0:
+            # A container this build cannot decode still opens: OpenCV reports
+            # 0x0 pixels and -1 frames rather than refusing. Nothing checked
+            # for that, so the upload passed every guard above - a zero pixel
+            # count is not "too large" - and died much later on the selection
+            # frame, telling the uploader WarriorIQ could not prepare their
+            # video. Reading frames from such a file can also block, so this
+            # has to come before inspect_video_quality touches it.
+            LOGGER.info(
+                "upload_undecodable_stream job_id=%s size=%sx%s frames=%s",
+                job_id, info.width, info.height, info.frame_count,
+            )
+            raise HTTPException(
+                400,
+                "WarriorIQ could not decode the video track in this file. "
+                "Please upload the original MP4 or MOV from your phone or camera "
+                "rather than a converted or re-wrapped copy.",
+            )
         quality = await run_in_threadpool(inspect_video_quality, video_path, info)
     except Exception:
         video_path.unlink(missing_ok=True)

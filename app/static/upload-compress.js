@@ -42,17 +42,23 @@
       typeof MediaRecorder.isTypeSupported === "function";
   }
 
+  /* MP4/H.264 only, and null rather than anything else.
+   *
+   * This used to fall back to VP9 or VP8 WebM, and that is what broke uploads
+   * from a phone. Desktop Chrome can record MP4, so a laptop produced a file
+   * the server read happily. Android Chrome's MediaRecorder usually cannot, so
+   * it fell through to WebM - and the server's OpenCV build reports a WebM as
+   * 0x0 pixels, -1 frames and -1 seconds, then either fails to read a frame or
+   * blocks trying. The upload was rejected with "could not prepare this video",
+   * for a file the phone had recorded perfectly well and WarriorIQ had itself
+   * converted into something unreadable.
+   *
+   * A phone that cannot record MP4 now simply skips the re-encode. The
+   * original camera recording is H.264 in an MP4, which the server reads. */
   function pickMime() {
-    var types = [
-      "video/mp4;codecs=avc1",
-      "video/webm;codecs=vp9",
-      "video/webm;codecs=vp8",
-      "video/webm"
-    ];
-    for (var i = 0; i < types.length; i++) {
-      if (MediaRecorder.isTypeSupported(types[i])) return types[i];
-    }
-    return null;
+    return MediaRecorder.isTypeSupported("video/mp4;codecs=avc1")
+      ? "video/mp4;codecs=avc1"
+      : null;
   }
 
   function loadMetadata(video, url) {
