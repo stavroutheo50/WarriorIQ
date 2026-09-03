@@ -1441,46 +1441,22 @@ class SocialAuthResilienceTests(unittest.TestCase):
 class UndecodableUploadTests(unittest.TestCase):
     """A file the server cannot decode must be refused clearly and early."""
 
-    def test_the_browser_encoder_only_emits_mp4(self):
-        """WebM produced here is a file this server cannot read."""
-        source = (Path(__file__).resolve().parents[1] / "app" / "static" / "upload-compress.js").read_text(encoding="utf-8")
-        self.assertNotIn('"video/webm', source)
-        self.assertIn('"video/mp4;codecs=avc1"', source)
+    def test_the_page_no_longer_re_encodes_before_uploading(self):
+        """The file is sent as filmed.
 
-
-class UploadShrinkPolicyTests(unittest.TestCase):
-    """The re-encode has to help the files that actually hurt."""
-
-    def setUp(self):
-        self.source = (Path(__file__).resolve().parents[1] / "app" / "static"
-                       / "upload-compress.js").read_text(encoding="utf-8")
-
-    def test_the_decision_is_time_saved_not_duration(self):
-        """A duration cap switched shrinking off for the files that need it.
-
-        An 881MB 4K bout went up untouched at about 0.6MB/s - twenty-five
-        minutes - because a 100-second cap declined to re-encode it. The same
-        fight shrunk is near 120MB: five minutes encoding, three and a half
-        uploading.
+        The in-browser re-encode produced WebM this server cannot decode,
+        truncated uploads when a phone backgrounded the tab, made people wait
+        minutes before a byte moved, and finally froze at a percentage because
+        its draw loop runs on requestAnimationFrame, which stops when a screen
+        dims. Fewer bytes was never worth any of that.
         """
-        self.assertIn("ASSUMED_UPLINK_BYTES_PER_SECOND", self.source)
-        self.assertIn("savedSeconds", self.source)
-        # The decision compares saving against the encode's own cost.
-        self.assertIn("savedSeconds < video.duration * 1.25", self.source)
-        # And is not a bare duration cutoff any more.
-        self.assertNotIn("if (video.duration > 100)", self.source)
+        from pathlib import Path
 
-    def test_a_long_fight_is_still_refused(self):
-        """Nobody holds a phone still for a quarter of an hour."""
-        self.assertIn("var MAX_SECONDS = 900;", self.source)
-        self.assertIn("if (video.duration > MAX_SECONDS) return null;", self.source)
-
-    def test_the_size_advice_matches_what_the_app_now_does(self):
-        """It used to tell people to re-film at 1080p - work the app now does."""
-        template = (Path(__file__).resolve().parents[1] / "app" / "templates"
-                    / "analyze.html").read_text(encoding="utf-8")
-        self.assertNotIn("filming at 1080p instead of 4K", template)
-        self.assertIn("WarriorIQ will shrink this before uploading", template)
+        root = Path(__file__).resolve().parents[1]
+        self.assertFalse((root / "app" / "static" / "upload-compress.js").exists())
+        page = (root / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
+        for gone in ("wiqShrinkVideo", "upload-compress", "Preparing video"):
+            self.assertNotIn(gone, page)
 
 
 class MovementScorecardRenderTests(unittest.TestCase):

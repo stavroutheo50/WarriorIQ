@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><script src="/static/upload-compress.js" defer></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
 {% block title %}{{sport_label}} fight analysis · WarriorIQ{% endblock %}
 {% block description %}Upload a {{sport_label}} bout to WarriorIQ for evidence-linked analysis scored under {{sport_label}} rules, with coaching priorities and a fighter-specific training plan.{% endblock %}
 {% block content %}
@@ -80,7 +80,7 @@
       {% endif %}
 
       <fieldset class="upload-consent card-inset"><legend>Two quick questions</legend><input type="hidden" name="people_permissions_confirmed" value="true"><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>This is my video, and the people in it are OK with me uploading it.</span></label><div class="minor-permission" role="group" aria-labelledby="minorPermissionLabel"><span id="minorPermissionLabel">Is anyone in the video under 18?</span><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No, all 18 or over</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes, and a parent or guardian said OK</span></label></div><p class="small muted">TV footage still needs permission. <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
-      <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Preparing video…" data-motion-primary disabled>Choose a video to continue</button>
+      <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Starting upload…" data-motion-primary disabled>Choose a video to continue</button>
       <div class="upload-progress" id="uploadProgress" role="status" aria-live="polite" hidden><span><i id="uploadProgressBar"></i></span><b id="uploadProgressText">Uploading fight video…</b><small id="uploadProgressHint">Keep this tab open — you can keep reading the page. WarriorIQ moves you on by itself.</small></div>
       {% if request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Analysis needs a free account, so your fights stay private to you. <a class="text-link" href="/signup?next=/analyze/{{sport}}">Create one in a moment.</a></p>{% endif %}
     </form>
@@ -122,7 +122,7 @@
   // A phone films at 1080p or 4K; a fight at that size is hundreds of megabytes
   // over a mobile uplink. Saying so before the upload starts is the difference
   // between a considered choice and six minutes staring at a stalled bar.
-  const sizeAdvice=b=>b>629145600?{tone:'warn',text:`${fmtMB(b)} — WarriorIQ will shrink this before uploading, which takes about as long as the fight and then uploads several times faster. Keep the screen on while it prepares.`}
+  const sizeAdvice=b=>b>629145600?{tone:'warn',text:`${fmtMB(b)} — a long upload on mobile data. Wi-Fi is much quicker, and filming at 1080p instead of 4K makes the file far smaller with no loss to the analysis.`}
     :b>209715200?{tone:'note',text:`${fmtMB(b)} — large but fine. Wi-Fi will be much quicker than mobile data.`}
     :{tone:'ok',text:`${fmtMB(b)} — ready for WarriorIQ analysis`};
   const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
@@ -162,17 +162,10 @@
   form.addEventListener('submit',async event=>{
     if(!videoInput.files[0]||!form.reportValidity())return;
     event.preventDefault();
-    let file=videoInput.files[0];
+    const file=videoInput.files[0];
     // Shrink oversized phone footage before it crosses a mobile uplink. The
     // analyser infers at 1280 and samples at most 15fps, so a 4K source is
     // bandwidth the analysis never reads. Any failure returns the original.
-    if(window.wiqShrinkVideo){
-      showProgress('active');uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');
-      progressText.textContent='Preparing video for upload…';
-      const smaller=await window.wiqShrinkVideo(file,f=>{const pct=Math.round(f*100);progressBar.style.width=`${pct}%`;progressText.textContent=`Preparing video · ${pct}% (this makes the upload much faster)`;uploadSubmit.textContent=`Preparing ${pct}%`;});
-      if(smaller){window.wiqToast(`Reduced to ${fmtMB(smaller.size)} for a faster upload.`,'success');file=smaller;}
-      progressBar.style.width='2%';
-    }
     const body=new FormData(form);body.set('video',file);
     const request=new XMLHttpRequest();
     showProgress('active');progressBar.style.width='2%';progressText.textContent='Uploading fight video…';uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');uploadSubmit.textContent='Uploading 0%';
