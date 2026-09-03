@@ -122,8 +122,17 @@
   // A phone films at 1080p or 4K; a fight at that size is hundreds of megabytes
   // over a mobile uplink. Saying so before the upload starts is the difference
   // between a considered choice and six minutes staring at a stalled bar.
-  const sizeAdvice=b=>b>629145600?{tone:'warn',text:`${fmtMB(b)} — a long upload on mobile data. Wi-Fi is much quicker, and filming at 1080p instead of 4K makes the file far smaller with no loss to the analysis.`}
-    :b>209715200?{tone:'note',text:`${fmtMB(b)} — large but fine. Wi-Fi will be much quicker than mobile data.`}
+  // The size is meaningless to most people; the minutes are not. A file that
+  // says "881 MB" and then sits at 26% looks broken, when it is simply a long
+  // upload. Saying how long before it starts turns a stall into a decision.
+  //
+  // 0.6 MB/s is what a real phone measured on mobile data. Wi-Fi is several
+  // times quicker, so this is the pessimistic end and the estimate can only
+  // come in better.
+  const MOBILE_BYTES_PER_SEC=0.6*1048576;
+  const fmtMins=b=>{const m=Math.round(b/MOBILE_BYTES_PER_SEC/60);return m<1?'under a minute':m===1?'about a minute':`about ${m} minutes`};
+  const sizeAdvice=b=>b>314572800?{tone:'warn',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data, less on Wi-Fi. Filming at 1080p instead of 4K makes it roughly four times smaller with no loss to the analysis.`}
+    :b>104857600?{tone:'note',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data. Wi-Fi will be quicker.`}
     :{tone:'ok',text:`${fmtMB(b)} — ready for WarriorIQ analysis`};
   const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
   const restore=(message)=>{showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
