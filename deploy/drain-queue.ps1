@@ -44,8 +44,22 @@ try {
     Push-Location $root
     # --once claims fights until the queue is empty, then exits. A non-zero code
     # means the server was unreachable, which the next scheduled run retries.
-    & $python $worker --once 2>&1 | ForEach-Object { Write-Log $_ }
-    $code = $LASTEXITCODE
+    # $ErrorActionPreference is deliberately relaxed across this one call.
+    #
+    # In Windows PowerShell 5.1, "2>&1" on a NATIVE executable wraps every
+    # stderr line in an ErrorRecord. Python's logging writes INFO to stderr, so
+    # under 'Stop' the worker's own first log line - "Worker running analysis
+    # code ..." - was raised as a terminating error and caught below. Every
+    # scheduled drain aborted on that line before analysing anything, and the
+    # log recorded "drain failed:" followed by an ordinary INFO message.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $python $worker --once 2>&1 | ForEach-Object { Write-Log "$_" }
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
     Write-Log "worker finished with exit code $code"
 } catch {
     Write-Log "drain failed: $($_.Exception.Message)"
