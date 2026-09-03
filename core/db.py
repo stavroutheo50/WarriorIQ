@@ -1280,13 +1280,40 @@ def get_report_share(token_hash: str) -> dict | None:
     return dict(row) if row else None
 
 
-def revoke_report_shares(job_id: str, profile_id: int) -> None:
+def list_active_report_shares(job_id: str, profile_id: int) -> list[dict]:
+    """Coach links that are still live for this fight, soonest to expire first.
+
+    The token itself is only ever stored as a digest, so a link can be counted
+    and dated here but never shown again after the moment it was created.
+    """
+    init_db()
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
-        con.execute(
-            "UPDATE report_shares SET revoked_at=? WHERE job_id=? AND profile_id=? AND revoked_at IS NULL",
-            (now, job_id, profile_id),
+        rows = con.execute(
+            "SELECT created_at,expires_at FROM report_shares"
+            " WHERE job_id=? AND profile_id=? AND revoked_at IS NULL AND expires_at>?"
+            " ORDER BY expires_at",
+            (job_id, profile_id, now),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def revoke_report_shares(job_id: str, profile_id: int) -> int:
+    """Kill every live coach link for this fight and report how many died.
+
+    Expired links are excluded deliberately. They already fail to open, so
+    sweeping them in would inflate the count the report page shows and tell
+    the athlete three links were killed when only two could still be used.
+    """
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE report_shares SET revoked_at=?"
+            " WHERE job_id=? AND profile_id=? AND revoked_at IS NULL AND expires_at>?",
+            (now, job_id, profile_id, now),
         )
+        return int(cursor.rowcount or 0)
 
 
 def delete_account(account_id: int) -> dict | None:

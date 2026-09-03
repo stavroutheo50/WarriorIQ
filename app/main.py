@@ -58,7 +58,8 @@ from core.db import (
     mark_email_verified, mark_outbound_message_sent,
     queue_outbound_message, record_account_signup_acceptance, record_legal_acceptance,
     record_security_event, record_subscription_action, release_analysis, reserve_analysis,
-    resolve_moderation_report, revoke_account_sessions, revoke_report_shares, save_annotation,
+    list_active_report_shares, resolve_moderation_report, revoke_account_sessions,
+    revoke_report_shares, save_annotation,
     save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
     set_account_status, set_annotation_sequence,
     set_fight_review_status, toggle_assignment, update_cookie_preferences,
@@ -2724,6 +2725,45 @@ def active_analysis(request: Request):
     }
 
 
+def _sharing_state(request: Request, job_id: str, profile_id: int | None) -> dict:
+    """What the athlete can see about their coach links.
+
+    Creating a link is the only moment its address exists in readable form, so
+    that one arrives as a query parameter and is shown once. Everything after
+    that is a count and an expiry date, which is what makes revoking visible:
+    without it the button redirected to an identical page and looked dead.
+    """
+    empty = {"links": [], "new_link": None, "new_link_expires": None, "revoked": None}
+    if profile_id is None:
+        return empty
+    links = [dict(link) for link in list_active_report_shares(job_id, profile_id)]
+    for link in links:
+        link["expires_label"] = _friendly_date(link.get("expires_at"))
+    token = (request.query_params.get("share") or "").strip()
+    new_link = f"{str(request.base_url).rstrip('/')}/s/{token}" if token else None
+    revoked_raw = request.query_params.get("revoked")
+    try:
+        revoked = int(revoked_raw) if revoked_raw is not None else None
+    except ValueError:
+        revoked = None
+    return {
+        "links": links,
+        "new_link": new_link,
+        "new_link_expires": links[-1]["expires_label"] if (new_link and links) else None,
+        "revoked": revoked,
+    }
+
+
+def _friendly_date(value: str | None) -> str:
+    """An ISO timestamp as a date a person would say out loud."""
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value).strftime("%d %b %Y")
+    except ValueError:
+        return ""
+
+
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result_page(request: Request, job_id: str):
     if not _authorized_job(request, job_id):
@@ -2760,13 +2800,15 @@ def result_page(request: Request, job_id: str):
         compare_with_previous(report, list_fights(_profile), job_id)
         if _profile is not None else {"available": False}
     )
+    can_share = bool(_account(request) and report_access.get("can_share"))
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "progress_since_last": progress_since_last,
         "identity": sport_identity(report.get("scorecard", {}).get("sport", "kickboxing")),
         "report_access": report_access,
         "analysis_quality": _analysis_quality_summary(report),
-        "can_share": bool(_account(request) and report_access.get("can_share")),
+        "can_share": can_share,
+        "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
     })
     response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
     if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:
@@ -3880,7 +3922,11 @@ def share_report(request: Request, job_id: str):
     token = session_token()
     expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     save_report_share(job_id, profile_id, token_digest(token), expires)
-    return RedirectResponse(f"/s/{token}", status_code=303)
+    # The link is only ever readable at this moment: the database keeps a digest,
+    # not the token. Sending the coach's own view back here would strand the
+    # athlete on a page with no address to copy, so return to the report with the
+    # one-time link in hand.
+    return RedirectResponse(f"/result/{job_id}?share={token}", status_code=303)
 
 
 @app.get("/s/{token}", response_class=HTMLResponse)
@@ -3906,8 +3952,8 @@ def revoke_shares(request: Request, job_id: str):
     fight = get_fight(job_id)
     if profile_id is None or not fight or int(fight["profile_id"]) != profile_id:
         raise HTTPException(404)
-    revoke_report_shares(job_id, profile_id)
-    return RedirectResponse(f"/result/{job_id}", status_code=303)
+    revoked = revoke_report_shares(job_id, profile_id)
+    return RedirectResponse(f"/result/{job_id}?revoked={revoked}", status_code=303)
 
 
 @app.post("/account/export")

@@ -100,3 +100,35 @@
 .pricing-card { display: flex; flex-direction: column; height: 100%; }
 .pricing-card .plan-features { flex: 1 1 auto; }
 .pricing-card > :last-child { margin-top: auto; }
+
+/* Coach links. Creating one used to redirect the athlete into the coach's own
+   view of the report, which meant the link's address was never once put in
+   front of the person who needed to send it; revoking redirected to an
+   identical page, so it read as a dead button. Both now report themselves. */
+.share-panel { margin: 18px 0 4px; }
+.share-panel p { margin: 8px 0 0; }
+.share-panel-new { border-color: var(--wiq-edge-strong, #3a506f); }
+.share-copy-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.share-link-field {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--wiq-line, #2a3a52);
+  border-radius: var(--wiq-radius-md, 10px);
+  background: rgba(8, 14, 24, .72);
+  color: var(--wiq-text, #e8eefb);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--wiq-text-micro, 12px);
+  text-overflow: ellipsis;
+}
+.share-link-field:focus {
+  outline: none;
+  border-color: var(--wiq-cyan, #59d2e8);
+}
+.share-panel .share-once { margin-top: 12px; }

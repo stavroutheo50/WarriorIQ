@@ -4,8 +4,31 @@
 {% block content %}
 <div class="section-title result-hero" data-reveal>
   <div><div class="eyebrow">Analysis complete</div><h2>Fight analysis</h2></div>
-  <div class="selection-tools">{% if can_share %}<form action="/share/{{job_id}}" method="post"><button class="btn" type="submit">Create 7-day coach link</button></form><form action="/shares/{{job_id}}/revoke" method="post"><button class="btn secondary" type="submit">Revoke links</button></form>{% endif %}</div>
+  <div class="selection-tools">{% if can_share %}<form action="/share/{{job_id}}" method="post"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
 </div>
+{% if can_share and sharing %}
+{% if sharing.new_link %}
+<section class="card share-panel share-panel-new" aria-label="Coach link created" data-reveal>
+  <div class="eyebrow">Coach link created</div>
+  <p class="muted">Send this to your coach. It opens the report summary without the original video, works for anyone holding it, and stops working on {{sharing.new_link_expires}}.</p>
+  <div class="share-copy-row">
+    <input class="share-link-field" type="text" readonly value="{{sharing.new_link}}" aria-label="Coach link address" onfocus="this.select()">
+    <button class="btn tiny" type="button" data-copy-link="{{sharing.new_link}}">Copy</button>
+  </div>
+  <p class="small muted share-once">This address is shown once. WarriorIQ stores only a fingerprint of it, so it cannot be displayed again &mdash; if you lose it, revoke and create a new one.</p>
+</section>
+{% elif sharing.revoked is not none %}
+<section class="card share-panel" aria-label="Coach links revoked" role="status" data-reveal>
+  <div class="eyebrow">Coach links</div>
+  <p class="muted">{% if sharing.revoked > 0 %}{{sharing.revoked}} link{{'' if sharing.revoked == 1 else 's'}} revoked. {{'It has' if sharing.revoked == 1 else 'They have'}} stopped working for anyone holding {{'it' if sharing.revoked == 1 else 'them'}}.{% else %}There were no live links to revoke.{% endif %}</p>
+</section>
+{% elif sharing.links %}
+<section class="card share-panel" aria-label="Active coach links" data-reveal>
+  <div class="eyebrow">Coach links</div>
+  <p class="muted">{{sharing.links|length}} live link{{'' if sharing.links|length == 1 else 's'}} for this fight. {{'It expires' if sharing.links|length == 1 else 'The next one expires'}} on {{sharing.links[0].expires_label}}.</p>
+</section>
+{% endif %}
+{% endif %}
 <section class="result-overview" aria-label="Fight summary" data-motion-sequence="result-summary">
   <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="Fighter A portrait" onerror="this.hidden=true"><span><small>Red corner</small><strong>Fighter A</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="Fighter B portrait" onerror="this.hidden=true"><span><small>Blue corner</small><strong>Fighter B</strong></span></div></div>
   <div class="result-context"><div><span>Ruleset</span><strong>{{report.scorecard.ruleset_label}}</strong></div><div><span>Format</span><strong>{{report.setup.round_count}} × {{report.setup.round_duration_seconds|int}}s</strong></div><div><span>Report focus</span><strong>Fighter {{report.video.focus_fighter|default(report.video.analysis_target, true)}}</strong></div></div>
@@ -429,4 +452,32 @@
 </div></details>{% endif %}
 </div></details>
 <aside class="notice ai-report-notice"><strong>AI-Assisted Analysis.</strong> WarriorIQ uses computer vision and AI; detection mistakes are possible. Statistics and scores are estimates, not guaranteed facts or an official judging decision. Use this report as training and performance guidance—not medical advice. Camera angle, resolution, obstruction and poor lighting can reduce analysis quality. <a class="text-link" href="/ai-transparency">How WarriorIQ AI works</a> · <a class="text-link" href="/sports-medical-disclaimer">Sports &amp; medical safety</a></aside>
+{% endblock %}
+{% block scripts %}
+<script>
+(()=>{
+  // wiqToast is defined in the base template's trailing script, so it is only
+  // ever read inside the handler -- by click time it exists.
+  const button=document.querySelector('[data-copy-link]');
+  if(!button)return;
+  const field=document.querySelector('.share-link-field');
+  const say=(message,tone)=>{if(window.wiqToast)window.wiqToast(message,tone);};
+  button.addEventListener('click',async()=>{
+    const link=button.getAttribute('data-copy-link')||'';
+    try{
+      await navigator.clipboard.writeText(link);
+    }catch(err){
+      // Clipboard access can be refused outright; selecting the text still
+      // leaves the athlete one keystroke from copying it.
+      if(field){field.focus();field.select();}
+      say('Press Ctrl+C to copy the link','info');
+      return;
+    }
+    const original=button.textContent;
+    button.textContent='Copied';
+    say('Coach link copied','success');
+    setTimeout(()=>{button.textContent=original},1600);
+  });
+})();
+</script>
 {% endblock %}

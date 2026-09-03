@@ -152,6 +152,37 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         records = database.list_legal_acceptances(guest_id=guest_id)
         self.assertEqual(records[0]["metadata"], {"analytics": True, "marketing": False})
 
+    def test_revoking_coach_links_reports_how_many_it_killed(self):
+        """The route redirected to an identical page, so revoking looked dead.
+
+        It can only say what happened if the database tells it how many rows
+        it actually changed, and if a live-link list exists to shrink.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        from core.db import (
+            list_active_report_shares, revoke_report_shares, save_report_share,
+        )
+
+        now = datetime.now(timezone.utc)
+        live = (now + timedelta(days=7)).isoformat()
+        expired = (now - timedelta(days=1)).isoformat()
+        save_report_share("job-1", 1, "digest-live-a", live)
+        save_report_share("job-1", 1, "digest-live-b", live)
+        save_report_share("job-1", 1, "digest-expired", expired)
+        # Another fight's link must survive: revoking is per fight.
+        save_report_share("job-2", 1, "digest-other-fight", live)
+
+        active = list_active_report_shares("job-1", 1)
+        self.assertEqual(len(active), 2, "an expired link is not a live link")
+
+        self.assertEqual(revoke_report_shares("job-1", 1), 2)
+        self.assertEqual(list_active_report_shares("job-1", 1), [])
+        self.assertEqual(len(list_active_report_shares("job-2", 1)), 1)
+
+        # Nothing left to kill, and the page needs to be able to say so.
+        self.assertEqual(revoke_report_shares("job-1", 1), 0)
+
     def test_password_reset_is_one_time_and_revokes_existing_sessions(self):
         account = register("reset@example.com", "Strong-Local-Password")
         with patch.object(webapp, "send_transactional_email", return_value=True) as send_email:

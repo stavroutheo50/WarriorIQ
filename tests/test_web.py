@@ -739,7 +739,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("only when external recovery is explicitly enabled", privacy)
         self.assertIn("rather than being chosen per upload", privacy)
 
-    def _render_result(self, selection_check):
+    def _render_result(self, selection_check, can_share=False, sharing=None):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -771,8 +771,49 @@ class PublicPageTests(unittest.TestCase):
             request=request, job_id="abc", report=report,
             identity=sport_identity("kickboxing"),
             report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
-            analysis_quality=_analysis_quality_summary(report), can_share=False, unavailable=[],
+            analysis_quality=_analysis_quality_summary(report), can_share=can_share,
+            sharing=sharing, unavailable=[],
         )
+
+    def test_a_new_coach_link_is_shown_once_with_its_address(self):
+        """Creating a link used to redirect to the coach's own view of the report.
+
+        That page has no address on it, so the athlete who just made the link
+        never saw the thing they were supposed to send. Only the moment of
+        creation can show it - the database keeps a digest, not the token.
+        """
+        html = self._render_result({}, can_share=True, sharing={
+            "links": [{"expires_at": "2026-09-10T12:00:00+00:00", "expires_label": "10 Sep 2026"}],
+            "new_link": "https://warrioriq.eu/s/abc123", "new_link_expires": "10 Sep 2026",
+            "revoked": None,
+        })
+        self.assertIn("https://warrioriq.eu/s/abc123", html)
+        self.assertIn("data-copy-link", html)
+        self.assertIn("10 Sep 2026", html)
+
+    def test_revoking_coach_links_says_how_many_stopped_working(self):
+        """The revoke button redirected to an identical page and read as dead."""
+        html = self._render_result({}, can_share=True, sharing={
+            "links": [], "new_link": None, "new_link_expires": None, "revoked": 2,
+        })
+        self.assertIn("2 links revoked", html)
+        none_left = self._render_result({}, can_share=True, sharing={
+            "links": [], "new_link": None, "new_link_expires": None, "revoked": 0,
+        })
+        self.assertIn("no live links to revoke", none_left.lower())
+
+    def test_there_is_no_revoke_button_when_no_link_is_live(self):
+        """Offering to revoke nothing is what made the button look broken."""
+        html = self._render_result({}, can_share=True, sharing={
+            "links": [], "new_link": None, "new_link_expires": None, "revoked": None,
+        })
+        self.assertNotIn("/shares/abc/revoke", html)
+        live = self._render_result({}, can_share=True, sharing={
+            "links": [{"expires_at": "2026-09-10T12:00:00+00:00", "expires_label": "10 Sep 2026"}],
+            "new_link": None, "new_link_expires": None, "revoked": None,
+        })
+        self.assertIn("/shares/abc/revoke", live)
+        self.assertIn("Revoke 1 link<", live)
 
     def test_the_labelling_list_survives_events_without_a_confidence(self):
         """Sorting candidates by confidence crashed on a null one.
