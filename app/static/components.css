@@ -9,3 +9,24 @@
 .trend-cell[data-direction="up"] strong { color: var(--green, #55d18b); }
 .trend-cell[data-direction="down"] strong { color: #ff7a90; }
 .row-muted { opacity: .55; }
+
+/* The upload runs while the page stays readable.
+   It used to sit inline in the form as the one thing on screen, so a
+   twenty-minute mobile upload looked like a page that had frozen. Once it is
+   actually running it lifts out to a strip pinned to the bottom of the window:
+   still visible while scrolling, still exact about bytes and time left, but no
+   longer the thing you are made to sit and watch. */
+.upload-progress[data-tone="active"],
+.upload-progress[data-tone="error"] {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 14px;
+  width: min(560px, calc(100vw - 28px));
+  z-index: 60;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+}
+@media (max-width: 620px) {
+  .upload-progress[data-tone="active"],
+  .upload-progress[data-tone="error"] { bottom: 8px; }
+}
