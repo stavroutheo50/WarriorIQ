@@ -1403,3 +1403,56 @@ class DowngradeBlockTests(unittest.TestCase):
         self.assertIn("Too small", page)
         self.assertIn("you have 8 fighters", page)
         self.assertIn("Not enough room", page)
+
+
+class AddFighterFromCoachPageTests(unittest.TestCase):
+    """A roster has to be reachable without analysing a fight first.
+
+    Filing an old fight needs somebody to file it against, and the assign
+    control only appears once a roster exists - so a workspace with fights but
+    no fighters had no way out of that.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        original_db = database.DB_PATH
+        self.addCleanup(lambda: setattr(database, "DB_PATH", original_db))
+        database.DB_PATH = Path(self.temp.name) / "add.sqlite3"
+        database.init_db()
+        limiter = patch.object(webapp, "_enforce_rate_limit", lambda *a, **k: None)
+        limiter.start()
+        self.addCleanup(limiter.stop)
+        self.client = TestClient(app)
+        self.addCleanup(self.client.close)
+        self.client.post("/signup", data={
+            "email": "roster@example.com", "password": "Strong-Local-Password",
+            "accept_terms": "true", "age_confirmed": "true"}, follow_redirects=False)
+        self.profile = database.get_account_by_email("roster@example.com")["profile_id"]
+
+    def test_the_coach_page_offers_a_way_to_add_one(self):
+        page = self.client.get("/coach").text
+        self.assertIn('action="/coach/fighters"', page)
+        self.assertIn("Add a fighter to the roster", page)
+
+    def test_adding_a_fighter(self):
+        r = self.client.post("/coach/fighters", data={"name": "  Theodoulos  "},
+                             follow_redirects=False)
+        self.assertEqual(r.status_code, 303)
+        self.assertEqual([f["name"] for f in database.list_fighters(self.profile)], ["Theodoulos"])
+
+    def test_the_same_name_again_is_not_a_second_seat(self):
+        self.client.post("/coach/fighters", data={"name": "Theodoulos"}, follow_redirects=False)
+        self.client.post("/coach/fighters", data={"name": "theodoulos"}, follow_redirects=False)
+        self.assertEqual(len(database.list_fighters(self.profile)), 1)
+
+    def test_the_seat_limit_applies_here_too(self):
+        """Otherwise this route is a way around the plan."""
+        self.client.post("/coach/fighters", data={"name": "Theodoulos"}, follow_redirects=False)
+        second = self.client.post("/coach/fighters", data={"name": "Maria"}, follow_redirects=False)
+        self.assertEqual(second.status_code, 402)
+        self.assertEqual(len(database.list_fighters(self.profile)), 1)
+
+    def test_a_blank_name_is_refused(self):
+        r = self.client.post("/coach/fighters", data={"name": "   "}, follow_redirects=False)
+        self.assertEqual(r.status_code, 400)

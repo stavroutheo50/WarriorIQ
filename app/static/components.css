@@ -45,3 +45,7 @@
    wonder where it went. */
 .plan-blocked { font-size: var(--wiq-text-micro); line-height: 1.4; padding: 7px 9px; margin-bottom: 8px;
                 border-radius: 8px; background: #3a1f2a; color: #ffb3c0; border: 1px solid #6d3247; }
+/* Adding a fighter without analysing a fight first. */
+.add-fighter { display: grid; gap: 5px; margin: 14px 0 6px; }
+.add-fighter-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.add-fighter-row input { flex: 1 1 200px; }

@@ -3446,6 +3446,34 @@ def coach_page(request: Request):
     )
 
 
+@app.post("/coach/fighters")
+def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/coach#squad")):
+    """Add someone to the roster without having to analyse a fight first.
+
+    Filing an old fight needs a fighter to file it against, and until now the
+    only way to create one was to upload a new fight and type a name on the
+    setup page - so a workspace with fights but no roster had no way out of it.
+    """
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/coach", status_code=303)
+    roster = list_fighters(profile_id)
+    cleaned = " ".join(name.split())
+    if not cleaned:
+        raise HTTPException(400, "A fighter needs a name.")
+    if not any(f["name"].lower() == cleaned.lower() for f in roster):
+        capacity = roster_capacity(_request_plan(request), len(roster))
+        if not capacity["can_add"]:
+            raise HTTPException(
+                402,
+                f"This plan holds {capacity['limit']} "
+                f"fighter{'s' if capacity['limit'] != 1 else ''} and they are all in use. "
+                "Archive one you no longer coach, or move to a plan with more room.",
+            )
+    create_fighter(profile_id, cleaned)
+    return RedirectResponse(_safe_next(next_path, "/coach#squad"), status_code=303)
+
+
 @app.post("/coach/fights/{job_id}/fighter")
 def assign_fight_to_fighter(
     request: Request,

@@ -7,6 +7,25 @@
 {# The squad view: what a coach opens this page for. Every fight in order,
    which way the numbers are moving, and which fights are not safe to compare.
    Movement only - nothing here waits on strike detection. #}
+{% if signed_in %}
+<section class="card" id="roster">
+  <div class="section-title" style="margin-top:0"><div><div class="eyebrow">Roster</div><h2>Your fighters</h2></div></div>
+  {# Without at least one fighter there is nothing to file a fight against, and
+     the only other way to create one is to upload a new fight. #}
+  <form class="add-fighter" method="post" action="/coach/fighters">
+    <input type="hidden" name="next_path" value="/coach#squad">
+    <label class="small muted" for="newFighter">Add a fighter to the roster</label>
+    <div class="add-fighter-row">
+      <input id="newFighter" name="name" type="text" maxlength="80" required
+             placeholder="Fighter's name" autocomplete="off">
+      <button class="btn ghost" type="submit">Add</button>
+    </div>
+  </form>
+
+  {% if roster %}<p class="small muted">On the roster: {{roster|map(attribute="name")|join(", ")}}</p>{% endif %}
+</section>
+{% endif %}
+
 {% if signed_in and squad and squad.fights %}
 <section class="card" id="squad">
   <div class="section-title" style="margin-top:0">

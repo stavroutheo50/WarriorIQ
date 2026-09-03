@@ -1345,13 +1345,23 @@ def create_fighter(profile_id: int, name: str) -> dict | None:
     init_db()
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
+        existing = con.execute(
+            "SELECT * FROM fighters WHERE profile_id=? AND name=? COLLATE NOCASE",
+            (profile_id, cleaned),
+        ).fetchone()
+        if existing:
+            # Same person, however it was typed. Un-archive rather than insert:
+            # a second row would take a second seat and split their fights
+            # across two trends.
+            con.execute("UPDATE fighters SET archived=0 WHERE id=?", (existing["id"],))
+            return dict(existing) | {"archived": 0}
         con.execute(
-            "INSERT INTO fighters(profile_id, name, created_at) VALUES(?,?,?) "
-            "ON CONFLICT(profile_id, name) DO UPDATE SET archived=0",
+            "INSERT INTO fighters(profile_id, name, created_at) VALUES(?,?,?)",
             (profile_id, cleaned, now),
         )
         row = con.execute(
-            "SELECT * FROM fighters WHERE profile_id=? AND name=?", (profile_id, cleaned),
+            "SELECT * FROM fighters WHERE profile_id=? AND name=? COLLATE NOCASE",
+            (profile_id, cleaned),
         ).fetchone()
     return dict(row) if row else None
 
