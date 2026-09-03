@@ -1370,3 +1370,28 @@ def archive_fighter(profile_id: int, fighter_id: int) -> bool:
             (int(fighter_id), profile_id),
         ).rowcount
     return bool(changed)
+
+
+def assign_fighter_to_fight(profile_id: int, job_id: str, fighter_id: int | None) -> bool:
+    """File an existing fight against a fighter, or unfile it.
+
+    Both sides are scoped to the workspace, so neither a fight nor a fighter
+    from somebody else's account can be reached by guessing an id. Passing None
+    clears the assignment, which is the honest way back from a mistake: a fight
+    filed against the wrong person is worse than one filed against nobody,
+    because the wrong one silently feeds that fighter's trend.
+    """
+    init_db()
+    with connection() as con:
+        if fighter_id is not None:
+            owned = con.execute(
+                "SELECT 1 FROM fighters WHERE id=? AND profile_id=?",
+                (int(fighter_id), profile_id),
+            ).fetchone()
+            if not owned:
+                return False
+        changed = con.execute(
+            "UPDATE fights SET fighter_id=? WHERE job_id=? AND profile_id=?",
+            (int(fighter_id) if fighter_id is not None else None, job_id, profile_id),
+        ).rowcount
+    return bool(changed)

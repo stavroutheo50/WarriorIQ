@@ -48,7 +48,7 @@ from core.release_validation import assess_end_to_end_validation, end_to_end_met
 from core.db import (
     add_assignment, analysis_allowance, apply_checkout_event, consume_email_verification_token,
     consume_password_reset_token,
-    create_fighter, create_moderation_report, create_oauth_account, delete_account, delete_fight,
+    assign_fighter_to_fight, create_fighter, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
     get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, get_fighter, get_profile,
     get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
@@ -3420,8 +3420,32 @@ def coach_page(request: Request):
             # coach half - every fight in order and which way the numbers are
             # moving. See core/squad.py.
             "squad": build_squad_view(fights),
+            # The roster is what the per-row assign control offers.
+            "roster": list_fighters(profile_id) if profile_id is not None else [],
         },
     )
+
+
+@app.post("/coach/fights/{job_id}/fighter")
+def assign_fight_to_fighter(
+    request: Request,
+    job_id: str,
+    fighter_id: str = Form(""),
+    next_path: str = Form("/coach#squad"),
+):
+    """File a past fight against a fighter.
+
+    Fights analysed before the roster existed have no owner, so they produce no
+    comparison and no trend. Rather than guess one for them - which is the bug
+    the roster replaced - they are listed as unfiled and assigned here.
+    """
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/coach", status_code=303)
+    chosen = int(fighter_id) if fighter_id.strip().isdigit() else None
+    if not assign_fighter_to_fight(profile_id, job_id, chosen):
+        raise HTTPException(404, "That fight or fighter is not in this workspace.")
+    return RedirectResponse(_safe_next(next_path, "/coach#squad"), status_code=303)
 
 
 @app.post("/coach/assignments")

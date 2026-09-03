@@ -40,7 +40,23 @@
     <tbody>
     {% for f in squad.fights %}
       <tr{% if not f.usable %} class="row-muted"{% endif %}>
-        <td>{% if f.fighter_name %}<b>{{f.fighter_name}}</b>{% else %}<span class="muted">Not filed</span>{% endif %}</td>
+        {# An unfiled fight produces no comparison and no trend, so it is fixed
+           here rather than left to be wondered about. Filed ones can be moved
+           too: the wrong fighter is worse than none, because it quietly feeds
+           somebody else's trend. #}
+        <td>
+          {% if roster %}
+          <form class="fighter-assign" method="post" action="/coach/fights/{{f.job_id}}/fighter">
+            <input type="hidden" name="next_path" value="/coach#squad">
+            <select name="fighter_id" aria-label="Fighter for {{f.name|truncate(20, true)}}">
+              <option value="">{% if f.fighter_name %}Unfile{% else %}Not filed{% endif %}</option>
+              {% for r in roster %}<option value="{{r.id}}" {% if f.fighter_id == r.id %}selected{% endif %}>{{r.name}}</option>{% endfor %}
+            </select>
+            <button class="btn ghost tiny" type="submit">Save</button>
+          </form>
+          {% elif f.fighter_name %}<b>{{f.fighter_name}}</b>
+          {% else %}<span class="muted">Not filed</span>{% endif %}
+        </td>
         <td>{{f.name|truncate(22, true)}}<br><small class="muted">{{f.created_at[:10] if f.created_at else ''}}</small></td>
         <td class="small">{{f.sport_label}}</td>
         <td class="small">{{f.ruleset}}</td>

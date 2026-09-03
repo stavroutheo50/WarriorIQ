@@ -30,3 +30,7 @@
   .upload-progress[data-tone="active"],
   .upload-progress[data-tone="error"] { bottom: 8px; }
 }
+/* Filing a past fight against a fighter, inline in the squad table. */
+.fighter-assign { display: flex; gap: 6px; align-items: center; }
+.fighter-assign select { min-width: 120px; padding: 5px 8px; font-size: var(--wiq-text-micro); }
+.btn.tiny { padding: 5px 10px; min-height: 0; font-size: var(--wiq-text-micro); }

@@ -1104,3 +1104,83 @@ class FighterRosterTests(unittest.TestCase):
 
         current = json.loads(Path(fights[0]["report_path"]).read_text(encoding="utf-8"))
         self.assertEqual(compare_with_previous(current, fights, "o0"), {"available": False})
+
+
+class AssignFighterToPastFightTests(unittest.TestCase):
+    """Fights from before the roster existed can be filed after the fact."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.original_db = database.DB_PATH
+        self.original_outputs = webapp.OUTPUTS
+        database.DB_PATH = Path(self.temp.name) / "assign.sqlite3"
+        webapp.OUTPUTS = Path(self.temp.name) / "outputs"
+        webapp.OUTPUTS.mkdir()
+        database.init_db()
+        self.client = TestClient(app)
+        self.client.post("/signup", data={
+            "email": "owner@example.com", "password": "Strong-Local-Password",
+            "accept_terms": "true", "age_confirmed": "true"}, follow_redirects=False)
+        self.profile = database.get_account_by_email("owner@example.com")["profile_id"]
+        self.fighter = database.create_fighter(self.profile, "Theodoulos")
+        report = webapp.OUTPUTS / "old.json"
+        report.write_text(json.dumps({"video": {}, "scorecard": {}, "tracking": {}}), encoding="utf-8")
+        database.save_fight(
+            job_id="old-fight", profile_id=self.profile, original_name="old.mp4",
+            video_path="old.mp4", report_path=str(report), fight_type="competition",
+            ruleset="K1", analysis_target="A", summary={},
+        )
+
+    def tearDown(self):
+        self.client.close()
+        database.DB_PATH = self.original_db
+        webapp.OUTPUTS = self.original_outputs
+        self.temp.cleanup()
+
+    def _fight(self):
+        return next(f for f in database.list_fights(self.profile) if f["job_id"] == "old-fight")
+
+    def test_an_old_fight_starts_unfiled_and_can_be_assigned(self):
+        self.assertIsNone(self._fight()["fighter_id"])
+        response = self.client.post(
+            "/coach/fights/old-fight/fighter",
+            data={"fighter_id": str(self.fighter["id"])}, follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303)
+        filed = self._fight()
+        self.assertEqual(filed["fighter_id"], self.fighter["id"])
+        self.assertEqual(filed["fighter_name"], "Theodoulos")
+
+    def test_it_can_be_unfiled_again(self):
+        """A fight filed against the wrong person is worse than one filed
+        against nobody, because the wrong one feeds that fighter's trend."""
+        self.client.post("/coach/fights/old-fight/fighter",
+                         data={"fighter_id": str(self.fighter["id"])}, follow_redirects=False)
+        self.client.post("/coach/fights/old-fight/fighter",
+                         data={"fighter_id": ""}, follow_redirects=False)
+        self.assertIsNone(self._fight()["fighter_id"])
+
+    def test_a_fighter_from_another_workspace_is_refused(self):
+        stranger = database.create_fighter(self.profile + 99, "Someone Else")
+        response = self.client.post(
+            "/coach/fights/old-fight/fighter",
+            data={"fighter_id": str(stranger["id"])}, follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertIsNone(self._fight()["fighter_id"])
+
+    def test_another_workspaces_fight_cannot_be_filed(self):
+        report = webapp.OUTPUTS / "theirs.json"
+        report.write_text("{}", encoding="utf-8")
+        database.save_fight(
+            job_id="not-mine", profile_id=self.profile + 99, original_name="theirs.mp4",
+            video_path="theirs.mp4", report_path=str(report), fight_type="competition",
+            ruleset="K1", analysis_target="A", summary={},
+        )
+        response = self.client.post(
+            "/coach/fights/not-mine/fighter",
+            data={"fighter_id": str(self.fighter["id"])}, follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 404)
+        theirs = [f for f in database.list_fights(self.profile + 99) if f["job_id"] == "not-mine"][0]
+        self.assertIsNone(theirs["fighter_id"])
