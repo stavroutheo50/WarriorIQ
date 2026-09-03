@@ -575,7 +575,13 @@ class PublicPageTests(unittest.TestCase):
         shell = (Path(__file__).resolve().parents[1] / "app" / "templates" / "base.html").read_text(encoding="utf-8")
         history_template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "history.html").read_text(encoding="utf-8")
 
-        self.assertIn('/static/product.css', shell)
+        # product.css is served inside the concatenated base bundle now, so the
+        # guarantee is that the shared layer still reaches the page - not that
+        # base.html names the file.
+        from app.main import CSS_BUNDLES
+
+        self.assertIn('/assets/base.css', shell)
+        self.assertIn("product.css", CSS_BUNDLES["base"])
         self.assertIn("See every shot.", home)
         self.assertIn("Know what to fix.", home)
         self.assertIn('class="product-preview"', home)
@@ -643,10 +649,15 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('data-page="home"', page.text)
         # The cache-busting version changes on every asset release, so assert the
         # shared motion layer is linked rather than pinning one version string.
-        self.assertRegex(page.text, r'href="/static/motion\.css\?v=[\w-]+"')
+        # The motion layer ships inside the shell bundle; the script is still
+        # its own file.
+        from app.main import CSS_BUNDLES
+
+        self.assertRegex(page.text, r'href="/assets/shell\.css\?v=[\w-]+"')
+        self.assertIn("motion.css", CSS_BUNDLES["shell"])
         self.assertRegex(page.text, r'src="/static/motion\.js\?v=[\w-]+"')
         self.assertIn('id="pageScrollProgress"', page.text)
-        css = self.client.get("/static/motion.css")
+        css = self.client.get("/assets/shell.css")
         self.assertEqual(css.status_code, 200)
         for rule in (
             "--wiq-motion-fast:140ms",

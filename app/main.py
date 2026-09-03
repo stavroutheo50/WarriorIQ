@@ -124,6 +124,33 @@ def _asset_version() -> str:
 
 ASSET_VERSION = _asset_version()
 templates.env.globals["asset_version"] = ASSET_VERSION
+
+# Every page pulled eight separate stylesheets, so a phone opening WarriorIQ
+# made eight blocking round trips to a shared host before it could paint
+# anything. They are concatenated here instead, at import, with no build step.
+#
+# Two bundles rather than one, because base.html puts {% block head %} between
+# these groups: a page's own stylesheet has to land after the first group and
+# before the second, or the cascade changes and pages restyle themselves. Two
+# requests instead of eight keeps the order identical.
+CSS_BUNDLES: dict[str, tuple[str, ...]] = {
+    "base": ("style.css", "navigation.css", "fixes.css", "product.css", "system.css"),
+    "shell": ("premium.css", "motion.css", "redesign.css"),
+}
+
+
+def _build_css_bundle(names: tuple[str, ...]) -> str:
+    parts = []
+    for name in names:
+        path = ROOT / "app" / "static" / name
+        try:
+            parts.append(f"/* {name} */\n{path.read_text(encoding='utf-8')}")
+        except OSError:
+            LOGGER.warning("css_bundle_missing file=%s", name)
+    return "\n".join(parts)
+
+
+CSS_BUNDLE_TEXT = {key: _build_css_bundle(names) for key, names in CSS_BUNDLES.items()}
 executor = ThreadPoolExecutor(max_workers=1)
 init_db()
 
@@ -3537,6 +3564,25 @@ def admin_delete_prohibited_video(request: Request, job_id: str = Form(...)):
         resource_type="fight", resource_id=job_id.strip(),
     )
     return RedirectResponse("/admin", status_code=303)
+
+
+@app.get("/assets/{bundle}.css", include_in_schema=False)
+def css_bundle(bundle: str):
+    """Serve one concatenated stylesheet instead of several.
+
+    Served from memory rather than written into app/static, because the web
+    host's application directory is not somewhere to be generating files at
+    import time. The version token in the URL is the same asset hash the
+    individual stylesheets used, so a deploy still busts the cache.
+    """
+    text = CSS_BUNDLE_TEXT.get(bundle)
+    if text is None:
+        raise HTTPException(404)
+    return Response(
+        content=text,
+        media_type="text/css",
+        headers={"Cache-Control": "public, max-age=604800"},
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)
