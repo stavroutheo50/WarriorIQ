@@ -1945,3 +1945,25 @@ def test_progress_is_not_claimed_across_two_different_sports():
         # Both fights still appear and still count as tracked well enough.
         assert len(squad["fights"]) == 2
         assert squad["usable_count"] == 2
+
+
+def test_a_stationary_candidate_is_refused_during_recovery_too():
+    """The veto has to hold while a fighter is missing, not only while held.
+
+    Skipping it during recovery let a lost fighter be re-acquired as whoever
+    was nearest, including people sitting down. On a real bout fighter A was
+    lost at 25 seconds and tracked a spectator in a chair for the rest of the
+    fight while coverage reported 96%, because coverage counts accepted
+    observations and cannot tell a fighter from a seated man.
+    """
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "core" / "identity.py").read_text(encoding="utf-8")
+    veto = source[source.index("Refuse to move onto somebody who has been standing still"):]
+    veto = veto[:veto.index("return -999.0")]
+    # The condition guarding the veto must not depend on the fighter being
+    # currently held.
+    assert "state.missing_frames == 0" not in veto, (
+        "the stationary veto is gated on the fighter being in hand again"
+    )
+    assert "candidate.track_id != state.current_track_id" in veto

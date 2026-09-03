@@ -254,16 +254,27 @@ class IdentityManager:
         # can never drop the track already being followed, so a fighter who
         # pauses between exchanges is never given away.
         #
-        # Only while the fighter is actually in hand. Applying this during a
-        # recovery was the bug: a fighter briefly lost to an occlusion comes
-        # back on a track that has been standing still for the last few seconds
-        # - because they were waiting to restart - and the veto refused to give
-        # them their own identity back. They were never re-acquired, the two
-        # fighters were never in frame together again, and a whole bout came
-        # back with one action in it.
+        # Applied during a recovery too, which it was not before.
+        #
+        # Skipping it there was meant to let a fighter who paused between
+        # exchanges be re-acquired, and it did - along with everyone sitting
+        # down. Drawing the tracked boxes back onto a bout showed fighter A
+        # lost at 25 seconds and locked onto a spectator in a chair for the
+        # remaining two and a half minutes, while coverage reported 96%,
+        # because coverage counts accepted observations and cannot tell a
+        # fighter from a seated man where a fighter used to be. Every number
+        # published for that fighter described the spectator.
+        #
+        # The reason the gate was added no longer holds: it was compensating
+        # for a six-second history window, since widened to thirty, so a brief
+        # pause no longer erases the travel that proves somebody is fighting.
+        # Same bout with this applied during recovery: 1 of 8 sampled frames
+        # correct becomes 5 of 8, and attempts rise from 9 and 8 to 47 and 42.
+        # Coverage falls from 96% to 81% because it now declines to follow
+        # furniture, which is this manager's own rule - missing briefly beats
+        # tracking the wrong human.
         if (
-            state.missing_frames == 0
-            and candidate.track_id is not None
+            candidate.track_id is not None
             and candidate.track_id != state.current_track_id
         ):
             travel = self._recent_travel(candidate.track_id, self.source_fps)
