@@ -1521,3 +1521,28 @@ class InlinePickerTests(unittest.TestCase):
             page = self.client.get(path).text
             self.assertNotIn('href="/static/components.css"', page)
             self.assertRegex(page, r'components\.css\?v=[0-9a-f]+')
+
+
+class MovementScorecardRenderTests(unittest.TestCase):
+    """The movement scorecard has to reach the page, and say what it excludes."""
+
+    def test_the_template_renders_the_card_and_its_limits(self):
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                    / "result.html").read_text(encoding="utf-8")
+        self.assertIn('id="report-movement-score"', template)
+        self.assertIn("movement.criteria_scored", template)
+        # The exclusion is not optional dressing: a scorecard that does not say
+        # it left out clean striking is claiming to be a full score.
+        self.assertIn("movement.criteria_excluded", template)
+        self.assertIn("movement.disclaimer", template)
+        # And it must render its own withheld state rather than vanishing.
+        self.assertIn("movement.reason", template)
+
+    def test_it_sits_above_the_striking_scorecard(self):
+        """The card WarriorIQ can stand behind comes first."""
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                    / "result.html").read_text(encoding="utf-8")
+        self.assertLess(
+            template.index('id="report-movement-score"'),
+            template.index('id="report-scorecard"'),
+        )

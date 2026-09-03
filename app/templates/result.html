@@ -294,6 +294,45 @@
 </section>
 {% endif %}
 
+{# The criteria movement can evidence, scored per round. Deliberately above
+   the striking scorecard: that one is withheld because strikes cannot be
+   detected reliably, and this one is the part WarriorIQ can actually stand
+   behind. See core/generalship.py. #}
+{% set movement = report.movement_scorecard|default({}, true) %}
+{% if movement %}
+<section class="card" id="report-movement-score">
+  <div class="section-title" style="margin-top:0">
+    <h2>Movement scorecard</h2>
+    <span class="pill">{{movement.criteria_scored|length|default(3)}} of 4 judging criteria</span>
+  </div>
+  {% if movement.available %}
+  <div class="grid">
+    <div><div class="score">{{movement.totals.A}}</div><div class="muted">Fighter A{% if movement.leader == 'A' %} · ahead{% endif %}</div></div>
+    <div><div class="score">{{movement.totals.B}}</div><div class="muted">Fighter B{% if movement.leader == 'B' %} · ahead{% endif %}</div></div>
+  </div>
+  <p class="small">Scored on <b>{{movement.criteria_scored|join(', ')}}</b>.
+     Not scored: <b>{{movement.criteria_excluded|join(', ')}}</b>.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Round</th><th>A</th><th>B</th><th>Pressed forward</th><th>Held the middle</th><th>Took ground</th><th>Read</th></tr></thead>
+    <tbody>
+    {% for r in movement.rounds %}
+      <tr>
+        <td>{{r.number}}</td><td>{{r.A}}</td><td>{{r.B}}</td>
+        <td>{% if r.aggression %}{{'%.0f'|format(r.aggression.A*100)}}% / {{'%.0f'|format(r.aggression.B*100)}}%{% else %}—{% endif %}</td>
+        <td>{% if r.generalship %}{{'%.0f'|format(r.generalship.A*100)}}% / {{'%.0f'|format(r.generalship.B*100)}}%{% else %}—{% endif %}</td>
+        <td>{% if r.territory %}{{'%.0f'|format(r.territory.A*100)}}% / {{'%.0f'|format(r.territory.B*100)}}%{% else %}—{% endif %}</td>
+        <td class="small">{{r.note}}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="small muted">{{movement.disclaimer}}</p>
+  {% else %}
+  <div class="notice">{{movement.reason}}</div>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="card" id="report-scorecard">
   <div class="section-title" style="margin-top:0"><h2>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary automatic scorecard{% else %}Automatic estimated scorecard{% endif %}</h2><span class="pill">{{report.scorecard.ruleset_label}}</span></div>
   {% if report.scorecard.available %}<div class="grid">
