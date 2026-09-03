@@ -61,6 +61,10 @@ class MetricsAccumulator:
         # When each fighter was and was not visible, so per-round evidence can
         # be rebuilt once the real round structure is known. See rebucket_rounds.
         self._presence: list[tuple[float, str, bool]] = []
+        # Position and pressure with the second they happened, so each round can
+        # be judged separately on ring generalship and effective aggression.
+        self.timed_positions: list[tuple[float, str, float, float]] = []
+        self.timed_pressure: list[tuple[float, str, float]] = []
 
     def rebucket_rounds(self, rounds) -> None:
         """Re-assign per-round pose evidence after the rounds are detected.
@@ -110,9 +114,14 @@ class MetricsAccumulator:
                 to_opp = opp_center - previous_center
                 nd, nv = float(np.linalg.norm(to_opp)), float(np.linalg.norm(delta))
                 if nd > 1e-6 and nv > 1e-6:
-                    self.pressure_samples[fighter].append(float(np.dot(delta / nv, to_opp / nd)))
+                    toward = float(np.dot(delta / nv, to_opp / nd))
+                    self.pressure_samples[fighter].append(toward)
+                    # Same reading, kept with its timestamp so a round can be
+                    # judged on it. See core/generalship.py.
+                    self.timed_pressure.append((float(seconds), fighter, toward))
 
         self.positions[fighter].append(np.asarray(center, dtype=np.float32))
+        self.timed_positions.append((float(seconds), fighter, float(center[0]), float(center[1])))
 
         kp = obs.keypoints
         nose, lw, rw = _p(kp, NOSE), _p(kp, L_WRIST), _p(kp, R_WRIST)

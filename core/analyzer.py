@@ -17,6 +17,7 @@ import torch
 from core.action import ActionEngine
 from core.config import OUTPUTS, SETTINGS
 from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
+from core.generalship import judge_fight
 from core.round_detect import RoundDetector
 from core.contact import (
     assess_selection,
@@ -890,6 +891,16 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         classifier=classifier,
     )
     report["detected_rounds"] = round_detector.summary() | {"applied": rounds_from_footage}
+
+    # A scorecard for the criteria movement can evidence. Kept separate from
+    # report["scorecard"] on purpose: that one scores strikes and is withheld
+    # because strikes cannot be detected reliably, while this one scores
+    # aggression, generalship and territory and says exactly what it leaves out.
+    report["movement_scorecard"] = judge_fight(
+        metrics, rounds,
+        {f: float(report["tracking"].get(f"fighter_{f}_coverage", 0.0)) for f in ("A", "B")},
+        SETTINGS.min_tracking_coverage_for_score,
+    )
     report["selection_check"] = assess_selection(
         observed_separations,
         len(report_events),

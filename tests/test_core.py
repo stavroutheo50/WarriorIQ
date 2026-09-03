@@ -1806,3 +1806,63 @@ def test_a_step_is_not_a_scored_kick():
         outcome="clean", target="body", evidence={},
     )
     assert is_verified_scoring_event(punch, "K1")
+
+
+def test_close_readings_do_not_become_a_wipeout():
+    """The scaling bug this replaced turned any difference into 100%/0%.
+
+    Normalising two fighters against each other - subtracting whichever was
+    lower - forces the loser to exactly zero. Two fighters who pressed forward
+    0.02 and -0.03 came out as a 100%/0% aggression split, which reads on a
+    scorecard as total dominance and means almost nothing.
+    """
+    from core.generalship import _share
+
+    close = _share(0.02, -0.03, -1.0, 1.0)
+    assert close is not None
+    assert 0.49 < close[0] < 0.53, f"a near-tie scored {close}"
+    assert abs(close[0] + close[1] - 1.0) < 1e-9
+
+    # A real gap separates them clearly - but still not to a wipeout, because
+    # pressing forward 0.6 against giving ground 0.4 is one-sided, not total.
+    clear = _share(0.60, -0.40, -1.0, 1.0)
+    assert 0.70 < clear[0] < 0.85, f"a one-sided round scored {clear}"
+
+
+def test_a_round_nobody_controlled_is_called_even():
+    """Refusing to name a winner is a real answer for a close round."""
+    from core.generalship import judge_round
+
+    level = {f: [0.01] * 80 for f in ("A", "B")}
+    centre = {f: [0.5] * 80 for f in ("A", "B")}
+    territory = {f: [0.0] * 4 for f in ("A", "B")}
+    judged = judge_round(1, level, centre, territory)
+    assert judged is not None
+    assert judged.winner is None
+    assert judged.score("A") == judged.score("B") == 10
+
+
+def test_a_dominant_round_is_scored_ten_nine():
+    from core.generalship import judge_round
+
+    pressure = {"A": [0.55] * 80, "B": [-0.35] * 80}
+    centre = {"A": [0.80] * 80, "B": [0.25] * 80}
+    territory = {"A": [0.30] * 6, "B": [-0.30] * 6}
+    judged = judge_round(2, pressure, centre, territory)
+    assert judged.winner == "A"
+    assert judged.score("A") == 10 and judged.score("B") == 9
+    assert judged.aggression["A"] > judged.aggression["B"]
+
+
+def test_movement_judging_is_withheld_when_tracking_is_poor():
+    """Same rule as the striking scorecard: no score from a fight it did not watch."""
+    from core.generalship import judge_fight
+
+    class _Metrics:
+        timed_pressure: list = []
+        timed_positions: list = []
+
+    card = judge_fight(_Metrics(), [], {"A": 0.60, "B": 0.95}, 0.85)
+    assert card["available"] is False
+    assert card["status"] == "insufficient_tracking"
+    assert "60%" in card["reason"]
