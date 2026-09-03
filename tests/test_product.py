@@ -1003,3 +1003,104 @@ class UndecodableUploadTests(unittest.TestCase):
         self.assertIn("could not decode", response.text.lower())
         # Not the old message, which blamed a stage the file never reached.
         self.assertNotIn("could not prepare", response.text.lower())
+
+
+class FighterRosterTests(unittest.TestCase):
+    """A fight is filed against a person, so progress is about that person."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.original_db = database.DB_PATH
+        database.DB_PATH = Path(self.temp.name) / "roster.sqlite3"
+        database.init_db()
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        self.client.close()
+        database.DB_PATH = self.original_db
+        self.temp.cleanup()
+
+    def test_the_setup_page_offers_the_roster_and_a_way_to_add(self):
+        self.client.post("/signup", data={
+            "email": "coach@example.com", "password": "Strong-Local-Password",
+            "accept_terms": "true", "age_confirmed": "true"}, follow_redirects=False)
+        profile = database.get_account_by_email("coach@example.com")["profile_id"]
+        database.create_fighter(profile, "Theodoulos")
+        database.create_fighter(profile, "Maria")
+
+        page = self.client.get("/analyze/kickboxing").text
+        self.assertIn('name="fighter_id"', page)
+        self.assertIn("Theodoulos", page)
+        self.assertIn("Maria", page)
+        # Adding one without leaving the page.
+        self.assertIn('name="fighter_name"', page)
+        self.assertIn("Add a new fighter", page)
+
+    def test_a_guest_is_not_asked_which_fighter(self):
+        """A guest has no workspace, so there is no roster to file against."""
+        page = self.client.get("/analyze/kickboxing").text
+        self.assertNotIn('name="fighter_id"', page)
+
+    def test_progress_is_only_compared_within_one_fighter(self):
+        """The reason the roster exists.
+
+        A coach's workspace holds a squad. Before fights were filed against a
+        person, "since your last fight" compared whatever two analyses came
+        last - which could be two different people.
+        """
+        from core.squad import compare_with_previous
+
+        profile = 1
+        theo = database.create_fighter(profile, "Theodoulos")
+        maria = database.create_fighter(profile, "Maria")
+
+        def report(pressure):
+            return {
+                "video": {"focus_fighter": "A"},
+                "scorecard": {"sport": "kickboxing", "sport_label": "Kickboxing"},
+                "tracking": {"fighter_A_coverage": 0.95, "fighter_B_coverage": 0.95},
+                "metrics": {"A": {"pressure_index": pressure, "ring_center_control": 0.5,
+                                  "footwork_body_lengths_per_second": 1.0}},
+            }
+
+        fights = []
+        for index, (who, pressure) in enumerate([(theo, 0.20), (maria, 0.90), (theo, 0.60)]):
+            path = Path(self.temp.name) / f"{index}.json"
+            path.write_text(json.dumps(report(pressure)), encoding="utf-8")
+            fights.append({"job_id": f"j{index}", "original_name": f"f{index}.mp4",
+                           "report_path": str(path), "ruleset": "K1",
+                           "fighter_id": who["id"], "fighter_name": who["name"],
+                           "created_at": f"2026-09-0{3 - index}T10:00:00"})
+
+        current = json.loads(Path(fights[0]["report_path"]).read_text(encoding="utf-8"))
+        progress = compare_with_previous(current, fights, "j0")
+        self.assertTrue(progress["available"])
+        # It skipped Maria's fight in between and compared Theodoulos to himself.
+        self.assertEqual(progress["previous_name"], "f2.mp4")
+        pressure = next(c for c in progress["changes"] if c["label"] == "Pressure")
+        self.assertAlmostEqual(pressure["before"], 0.60)
+        self.assertAlmostEqual(pressure["now"], 0.20)
+
+    def test_a_fight_with_no_fighter_is_never_compared(self):
+        """Fights analysed before the roster existed have no owner to compare."""
+        from core.squad import compare_with_previous
+
+        def report():
+            return {
+                "video": {"focus_fighter": "A"},
+                "scorecard": {"sport": "kickboxing"},
+                "tracking": {"fighter_A_coverage": 0.95, "fighter_B_coverage": 0.95},
+                "metrics": {"A": {"pressure_index": 0.3, "ring_center_control": 0.5,
+                                  "footwork_body_lengths_per_second": 1.0}},
+            }
+
+        fights = []
+        for index in range(2):
+            path = Path(self.temp.name) / f"old{index}.json"
+            path.write_text(json.dumps(report()), encoding="utf-8")
+            fights.append({"job_id": f"o{index}", "original_name": f"o{index}.mp4",
+                           "report_path": str(path), "ruleset": "K1",
+                           "fighter_id": None, "created_at": "2026-09-01T10:00:00"})
+
+        current = json.loads(Path(fights[0]["report_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(compare_with_previous(current, fights, "o0"), {"available": False})

@@ -1006,6 +1006,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             ruleset=req.ruleset,
             analysis_target=req.focus_fighter or req.analysis_target,
             summary=summary,
+            fighter_id=req.fighter_id,
             video_delete_after=(
                 datetime.now(timezone.utc) + timedelta(days=SETTINGS.saved_video_retention_days)
             ).isoformat(),

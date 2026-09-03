@@ -46,6 +46,24 @@
       </div>
       {% endif %}
 
+      {# Who is this fight about? A coach's workspace holds a squad, so filing
+         the fight against a person is what makes "since your last fight" and
+         the per-fighter trends mean anything. Guests have no workspace, so
+         they are not asked. #}
+      {% if request.state.account %}
+      <div class="field">
+        <label for="fighterPick">Which fighter?</label>
+        <select id="fighterPick" name="fighter_id">
+          {% for f in roster %}<option value="{{f.id}}">{{f.name}}</option>{% endfor %}
+          <option value="" {% if not roster %}selected{% endif %}>+ Add a new fighter</option>
+        </select>
+        <input class="field-input" id="fighterName" name="fighter_name" type="text"
+               placeholder="Fighter's name" maxlength="80" autocomplete="off"
+               {% if roster %}hidden{% endif %}>
+        <p class="small muted">Filing each fight against a fighter is what lets WarriorIQ show whether they are improving.</p>
+      </div>
+      {% endif %}
+
       <fieldset class="upload-consent card-inset"><legend>Two quick questions</legend><input type="hidden" name="people_permissions_confirmed" value="true"><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>This is my video, and the people in it are OK with me uploading it.</span></label><div class="minor-permission" role="group" aria-labelledby="minorPermissionLabel"><span id="minorPermissionLabel">Is anyone in the video under 18?</span><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No, all 18 or over</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes, and a parent or guardian said OK</span></label></div><p class="small muted">TV footage still needs permission. <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
       <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Preparing video…" data-motion-primary disabled>Choose a video to continue</button>
       <div class="upload-progress" id="uploadProgress" role="status" aria-live="polite" hidden><span><i id="uploadProgressBar"></i></span><b id="uploadProgressText">Uploading fight video…</b><small id="uploadProgressHint">Keep this tab open — you can keep reading the page. WarriorIQ moves you on by itself.</small></div>
@@ -112,6 +130,11 @@
     // and referee counts had no way to be expressed at all.
     roundCount.value=1;roundSeconds.value=Math.ceil(seconds)
   };
+  const fighterPick=document.getElementById('fighterPick'),fighterName=document.getElementById('fighterName');
+  if(fighterPick&&fighterName){
+    const syncFighter=()=>{const adding=fighterPick.value==='';fighterName.hidden=!adding;fighterName.required=adding;if(!adding)fighterName.value=''};
+    fighterPick.addEventListener('change',syncFighter);syncFighter();
+  }
   videoInput.addEventListener('change',()=>{setReady();const file=videoInput.files[0];if(file)applyDuration(file)});
   form.addEventListener('submit',async event=>{
     if(!videoInput.files[0]||!form.reportValidity())return;

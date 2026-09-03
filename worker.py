@@ -54,6 +54,7 @@ def _request_from_job(job_id: str, job: dict) -> AnalysisRequest:
         profile_id=int(job.get("profile_id", 0)),
         persist_result=bool(job.get("persist_result", False)),
         openai_identity_recovery=bool(job.get("openai_identity_recovery", False)),
+        fighter_id=job.get("fighter_id"),
     )
 
 

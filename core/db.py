@@ -245,6 +245,23 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_oauth_identities_account
             ON oauth_identities(account_id);
+
+            -- Who a fight was about.
+            --
+            -- A workspace used to be assumed to hold one person, so "since your
+            -- last fight" compared whatever two analyses came last. That is
+            -- true for an athlete and false for a coach, whose workspace holds
+            -- a squad, and comparing two different fighters and calling the
+            -- difference progress is not a fact about either of them.
+            CREATE TABLE IF NOT EXISTS fighters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(profile_id, name)
+            );
+            CREATE INDEX IF NOT EXISTS idx_fighters_profile ON fighters(profile_id);
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -254,6 +271,11 @@ def init_db() -> None:
             con.execute("ALTER TABLE profiles ADD COLUMN default_fighter TEXT NOT NULL DEFAULT 'A'")
         if "allow_model_training" not in columns:
             con.execute("ALTER TABLE profiles ADD COLUMN allow_model_training INTEGER NOT NULL DEFAULT 0")
+        fight_columns = {row[1] for row in con.execute("PRAGMA table_info(fights)").fetchall()}
+        if "fighter_id" not in fight_columns:
+            # Nullable on purpose: every fight analysed before the roster
+            # existed has no owner, and guessing one would be inventing data.
+            con.execute("ALTER TABLE fights ADD COLUMN fighter_id INTEGER")
         account_columns = {row[1] for row in con.execute("PRAGMA table_info(accounts)").fetchall()}
         if "plan_override" not in account_columns:
             con.execute("ALTER TABLE accounts ADD COLUMN plan_override TEXT")
@@ -345,6 +367,7 @@ def save_fight(
     analysis_target: str,
     summary: dict,
     video_delete_after: str | None = None,
+    fighter_id: int | None = None,
 ) -> None:
     init_db()
     now = datetime.now(timezone.utc).isoformat()
@@ -352,8 +375,9 @@ def save_fight(
         con.execute(
             """
             INSERT INTO fights(job_id, profile_id, original_name, video_path, report_path,
-                               fight_type, ruleset, analysis_target, created_at, summary_json, video_delete_after)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                               fight_type, ruleset, analysis_target, created_at, summary_json, video_delete_after,
+                               fighter_id)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(job_id) DO UPDATE SET
                 report_path=excluded.report_path,
                 summary_json=excluded.summary_json
@@ -370,6 +394,7 @@ def save_fight(
                 now,
                 json.dumps(summary),
                 video_delete_after,
+                fighter_id,
             ),
         )
 
@@ -378,7 +403,11 @@ def list_fights(profile_id: int = 1) -> list[dict]:
     init_db()
     with connection() as con:
         rows = con.execute(
-            "SELECT * FROM fights WHERE profile_id=? ORDER BY id DESC",
+            # The fighter's name travels with the fight so callers never have
+            # to look it up per row.
+            "SELECT fights.*, fighters.name AS fighter_name "
+            "FROM fights LEFT JOIN fighters ON fighters.id = fights.fighter_id "
+            "WHERE fights.profile_id=? ORDER BY fights.id DESC",
             (profile_id,),
         ).fetchall()
     fights = []
@@ -1285,3 +1314,59 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM accounts WHERE id=?", (account_id,))
         con.execute("DELETE FROM profiles WHERE id=?", (profile_id,))
     return {"account": account, "profile": profile, "fights": fights}
+
+
+def list_fighters(profile_id: int, include_archived: bool = False) -> list[dict]:
+    """The roster for a workspace, newest name last so the list reads stably."""
+    init_db()
+    clause = "" if include_archived else " AND archived=0"
+    with connection() as con:
+        rows = con.execute(
+            f"SELECT * FROM fighters WHERE profile_id=?{clause} ORDER BY name COLLATE NOCASE",
+            (profile_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_fighter(profile_id: int, name: str) -> dict | None:
+    """Add a fighter, or return the existing one of that name.
+
+    Names are the coach's own labels, so the same name twice is the same
+    person rather than an error worth showing anybody.
+    """
+    cleaned = " ".join(str(name or "").split())[:80]
+    if not cleaned:
+        return None
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            "INSERT INTO fighters(profile_id, name, created_at) VALUES(?,?,?) "
+            "ON CONFLICT(profile_id, name) DO UPDATE SET archived=0",
+            (profile_id, cleaned, now),
+        )
+        row = con.execute(
+            "SELECT * FROM fighters WHERE profile_id=? AND name=?", (profile_id, cleaned),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_fighter(profile_id: int, fighter_id: int) -> dict | None:
+    """Always scoped to the workspace, so an id from elsewhere resolves to nothing."""
+    init_db()
+    with connection() as con:
+        row = con.execute(
+            "SELECT * FROM fighters WHERE id=? AND profile_id=?", (int(fighter_id), profile_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def archive_fighter(profile_id: int, fighter_id: int) -> bool:
+    """Archived, never deleted: their fights still refer to them."""
+    init_db()
+    with connection() as con:
+        changed = con.execute(
+            "UPDATE fighters SET archived=1 WHERE id=? AND profile_id=?",
+            (int(fighter_id), profile_id),
+        ).rowcount
+    return bool(changed)

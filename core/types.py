@@ -44,6 +44,9 @@ class AnalysisRequest:
     profile_id: int = 1
     persist_result: bool = True
     openai_identity_recovery: bool = False
+    # Which fighter on the workspace roster this bout is about. None for a
+    # fight analysed before the roster existed, or by a guest.
+    fighter_id: int | None = None
 
 
 @dataclass

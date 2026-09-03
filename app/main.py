@@ -48,11 +48,11 @@ from core.release_validation import assess_end_to_end_validation, end_to_end_met
 from core.db import (
     add_assignment, analysis_allowance, apply_checkout_event, consume_email_verification_token,
     consume_password_reset_token,
-    create_moderation_report, create_oauth_account, delete_account, delete_fight,
+    create_fighter, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
-    get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, get_profile,
+    get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, get_fighter, get_profile,
     get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
-    list_expired_fight_videos, list_fights, list_legal_acceptances, list_moderation_reports,
+    list_expired_fight_videos, list_fighters, list_fights, list_legal_acceptances, list_moderation_reports,
     list_oauth_identities,
     list_outbound_messages, list_security_events, list_subscription_actions, mark_fight_video_deleted,
     mark_email_verified, mark_outbound_message_sent,
@@ -1164,6 +1164,7 @@ def _analysis_request(job_id: str, job: dict, fighter_a_box: list[float], fighte
         profile_id=job.get("profile_id", 1),
         persist_result=bool(job.get("persist_result", False)),
         openai_identity_recovery=bool(job.get("openai_identity_recovery", False)),
+        fighter_id=job.get("fighter_id"),
     )
 
 
@@ -1767,6 +1768,12 @@ def _sport_context(request: Request, sport: str) -> dict:
         # key instead of showing a select the reader cannot get wrong.
         "rulesets": [(key, RULESET_LABELS[key]) for key in keys],
         "only_ruleset": keys[0] if len(keys) == 1 else None,
+        # The workspace roster, so a fight can be filed against the person it
+        # was actually about. Empty for a guest, who has no workspace.
+        "roster": (
+            list_fighters(int(_account(request)["profile_id"]))
+            if _account(request) else []
+        ),
         "unobserved": sport_unobserved(sport),
         # True when every ruleset in the sport shares the same blind spot. When
         # only one does - jumping-kick bonuses exist in Point Fighting and
@@ -1863,6 +1870,11 @@ async def upload(
     # OPENAI_API_KEY is configured, so the choice that actually matters is the
     # operator's, and it is made once in the environment rather than per fight.
     openai_identity_recovery: bool = Form(True),
+    # Which fighter this bout is about. Either an existing roster id, or a new
+    # name typed on the setup page - a coach adding a fighter should not have
+    # to go somewhere else first.
+    fighter_id: str = Form(""),
+    fighter_name: str = Form(""),
     rights_confirmed: bool = Form(False),
     people_permissions_confirmed: bool = Form(False),
     minor_permission_status: str = Form(""),
@@ -1993,6 +2005,14 @@ async def upload(
         raise HTTPException(422, "WarriorIQ could not prepare this video's fighter-selection frame.") from exc
 
     profile_id = int(account["profile_id"]) if account else 0
+    # A guest has no workspace to hold a roster, so their fight simply has no
+    # fighter attached rather than a half-made one.
+    chosen_fighter = None
+    if account:
+        if fighter_name.strip():
+            chosen_fighter = create_fighter(profile_id, fighter_name)
+        elif fighter_id.strip().isdigit():
+            chosen_fighter = get_fighter(profile_id, int(fighter_id))
     if not account:
         mark_guest_job(job_id, request.state.guest_id, str(video_path))
 
@@ -2021,6 +2041,7 @@ async def upload(
             "quality": quality,
             "upload_scan_status": scan["status"],
             "openai_identity_recovery": bool(openai_identity_recovery),
+            "fighter_id": chosen_fighter["id"] if chosen_fighter else None,
         },
     )
     acceptance_owner = {"profile_id": int(account["profile_id"])} if account else {"guest_id": request.state.guest_id}
@@ -2290,6 +2311,7 @@ def _save_remote_fight(job_id: str, job: dict, report: dict) -> None:
         ruleset=str(job["ruleset"]),
         analysis_target=str(job.get("focus_fighter") or "A"),
         summary=summary,
+        fighter_id=job.get("fighter_id"),
         video_delete_after=(
             datetime.now(timezone.utc) + timedelta(days=SETTINGS.saved_video_retention_days)
         ).isoformat(),

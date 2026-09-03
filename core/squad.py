@@ -68,6 +68,8 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
     scorecard = report.get("scorecard") or {}
     return {
         "job_id": fight.get("job_id"),
+        "fighter_id": fight.get("fighter_id"),
+        "fighter_name": fight.get("fighter_name"),
         "sport": scorecard.get("sport") or "unknown",
         "sport_label": scorecard.get("sport_label") or scorecard.get("sport") or "—",
         "name": fight.get("original_name"),
@@ -124,7 +126,13 @@ def build_squad_view(fights: list[dict], limit: int = 25) -> dict:
     comparable = usable
     if usable:
         trend_sport = usable[0].get("sport")
-        comparable = [row for row in usable if row.get("sport") == trend_sport]
+        trend_fighter = usable[0].get("fighter_id")
+        comparable = [
+            row for row in usable
+            if row.get("sport") == trend_sport
+            and trend_fighter is not None
+            and row.get("fighter_id") == trend_fighter
+        ]
     if len(comparable) >= 2:
         # list_fights returns newest first.
         newest, previous = comparable[0], comparable[1]
@@ -142,6 +150,7 @@ def build_squad_view(fights: list[dict], limit: int = 25) -> dict:
         "trend": trend,
         "trend_available": bool(trend),
         "trend_sport": trend_sport,
+        "trend_fighter": (usable[0].get("fighter_name") if usable else None),
         "note": (
             "Compared across the two most recent fights in the same sport that WarriorIQ "
             "tracked well enough. Movement only - striking is not included."
@@ -173,13 +182,19 @@ def compare_with_previous(report: dict, fights: list[dict], job_id: str) -> dict
         if fight.get("job_id") == job_id:
             current = summarize_fight(report, fight)
             continue
-        # Same sport only. Pressure and centre control mean different things in
-        # a taekwondo bout and a kickboxing bout, so comparing across them and
-        # calling the difference progress is meaningless - and it is worse than
-        # meaningless when it tells somebody they got worse.
-        if current is not None and row["usable"] and row.get("sport") == current.get("sport"):
-            previous = row
-            break
+        # Same fighter, same sport. The roster settles the first: a workspace
+        # can hold a squad, and comparing two different people and calling the
+        # difference progress is not a fact about either of them. Where the
+        # fight predates the roster and has no fighter, nothing is compared
+        # rather than falling back to a guess.
+        if current is None or not row["usable"]:
+            continue
+        if current.get("fighter_id") is None or row.get("fighter_id") != current.get("fighter_id"):
+            continue
+        if row.get("sport") != current.get("sport"):
+            continue
+        previous = row
+        break
 
     if current is None or previous is None or not current["usable"]:
         return {"available": False}

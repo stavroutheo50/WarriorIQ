@@ -10,7 +10,7 @@
 {% if signed_in and squad and squad.fights %}
 <section class="card" id="squad">
   <div class="section-title" style="margin-top:0">
-    <div><div class="eyebrow">Squad</div><h2>Every fight, newest first</h2></div>
+    <div><div class="eyebrow">Squad</div><h2>Every fight, newest first</h2>{% if squad.trend_fighter %}<small class="muted">Trend shown for {{squad.trend_fighter}}</small>{% endif %}</div>
     <span class="pill">{{squad.usable_count}} comparable{% if squad.unusable_count %} · {{squad.unusable_count}} not tracked well enough{% endif %}</span>
   </div>
 
@@ -36,11 +36,12 @@
   {% endif %}
 
   <div class="table-wrap"><table>
-    <thead><tr><th>Fight</th><th>Sport</th><th>Ruleset</th><th>Seen</th><th>Movement</th><th>Pressure</th><th>Centre</th><th>Work on</th><th></th></tr></thead>
+    <thead><tr><th>Fighter</th><th>Fight</th><th>Sport</th><th>Ruleset</th><th>Seen</th><th>Movement</th><th>Pressure</th><th>Centre</th><th>Work on</th><th></th></tr></thead>
     <tbody>
     {% for f in squad.fights %}
       <tr{% if not f.usable %} class="row-muted"{% endif %}>
-        <td>{{f.name|truncate(26, true)}}<br><small class="muted">{{f.created_at[:10] if f.created_at else ''}}</small></td>
+        <td>{% if f.fighter_name %}<b>{{f.fighter_name}}</b>{% else %}<span class="muted">Not filed</span>{% endif %}</td>
+        <td>{{f.name|truncate(22, true)}}<br><small class="muted">{{f.created_at[:10] if f.created_at else ''}}</small></td>
         <td class="small">{{f.sport_label}}</td>
         <td class="small">{{f.ruleset}}</td>
         <td>{{'%.0f'|format(f.coverage*100)}}%{% if not f.usable %} <small class="muted">too low to compare</small>{% endif %}</td>
