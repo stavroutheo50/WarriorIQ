@@ -1482,47 +1482,6 @@ class UploadShrinkPolicyTests(unittest.TestCase):
         self.assertIn("WarriorIQ will shrink this before uploading", template)
 
 
-class InlinePickerTests(unittest.TestCase):
-    """Fighters are chosen before the upload, against the file on the device."""
-
-    def setUp(self):
-        self.client = TestClient(app)
-
-    def test_the_page_can_play_the_local_file(self):
-        """A blob: URL is how the phone's own copy gets played.
-
-        media-src was 'self', which blocks blob:, and the picker silently
-        never loaded its video - the panel opened and stayed on "Loading your
-        fight" for ever. Caught only by driving the real page.
-        """
-        header = self.client.get("/analyze/kickboxing").headers["content-security-policy"]
-        directives = dict(
-            (part.strip().split(" ", 1) + [""])[:2]
-            for part in header.split(";") if part.strip()
-        )
-        self.assertIn("blob:", directives["media-src"])
-        # It must not have been widened anywhere it was not needed.
-        self.assertNotIn("blob:", directives.get("connect-src", ""))
-
-    def test_picker_assets_and_markup_are_present(self):
-        page = self.client.get("/analyze/kickboxing").text
-        for needed in ('id="inlinePicker"', 'id="pickVideo"', 'id="pickCanvas"',
-                       'id="pickStart"', "/static/inline-picker.js"):
-            self.assertIn(needed, page)
-
-    def test_component_styles_are_cache_busted(self):
-        """components.css shipped with no version, so CSS fixes never landed.
-
-        Every other stylesheet carries the asset hash. This one did not, and it
-        is cached for a week, so a returning visitor kept the old rules against
-        new markup - which is how a button told to hide stayed on screen.
-        """
-        for path in ("/analyze/kickboxing",):
-            page = self.client.get(path).text
-            self.assertNotIn('href="/static/components.css"', page)
-            self.assertRegex(page, r'components\.css\?v=[0-9a-f]+')
-
-
 class MovementScorecardRenderTests(unittest.TestCase):
     """The movement scorecard has to reach the page, and say what it excludes."""
 

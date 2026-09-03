@@ -262,15 +262,6 @@ class StartPayload(BaseModel):
     fighter_b_box: list[float]
     focus_fighter: str | None = None
     analysis_target: str | None = None
-    # Boxes as fractions of the frame rather than pixels.
-    #
-    # The fighters can now be chosen in the browser, against the file on the
-    # phone, while a smaller re-encoded copy is still uploading. Those two
-    # videos do not share a pixel grid - one is 4K, the other 1280 - so pixel
-    # coordinates picked on the original land somewhere else entirely on the
-    # copy that gets analysed. Fractions survive the rescale; the server
-    # multiplies them by the dimensions of the file it actually received.
-    normalized_boxes: bool = False
 
 
 class DeletePayload(BaseModel):
@@ -775,12 +766,7 @@ async def viewer_context(request: Request, call_next):
     response.headers.setdefault(
         "Content-Security-Policy",
         f"default-src 'self' data:; script-src {script_src}; style-src 'self' 'unsafe-inline'; "
-        # blob: is the uploader's own copy of the fight. The fighters are now
-        # chosen against the file on the device, before it is uploaded, which
-        # means playing it from a blob URL this page created for itself. It
-        # does not widen anything outward: a blob URL is same-origin and can
-        # only ever hold bytes this page already had.
-        f"img-src {img_src}; media-src 'self' blob:; connect-src {connect_src}; frame-src {frame_src}; "
+f"img-src {img_src}; media-src 'self'; connect-src {connect_src}; frame-src {frame_src}; "
         "frame-ancestors 'none'; form-action 'self'",
     )
     if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/s/")):
@@ -2528,23 +2514,8 @@ def start(request: Request, job_id: str, payload: StartPayload):
         if selection is None:
             raise HTTPException(409, "The selected frame is unavailable. Choose another frame.")
         video_height, video_width = selection.shape[:2]
-    box_a, box_b = payload.fighter_a_box, payload.fighter_b_box
-    if payload.normalized_boxes:
-        # Chosen in the browser against the phone's own copy of the video, so
-        # they arrive as fractions of the frame. Scale them onto whichever file
-        # was actually uploaded. See StartPayload.normalized_boxes.
-        def to_pixels(box: list[float]) -> list[float]:
-            if len(box) != 4 or any(
-                isinstance(v, bool) or not isinstance(v, (int, float))
-                or not math.isfinite(float(v)) for v in box
-            ):
-                raise HTTPException(400, "A fighter box needs four valid coordinates.")
-            scale = (video_width, video_height, video_width, video_height)
-            return [float(v) * axis for v, axis in zip(box, scale)]
-
-        box_a, box_b = to_pixels(box_a), to_pixels(box_b)
-    fighter_a_box = _validated_fighter_box(box_a, video_width, video_height, "Fighter A")
-    fighter_b_box = _validated_fighter_box(box_b, video_width, video_height, "Fighter B")
+    fighter_a_box = _validated_fighter_box(payload.fighter_a_box, video_width, video_height, "Fighter A")
+    fighter_b_box = _validated_fighter_box(payload.fighter_b_box, video_width, video_height, "Fighter B")
     shared = (
         max(0.0, min(fighter_a_box[2], fighter_b_box[2]) - max(fighter_a_box[0], fighter_b_box[0]))
         * max(0.0, min(fighter_a_box[3], fighter_b_box[3]) - max(fighter_a_box[1], fighter_b_box[1]))
