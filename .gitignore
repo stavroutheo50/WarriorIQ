@@ -40,3 +40,12 @@ logs/
 # them personal data under GDPR, and this repository is public. They live on the
 # server and are fetched with tools/pull_dataset.py; they must never be a commit.
 dataset/sequences/
+
+# Fight footage stays on the machine that filmed it.
+#
+# fights/ is a local drop-box - its own placeholder says "these never leave
+# your PC" - but three real bouts were committed into it, 45MB of identifiable
+# athletes in a public repository. The folder and its instructions stay; the
+# video does not.
+fights/*
+!fights/PUT_FIGHT_VIDEOS_HERE.txt
