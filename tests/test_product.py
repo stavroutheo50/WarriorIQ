@@ -1332,3 +1332,74 @@ class AccountTypeChoiceTests(unittest.TestCase):
     def test_an_unknown_type_settles_on_athlete(self):
         self._save("owner")
         self.assertEqual(database.get_profile(self.profile)["account_type"], "athlete")
+
+
+class DowngradeBlockTests(unittest.TestCase):
+    """A plan smaller than the roster is refused, not sold and reconciled.
+
+    Making the numbers fit would mean archiving fighters on a coach's behalf.
+    Quietly removing people from somebody's squad because of a billing change
+    is not something WarriorIQ should ever do, so the sale is what gives way.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        original_db = database.DB_PATH
+        self.addCleanup(lambda: setattr(database, "DB_PATH", original_db))
+        database.DB_PATH = Path(self.temp.name) / "downgrade.sqlite3"
+        database.init_db()
+        limiter = patch.object(webapp, "_enforce_rate_limit", lambda *a, **k: None)
+        limiter.start()
+        self.addCleanup(limiter.stop)
+        self.client = TestClient(app)
+        self.addCleanup(self.client.close)
+        self.client.post("/signup", data={
+            "email": "squad@example.com", "password": "Strong-Local-Password",
+            "accept_terms": "true", "age_confirmed": "true"}, follow_redirects=False)
+        account = database.get_account_by_email("squad@example.com")
+        self.assertIsNotNone(account)
+        self.profile = account["profile_id"]
+        for index in range(8):
+            database.create_fighter(self.profile, f"Fighter {index}")
+
+    def test_a_plan_with_too_few_seats_is_refused(self):
+        """Eight fighters cannot move onto a five-seat plan.
+
+        Release readiness is stubbed because this build blocks all paid
+        checkout first and correctly so - nothing can be bought until the
+        operator identity is real. That guard would otherwise hide the one
+        being tested here.
+        """
+        with patch("core.readiness.release_readiness", return_value={"release_ready": True}):
+            response = self.client.post("/checkout/coach_5", data={"billing_acceptance": "true"},
+                                        follow_redirects=False)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("holds 5", response.text)
+        self.assertIn("Archive 3", response.text)
+        self.assertIn("will not remove anyone for you", response.text)
+        # And nobody was archived to make it fit.
+        self.assertEqual(len(database.list_fighters(self.profile)), 8)
+
+    def test_a_big_enough_plan_is_not_blocked_by_this_check(self):
+        """Coach 15 holds the eight, so this check does not stand in the way.
+
+        It may still stop for another reason - payments are locked in this
+        build - but never with the roster message.
+        """
+        response = self.client.post("/checkout/coach_15", data={"billing_acceptance": "true"},
+                                    follow_redirects=False)
+        self.assertNotEqual(response.status_code, 409)
+        self.assertNotIn("Archive", response.text)
+
+    def test_an_unlimited_plan_is_never_blocked(self):
+        response = self.client.post("/checkout/gym", data={"billing_acceptance": "true"},
+                                    follow_redirects=False)
+        self.assertNotEqual(response.status_code, 409)
+
+    def test_the_pricing_page_says_so_before_the_click(self):
+        """Better to see why on the card than to fail after committing."""
+        page = self.client.get("/pricing?audience=coach").text
+        self.assertIn("Too small", page)
+        self.assertIn("you have 8 fighters", page)
+        self.assertIn("Not enough room", page)

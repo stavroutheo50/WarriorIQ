@@ -3828,6 +3828,9 @@ def pricing_page(request: Request, audience: str = ""):
             "request": request, "plans": PLANS,
             "audience": chosen,
             "audience_plans": plans_for(chosen),
+            # So a plan too small for this roster says so on the card, rather
+            # than failing after somebody has committed to buying it.
+            "roster_held": len(list_fighters(int(account["profile_id"]))) if account else 0,
             "other_audience": "coach" if chosen == "athlete" else "athlete",
             "payments_enabled": SETTINGS.payments_enabled, "account": account,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
@@ -3981,6 +3984,22 @@ def checkout(request: Request, plan_key: str, billing_acceptance: bool = Form(Fa
         raise HTTPException(503, "Paid checkout is blocked until WarriorIQ's real operator identity, email verification, storage, and analysis worker are ready.")
     if plan_key not in PLANS or plan_key == "free":
         raise HTTPException(400, "Choose a valid paid plan.")
+    # A plan with fewer seats than the roster already holds is refused here
+    # rather than sold and reconciled afterwards. The alternative is archiving
+    # fighters on somebody's behalf to make the numbers fit, and quietly
+    # removing people from a coach's squad because of a billing change is not
+    # something this should ever do.
+    target_seats = PLANS[plan_key].get("roster_limit")
+    if target_seats is not None:
+        held = len(list_fighters(int(account["profile_id"])))
+        if held > int(target_seats):
+            raise HTTPException(
+                409,
+                f"{PLANS[plan_key]['label']} holds {target_seats} "
+                f"fighter{'s' if int(target_seats) != 1 else ''}, and this workspace has {held}. "
+                f"Archive {held - int(target_seats)} you no longer coach first - "
+                "WarriorIQ will not remove anyone for you.",
+            )
     record_legal_acceptance(
         "recurring_billing_terms", SETTINGS.policy_version,
         profile_id=int(account["profile_id"]), resource_id=plan_key,

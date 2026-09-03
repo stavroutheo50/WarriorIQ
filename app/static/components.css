@@ -40,3 +40,8 @@
 .audience-note { margin: 0 0 18px; }
 .plan-seats { font-size: var(--wiq-text-micro); letter-spacing: .4px; text-transform: uppercase;
               color: var(--wiq-text-tertiary); margin-bottom: 4px; }
+/* A plan smaller than the roster it would have to hold. Shown rather than
+   hidden: a coach comparing plans should see why one is unavailable, not
+   wonder where it went. */
+.plan-blocked { font-size: var(--wiq-text-micro); line-height: 1.4; padding: 7px 9px; margin-bottom: 8px;
+                border-radius: 8px; background: #3a1f2a; color: #ffb3c0; border: 1px solid #6d3247; }
