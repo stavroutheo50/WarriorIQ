@@ -1902,3 +1902,46 @@ def test_progress_is_not_claimed_from_a_badly_tracked_fight():
         ]
         current = json.loads(paths[0].read_text(encoding="utf-8"))
         assert compare_with_previous(current, fights, "now") == {"available": False}
+
+
+def test_progress_is_not_claimed_across_two_different_sports():
+    """Pressure means different things in taekwondo and kickboxing.
+
+    The first version compared a taekwondo bout against a kickboxing bout and
+    reported "better than your last fight", which is not a fact about the
+    athlete. Comparisons are same-sport only, and the coach trend follows the
+    newest fight's sport for the same reason - while the fight list itself
+    still shows everything.
+    """
+    import json
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from core.squad import build_squad_view, compare_with_previous
+
+    def report(sport, pressure):
+        return {
+            "video": {"focus_fighter": "A"},
+            "scorecard": {"sport": sport, "sport_label": sport.title()},
+            "tracking": {"fighter_A_coverage": 0.95, "fighter_B_coverage": 0.95},
+            "metrics": {"A": {"pressure_index": pressure, "ring_center_control": 0.5,
+                              "footwork_body_lengths_per_second": 1.0}},
+        }
+
+    with TemporaryDirectory() as tmp:
+        fights = []
+        for index, (sport, pressure) in enumerate([("taekwondo", 0.10), ("kickboxing", 0.60)]):
+            path = Path(tmp) / f"{index}.json"
+            path.write_text(json.dumps(report(sport, pressure)), encoding="utf-8")
+            fights.append({"job_id": f"j{index}", "original_name": f"{sport}.mp4",
+                           "report_path": str(path), "ruleset": "X",
+                           "created_at": f"2026-09-0{3 - index}T10:00:00"})
+
+        current = json.loads(Path(fights[0]["report_path"]).read_text(encoding="utf-8"))
+        assert compare_with_previous(current, fights, "j0") == {"available": False}
+
+        squad = build_squad_view(fights)
+        assert squad["trend_available"] is False, "trended across two sports"
+        # Both fights still appear and still count as tracked well enough.
+        assert len(squad["fights"]) == 2
+        assert squad["usable_count"] == 2

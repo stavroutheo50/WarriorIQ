@@ -36,11 +36,12 @@
   {% endif %}
 
   <div class="table-wrap"><table>
-    <thead><tr><th>Fight</th><th>Ruleset</th><th>Seen</th><th>Movement</th><th>Pressure</th><th>Centre</th><th>Work on</th><th></th></tr></thead>
+    <thead><tr><th>Fight</th><th>Sport</th><th>Ruleset</th><th>Seen</th><th>Movement</th><th>Pressure</th><th>Centre</th><th>Work on</th><th></th></tr></thead>
     <tbody>
     {% for f in squad.fights %}
       <tr{% if not f.usable %} class="row-muted"{% endif %}>
         <td>{{f.name|truncate(26, true)}}<br><small class="muted">{{f.created_at[:10] if f.created_at else ''}}</small></td>
+        <td class="small">{{f.sport_label}}</td>
         <td class="small">{{f.ruleset}}</td>
         <td>{{'%.0f'|format(f.coverage*100)}}%{% if not f.usable %} <small class="muted">too low to compare</small>{% endif %}</td>
         <td class="small">{{f.movement_verdict or '—'}}</td>

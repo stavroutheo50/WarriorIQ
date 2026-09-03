@@ -39,6 +39,18 @@ $ES_CONTINUOUS = [uint32]'0x80000000'
 $ES_SYSTEM_REQUIRED = [uint32]'0x00000001'
 [void]$power::SetThreadExecutionState($ES_CONTINUOUS -bor $ES_SYSTEM_REQUIRED)
 
+# A continuously running worker already claims fights within a second, so this
+# scheduled drain has nothing to do and must not start a second one: two
+# workers means the pose model loaded twice on one GPU, which is how a machine
+# ended up holding 3.3GB doing nothing. The drain stays installed as the
+# fallback for when the continuous worker is not running.
+$running = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine -match 'worker\.py' -and $_.CommandLine -notmatch '--once' }
+if ($running) {
+    Write-Log "continuous worker already running (pid $($running[0].ProcessId)); nothing to drain"
+    exit 0
+}
+
 Write-Log 'waking - draining the WarriorIQ queue'
 try {
     Push-Location $root

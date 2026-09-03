@@ -65,8 +65,11 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
 
     coaching = ((report.get("coaching") or {}).get(focus) or {})
     improvements = coaching.get("improvements") or []
+    scorecard = report.get("scorecard") or {}
     return {
         "job_id": fight.get("job_id"),
+        "sport": scorecard.get("sport") or "unknown",
+        "sport_label": scorecard.get("sport_label") or scorecard.get("sport") or "—",
         "name": fight.get("original_name"),
         "created_at": fight.get("created_at"),
         "ruleset": fight.get("ruleset"),
@@ -113,9 +116,18 @@ def build_squad_view(fights: list[dict], limit: int = 25) -> dict:
 
     usable = [row for row in rows if row["usable"]]
     trend = {}
-    if len(usable) >= 2:
+    trend_sport = None
+    # The trend follows the newest fight's sport, for the same reason the
+    # athlete comparison does: these numbers are not comparable across sports.
+    # Kept separate from `usable` so the counts above still describe every
+    # fight in the list, not just the one sport being trended.
+    comparable = usable
+    if usable:
+        trend_sport = usable[0].get("sport")
+        comparable = [row for row in usable if row.get("sport") == trend_sport]
+    if len(comparable) >= 2:
         # list_fights returns newest first.
-        newest, previous = usable[0], usable[1]
+        newest, previous = comparable[0], comparable[1]
         for key in ("pressure", "centre", "footwork"):
             trend[key] = {
                 "direction": _direction(newest.get(key), previous.get(key)),
@@ -129,9 +141,10 @@ def build_squad_view(fights: list[dict], limit: int = 25) -> dict:
         "unusable_count": len(rows) - len(usable),
         "trend": trend,
         "trend_available": bool(trend),
+        "trend_sport": trend_sport,
         "note": (
-            "Compared across the two most recent fights WarriorIQ tracked well enough. "
-            "Movement only - striking is not included."
+            "Compared across the two most recent fights in the same sport that WarriorIQ "
+            "tracked well enough. Movement only - striking is not included."
         ),
     }
 
@@ -160,7 +173,11 @@ def compare_with_previous(report: dict, fights: list[dict], job_id: str) -> dict
         if fight.get("job_id") == job_id:
             current = summarize_fight(report, fight)
             continue
-        if current is not None and row["usable"]:
+        # Same sport only. Pressure and centre control mean different things in
+        # a taekwondo bout and a kickboxing bout, so comparing across them and
+        # calling the difference progress is meaningless - and it is worse than
+        # meaningless when it tells somebody they got worse.
+        if current is not None and row["usable"] and row.get("sport") == current.get("sport"):
             previous = row
             break
 
