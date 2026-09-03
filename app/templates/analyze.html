@@ -63,7 +63,7 @@
   // A phone films at 1080p or 4K; a fight at that size is hundreds of megabytes
   // over a mobile uplink. Saying so before the upload starts is the difference
   // between a considered choice and six minutes staring at a stalled bar.
-  const sizeAdvice=b=>b>629145600?{tone:'warn',text:`${fmtMB(b)} — this will take a while on mobile data. Trimming to the rounds you need, or filming at 1080p instead of 4K, uploads far faster and does not reduce analysis quality.`}
+  const sizeAdvice=b=>b>629145600?{tone:'warn',text:`${fmtMB(b)} — WarriorIQ will shrink this before uploading, which takes about as long as the fight and then uploads several times faster. Keep the screen on while it prepares.`}
     :b>209715200?{tone:'note',text:`${fmtMB(b)} — large but fine. Wi-Fi will be much quicker than mobile data.`}
     :{tone:'ok',text:`${fmtMB(b)} — ready for WarriorIQ analysis`};
   const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};

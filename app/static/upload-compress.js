@@ -23,18 +23,26 @@
   var MIN_BYTES = 60 * 1024 * 1024;   // below this the wait is not worth a re-encode
   var BITRATE = 3200000;              // ample for 720p-class fight footage
 
-  /* This re-encode runs at PLAYBACK SPEED: it plays the file and captures the
-   * canvas, so preparing a five-minute fight costs five minutes before the
-   * upload even starts, and the page just says "Preparing video". That is the
-   * "uploading takes forever on mobile" report, and on a long file it is not
-   * even a win - five minutes of encoding to save a couple of minutes of
-   * transfer is worse than simply sending the original and showing real
-   * progress. It also cannot survive the phone being backgrounded: playback
-   * and requestAnimationFrame both stop, and the recording is truncated.
+  /* This re-encode runs at PLAYBACK SPEED: preparing a five-minute fight costs
+   * five minutes before the upload starts. Whether that is worth paying has
+   * nothing to do with how long the fight is - it depends on how much transfer
+   * it saves, so that is what gets measured.
    *
-   * So it is capped by duration. Short high-resolution clips still get the
-   * benefit; anything longer uploads as filmed. */
-  var MAX_SECONDS = 100;
+   * A capped-by-duration rule was tried and was wrong in the direction that
+   * hurts most. It switched the re-encode off for long files, which are
+   * exactly the ones that need it: an 881MB 4K bout went up untouched at
+   * roughly 0.6MB/s, which is about twenty-five minutes. The same fight
+   * shrunk is near 120MB - five minutes of encoding and three and a half of
+   * transfer.
+   *
+   * A conservative mobile uplink, deliberately pessimistic. Guessing too low
+   * only declines a re-encode that would have helped a little; guessing too
+   * high spends real minutes encoding for a saving the connection did not
+   * need. ~6 Mbps. */
+  var ASSUMED_UPLINK_BYTES_PER_SECOND = 750 * 1024;
+  /* However good the arithmetic looks, nobody is holding a phone still for a
+   * quarter of an hour, and a backgrounded tab truncates the recording. */
+  var MAX_SECONDS = 900;
 
   function supported() {
     return typeof window.MediaRecorder === "function" &&
@@ -95,8 +103,16 @@
       // Already at or below what the analyser wants: leave it completely alone.
       if (!longEdge || longEdge <= TARGET_LONG_EDGE) return null;
       if (!isFinite(video.duration) || video.duration <= 0) return null;
-      // Long footage: send it as filmed. See MAX_SECONDS above.
       if (video.duration > MAX_SECONDS) return null;
+
+      // Is re-encoding worth the wait on this particular file? The encode runs
+      // at playback speed, so it costs about the fight's own length; what it
+      // buys is everything it takes off the transfer.
+      var estimatedBytes = video.duration * BITRATE / 8;
+      var savedSeconds = (file.size - estimatedBytes) / ASSUMED_UPLINK_BYTES_PER_SECOND;
+      // A clear win, not a marginal one: the person is staring at a progress
+      // bar either way, and only one of the two is visibly moving their file.
+      if (savedSeconds < video.duration * 1.25) return null;
 
       var scale = TARGET_LONG_EDGE / longEdge;
       var canvas = document.createElement("canvas");

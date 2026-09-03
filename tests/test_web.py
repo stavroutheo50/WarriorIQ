@@ -1441,3 +1441,38 @@ class UndecodableUploadTests(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] / "app" / "static" / "upload-compress.js").read_text(encoding="utf-8")
         self.assertNotIn('"video/webm', source)
         self.assertIn('"video/mp4;codecs=avc1"', source)
+
+
+class UploadShrinkPolicyTests(unittest.TestCase):
+    """The re-encode has to help the files that actually hurt."""
+
+    def setUp(self):
+        self.source = (Path(__file__).resolve().parents[1] / "app" / "static"
+                       / "upload-compress.js").read_text(encoding="utf-8")
+
+    def test_the_decision_is_time_saved_not_duration(self):
+        """A duration cap switched shrinking off for the files that need it.
+
+        An 881MB 4K bout went up untouched at about 0.6MB/s - twenty-five
+        minutes - because a 100-second cap declined to re-encode it. The same
+        fight shrunk is near 120MB: five minutes encoding, three and a half
+        uploading.
+        """
+        self.assertIn("ASSUMED_UPLINK_BYTES_PER_SECOND", self.source)
+        self.assertIn("savedSeconds", self.source)
+        # The decision compares saving against the encode's own cost.
+        self.assertIn("savedSeconds < video.duration * 1.25", self.source)
+        # And is not a bare duration cutoff any more.
+        self.assertNotIn("if (video.duration > 100)", self.source)
+
+    def test_a_long_fight_is_still_refused(self):
+        """Nobody holds a phone still for a quarter of an hour."""
+        self.assertIn("var MAX_SECONDS = 900;", self.source)
+        self.assertIn("if (video.duration > MAX_SECONDS) return null;", self.source)
+
+    def test_the_size_advice_matches_what_the_app_now_does(self):
+        """It used to tell people to re-film at 1080p - work the app now does."""
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                    / "analyze.html").read_text(encoding="utf-8")
+        self.assertNotIn("filming at 1080p instead of 4K", template)
+        self.assertIn("WarriorIQ will shrink this before uploading", template)
