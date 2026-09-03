@@ -35,6 +35,23 @@
     <div class="field"><label>My identity in reports</label><select name="default_fighter"><option value="A" {% if profile.default_fighter == 'A' %}selected{% endif %}>Fighter A</option><option value="B" {% if profile.default_fighter == 'B' %}selected{% endif %}>Fighter B</option></select><div class="small muted">The progress dashboard follows this fighter across saved reports.</div></div>
     <div class="field"><label>Profile photo</label><input class="file-native" id="profilePhoto" type="file" name="photo" accept="image/*"><label class="file-button" id="photoButton" for="profilePhoto"><span>＋</span><b id="photoText">Choose profile photo</b></label></div>
     <div class="field"><label>Profile / highlight video</label><input class="file-native" id="profileVideo" type="file" name="profile_video" accept="video/*"><label class="file-button" id="profileVideoButton" for="profileVideo"><span>＋</span><b id="profileVideoText">Choose profile video</b></label></div>
+    {# Athlete or coach decides two things: how many fighters the roster may
+       hold, and which pricing ladder is shown. Changing it never touches the
+       roster - a coach dropping to an athlete account keeps their fighters,
+       they simply cannot add more than the plan allows. #}
+    <div class="field">
+      <label for="accountType">What is this workspace for?</label>
+      <select id="accountType" name="account_type">
+        <option value="athlete" {% if (profile.account_type or 'athlete') == 'athlete' %}selected{% endif %}>Just me — I analyse my own fights</option>
+        <option value="coach" {% if profile.account_type == 'coach' %}selected{% endif %}>A squad — I coach several fighters</option>
+      </select>
+      <p class="small muted">
+        {% if profile.account_type == 'coach' %}Coach plans are priced by how many fighters your roster holds.
+        {% else %}Athlete plans cover one fighter.{% endif %}
+        <a class="text-link" href="/pricing?audience={{profile.account_type or 'athlete'}}">See the plans</a>.
+      </p>
+    </div>
+
     <div class="field"><label>Coach / athlete notes</label><textarea name="notes" rows="5">{{profile.notes or ''}}</textarea></div>
     <label class="check legal-check"><input type="checkbox" name="allow_model_training" value="true" {% if profile.allow_model_training %}checked{% endif %}> <span><strong>Help improve WarriorIQ models</strong><br><span class="small muted">Optional. When enabled, corrections you deliberately save may export a pose-feature sequence to the private training dataset. Raw video is not added by this setting. Turning it off stops future exports.</span></span></label>
     <button class="btn" type="submit">Save profile</button>

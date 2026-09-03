@@ -556,8 +556,14 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertIn("1 analysis per day", pricing)
         self.assertIn("3 analyses per day", pricing)
         self.assertIn("10 analyses per day", pricing)
-        self.assertIn("Unlimited fight analyses", pricing)
-        self.assertIn("€89.99", pricing)
+        # The page shows one ladder at a time now: an athlete buys reports on
+        # themselves, a coach buys seats on a roster. Unlimited analyses is a
+        # coach plan, so it lives on the coach side.
+        self.assertIn("For a coach with a squad", pricing)
+        coach_pricing = self.client.get("/pricing?audience=coach").text
+        self.assertIn("Unlimited fight analyses", coach_pricing)
+        self.assertIn("Unlimited fighters", coach_pricing)
+        self.assertIn("€89.99", coach_pricing)   # the Gym price lives on the coach ladder
         self.assertIn('class="plan-banner">Most flexible', pricing)
 
     def _sign_in(self, email="uploader@example.com"):
@@ -1010,15 +1016,16 @@ class FighterRosterTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.original_db = database.DB_PATH
+        self.addCleanup(self.temp.cleanup)
+        original_db = database.DB_PATH
+        self.addCleanup(lambda: setattr(database, "DB_PATH", original_db))
         database.DB_PATH = Path(self.temp.name) / "roster.sqlite3"
         database.init_db()
+        limiter = patch.object(webapp, "_enforce_rate_limit", lambda *a, **k: None)
+        limiter.start()
+        self.addCleanup(limiter.stop)
         self.client = TestClient(app)
-
-    def tearDown(self):
-        self.client.close()
-        database.DB_PATH = self.original_db
-        self.temp.cleanup()
+        self.addCleanup(self.client.close)
 
     def test_the_setup_page_offers_the_roster_and_a_way_to_add(self):
         self.client.post("/signup", data={
@@ -1111,13 +1118,19 @@ class AssignFighterToPastFightTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.original_db = database.DB_PATH
-        self.original_outputs = webapp.OUTPUTS
+        self.addCleanup(self.temp.cleanup)
+        original_db, original_outputs = database.DB_PATH, webapp.OUTPUTS
+        self.addCleanup(lambda: setattr(database, "DB_PATH", original_db))
+        self.addCleanup(lambda: setattr(webapp, "OUTPUTS", original_outputs))
         database.DB_PATH = Path(self.temp.name) / "assign.sqlite3"
         webapp.OUTPUTS = Path(self.temp.name) / "outputs"
         webapp.OUTPUTS.mkdir()
         database.init_db()
+        limiter = patch.object(webapp, "_enforce_rate_limit", lambda *a, **k: None)
+        limiter.start()
+        self.addCleanup(limiter.stop)
         self.client = TestClient(app)
+        self.addCleanup(self.client.close)
         self.client.post("/signup", data={
             "email": "owner@example.com", "password": "Strong-Local-Password",
             "accept_terms": "true", "age_confirmed": "true"}, follow_redirects=False)
@@ -1130,12 +1143,6 @@ class AssignFighterToPastFightTests(unittest.TestCase):
             video_path="old.mp4", report_path=str(report), fight_type="competition",
             ruleset="K1", analysis_target="A", summary={},
         )
-
-    def tearDown(self):
-        self.client.close()
-        database.DB_PATH = self.original_db
-        webapp.OUTPUTS = self.original_outputs
-        self.temp.cleanup()
 
     def _fight(self):
         return next(f for f in database.list_fights(self.profile) if f["job_id"] == "old-fight")
@@ -1184,3 +1191,144 @@ class AssignFighterToPastFightTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         theirs = [f for f in database.list_fights(self.profile + 99) if f["job_id"] == "not-mine"][0]
         self.assertIsNone(theirs["fighter_id"])
+
+
+class PlanRosterLimitTests(unittest.TestCase):
+    """The seat count is what a coach's plan sells, so it has to be enforced."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        originals = (database.DB_PATH, webapp.UPLOADS, webapp.OUTPUTS)
+        self.addCleanup(lambda: setattr(database, "DB_PATH", originals[0]))
+        self.addCleanup(lambda: setattr(webapp, "UPLOADS", originals[1]))
+        self.addCleanup(lambda: setattr(webapp, "OUTPUTS", originals[2]))
+        database.DB_PATH = Path(self.temp.name) / "plans.sqlite3"
+        webapp.UPLOADS = Path(self.temp.name) / "uploads"
+        webapp.OUTPUTS = Path(self.temp.name) / "outputs"
+        webapp.UPLOADS.mkdir()
+        webapp.OUTPUTS.mkdir()
+        database.init_db()
+        limiter = patch.object(webapp, "_enforce_rate_limit", lambda *a, **k: None)
+        limiter.start()
+        self.addCleanup(limiter.stop)
+        self.client = TestClient(app)
+        self.addCleanup(self.client.close)
+        self.client.post("/signup", data={
+            "email": "coach@example.com", "password": "Strong-Local-Password",
+            "accept_terms": "true", "age_confirmed": "true"}, follow_redirects=False)
+        self.profile = database.get_account_by_email("coach@example.com")["profile_id"]
+
+    def _upload_named(self, name):
+        from core.types import VideoInfo
+        info = VideoInfo("f.mp4", 30.0, 900, 640, 360, 30.0)
+        with patch.object(webapp, "get_video_info", return_value=info), \
+             patch.object(webapp, "scan_upload", return_value={"clean": True, "status": "clean"}), \
+             patch.object(webapp, "inspect_video_quality", return_value={"status": "good", "score": 90}), \
+             patch.object(webapp, "pick_selection_frame", return_value=0), \
+             patch.object(webapp, "read_frame", return_value=np.zeros((360, 640, 3), np.uint8)):
+            return self.client.post(
+                "/upload",
+                data={"rights_confirmed": "true", "people_permissions_confirmed": "true",
+                      "minor_permission_status": "no_minors", "fighter_name": name},
+                files={"video": ("f.mp4", b"0" * 4096, "video/mp4")},
+                follow_redirects=False,
+            )
+
+    def test_a_one_fighter_plan_refuses_a_second_name(self):
+        """The free plan holds one fighter, because an athlete is one person."""
+        first = self._upload_named("Theodoulos")
+        self.assertIn(first.status_code, (302, 303))
+        self.assertEqual([f["name"] for f in database.list_fighters(self.profile)], ["Theodoulos"])
+
+        second = self._upload_named("Maria")
+        self.assertEqual(second.status_code, 402)
+        self.assertIn("all in use", second.text)
+        # The refused upload leaves nothing behind.
+        self.assertEqual([f["name"] for f in database.list_fighters(self.profile)], ["Theodoulos"])
+
+    def test_the_same_fighter_again_is_not_a_new_seat(self):
+        self._upload_named("Theodoulos")
+        again = self._upload_named("  Theodoulos  ")
+        self.assertIn(again.status_code, (302, 303))
+        self.assertEqual(len(database.list_fighters(self.profile)), 1)
+
+    def test_each_audience_sees_its_own_ladder(self):
+        from core.payments import plans_for
+
+        athlete = [key for key, _ in plans_for("athlete")]
+        coach = [key for key, _ in plans_for("coach")]
+        self.assertEqual(athlete, ["free", "athlete", "athlete_pro"])
+        self.assertEqual(coach, ["coach_5", "coach_15", "coach_30", "gym"])
+        self.assertFalse(set(athlete) & set(coach), "a plan is offered to both audiences")
+
+
+class AccountTypeChoiceTests(unittest.TestCase):
+    """Athlete or coach is chosen on the profile, and decides two things."""
+
+    def setUp(self):
+        # addCleanup rather than tearDown: tearDown is skipped when setUp
+        # raises, and these swap module globals. One skipped restore left
+        # DB_PATH inside a deleted temp directory and took the rest of the run
+        # with it.
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        original_db = database.DB_PATH
+        self.addCleanup(lambda: setattr(database, "DB_PATH", original_db))
+        database.DB_PATH = Path(self.temp.name) / "type.sqlite3"
+        database.init_db()
+
+        # The signup rate limiter is process-global, so a class signing up once
+        # per test exhausts it depending on where it falls in the run. Nothing
+        # here is testing the limiter.
+        limiter = patch.object(webapp, "_enforce_rate_limit", lambda *a, **k: None)
+        limiter.start()
+        self.addCleanup(limiter.stop)
+
+        self.client = TestClient(app)
+        self.addCleanup(self.client.close)
+        self.client.post("/signup", data={
+            "email": "me@example.com", "password": "Strong-Local-Password",
+            "accept_terms": "true", "age_confirmed": "true"}, follow_redirects=False)
+        account = database.get_account_by_email("me@example.com")
+        self.assertIsNotNone(account, "signup failed, so this test proves nothing")
+        self.profile = account["profile_id"]
+
+    def _save(self, account_type):
+        return self.client.post("/profile", data={
+            "display_name": "Me", "notes": "", "default_fighter": "A",
+            "account_type": account_type}, follow_redirects=False)
+
+    def test_a_workspace_starts_as_an_athlete(self):
+        """Never grant roster room nobody asked for."""
+        self.assertEqual(database.get_profile(self.profile)["account_type"], "athlete")
+        self.assertIn("Just me", self.client.get("/profile").text)
+
+    def test_choosing_coach_switches_the_pricing_ladder(self):
+        self._save("coach")
+        self.assertEqual(database.get_profile(self.profile)["account_type"], "coach")
+        # The pricing page follows the workspace without being asked.
+        pricing = self.client.get("/pricing").text
+        self.assertIn('data-plan="coach_5"', pricing)
+        self.assertIn('data-plan="gym"', pricing)
+        # No athlete card. Checked on the card rather than the words, because
+        # "Everything in Athlete Pro" is a feature line on the Gym plan.
+        self.assertNotIn('data-plan="athlete_pro"', pricing)
+        self.assertNotIn('data-plan="free"', pricing)
+
+    def test_switching_back_keeps_the_roster(self):
+        """A coach dropping to an athlete account does not lose their fighters.
+
+        They simply cannot add more than the plan allows, and their existing
+        fights still resolve to the people they were about.
+        """
+        self._save("coach")
+        for name in ("Theodoulos", "Maria"):
+            database.create_fighter(self.profile, name)
+        self._save("athlete")
+        self.assertEqual(database.get_profile(self.profile)["account_type"], "athlete")
+        self.assertEqual(len(database.list_fighters(self.profile)), 2)
+
+    def test_an_unknown_type_settles_on_athlete(self):
+        self._save("owner")
+        self.assertEqual(database.get_profile(self.profile)["account_type"], "athlete")

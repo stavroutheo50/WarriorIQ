@@ -271,6 +271,11 @@ def init_db() -> None:
             con.execute("ALTER TABLE profiles ADD COLUMN default_fighter TEXT NOT NULL DEFAULT 'A'")
         if "allow_model_training" not in columns:
             con.execute("ALTER TABLE profiles ADD COLUMN allow_model_training INTEGER NOT NULL DEFAULT 0")
+        if "account_type" not in columns:
+            # Athlete unless told otherwise: an existing workspace holds one
+            # person's fights, and upgrading somebody to a coach account they
+            # did not ask for would offer them seats they are not paying for.
+            con.execute("ALTER TABLE profiles ADD COLUMN account_type TEXT NOT NULL DEFAULT 'athlete'")
         fight_columns = {row[1] for row in con.execute("PRAGMA table_info(fights)").fetchall()}
         if "fighter_id" not in fight_columns:
             # Nullable on purpose: every fight analysed before the roster
@@ -1395,3 +1400,12 @@ def assign_fighter_to_fight(profile_id: int, job_id: str, fighter_id: int | None
             (int(fighter_id) if fighter_id is not None else None, job_id, profile_id),
         ).rowcount
     return bool(changed)
+
+
+def set_account_type(profile_id: int, account_type: str) -> str:
+    """Athlete or coach. Anything else is treated as athlete."""
+    chosen = "coach" if str(account_type).strip().lower() == "coach" else "athlete"
+    init_db()
+    with connection() as con:
+        con.execute("UPDATE profiles SET account_type=? WHERE id=?", (chosen, profile_id))
+    return chosen

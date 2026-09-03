@@ -48,7 +48,7 @@ from core.release_validation import assess_end_to_end_validation, end_to_end_met
 from core.db import (
     add_assignment, analysis_allowance, apply_checkout_event, consume_email_verification_token,
     consume_password_reset_token,
-    assign_fighter_to_fight, create_fighter, create_moderation_report, create_oauth_account, delete_account, delete_fight,
+    assign_fighter_to_fight, create_fighter, set_account_type, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
     get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, get_fighter, get_profile,
     get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
@@ -66,7 +66,7 @@ from core.db import (
 )
 from core.evidence_trust import report_evidence_trust
 from core.coaching import build_coaching, build_training_plan
-from core.payments import PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
+from core.payments import roster_capacity, plans_for, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
@@ -2010,6 +2010,22 @@ async def upload(
     chosen_fighter = None
     if account:
         if fighter_name.strip():
+            # The seat count is what a coach's plan sells, so it is checked
+            # here rather than described on the pricing page. An existing name
+            # is not a new seat: create_fighter resolves it to the same person.
+            roster = list_fighters(profile_id)
+            already = next((f for f in roster if f["name"].lower() == " ".join(fighter_name.split()).lower()), None)
+            if already is None:
+                capacity = roster_capacity(_request_plan(request), len(roster))
+                if not capacity["can_add"]:
+                    video_path.unlink(missing_ok=True)
+                    shutil.rmtree(OUTPUTS / job_id, ignore_errors=True)
+                    raise HTTPException(
+                        402,
+                        f"This plan holds {capacity['limit']} "
+                        f"fighter{'s' if capacity['limit'] != 1 else ''} and they are all in use. "
+                        "Archive one you no longer coach, or move to a plan with more room.",
+                    )
             chosen_fighter = create_fighter(profile_id, fighter_name)
         elif fighter_id.strip().isdigit():
             chosen_fighter = get_fighter(profile_id, int(fighter_id))
@@ -3251,6 +3267,7 @@ async def save_profile(
     notes: str = Form(""),
     default_fighter: str = Form("A"),
     allow_model_training: bool = Form(False),
+    account_type: str = Form("athlete"),
     photo: UploadFile | None = File(None),
     profile_video: UploadFile | None = File(None),
 ):
@@ -3261,6 +3278,9 @@ async def save_profile(
     default_fighter = default_fighter.upper()
     if default_fighter not in {"A", "B"}:
         raise HTTPException(400, "Default fighter must be A or B.")
+    # Anything unexpected settles on athlete, which is the narrower of the two:
+    # it never grants roster room nobody paid for.
+    set_account_type(profile_id, account_type)
     photo_path = None
     profile_video_path = None
     if photo and photo.filename:
@@ -3787,13 +3807,28 @@ def search_guide_page(request: Request):
 
 
 @app.get("/pricing", response_class=HTMLResponse)
-def pricing_page(request: Request):
+def pricing_page(request: Request, audience: str = ""):
+    """Two ladders, one page.
+
+    An athlete analyses one person and a coach analyses a squad, so they are
+    buying different things: seats on a roster versus reports on themselves.
+    Showing both catalogues at once made each side read half a page that did
+    not apply to them. The workspace's own kind decides which is shown, and
+    the other stays one link away for anyone who is on the wrong one.
+    """
     account = _account(request)
+    profile = get_profile(int(account["profile_id"])) if account else None
+    chosen = (audience or (profile or {}).get("account_type") or "athlete").strip().lower()
+    if chosen not in {"athlete", "coach"}:
+        chosen = "athlete"
     return templates.TemplateResponse(
         request=request,
         name="pricing.html",
         context={
             "request": request, "plans": PLANS,
+            "audience": chosen,
+            "audience_plans": plans_for(chosen),
+            "other_audience": "coach" if chosen == "athlete" else "athlete",
             "payments_enabled": SETTINGS.payments_enabled, "account": account,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
         },

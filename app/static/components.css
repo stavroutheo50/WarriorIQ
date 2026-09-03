@@ -34,3 +34,9 @@
 .fighter-assign { display: flex; gap: 6px; align-items: center; }
 .fighter-assign select { min-width: 120px; padding: 5px 8px; font-size: var(--wiq-text-micro); }
 .btn.tiny { padding: 5px 10px; min-height: 0; font-size: var(--wiq-text-micro); }
+/* Athlete and coach ladders are different products, so the page picks one. */
+.audience-switch { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.audience-switch .btn.is-current { pointer-events: none; }
+.audience-note { margin: 0 0 18px; }
+.plan-seats { font-size: var(--wiq-text-micro); letter-spacing: .4px; text-transform: uppercase;
+              color: var(--wiq-text-tertiary); margin-bottom: 4px; }
