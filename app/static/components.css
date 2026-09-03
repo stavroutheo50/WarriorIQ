@@ -24,3 +24,12 @@
    button told to hide stays on screen. The picker relies on hiding "Use this
    moment" once the frame is chosen. */
 .picker-actions .btn[hidden] { display: none; }
+
+/* Coach squad view. A fight the analysis could not watch properly is shown but
+   dimmed - never hidden, because a coach making selection decisions has to be
+   able to tell a tracking failure from a bad week. */
+.trend-cell { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.trend-cell strong { font-size: 22px; }
+.trend-cell[data-direction="up"] strong { color: var(--green, #55d18b); }
+.trend-cell[data-direction="down"] strong { color: #ff7a90; }
+.row-muted { opacity: .55; }

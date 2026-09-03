@@ -1866,3 +1866,39 @@ def test_movement_judging_is_withheld_when_tracking_is_poor():
     assert card["available"] is False
     assert card["status"] == "insufficient_tracking"
     assert "60%" in card["reason"]
+
+
+def test_progress_is_not_claimed_from_a_badly_tracked_fight():
+    """"You got worse" is a serious thing to tell an athlete.
+
+    A fight WarriorIQ could not watch properly is not evidence of anything, so
+    it is skipped as a comparison point rather than compared against.
+    """
+    import json
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from core.squad import compare_with_previous
+
+    def report(coverage, pressure):
+        return {
+            "video": {"focus_fighter": "A"},
+            "tracking": {"fighter_A_coverage": coverage, "fighter_B_coverage": coverage},
+            "metrics": {"A": {"pressure_index": pressure, "ring_center_control": 0.5,
+                              "footwork_body_lengths_per_second": 1.0}},
+        }
+
+    with TemporaryDirectory() as tmp:
+        paths = []
+        for name, body in (("now", report(0.95, 0.30)), ("bad", report(0.40, 0.90))):
+            path = Path(tmp) / f"{name}.json"
+            path.write_text(json.dumps(body), encoding="utf-8")
+            paths.append(path)
+        fights = [
+            {"job_id": "now", "original_name": "now.mp4", "report_path": str(paths[0]),
+             "ruleset": "K1", "created_at": "2026-09-03T10:00:00"},
+            {"job_id": "bad", "original_name": "bad.mp4", "report_path": str(paths[1]),
+             "ruleset": "K1", "created_at": "2026-09-02T10:00:00"},
+        ]
+        current = json.loads(paths[0].read_text(encoding="utf-8"))
+        assert compare_with_previous(current, fights, "now") == {"available": False}

@@ -79,6 +79,7 @@ from core.retention import (
 )
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_unobserved
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
+from core.squad import build_squad_view, compare_with_previous
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import get_video_info, pick_selection_frame, read_frame
@@ -2733,8 +2734,17 @@ def result_page(request: Request, job_id: str):
         request.state.analysis_navigation["last_completed"] = None
         request.state.analysis_navigation["display"] = request.state.analysis_navigation.get("active")
         request.state.active_analysis = request.state.analysis_navigation.get("active")
+    # The athlete's half of the split: one comparison against their last fight,
+    # so the page answers "am I better than last time" without becoming the
+    # coach's squad view. See core/squad.py.
+    _profile = _profile_id(request)
+    progress_since_last = (
+        compare_with_previous(report, list_fights(_profile), job_id)
+        if _profile is not None else {"available": False}
+    )
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
+        "progress_since_last": progress_since_last,
         "identity": sport_identity(report.get("scorecard", {}).get("sport", "kickboxing")),
         "report_access": report_access,
         "analysis_quality": _analysis_quality_summary(report),
@@ -3413,6 +3423,10 @@ def coach_page(request: Request):
             "signed_in": profile_id is not None,
             "focus": focus,
             "suggested_assignments": suggested_assignments,
+            # A coach triages a squad; an athlete fixes one thing. This is the
+            # coach half - every fight in order and which way the numbers are
+            # moving. See core/squad.py.
+            "squad": build_squad_view(fights),
         },
     )
 

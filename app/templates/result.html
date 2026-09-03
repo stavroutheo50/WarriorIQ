@@ -294,6 +294,34 @@
 </section>
 {% endif %}
 
+{# The athlete's question: am I better than last time? One line, near the top,
+   before any of the detail. A coach's breadth lives on /coach instead. #}
+{% set progress = progress_since_last|default({}, true) %}
+{% if progress.available %}
+<section class="card" id="report-progress">
+  <div class="section-title" style="margin-top:0">
+    <div><div class="eyebrow">Since your last fight</div><h2>{{progress.headline}}</h2></div>
+  </div>
+  <div class="grid">
+    {% for c in progress.changes %}
+    <div class="trend-cell" data-direction="{{c.direction}}">
+      <span class="eyebrow">{{c.label}}</span>
+      <strong>{% if c.now is not none %}{{'%.2f'|format(c.now)}}{% else %}—{% endif %}</strong>
+      <small>
+        {% if c.direction == 'up' %}▲ up from{% elif c.direction == 'down' %}▼ down from{% else %}— steady at{% endif %}
+        {% if c.before is not none %}{{'%.2f'|format(c.before)}}{% endif %}
+      </small>
+    </div>
+    {% endfor %}
+  </div>
+  {# A fight carries no athlete identity, so this compares the two most recent
+     analyses in this workspace and assumes they are the same person. On a
+     shared coach workspace they may not be, so the fight it used is named
+     rather than implied. #}
+  <p class="small muted">Compared with <b>{{progress.previous_name|truncate(30, true)}}</b>{% if progress.previous_date %} ({{progress.previous_date}}){% endif %} — the last fight WarriorIQ tracked well enough to compare. If that was a different fighter, ignore this. Movement only.</p>
+</section>
+{% endif %}
+
 {# The criteria movement can evidence, scored per round. Deliberately above
    the striking scorecard: that one is withheld because strikes cannot be
    detected reliably, and this one is the part WarriorIQ can actually stand
