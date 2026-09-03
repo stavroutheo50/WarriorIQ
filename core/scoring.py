@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
+from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
 from core.config import RULESET_LABELS
 from core.types import KnockdownEvent, StrikeEvent
 
@@ -278,12 +279,50 @@ def _effective_value(event: StrikeEvent, profile: RuleProfile | None = None) -> 
     return base * target * (0.65 + 0.35 * contact) * (0.75 + 0.25 * confidence)
 
 
+# How much of the rule-based confidence range a scoring action must clear.
+#
+# Half of it: a displayed score is a stronger claim than "something was thrown"
+# and this sits well above the attempt tier, which asks a quarter. It is
+# written as a share for the same reason that one is - the constant here was
+# 0.72, fitted to a confidence formula that saturated near 1.0, and it outlived
+# a rescale of that formula. Afterwards the formula ran 0.30 to 0.94 with a
+# median near 0.50, so 0.72 meant two thirds of maximum evidence on a landed,
+# legal, in-range strike. On a taekwondo bout that left 5 verified actions out
+# of 19 good ones, and on a kickboxing bout it left none at all: the four that
+# landed peaked at 0.70, just under the bar. No score could be shown for either.
+SCORING_CONFIDENCE = CONFIDENCE_FLOOR + 0.50 * (CONFIDENCE_CEILING - CONFIDENCE_FLOOR)
+
+
+# A scored kick has to have taken a foot off the floor, measured against the
+# athlete's own torso. Half a torso is far less than any real kick and far more
+# than a step.
+#
+# This exists because footwork was being scored as landed kicks. On a taekwondo
+# bout every one of 33 detected kicks had the kicking foot level with or below
+# the standing foot - median lift -0.01 torsos - and nine of them were recorded
+# as landing. The cause is upstream and cannot be tuned away: across 487
+# fighter-frames of that same bout the pose model never once placed a foot more
+# than 0.6 torsos above the other, with high ankle confidence throughout, while
+# the video plainly shows kicks. It confidently returns a standing pose during
+# a kick at this resolution, so what the action stage sees as a fast leg is
+# usually a step.
+#
+# Attempts are unaffected: they are already published as unvalidated candidates.
+# This only stops a footstep reaching a scorecard as a landed strike.
+MIN_SCORING_FOOT_LIFT = 0.5
+
+
 def is_verified_scoring_event(event: StrikeEvent, ruleset: str) -> bool:
     """Only evidence strong enough to support a displayed score is counted."""
+    if event.family == "kick":
+        lift = (event.evidence or {}).get("foot_lift_torsos")
+        # None means the pose could not say, which is not evidence of a kick.
+        if lift is None or float(lift) < MIN_SCORING_FOOT_LIFT:
+            return False
     return (
         is_legal_event(event, ruleset)
         and event.outcome in {"clean", "likely_landed"}
-        and float(event.confidence) >= 0.72
+        and float(event.confidence) >= SCORING_CONFIDENCE
         and float(event.contact_confidence) >= 0.62
         and event.target in {"head", "body", "leg"}
     )

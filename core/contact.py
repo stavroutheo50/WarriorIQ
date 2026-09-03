@@ -63,6 +63,24 @@ def _target_points(kp: np.ndarray | None) -> dict[str, list[np.ndarray]]:
     }
 
 
+def _torso_lines(kp: np.ndarray | None) -> tuple[float | None, float | None]:
+    """The defender's shoulder and hip heights, averaged across each pair.
+
+    These are the two landmarks that stay put while somebody throws a kick,
+    which is what makes them a usable ruler for deciding what was hit. One
+    shoulder or one hip is enough when the other is occluded.
+    """
+    if kp is None:
+        return None, None
+
+    def line(indices: tuple[int, int]) -> float | None:
+        found = [_valid(kp, index) for index in indices]
+        found = [float(p[1]) for p in found if p is not None]
+        return sum(found) / len(found) if found else None
+
+    return line((L_SHOULDER, R_SHOULDER)), line((L_HIP, R_HIP))
+
+
 def _distance_to_group(point: np.ndarray, points: list[np.ndarray]) -> float:
     if not points:
         return 9999.0
@@ -320,20 +338,47 @@ def classify_contact(event: StrikeEvent) -> StrikeEvent:
         event.contact_confidence = 0.0
         return event
 
-    # Target height is more stable from the full defender box than from one
-    # noisy wrist/ankle keypoint. The closest-keypoint distance still decides
-    # whether contact occurred; this zone decides high/body/low terminology.
-    defender_box = best_eval.get("defender_box")
-    if defender_box is not None:
-        _, y1, _, y2 = map(float, defender_box)
-        height = max(1.0, y2 - y1)
-        vertical = (float(best_eval["endpoint"][1]) - y1) / height
-        if vertical <= 0.28:
+    # Which zone was hit, measured against the defender's own shoulders and
+    # hips rather than their bounding box.
+    #
+    # The box was used because a single wrist or ankle keypoint is noisy, but
+    # the box is worse: it is not the person, it is everything the person is
+    # currently doing. When the defender is mid-kick their box grows upward
+    # with the raised leg, and a strike measured as a fraction of that taller
+    # box slides down the scale. In taekwondo, where both fighters kick at
+    # once, defender boxes in one bout ranged from 100 to 245 pixels on
+    # athletes about 160 tall, and every landed kick came back as hitting the
+    # leg - ten front and push kicks, the two techniques that go to the body.
+    # Under WT rules the leg is not even a scoring target, so the whole fight
+    # scored nothing.
+    #
+    # Shoulders and hips do not move when someone raises a leg, so the torso
+    # they span is a stable ruler. Above the shoulders is the head, below the
+    # hips is the leg, and the trunk between them is the body.
+    endpoint_y = float(best_eval["endpoint"][1])
+    shoulders_y, hips_y = _torso_lines(best_eval.get("defender_kp"))
+    if shoulders_y is not None and hips_y is not None and hips_y > shoulders_y:
+        torso = hips_y - shoulders_y
+        if endpoint_y < shoulders_y - 0.10 * torso:
             best_target = "head"
-        elif vertical >= 0.56:
+        elif endpoint_y > hips_y + 0.25 * torso:
             best_target = "leg"
         else:
             best_target = "body"
+    else:
+        # No usable torso: fall back to the box, which is still better than
+        # keeping whichever keypoint happened to be nearest.
+        defender_box = best_eval.get("defender_box")
+        if defender_box is not None:
+            _, y1, _, y2 = map(float, defender_box)
+            height = max(1.0, y2 - y1)
+            vertical = (endpoint_y - y1) / height
+            if vertical <= 0.28:
+                best_target = "head"
+            elif vertical >= 0.56:
+                best_target = "leg"
+            else:
+                best_target = "body"
 
     # Once the target zone is known, bind every later decision to the sample
     # closest to that same zone. Previously the target could be changed after

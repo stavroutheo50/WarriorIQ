@@ -256,6 +256,32 @@ def _is_spinning(angles: list[float]) -> bool:
     return abs(travelled) >= _SPIN_DEGREES
 
 
+def _foot_lift(sample: Sample, limb: str) -> float | None:
+    """How far the kicking foot is above the standing one, in torso lengths.
+
+    A kick takes a foot off the floor. A step does not, and that is the whole
+    difference between the two - so this is the physical evidence that a kick
+    happened at all, rather than a fighter shifting their weight.
+
+    Returns None when the pose does not support the measurement, which must be
+    read as "cannot tell" and never as "it happened".
+    """
+    kicking_index = L_ANKLE if limb.startswith("left") else R_ANKLE
+    standing_index = R_ANKLE if limb.startswith("left") else L_ANKLE
+    kicking = _point(sample.keypoints, kicking_index)
+    standing = _point(sample.keypoints, standing_index)
+    shoulders = [_point(sample.keypoints, i) for i in (L_SHOULDER, R_SHOULDER)]
+    hips = [_point(sample.keypoints, i) for i in (L_HIP, R_HIP)]
+    shoulders = [float(p[1]) for p in shoulders if p is not None]
+    hips = [float(p[1]) for p in hips if p is not None]
+    if kicking is None or standing is None or not shoulders or not hips:
+        return None
+    torso = (sum(hips) / len(hips)) - (sum(shoulders) / len(shoulders))
+    if torso <= 4.0:
+        return None
+    return (float(standing[1]) - float(kicking[1])) / torso
+
+
 def _is_jumping(start: Sample, peak: Sample) -> bool:
     """Did both feet leave the floor?
 
@@ -522,6 +548,7 @@ class ActionEngine:
                     else:
                         technique = _classify_knee(peak_sample, event_limb)
 
+                    foot_lift = _foot_lift(peak_sample, event_limb) if family == "kick" else None
                     spinning = family in {"kick", "knee"} and _is_spinning(active.shoulder_angles)
                     jumping = family in {"kick", "knee"} and _is_jumping(start_sample, peak_sample)
 
@@ -608,6 +635,9 @@ class ActionEngine:
                             # already classified as one.
                             "spinning": spinning,
                             "jumping": jumping,
+                            # Evidence that a kick was a kick. See _foot_lift:
+                            # None means the pose could not say.
+                            "foot_lift_torsos": foot_lift,
                         },
                     )
                     events.append(event)

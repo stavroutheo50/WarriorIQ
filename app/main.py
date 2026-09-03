@@ -889,6 +889,12 @@ def _strike_from_dict(event: dict) -> StrikeEvent:
         confidence=1.0 if event.get("human_verified") else float(event.get("confidence", 0)),
         contact_confidence=1.0 if event.get("human_verified") else float(event.get("contact_confidence", 0)),
         model_source="human_ground_truth" if event.get("human_verified") else str(event.get("model_source", "temporal_rules")),
+        # Rebuilding an event without its evidence quietly changes what it
+        # means. Scoring reads foot_lift_torsos from here to tell a kick from a
+        # step, so dropping it made every kick in a saved report unscoreable -
+        # a different answer from the same fight depending on whether it came
+        # from the analysis or from disk.
+        evidence=dict(event.get("evidence") or {}),
     )
 
 

@@ -148,6 +148,9 @@ class ProductFoundationTests(unittest.TestCase):
             start_frame=0, peak_frame=1, end_frame=2, start_time=0.0, peak_time=0.1, end_time=0.2,
             technique=technique, family=family, limb="x", outcome="clean", target=target,
             confidence=1.0, contact_confidence=1.0, model_source="test",
+            # A real kick takes a foot off the floor; scoring now requires that
+            # evidence, so a fixture standing for a real kick carries it.
+            evidence={"foot_lift_torsos": 1.2},
         )
 
     def test_each_sport_enforces_its_own_legal_techniques(self):
@@ -603,6 +606,7 @@ class ScoringTests(unittest.TestCase):
             technique, family, "right_hand",
             outcome="clean", landed=True, target=target,
             confidence=0.9, contact_confidence=0.9,
+            evidence={"foot_lift_torsos": 1.2},
         )
 
     def test_knee_legal_in_k1_not_full_contact(self):
@@ -1469,6 +1473,7 @@ class FederationPointTableTests(unittest.TestCase):
             peak_time=seconds, end_time=seconds + .1, technique="x", family=family,
             limb="lead", outcome="clean", landed=True, target=target,
             confidence=.9, contact_confidence=.9,
+            evidence={"foot_lift_torsos": 1.2},   # a real kick left the floor
         )
 
     def test_itf_scores_its_own_published_table(self):
@@ -1738,3 +1743,66 @@ def test_airtime_is_not_claimed_on_a_distant_fighter():
 
     # A lift that would clear the ratio on a close-up fighter, at a distance.
     assert not _is_jumping(tiny(170.0), tiny(150.0, frame=6))
+
+
+def test_both_confidence_gates_track_the_formula_that_feeds_them():
+    """Two gates were fitted to a confidence formula that later changed.
+
+    The attempt gate was 0.86 and the scoring gate 0.72, both set when the
+    rule-based confidence saturated near 1.0. After it was rebuilt to run
+    0.30-0.94 with a median near 0.50, the first hid all but 5 of 309
+    detections and the second left a kickboxing bout with zero verified
+    scoring actions - its four landed strikes peaked at 0.70.
+
+    So both are now shares of the range the formula can actually produce, and
+    this checks the two properties that matter: each sits inside the range,
+    and scoring stays the stronger claim.
+    """
+    from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
+    from core.analyzer import ATTEMPT_CONFIDENCE
+    from core.scoring import SCORING_CONFIDENCE
+
+    span = CONFIDENCE_CEILING - CONFIDENCE_FLOOR
+    for gate in (ATTEMPT_CONFIDENCE, SCORING_CONFIDENCE):
+        assert CONFIDENCE_FLOOR < gate < CONFIDENCE_CEILING
+    # Showing a score demands more than saying a strike was thrown.
+    assert SCORING_CONFIDENCE > ATTEMPT_CONFIDENCE
+    # And neither may drift back above what ordinary technique produces.
+    assert SCORING_CONFIDENCE <= CONFIDENCE_FLOOR + 0.6 * span
+
+
+def test_a_step_is_not_a_scored_kick():
+    """Footwork was reaching the scorecard as landed kicks.
+
+    On a taekwondo bout every one of 33 detected kicks had the kicking foot
+    level with or below the standing foot, and nine were recorded as landing.
+    The cause is upstream: across 487 fighter-frames the pose model never
+    placed a foot more than 0.6 torsos above the other, with high ankle
+    confidence, while the video plainly shows kicks. Until that changes, a
+    kick with no lift behind it cannot be scored.
+    """
+    from core.scoring import MIN_SCORING_FOOT_LIFT, is_verified_scoring_event
+    from core.types import StrikeEvent
+
+    def kick(lift):
+        return StrikeEvent(
+            fighter="A", opponent="B", round_number=1, start_frame=0, peak_frame=1,
+            end_frame=2, start_time=0.0, peak_time=0.1, end_time=0.2,
+            technique="right_round_kick", family="kick", limb="right_leg",
+            confidence=0.90, contact_confidence=0.90, outcome="clean", target="body",
+            evidence={} if lift is None else {"foot_lift_torsos": lift},
+        )
+
+    assert not is_verified_scoring_event(kick(-0.01), "K1"), "a step scored as a kick"
+    assert not is_verified_scoring_event(kick(0.14), "K1"), "a shuffle scored as a kick"
+    assert not is_verified_scoring_event(kick(None), "K1"), "unmeasurable counted as proof"
+    assert is_verified_scoring_event(kick(MIN_SCORING_FOOT_LIFT + 0.4), "K1")
+
+    # Punches are untouched: a punch has no foot to lift.
+    punch = StrikeEvent(
+        fighter="A", opponent="B", round_number=1, start_frame=0, peak_frame=1,
+        end_frame=2, start_time=0.0, peak_time=0.1, end_time=0.2, technique="cross",
+        family="punch", limb="right_hand", confidence=0.90, contact_confidence=0.90,
+        outcome="clean", target="body", evidence={},
+    )
+    assert is_verified_scoring_event(punch, "K1")

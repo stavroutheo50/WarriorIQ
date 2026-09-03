@@ -1107,6 +1107,9 @@ class PublicPageTests(unittest.TestCase):
             "fighter": "A", "technique": "right_low_kick", "family": "kick",
             "limb": "right_leg", "target": "leg", "outcome": "clean",
             "confidence": .90, "contact_confidence": .86, "round_number": 1,
+            # Scoring now needs proof a kick left the floor, so these stand
+            # for real kicks rather than footwork.
+            "evidence": {"foot_lift_torsos": 1.2},
         }
         report = {"setup": {"ruleset": "K1"}, "events": [
             {**base, "peak_time": 8.00},
@@ -1183,6 +1186,7 @@ class PublicPageTests(unittest.TestCase):
             "round_number": 1, "fighter": "A", "technique": "left_head_kick",
             "family": "kick", "limb": "left_leg", "target": "head",
             "outcome": "clean", "confidence": .92, "contact_confidence": .90,
+            "evidence": {"foot_lift_torsos": 1.4},   # a head kick, so plainly airborne
         }
         candidates = [
             {**candidate, "peak_time": 4.2 + i * 3, "start_time": 4.0 + i * 3, "end_time": 4.4 + i * 3,
