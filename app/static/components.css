@@ -210,3 +210,13 @@
   font-variant-numeric: tabular-nums;
   color: var(--wiq-text, #e8eefb);
 }
+
+/* What the movement averages were measured over.
+   The numbers above used to vanish entirely below a coverage line, so a
+   fighter saw a row of dashes with nothing to explain them. They are shown
+   now, with the ground they stand on next to them. */
+.vitals-basis {
+  margin: 10px 0 0;
+  padding-left: 2px;
+  font-variant-numeric: tabular-nums;
+}

@@ -789,7 +789,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("rather than being chosen per upload", privacy)
 
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
-                       scorecard_available=None):
+                       scorecard_available=None, measurement=None):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -816,6 +816,9 @@ class PublicPageTests(unittest.TestCase):
         fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
         report = json.loads(fixture.read_text(encoding="utf-8"))
         report["selection_check"] = selection_check
+        if measurement is not None:
+            for fighter in ("A", "B"):
+                report.setdefault("metrics", {}).setdefault(fighter, {})["measurement"] = measurement
         if scorecard_available is not None:
             report.setdefault("scorecard", {})["available"] = scorecard_available
         request = Stub(url=Stub(path="/report/abc"), state=Stub(account=None), cookies={}, headers={})
@@ -850,6 +853,29 @@ class PublicPageTests(unittest.TestCase):
                 if phrase in visible:
                     offenders.setdefault(page.name, []).append(phrase)
         self.assertEqual(offenders, {}, f"internal vocabulary shown to fighters: {offenders}")
+
+    def test_partial_coverage_shows_its_numbers_with_the_ground_they_stand_on(self):
+        """The strip used to blank entirely below a coverage line.
+
+        A fighter saw a row of dashes and nothing explaining them. The numbers
+        are shown now, and the sample size travels with them so a partial round
+        is never presented as a whole one.
+        """
+        html = self._render_result({}, measurement={
+            "measured_frames": 410, "analyzed_frames": 923,
+            "share": 410/923, "confident": False,
+        })
+        self.assertIn("Measured across 410 of 923 analysed frames", html)
+        self.assertIn("44% of the fight", html)
+        self.assertIn("could see rather than the whole of it", html)
+
+    def test_full_coverage_states_the_basis_without_the_caution(self):
+        html = self._render_result({}, measurement={
+            "measured_frames": 900, "analyzed_frames": 923,
+            "share": 900/923, "confident": True,
+        })
+        self.assertIn("Measured across 900 of 923 analysed frames", html)
+        self.assertNotIn("rather than the whole of it", html, "no caveat when it saw the round")
 
     def test_an_unscored_fight_says_why_in_words_a_fighter_can_act_on(self):
         """The page named an internal component instead of giving a reason.

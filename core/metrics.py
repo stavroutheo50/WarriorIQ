@@ -237,9 +237,27 @@ class MetricsAccumulator:
             counters = self._counter_stats(fighter, events)
             defense_counts = Counter(d.defense for d in defenses if d.fighter == fighter)
             total_defenses = sum(defense_counts.values())
+            # A measurement is reported with the ground it stands on, rather
+            # than withheld outright below a coverage line.
+            #
+            # The gate used to be all-or-nothing at 60% coverage: at 59% a
+            # fighter saw an empty metric strip, at 60% they saw everything,
+            # and the page never said which. On a real fight measuring 44% and
+            # 56%, every movement number was blank - the exact figures the site
+            # promises - with nothing to explain why. Averaging four hundred
+            # observed frames is not dishonest; presenting it as if it covered
+            # the whole round would be, so the sample size travels with it.
+            #
+            # The floor that remains is a sample floor, not a coverage one:
+            # below it there genuinely is not enough to average.
+            measured = min(
+                len(self.guard_samples[fighter]),
+                len(self.balance_samples[fighter]),
+            )
+            enough = measured >= SETTINGS.min_metric_samples
             advanced_available = coverage >= SETTINGS.min_pose_coverage_for_metric
 
-            if advanced_available:
+            if enough:
                 footwork = self.movement[fighter] / max(1.0, segment_duration)
                 pressure = float(np.mean(self.pressure_samples[fighter])) if self.pressure_samples[fighter] else None
                 ring_control = self._center_control(fighter)
@@ -278,6 +296,15 @@ class MetricsAccumulator:
             result[fighter] = {
                 "pose_coverage": coverage,
                 "advanced_metrics_available": advanced_available,
+                # What the movement numbers above were averaged over, so the
+                # report can say "measured across 411 of 928 frames" instead of
+                # presenting a partial round as a whole one.
+                "measurement": {
+                    "measured_frames": int(measured),
+                    "analyzed_frames": int(self.frames[fighter]),
+                    "share": float(measured / max(1, self.frames[fighter])),
+                    "confident": bool(advanced_available),
+                },
                 "attacks": attack,
                 "combinations": combos,
                 "counters": counters,

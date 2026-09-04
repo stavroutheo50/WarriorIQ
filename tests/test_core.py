@@ -2275,3 +2275,49 @@ class RejectionReasonTests(unittest.TestCase):
         self.assertEqual(manager.rejections, {"appearance": 2, "known_furniture": 1})
         self.assertEqual(manager.a.switches_rejected, 2, "the per-fighter total still counts")
         self.assertEqual(manager.b.switches_rejected, 1)
+
+
+class MetricSampleBasisTests(unittest.TestCase):
+    """A measurement is reported with the ground it stands on."""
+
+    @staticmethod
+    def _tracker(guard_samples: int, frames: int):
+        from core.metrics import MetricsAccumulator
+
+        t = MetricsAccumulator(480, 220)
+        for fighter in ("A", "B"):
+            t.frames[fighter] = frames
+            t.visible[fighter] = guard_samples
+            t.movement[fighter] = 12.0
+            t.guard_samples[fighter] = [0.4] * guard_samples
+            t.balance_samples[fighter] = [0.7] * guard_samples
+            t.pressure_samples[fighter] = [0.1] * guard_samples
+        return t
+
+    def test_partial_coverage_still_reports_with_its_sample_size(self):
+        """44% coverage used to blank the whole strip with no reason given.
+
+        Averaging four hundred observed frames is not dishonest. Presenting it
+        as though it covered the whole round would be, so the count travels
+        with the number.
+        """
+        result = self._tracker(411, 928).finalize([], [], 60.0)["A"]
+        self.assertIsNotNone(result["guard_index"], "a measurable round is measured")
+        self.assertIsNotNone(result["balance_index"])
+        basis = result["measurement"]
+        self.assertEqual(basis["measured_frames"], 411)
+        self.assertEqual(basis["analyzed_frames"], 928)
+        self.assertAlmostEqual(basis["share"], 411/928, places=4)
+        self.assertFalse(basis["confident"], "and it is flagged as a partial view")
+
+    def test_a_handful_of_frames_is_still_refused(self):
+        """The floor that remains is a sample floor: a mean of ten frames is noise."""
+        result = self._tracker(9, 928).finalize([], [], 60.0)["A"]
+        self.assertIsNone(result["guard_index"])
+        self.assertIsNone(result["balance_index"])
+        self.assertEqual(result["measurement"]["measured_frames"], 9)
+
+    def test_full_coverage_is_marked_confident(self):
+        result = self._tracker(900, 928).finalize([], [], 60.0)["A"]
+        self.assertIsNotNone(result["guard_index"])
+        self.assertTrue(result["measurement"]["confident"])

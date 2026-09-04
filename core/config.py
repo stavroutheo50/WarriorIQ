@@ -290,6 +290,12 @@ class Settings:
     # Reports / evidence
     # ------------------------------------------------------------
     min_pose_coverage_for_metric: float = 0.60
+    # Below this many observed frames there is genuinely too little to average,
+    # and a mean of a handful of frames is noise wearing a number's clothes.
+    # This is a sample floor and not a coverage one: a fighter observed for
+    # four hundred frames of a round is measurable, and the report says so by
+    # carrying the sample size rather than by hiding the result.
+    min_metric_samples: int = int(os.getenv("WARRIORIQ_MIN_METRIC_SAMPLES", "60"))
     # A score remains explicitly estimated, but 85% verified coverage for
     # both fighters is sufficient when each counted action also passes the
     # stricter technique/contact evidence thresholds in scoring.py.
