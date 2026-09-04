@@ -764,11 +764,15 @@ async def viewer_context(request: Request, call_next):
         img_src += " https://*.google-analytics.com https://*.googletagmanager.com"
         if SETTINGS.gtm_container_id:
             frame_src += " https://www.googletagmanager.com"
+    # Sign-in forms redirect to the provider, and form-action is enforced across
+    # that redirect: with 'self' alone every social button is blocked by the
+    # browser before it leaves the page.
+    form_action = " ".join(["'self'", *SOCIAL_AUTH.form_action_origins])
     response.headers.setdefault(
         "Content-Security-Policy",
         f"default-src 'self' data:; script-src {script_src}; style-src 'self' 'unsafe-inline'; "
 f"img-src {img_src}; media-src 'self'; connect-src {connect_src}; frame-src {frame_src}; "
-        "frame-ancestors 'none'; form-action 'self'",
+        f"frame-ancestors 'none'; form-action {form_action}",
     )
     if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/s/")):
         response.headers.setdefault("Cache-Control", "no-store")

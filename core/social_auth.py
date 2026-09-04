@@ -29,6 +29,21 @@ PROVIDER_LABELS = {
     "github": "GitHub",
 }
 
+# Where each provider's consent page lives.
+#
+# Pressing a social button submits a form, and the reply is a redirect to the
+# provider. Content-Security-Policy's form-action is enforced across that
+# redirect, so a policy of 'self' blocks the hop to the provider and Chrome
+# aborts the submission - the button had already been switched to "Working..."
+# by then, so the page sat there apparently loading for ever. Only the origins
+# of providers that are actually configured are ever added to the policy.
+AUTHORIZE_ORIGINS = {
+    "google": "https://accounts.google.com",
+    "facebook": "https://www.facebook.com",
+    "microsoft": "https://login.microsoftonline.com",
+    "github": "https://github.com",
+}
+
 # Every outbound call to a provider is made while somebody waits on a button.
 # Without a ceiling, a host that cannot reach the provider turns that button
 # into an infinite spinner instead of an error.
@@ -110,6 +125,11 @@ class SocialAuthRegistry:
             for key in PROVIDER_LABELS
             if key in self._enabled
         ]
+
+    @property
+    def form_action_origins(self) -> list[str]:
+        """Origins a sign-in form is allowed to be redirected to."""
+        return [AUTHORIZE_ORIGINS[key] for key in sorted(self._enabled) if key in AUTHORIZE_ORIGINS]
 
     def is_enabled(self, provider: str) -> bool:
         return provider in self._enabled

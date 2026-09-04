@@ -1535,3 +1535,47 @@ class AddFighterFromCoachPageTests(unittest.TestCase):
     def test_a_blank_name_is_refused(self):
         r = self.client.post("/coach/fighters", data={"name": "   "}, follow_redirects=False)
         self.assertEqual(r.status_code, 400)
+
+
+class SocialSignInCspTests(unittest.TestCase):
+    """The browser blocked every social sign-in before it left the page."""
+
+    def test_form_action_allows_exactly_the_configured_providers(self):
+        """A policy of 'self' aborts the redirect to the provider.
+
+        Reproduced in a browser against the live site: pressing Continue with
+        Google logged "violates the following Content Security Policy
+        directive: form-action 'self'" and the POST ended in ERR_ABORTED. The
+        submit handler had already relabelled the button "Working...", so it
+        sat there loading for ever - the exact reported symptom.
+        """
+        from core.social_auth import AUTHORIZE_ORIGINS, SocialAuthRegistry
+
+        registry = SocialAuthRegistry()
+        registry._enabled = {"google", "github"}
+        self.assertEqual(
+            set(registry.form_action_origins),
+            {"https://accounts.google.com", "https://github.com"},
+        )
+
+        # Nothing configured means nothing added: the policy stays at 'self'.
+        registry._enabled = set()
+        self.assertEqual(registry.form_action_origins, [])
+
+        # Every provider that can be registered needs somewhere to redirect to,
+        # or its button is shown and then blocked by the browser.
+        from core.social_auth import PROVIDER_LABELS
+
+        self.assertEqual(set(PROVIDER_LABELS), set(AUTHORIZE_ORIGINS))
+
+    def test_the_response_header_carries_those_origins(self):
+        from fastapi.testclient import TestClient
+
+        import app.main as webapp
+        from core.social_auth import SOCIAL_AUTH
+
+        with TestClient(webapp.app) as client:
+            policy = client.get("/login").headers["Content-Security-Policy"]
+        self.assertIn("form-action 'self'", policy)
+        for origin in SOCIAL_AUTH.form_action_origins:
+            self.assertIn(origin, policy, "a configured provider must be reachable")
