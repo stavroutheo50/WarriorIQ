@@ -1817,8 +1817,15 @@ def choose_sport(request: Request):
     Rules, legal targets and what the analysis can observe all follow from the
     sport, so it is asked first and asked on its own rather than as one field
     among ten on a form the reader has already started filling in.
+
+    Signed-out visitors are sent to sign in first. An analysis they start
+    without an account produces a guest report that is deleted after two hours
+    and never joins their fight library, so letting them spend an upload and an
+    analysis before mentioning that wastes the one thing they cannot get back.
     """
     account = _account(request)
+    if account is None:
+        return RedirectResponse("/login?next=/analyze", status_code=303)
     return templates.TemplateResponse(
         request=request,
         name="sports.html",

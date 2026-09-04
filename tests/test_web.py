@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import re
+import contextlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from unittest.mock import patch
 
@@ -115,6 +117,20 @@ class PublicPageTests(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(app)
 
+    @contextlib.contextmanager
+    def signed_in(self):
+        """Reach pages that now require an account.
+
+        Choosing a sport sends signed-out visitors to sign in, because an
+        analysis started without an account becomes a guest report that is
+        deleted after two hours. These tests are about what those pages say,
+        not about the gate, so they borrow an account rather than build one.
+        """
+        import app.main as webapp
+
+        with mock.patch.object(webapp, "_account", return_value={"id": 1, "profile_id": 1}),                 mock.patch.object(webapp, "analysis_allowance", return_value=None):
+            yield
+
     def test_public_pages_render(self):
         for path in ("/", "/dashboard", "/history", "/profile", "/coach", "/compare", "/validation", "/pricing", "/privacy", "/login", "/signup"):
             with self.subTest(path=path):
@@ -137,6 +153,21 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("Launch is blocked", self.client.get("/legal").text)
         self.assertIn("does not register", self.client.get("/dmca").text)
 
+    def test_choosing_a_sport_signed_out_goes_to_sign_in_first(self):
+        """A guest analysis is deleted after two hours and never saved.
+
+        Letting someone pick a sport, upload a fight and wait for the analysis
+        before mentioning that spends the one thing they cannot get back. The
+        sign-in page carries the destination so they land back on the chooser.
+        """
+        response = self.client.get("/analyze", follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/login?next=/analyze")
+
+        landed = self.client.get("/analyze").text
+        self.assertIn('name="next_path" value="/analyze"', landed)
+        self.assertIn("/signup?next=/analyze", landed, "creating an account keeps the destination")
+
     def test_every_sport_states_what_the_analysis_cannot_see(self):
         """Coverage is disclosed at the point of choice, not after the upload.
 
@@ -148,7 +179,8 @@ class PublicPageTests(unittest.TestCase):
         """
         from core.scoring import SPORTS, sport_unobserved
 
-        chooser = self.client.get("/analyze").text
+        with self.signed_in():
+            chooser = self.client.get("/analyze").text
         for sport in SPORTS:
             with self.subTest(sport=sport):
                 self.assertIn(f'data-sport="{sport}"', chooser)
@@ -178,7 +210,8 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('class="sport-grid"', template)
         self.assertNotIn("data-motion-sequence", template)
         # Every sport must be reachable straight from the markup.
-        page = self.client.get("/analyze").text
+        with self.signed_in():
+            page = self.client.get("/analyze").text
         for sport in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
             self.assertIn(f'href="/analyze/{sport}"', page)
 
