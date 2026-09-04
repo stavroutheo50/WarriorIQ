@@ -354,6 +354,39 @@ class DurableAnalysisStateTests(TestCase):
         self.assertEqual(status["reason"], "analysis_dependencies_missing")
         self.assertIn("ultralytics", status["missing_dependencies"])
 
+    def test_the_live_overlay_draws_skeletons_inside_the_letterboxed_video(self):
+        """Boxes were placed as a percentage of the wrapper, not of the video.
+
+        The wrapper is 16/9 and the video is object-fit:contain, so real
+        tournament footage at 480x220 is letterboxed and every overlay sat well
+        below the fighter it was meant to mark. The skeleton needs the same
+        correction, so both go through one content rect.
+        """
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
+        self.assertIn('id="liveSkeletons"', template)
+        self.assertIn("function contentRect()", template)
+        self.assertIn("Math.min(wrapWidth/vw,wrapHeight/vh)", template, "contain, not stretch")
+        self.assertIn("renderSkeletons(latestData.latest_observation)", template)
+        # Positioning must use the content rect rather than raw wrapper percentages.
+        self.assertNotIn("element.style.left=`${x1*100}%`", template)
+        self.assertIn("rect.ox+x1*rect.width", template)
+
+    def test_the_worker_sends_joints_for_the_live_overlay(self):
+        """A skeleton cannot be drawn from a bounding box."""
+        import numpy as np
+
+        from core.analyzer import _live_keypoints
+
+        class Obs:
+            keypoints = np.array([[48.0, 22.0], [96.0, 44.0], [240.0, 110.0]], dtype=np.float32)
+            keypoint_conf = np.array([0.9, 0.05, 0.8], dtype=np.float32)
+
+        points = _live_keypoints(Obs(), 480, 220)
+        self.assertEqual(points[0], [0.1, 0.1], "normalised to the frame")
+        self.assertIsNone(points[1], "a joint the model is unsure of is not drawn")
+        self.assertEqual(points[2], [0.5, 0.5])
+        self.assertIsNone(_live_keypoints(type("Bare", (), {"keypoints": None})(), 480, 220))
+
     def test_live_template_is_video_first_and_never_claims_unvalidated_actions(self):
         template = (
             Path(__file__).resolve().parents[1] / "app" / "templates" / "progress.html"
@@ -362,7 +395,10 @@ class DurableAnalysisStateTests(TestCase):
         self.assertIn('id="liveVideo"', template)
         self.assertIn('id="eventFeed"', template)
         self.assertIn('id="analysisMarkers"', template)
-        self.assertIn("action model has not passed WarriorIQ’s release gate", template)
+        # The page must still say the strike numbers are not trustworthy yet,
+        # in words a fighter can use rather than by naming a component.
+        self.assertIn("strike counting is not accurate enough to trust yet", template)
+        self.assertNotIn("action model", template)
         self.assertIn("Restart preserved analysis", template)
         self.assertIn("Leave analysis running", template)
         self.assertIn('id="currentAnalysis"', template)

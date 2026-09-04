@@ -8,7 +8,7 @@
 
 <div class="selection-tools"><a class="btn {% if mode != 'scorecard' %}secondary{% endif %}" href="/review/{{job_id}}?mode=scorecard">Quick scorecard check</a><a class="btn {% if mode != 'dataset' %}secondary{% endif %}" href="/review/{{job_id}}?mode=dataset">Optional full model review</a></div>
 
-<div class="notice"><strong>{% if mode == 'scorecard' %}Turn the estimate into video-checked facts.{% else %}Help improve the action model.{% endif %}</strong> {% if mode == 'scorecard' %}Only scoring candidates are shown. Watch each moment, correct it or choose <em>Not an action</em>, then add any scoring action the detector missed at the video's current time.{% else %}This optional workspace includes scoring and non-scoring action candidates. Its labels can rebuild coaching and create temporal-model training data.{% endif %}</div>
+<div class="notice"><strong>{% if mode == 'scorecard' %}Turn the estimate into video-checked facts.{% else %}Help WarriorIQ read strikes better.{% endif %}</strong> {% if mode == 'scorecard' %}Only scoring candidates are shown. Watch each moment, correct it or choose <em>Not an action</em>, then add any scoring action the detector missed at the video's current time.{% else %}This optional workspace includes scoring and non-scoring action candidates. Its labels can rebuild coaching and create temporal-model training data.{% endif %}</div>
 
 <section class="card review-player">
   <video id="reviewVideo" controls preload="metadata" src="/media/{{job_id}}"></video>

@@ -165,13 +165,48 @@ def _provisional_stats(
     )
 
 
+def _live_keypoints(observation, width: int, height: int) -> list[list[float] | None] | None:
+    """The fighter's joints for the live overlay, as fractions of the frame.
+
+    The progress page drew a bounding box, which says where a fighter is but
+    nothing about what they are doing - and a box around two people standing
+    close together looks identical whether tracking is right or wrong. The
+    skeleton makes a bad lock obvious while the analysis is still running.
+    """
+    points = getattr(observation, "keypoints", None)
+    if points is None or not width or not height:
+        return None
+    scores = getattr(observation, "keypoint_conf", None)
+    live: list[list[float] | None] = []
+    for index, point in enumerate(points[:, :2]):
+        score = 1.0
+        if scores is not None and index < len(scores):
+            score = float(scores[index])
+        if score < _MIN_LIVE_KEYPOINT_CONF:
+            live.append(None)
+            continue
+        live.append([float(point[0]) / width, float(point[1]) / height])
+    return live
+
+
+# A live keypoint is drawn or it is not; there is no half-confident joint on a
+# moving overlay. Below this the point is sent as null so the page skips the
+# limb rather than drawing an arm through the floor.
+_MIN_LIVE_KEYPOINT_CONF = 0.30
+
+
 def _latest_observation(seconds: float, width: int, height: int, fighter_a, fighter_b, manager) -> dict:
     def item(observation, confidence: float) -> dict:
         box = None
+        keypoints = None
         if observation is not None:
             x1, y1, x2, y2 = (float(value) for value in observation.box)
             box = [x1 / width, y1 / height, x2 / width, y2 / height]
-        return {"visible": observation is not None, "box": box, "identity_confidence": float(confidence)}
+            keypoints = _live_keypoints(observation, width, height)
+        return {
+            "visible": observation is not None, "box": box, "keypoints": keypoints,
+            "identity_confidence": float(confidence),
+        }
 
     return {
         "time_seconds": float(seconds),

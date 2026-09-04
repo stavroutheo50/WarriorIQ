@@ -48,7 +48,7 @@
 </section>
 
 <section class="card end-to-end-validation">
-  <div class="accuracy-card-head"><div><div class="eyebrow">Automatic evidence gate</div><h2>End-to-end fight facts</h2></div><span class="accuracy-state {% if end_to_end.passed %}good{% else %}warn{% endif %}">{% if end_to_end.passed %}Gate passed{% else %}Not release ready{% endif %}</span></div>
+  <div class="accuracy-card-head"><div><div class="eyebrow">Automatic checks</div><h2>End-to-end fight facts</h2></div><span class="accuracy-state {% if end_to_end.passed %}good{% else %}warn{% endif %}">{% if end_to_end.passed %}Gate passed{% else %}Not release ready{% endif %}</span></div>
   <p class="muted">A technique model cannot unlock evidence by itself. Fighter identity, target, outcome, legality and exact contact timing must all pass on separate ground truth.</p>
   <div class="end-to-end-grid">{% for name,requirement in end_to_end.requirements.items() %}{% set measured=end_to_end.measured[name] %}<div><span>{{name.replace('_',' ')}}</span><strong>{% if measured is none %}—{% elif 'accuracy' in name %}{{'%.1f'|format(measured*100)}}%{% elif name == 'timing_mae_seconds' %}{{'%.3f'|format(measured)}}s{% else %}{{measured|int}}{% endif %}</strong><small>{{'At least' if requirement.direction == 'minimum' else 'At most'}} {% if 'accuracy' in name %}{{'%.0f'|format(requirement.value*100)}}%{% elif name == 'timing_mae_seconds' %}{{'%.2f'|format(requirement.value)}}s{% else %}{{requirement.value|int}}{% endif %}</small></div>{% endfor %}</div>
 </section>

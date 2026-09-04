@@ -132,3 +132,23 @@
   border-color: var(--wiq-cyan, #59d2e8);
 }
 .share-panel .share-once { margin-top: 12px; }
+
+/* Live analysis overlay: skeletons, not boxes.
+   A box says where a fighter is and nothing about what they are doing, and a
+   box drawn around two people standing close together looks the same whether
+   the tracker is locked on or has drifted onto a bystander. The skeleton makes
+   a wrong lock obvious while the analysis is still running, which is when it
+   is still worth cancelling. The corner label stays so A and B remain legible. */
+.live-skeletons {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.live-video-wrap .fighter-overlay {
+  border: 0;
+  width: 0;
+  height: 0;
+  box-shadow: none;
+  transition: left .15s linear, top .15s linear;
+}
+.live-video-wrap .fighter-overlay b { top: 0; left: 0; border-radius: 6px; }

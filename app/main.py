@@ -2725,6 +2725,61 @@ def active_analysis(request: Request):
     }
 
 
+def _score_withheld(report: dict) -> dict | None:
+    """Why this fight has no score, in words a fighter can act on.
+
+    The page used to say "Strike scoring needs the action model", which names
+    an internal component rather than a reason and is usually not even the
+    right one - a score is withheld far more often because a fighter was lost
+    on camera. The accurate explanation existed all along in the scorecard's
+    disclaimer, buried inside the deep-dive section at the bottom of the
+    report, where someone looking at "Not scored" never saw it.
+    """
+    scorecard = report.get("scorecard") or {}
+    if scorecard.get("available"):
+        return None
+    tracking = report.get("tracking") or {}
+    status = scorecard.get("status")
+
+    def _pct(key: str) -> str:
+        try:
+            return f"{float(tracking.get(key, 0)) * 100:.0f}%"
+        except (TypeError, ValueError):
+            return "an unknown share"
+
+    if status == "both_fighters_required":
+        return {
+            "reason": "You analysed one fighter, so there is no opponent to score against.",
+            "fix": "Run it again and choose Analyze both fighters.",
+        }
+    if status == "insufficient_observation_coverage":
+        required = f"{SETTINGS.min_tracking_coverage_for_score * 100:.0f}%"
+        return {
+            "reason": (
+                f"We lost sight of a fighter too often. We followed the red corner for "
+                f"{_pct('fighter_A_coverage')} of the fight and the blue corner for "
+                f"{_pct('fighter_B_coverage')}, and a fair score needs {required} of each."
+            ),
+            "fix": "Pick both fighters again on a frame where they are clearly apart, then re-run.",
+        }
+    if status == "insufficient_scoring_actions":
+        counted = (scorecard.get("evidence") or {}).get("scoring_action_candidates")
+        seen = f"Only {counted} were clear enough." if counted else "None were clear enough."
+        return {
+            "reason": f"Too few strikes could be counted with confidence. {seen}",
+            "fix": "Footage shot closer, steadier or from the side usually reads far better.",
+        }
+    if status == "identity_integrity_failed":
+        return {
+            "reason": "We could not stay certain which fighter was which for the whole fight.",
+            "fix": "Pick both fighters again on a clearer frame, then re-run.",
+        }
+    return {
+        "reason": "Tracking was not steady enough for a fair score.",
+        "fix": "Pick both fighters again on a clearer frame, then re-run.",
+    }
+
+
 def _sharing_state(request: Request, job_id: str, profile_id: int | None) -> dict:
     """What the athlete can see about their coach links.
 
@@ -2809,6 +2864,7 @@ def result_page(request: Request, job_id: str):
         "analysis_quality": _analysis_quality_summary(report),
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
+        "score_withheld": _score_withheld(report),
     })
     response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
     if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:

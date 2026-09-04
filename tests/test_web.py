@@ -739,7 +739,8 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("only when external recovery is explicitly enabled", privacy)
         self.assertIn("rather than being chosen per upload", privacy)
 
-    def _render_result(self, selection_check, can_share=False, sharing=None):
+    def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
+                       scorecard_available=None):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -766,14 +767,89 @@ class PublicPageTests(unittest.TestCase):
         fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
         report = json.loads(fixture.read_text(encoding="utf-8"))
         report["selection_check"] = selection_check
+        if scorecard_available is not None:
+            report.setdefault("scorecard", {})["available"] = scorecard_available
         request = Stub(url=Stub(path="/report/abc"), state=Stub(account=None), cookies={}, headers={})
         return env.get_template("result.html").render(
             request=request, job_id="abc", report=report,
             identity=sport_identity("kickboxing"),
             report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
             analysis_quality=_analysis_quality_summary(report), can_share=can_share,
-            sharing=sharing, unavailable=[],
+            sharing=sharing, score_withheld=score_withheld, unavailable=[],
         )
+
+    def test_no_page_explains_itself_by_naming_an_internal_component(self):
+        """An internal component name is not a reason a fighter can use.
+
+        A kickboxer reading "hidden until the action model is trained" learns
+        nothing they can act on and nothing about what WarriorIQ actually did.
+        Six user-facing strings across five pages explained withheld strike
+        numbers that way.
+        """
+        import re
+        from pathlib import Path
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        offenders = {}
+        for page in sorted(templates.glob("*.html")):
+            body = page.read_text(encoding="utf-8")
+            # Developer comments may still name the component; the rendered
+            # copy a fighter reads may not. Jinja comments span lines, so they
+            # have to be removed as blocks rather than line by line.
+            visible = re.sub(r"\{#.*?#\}", " ", body, flags=re.S)
+            for phrase in ("action model", "evidence gate", "release-validation gate"):
+                if phrase in visible:
+                    offenders.setdefault(page.name, []).append(phrase)
+        self.assertEqual(offenders, {}, f"internal vocabulary shown to fighters: {offenders}")
+
+    def test_an_unscored_fight_says_why_in_words_a_fighter_can_act_on(self):
+        """The page named an internal component instead of giving a reason.
+
+        "Strike scoring needs the action model" tells a kickboxer nothing, and
+        it is usually not the cause either - a score is withheld far more often
+        because a fighter was lost on camera. The real explanation was sitting
+        in the scorecard disclaimer at the bottom of the report, where nobody
+        reading "Not scored" would find it.
+        """
+        from app.main import _score_withheld
+
+        withheld = _score_withheld({
+            "scorecard": {"available": False, "status": "insufficient_observation_coverage"},
+            "tracking": {"fighter_A_coverage": 0.96, "fighter_B_coverage": 0.81},
+        })
+        self.assertIn("96%", withheld["reason"])
+        self.assertIn("81%", withheld["reason"], "the fighter is told which corner was lost")
+        self.assertIn("85%", withheld["reason"], "and what the bar actually is")
+
+        html = self._render_result({}, score_withheld=withheld, scorecard_available=False)
+        self.assertIn("Not scored", html)
+        self.assertNotIn("action model", html, "no internal component names on the page")
+        self.assertIn("81%", html)
+        self.assertIn(withheld["fix"], html)
+
+    def test_every_withheld_score_state_gives_a_reason_and_a_next_step(self):
+        """A state with no branch would silently fall back to saying nothing."""
+        from app.main import _score_withheld
+
+        states = [
+            "both_fighters_required", "insufficient_observation_coverage",
+            "insufficient_scoring_actions", "identity_integrity_failed",
+            "insufficient_tracking_evidence", "some_state_added_later",
+        ]
+        for status in states:
+            with self.subTest(status=status):
+                withheld = _score_withheld({
+                    "scorecard": {"available": False, "status": status, "evidence": {}},
+                    "tracking": {"fighter_A_coverage": 0.5, "fighter_B_coverage": 0.5},
+                })
+                self.assertTrue(withheld["reason"].strip())
+                self.assertTrue(withheld["fix"].strip())
+                self.assertNotIn("model", withheld["reason"].lower())
+
+    def test_a_scored_fight_has_nothing_to_explain(self):
+        from app.main import _score_withheld
+
+        self.assertIsNone(_score_withheld({"scorecard": {"available": True}}))
 
     def test_a_new_coach_link_is_shown_once_with_its_address(self):
         """Creating a link used to redirect to the coach's own view of the report.
