@@ -252,6 +252,23 @@ class Settings:
     min_switch_spread_body_lengths: float = float(
         os.getenv("WARRIORIQ_MIN_SWITCH_SPREAD", "0.5")
     )
+    # A second opinion on the two fighters' joints, from a top-down pose model.
+    # The fused detector regresses keypoints from whole-frame features and
+    # collapses on small or unusual bodies - measured on real footage it
+    # squeezed a fighter's torso to a sliver and put both legs on one point
+    # while reporting 0.93 ankle confidence. RTMPose receives the fighter
+    # cropped and rescaled to its full input and gets it right.
+    #
+    # Off by default because it is not free: 15.7 ms per person with no
+    # batching benefit, which roughly doubles analysis time. It is better, not
+    # faster, and that trade should be chosen rather than inherited.
+    rtm_pose_enabled: bool = env_bool("WARRIORIQ_RTM_POSE", False)
+    rtm_pose_device: str = os.getenv("WARRIORIQ_RTM_POSE_DEVICE", "cuda").strip()
+    rtm_pose_model: str = os.getenv(
+        "WARRIORIQ_RTM_POSE_MODEL",
+        "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/"
+        "rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip",
+    ).strip()
     # How often the analysis was looking at one of the two people who actually
     # fought. Set once measured on real runs; a correct run loses its fighters
     # to occlusion and pans, so this only has to separate "followed the fight"

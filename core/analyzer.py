@@ -49,6 +49,7 @@ from core.identity import IdentityManager
 from core.metrics import MetricsAccumulator
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
 from core.report import build_report, write_report
+from core.rtm_pose import refine as refine_fighter_pose
 from core.sam_recovery import SamRecovery, nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
 from core.scoring import is_legal_event, normalize_ruleset
@@ -605,6 +606,9 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                         guided_pose_recoveries["B"] += 1
                 people.extend(focused)
                 fighter_a, fighter_b = manager.update(people, source_frame, sam_guidance=guidance)
+                # Joints only, and only for the two fighters, only after
+                # identity has already chosen them. See core/rtm_pose.py.
+                refine_fighter_pose(frame, [fighter_a, fighter_b])
                 if guidance is not None:
                     if fighter_a is not None and guidance.get("A") is not None:
                         sam_guided["A"] += 1

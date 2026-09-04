@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 import sqlite3
 import json
 from contextlib import closing
@@ -2155,3 +2156,90 @@ class FurnitureReleaseTests(unittest.TestCase):
             manager._remember_positions([person(9, 120.0 + (index % 50) * 8.0)], frame)
         self.assertFalse(manager._release_if_furniture(manager.a))
         self.assertEqual(manager.a.current_track_id, 9)
+
+
+class RtmPoseRefinementTests(unittest.TestCase):
+    """A second opinion on the fighters' joints, and never on anyone else."""
+
+    def setUp(self):
+        from core import rtm_pose
+
+        rtm_pose.reset_for_tests()
+        self.addCleanup(rtm_pose.reset_for_tests)
+
+    @staticmethod
+    def _person(x=10.0):
+        import numpy as np
+
+        from core.types import PersonObservation
+
+        return PersonObservation(
+            track_id=1,
+            box=np.asarray([x, 10, x + 30, 90], dtype=np.float32),
+            confidence=0.9,
+            keypoints=np.zeros((17, 2), dtype=np.float32),
+            keypoint_conf=np.zeros(17, dtype=np.float32),
+        )
+
+    def test_switched_off_it_touches_nothing(self):
+        """The default has to be the analysis WarriorIQ already ran."""
+        import dataclasses
+
+        import numpy as np
+
+        from core import rtm_pose
+
+        person = self._person()
+        off = dataclasses.replace(rtm_pose.SETTINGS, rtm_pose_enabled=False)
+        with mock.patch.object(rtm_pose, "SETTINGS", off):
+            refined = rtm_pose.refine(np.zeros((220, 480, 3), dtype=np.uint8), [person])
+        self.assertEqual(refined, 0)
+        self.assertTrue((person.keypoints == 0).all(), "keypoints untouched")
+
+    def test_it_replaces_joints_and_leaves_identity_alone(self):
+        """Boxes, track ids and appearance decide who this is; joints do not.
+
+        Refinement runs after identity has already committed, so it can change
+        what the joints say and can never move a fighter onto somebody else.
+        """
+        import dataclasses
+
+        import numpy as np
+
+        from core import rtm_pose
+
+        person = self._person()
+        original_box = person.box.copy()
+        fake_kp = np.tile(np.asarray([[7.0, 9.0]], dtype=np.float32), (17, 1))
+        fake_sc = np.full(17, 0.8, dtype=np.float32)
+
+        on = dataclasses.replace(rtm_pose.SETTINGS, rtm_pose_enabled=True)
+        with mock.patch.object(rtm_pose, "SETTINGS", on), \
+                mock.patch.object(rtm_pose, "_get", return_value=lambda f, b: ([fake_kp], [fake_sc])):
+            refined = rtm_pose.refine(np.zeros((220, 480, 3), dtype=np.uint8), [person, None])
+
+        self.assertEqual(refined, 1, "the None fighter is skipped, not crashed on")
+        self.assertEqual(person.keypoints.shape, (17, 2), "still the COCO-17 contract")
+        self.assertAlmostEqual(float(person.keypoints[0][0]), 7.0)
+        self.assertAlmostEqual(float(person.keypoint_conf[0]), 0.8)
+        self.assertTrue((person.box == original_box).all(), "the box is not a pose decision")
+        self.assertEqual(person.track_id, 1)
+
+    def test_a_model_that_will_not_load_degrades_instead_of_failing(self):
+        """No pose model is a worse analysis. A crash is no analysis."""
+        import dataclasses
+
+        import numpy as np
+
+        from core import rtm_pose
+
+        person = self._person()
+        on = dataclasses.replace(rtm_pose.SETTINGS, rtm_pose_enabled=True)
+        with mock.patch.object(rtm_pose, "SETTINGS", on), \
+                mock.patch.object(rtm_pose, "_Refiner", side_effect=RuntimeError("no onnxruntime")):
+            first = rtm_pose.refine(np.zeros((220, 480, 3), dtype=np.uint8), [person])
+            second = rtm_pose.refine(np.zeros((220, 480, 3), dtype=np.uint8), [person])
+
+        self.assertEqual((first, second), (0, 0))
+        self.assertTrue(rtm_pose._unavailable, "it gives up rather than retrying every frame")
+        self.assertTrue((person.keypoints == 0).all())
