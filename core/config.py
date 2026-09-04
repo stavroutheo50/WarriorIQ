@@ -72,7 +72,14 @@ class Settings:
     # stay under the size the detector resolves reliably, so a small source is
     # analysed at a larger inference size instead.
     low_resolution_edge: int = int(os.getenv("WARRIORIQ_LOW_RES_EDGE", "960"))
-    low_resolution_imgsz: int = int(os.getenv("WARRIORIQ_LOW_RES_IMGSZ", "1280"))
+    # Measured on real 480x220 tournament footage, frame by frame. At 1280 the
+    # athletes are detected at 0.24 to 0.32 confidence - at or under BoT-SORT's
+    # new_track_thresh of 0.30 - so the tracker never starts a track for them
+    # and identity is left choosing between the referee and the spectators. At
+    # 1600 the same fighters come in at 0.55 to 0.86 and clear it comfortably.
+    # 1920 is worse, not better: the peaks do not improve and it adds a tail of
+    # 0.12 to 0.19 detections for the tracker to trip over.
+    low_resolution_imgsz: int = int(os.getenv("WARRIORIQ_LOW_RES_IMGSZ", "1600"))
     detection_conf: float = float(os.getenv("WARRIORIQ_DET_CONF", "0.20"))
     # Fighter drawing is fully manual. Candidate detection is only a visual
     # advisory, so free-tier web instances can skip loading YOLO on this page.
