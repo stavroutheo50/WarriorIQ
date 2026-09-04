@@ -5,6 +5,7 @@ import json
 import html
 import hmac
 import logging
+from logging.handlers import RotatingFileHandler
 import math
 import shutil
 import threading
@@ -41,7 +42,9 @@ from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
 )
-from core.config import DATASET, OUTPUTS, ROOT, RULESET_LABELS, RULESET_SHORT, RULESET_SPORTS, SETTINGS, UPLOADS
+from core.config import (
+    DATA_ROOT, DATASET, OUTPUTS, ROOT, RULESET_LABELS, RULESET_SHORT, RULESET_SPORTS, SETTINGS, UPLOADS,
+)
 from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
@@ -170,6 +173,41 @@ MAX_PROFILE_PHOTO_BYTES = 15 * 1024 * 1024
 MAX_PROFILE_VIDEO_BYTES = 500 * 1024 * 1024
 _progress_report_cache: dict[str, tuple[int, dict]] = {}
 LOGGER = logging.getLogger("warrioriq")
+
+
+def _configure_logging() -> None:
+    """Give the application's warnings somewhere to land.
+
+    Every logger here was created and none was ever given a handler, so Python
+    fell back to writing warnings at stderr - which under Passenger goes to a
+    log this host has not written to since August. The result was that the one
+    line naming why a sign-in failed, or why an email was not sent, existed in
+    the code and was visible nowhere, and every failure had to be reverse
+    engineered from outside the server.
+
+    Writes beside the database, which is by definition a directory this account
+    can write to. A failure to open the file must never take the site down with
+    it: no log is bad, no site is worse.
+    """
+    logger = logging.getLogger("warrioriq")
+    logger.setLevel(logging.INFO)
+    if any(getattr(handler, "_warrioriq_file", False) for handler in logger.handlers):
+        return
+    target = os.getenv("WARRIORIQ_LOG_FILE", "").strip()
+    path = Path(target) if target else DATA_ROOT / "warrioriq.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(path, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+    except OSError as exc:
+        logging.getLogger().warning("warrioriq_log_unavailable path=%s error=%s", path, type(exc).__name__)
+        return
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    handler._warrioriq_file = True
+    logger.addHandler(handler)
+    logger.propagate = False
+
+
+_configure_logging()
 
 PUBLIC_INDEX_ROUTES = (
     "/", "/pricing", "/privacy", "/legal", "/terms", "/cookies",

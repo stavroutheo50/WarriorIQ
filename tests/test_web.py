@@ -616,8 +616,8 @@ class PublicPageTests(unittest.TestCase):
 
         self.assertIn('/assets/base.css', shell)
         self.assertIn("product.css", CSS_BUNDLES["base"])
-        self.assertIn("See every shot.", home)
-        self.assertIn("Know what to fix.", home)
+        self.assertIn("Upload your fight.", home)
+        self.assertIn("See it in numbers.", home)
         self.assertIn('class="product-preview"', home)
         self.assertIn('class="workflow-track"', home)
         self.assertIn('class="fight-archive"', history)
@@ -728,8 +728,8 @@ class PublicPageTests(unittest.TestCase):
     def test_home_copy_uses_the_warrioriq_combat_sports_voice(self):
         page = self.client.get("/").text
         self.assertIn("For fighters and coaches", page)
-        self.assertIn("See every shot.", page)
-        self.assertIn("Know what to fix.", page)
+        self.assertIn("Upload your fight.", page)
+        self.assertIn("See it in numbers.", page)
         self.assertNotIn("WonderIQ", page)
         # "Frame by frame" is industry shorthand a fighter does not read as a
         # promise. The headline says what they get instead.
@@ -1776,3 +1776,33 @@ class UploadHandoffTests(unittest.TestCase):
         self.assertIn('name="round_duration_seconds" value="0"', self.page)
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
         self.assertIn("round_duration_seconds: float = Form(0.0)", source)
+
+
+class HomepagePromiseTests(unittest.TestCase):
+    """The homepage may not sell what the report withholds."""
+
+    def test_the_hero_does_not_promise_strike_counting(self):
+        """It said "See every shot" and "what landed, what missed".
+
+        The report says the opposite in as many words - landed, missed and
+        blocked are hidden until WarriorIQ can count them accurately - so the
+        first line on the site promised precisely the thing the product
+        declines to show. Whatever the hero says has to survive being read
+        beside a finished report.
+        """
+        from pathlib import Path
+
+        home = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+        hero = home.split("</section>")[0].lower()
+        for claim in ("see every shot", "what landed", "every punch", "counts every"):
+            self.assertNotIn(claim, hero, f"the hero cannot promise {claim!r} while strike counting is off")
+
+    def test_the_hero_says_what_is_actually_delivered(self):
+        """"Straight to the point" means naming the real deliverables."""
+        from pathlib import Path
+
+        home = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+        hero = home.split("</section>")[0].lower()
+        self.assertIn("score estimate", hero, "the scorecard is the headline deliverable")
+        self.assertIn("four-week plan", hero, "so is the training plan")
+        self.assertIn("guard", hero, "and the measurements that are actually real")

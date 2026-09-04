@@ -1698,3 +1698,49 @@ class SocialIdentityLinkingTests(unittest.TestCase):
         linked = webapp._link_verified_identity(self._identity("Mixed@Example.com", True))
         self.assertIsNotNone(linked)
         self.assertEqual(int(linked["id"]), int(account["id"]))
+
+
+class ApplicationLoggingTests(unittest.TestCase):
+    """Warnings existed in the code and were visible nowhere."""
+
+    def test_the_application_logger_actually_writes_somewhere(self):
+        """Every diagnosis this far was reverse-engineered from outside.
+
+        The loggers were created and never given a handler, so Python fell back
+        to stderr, which under Passenger goes to a log this host had not
+        written to in a week. The line naming why a sign-in failed was being
+        produced and discarded.
+        """
+        import logging
+
+        logger = logging.getLogger("warrioriq")
+        files = [h for h in logger.handlers if getattr(h, "_warrioriq_file", False)]
+        self.assertTrue(files, "the application logger must have a file handler")
+        self.assertFalse(logger.propagate, "handled here, not shouted at the root logger")
+        self.assertLessEqual(logger.level, logging.INFO)
+
+    def test_configuring_twice_does_not_duplicate_the_handler(self):
+        """Passenger imports can run more than once; each line must appear once."""
+        import logging
+
+        logger = logging.getLogger("warrioriq")
+        before = len([h for h in logger.handlers if getattr(h, "_warrioriq_file", False)])
+        webapp._configure_logging()
+        webapp._configure_logging()
+        after = len([h for h in logger.handlers if getattr(h, "_warrioriq_file", False)])
+        self.assertEqual(before, after, "re-running configuration must add nothing")
+
+    def test_an_unwritable_log_path_does_not_take_the_site_down(self):
+        """No log is bad. No site is worse."""
+        import logging
+
+        logger = logging.getLogger("warrioriq")
+        kept = list(logger.handlers)
+        self.addCleanup(lambda: setattr(logger, "handlers", kept))
+        logger.handlers = []
+        with mock.patch.dict(
+            webapp.os.environ,
+            {"WARRIORIQ_LOG_FILE": str(Path(self.__class__.__name__) / "no" / "such" / "x.log")},
+        ), mock.patch.object(webapp.Path, "mkdir", side_effect=OSError("denied")):
+            webapp._configure_logging()
+        self.assertEqual(logger.handlers, [], "it declines to log rather than raising")
