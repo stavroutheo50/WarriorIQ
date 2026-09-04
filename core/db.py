@@ -716,6 +716,26 @@ def get_account_for_oauth_identity(provider: str, subject: str) -> dict | None:
     return dict(row) if row else None
 
 
+def link_oauth_identity(provider: str, subject: str, account_id: int, email: str | None) -> None:
+    """Bind a provider identity to an account that already exists.
+
+    Only ever called for an address the provider itself has verified. The
+    caller owns that check: without it, anyone able to register a victim's
+    address at any provider could walk into their WarriorIQ account.
+    """
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            """INSERT INTO oauth_identities(provider,subject,account_id,email_at_link,created_at,updated_at)
+               VALUES(?,?,?,?,?,?)
+               ON CONFLICT(provider,subject) DO UPDATE SET
+                 account_id=excluded.account_id, email_at_link=excluded.email_at_link,
+                 updated_at=excluded.updated_at""",
+            (provider, subject, int(account_id), email, now, now),
+        )
+
+
 def list_oauth_identities(account_id: int) -> list[dict]:
     init_db()
     with connection() as con:

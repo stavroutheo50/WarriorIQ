@@ -53,7 +53,7 @@ from core.db import (
     get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, get_fighter, get_profile,
     get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
     list_expired_fight_videos, list_fighters, list_fights, list_legal_acceptances, list_moderation_reports,
-    list_oauth_identities,
+    link_oauth_identity, list_oauth_identities,
     list_outbound_messages, list_security_events, list_subscription_actions, mark_fight_video_deleted,
     mark_email_verified, mark_outbound_message_sent,
     queue_outbound_message, record_account_signup_acceptance, record_legal_acceptance,
@@ -1407,6 +1407,33 @@ async def social_auth_start(
     return response
 
 
+def _link_verified_identity(identity) -> dict | None:
+    """Let an existing account sign in with a provider for the first time.
+
+    Someone who signed up with a password and later presses Continue with
+    Google has no linked identity, so the callback refused them and pointed at
+    Create account - which then refused too, because the email is already
+    taken. Settings has no connect button either, so there was no way through
+    at all: the advice to "sign in with its password first" led nowhere.
+
+    Linking is allowed only on an address the provider has verified. Without
+    that check, registering a victim's address at any provider would be enough
+    to walk into their account, so an unverified email is treated as no email.
+    """
+    email = (identity.email or "").strip().lower()
+    if not identity.email_verified or not email or not valid_email(email):
+        return None
+    account = get_account_by_email(email)
+    if not account or account.get("account_status") != "active":
+        return None
+    link_oauth_identity(identity.provider, identity.subject, int(account["id"]), email)
+    record_security_event(
+        "oauth_identity_linked", account_id=int(account["id"]),
+        metadata={"provider": identity.provider},
+    )
+    return get_account_for_oauth_identity(identity.provider, identity.subject)
+
+
 @app.api_route("/auth/{provider}/callback", methods=["GET", "POST"])
 async def social_auth_callback(request: Request, provider: str):
     _enforce_rate_limit(request, "social-auth-callback", 40, 300)
@@ -1435,6 +1462,8 @@ async def social_auth_callback(request: Request, provider: str):
 
     account = get_account_for_oauth_identity(identity.provider, identity.subject)
     created = False
+    if not account:
+        account = _link_verified_identity(identity)
     if not account:
         if intent["mode"] != "signup":
             return _social_auth_error(

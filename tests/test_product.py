@@ -1632,3 +1632,69 @@ class TransactionalEmailConfigTests(unittest.TestCase):
         self.assertFalse(sent)
         smtp.SMTP.assert_not_called()
         self.assertIn("missing_smtp_password", "".join(logged.output))
+
+
+class SocialIdentityLinkingTests(unittest.TestCase):
+    """Signing up with a password locked you out of the social buttons."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        original = database.DB_PATH
+        self.addCleanup(lambda: setattr(database, "DB_PATH", original))
+        database.DB_PATH = Path(self.temp.name) / "link.sqlite3"
+        database.init_db()
+
+    @staticmethod
+    def _identity(email, verified):
+        from core.social_auth import SocialIdentity
+
+        return SocialIdentity(
+            provider="google", subject="google-subject-1", email=email,
+            display_name="Test", email_verified=verified,
+        )
+
+    def test_a_password_account_can_start_using_google(self):
+        """Every route was closed before this.
+
+        Continue with Google refused because no identity was linked, Create
+        account refused because the email was taken, and settings has no
+        connect button - so the error's own advice to sign in with a password
+        first led nowhere.
+        """
+        from core.auth import create_account
+
+        account = create_account("fighter@example.com", "a-long-enough-password")
+        linked = webapp._link_verified_identity(self._identity("fighter@example.com", True))
+        self.assertIsNotNone(linked, "a verified provider email signs into the matching account")
+        self.assertEqual(int(linked["id"]), int(account["id"]), "the same account, not a new one")
+
+        # And the link persists, so the second attempt needs no linking at all.
+        from core.db import get_account_for_oauth_identity
+
+        again = get_account_for_oauth_identity("google", "google-subject-1")
+        self.assertEqual(int(again["id"]), int(account["id"]))
+
+    def test_an_unverified_provider_email_is_refused(self):
+        """Otherwise registering someone's address at a provider takes their account."""
+        from core.auth import create_account
+
+        create_account("victim@example.com", "a-long-enough-password")
+        self.assertIsNone(
+            webapp._link_verified_identity(self._identity("victim@example.com", False)),
+            "an unverified address must be treated as no address at all",
+        )
+
+    def test_an_address_with_no_account_links_to_nothing(self):
+        self.assertIsNone(webapp._link_verified_identity(self._identity("nobody@example.com", True)))
+        self.assertIsNone(webapp._link_verified_identity(self._identity("", True)))
+        self.assertIsNone(webapp._link_verified_identity(self._identity("not-an-email", True)))
+
+    def test_the_match_ignores_address_case(self):
+        """Providers may return a differently cased address than was typed."""
+        from core.auth import create_account
+
+        account = create_account("mixed@example.com", "a-long-enough-password")
+        linked = webapp._link_verified_identity(self._identity("Mixed@Example.com", True))
+        self.assertIsNotNone(linked)
+        self.assertEqual(int(linked["id"]), int(account["id"]))
