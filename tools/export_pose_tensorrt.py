@@ -38,14 +38,35 @@ def main():
     # inference_size() exists precisely to upscale small sources so athletes
     # clear what pose estimation can resolve. A dynamic engine is what lets it
     # actually do that.
-    exported = model.export(
-        format="engine",
-        device=_export_device(),
-        imgsz=max(SETTINGS.default_imgsz, SETTINGS.low_resolution_imgsz),
-        half=False,
-        dynamic=True,
-        workspace=4,
-    )
+    size = max(SETTINGS.default_imgsz, SETTINGS.low_resolution_imgsz)
+
+    def build(half: bool):
+        return model.export(
+            format="engine",
+            device=_export_device(),
+            imgsz=size,
+            half=half,
+            dynamic=True,
+            workspace=4,
+        )
+
+    # fp16 roughly halves both the inference time and the activation memory,
+    # which matters on an 8GB card that also drives a display: at imgsz 1600
+    # the fp32 engine alone holds 3.85GB, leaving too little for the tracker's
+    # ReID model and SAM2 recovery beside it.
+    #
+    # TensorRT 11 removed the fp16 builder flag, so the precision has to be
+    # baked into the ONNX graph by NVIDIA ModelOpt first. That needs onnx>=1.18,
+    # whose test data cannot be unpacked on Windows unless long paths are
+    # enabled. Rather than fail the export - which would leave no engine at all
+    # and stop every analysis - fall back to fp32 and say exactly what is
+    # missing.
+    try:
+        exported = build(half=True)
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"  fp16 unavailable ({type(exc).__name__}: {exc}); building fp32 instead.")
+        print("  To get fp16: enable Windows long paths, then `pip install -U onnx`.")
+        exported = build(half=False)
     src = Path(str(exported))
     dst = Path(SETTINGS.pose_model_engine)
     dst.parent.mkdir(parents=True, exist_ok=True)
