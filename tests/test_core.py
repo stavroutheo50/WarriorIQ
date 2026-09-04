@@ -1961,7 +1961,7 @@ def test_a_stationary_candidate_is_refused_during_recovery_too():
 
     source = (Path(__file__).resolve().parents[1] / "core" / "identity.py").read_text(encoding="utf-8")
     veto = source[source.index("Refuse to move onto somebody who has been standing still"):]
-    veto = veto[:veto.index("return -999.0")]
+    veto = veto[:veto.index('_refuse(state, "too_still_spread")')]
     # The condition guarding the veto must not depend on the fighter being
     # currently held.
     assert "state.missing_frames == 0" not in veto, (
@@ -2243,3 +2243,35 @@ class RtmPoseRefinementTests(unittest.TestCase):
         self.assertEqual((first, second), (0, 0))
         self.assertTrue(rtm_pose._unavailable, "it gives up rather than retrying every frame")
         self.assertTrue((person.keypoints == 0).all())
+
+
+class RejectionReasonTests(unittest.TestCase):
+    """A refusal count with no reason cannot be acted on."""
+
+    def test_each_guard_records_why_it_refused(self):
+        """Appearance turning away the real fighter and a motion gate correctly
+        refusing a spectator both increment the same total. They need opposite
+        fixes, so the reason has to survive.
+        """
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, 100, x + 30, 180], dtype=np.float32),
+                confidence=0.9,
+            )
+
+        manager = IdentityManager(person(1, 100), person(2, 300), 0, source_fps=30.0)
+        self.assertEqual(manager.rejections, {}, "nothing refused yet")
+
+        manager._refuse(manager.a, "appearance")
+        manager._refuse(manager.a, "appearance")
+        manager._refuse(manager.b, "known_furniture")
+
+        self.assertEqual(manager.rejections, {"appearance": 2, "known_furniture": 1})
+        self.assertEqual(manager.a.switches_rejected, 2, "the per-fighter total still counts")
+        self.assertEqual(manager.b.switches_rejected, 1)

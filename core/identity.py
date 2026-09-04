@@ -153,6 +153,11 @@ class IdentityManager:
         # perfectly still must not be re-acquired on the next frame, or
         # the manager spends the fight letting go of the same chair.
         self._furniture: set[int] = set()
+        # Why identities were refused, not merely how often. A bare total
+        # cannot tell an appearance gate rejecting the real fighter from a
+        # motion gate correctly refusing a spectator, and those need
+        # opposite fixes.
+        self.rejections: dict[str, int] = {}
         self.source_fps = max(1.0, float(source_fps))
 
     def _remember_positions(self, people: list[PersonObservation], source_frame: int) -> None:
@@ -191,6 +196,12 @@ class IdentityManager:
         )
         body = sorted(item[3] for item in history)[len(history) // 2]
         return distance / body / (seconds / 60.0)
+
+    def _refuse(self, state: FighterState, reason: str) -> float:
+        """Record a refused identity takeover and why."""
+        state.switches_rejected += 1
+        self.rejections[reason] = self.rejections.get(reason, 0) + 1
+        return -999.0
 
     def _recent_spread(self, track_id: int | None, fps: float) -> float | None:
         """How far a track roams around its own average position, in body lengths.
@@ -274,8 +285,7 @@ class IdentityManager:
         # briefly beats tracking the wrong human.
         if state.anchor_appearance is not None and candidate.appearance is not None:
             if anchor < SETTINGS.min_anchor_appearance_similarity:
-                state.switches_rejected += 1
-                return -999.0
+                return self._refuse(state, "appearance")
         # Refuse to move onto somebody who has been standing still. Coaches,
         # the referee and the officials at the table all sit near the action
         # and all look plausible for a frame; what none of them do is cover
@@ -310,16 +320,13 @@ class IdentityManager:
             and candidate.track_id != state.current_track_id
         ):
             if int(candidate.track_id) in self._furniture:
-                state.switches_rejected += 1
-                return -999.0
+                return self._refuse(state, "known_furniture")
             travel = self._recent_travel(candidate.track_id, self.source_fps)
             if travel is not None and travel < SETTINGS.min_switch_travel_per_minute:
-                state.switches_rejected += 1
-                return -999.0
+                return self._refuse(state, "too_still_travel")
             spread = self._recent_spread(candidate.track_id, self.source_fps)
             if spread is not None and spread < SETTINGS.min_switch_spread_body_lengths:
-                state.switches_rejected += 1
-                return -999.0
+                return self._refuse(state, "too_still_spread")
         if keep_id_bonus and candidate.track_id is not None and candidate.track_id == state.current_track_id:
             score += SETTINGS.track_id_bonus
         return float(score)

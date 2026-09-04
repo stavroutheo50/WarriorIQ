@@ -892,6 +892,10 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "sam_continuous_failure_reason": sam_recovery.continuous_failure_reason,
         "fighter_A_rejected_switches": manager.a.switches_rejected,
         "fighter_B_rejected_switches": manager.b.switches_rejected,
+        # Which guard refused, not merely how many times. A total cannot tell an
+        # appearance gate turning away the real fighter from a motion gate
+        # correctly refusing a spectator, and those want opposite fixes.
+        "rejected_switch_reasons": dict(manager.rejections),
         "sam_available": sam_was_available,
         "sam_failure_reason": sam_recovery.failure_reason,
         "openai_identity_enabled": identity_referee.enabled,
