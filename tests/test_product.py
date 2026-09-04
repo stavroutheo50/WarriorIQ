@@ -152,6 +152,42 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         records = database.list_legal_acceptances(guest_id=guest_id)
         self.assertEqual(records[0]["metadata"], {"analytics": True, "marketing": False})
 
+    def test_health_reports_the_running_code_not_the_file_on_disk(self):
+        """A deploy that copies files without restarting must not look healthy.
+
+        /health read DEPLOYED_COMMIT on every request, so it echoed whatever the
+        last deploy wrote even while the worker served the previous code. The
+        site reported the new commit for hours while running the old one.
+        """
+        health = self.client.get("/health").json()
+        self.assertEqual(health["commit"], webapp.RUNNING_COMMIT)
+
+        # Files newer than the process: the probe must say so rather than
+        # reporting the new commit as though it were running.
+        (webapp.ROOT / "DEPLOYED_COMMIT").write_text("deadbee", encoding="utf-8")
+        self.addCleanup(lambda: (webapp.ROOT / "DEPLOYED_COMMIT").unlink(missing_ok=True))
+        stale = self.client.get("/health").json()
+        self.assertEqual(stale["commit"], webapp.RUNNING_COMMIT, "still the running code")
+        self.assertEqual(stale["deployed"], "deadbee")
+        self.assertTrue(stale["restart_required"])
+
+    def test_the_deploy_restarts_the_application_last(self):
+        """Copying files leaves Passenger serving the imported app from memory.
+
+        Without a restart task the deploy updated every file and changed
+        nothing a visitor could see, and it has to come after the copies so the
+        new process starts against a complete tree.
+        """
+        import yaml
+
+        raw = (Path(__file__).resolve().parents[1] / ".cpanel.yml").read_text(encoding="utf-8")
+        tasks = yaml.safe_load(raw)["deployment"]["tasks"]
+        restart = [i for i, task in enumerate(tasks) if "restart.txt" in task]
+        self.assertEqual(len(restart), 1, "exactly one restart trigger")
+        copies = [i for i, task in enumerate(tasks) if task.startswith("/bin/cp")]
+        self.assertTrue(copies, "the deploy still copies the application")
+        self.assertGreater(restart[0], max(copies), "restart must follow every copy")
+
     def test_revoking_coach_links_reports_how_many_it_killed(self):
         """The route redirected to an identical page, so revoking looked dead.
 

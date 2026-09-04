@@ -9,3 +9,16 @@ deployment:
     # and environment variables deploy separately, so a restart can pick up new
     # settings while still serving old code; this makes that visible.
     - /usr/bin/git rev-parse --short HEAD > $DEPLOYPATH/DEPLOYED_COMMIT
+    # Restart the application as the last step of the deploy.
+    #
+    # Copying files does not change the running process: Passenger keeps the
+    # imported app in memory, so a deploy updated every file on disk while the
+    # site kept serving the previous code. Static files hid it - they are read
+    # from disk per request, so new CSS appeared immediately and made the deploy
+    # look complete - while anything decided at import time, ASSET_VERSION
+    # included, stayed on the old value until the worker was recycled.
+    #
+    # Passenger restarts when this file's timestamp changes, and it must be the
+    # final task so the new process starts against a fully copied tree.
+    - /bin/mkdir -p $DEPLOYPATH/tmp
+    - /bin/touch $DEPLOYPATH/tmp/restart.txt

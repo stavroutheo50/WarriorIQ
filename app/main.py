@@ -3807,10 +3807,30 @@ def _deployed_commit() -> str:
         return "unknown"
 
 
+# What this process started with, captured once at import.
+#
+# /health used to read the file on every request, so it reported whatever the
+# last deploy had written even when the worker serving that request was still
+# running the previous code. A deploy that copied every file but never recycled
+# the process therefore looked perfectly healthy. This constant can only move
+# when the process itself is replaced, which is the whole point of it.
+RUNNING_COMMIT = _deployed_commit()
+
+
 @app.get("/health", include_in_schema=False)
 def health_check():
-    """Minimal deployment probe with no account, model or filesystem details."""
-    return {"status": "ok", "service": "WarriorIQ", "commit": _deployed_commit()}
+    """Minimal deployment probe with no account, model or filesystem details.
+
+    "commit" is the code actually running. "deployed" only appears when the
+    files on disk are newer than the process serving them, which means a deploy
+    copied its files without restarting the application.
+    """
+    payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT}
+    on_disk = _deployed_commit()
+    if on_disk != RUNNING_COMMIT:
+        payload["deployed"] = on_disk
+        payload["restart_required"] = True
+    return payload
 
 
 @app.get("/ready", include_in_schema=False)
