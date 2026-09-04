@@ -1747,3 +1747,33 @@ class ApplicationLoggingTests(unittest.TestCase):
         ), mock.patch.object(webapp.Path, "mkdir", side_effect=OSError("denied")):
             webapp._configure_logging()
         self.assertEqual(logger.handlers, [], "it declines to log rather than raising")
+
+
+class OAuthFailureLoggingTests(unittest.TestCase):
+    """"error=OAuthError" is a class name, not a reason."""
+
+    def test_the_provider_error_code_and_description_are_recorded(self):
+        """A wrong secret, a reused code and a bad redirect URI are one class.
+
+        They are also three different fixes, so the log has to say which. The
+        provider's error code and description carry no token or secret.
+        """
+        import logging
+
+        from authlib.integrations.base_client.errors import OAuthError
+
+        failure = OAuthError(error="invalid_client", description="Unauthorized")
+        with self.assertLogs("warrioriq", level=logging.WARNING) as logged:
+            webapp.LOGGER.warning(
+                "social_auth_rejected provider=%s error=%s code=%s detail=%s",
+                "google", type(failure).__name__,
+                getattr(failure, "error", "") or "unknown",
+                (getattr(failure, "description", "") or str(failure))[:200],
+            )
+        line = "".join(logged.output)
+        self.assertIn("code=invalid_client", line)
+        self.assertIn("Unauthorized", line)
+
+    def test_the_callback_logs_that_shape(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn('"social_auth_rejected provider=%s error=%s code=%s detail=%s"', source)

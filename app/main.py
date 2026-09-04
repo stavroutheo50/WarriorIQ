@@ -1503,7 +1503,16 @@ async def social_auth_callback(request: Request, provider: str):
         token = await client.authorize_access_token(request)
         identity = await SOCIAL_AUTH.identity_from_token(provider, client, token)
     except (OAuthError, ValueError) as exc:
-        LOGGER.warning("social_auth_rejected provider=%s error=%s", provider, type(exc).__name__)
+        # "OAuthError" alone cannot be acted on: a wrong client secret, a reused
+        # code and a mismatched redirect URI are one class and three different
+        # fixes. authlib carries the provider's own error code and description,
+        # neither of which contains a token or a secret, so both are recorded.
+        LOGGER.warning(
+            "social_auth_rejected provider=%s error=%s code=%s detail=%s",
+            provider, type(exc).__name__,
+            getattr(exc, "error", "") or "unknown",
+            (getattr(exc, "description", "") or str(exc))[:200],
+        )
         return _social_auth_error(request, intent, "The identity provider could not verify this sign-in.")
     except Exception as exc:
         LOGGER.warning("social_auth_unavailable provider=%s error=%s", provider, type(exc).__name__)
