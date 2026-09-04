@@ -1848,3 +1848,29 @@ class HomepagePromiseTests(unittest.TestCase):
         self.assertIn("score estimate", hero, "the scorecard is the headline deliverable")
         self.assertIn("four-week plan", hero, "so is the training plan")
         self.assertIn("guard", hero, "and the measurements that are actually real")
+
+
+class InterruptedVideoTransferTests(unittest.TestCase):
+    """Upload succeeded, analysis said it could not open the video."""
+
+    def test_a_truncated_transfer_is_not_blamed_on_the_footage(self):
+        """The file was decoded here well enough to cut a selection frame.
+
+        So a video the analysis machine cannot open means the copy to that
+        machine stopped early. The old wording sent people away to re-export a
+        file that was never the problem.
+        """
+        for error in (
+            RuntimeError("Could not open fight video"),
+            RuntimeError("Could not read the selected fight-start frame"),
+            RuntimeError("Video download stopped early: received 12 of 900 bytes."),
+        ):
+            with self.subTest(error=str(error)):
+                message = _public_analysis_error(error)
+                self.assertIn("start the analysis again", message.lower())
+                self.assertNotIn("could not finish", message.lower())
+
+    def test_other_failures_keep_their_own_wording(self):
+        self.assertIn("memory", _public_analysis_error(MemoryError("out of memory")).lower())
+        self.assertIn("unavailable", _public_analysis_error(ImportError("no module")).lower())
+        self.assertIn("could not finish", _public_analysis_error(ValueError("something else")).lower())

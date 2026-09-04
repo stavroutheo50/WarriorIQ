@@ -374,6 +374,17 @@ def _public_analysis_error(exc: Exception) -> str:
         return "The analysis engine is unavailable on this server. Your upload and fighter selections are preserved."
     if isinstance(exc, MemoryError) or "out of memory" in str(exc).lower():
         return "This analysis exceeded the server's available memory. Your upload and fighter selections are preserved."
+    # The upload finished and the video was decoded here well enough to cut a
+    # fighter-selection frame, so a file the analysis machine cannot open means
+    # the copy to that machine stopped early rather than that the footage is
+    # bad. Saying "could not analyse your video" sends people off to re-export
+    # a file that was never the problem; starting again is what actually works.
+    detail = str(exc).lower()
+    if "could not open" in detail or "stopped early" in detail or "could not read" in detail:
+        return (
+            "The video did not reach the analysis machine in one piece, so nothing was analysed. "
+            "Your upload and fighter selections are preserved - start the analysis again."
+        )
     return "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again."
 
 

@@ -82,7 +82,20 @@ class RemoteWorkerClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=120) as response, destination.open("wb") as output:
+                expected = response.headers.get("Content-Length")
                 shutil.copyfileobj(response, output, length=1024 * 1024)
+            # A dropped connection ends copyfileobj quietly and leaves a
+            # truncated file behind. Nothing checked, so the analysis started
+            # on half a video and died on cv2.VideoCapture with "Could not open
+            # fight video" - which reads as a broken upload, when the upload was
+            # complete and it was this download that stopped early.
+            if expected is not None:
+                written = destination.stat().st_size
+                if written != int(expected):
+                    destination.unlink(missing_ok=True)
+                    raise RemoteWorkerError(
+                        f"Video download stopped early: received {written} of {expected} bytes."
+                    )
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]
             if exc.code == 409:

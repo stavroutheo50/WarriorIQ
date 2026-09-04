@@ -719,3 +719,18 @@ class DurableAnalysisStateTests(TestCase):
             state.delete_job(job_id)
             client.close()
             other_client.close()
+
+    def test_the_progress_bar_sits_against_the_video(self):
+        """The bar was below the event timeline, the percentage in the header.
+
+        On a phone that put the number and the bar a scroll apart, and neither
+        beside the footage they describe.
+        """
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
+        wrap_end = template.index('id="eventFlash"')
+        bar = template.index('id="progressShell"')
+        timeline = template.index('id="analysisTimeline"')
+        self.assertLess(wrap_end, bar, "the bar comes after the video")
+        self.assertLess(bar, timeline, "and before the event timeline, not after it")
+        self.assertIn('id="percentInline"', template, "the percentage reads next to the bar")
+        self.assertIn("$('percentInline').textContent", template, "and is actually updated")

@@ -190,3 +190,23 @@
 }
 .progression-targets b { color: var(--wiq-text, #e8eefb); font-weight: 750; }
 .progression-check { margin: 10px 0 0; }
+
+/* Analysis progress, against the video it describes.
+   The bar sat below the event timeline while the percentage lived in the page
+   header, so on a phone the two were a scroll apart and neither was next to
+   the footage being analysed. */
+.analysis-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0 4px;
+}
+.analysis-progress-row .analysis-progress { flex: 1 1 auto; }
+.analysis-progress-value {
+  flex: 0 0 auto;
+  min-width: 3.6em;
+  text-align: right;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--wiq-text, #e8eefb);
+}
