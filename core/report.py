@@ -4,7 +4,9 @@ import json
 from html import escape
 from pathlib import Path
 
-from core.coaching import build_coaching, build_pose_coaching, build_training_plan
+from core.coaching import (
+    build_coaching, build_pose_coaching, build_training_plan, build_training_progression,
+)
 from core.sport_profiles import build_sport_coaching
 from core.config import SETTINGS
 from core.evidence_trust import automated_evidence_trust
@@ -102,12 +104,16 @@ def refresh_identity_integrity(report: dict) -> dict:
                 report.setdefault("training_plan", {})[fighter] = build_training_plan(
                     pose_coaching, fighter, metrics[fighter]
                 )
+                report.setdefault("training_progression", {})[fighter] = build_training_progression(
+                    pose_coaching, fighter, metrics[fighter]
+                )
             elif not identity_ready[fighter]:
                 report.setdefault("coaching", {})[fighter] = {
                     "strengths": [], "improvements": [], "drills": [],
                     "note": "Coaching withheld because this fighter did not pass the identity-integrity gate.",
                 }
                 report.setdefault("training_plan", {})[fighter] = []
+                report.setdefault("training_progression", {})[fighter] = []
         return report
 
     if not bool(integrity.get("action_metrics_trusted", False)):
@@ -119,6 +125,9 @@ def refresh_identity_integrity(report: dict) -> dict:
             pose_coaching = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"))
             report.setdefault("coaching", {})[fighter] = pose_coaching
             report.setdefault("training_plan", {})[fighter] = build_training_plan(
+                pose_coaching, fighter, metrics[fighter]
+            )
+            report.setdefault("training_progression", {})[fighter] = build_training_progression(
                 pose_coaching, fighter, metrics[fighter]
             )
     return report
@@ -360,6 +369,10 @@ def build_report(
         "training_plan": {
             "A": build_training_plan(coaching_a, "A", metrics["A"]),
             "B": build_training_plan(coaching_b, "B", metrics["B"]),
+        },
+        "training_progression": {
+            "A": build_training_progression(coaching_a, "A", metrics["A"]),
+            "B": build_training_progression(coaching_b, "B", metrics["B"]),
         },
         "integrity": {
             **evidence_trust,

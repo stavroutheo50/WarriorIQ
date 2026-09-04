@@ -149,6 +149,10 @@ class IdentityManager:
         # did you move? Measured across every fight so far, fighters cover 24 to
         # 65 body lengths a minute; a man standing at the mat edge covered 9.6.
         self._track_history: dict[int, deque] = {}
+        # Tracks proven to be scenery. A fighter released for standing
+        # perfectly still must not be re-acquired on the next frame, or
+        # the manager spends the fight letting go of the same chair.
+        self._furniture: set[int] = set()
         self.source_fps = max(1.0, float(source_fps))
 
     def _remember_positions(self, people: list[PersonObservation], source_frame: int) -> None:
@@ -187,6 +191,34 @@ class IdentityManager:
         )
         body = sorted(item[3] for item in history)[len(history) // 2]
         return distance / body / (seconds / 60.0)
+
+    def _recent_spread(self, track_id: int | None, fps: float) -> float | None:
+        """How far a track roams around its own average position, in body lengths.
+
+        Path length cannot separate a fighter from a spectator. Detection noise
+        on a seated person accumulates - a box trembling two pixels a frame adds
+        up to a respectable distance over ten seconds - and that is precisely
+        how identity walked off into the crowd while passing the travel test.
+
+        Spread does not accumulate. Someone sitting still has a small one no
+        matter how much their box shakes, because every sample stays near the
+        same mean. A fighter covers ground and cannot help but have a large one.
+
+        None until there is a long enough look to be certain, so a fighter held
+        briefly against the ropes is never mistaken for furniture.
+        """
+        if track_id is None or fps <= 0:
+            return None
+        history = self._track_history.get(int(track_id))
+        if not history or len(history) < 40:
+            return None
+        span_frames = history[-1][0] - history[0][0]
+        if span_frames <= 0 or span_frames / fps < 6.0:
+            return None
+        points = np.array([(item[1], item[2]) for item in history], dtype=np.float64)
+        spread = float(np.sqrt(((points - points.mean(axis=0)) ** 2).sum(axis=1).mean()))
+        body = sorted(item[3] for item in history)[len(history) // 2]
+        return spread / body
 
     @staticmethod
     def _by_track_id(people: list[PersonObservation], track_id: int | None) -> PersonObservation | None:
@@ -277,8 +309,15 @@ class IdentityManager:
             candidate.track_id is not None
             and candidate.track_id != state.current_track_id
         ):
+            if int(candidate.track_id) in self._furniture:
+                state.switches_rejected += 1
+                return -999.0
             travel = self._recent_travel(candidate.track_id, self.source_fps)
             if travel is not None and travel < SETTINGS.min_switch_travel_per_minute:
+                state.switches_rejected += 1
+                return -999.0
+            spread = self._recent_spread(candidate.track_id, self.source_fps)
+            if spread is not None and spread < SETTINGS.min_switch_spread_body_lengths:
                 state.switches_rejected += 1
                 return -999.0
         if keep_id_bonus and candidate.track_id is not None and candidate.track_id == state.current_track_id:
@@ -417,7 +456,38 @@ class IdentityManager:
             if obs is None:
                 state.missing_frames += 1
                 state.identity_confidence = 0.0
+        a_obs = None if self._release_if_furniture(self.a) else a_obs
+        b_obs = None if self._release_if_furniture(self.b) else b_obs
         return a_obs, b_obs
+
+    def _release_if_furniture(self, state: FighterState) -> bool:
+        """Let go of a fighter that has turned out to be a seated spectator.
+
+        Refusing to switch onto scenery cannot help when the fighter was
+        acquired as scenery: a track is created with no history, so nothing is
+        known about it at the moment it is taken, and the guard only ever runs
+        on candidates. Measured on real tournament footage, B held one seated
+        man for an entire round and the analysis called it 98% coverage - which
+        is the trap, because a person in a chair is trivially easy to keep
+        covered. High coverage was evidence of the failure, not of success.
+
+        Six seconds of continuous history with almost no spread is not a
+        fighter under any reading, so the identity is dropped and recovery is
+        allowed to look again. The track is remembered so the next frame does
+        not simply pick the same chair back up.
+        """
+        track_id = state.current_track_id
+        if track_id is None:
+            return False
+        spread = self._recent_spread(track_id, self.source_fps)
+        if spread is None or spread >= SETTINGS.min_switch_spread_body_lengths:
+            return False
+        self._furniture.add(int(track_id))
+        state.current_track_id = None
+        state.identity_confidence = 0.0
+        state.missing_frames += 1
+        state.switches_rejected += 1
+        return True
 
     def needs_recovery(self, state: FighterState, analyzed_index: int) -> bool:
         return (

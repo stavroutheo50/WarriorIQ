@@ -1967,3 +1967,191 @@ def test_a_stationary_candidate_is_refused_during_recovery_too():
         "the stationary veto is gated on the fighter being in hand again"
     )
     assert "candidate.track_id != state.current_track_id" in veto
+
+
+class TrainingProgressionTests(unittest.TestCase):
+    """A month of work, not one session repeated."""
+
+    def _coaching(self):
+        return {"drills": [
+            {"name": "Guard-return audit", "prescription": "4 x 90 sec: freeze in stance after every exchange.",
+             "metric": "guard_index", "label": "Guard position", "measured": 0.125, "opponent": 0.31},
+            {"name": "Balanced-finish rounds", "prescription": "4 x 90 sec: finish every technique in stance.",
+             "metric": "balance_index", "label": "Post-action balance", "measured": 0.756, "opponent": 0.80},
+        ]}
+
+    def test_the_last_week_lands_exactly_on_the_next_session_goal(self):
+        """Two numbers for the same target makes an athlete believe neither.
+
+        The weekly steps and the single next-session goal are computed from one
+        definition precisely so the progression finishes where the goal points.
+        """
+        from core.coaching import build_training_plan, build_training_progression
+
+        coaching = self._coaching()
+        plan = build_training_plan(coaching, "A", {})
+        weeks = build_training_progression(coaching, "A", {})
+
+        self.assertEqual(len(weeks), 4)
+        final = weeks[-1]["targets"][0]
+        self.assertEqual(final["to"], final["final"], "week four is the goal")
+        # And that goal is the one the next-session block already stated.
+        self.assertIn(final["final"], plan[0]["goal"])
+
+    def test_each_week_changes_how_the_work_is_done(self):
+        """Escalating only the volume is a list, not a training plan."""
+        from core.coaching import build_training_progression
+
+        weeks = build_training_progression(self._coaching(), "A", {})
+        themes = [week["theme"] for week in weeks]
+        methods = [week["method"] for week in weeks]
+        self.assertEqual(len(set(themes)), 4, "four distinct themes")
+        self.assertEqual(len(set(methods)), 4, "four distinct methods")
+        # The targets climb rather than repeating the same number every week.
+        guard = [week["targets"][0]["to"] for week in weeks]
+        self.assertEqual(len(set(guard)), 4, f"targets must step up: {guard}")
+
+    def test_the_plan_names_the_fighter_and_carries_the_real_drill(self):
+        from core.coaching import build_training_progression
+
+        weeks = build_training_progression(self._coaching(), "B", {})
+        self.assertTrue(all(item.startswith("Fighter B:") for week in weeks for item in week["work"]))
+        self.assertIn("freeze in stance", weeks[0]["work"][0])
+
+    def test_no_drills_means_no_invented_progression(self):
+        from core.coaching import build_training_progression
+
+        self.assertEqual(build_training_progression({"drills": []}, "A", {}), [])
+        # A drill with no measurement behind it cannot be given a target.
+        unmeasured = {"drills": [{"name": "x", "prescription": "y", "metric": None, "measured": None}]}
+        self.assertEqual(build_training_progression(unmeasured, "A", {}), [])
+
+
+class StationarySpreadVetoTests(unittest.TestCase):
+    """Path length cannot tell a fighter from a spectator; spread can."""
+
+    @staticmethod
+    def _manager():
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x, y=100.0):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, y, x + 30, y + 80], dtype=np.float32),
+                confidence=0.9,
+            )
+
+        return IdentityManager(person(1, 100), person(2, 300), 0, source_fps=30.0), person
+
+    def test_a_jittering_spectator_passes_the_travel_test_and_fails_on_spread(self):
+        """The exact failure that walked identity into the crowd.
+
+        A seated person whose detection box trembles a few pixels a frame
+        accumulates real path length - enough to clear the travel floor - while
+        never actually going anywhere. Spread does not accumulate, so it sees
+        through the jitter.
+        """
+        from core.config import SETTINGS
+
+        manager, person = self._manager()
+        # Ten seconds of a box shaking around one spot, never leaving it.
+        for index, frame in enumerate(range(0, 300, 2)):
+            wobble = 6.0 if index % 2 else -6.0
+            manager._remember_positions([person(9, 200.0 + wobble, 100.0 + wobble)], frame)
+
+        travel = manager._recent_travel(9, 30.0)
+        self.assertIsNotNone(travel)
+        self.assertGreater(
+            travel, SETTINGS.min_switch_travel_per_minute,
+            "jitter alone clears the travel floor - this is why travel was not enough",
+        )
+
+        spread = manager._recent_spread(9, 30.0)
+        self.assertIsNotNone(spread)
+        self.assertLess(
+            spread, SETTINGS.min_switch_spread_body_lengths,
+            "but it never leaves one spot, so the spread test refuses it",
+        )
+
+    def test_a_fighter_covering_ground_is_not_refused(self):
+        """The veto must cost a real fighter nothing."""
+        from core.config import SETTINGS
+
+        manager, person = self._manager()
+        # Ten seconds crossing the ring and back, as a fighter does.
+        for index, frame in enumerate(range(0, 300, 2)):
+            x = 120.0 + (index % 50) * 8.0
+            manager._remember_positions([person(9, x, 100.0)], frame)
+
+        spread = manager._recent_spread(9, 30.0)
+        self.assertIsNotNone(spread)
+        self.assertGreater(spread, SETTINGS.min_switch_spread_body_lengths)
+
+    def test_a_short_look_is_never_judged(self):
+        """Under six seconds is not evidence of anything, including furniture."""
+        manager, person = self._manager()
+        for frame in range(0, 120, 2):
+            manager._remember_positions([person(9, 200.0)], frame)
+        self.assertIsNone(manager._recent_spread(9, 30.0), "four seconds is too short to judge")
+
+
+class FurnitureReleaseTests(unittest.TestCase):
+    """Refusing to switch onto scenery cannot help if scenery was the seed."""
+
+    @staticmethod
+    def _manager():
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x, y=100.0):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, y, x + 30, y + 80], dtype=np.float32),
+                confidence=0.9,
+            )
+
+        return IdentityManager(person(1, 100), person(2, 300), 0, source_fps=30.0), person
+
+    def test_a_fighter_held_on_a_seated_person_is_let_go(self):
+        """Measured on real footage: B held one spectator for a whole round.
+
+        A track is created with no history, so nothing is known about it when
+        it is taken, and the switch guard only ever runs on candidates. The
+        analysis reported 98% coverage while watching a man in a chair, because
+        a stationary target is trivially easy to keep covered.
+        """
+        manager, person = self._manager()
+        manager.a.current_track_id = 9
+        for frame in range(0, 300, 2):
+            manager._remember_positions([person(9, 200.0)], frame)
+
+        self.assertTrue(manager._release_if_furniture(manager.a))
+        self.assertIsNone(manager.a.current_track_id, "the identity is dropped")
+        self.assertEqual(manager.a.identity_confidence, 0.0)
+
+    def test_the_released_track_is_never_picked_back_up(self):
+        """Otherwise the manager spends the fight letting go of one chair."""
+        manager, person = self._manager()
+        manager.a.current_track_id = 9
+        for frame in range(0, 300, 2):
+            manager._remember_positions([person(9, 200.0)], frame)
+        manager._release_if_furniture(manager.a)
+
+        self.assertIn(9, manager._furniture, "the track is remembered as scenery")
+        # And the memory is shared, so the other fighter cannot take it either.
+        manager.b.current_track_id = None
+        self.assertIn(9, manager._furniture)
+
+    def test_a_moving_fighter_is_never_released(self):
+        """The release must cost a real fighter nothing."""
+        manager, person = self._manager()
+        manager.a.current_track_id = 9
+        for index, frame in enumerate(range(0, 300, 2)):
+            manager._remember_positions([person(9, 120.0 + (index % 50) * 8.0)], frame)
+        self.assertFalse(manager._release_if_furniture(manager.a))
+        self.assertEqual(manager.a.current_track_id, 9)

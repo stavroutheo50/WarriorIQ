@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from core.types import StrikeEvent
 
 
@@ -384,6 +386,80 @@ def build_coaching(fighter: str, metrics: dict, events: list[StrikeEvent]) -> di
     }
 
 
+def _metric_progress(key: str, current: float) -> tuple[float, Callable[[float], str]]:
+    """Where one measurement should get to, and how to say it out loud.
+
+    One definition, because the next-session goal and the multi-week
+    progression have to agree. Two copies of this arithmetic would drift, and
+    an athlete told to reach two different numbers for the same thing stops
+    believing either.
+    """
+    if key == "pressure_index":
+        # Stored as -1..1 and spoken as 0..100, so +6 spoken is +0.12 stored.
+        return min(0.5, current + 0.12), lambda value: f"{(value + 1) / 2 * 100:.0f} out of 100"
+    if key == "footwork_body_lengths_per_second":
+        return current + 0.25, lambda value: f"{value:.1f} body lengths a second"
+    return min(0.95, current + 0.08), lambda value: f"{_pct(value)}%"
+
+
+# Four weeks, each changing how the drill is done rather than only how much of
+# it. A plan that repeats the same drill at the same intensity is a list, not
+# training: the correction has to survive resistance before it survives a fight.
+_PROGRESSION_WEEKS: tuple[tuple[str, str, int], ...] = (
+    ("Own the shape",
+     "No resistance. Slow enough that every repetition is correct, in front of a mirror or camera.", 3),
+    ("Against a partner",
+     "A partner feeds the situation at roughly half speed and does not try to win.", 3),
+    ("Under pressure",
+     "Live rounds at fight pace with one rule: the correction is the only thing being judged.", 4),
+    ("Prove it",
+     "Spar normally without thinking about it, then film a round and run it through WarriorIQ.", 2),
+)
+
+
+def build_training_progression(coaching: dict, fighter: str, own: dict) -> list[dict]:
+    """A four-week block that ends where the next-session goal was pointing.
+
+    The report gave a single next session and a target, which tells an athlete
+    what to fix but not how to get there, and gives a coach nothing to plan a
+    month around. The weekly targets are steps along the same line the goal
+    already drew, so week four's number is the goal.
+    """
+    drills = [
+        drill for drill in coaching.get("drills", [])
+        if drill.get("metric") is not None and drill.get("measured") is not None
+    ][:2]
+    if not drills:
+        return []
+    weeks = []
+    for index, (theme, method, sessions) in enumerate(_PROGRESSION_WEEKS, start=1):
+        targets = []
+        for drill in drills:
+            current = float(drill["measured"])
+            final, show = _metric_progress(drill["metric"], current)
+            step = current + (final - current) * (index / len(_PROGRESSION_WEEKS))
+            targets.append({
+                "label": drill.get("label", "this measurement"),
+                "from": show(current),
+                "to": show(step),
+                "final": show(final),
+            })
+        weeks.append({
+            "week": index,
+            "theme": theme,
+            "method": method,
+            "sessions_per_week": sessions,
+            "work": [f"Fighter {fighter}: {drill['prescription']}" for drill in drills],
+            "targets": targets,
+            "check": (
+                "Film a round and analyse it. These are the numbers that should have moved."
+                if index == len(_PROGRESSION_WEEKS)
+                else "Judge the week on whether the shape held, not on how tired you were."
+            ),
+        })
+    return weeks
+
+
 def build_training_plan(coaching: dict, fighter: str, own: dict) -> list[dict]:
     """Turn this fighter's findings into a measurable next-session schedule."""
     drills = coaching.get("drills", [])
@@ -414,16 +490,13 @@ def build_training_plan(coaching: dict, fighter: str, own: dict) -> list[dict]:
                 "without sacrificing the strongest measured area."
             )
         current = float(current)
+        target, show = _metric_progress(key, current)
         if key == "pressure_index":
-            now = (current + 1) / 2 * 100
-            target = min(75.0, now + 6)
-            goal = f"Move your pressure from {now:.0f} to {target:.0f} out of 100."
+            goal = f"Move your pressure from {show(current)} to {show(target)}."
         elif key == "footwork_body_lengths_per_second":
-            target = current + 0.25
-            goal = f"Move your feet more: {current:.1f} to {target:.1f} body lengths a second."
+            goal = f"Move your feet more: {show(current)} to {show(target)}."
         else:
-            target = min(0.95, current + 0.08)
-            goal = f"Raise {drill.get('label', 'this number').lower()} from {_pct(current)}% to {_pct(target)}%."
+            goal = f"Raise {drill.get('label', 'this number').lower()} from {show(current)} to {show(target)}."
         if theirs is not None:
             if key == "pressure_index":
                 theirs_shown = f"{(float(theirs) + 1) / 2 * 100:.0f}"

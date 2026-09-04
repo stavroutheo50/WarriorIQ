@@ -410,7 +410,26 @@
 
 {% if report_access.training_items != 0 %}<div class="grid{% if focus != 'BOTH' %} single{% endif %}" id="report-training">
 {% for fighter in ['A','B'] %}{% if focus == 'BOTH' or focus == fighter %}
-{% set training = report.training_plan[fighter] if report_access.report_tier == 'full' else report.training_plan[fighter][:report_access.training_items] %}<section class="card"><div class="eyebrow">Training plan · Fighter {{fighter}}</div><h2>Next-session plan</h2><ul class="list-clean">{% for x in training %}<li><strong>{{x.focus}}</strong><br><span class="muted">{{x.work}}</span><div class="small">Goal: {{x.goal}}</div></li>{% else %}<li class="muted">No safe plan could be generated from this analysis.</li>{% endfor %}</ul></section>
+{% set training = report.training_plan[fighter] if report_access.report_tier == 'full' else report.training_plan[fighter][:report_access.training_items] %}<section class="card"><div class="eyebrow">Training plan · Fighter {{fighter}}</div><h2>Next-session plan</h2><ul class="list-clean">{% for x in training %}<li><strong>{{x.focus}}</strong><br><span class="muted">{{x.work}}</span><div class="small">Goal: {{x.goal}}</div></li>{% else %}<li class="muted">No safe plan could be generated from this analysis.</li>{% endfor %}</ul>
+{% set progression = report.training_progression[fighter] if report.training_progression and fighter in report.training_progression else [] %}
+{% if progression and report_access.report_tier == 'full' %}
+<div class="training-progression">
+  <h3>The next four weeks</h3>
+  <p class="muted">Each week changes how the work is done, not just how much. Week four lands on the goal above &mdash; film a round then and the numbers should have moved.</p>
+  <ol class="progression-weeks">
+    {% for week in progression %}
+    <li>
+      <header><span class="progression-week">Week {{week.week}}</span><strong>{{week.theme}}</strong><small>{{week.sessions_per_week}}&times; a week</small></header>
+      <p class="progression-method">{{week.method}}</p>
+      <ul class="progression-work">{% for item in week.work %}<li>{{item}}</li>{% endfor %}</ul>
+      <div class="progression-targets">{% for target in week.targets %}<span><b>{{target.label}}</b> {{target.from}} &rarr; {{target.to}}</span>{% endfor %}</div>
+      <p class="progression-check small muted">{{week.check}}</p>
+    </li>
+    {% endfor %}
+  </ol>
+</div>
+{% endif %}
+</section>
 {% endif %}{% endfor %}
 </div>{% else %}<section class="locked-report-card" id="report-training"><div><div class="eyebrow">Complete training plan</div><h2>Turn the report into your next session.</h2><p class="muted">Expanded and Complete reports include a fighter-specific training plan linked to the measured evidence.</p></div><a class="btn secondary" href="/pricing">See report options</a></section>{% endif %}
 

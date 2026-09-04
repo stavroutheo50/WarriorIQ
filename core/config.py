@@ -235,6 +235,16 @@ class Settings:
     min_switch_travel_per_minute: float = float(
         os.getenv("WARRIORIQ_MIN_SWITCH_TRAVEL", "12")
     )
+    # How far a track must roam around its own average position, in body
+    # lengths, before it may take a fighter's identity. The travel test above
+    # measures path length, which detection noise on a seated spectator quietly
+    # accumulates; this one does not accumulate, so a trembling box in the
+    # crowd stays small however long it is watched. Only applied after six
+    # seconds of continuous history, so a fighter pinned on the ropes is never
+    # read as furniture.
+    min_switch_spread_body_lengths: float = float(
+        os.getenv("WARRIORIQ_MIN_SWITCH_SPREAD", "0.5")
+    )
     # How often the analysis was looking at one of the two people who actually
     # fought. Set once measured on real runs; a correct run loses its fighters
     # to occlusion and pans, so this only has to separate "followed the fight"

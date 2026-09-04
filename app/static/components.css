@@ -152,3 +152,41 @@
   transition: left .15s linear, top .15s linear;
 }
 .live-video-wrap .fighter-overlay b { top: 0; left: 0; border-radius: 6px; }
+
+/* The four-week block under the next-session plan.
+   A single session and a target says what to fix but not how to arrive there,
+   and gives a coach nothing to plan a month around. Numbered so a week can be
+   pointed at, and each one states how the work changes rather than repeating
+   the same drill louder. */
+.training-progression { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--wiq-line, #2a3a52); }
+.training-progression h3 { margin: 0 0 6px; }
+.progression-weeks { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 14px; }
+.progression-weeks > li {
+  padding: 16px 18px;
+  border: 1px solid var(--wiq-line, #2a3a52);
+  border-radius: var(--wiq-radius-md, 10px);
+  background: rgba(8, 14, 24, .42);
+}
+.progression-weeks header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.progression-week {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(85, 119, 216, .18);
+  color: var(--wiq-cyan, #8ea9f5);
+  font-size: var(--wiq-text-micro, 11px);
+  font-weight: 800;
+  letter-spacing: .6px;
+}
+.progression-weeks header small { margin-left: auto; color: var(--wiq-text-tertiary, #7c8aa2); }
+.progression-method { margin: 10px 0 0; color: var(--wiq-text-secondary, #9fabbe); }
+.progression-work { margin: 10px 0 0; padding-left: 18px; color: var(--wiq-text-secondary, #9fabbe); }
+.progression-work li + li { margin-top: 5px; }
+.progression-targets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.progression-targets span {
+  padding: 5px 10px;
+  border: 1px solid var(--wiq-line, #2a3a52);
+  border-radius: 8px;
+  font-size: var(--wiq-text-micro, 12px);
+}
+.progression-targets b { color: var(--wiq-text, #e8eefb); font-weight: 750; }
+.progression-check { margin: 10px 0 0; }
