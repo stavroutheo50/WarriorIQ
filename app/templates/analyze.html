@@ -212,7 +212,20 @@
     // below navigates. Leaving the flag set meant the beforeunload guard
     // blocked WarriorIQ's own redirect with "Leave site?" the moment the
     // upload finished - the bar stopping at 99% and the fight never starting.
-    request.addEventListener('load',()=>{releasePage();let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';location.assign(payload.next_url);return}restore(payload.detail||'WarriorIQ could not prepare this video. Please try again.')});
+    // The server explains its own refusals in payload.detail. Anything that
+    // is not our JSON came from in front of the application - the host
+    // rejecting the request body, a gateway timing out - and reporting all of
+    // those as "could not prepare this video" sent people back to re-export a
+    // file that was never the problem. The status is the only evidence there
+    // is, so it is turned into something the uploader can act on and quote.
+    const uploadFailureFor=status=>{
+      if(status===413)return 'The server refused this video because the file is too large. A shorter clip, or the same fight at a lower resolution, will go through.';
+      if(status===429)return 'Too many uploads in a short time. Wait a few minutes and try again.';
+      if(status===502||status===503||status===504)return 'The server did not answer in time. Wait a moment and try again.';
+      if(!status)return 'The upload stopped before it reached WarriorIQ. Check your signal and try again.';
+      return `WarriorIQ could not prepare this video (error ${status}). Please try again, and tell support that number if it keeps happening.`;
+    };
+    request.addEventListener('load',()=>{releasePage();let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';location.assign(payload.next_url);return}restore(payload.detail||uploadFailureFor(request.status))});
     request.addEventListener('error',()=>restore('The upload connection stopped. Check your signal and try again.'));
     request.addEventListener('abort',()=>restore('The upload was cancelled. Your video is still selected.'));
     uploadInFlight=true;

@@ -10,7 +10,10 @@
   <div class="pricing-promise"><span>✓ No video filename shown</span><span>✓ Your footage stays private</span><span>✓ Upgrade when you need more</span></div>
 </header>
 
-{% if not request.state.launch.ready %}<div class="notice"><strong>Paid checkout is safely locked.</strong> Real operator and legal contact details have not all been configured, so this build cannot collect subscriptions yet. <a class="text-link" href="/legal">Open launch readiness</a>.</div>{% endif %}
+{#- What a visitor needs to know is that they cannot be charged, not which
+    internal fields are still blank. The launch-readiness checklist it used to
+    link to lists the operator's own missing company details. -#}
+{% if not payments_enabled %}<div class="notice"><strong>Paid subscriptions are not available during early access yet.</strong> Every plan below is free to use while WarriorIQ is in early access, and no card is ever asked for.</div>{% endif %}
 
 {% if allowance %}
 <section class="allowance-strip">
@@ -61,7 +64,7 @@
     {% elif payments_enabled and plan.stripe_price_id %}
       <form method="post" action="/checkout/{{key}}"><label class="check billing-check"><input type="checkbox" name="billing_acceptance" value="true" required> I understand {{plan.price}} {{plan.period}}, recurring until cancelled, with {{plan.limit_label|lower}}. I accept the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms</a> and <a class="text-link" href="/refunds" target="_blank" rel="noopener">cancellation policy</a>.</label><button class="btn" type="submit" data-loading-label="Opening secure checkout…">Continue to secure payment</button></form>
     {% elif account %}
-      <a class="btn secondary" href="{% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Preview in local beta</a>
+      <a class="btn secondary" href="{% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Preview this plan</a>
     {% else %}
       <a class="btn secondary" href="/signup?next={% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Create account first</a>
     {% endif %}
@@ -78,5 +81,5 @@
   </div>
 </section>
 
-<section class="trust-panel pricing-trust"><div><div class="eyebrow">Honest billing foundation</div><h2>No charge before checkout is ready</h2><p>This local build opens paid checkout only after Stripe prices and signed webhooks are configured. Daily and monthly allowances are enforced atomically, and a failed analysis returns its reserved use.</p></div><div class="trust-checks"><span>✓ Secure hosted checkout</span><span>✓ Signed webhook verification</span><span>✓ Account-linked allowances</span><span>✓ Failed analyses are returned</span></div></section>
+<section class="trust-panel pricing-trust"><div><div class="eyebrow">Honest billing foundation</div><h2>No charge before checkout is ready</h2><p>Nobody can be billed while paid subscriptions are switched off, and no card details are collected anywhere on this site. Your analysis allowance is counted per account, and an analysis that fails gives its use back rather than spending it.</p></div><div class="trust-checks"><span>✓ Secure hosted checkout</span><span>✓ Signed webhook verification</span><span>✓ Account-linked allowances</span><span>✓ Failed analyses are returned</span></div></section>
 {% endblock %}

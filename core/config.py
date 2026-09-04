@@ -288,6 +288,11 @@ class Settings:
     version: str = "1.0"
     default_profile_name: str = "My Athlete"
     payments_enabled: bool = env_bool("WARRIORIQ_PAYMENTS", False)
+    # The launch checklist names the operator details still missing - company
+    # name, registration number, copyright agent. Useful to whoever is setting
+    # WarriorIQ up, and to a visitor it reads as "this company does not exist
+    # yet". Off unless the operator deliberately turns it on.
+    show_launch_checklist: bool = env_bool("WARRIORIQ_SHOW_LAUNCH_CHECKLIST", False)
 
     # Social sign-in is opt-in per provider. A provider is exposed only when
     # both credentials and a stable state-signing secret are configured.

@@ -7,7 +7,11 @@
     <div class="eyebrow">For fighters and coaches</div>
     <h1><span>Upload your fight.</span> <em>See it in numbers.</em></h1>
     <p>WarriorIQ follows both fighters through the whole round and measures how much ground you covered, who took the centre, how often your guard stayed up, and how balanced you finished. You get a round-by-round score estimate under your own sport&rsquo;s rules, and a four-week plan built from your numbers.</p>
-    <div class="hero-actions"><a class="btn btn-lead" data-motion-primary href="/analyze">Choose your sport <span aria-hidden="true">&#8594;</span></a><a class="btn secondary" href="#how-it-works">How it works</a></div>
+    {#- Analysing a fight needs an account: the upload endpoint refuses an
+       anonymous request, because footage carries identifiable athletes and the
+       allowance is counted per account. The button says so rather than sending
+       someone to a sign-in wall they were not told about. -#}
+    <div class="hero-actions">{% if request.state.account %}<a class="btn btn-lead" data-motion-primary href="/analyze">Choose your sport <span aria-hidden="true">&#8594;</span></a>{% else %}<a class="btn btn-lead" data-motion-primary href="/signup?next=/analyze">Create a free account <span aria-hidden="true">&#8594;</span></a>{% endif %}<a class="btn secondary" href="#how-it-works">How it works</a></div>
     <div class="fight-path" aria-label="WarriorIQ workflow"><span><b>01</b> Upload</span><i aria-hidden="true"></i><span><b>02</b> Review</span><i aria-hidden="true"></i><span><b>03</b> Train</span></div>
     <div class="trust-row"><span class="status-dot"></span><span class="small muted">Private processing</span><span class="pill">Evidence linked</span></div>
     <div class="sport-rail" aria-label="Sports analyzed">{% for sport, name in sports.items() %}<b>{{name}}</b>{% endfor %}</div>
@@ -48,7 +52,7 @@
 
 <section class="trust-panel"><div><div class="eyebrow">Built for serious review</div><h2>Evidence before claims.</h2><p>When footage cannot support a conclusion, WarriorIQ says so. Measured observations stay separate from uncertainty, and scorecards remain training estimates—not official judging.</p></div><div class="trust-checks"><span>Confidence-gated scorecards</span><span>Ruleset-aware evidence</span><span>Temporary guest processing</span><span>Account-controlled deletion</span></div></section>
 
-<section class="product-section coach-callout final-cta" data-reveal><div><div class="eyebrow">Bring your corner with you</div><h2>One fight. A clearer next session.</h2><p class="muted">Save progress, share a private summary, and turn the same fight evidence into practical work between sessions.</p></div><div class="hero-actions"><a class="btn" data-motion-primary href="/analyze">Analyze a fight</a><a class="btn secondary" href="/pricing">Explore plans</a></div></section>
+<section class="product-section coach-callout final-cta" data-reveal><div><div class="eyebrow">Bring your corner with you</div><h2>One fight. A clearer next session.</h2><p class="muted">Save progress, share a private summary, and turn the same fight evidence into practical work between sessions.</p></div><div class="hero-actions">{% if request.state.account %}<a class="btn" data-motion-primary href="/analyze">Analyze a fight</a>{% else %}<a class="btn" data-motion-primary href="/signup?next=/analyze">Create a free account to analyze a fight</a>{% endif %}<a class="btn secondary" href="/pricing">Explore plans</a></div></section>
 
 <section class="product-section faq"><div class="section-intro" data-reveal><div class="eyebrow">Questions</div><h2>Before you upload</h2></div><details><summary>Is WarriorIQ an official judge?</summary><p>No. Scorecards are evidence-gated estimates for training and review, not replacements for licensed officials.</p></details><details><summary>Does a guest fight remain saved?</summary><p>No. Guest files are held temporarily so the report can work, excluded from the fight library, and automatically removed after two hours.</p></details><details><summary>What happens when the AI is uncertain?</summary><p>It uses recovery evidence and suppresses unsupported claims. The planned uncertainty flow asks only a few simple questions when automatic recovery cannot resolve an important moment.</p></details>
 </section>

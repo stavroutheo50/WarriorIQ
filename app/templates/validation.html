@@ -99,7 +99,6 @@
 <section class="card">
   <div class="eyebrow">Training readiness</div><h2>{% if summary.train_ready %}Label gate ready for an experimental run{% else %}More ground truth required{% endif %}</h2>
   <p class="muted">Current labels: {{summary.positive_labels}} real actions and {{summary.negative_labels}} false candidates across {{summary.fights}} fights. Training and validation always split by whole fight, never random clips.</p>
-  <p><code>.\.venv\Scripts\python.exe tools\train_temporal_model.py --dataset-version corrections-v1</code></p>
 </section>
 
 <section class="card"><h2>Recent ground-truth labels</h2><div class="table-wrap"><table><thead><tr><th>Fight</th><th>Contact time</th><th>Prediction</th><th>Ground truth</th><th>Training sequence</th></tr></thead><tbody>{% for x in annotations[:30] %}<tr><td>Fight analysis</td><td>{{'%.2f'|format(x.event_time)}}s</td><td>{{x.predicted.technique|default('unknown')|replace('_',' ')}}</td><td>{{x.corrected.fighter}} · {{x.corrected.technique|replace('_',' ')}} · {{x.corrected.target or 'none'}} · {{x.corrected.outcome}}</td><td>{% if x.sequence_path %}<span class="good">Exported</span>{% else %}<span class="muted">Not exported</span>{% endif %}</td></tr>{% else %}<tr><td colspan="5" class="muted">No labels saved.</td></tr>{% endfor %}</tbody></table></div></section>

@@ -79,7 +79,7 @@ from core.upload_security import scan_upload
 from core.report import build_preliminary_scorecard, refresh_identity_integrity
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
-    guest_job_valid, mark_guest_job,
+    guest_job_valid,
 )
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_unobserved
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
@@ -2115,9 +2115,6 @@ async def upload(
             chosen_fighter = create_fighter(profile_id, fighter_name)
         elif fighter_id.strip().isdigit():
             chosen_fighter = get_fighter(profile_id, int(fighter_id))
-    if not account:
-        mark_guest_job(job_id, request.state.guest_id, str(video_path))
-
     create_job(
         job_id,
         {
@@ -3138,6 +3135,17 @@ def complete_evidence_review(
 
 @app.get("/validation", response_class=HTMLResponse)
 def validation_page(request: Request):
+    """Model-validation counts, for whoever is building this.
+
+    Not linked from anywhere in the site. It reports label counts, dataset
+    splits and whether the action model is release ready - true things, and
+    meaningless to a fighter, who reads "0 labels, not release ready" as a
+    verdict on the product they are being asked to pay for. Signing in is the
+    gate rather than an admin role, because no such role exists here and
+    inventing one to hide a page would be the wrong way round.
+    """
+    if not _account(request):
+        raise HTTPException(404)
     profile_id = _profile_id(request)
     owned_jobs = {fight["job_id"] for fight in list_fights(profile_id)} if profile_id is not None else set()
     annotations = [item for item in list_annotations() if item["job_id"] in owned_jobs]
@@ -3764,6 +3772,7 @@ def legal_center(request: Request):
         context={
             "request": request, "documents": LEGAL_DOCUMENTS,
             "launch": launch_readiness(), "policy_version": SETTINGS.policy_version,
+            "launch_checklist_visible": SETTINGS.show_launch_checklist,
         },
     )
 

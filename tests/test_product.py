@@ -601,11 +601,14 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             delete_job(job_id)
 
     def test_public_navigation_destinations_render(self):
-        for path in ("/", "/dashboard", "/history", "/compare", "/coach", "/validation", "/pricing", "/privacy", "/login", "/signup"):
+        for path in ("/", "/dashboard", "/history", "/compare", "/coach", "/pricing", "/privacy", "/login", "/signup"):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("WARRIOR", response.text)
+        # The accuracy lab is deliberately not among them: it reports internal
+        # model-validation counts that read as a verdict on the product.
+        self.assertEqual(self.client.get("/validation").status_code, 404)
 
     def test_primary_actions_are_real_and_explain_their_state(self):
         self._sign_in("actions@example.com")

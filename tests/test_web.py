@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+import app.main as webapp
 from app.main import (
     _apply_report_annotations, _build_replay_chapters, _prediction_at,
     _public_analysis_error, _review_candidates, app,
@@ -128,11 +129,15 @@ class PublicPageTests(unittest.TestCase):
         """
         import app.main as webapp
 
-        with mock.patch.object(webapp, "_account", return_value={"id": 1, "profile_id": 1}),                 mock.patch.object(webapp, "analysis_allowance", return_value=None):
+        account = {"id": 1, "profile_id": 1, "email": "test@example.com"}
+        # The navigation reads request.state.account, which the middleware
+        # fills from resolve_session rather than from _account, so both have to
+        # answer for the page to render as a signed-in one.
+        with mock.patch.object(webapp, "_account", return_value=account),                 mock.patch.object(webapp, "resolve_session", return_value=account),                 mock.patch.object(webapp, "analysis_allowance", return_value=None):
             yield
 
     def test_public_pages_render(self):
-        for path in ("/", "/dashboard", "/history", "/profile", "/coach", "/compare", "/validation", "/pricing", "/privacy", "/login", "/signup"):
+        for path in ("/", "/dashboard", "/history", "/profile", "/coach", "/compare", "/pricing", "/privacy", "/login", "/signup"):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
@@ -150,7 +155,18 @@ class PublicPageTests(unittest.TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("Policy version", response.text)
-        self.assertIn("Launch is blocked", self.client.get("/legal").text)
+        # The launch checklist names the operator details still missing - company
+        # name, registration number, copyright agent - which reads to a visitor
+        # as "this company does not exist". Off unless deliberately switched on.
+        legal = self.client.get("/legal").text
+        self.assertNotIn("Launch is blocked", legal)
+        self.assertNotIn("ITEMS MISSING", legal)
+        self.assertIn("Privacy Policy", legal, "the documents themselves stay public")
+        import dataclasses
+
+        shown = dataclasses.replace(webapp.SETTINGS, show_launch_checklist=True)
+        with mock.patch.object(webapp, "SETTINGS", shown):
+            self.assertIn("Launch is blocked", self.client.get("/legal").text)
         self.assertIn("does not register", self.client.get("/dmca").text)
 
     def test_choosing_a_sport_signed_out_goes_to_sign_in_first(self):
@@ -1237,12 +1253,27 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn('<section class="card"><div class="eyebrow">Performance integrity</div>', template)
 
     def test_mobile_navigation_keeps_the_primary_product_actions_only(self):
-        page = self.client.get("/").text
-        menu = page.split('<div class="mobile-menu"', 1)[1].split('</div>', 1)[0]
-        for label in (">Analyze<", ">Progress<", ">Coach<", ">Plans<"):
+        """Signed out, the menu offers the public site and nothing more.
+
+        Fight library, Progress, Coach and Compare all render a "sign in first"
+        empty state for a visitor with no account, so listing them handed
+        someone who had never used WarriorIQ four doors to the same locked
+        room. The accuracy lab is never listed: it reports internal model
+        validation counts.
+        """
+        menu = self.client.get("/").text.split('<div class="mobile-menu"', 1)[1].split('</div>', 1)[0]
+        for label in (">Analyze fight<", ">How it works<", ">Plans<", ">Sign in<", ">Create account<"):
             self.assertIn(label, menu)
-        self.assertNotIn("Accuracy", menu)
-        self.assertNotIn("Compare", menu)
+        for hidden in ("Accuracy", "Compare", "Fight library", ">Progress<", ">Coach<"):
+            self.assertNotIn(hidden, menu, "workspace tools are not offered before there is a workspace")
+
+    def test_signed_in_navigation_still_carries_the_workspace_tools(self):
+        """Splitting the navigation must not cost an account holder anything."""
+        with self.signed_in():
+            menu = self.client.get("/").text.split('<div class="mobile-menu"', 1)[1].split('</div>', 1)[0]
+        for label in (">Analyze<", ">Fight library<", ">Progress<", ">Coach<", ">Plans<"):
+            self.assertIn(label, menu)
+        self.assertNotIn("Accuracy", menu, "still never the accuracy lab")
 
     def test_performance_report_has_accessible_animated_measurement_rails(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
@@ -1274,8 +1305,19 @@ class PublicPageTests(unittest.TestCase):
         self.assertEqual(len(candidates), 3)
         self.assertEqual(sum(item["fighter"] == "A" and item["limb"] == "right_leg" for item in candidates), 1)
 
+    def test_the_accuracy_lab_is_not_reachable_by_a_visitor(self):
+        """It reports "0 labels, not release ready" - true, and not for customers.
+
+        A fighter deciding whether to trust WarriorIQ reads internal model
+        validation counts as a verdict on the product. The page is unlinked and
+        now answers 404 to anyone without an account, so it cannot be stumbled
+        into from the site.
+        """
+        self.assertEqual(self.client.get("/validation").status_code, 404)
+
     def test_accuracy_page_never_invents_measurements(self):
-        response = self.client.get("/validation")
+        with self.signed_in():
+            response = self.client.get("/validation")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Ground-truth validation", response.text)
         self.assertIn("Release target", response.text)
