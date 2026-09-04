@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -1579,3 +1580,55 @@ class SocialSignInCspTests(unittest.TestCase):
         self.assertIn("form-action 'self'", policy)
         for origin in SOCIAL_AUTH.form_action_origins:
             self.assertIn(origin, policy, "a configured provider must be reachable")
+
+
+class TransactionalEmailConfigTests(unittest.TestCase):
+    """Password resets were silently going nowhere in production."""
+
+    def test_a_display_name_alone_is_turned_into_a_real_from_address(self):
+        """A display name is not an address, and is the natural thing to type.
+
+        A bare name makes an invalid From header that the mail server rejects.
+        Pairing it with the authenticated mailbox costs nothing, and a value
+        that already carries an address must survive completely untouched.
+        """
+        from core.notifications import _from_header
+
+        self.assertEqual(
+            _from_header("WarriorIQ", "warrioriqai@gmail.com"),
+            "WarriorIQ <warrioriqai@gmail.com>",
+        )
+        # An address already given is left exactly alone.
+        self.assertEqual(_from_header("WarriorIQ <a@b.com>", "x@y.com"), "WarriorIQ <a@b.com>")
+        self.assertEqual(_from_header("", "warrioriqai@gmail.com"), "warrioriqai@gmail.com")
+        # Nothing usable at all must not produce a header of pure nonsense.
+        self.assertEqual(_from_header("WarriorIQ", ""), "")
+
+    def test_a_username_with_no_password_fails_loudly_instead_of_raising(self):
+        """WARRIORIQ_SMTP_PASSWORD was empty, so every login attempt threw.
+
+        The caller catches that and queues the message for a retry worker that
+        is not running, so a locked-out user simply never received a reset link
+        and nothing said why.
+        """
+        import logging
+
+        from types import SimpleNamespace
+
+        from core import notifications
+
+        env = {
+            "WARRIORIQ_SMTP_HOST": "smtp.gmail.com",
+            "WARRIORIQ_SMTP_USERNAME": "warrioriqai@gmail.com",
+            "WARRIORIQ_SMTP_PASSWORD": "",
+            "WARRIORIQ_EMAIL_FROM": "WarriorIQ",
+        }
+        with mock.patch.dict(notifications.os.environ, env, clear=False), \
+                mock.patch.object(notifications, "SETTINGS", SimpleNamespace(email_provider="smtp")), \
+                mock.patch.object(notifications, "smtplib") as smtp:
+            with self.assertLogs("warrioriq.notifications", level=logging.ERROR) as logged:
+                sent = notifications.send_transactional_email("a@b.com", "s", "b")
+
+        self.assertFalse(sent)
+        smtp.SMTP.assert_not_called()
+        self.assertIn("missing_smtp_password", "".join(logged.output))
