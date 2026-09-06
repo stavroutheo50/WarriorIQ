@@ -209,6 +209,46 @@ class IdentityManager:
         body = sorted(item[3] for item in history)[len(history) // 2]
         return distance / body / (seconds / 60.0)
 
+    def _recent_spread_short(self, track_id: int | None, fps: float) -> float | None:
+        """Spread over the last second and a half, not over the whole history.
+
+        The 6 s reading exists so a fighter briefly held against the ropes is
+        never mistaken for furniture, and it is right to be that patient about
+        a marginal case. But it means a track cannot be judged at all until it
+        has been watched for six seconds, and a seated spectator acquired in
+        the meantime is held for exactly that long - measured, frames 216 to
+        386 of the reference bout, while the bout went on without the fighter.
+
+        Someone who has not moved *at all* does not need six seconds to
+        establish. This reads the recent window instead, against a threshold
+        several times stricter, so it can only ever fire on a person who is
+        genuinely motionless.
+        """
+        if track_id is None or fps <= 0:
+            return None
+        history = self._track_history.get(int(track_id))
+        if not history:
+            return None
+        window = SETTINGS.stationary_short_seconds * fps
+        recent = [item for item in history if history[-1][0] - item[0] <= window]
+        if len(recent) < 12:
+            return None
+        # Nine tenths of the intended look, not all of it. Frames are sampled
+        # every other frame, so the oldest sample inside a window of exactly
+        # this length sits just under it and an equality test here would never
+        # be satisfied at all.
+        if (recent[-1][0] - recent[0][0]) < 0.9 * window:
+            return None
+        points = np.array([(item[1], item[2]) for item in recent], dtype=np.float64)
+        spread = float(np.sqrt(((points - points.mean(axis=0)) ** 2).sum(axis=1).mean()))
+        body = sorted(item[3] for item in recent)[len(recent) // 2]
+        return spread / body
+
+    def _is_motionless(self, track_id: int | None, fps: float) -> bool:
+        """Has this track not moved at all over the recent short window?"""
+        short = self._recent_spread_short(track_id, fps)
+        return short is not None and short < SETTINGS.max_stationary_spread_short
+
     def _refuse(self, state: FighterState, reason: str) -> float:
         """Record a refused identity takeover and why."""
         state.switches_rejected += 1
@@ -378,6 +418,11 @@ class IdentityManager:
                     return self._refuse(state, "known_furniture")
                 self._furniture.discard(int(candidate.track_id))
                 self.forgiven_furniture += 1
+            # A person who has not moved at all needs no long look. Without
+            # this, a spectator acquired early is held for the full six
+            # seconds the patient reading needs before it may speak.
+            if self._is_motionless(candidate.track_id, self.source_fps):
+                return self._refuse(state, "motionless")
             travel = self._recent_travel(candidate.track_id, self.source_fps)
             if travel is not None and travel < SETTINGS.min_switch_travel_per_minute:
                 return self._refuse(state, "too_still_travel")
@@ -558,7 +603,12 @@ class IdentityManager:
         if track_id is None:
             return False
         spread = self._recent_spread(track_id, self.source_fps)
-        if spread is None or spread >= SETTINGS.min_switch_spread_body_lengths:
+        patient = spread is not None and spread < SETTINGS.min_switch_spread_body_lengths
+        # Six seconds is the right amount of patience for a fighter who might
+        # merely be resting. It is far too much for a person in a chair, and
+        # the wait is not free: it is a wait spent measuring the wrong human
+        # and attributing the result to a fighter.
+        if not patient and not self._is_motionless(track_id, self.source_fps):
             return False
         self._furniture.add(int(track_id))
         state.current_track_id = None

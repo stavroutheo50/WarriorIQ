@@ -2666,3 +2666,69 @@ class HomelessFighterTests(unittest.TestCase):
         self.assertIsNone(a_obs, "A has nobody to follow and should admit it")
         self.assertIsNotNone(b_obs)
         self.assertEqual(b_obs.track_id, 2, "B must keep the man B was following")
+
+
+class MotionlessTrackTests(unittest.TestCase):
+    """A person who has not moved at all is decidable in well under six seconds."""
+
+    @staticmethod
+    def _manager():
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, 40., x + 30., 100.], dtype=np.float32),
+                confidence=0.8)
+
+        return IdentityManager(person(1, 220.), person(2, 270.), 0, source_fps=30.0)
+
+    @staticmethod
+    def _watch(manager, track_id, frames, move_per_frame):
+        import numpy as np
+
+        from core.types import PersonObservation
+
+        x = 300.0
+        for frame in frames:
+            box = np.asarray([x, 40., x + 30., 100.], dtype=np.float32)
+            manager._remember_positions(
+                [PersonObservation(track_id=track_id, box=box, confidence=0.8)], frame)
+            x += move_per_frame
+
+    def test_two_seconds_of_sitting_still_is_enough(self):
+        """The six-second reading has not spoken yet, and need not."""
+        manager = self._manager()
+        # Two seconds, sampled every other frame, of a box that does not move.
+        self._watch(manager, 5, range(0, 60, 2), 0.0)
+
+        self.assertIsNone(
+            manager._recent_spread(5, 30.0),
+            "the patient reading should still be abstaining at two seconds")
+        self.assertTrue(manager._is_motionless(5, 30.0))
+
+    def test_a_fighter_who_covers_ground_is_not_motionless(self):
+        manager = self._manager()
+        self._watch(manager, 6, range(0, 60, 2), 1.5)
+        self.assertFalse(manager._is_motionless(6, 30.0))
+
+    def test_a_glimpse_is_never_enough(self):
+        """Refusing a track for standing still needs a real look at it first."""
+        manager = self._manager()
+        self._watch(manager, 7, range(0, 12, 2), 0.0)
+        self.assertIsNone(manager._recent_spread_short(7, 30.0))
+        self.assertFalse(manager._is_motionless(7, 30.0))
+
+    def test_the_window_length_is_actually_reachable(self):
+        """Frames arrive every other frame, so an exact-length test never fires.
+
+        This is a regression guard: requiring the span to reach the full window
+        meant the reading returned None for every track in a real run and the
+        guard silently never ran at all.
+        """
+        manager = self._manager()
+        self._watch(manager, 8, range(0, 60, 2), 0.0)
+        self.assertIsNotNone(manager._recent_spread_short(8, 30.0))

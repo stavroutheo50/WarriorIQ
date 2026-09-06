@@ -50,6 +50,13 @@ the referee fall from 242 to 6, while frames spent on somebody who is not the
 referee are 686 against 671 - the same amount of real tracking, without the
 contamination.
 
+A third fault sat behind the official too: a seated spectator could be
+acquired and then held for six seconds, because the stationary guard cannot
+judge a track until it has watched one that long. Measured over 1.5 s instead,
+seated people reach 0.006 to 0.021 body lengths of spread and the least mobile
+fighter 0.059, so a much stricter threshold over a much shorter look settles
+the motionless cases early and leaves the patient reading to the marginal ones.
+
 Note the coupling. The anchor repair on its own makes matters worse, not
 better: it recovers more readily, and with nothing to refuse the official it
 recovers onto him, taking referee frames from 242 up to 298. These two changes

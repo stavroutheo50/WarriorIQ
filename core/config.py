@@ -274,6 +274,16 @@ class Settings:
     min_switch_spread_body_lengths: float = float(
         os.getenv("WARRIORIQ_MIN_SWITCH_SPREAD", "0.5")
     )
+    # A second, much stricter reading of the same measurement over a much
+    # shorter look. The 6 s guard above is calibrated to catch marginal cases
+    # and so must wait; somebody who has not moved at all is decidable far
+    # sooner. Measured over 1.5 s on real footage: seated spectators reach
+    # 0.006 to 0.021 body lengths and the least mobile fighter 0.059. This sits
+    # between them with margin at both ends.
+    max_stationary_spread_short: float = float(
+        os.getenv("WARRIORIQ_MAX_STATIONARY_SPREAD_SHORT", "0.04"))
+    stationary_short_seconds: float = float(
+        os.getenv("WARRIORIQ_STATIONARY_SHORT_SECONDS", "1.5"))
     # A second opinion on the two fighters' joints, from a top-down pose model.
     # The fused detector regresses keypoints from whole-frame features and
     # collapses on small or unusual bodies - measured on real footage it
