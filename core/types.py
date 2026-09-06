@@ -60,6 +60,10 @@ class PersonObservation:
     # A learned appearance vector, computed once per frame for every person and
     # compared like the histogram beside it. See core/reid.py.
     reid: np.ndarray | None = None
+    # Whether this detection is the official rather than a fighter, scored on
+    # the frame where the pixels are so the identity manager never needs it.
+    # See core/referee.py.
+    referee_prob: float | None = None
     pose_signature: np.ndarray | None = None
 
 
@@ -90,6 +94,10 @@ class FighterState:
     # anchor_appearance never updates - it is the only thing that still
     # remembers the real fighter after a gradual slide.
     anchor_reid: np.ndarray | None = None
+    # Whether the person originally selected scored as the official. If they
+    # did, the referee filter stands down for this fighter rather than
+    # refusing every candidate who is actually the person the user picked.
+    anchor_is_referee: bool = False
     anchor_pose: np.ndarray | None = None
     switches_rejected: int = 0
 

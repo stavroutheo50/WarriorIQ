@@ -125,6 +125,19 @@ class Settings:
     reid_device: str = os.getenv("WARRIORIQ_REID_DEVICE", "").strip()
     min_anchor_reid_similarity: float = float(
         os.getenv("WARRIORIQ_MIN_ANCHOR_REID", "0.745"))
+    # A categorical refusal rather than another threshold on similarity. The
+    # referee passes every comparative guard honestly, so the only thing that
+    # separates him is what he is wearing. See core/referee.py for why this
+    # feature is deliberately four numbers wide and per-federation.
+    referee_filter_enabled: bool = env_bool("WARRIORIQ_REFEREE_FILTER", False)
+    referee_probe_path: str = os.getenv(
+        "WARRIORIQ_REFEREE_PROBE", "models/referee_probe.npz").strip()
+    # Measured on 58 hand-checked crops from real footage: the official scores
+    # 0.56 to 0.997 and everyone else 0.003 to 0.091. The gap is wide enough
+    # that the midpoint costs nothing at either end, and on two unseen fights
+    # the crops that land near it are seated table officials, not fighters.
+    min_referee_probability: float = float(
+        os.getenv("WARRIORIQ_MIN_REFEREE_PROB", "0.50"))
     # Fighter motion between sampled frames is often larger than generic
     # pedestrian motion. These values still reject distant bystanders, while
     # allowing a fighter to be recovered after a tracker-ID reset.

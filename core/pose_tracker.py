@@ -8,6 +8,7 @@ import torch
 from core.config import SETTINGS
 from ultralytics import YOLO
 from core.identity import appearance_hist, pose_signature
+from core.referee import referee_probabilities
 from core.reid import embed
 from core.types import PersonObservation
 
@@ -167,9 +168,14 @@ class PoseTracker:
         # compare learned appearance instead of a colour histogram. See
         # core/reid.py for why the histogram is not enough here.
         if people:
-            vectors = embed(frame, np.asarray([p.box for p in people], dtype=np.float32))
-            for person, vector in zip(people, vectors):
+            boxes = np.asarray([p.box for p in people], dtype=np.float32)
+            vectors = embed(frame, boxes)
+            # And who the official is, which is a categorical question the
+            # comparative guards cannot answer. See core/referee.py.
+            verdicts = referee_probabilities(frame, boxes)
+            for person, vector, verdict in zip(people, vectors, verdicts):
                 person.reid = vector
+                person.referee_prob = verdict
         return people
 
     def recover_from_guidance(
@@ -312,6 +318,9 @@ def find_initial_people(manual_a, manual_b, people: list[PersonObservation], fra
             # comparison returns "no opinion", and the learned gate quietly
             # never runs while looking enabled.
             reid=(embed(frame, box.reshape(1, 4)) or [None])[0] if frame is not None else None,
+            referee_prob=(
+                referee_probabilities(frame, box.reshape(1, 4)) or [None]
+            )[0] if frame is not None else None,
             pose_signature=None,
         )
 

@@ -130,6 +130,9 @@ class IdentityManager:
             pose_signature=pose_signature(initial_a.keypoints, initial_a.box),
             anchor_appearance=None if initial_a.appearance is None else initial_a.appearance.copy(),
             anchor_reid=None if initial_a.reid is None else np.asarray(initial_a.reid).copy(),
+            anchor_is_referee=bool(
+                initial_a.referee_prob is not None
+                and initial_a.referee_prob >= SETTINGS.min_referee_probability),
             anchor_pose=pose_signature(initial_a.keypoints, initial_a.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
@@ -143,6 +146,9 @@ class IdentityManager:
             pose_signature=pose_signature(initial_b.keypoints, initial_b.box),
             anchor_appearance=None if initial_b.appearance is None else initial_b.appearance.copy(),
             anchor_reid=None if initial_b.reid is None else np.asarray(initial_b.reid).copy(),
+            anchor_is_referee=bool(
+                initial_b.referee_prob is not None
+                and initial_b.referee_prob >= SETTINGS.min_referee_probability),
             anchor_pose=pose_signature(initial_b.keypoints, initial_b.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
@@ -289,6 +295,20 @@ class IdentityManager:
         # like the fighter the user picked is the exact shape of a referee walking
         # through. Refusing is correct here: this manager's rule is that missing
         # briefly beats tracking the wrong human.
+        # The official is refused outright, before any similarity is consulted.
+        # He defeats every comparative guard honestly: he is on the mat, the
+        # right size, lit the same, and he moves like an athlete because he is
+        # one. There is no threshold on resemblance that admits a tiring
+        # fighter and refuses him, so the question has to change from "how
+        # similar is he" to "what is he". See core/referee.py.
+        #
+        # Unless the person originally selected scored as the official himself,
+        # in which case the user meant to follow him and this filter has no
+        # business refusing the very person they picked.
+        if (not state.anchor_is_referee
+                and candidate.referee_prob is not None
+                and candidate.referee_prob >= SETTINGS.min_referee_probability):
+            return self._refuse(state, "referee")
         # A learned appearance space when one is available, and the colour
         # histogram when it is not. Measured on real footage the histogram
         # cannot separate a referee from a fighter at all - their similarity

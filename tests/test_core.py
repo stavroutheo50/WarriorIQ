@@ -2432,3 +2432,136 @@ class ReidEncoderTests(unittest.TestCase):
         from core.config import SETTINGS
 
         self.assertFalse(SETTINGS.reid_enabled, "measured as not separating; stays off")
+
+
+class RefereeFilterTests(unittest.TestCase):
+    """A categorical refusal, because no threshold on resemblance works here."""
+
+    def setUp(self):
+        from core import referee
+
+        referee.reset_for_tests()
+        self.addCleanup(referee.reset_for_tests)
+
+    @staticmethod
+    def _person(shirt, trousers, room=110):
+        """A crude person on a mid-grey ground: shirt over trousers, in BGR."""
+        import numpy as np
+
+        frame = np.full((220, 480, 3), room, dtype=np.uint8)
+        frame[40:70, 200:230] = shirt
+        frame[70:100, 200:230] = trousers
+        return frame, [200.0, 34.0, 230.0, 104.0]
+
+    def test_disabled_filter_says_nothing_rather_than_not_a_referee(self):
+        """None and 0.0 mean different things to the caller.
+
+        A disabled filter must never read as positive evidence that this
+        person is a fighter.
+        """
+        import dataclasses
+        from unittest import mock
+
+        from core import referee
+
+        off = dataclasses.replace(referee.SETTINGS, referee_filter_enabled=False)
+        with mock.patch.object(referee, "SETTINGS", off):
+            frame, box = self._person((240, 240, 240), (20, 20, 20))
+            self.assertIsNone(referee.referee_probability(frame, box))
+
+    def test_missing_weights_disable_rather_than_guess(self):
+        import dataclasses
+        from unittest import mock
+
+        from core import referee
+
+        nowhere = dataclasses.replace(
+            referee.SETTINGS, referee_filter_enabled=True,
+            referee_probe_path="models/does-not-exist.npz")
+        with mock.patch.object(referee, "SETTINGS", nowhere):
+            frame, box = self._person((240, 240, 240), (20, 20, 20))
+            self.assertIsNone(referee.referee_probability(frame, box))
+
+    def test_pale_shirt_over_dark_trousers_scores_above_a_saturated_singlet(self):
+        """The one distinction the trained probe exists to make."""
+        import dataclasses
+        from unittest import mock
+
+        from core import referee
+
+        on = dataclasses.replace(referee.SETTINGS, referee_filter_enabled=True)
+        with mock.patch.object(referee, "SETTINGS", on):
+            official = referee.referee_probability(*self._person((240, 240, 240), (20, 20, 20)))
+            fighter = referee.referee_probability(*self._person((190, 90, 40), (170, 80, 35)))
+            if official is None or fighter is None:
+                self.skipTest("trained probe not present in this checkout")
+            self.assertGreater(official, fighter)
+
+    def test_batch_matches_one_at_a_time(self):
+        """Sharing the room-brightness reference must not change the answer."""
+        import dataclasses
+        from unittest import mock
+
+        from core import referee
+
+        on = dataclasses.replace(referee.SETTINGS, referee_filter_enabled=True)
+        with mock.patch.object(referee, "SETTINGS", on):
+            frame, box = self._person((240, 240, 240), (20, 20, 20))
+            single = referee.referee_probability(frame, box)
+            if single is None:
+                self.skipTest("trained probe not present in this checkout")
+            batched = referee.referee_probabilities(frame, [box, box])
+            self.assertEqual(len(batched), 2)
+            for value in batched:
+                self.assertAlmostEqual(single, value, places=6)
+
+    def test_degenerate_box_has_no_opinion(self):
+        import dataclasses
+        from unittest import mock
+
+        from core import referee
+
+        on = dataclasses.replace(referee.SETTINGS, referee_filter_enabled=True)
+        with mock.patch.object(referee, "SETTINGS", on):
+            frame, _ = self._person((240, 240, 240), (20, 20, 20))
+            self.assertIsNone(referee.referee_probability(frame, None))
+            self.assertIsNone(referee.referee_probability(None, [0., 0., 9., 9.]))
+
+    def test_a_candidate_scored_as_the_official_is_refused(self):
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, referee_prob):
+            return PersonObservation(
+                track_id=track_id, box=np.asarray([10., 10., 40., 90.], dtype=np.float32),
+                confidence=0.8, referee_prob=referee_prob)
+
+        manager = IdentityManager(person(1, 0.01), person(2, 0.01), 0, source_fps=30.0)
+        self.assertFalse(manager.a.anchor_is_referee)
+        before = manager.rejections.get("referee", 0)
+        manager._score(manager.a, person(7, 0.99))
+        self.assertEqual(manager.rejections.get("referee", 0), before + 1)
+
+    def test_filter_stands_down_when_the_official_was_the_one_selected(self):
+        """The user's own choice is never overridden by this filter.
+
+        If somebody deliberately seeds the analysis on the referee, refusing
+        every candidate who is the referee would follow nobody at all.
+        """
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, referee_prob):
+            return PersonObservation(
+                track_id=track_id, box=np.asarray([10., 10., 40., 90.], dtype=np.float32),
+                confidence=0.8, referee_prob=referee_prob)
+
+        manager = IdentityManager(person(1, 0.99), person(2, 0.01), 0, source_fps=30.0)
+        self.assertTrue(manager.a.anchor_is_referee)
+        before = manager.rejections.get("referee", 0)
+        manager._score(manager.a, person(7, 0.99))
+        self.assertEqual(manager.rejections.get("referee", 0), before)
