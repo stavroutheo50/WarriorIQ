@@ -45,7 +45,7 @@ from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
 # it, and left six real fights showing 5 attempts out of 309 detections.
 ATTEMPT_CONFIDENCE = CONFIDENCE_FLOOR + 0.25 * (CONFIDENCE_CEILING - CONFIDENCE_FLOOR)
 
-from core.identity import IdentityManager
+from core.identity import IdentityManager, fighter_pair_similarity
 from core.metrics import MetricsAccumulator
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
 from core.report import build_report, write_report
@@ -516,6 +516,9 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         first_frame,
     )
     manager = IdentityManager(initial_a, initial_b, start_frame, source_fps=info.fps)
+    # Can these two be told apart in this video at all? Asked once, at the
+    # start, because no amount of work downstream recovers from "no".
+    pair_similarity = fighter_pair_similarity(initial_a, initial_b)
     manager.prime_track_history(warm_samples)
     canonical_a_box = [float(value) for value in initial_a.box]
     canonical_b_box = [float(value) for value in initial_b.box]
@@ -923,6 +926,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         # correctly refusing a spectator, and those want opposite fixes.
         "rejected_switch_reasons": dict(manager.rejections),
         "furniture_tracks_readmitted": manager.forgiven_furniture,
+        # How alike the two chosen fighters are, and how often the analysis
+        # could not tell which was which. Reported whether or not they cross
+        # the line, because the number is the evidence for the verdict.
+        "fighter_pair_similarity": None if pair_similarity is None else float(pair_similarity),
+        "fighters_separable": (
+            None if pair_similarity is None
+            else bool(pair_similarity < SETTINGS.max_fighter_pair_similarity)),
+        "identity_confusions": int(manager.confusions),
+        "last_identity_confusion_frame": manager.last_confusion_frame,
         "sam_available": sam_was_available,
         "sam_failure_reason": sam_recovery.failure_reason,
         "openai_identity_enabled": identity_referee.enabled,

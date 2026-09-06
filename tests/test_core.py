@@ -2893,3 +2893,90 @@ class LabelPackTests(unittest.TestCase):
         audit = audit_sequence_directory(dataset / "sequences")
         self.assertEqual(audit["invalid_sequences"], 0)
         self.assertEqual(audit["valid_sequences"], 1)
+
+
+class FighterSeparabilityTests(unittest.TestCase):
+    """Whether these two can be told apart at all, asked before analysing."""
+
+    @staticmethod
+    def _observation(hue):
+        import numpy as np
+
+        import cv2
+
+        from core.identity import appearance_hist
+        from core.types import PersonObservation
+
+        frame = np.zeros((220, 480, 3), dtype=np.uint8)
+        patch = np.zeros((60, 30, 3), dtype=np.uint8)
+        patch[:, :] = (hue, 200, 200)
+        frame[40:100, 200:230] = cv2.cvtColor(patch, cv2.COLOR_HSV2BGR)
+        box = [200.0, 34.0, 230.0, 104.0]
+        return PersonObservation(
+            track_id=None, box=np.asarray(box, dtype=np.float32), confidence=1.0,
+            appearance=appearance_hist(frame, box))
+
+    def test_two_fighters_in_different_kit_are_separable(self):
+        from core.config import SETTINGS
+        from core.identity import fighter_pair_similarity
+
+        alike = fighter_pair_similarity(self._observation(10), self._observation(110))
+        self.assertIsNotNone(alike)
+        self.assertLess(alike, SETTINGS.max_fighter_pair_similarity)
+
+    def test_two_fighters_in_the_same_kit_are_not(self):
+        from core.config import SETTINGS
+        from core.identity import fighter_pair_similarity
+
+        alike = fighter_pair_similarity(self._observation(110), self._observation(110))
+        self.assertGreaterEqual(alike, SETTINGS.max_fighter_pair_similarity)
+
+    def test_no_opinion_without_an_appearance(self):
+        from core.identity import fighter_pair_similarity
+
+        self.assertIsNone(fighter_pair_similarity(None, self._observation(10)))
+
+    def test_inseparable_fighters_withhold_the_scorecard(self):
+        """High coverage must not rescue a bout whose fighters are confusable."""
+        from core.report import refresh_identity_integrity
+
+        report = {
+            "video": {"analysis_target": "BOTH"},
+            "tracking": {
+                "fighter_A_coverage": 0.95, "fighter_B_coverage": 0.95,
+                "fighter_A_initial_iou": 0.9, "fighter_B_initial_iou": 0.9,
+                "fighter_A_seed_source": "pose_detector",
+                "fighter_B_seed_source": "pose_detector",
+                "fighters_separable": False, "fighter_pair_similarity": 0.89,
+            },
+        }
+        refresh_identity_integrity(report)
+        self.assertFalse(report["integrity"]["identity_evidence_trusted"])
+        self.assertEqual(report["scorecard"]["status"], "fighters_not_separable")
+        self.assertFalse(report["scorecard"]["available"])
+
+    def test_the_explanation_names_the_problem_and_a_fix(self):
+        from app.main import _score_withheld
+
+        explained = _score_withheld({
+            "scorecard": {"available": False, "status": "fighters_not_separable"},
+            "tracking": {"fighter_pair_similarity": 0.89, "identity_confusions": 4},
+        })
+        self.assertIn("89%", explained["reason"])
+        self.assertIn("4 times", explained["reason"])
+        self.assertTrue(explained["fix"])
+
+    def test_looking_alike_never_blocks_the_analysis(self):
+        """Most footage is not shot for us; refusing it helps nobody.
+
+        The warning travels with the result instead, so a user with a phone
+        video of two fighters in the same club kit still gets an analysis and
+        is told which parts of it to trust.
+        """
+        import inspect
+
+        from app import main
+
+        source = inspect.getsource(main.start)
+        self.assertIn("looks_alike", source)
+        self.assertNotIn("fighters_look_alike\"", source.split("LOGGER.info")[0][-400:])

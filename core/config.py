@@ -116,6 +116,24 @@ class Settings:
     # margin, and still refuses roughly half of the impostors outright.
     min_anchor_appearance_similarity: float = float(
         os.getenv("WARRIORIQ_MIN_ANCHOR_SIMILARITY", "0.55"))
+    # How alike the two selected fighters may look before per-fighter results
+    # stop meaning anything. This is a different question from every other
+    # threshold here: not "is this candidate the fighter" but "can these two be
+    # told apart at all in this video", and it is answerable in a second, at
+    # selection, before anything is analysed.
+    #
+    # Measured on three bouts, comparing the two chosen fighters to each other:
+    # the two where identity holds score 0.613 and 0.640, and the one where it
+    # cannot be made to work scores 0.891. The learned embedding is no use for
+    # this - it says 0.89 to 0.91 for all three alike - because it is trained
+    # to describe a person, and two people in similar kit genuinely are similar.
+    # Colour is cruder and, for this one question, better.
+    #
+    # Deliberately nearer the failing case: a false warning costs a user a
+    # re-selection, while a missed one costs them a scorecard that names the
+    # wrong fighter.
+    max_fighter_pair_similarity: float = float(
+        os.getenv("WARRIORIQ_MAX_PAIR_SIMILARITY", "0.78"))
     # A learned appearance space for the same gate. The histogram above cannot
     # separate a referee from a fighter - measured, their ranges overlap almost
     # completely - while an embedding puts the referee at 0.695-0.741 and the

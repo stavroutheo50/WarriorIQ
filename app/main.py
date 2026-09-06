@@ -42,6 +42,7 @@ from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
 )
+from core.identity import fighter_pair_similarity
 from core.config import (
     DATA_ROOT, DATASET, OUTPUTS, ROOT, RULESET_LABELS, RULESET_SHORT, RULESET_SPORTS, SETTINGS, UPLOADS,
 )
@@ -1344,12 +1345,22 @@ def _wake_analysis_worker(job_id: str) -> None:
     threading.Thread(target=run, name=f"wiq-wake-{job_id}", daemon=True).start()
 
 
-def _analysis_started_response(request: Request, job_id: str, deferred: bool = False) -> JSONResponse:
+def _analysis_started_response(request: Request, job_id: str, deferred: bool = False,
+                              looks_alike: float | None = None) -> JSONResponse:
     response = JSONResponse({
         "ok": True,
         "progress_url": f"/progress/{job_id}",
         "deferred": deferred,
         **({"notice": _deferred_analysis_message()} if deferred else {}),
+        **({"fighters_look_alike": {
+            "similarity": round(float(looks_alike), 3),
+            "message": (
+                f"These two look {looks_alike:.0%} alike to us, where a bout we can read "
+                "is usually nearer 60%. We will still analyse it, but we may mix them up - "
+                "if the report says so, pick them again on a frame where their kit or "
+                "headguards differ most."
+            ),
+        }} if looks_alike is not None else {}),
     })
     response.set_cookie(
         ACTIVE_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
@@ -2673,6 +2684,25 @@ def start(request: Request, job_id: str, payload: StartPayload):
     )
     if shared / max(1.0, smallest) >= 0.28:
         raise HTTPException(400, "Draw a separate fighter in each box; the two selections overlap too much.")
+
+    # Asked here, on one frame, in a few milliseconds - because it decides
+    # whether anything the analysis says afterwards about *which* fighter did
+    # what can be believed, and because this is the last moment the person who
+    # can actually answer it is still looking at the screen.
+    chosen_frame = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
+    alike = fighter_pair_similarity(
+        _appearance_observation(chosen_frame, fighter_a_box),
+        _appearance_observation(chosen_frame, fighter_b_box),
+    )
+    # Warned, never refused. Most footage is not shot for us, and a user with a
+    # phone video of two fighters in the same club kit still deserves an
+    # analysis - they just deserve to be told which parts of it to trust. The
+    # results carry the same finding through to the report.
+    looks_alike = (
+        alike is not None and alike >= SETTINGS.max_fighter_pair_similarity
+    )
+    if looks_alike:
+        LOGGER.info("fighters_look_alike job=%s similarity=%.3f", job_id, float(alike))
     # A/B is the report focus, not a tracking shortcut. WarriorIQ always
     # analyzes both selected fighters so identity context and the scorecard do
     # not disappear when the user asks for a detailed report on one athlete.
@@ -2708,7 +2738,8 @@ def start(request: Request, job_id: str, payload: StartPayload):
         executor.submit(_run_job, job_id, req, analysis_run_id)
     else:
         _wake_analysis_worker(job_id)
-    return _analysis_started_response(request, job_id, capacity["deferred"])
+    return _analysis_started_response(request, job_id, capacity["deferred"],
+                                      looks_alike=float(alike) if looks_alike else None)
 
 
 @app.post("/api/restart/{job_id}")
@@ -2824,6 +2855,26 @@ def active_analysis(request: Request):
     }
 
 
+def _appearance_observation(image, box):
+    """Wrap a selection box so it can be compared the way the analysis will.
+
+    Deliberately the same descriptor the identity manager uses. A check that
+    measured similarity differently from the thing it is predicting would be
+    worse than no check at all.
+    """
+    from core.identity import appearance_hist
+    from core.types import PersonObservation
+
+    import numpy as np
+
+    if image is None or box is None:
+        return None
+    return PersonObservation(
+        track_id=None, box=np.asarray(box, dtype=np.float32), confidence=1.0,
+        appearance=appearance_hist(image, box),
+    )
+
+
 def _score_withheld(report: dict) -> dict | None:
     """Why this fight has no score, in words a fighter can act on.
 
@@ -2846,6 +2897,27 @@ def _score_withheld(report: dict) -> dict | None:
         except (TypeError, ValueError):
             return "an unknown share"
 
+    if status == "fighters_not_separable":
+        alike = tracking.get("fighter_pair_similarity")
+        alike_text = f"{float(alike):.0%}" if alike is not None else "very closely"
+        confusions = int(tracking.get("identity_confusions") or 0)
+        muddled = (
+            f" We lost track of which was which {confusions} times during the fight."
+            if confusions else ""
+        )
+        return {
+            "reason": (
+                f"The two fighters look too alike in this video for us to tell them apart. "
+                f"Their kit matches {alike_text}, where a bout we can read is usually nearer 60%."
+                f"{muddled} Rather than guess, we have not credited strikes to either name."
+            ),
+            "fix": (
+                "Pick the two fighters again on a frame where their kit, headguards or corner "
+                "colours differ most - often just after a break, when they are apart and facing "
+                "the camera. If they genuinely wear the same colours, film from a side angle so "
+                "position tells them apart instead."
+            ),
+        }
     if status == "both_fighters_required":
         return {
             "reason": "You analysed one fighter, so there is no opponent to score against.",

@@ -62,10 +62,16 @@ def refresh_identity_integrity(report: dict) -> dict:
     reports with pose-only coaching when action labels are still unvalidated.
     """
     tracking = report.setdefault("tracking", {})
+    # Two fighters who cannot be told apart in this video fail identity however
+    # well they were followed. Coverage answers "was somebody tracked", never
+    # "was it the right somebody", and this is the one case where the analysis
+    # can know the answer is no before it starts.
+    separable = tracking.get("fighters_separable")
     identity_ready = {
         fighter: (
             _identity_seed_safe(tracking, fighter)
             and float(tracking.get(f"fighter_{fighter}_coverage", 0.0)) >= 0.45
+            and separable is not False
         )
         for fighter in ("A", "B")
     }
@@ -88,10 +94,19 @@ def refresh_identity_integrity(report: dict) -> dict:
             "totals": {"A": None, "B": None},
             "rounds": [],
             "winner_estimate": None,
-            "status": "identity_integrity_failed",
+            "status": ("fighters_not_separable" if separable is False
+                       else "identity_integrity_failed"),
             "disclaimer": (
-                f"Scorecard withheld because {failed} did not pass the fighter-identity gate. "
-                "Return to fighter selection and analyze again; person coverage alone cannot prove identity."
+                (
+                    "Scorecard withheld because the two fighters look too alike in this "
+                    "video to tell apart reliably. Their kit matches at "
+                    f"{float(tracking.get('fighter_pair_similarity') or 0.0):.0%} where a "
+                    "readable bout is usually nearer 60%, so any per-fighter total risks "
+                    "crediting the wrong athlete."
+                ) if separable is False else (
+                    f"Scorecard withheld because {failed} did not pass the fighter-identity gate. "
+                    "Return to fighter selection and analyze again; person coverage alone cannot prove identity."
+                )
             ),
         })
         report["key_moments"] = []

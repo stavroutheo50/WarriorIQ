@@ -85,6 +85,27 @@ def appearance_similarity(a: np.ndarray | None, b: np.ndarray | None) -> float:
     return float(max(0.0, min(1.0, cv2.compareHist(a.astype(np.float32), b.astype(np.float32), cv2.HISTCMP_CORREL) * 0.5 + 0.5)))
 
 
+def fighter_pair_similarity(observation_a, observation_b) -> float | None:
+    """How alike the two chosen fighters look, or None if it cannot be judged.
+
+    Every other check in this module asks whether a candidate is the fighter.
+    This asks something the analysis has never asked: whether the two fighters
+    can be distinguished from each other *in this particular video at all*.
+
+    When they cannot, no threshold anywhere downstream rescues it. Measured on
+    a crowded hall where the two competitors score 0.89 against each other, the
+    identity manager will hand one fighter's strikes to the other and report
+    high coverage while doing it, because coverage measures whether somebody
+    was followed and not whether it was the right somebody. Saying so at
+    selection is worth more than any amount of work afterwards.
+    """
+    if observation_a is None or observation_b is None:
+        return None
+    if observation_a.appearance is None or observation_b.appearance is None:
+        return None
+    return appearance_similarity(observation_a.appearance, observation_b.appearance)
+
+
 def pose_signature(keypoints: np.ndarray | None, box) -> np.ndarray | None:
     if keypoints is None or box is None or len(keypoints) < 17:
         return None
@@ -172,6 +193,9 @@ class IdentityManager:
         # motion gate correctly refusing a spectator, and those need
         # opposite fixes.
         self.rejections: dict[str, int] = {}
+        # Frames where A and B were equally plausible either way round.
+        self.confusions = 0
+        self.last_confusion_frame: int | None = None
         self.source_fps = max(1.0, float(source_fps))
 
     def _remember_positions(self, people: list[PersonObservation], source_frame: int) -> None:
@@ -615,6 +639,11 @@ class IdentityManager:
             swapped = scores_a[bi] + scores_b[ai]
             chosen = scores_a[ai] + scores_b[bi]
             if chosen - swapped < 0.06:
+                # Not "we lost them" but "we cannot tell which is which". The
+                # difference matters to whoever is watching: the first needs
+                # better footage, the second needs a person to say who is who.
+                self.confusions += 1
+                self.last_confusion_frame = source_frame
                 ai = bi = None
 
         a_obs = self._commit(self.a, people[ai], source_frame, scores_a[ai], recovered=people[ai].track_id != self.a.current_track_id) if ai is not None else None
