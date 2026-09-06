@@ -56,3 +56,6 @@ fights/*
 
 # Generated labelling packs: clips plus a self-contained page, megabytes each.
 labelpack/
+
+# The single-worker heartbeat. Machine-local state, never shared.
+worker.lock

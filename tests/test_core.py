@@ -3027,3 +3027,74 @@ class IdentityRecheckTests(unittest.TestCase):
         page = Path("app/templates/result.html").read_text(encoding="utf-8")
         self.assertIn("score_withheld.action.url", page)
         self.assertIn("score_withheld.action.label", page)
+
+
+class WorkerSingleInstanceTests(unittest.TestCase):
+    """One worker per machine, and only one that can actually analyse."""
+
+    def setUp(self):
+        import worker
+
+        self.worker = worker
+        self.addCleanup(self._clear)
+
+    def _clear(self):
+        try:
+            self.worker._lock_path().unlink()
+        except OSError:
+            pass
+
+    def test_a_live_holder_keeps_the_lock(self):
+        import os
+        import time
+        from unittest import mock
+
+        self.worker._lock_path().write_text(f"424242 {time.time():.0f}", encoding="utf-8")
+        with mock.patch.object(self.worker, "_worker_is_alive", return_value=True):
+            self.assertFalse(self.worker._claim_sole_worker())
+        # And the holder's id is left untouched, not overwritten by the loser.
+        self.assertEqual(self.worker._read_lock()[0], 424242)
+        self.assertNotEqual(self.worker._read_lock()[0], os.getpid())
+
+    def test_a_holder_that_stopped_breathing_loses_it(self):
+        """The reason this is a heartbeat and not a process id.
+
+        Something outside the project was launching worker.py with a Python
+        that could not import the models. It took the lock, could not work,
+        and would not let go. A holder that stops refreshing loses it.
+        """
+        import time
+        from unittest import mock
+
+        stale = time.time() - (self.worker.LOCK_STALE_SECONDS + 30)
+        self.worker._lock_path().write_text(f"424242 {stale:.0f}", encoding="utf-8")
+        with mock.patch.object(self.worker, "_worker_is_alive", return_value=True):
+            self.assertTrue(self.worker._claim_sole_worker())
+
+    def test_a_dead_process_loses_it_immediately(self):
+        import time
+        from unittest import mock
+
+        self.worker._lock_path().write_text(f"424242 {time.time():.0f}", encoding="utf-8")
+        with mock.patch.object(self.worker, "_worker_is_alive", return_value=False):
+            self.assertTrue(self.worker._claim_sole_worker())
+
+    def test_a_corrupt_lock_does_not_stop_the_worker(self):
+        self.worker._lock_path().write_text("not a lock", encoding="utf-8")
+        self.assertTrue(self.worker._claim_sole_worker())
+
+    def test_the_requirements_are_checked_before_the_imports_that_need_them(self):
+        """Otherwise the wrong Python dies on a traceback instead of a reason."""
+        from pathlib import Path
+
+        source = Path("worker.py").read_text(encoding="utf-8")
+        self.assertLess(
+            source.index("_missing_requirements"),
+            source.index("from dotenv import load_dotenv"),
+            "the capability check must run before the third-party imports")
+
+    def test_the_requirements_name_what_the_analysis_actually_needs(self):
+        import worker
+
+        for name in ("torch", "ultralytics", "cv2"):
+            self.assertIn(name, worker.ANALYSIS_REQUIREMENTS)

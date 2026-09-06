@@ -17,6 +17,42 @@ import contextlib
 import ctypes
 import sys
 
+ANALYSIS_REQUIREMENTS = ("dotenv", "numpy", "cv2", "torch", "ultralytics")
+
+
+def _missing_requirements() -> list[str]:
+    """Which analysis dependencies this interpreter lacks.
+
+    Asked before the imports that would need them, and before claiming
+    anything. A worker that cannot import the models can still poll, claim a
+    job and fail it, and - now that there is a single-worker lock - can hold
+    that lock against the one interpreter that could have done the work.
+
+    Seen on the machine that runs this: worker.py was being launched with an
+    unrelated Python that had none of torch, OpenCV or ultralytics. It died on
+    the first third-party import with a bare traceback, over and over, which
+    reads as a broken worker rather than as the wrong Python.
+    """
+    import importlib.util
+
+    return [name for name in ANALYSIS_REQUIREMENTS
+            if importlib.util.find_spec(name) is None]
+
+
+if __name__ == "__main__":
+    _lacking = _missing_requirements()
+    if _lacking:
+        print("\n".join([
+            "This Python cannot run the WarriorIQ analysis.",
+            "  missing:     " + ", ".join(_lacking),
+            "  interpreter: " + sys.executable,
+            "",
+            "Start the worker with the project's own environment instead:",
+            "    .venv/Scripts/python.exe worker.py     (or start-worker.bat)",
+            "and close whatever launched this one.",
+        ]), file=sys.stderr)
+        raise SystemExit(2)
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -135,6 +171,8 @@ def run_worker(*, once: bool = False) -> int:
             return 2
         return run_remote_worker(worker_id, once=once)
     while True:
+        # Says "still here" to the single-worker lock as well as to the queue.
+        refresh_worker_lock()
         record_worker_heartbeat(worker_id)
         claimed = claim_next_job(worker_id)
         if claimed:
@@ -243,6 +281,11 @@ def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
             shutil.rmtree(output_dir, ignore_errors=True)
 
 
+# Distinct from a crash, so a supervisor can tell a planned restart apart
+# from a failing worker if it ever wants to.
+EXIT_CODE_CHANGED = 75
+
+
 def _source_fingerprint() -> str:
     """A fingerprint of the code this worker is running.
 
@@ -270,6 +313,81 @@ def _code_changed_since(fingerprint: str) -> bool:
     return _source_fingerprint() != fingerprint
 
 
+LOCK_STALE_SECONDS = 90
+
+
+def _lock_path() -> Path:
+    return Path(__file__).resolve().parent / "worker.lock"
+
+
+def _read_lock() -> "tuple[int, float] | None":
+    try:
+        parts = _lock_path().read_text(encoding="utf-8").split()
+        return int(parts[0]), float(parts[1])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def refresh_worker_lock() -> None:
+    """Say the holder is still here. Called from the poll loop."""
+    try:
+        _lock_path().write_text(f"{os.getpid()} {time.time():.0f}", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _claim_sole_worker() -> bool:
+    """Refuse to start if a live worker on this machine already holds the lock.
+
+    The analysis is not safe to run many times over: every worker polls the
+    same queue and loads its own copy of the models onto one 8 GB card. Two of
+    them race for jobs; forty make the machine useless, which is exactly what a
+    re-exec bug produced here once.
+
+    The claim is a heartbeat, not a process id, because a process id alone is
+    not enough on this machine. Something outside the project was launching
+    worker.py with an unrelated Python that could not import the models; it
+    took the lock and would not let go of it. A holder that stops refreshing -
+    because it crashed, was killed, or never got as far as working - loses the
+    lock after LOCK_STALE_SECONDS and the next capable worker takes it. That
+    needs no knowledge of who the other process is, which is the only thing
+    that reliably works here.
+    """
+    held = _read_lock()
+    if held:
+        pid, beat = held
+        age = time.time() - beat
+        if pid != os.getpid() and age < LOCK_STALE_SECONDS and _worker_is_alive(pid):
+            LOGGER.error(
+                "Another WarriorIQ worker holds the lock (process %s, last seen "
+                "%.0fs ago). Not starting a second one: they would race for the "
+                "same jobs and share one GPU.", pid, age)
+            return False
+        if pid != os.getpid():
+            LOGGER.warning(
+                "Taking over the worker lock from process %s (last seen %.0fs ago).",
+                pid, age)
+    refresh_worker_lock()
+    return True
+
+
+def _worker_is_alive(pid: int) -> bool:
+    """Is this process id a live Python process, rather than a recycled number?"""
+    try:
+        import subprocess
+
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout if os.name == "nt" else ""
+        if os.name == "nt":
+            return "python" in out.lower()
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
 def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
     client = RemoteWorkerClient(SETTINGS.worker_remote_url, SETTINGS.worker_token, worker_id)
     running_code = _source_fingerprint()
@@ -278,18 +396,29 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
         # Checked between jobs, never during one. Exiting hands the queue back
         # cleanly and whatever supervises this restarts it on the new code.
         if _code_changed_since(running_code):
-            # Restart in place rather than exiting. Exiting assumed something
-            # was supervising this process; when nothing was, the worker simply
-            # vanished the moment the code changed and a queued fight sat there
-            # with no one to claim it. Re-exec needs no supervisor and cannot
-            # leave a hole.
+            # Exit and let the launcher start the next one. This used to
+            # re-exec in place, on the reasoning that re-exec needs no
+            # supervisor and cannot leave a hole. That is true on POSIX and
+            # false on Windows, where os.execv starts a new process and the
+            # old one carries on: every save while editing core/ doubled the
+            # workers instead of replacing them. Measured on the machine that
+            # actually runs the analysis - 177 restarts logged, 40 live
+            # workers, all polling the same queue and sharing one 8 GB GPU.
+            #
+            # start-worker.bat loops, and the Startup entry launches it, so
+            # there is a supervisor on the machine this runs on. Where there is
+            # not, the message below says plainly what happened and what to do,
+            # which beats a process table filling up silently.
             LOGGER.warning(
-                "Analysis code changed on disk (was %s, now %s); restarting on it",
+                "Analysis code changed on disk (was %s, now %s); exiting so the "
+                "launcher can start the new code. If nothing restarts this, run "
+                "start-worker.bat.",
                 running_code, _source_fingerprint(),
             )
             sys.stdout.flush()
             sys.stderr.flush()
-            os.execv(sys.executable, [sys.executable, *sys.argv])
+            return EXIT_CODE_CHANGED
+        refresh_worker_lock()
         try:
             retry_heartbeat(client)
             claimed = client.claim()
@@ -334,4 +463,14 @@ if __name__ == "__main__":
     parser.add_argument("--once", action="store_true", help="Claim at most one queued job and exit")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
-    raise SystemExit(run_worker(once=args.once))
+    if not _claim_sole_worker() and not args.once:
+        raise SystemExit(1)
+    try:
+        raise SystemExit(run_worker(once=args.once))
+    finally:
+        held = _read_lock()
+        if held and held[0] == os.getpid():
+            try:
+                _lock_path().unlink()
+            except OSError:
+                pass
