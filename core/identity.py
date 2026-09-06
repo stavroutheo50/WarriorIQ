@@ -6,6 +6,7 @@ from collections import deque
 import numpy as np
 
 from core.config import SETTINGS
+from core.reid import pool as reid_pool
 from core.reid import similarity as reid_similarity
 from core.types import FighterState, PersonObservation
 
@@ -162,6 +163,7 @@ class IdentityManager:
         # perfectly still must not be re-acquired on the next frame, or
         # the manager spends the fight letting go of the same chair.
         self._furniture: set[int] = set()
+        self._track_reid: dict[int, deque] = {}
         # Tracks readmitted after moving again, so the effect of the
         # ban lapsing is visible rather than inferred.
         self.forgiven_furniture = 0
@@ -176,6 +178,12 @@ class IdentityManager:
         for person in people:
             if person.track_id is None or person.box is None:
                 continue
+            if person.reid is not None:
+                # A rolling window per track, so the comparison is made against
+                # several looks at somebody rather than one noisy crop.
+                seen = self._track_reid.setdefault(int(person.track_id), deque(
+                    maxlen=max(1, SETTINGS.reid_pool_size)))
+                seen.append(np.asarray(person.reid, dtype=np.float32).ravel())
             history = self._track_history.setdefault(int(person.track_id), deque(maxlen=450))
             box = person.box
             history.append((
@@ -224,6 +232,20 @@ class IdentityManager:
         """
         for source_frame, people in samples:
             self._remember_positions(people, source_frame)
+
+    def _pooled_reid(self, track_id) -> np.ndarray | None:
+        """This track's averaged appearance, or None until it has been seen enough.
+
+        None rather than a weak answer: a track met a moment ago has no usable
+        description, and refusing somebody on that basis is exactly the mistake
+        the short-window motion guard is written to avoid.
+        """
+        if track_id is None:
+            return None
+        seen = self._track_reid.get(int(track_id))
+        if seen is None or len(seen) < SETTINGS.reid_min_pool:
+            return None
+        return reid_pool(seen)
 
     def _recent_spread_short(self, track_id: int | None, fps: float) -> float | None:
         """Spread over the last second and a half, not over the whole history.
@@ -381,7 +403,9 @@ class IdentityManager:
         # referee at 0.695-0.741 and the fighters at 0.724-0.828. Whichever
         # answers, only one gate runs: asking both would reimpose the weaker
         # one's mistakes on top of the stronger one's judgement.
-        learned = reid_similarity(state.anchor_reid, candidate.reid)
+        learned = reid_similarity(
+            reid_pool(state.anchor_reid_samples) if state.anchor_reid_samples else state.anchor_reid,
+            self._pooled_reid(candidate.track_id))
         if learned is not None:
             if learned < SETTINGS.min_anchor_reid_similarity:
                 return self._refuse(state, "appearance_reid")
@@ -466,6 +490,10 @@ class IdentityManager:
         state.current_track_id = obs.track_id
         state.identity_confidence = float(max(0.0, min(1.0, score)))
         state.missing_frames = 0
+        if (obs.reid is not None
+                and len(state.anchor_reid_samples) < SETTINGS.reid_pool_size):
+            state.anchor_reid_samples.append(
+                np.asarray(obs.reid, dtype=np.float32).ravel())
         state.last_seen_source_frame = source_frame
         return obs
 

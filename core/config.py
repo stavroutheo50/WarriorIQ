@@ -120,11 +120,44 @@ class Settings:
     # separate a referee from a fighter - measured, their ranges overlap almost
     # completely - while an embedding puts the referee at 0.695-0.741 and the
     # fighters at 0.724-0.828. See core/reid.py. Off until measured end to end.
-    reid_enabled: bool = env_bool("WARRIORIQ_REID", False)
-    reid_model: str = os.getenv("WARRIORIQ_REID_MODEL", "yolo26m.pt").strip()
+    reid_enabled: bool = env_bool("WARRIORIQ_REID", True)
+    # A purpose-trained re-identification encoder, not the detector. The old
+    # default here was "yolo26m.pt", which is the detector: Ultralytics routes
+    # a .pt through the YOLO predictor and reads the second-to-last layer, so
+    # what came back described "this is a person" rather than "this is *which*
+    # person". That is why two attempts at a learned appearance gate failed.
+    # It was also far slower, because the predictor path runs a full detection
+    # per call; the .onnx assets go through AutoBackend at 10.4 ms per person.
+    #
+    # The nano encoder is used deliberately: measured on real footage it
+    # separates better than the medium one (pooled AUC 0.996 against 0.989)
+    # and costs the same, since the time goes on cropping rather than on the
+    # network. There is not enough detail in a 60-pixel-tall person for the
+    # larger model's extra capacity to describe.
+    reid_model: str = os.getenv("WARRIORIQ_REID_MODEL", "yolo26n-reid.onnx").strip()
+    # Embeddings are pooled over a track before being compared. One crop of a
+    # person this small is too noisy to identify anybody: measured on the
+    # busiest bout, single crops separate the same person from a different one
+    # at AUC 0.689, and the mean of three at 0.996. Same encoder, same frames -
+    # the descriptor was never the problem, the sample size was.
+    reid_pool_size: int = int(os.getenv("WARRIORIQ_REID_POOL", "6"))
+    reid_min_pool: int = int(os.getenv("WARRIORIQ_REID_MIN_POOL", "3"))
     reid_device: str = os.getenv("WARRIORIQ_REID_DEVICE", "").strip()
+    # Against pooled embeddings, not single crops. Measured across three bouts:
+    # the same person scores a median of 0.93 to 0.98 and a different person
+    # 0.56 to 0.82. The tails overlap, so this cannot be set to separate them
+    # cleanly and the value is a chosen trade, measured by eye on all three:
+    #
+    #   0.72  the quiet bout keeps 11/12 and 10/12; the crowded one collapses
+    #         to 5/12, barely better than having no gate at all
+    #   0.78  the quiet bout 10/12 and 10/12; the crowded one 9/12, with its
+    #         wrong boxes down from roughly 800 to 220
+    #   0.85  the crowded one reaches 10/12 and loses half its coverage
+    #
+    # 0.78 is the middle. Raising it buys precision on a busy hall and costs
+    # frames everywhere; lowering it gives the crowd back.
     min_anchor_reid_similarity: float = float(
-        os.getenv("WARRIORIQ_MIN_ANCHOR_REID", "0.745"))
+        os.getenv("WARRIORIQ_MIN_ANCHOR_REID", "0.78"))
     # A categorical refusal rather than another threshold on similarity. The
     # referee passes every comparative guard honestly, so the only thing that
     # separates him is what he is wearing. See core/referee.py for why this

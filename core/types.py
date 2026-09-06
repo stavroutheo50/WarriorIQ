@@ -94,6 +94,10 @@ class FighterState:
     # anchor_appearance never updates - it is the only thing that still
     # remembers the real fighter after a gradual slide.
     anchor_reid: np.ndarray | None = None
+    # The first few looks at the person originally selected, averaged. One crop
+    # of somebody sixty pixels tall does not describe them well enough to
+    # recognise them again; see core/reid.py.
+    anchor_reid_samples: list = field(default_factory=list)
     # Whether the person originally selected scored as the official. If they
     # did, the referee filter stands down for this fighter rather than
     # refusing every candidate who is actually the person the user picked.

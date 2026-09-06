@@ -1,24 +1,38 @@
-"""A learned appearance space, for telling a referee from a fighter.
+"""A learned appearance space, for telling one person from another.
 
-Identity has been decided by a hue/saturation histogram of the torso, and that
+Identity was decided by a hue/saturation histogram of the torso, and that
 descriptor is at its limit here. Measured against the person originally
 selected, on real footage: the referee scores 0.54 to 0.67 and the fighters
 0.54 to 0.79. The ranges overlap almost completely, so no threshold separates
-them - removing the gate triples the frames spent on the referee, and raising
-it collapses fighter B's coverage from 0.56 to 0.21. Adding the brightness
-channel shifts both down by the same amount rather than opening a gap.
-
-Two people wearing shorts on the same mat under the same lights are not
+them. Two people in shorts on the same mat under the same lights are not
 separable by colour, which is what a histogram measures.
 
-The same comparison through a learned embedding, on the same frames: referee
-0.695 to 0.741, fighters 0.724 to 0.828. A threshold of 0.745 refuses all four
-referee crops and keeps ten of the eleven fighter crops. That is a usable gate
-where the histogram had none.
+Two attempts at replacing it failed, and both failures were mine rather than
+the method's:
 
-The encoder is the one Ultralytics already ships for BoT-SORT's own ReID, so
-there is no new model to download, no new dependency, and no second weights
-file to keep in step with the detector.
+  * The encoder was wrong. The setting said "yolo26m.pt", which is the
+    *detector*: Ultralytics routes a .pt through the YOLO predictor and reads
+    the second-to-last layer, so what came back described "this is a person"
+    rather than "this is which person". Ultralytics ships purpose-trained ReID
+    encoders as yolo26{n,s,m,l,x}-reid.onnx, and those go through AutoBackend
+    instead - more accurate and far cheaper, since the predictor path runs a
+    whole detection per call.
+
+  * The sample was too small. Even with the right encoder, one crop of a
+    person sixty pixels tall does not describe them. Measured on the busiest
+    bout: single crops separate same-person from different-person at AUC
+    0.689. The mean of three crops of the same track, same encoder and same
+    frames, reaches 0.996.
+
+So embeddings are pooled over a track before anything is compared, and the
+fighter's anchor is pooled over their first few frames rather than taken from
+the seed crop alone. Across three bouts the same person then scores a median
+of 0.93 to 0.98 and a different person 0.56 to 0.82.
+
+The nano encoder is used on purpose: it separates better than the medium one
+(0.996 against 0.989) and costs the same, because the time goes on cropping
+rather than on the network. There is not enough detail in a person this small
+for the larger model's extra capacity to describe.
 """
 
 from __future__ import annotations
@@ -90,6 +104,26 @@ def similarity(a: np.ndarray | None, b: np.ndarray | None) -> float | None:
     if scale <= 0.0:
         return None
     return float(np.dot(left, right) / scale)
+
+
+def pool(vectors) -> np.ndarray | None:
+    """Mean of several embeddings, renormalised, or None if there are none.
+
+    The whole point of this module in practice. A single crop of a person
+    sixty pixels tall carries too little to identify them - measured on real
+    footage, one crop separates same-person from different-person at AUC 0.689
+    and the mean of three at 0.996, with the same encoder on the same frames.
+    """
+    usable = [np.asarray(v, dtype=np.float32).ravel() for v in vectors if v is not None]
+    if not usable:
+        return None
+    width = usable[0].size
+    usable = [v for v in usable if v.size == width]
+    if not usable:
+        return None
+    mean = np.mean(usable, axis=0)
+    scale = float(np.linalg.norm(mean))
+    return None if scale <= 0.0 else (mean / scale)
 
 
 def reset_for_tests() -> None:

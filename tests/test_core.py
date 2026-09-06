@@ -2428,10 +2428,48 @@ class ReidEncoderTests(unittest.TestCase):
         self.assertEqual(first, [None])
         self.assertTrue(reid._unavailable, "it gives up rather than retrying every frame")
 
-    def test_it_is_off_by_default(self):
+    def test_the_encoder_is_a_reid_model_and_not_the_detector(self):
+        """The original failure: the setting pointed at the detector.
+
+        Ultralytics routes a .pt through the YOLO predictor and reads the
+        second-to-last layer, which describes "this is a person" rather than
+        "this is which person" - and runs a whole detection per call. The
+        purpose-trained encoders are the -reid.onnx assets.
+        """
         from core.config import SETTINGS
 
-        self.assertFalse(SETTINGS.reid_enabled, "measured as not separating; stays off")
+        self.assertTrue(SETTINGS.reid_model.endswith("-reid.onnx"), SETTINGS.reid_model)
+
+    def test_a_single_crop_is_never_compared(self):
+        """Pooling is the whole reason this works; a lone crop is too noisy."""
+        from core.config import SETTINGS
+
+        self.assertGreaterEqual(SETTINGS.reid_min_pool, 2)
+        self.assertGreaterEqual(SETTINGS.reid_pool_size, SETTINGS.reid_min_pool)
+
+    def test_pooling_averages_and_renormalises(self):
+        import numpy as np
+
+        from core.reid import pool
+
+        a = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        b = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        mean = pool([a, b])
+        self.assertAlmostEqual(float(np.linalg.norm(mean)), 1.0, places=5)
+        self.assertAlmostEqual(float(mean[0]), float(mean[1]), places=5)
+
+    def test_pooling_ignores_gaps_rather_than_failing(self):
+        """Some frames yield no embedding; that must not lose the whole track."""
+        import numpy as np
+
+        from core.reid import pool
+
+        a = np.ones(4, dtype=np.float32)
+        self.assertIsNone(pool([]))
+        self.assertIsNone(pool([None, None]))
+        self.assertIsNotNone(pool([None, a, None]))
+        # A vector of a different width is dropped, not broadcast into nonsense.
+        self.assertIsNotNone(pool([a, np.ones(7, dtype=np.float32)]))
 
 
 class RefereeFilterTests(unittest.TestCase):
