@@ -6,6 +6,7 @@ from collections import deque
 import numpy as np
 
 from core.config import SETTINGS
+from core.reid import similarity as reid_similarity
 from core.types import FighterState, PersonObservation
 
 
@@ -128,6 +129,7 @@ class IdentityManager:
             appearance=None if initial_a.appearance is None else initial_a.appearance.copy(),
             pose_signature=pose_signature(initial_a.keypoints, initial_a.box),
             anchor_appearance=None if initial_a.appearance is None else initial_a.appearance.copy(),
+            anchor_reid=None if initial_a.reid is None else np.asarray(initial_a.reid).copy(),
             anchor_pose=pose_signature(initial_a.keypoints, initial_a.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
@@ -140,6 +142,7 @@ class IdentityManager:
             appearance=None if initial_b.appearance is None else initial_b.appearance.copy(),
             pose_signature=pose_signature(initial_b.keypoints, initial_b.box),
             anchor_appearance=None if initial_b.appearance is None else initial_b.appearance.copy(),
+            anchor_reid=None if initial_b.reid is None else np.asarray(initial_b.reid).copy(),
             anchor_pose=pose_signature(initial_b.keypoints, initial_b.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
@@ -286,7 +289,18 @@ class IdentityManager:
         # like the fighter the user picked is the exact shape of a referee walking
         # through. Refusing is correct here: this manager's rule is that missing
         # briefly beats tracking the wrong human.
-        if state.anchor_appearance is not None and candidate.appearance is not None:
+        # A learned appearance space when one is available, and the colour
+        # histogram when it is not. Measured on real footage the histogram
+        # cannot separate a referee from a fighter at all - their similarity
+        # ranges overlap almost completely - while the embedding puts the
+        # referee at 0.695-0.741 and the fighters at 0.724-0.828. Whichever
+        # answers, only one gate runs: asking both would reimpose the weaker
+        # one's mistakes on top of the stronger one's judgement.
+        learned = reid_similarity(state.anchor_reid, candidate.reid)
+        if learned is not None:
+            if learned < SETTINGS.min_anchor_reid_similarity:
+                return self._refuse(state, "appearance_reid")
+        elif state.anchor_appearance is not None and candidate.appearance is not None:
             if anchor < SETTINGS.min_anchor_appearance_similarity:
                 return self._refuse(state, "appearance")
         # Refuse to move onto somebody who has been standing still. Coaches,

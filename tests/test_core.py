@@ -2379,3 +2379,56 @@ class FurnitureBanLapseTests(unittest.TestCase):
         self.assertEqual(score, -999.0, "it never went anywhere, so it is still scenery")
         self.assertIn(9, manager._furniture)
         self.assertEqual(manager.forgiven_furniture, 0)
+
+
+class ReidEncoderTests(unittest.TestCase):
+    """Scaffolding for a learned appearance gate, off until one separates."""
+
+    def setUp(self):
+        from core import reid
+
+        reid.reset_for_tests()
+        self.addCleanup(reid.reset_for_tests)
+
+    def test_no_opinion_is_not_a_weak_match(self):
+        """A missing embedding must not read as 0.5 similarity.
+
+        The caller falls back to the colour histogram when this returns None.
+        A neutral number would instead be treated as evidence.
+        """
+        import numpy as np
+
+        from core.reid import similarity
+
+        self.assertIsNone(similarity(None, np.ones(8, dtype=np.float32)))
+        self.assertIsNone(similarity(np.ones(8, dtype=np.float32), None))
+        self.assertIsNone(similarity(np.ones(4, dtype=np.float32), np.ones(8, dtype=np.float32)))
+        self.assertIsNone(similarity(np.zeros(8, dtype=np.float32), np.ones(8, dtype=np.float32)))
+
+    def test_identical_appearance_scores_one(self):
+        import numpy as np
+
+        from core.reid import similarity
+
+        v = np.asarray([0.3, 0.9, 0.1, 0.5], dtype=np.float32)
+        self.assertAlmostEqual(similarity(v, v.copy()), 1.0, places=5)
+
+    def test_an_encoder_that_will_not_load_degrades_quietly(self):
+        """No learned gate is a worse analysis. A crash is no analysis."""
+        import dataclasses
+
+        import numpy as np
+
+        from core import reid
+
+        on = dataclasses.replace(reid.SETTINGS, reid_enabled=True)
+        with mock.patch.object(reid, "SETTINGS", on), \
+                mock.patch.dict("sys.modules", {"ultralytics.trackers.utils.reid": None}):
+            first = reid.embed(np.zeros((220, 480, 3), dtype=np.uint8), np.asarray([[1., 1., 9., 9.]]))
+        self.assertEqual(first, [None])
+        self.assertTrue(reid._unavailable, "it gives up rather than retrying every frame")
+
+    def test_it_is_off_by_default(self):
+        from core.config import SETTINGS
+
+        self.assertFalse(SETTINGS.reid_enabled, "measured as not separating; stays off")

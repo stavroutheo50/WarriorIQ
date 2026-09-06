@@ -116,6 +116,15 @@ class Settings:
     # margin, and still refuses roughly half of the impostors outright.
     min_anchor_appearance_similarity: float = float(
         os.getenv("WARRIORIQ_MIN_ANCHOR_SIMILARITY", "0.55"))
+    # A learned appearance space for the same gate. The histogram above cannot
+    # separate a referee from a fighter - measured, their ranges overlap almost
+    # completely - while an embedding puts the referee at 0.695-0.741 and the
+    # fighters at 0.724-0.828. See core/reid.py. Off until measured end to end.
+    reid_enabled: bool = env_bool("WARRIORIQ_REID", False)
+    reid_model: str = os.getenv("WARRIORIQ_REID_MODEL", "yolo26m.pt").strip()
+    reid_device: str = os.getenv("WARRIORIQ_REID_DEVICE", "").strip()
+    min_anchor_reid_similarity: float = float(
+        os.getenv("WARRIORIQ_MIN_ANCHOR_REID", "0.745"))
     # Fighter motion between sampled frames is often larger than generic
     # pedestrian motion. These values still reject distant bystanders, while
     # allowing a fighter to be recovered after a tracker-ID reset.

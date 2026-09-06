@@ -57,6 +57,9 @@ class PersonObservation:
     keypoints: np.ndarray | None = None
     keypoint_conf: np.ndarray | None = None
     appearance: np.ndarray | None = None
+    # A learned appearance vector, computed once per frame for every person and
+    # compared like the histogram beside it. See core/reid.py.
+    reid: np.ndarray | None = None
     pose_signature: np.ndarray | None = None
 
 
@@ -83,6 +86,10 @@ class FighterState:
     # still reading high because it is scored against the drifted template.
     # The anchor is the only thing that still remembers the real fighter.
     anchor_appearance: np.ndarray | None = None
+    # The learned appearance of the person actually selected, which like
+    # anchor_appearance never updates - it is the only thing that still
+    # remembers the real fighter after a gradual slide.
+    anchor_reid: np.ndarray | None = None
     anchor_pose: np.ndarray | None = None
     switches_rejected: int = 0
 

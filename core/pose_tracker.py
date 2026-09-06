@@ -8,6 +8,7 @@ import torch
 from core.config import SETTINGS
 from ultralytics import YOLO
 from core.identity import appearance_hist, pose_signature
+from core.reid import embed
 from core.types import PersonObservation
 
 
@@ -161,7 +162,15 @@ class PoseTracker:
             classes=[0],
             verbose=False,
         )
-        return self.parse(results[0], frame)
+        people = self.parse(results[0], frame)
+        # One batched pass for the whole frame, so the identity manager can
+        # compare learned appearance instead of a colour histogram. See
+        # core/reid.py for why the histogram is not enough here.
+        if people:
+            vectors = embed(frame, np.asarray([p.box for p in people], dtype=np.float32))
+            for person, vector in zip(people, vectors):
+                person.reid = vector
+        return people
 
     def recover_from_guidance(
         self,
@@ -299,6 +308,10 @@ def find_initial_people(manual_a, manual_b, people: list[PersonObservation], fra
             keypoints=None,
             keypoint_conf=None,
             appearance=appearance_hist(frame, box) if frame is not None else None,
+            # Without this the anchor has no learned appearance, every
+            # comparison returns "no opinion", and the learned gate quietly
+            # never runs while looking enabled.
+            reid=(embed(frame, box.reshape(1, 4)) or [None])[0] if frame is not None else None,
             pose_signature=None,
         )
 
