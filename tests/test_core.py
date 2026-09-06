@@ -2980,3 +2980,50 @@ class FighterSeparabilityTests(unittest.TestCase):
         source = inspect.getsource(main.start)
         self.assertIn("looks_alike", source)
         self.assertNotIn("fighters_look_alike\"", source.split("LOGGER.info")[0][-400:])
+
+
+class IdentityRecheckTests(unittest.TestCase):
+    """Getting from "we mixed them up" back to the moment it happened."""
+
+    @staticmethod
+    def _report(frame=None, fps=30.0):
+        return {
+            "scorecard": {"available": False, "status": "fighters_not_separable"},
+            "tracking": {"fighter_pair_similarity": 0.89, "identity_confusions": 3,
+                         "last_identity_confusion_frame": frame},
+            "video": {"fps": fps},
+        }
+
+    def test_the_link_lands_on_the_frame_we_lost_them(self):
+        from app.main import _score_withheld
+
+        action = _score_withheld(self._report(frame=1260), "job123")["action"]
+        self.assertEqual(action["url"], "/select/job123?seconds=42.00")
+
+    def test_without_a_moment_it_still_offers_reselection(self):
+        """Fighters can be inseparable from the first frame, with no confusion."""
+        from app.main import _score_withheld
+
+        action = _score_withheld(self._report(frame=None), "job123")["action"]
+        self.assertEqual(action["url"], "/select/job123")
+
+    def test_no_link_when_there_is_no_job_to_link_to(self):
+        """Shared reports render without a job id and must not grow a dead link."""
+        from app.main import _score_withheld
+
+        self.assertNotIn("action", _score_withheld(self._report(frame=1260), None))
+
+    def test_a_missing_frame_rate_does_not_produce_a_nonsense_timestamp(self):
+        from app.main import _score_withheld
+
+        report = self._report(frame=1260)
+        report["video"].pop("fps")
+        self.assertEqual(
+            _score_withheld(report, "j")["action"]["url"], "/select/j?seconds=42.00")
+
+    def test_the_result_page_renders_the_link(self):
+        from pathlib import Path
+
+        page = Path("app/templates/result.html").read_text(encoding="utf-8")
+        self.assertIn("score_withheld.action.url", page)
+        self.assertIn("score_withheld.action.label", page)

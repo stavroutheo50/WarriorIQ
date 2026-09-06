@@ -220,3 +220,11 @@
   padding-left: 2px;
   font-variant-numeric: tabular-nums;
 }
+
+/* The way back from "we mixed your fighters up" to the frame where it
+   happened. Deliberately a visible action rather than prose: the sentence
+   above it is an apology, and this is the thing that fixes it. */
+.recheck-link{display:inline-block;margin-top:6px;padding:4px 10px;border-radius:999px;
+  border:1px solid rgba(135,148,255,.55);color:#a9b4ff;font-weight:700;text-decoration:none;
+  white-space:nowrap}
+.recheck-link:hover,.recheck-link:focus-visible{background:rgba(135,148,255,.14);color:#cdd4ff}

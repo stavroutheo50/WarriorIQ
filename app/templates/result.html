@@ -113,7 +113,7 @@
 {% endif %}
 
 <section class="numbers-first-report" aria-labelledby="numbersTitle" data-motion-sequence="report-numbers">
-  <header><div><span class="eyebrow">Performance report · Fighter {{primary}}</span><h1 id="numbersTitle">Your fight in numbers.</h1></div><div class="numbers-score">{% if report.scorecard.available %}<span>Estimated score</span><strong>{{report.scorecard.totals.A}}–{{report.scorecard.totals.B}}</strong>{% else %}<span>Score</span><strong>—</strong><small>{% if score_withheld %}{{score_withheld.fix}}{% else %}Withheld{% endif %}</small>{% endif %}</div></header>
+  <header><div><span class="eyebrow">Performance report · Fighter {{primary}}</span><h1 id="numbersTitle">Your fight in numbers.</h1></div><div class="numbers-score">{% if report.scorecard.available %}<span>Estimated score</span><strong>{{report.scorecard.totals.A}}–{{report.scorecard.totals.B}}</strong>{% else %}<span>Score</span><strong>—</strong><small>{% if score_withheld %}{{score_withheld.fix}}{% if score_withheld.action %} <a class="recheck-link" href="{{score_withheld.action.url}}">{{score_withheld.action.label}}</a>{% endif %}{% else %}Withheld{% endif %}</small>{% endif %}</div></header>
   {# Measured every fight, whatever the action model is doing. These come from
      pose geometry, so they survive the evidence gate that hides strike counts -
      which is why the report used to collapse to almost nothing. Big numbers,

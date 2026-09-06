@@ -2227,10 +2227,18 @@ def frame_page(request: Request, job_id: str):
 
 
 @app.get("/select/{job_id}", response_class=HTMLResponse)
-def select_page(request: Request, job_id: str):
+def select_page(request: Request, job_id: str, seconds: float | None = None):
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
+    # Arriving with a timestamp means the analysis asked to be told who is who,
+    # and named the moment it lost track. Land on that frame rather than making
+    # somebody scrub for it - they are here because we already failed once.
+    if seconds is not None:
+        try:
+            _seek_selection_frame(job_id, job, float(seconds))
+        except Exception:                                           # noqa: BLE001
+            LOGGER.warning("recheck_seek_failed job=%s seconds=%s", job_id, seconds)
     return templates.TemplateResponse(request=request, name="select.html", context={"request": request, "job_id": job_id, "job": job})
 
 
@@ -2244,18 +2252,24 @@ def selection_image(request: Request, job_id: str):
     return FileResponse(path, media_type="image/jpeg")
 
 
+def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float, int]:
+    """Point this job's selection frame at a moment in the video."""
+    seconds = max(0.0, min(seconds, max(0.0, float(job["video_duration"]) - 0.001)))
+    info = get_video_info(job["video_path"])
+    frame_number = int(round(seconds * info.fps))
+    frame = read_frame(job["video_path"], frame_number)
+    if frame is None or not cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), frame):
+        raise HTTPException(500, "Could not save the selected fighter frame.")
+    update_job(job_id, {"selection_frame": frame_number, "start_seconds": seconds})
+    return seconds, frame_number
+
+
 @app.post("/api/selection-frame/{job_id}")
 def set_selection_frame(request: Request, job_id: str, payload: SelectionFramePayload):
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
-    seconds = max(0.0, min(float(payload.seconds), max(0.0, float(job["video_duration"]) - 0.001)))
-    info = get_video_info(job["video_path"])
-    frame_number = int(round(seconds * info.fps))
-    frame = read_frame(job["video_path"], frame_number)
-    if not cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), frame):
-        raise HTTPException(500, "Could not save the selected fighter frame.")
-    update_job(job_id, {"selection_frame": frame_number, "start_seconds": seconds})
+    seconds, frame_number = _seek_selection_frame(job_id, job, float(payload.seconds))
     return {"ok": True, "seconds": seconds, "frame": frame_number}
 
 
@@ -2875,7 +2889,7 @@ def _appearance_observation(image, box):
     )
 
 
-def _score_withheld(report: dict) -> dict | None:
+def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
     """Why this fight has no score, in words a fighter can act on.
 
     The page used to say "Strike scoring needs the action model", which names
@@ -2905,12 +2919,23 @@ def _score_withheld(report: dict) -> dict | None:
             f" We lost track of which was which {confusions} times during the fight."
             if confusions else ""
         )
+        # Land them on the moment we lost track, when we know one; otherwise on
+        # the frame they picked. Either way the next click is the question we
+        # actually need answered, not a video to scrub through.
+        moment = tracking.get("last_identity_confusion_frame")
+        fps = float((report.get("video") or {}).get("fps") or 0) or 30.0
+        recheck = None
+        if job_id:
+            recheck = f"/select/{job_id}"
+            if moment:
+                recheck += f"?seconds={max(0.0, float(moment) / fps):.2f}"
         return {
             "reason": (
                 f"The two fighters look too alike in this video for us to tell them apart. "
                 f"Their kit matches {alike_text}, where a bout we can read is usually nearer 60%."
                 f"{muddled} Rather than guess, we have not credited strikes to either name."
             ),
+            **({"action": {"label": "Show me who is who", "url": recheck}} if recheck else {}),
             "fix": (
                 "Pick the two fighters again on a frame where their kit, headguards or corner "
                 "colours differ most - often just after a break, when they are apart and facing "
@@ -3035,7 +3060,7 @@ def result_page(request: Request, job_id: str):
         "analysis_quality": _analysis_quality_summary(report),
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
-        "score_withheld": _score_withheld(report),
+        "score_withheld": _score_withheld(report, job_id),
     })
     response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
     if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:
