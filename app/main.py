@@ -1853,6 +1853,10 @@ def _sport_context(request: Request, sport: str) -> dict:
         "request": request,
         "sport": sport,
         "sport_label": RULESET_SPORTS[sport],
+        # The smaller of what WarriorIQ allows and what the host will carry, so
+        # a file that cannot possibly arrive is refused here instead of after a
+        # minute of uploading.
+        "upload_limit_bytes": min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes),
         "identity": sport_identity(sport),
         "sports": RULESET_SPORTS,
         # Boxing and MMA each have exactly one ruleset, so asking which one is a

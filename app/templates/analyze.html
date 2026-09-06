@@ -131,7 +131,12 @@
   // come in better.
   const MOBILE_BYTES_PER_SEC=0.6*1048576;
   const fmtMins=b=>{const m=Math.round(b/MOBILE_BYTES_PER_SEC/60);return m<1?'under a minute':m===1?'about a minute':`about ${m} minutes`};
-  const sizeAdvice=b=>b>314572800?{tone:'warn',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data, less on Wi-Fi. Filming at 1080p instead of 4K makes it roughly four times smaller with no loss to the analysis.`}
+  // What the web host will actually carry. Bigger than this is refused before
+  // a single byte leaves the phone: the server aborts the body partway with a
+  // 500, so waiting a minute to be told nothing useful was the old behaviour.
+  const UPLOAD_LIMIT={{upload_limit_bytes}};
+  const overLimit=b=>b>UPLOAD_LIMIT;
+  const sizeAdvice=b=>overLimit(b)?{tone:'bad',text:`${fmtMB(b)} — too large to upload. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p instead of 4K, or trim to a single round, and it will fit.`}:b>314572800?{tone:'warn',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data, less on Wi-Fi. Filming at 1080p instead of 4K makes it roughly four times smaller with no loss to the analysis.`}
     :b>104857600?{tone:'note',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data. Wi-Fi will be quicker.`}
     :{tone:'ok',text:`${fmtMB(b)} — ready for WarriorIQ analysis`};
   const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
@@ -172,6 +177,13 @@
     if(!videoInput.files[0]||!form.reportValidity())return;
     event.preventDefault();
     const file=videoInput.files[0];
+    // Refuse here rather than after a minute of uploading. The host aborts the
+    // request body partway and answers 500, which reaches the page as a
+    // failure with nothing to act on and no file kept.
+    if(overLimit(file.size)){
+      restore(`This video is ${fmtMB(file.size)} and the upload limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p rather than 4K, or upload one round at a time — either fits, and neither costs the analysis anything.`);
+      return;
+    }
     // Shrink oversized phone footage before it crosses a mobile uplink. The
     // analyser infers at 1280 and samples at most 15fps, so a 4K source is
     // bandwidth the analysis never reads. Any failure returns the original.

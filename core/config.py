@@ -379,6 +379,17 @@ class Settings:
         50 * 1024 * 1024,
         int(os.getenv("WARRIORIQ_MAX_FIGHT_BYTES", str(2 * 1024 * 1024 * 1024))),
     )
+    # What the web host will actually accept in one request body, which is not
+    # the same thing as what WarriorIQ would allow. Measured against the live
+    # server: the body is refused at exactly 130 MiB, three times running, with
+    # a 500 rather than a 413 - so an upload ran for a minute and then died
+    # with no usable message. max_fight_bytes above says 2 GB and cannot be
+    # honoured while this is smaller. Raise this once the host's
+    # LimitRequestBody is raised, and the page follows it.
+    max_upload_bytes: int = max(
+        8 * 1024 * 1024,
+        int(os.getenv("WARRIORIQ_MAX_UPLOAD_BYTES", str(130 * 1024 * 1024))),
+    )
     max_video_duration_seconds: int = max(60, int(os.getenv("WARRIORIQ_MAX_VIDEO_SECONDS", "10800")))
     max_video_pixels: int = max(640 * 360, int(os.getenv("WARRIORIQ_MAX_VIDEO_PIXELS", str(3840 * 2160))))
     malware_scan_command: str = os.getenv("WARRIORIQ_MALWARE_SCAN_COMMAND", "").strip()

@@ -734,3 +734,27 @@ class DurableAnalysisStateTests(TestCase):
         self.assertLess(bar, timeline, "and before the event timeline, not after it")
         self.assertIn('id="percentInline"', template, "the percentage reads next to the bar")
         self.assertIn("$('percentInline').textContent", template, "and is actually updated")
+
+    def test_an_impossible_upload_is_refused_before_it_starts(self):
+        """The host aborts the body at 130 MiB and answers 500.
+
+        Measured against the live server three times, aborting at an identical
+        136,314,880 bytes. The page used to upload for a minute and then show a
+        failure with nothing to act on, so the file is now checked first.
+        """
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
+        self.assertIn("const UPLOAD_LIMIT={{upload_limit_bytes}}", template, "the limit comes from the server")
+        self.assertIn("if(overLimit(file.size)){", template, "and is checked before uploading")
+        guard = template.index("if(overLimit(file.size)){")
+        send = template.index("request.send(body)")
+        self.assertLess(guard, send, "the check must come before the upload starts")
+
+    def test_the_limit_is_the_smaller_of_the_two(self):
+        """WarriorIQ allows 2GB and the host carries 130MiB; the page must not
+        promise the larger number."""
+        from core.config import SETTINGS
+
+        import app.main as webapp
+
+        self.assertLessEqual(SETTINGS.max_upload_bytes, webapp.MAX_FIGHT_BYTES)
+        self.assertGreaterEqual(SETTINGS.max_upload_bytes, 8 * 1024 * 1024)
