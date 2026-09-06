@@ -3098,3 +3098,35 @@ class WorkerSingleInstanceTests(unittest.TestCase):
 
         for name in ("torch", "ultralytics", "cv2"):
             self.assertIn(name, worker.ANALYSIS_REQUIREMENTS)
+
+
+class LabelGranularityTests(unittest.TestCase):
+    """Ask what the footage can answer, and never upgrade a guess to a fact."""
+
+    def test_the_page_asks_the_family_first(self):
+        from pathlib import Path
+
+        page = Path("tools/label_pack_page.html").read_text(encoding="utf-8")
+        self.assertIn("FAMILIES", page)
+        self.assertLess(page.index("const FAMILIES"), page.index("const DETAIL"),
+                        "family is the answerable question and must come first")
+
+    def test_a_family_answer_is_never_written_as_no_strike(self):
+        """The trap this guards.
+
+        _temporal_label maps anything it does not recognise to "none", so a
+        coarse "kick" would be filed as "no strike happened" - teaching the
+        model the opposite of what the labeller saw, silently.
+        """
+        from core.annotations import _temporal_label
+
+        for family in ("punch", "kick", "knee"):
+            self.assertEqual(_temporal_label(family), "none",
+                             "still true, which is exactly why ingest must divert it")
+
+        from pathlib import Path
+        source = Path("tools/ingest_labels.py").read_text(encoding="utf-8")
+        self.assertIn('FAMILIES = {"punch", "kick", "knee"}', source)
+        self.assertLess(source.index("if technique in FAMILIES"),
+                        source.index("kept[_temporal_label(technique)]"),
+                        "families must be diverted before reaching _temporal_label")

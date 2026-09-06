@@ -89,30 +89,38 @@
   </div>
 
   <ul class="how">
-    <li>The <b>yellow box</b> is the fighter you are judging. It vanishes in frames where the
-      analysis lost them &mdash; that is normal, and judging by the marked frames is fine.</li>
-    <li>The frame marked <b>THE MOMENT</b> is where we think the action peaks. Look there first.</li>
-    <li>Some clips are moments we think <b>nothing happened</b>. If nothing did, press
-      <kbd>n</kbd>. If we missed a strike, name it &mdash; those are the most valuable answers here.</li>
-    <li>Not sure? Press <kbd>x</kbd>. Skipped clips are never used as training data, and guessing
-      is worse than skipping.</li>
+    <li>The <b>yellow box</b> is the fighter you are judging; grey is their opponent. The box
+      vanishes in frames where the analysis lost them &mdash; that is normal.</li>
+    <li>Answer <b>what you can actually see</b>: punch, kick, knee, or nothing. That is the
+      question that matters. The exact technique is offered afterwards and is always optional,
+      because on footage this size a jab and a cross often look identical &mdash; and a guess
+      recorded as fact is worse for the model than no answer.</li>
+    <li>Our guess is shown, and it is <b>frequently wrong</b>. Do not let it lead you.</li>
+    <li>Some clips are moments we think <b>nothing happened</b>. If we missed a strike there,
+      saying so is the most valuable answer in the pack.</li>
+    <li>Can't tell? <kbd>x</kbd>. Skipped clips never become training data.</li>
   </ul>
 </main>
 
 <script>
 const DATA = /*__DATA__*/ null;
 
-// Grouped so the eye goes to a family first and a limb second. Seventeen flat
-// buttons is a memory test; four groups of four is a glance.
-const GROUPS = [
-  ["Punches", [["1","jab"],["2","cross"],["3","left_hook"],["4","right_hook"],
-               ["5","left_uppercut"],["6","right_uppercut"],
-               ["7","backfist"],["8","spinning_backfist"]]],
-  ["Kicks",   [["q","left_round_kick"],["w","right_round_kick"],
-               ["e","left_front_kick"],["r","right_front_kick"],
-               ["t","left_push_kick"],["y","right_push_kick"]]],
-  ["Knees",   [["a","left_knee"],["s","right_knee"]]],
-];
+// Family first, because family is what a person can actually see at this
+// resolution. Judged on real footage: a punch is tellable from a kick from
+// nothing; a jab is not tellable from a cross from a hook on a fighter sixty
+// pixels tall. Asking the fine question first produced confident-looking
+// answers to a question the footage cannot settle, which is worse than no
+// answer at all - a wrong label is indistinguishable from a right one later.
+const FAMILIES = [["1","punch"],["2","kick"],["3","knee"]];
+const DETAIL = {
+  punch: [["q","jab"],["w","cross"],["e","left_hook"],["r","right_hook"],
+          ["t","left_uppercut"],["y","right_uppercut"],
+          ["u","backfist"],["i","spinning_backfist"]],
+  kick:  [["q","left_round_kick"],["w","right_round_kick"],
+          ["e","left_front_kick"],["r","right_front_kick"],
+          ["t","left_push_kick"],["y","right_push_kick"]],
+  knee:  [["q","left_knee"],["w","right_knee"]],
+};
 const NONE = ["n", "none"];
 
 const store = "warrioriq-labels-" + DATA.job;
@@ -120,13 +128,23 @@ let labels = {};
 try { labels = JSON.parse(localStorage.getItem(store) || "{}"); } catch (e) { labels = {}; }
 const items = DATA.candidates;
 let at = 0;
+let pending = null;          // family chosen, offering the optional detail
 
 const pretty = (name) => name.replace(/_/g, " ");
 const persist = () => { try { localStorage.setItem(store, JSON.stringify(labels)); } catch (e) {} };
+const familyOf = (t) => t && (t.includes("kick") ? "kick" : t.includes("knee") ? "knee" : "punch");
 const nextUnlabelled = (from) => {
   for (let i = from; i < items.length; i++) if (!(items[i].id in labels)) return i;
   return items.length;
 };
+
+function record(value) {
+  labels[items[at].id] = value;
+  persist();
+  pending = null;
+  at = nextUnlabelled(at + 1);
+  render();
+}
 
 function render() {
   const done = Object.keys(labels).length;
@@ -140,65 +158,87 @@ function render() {
 
   const item = items[at];
   document.getElementById("strip").src = item.clip;
-  document.getElementById("guess").innerHTML = item.source === "quiet"
-    ? "We think <b>nothing happened</b> here."
-      + "<span class='enter'>Enter agrees &mdash; or name what we missed</span>"
-    : "We think it was a <b>" + pretty(item.proposed) + "</b>."
-      + "<span class='enter'>Enter agrees &mdash; or pick the right one</span>";
-}
+  document.getElementById("guess").innerHTML = pending
+    ? "Recorded as a <b>" + pending + "</b>."
+      + "<span class='enter'>Add the exact technique if you can see it, or Enter to move on</span>"
+    : (item.source === "quiet"
+        ? "We think <b>nothing happened</b> here."
+          + "<span class='enter'>Enter agrees &mdash; or say what we missed</span>"
+        : "We guessed <b>" + pretty(item.proposed) + "</b>, which may be wrong."
+          + "<span class='enter'>Answer what you can see</span>");
 
-function choose(technique) {
-  if (at >= items.length) return;
-  labels[items[at].id] = technique;
-  persist();
-  at = nextUnlabelled(at + 1);
-  render();
-}
-
-const keys = document.getElementById("keys");
-for (const [title, entries] of GROUPS) {
-  const box = document.createElement("div");
-  box.className = "group";
-  box.innerHTML = "<h3>" + title + "</h3>";
-  for (const [key, name] of entries) {
-    const b = document.createElement("button");
-    b.innerHTML = "<kbd>" + key + "</kbd><span>" + pretty(name) + "</span>";
-    b.onclick = () => choose(name);
-    box.appendChild(b);
+  const keys = document.getElementById("keys");
+  keys.innerHTML = "";
+  if (pending) {
+    const box = document.createElement("div");
+    box.className = "group";
+    box.innerHTML = "<h3>Which " + pending + "? (optional)</h3>";
+    for (const [key, name] of DETAIL[pending]) {
+      const b = document.createElement("button");
+      b.innerHTML = "<kbd>" + key + "</kbd><span>" + pretty(name) + "</span>";
+      b.onclick = () => record(name);
+      box.appendChild(b);
+    }
+    const skip = document.createElement("button");
+    skip.className = "big";
+    skip.innerHTML = "<kbd>&#9166;</kbd><span>Can't tell &mdash; keep it as \"" + pending + "\"</span>";
+    skip.onclick = () => record(pending);
+    box.appendChild(skip);
+    keys.appendChild(box);
+    return;
   }
-  keys.appendChild(box);
-}
-const noneBox = document.createElement("div");
-noneBox.className = "group none";
-noneBox.innerHTML = "<h3>Nothing / unsure</h3>";
-const noneBtn = document.createElement("button");
-noneBtn.className = "big";
-noneBtn.innerHTML = "<kbd>n</kbd><span>No strike here</span>";
-noneBtn.onclick = () => choose("none");
-const skipBtn = document.createElement("button");
-skipBtn.className = "big";
-skipBtn.innerHTML = "<kbd>x</kbd><span>I can't tell &mdash; skip it</span>";
-skipBtn.onclick = () => choose("__unsure__");
-noneBox.append(noneBtn, skipBtn);
-keys.appendChild(noneBox);
 
-const ALL = [...GROUPS.flatMap(([, e]) => e), NONE];
+  const main = document.createElement("div");
+  main.className = "group";
+  main.innerHTML = "<h3>What kind of action</h3>";
+  for (const [key, name] of FAMILIES) {
+    const b = document.createElement("button");
+    b.className = "big";
+    b.innerHTML = "<kbd>" + key + "</kbd><span>" + name + "</span>";
+    b.onclick = () => { pending = name; render(); };
+    main.appendChild(b);
+  }
+  keys.appendChild(main);
+
+  const other = document.createElement("div");
+  other.className = "group none";
+  other.innerHTML = "<h3>Nothing / unsure</h3>";
+  const no = document.createElement("button");
+  no.className = "big";
+  no.innerHTML = "<kbd>n</kbd><span>No strike here</span>";
+  no.onclick = () => record("none");
+  const skip = document.createElement("button");
+  skip.className = "big";
+  skip.innerHTML = "<kbd>x</kbd><span>I can't tell &mdash; skip it</span>";
+  skip.onclick = () => record("__unsure__");
+  other.append(no, skip);
+  keys.appendChild(other);
+}
+
 document.addEventListener("keydown", (ev) => {
-  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if (ev.metaKey || ev.ctrlKey || ev.altKey || at >= items.length) return;
+  const key = ev.key.toLowerCase();
   if (ev.key === "Enter") {
-    if (at < items.length) choose(items[at].source === "quiet" ? "none" : items[at].proposed);
+    if (pending) record(pending);
+    else record(items[at].source === "quiet" ? "none" : familyOf(items[at].proposed));
     ev.preventDefault(); return;
   }
-  const key = ev.key.toLowerCase();
-  if (key === "x") { if (at < items.length) choose("__unsure__"); ev.preventDefault(); return; }
+  if (key === "x") { record("__unsure__"); ev.preventDefault(); return; }
   if (ev.key === "Backspace") {
+    if (pending) { pending = null; render(); ev.preventDefault(); return; }
     for (let i = at - 1; i >= 0; i--) {
       if (items[i].id in labels) { delete labels[items[i].id]; at = i; persist(); render(); break; }
     }
     ev.preventDefault(); return;
   }
-  const hit = ALL.find((k) => k[0] === key);
-  if (hit) { choose(hit[1]); ev.preventDefault(); }
+  if (pending) {
+    const hit = DETAIL[pending].find((k) => k[0] === key);
+    if (hit) { record(hit[1]); ev.preventDefault(); }
+    return;
+  }
+  if (key === "n") { record("none"); ev.preventDefault(); return; }
+  const fam = FAMILIES.find((k) => k[0] === key);
+  if (fam) { pending = fam[1]; render(); ev.preventDefault(); }
 });
 
 document.getElementById("save").onclick = () => {

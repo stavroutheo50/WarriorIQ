@@ -44,10 +44,19 @@ def main() -> int:
     if not entries:
         raise SystemExit("no labels in that file")
 
+    FAMILIES = {"punch", "kick", "knee"}
     kept = collections.Counter()
+    coarse = []
     agreed = disagreed = failed = 0
     for entry in entries:
         technique = entry["technique"]
+        if technique in FAMILIES:
+            # A family is a real answer, not a missing one, and it must never
+            # reach _temporal_label - that maps anything it does not recognise
+            # to "none", which would file a kick as "no strike happened" and
+            # quietly teach the model the opposite of what the labeller saw.
+            coarse.append(entry)
+            continue
         # What the trainer will actually see, after kick heights collapse.
         kept[_temporal_label(technique)] += 1
         if technique == entry.get("proposed"):
@@ -65,7 +74,19 @@ def main() -> int:
         if written is None:
             failed += 1
 
-    print("%d labels: %d confirmed the analysis, %d corrected it" % (len(entries), agreed, disagreed))
+    if coarse and not args.dry_run:
+        # Kept for a family-level model, which is the granularity this footage
+        # can actually support. The 17-class trainer cannot use them.
+        path = DATASET / ("%s-family-labels.json" % args.job)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(coarse, indent=1), encoding="utf-8")
+        print("%d answered only as punch/kick/knee -> %s" % (len(coarse), path))
+        print("   (the 17-class trainer cannot use these; they are not lost)")
+    elif coarse:
+        print("%d answered only as punch/kick/knee (not written in a dry run)" % len(coarse))
+
+    print("%d labels: %d exact, %d only a family, of which %d confirmed our guess"
+          % (len(entries), len(entries) - len(coarse), len(coarse), agreed))
     if payload.get("unsure"):
         print("%d marked unsure and skipped" % len(payload["unsure"]))
     print("class balance after kick heights collapse:")
