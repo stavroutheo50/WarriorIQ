@@ -2773,3 +2773,85 @@ class WarmUpPassTests(unittest.TestCase):
         from core.config import SETTINGS
 
         self.assertLess(SETTINGS.max_stationary_spread_short, 0.029)
+
+
+class LabelPackTests(unittest.TestCase):
+    """The offline labelling route, which is what unblocks the strike model."""
+
+    def _page(self):
+        from pathlib import Path
+        return Path("tools/label_pack_page.html").read_text(encoding="utf-8")
+
+    def test_the_page_keeps_the_slot_the_builder_writes_into(self):
+        """The two halves agree through one placeholder and nothing else."""
+        self.assertIn("/*__DATA__*/ null", self._page())
+
+    def test_the_page_does_not_fetch_anything(self):
+        """It is opened from the filesystem, where fetch and XHR are blocked.
+
+        If either ever appears here the page will look fine to whoever wrote
+        it, served over http, and be blank for the person actually labelling.
+        """
+        page = self._page()
+        for forbidden in ("fetch(", "XMLHttpRequest", "import("):
+            self.assertNotIn(forbidden, page)
+
+    def test_injected_payload_cannot_close_the_script_tag(self):
+        """A technique name is free text by the time it reaches the page."""
+        import json
+
+        payload = json.dumps({"candidates": [{"proposed": "</script><b>x"}]})
+        self.assertIn("</script>", payload)
+        self.assertNotIn("</script>", payload.replace("</", chr(60) + chr(92) + chr(47)))
+
+    def test_ingest_ids_cannot_overwrite_annotator_sequences(self):
+        import tools.ingest_labels as ingest
+
+        self.assertGreaterEqual(ingest.ID_BASE, 100000)
+
+    def test_a_label_becomes_a_sequence_the_trainer_accepts(self):
+        """End to end, into a temporary dataset rather than the real one."""
+        import json
+        import shutil
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        import numpy as np
+
+        import core.annotations as annotations
+        from core.model_validation import audit_sequence_directory
+
+        outputs = Path(tempfile.mkdtemp())
+        dataset = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, outputs, True)
+        self.addCleanup(shutil.rmtree, dataset, True)
+
+        job = (outputs / "pack_job")
+        job.mkdir()
+        keypoints = [[10.0 + i, 20.0 + i] for i in range(17)]
+        with (job / "tracking.jsonl").open("w", encoding="utf-8") as handle:
+            for step in range(20):
+                handle.write(json.dumps({
+                    "source_frame": 100 + step * 2,
+                    "time_seconds": 5.0 + step * 0.06,
+                    "fighter_A": {"identity_confidence": 0.9, "observation": {
+                        "box": [10.0, 20.0, 40.0, 90.0], "keypoints": keypoints}},
+                    "fighter_B": {"identity_confidence": 0.9, "observation": {
+                        "box": [50.0, 20.0, 80.0, 90.0], "keypoints": keypoints}},
+                }) + "\n")
+
+        with mock.patch.object(annotations, "OUTPUTS", outputs), \
+                mock.patch.object(annotations, "DATASET", dataset):
+            written = annotations.export_sequence(
+                "pack_job", 500007,
+                {"fighter": "A", "technique": "left_round_kick",
+                 "target": "body", "outcome": "uncertain"}, 5.6)
+
+        self.assertIsNotNone(written)
+        stored = np.load(written, allow_pickle=False)
+        self.assertEqual(stored["x"].shape[1], 102)
+        self.assertEqual(stored["x"].dtype, np.float32)
+        audit = audit_sequence_directory(dataset / "sequences")
+        self.assertEqual(audit["invalid_sequences"], 0)
+        self.assertEqual(audit["valid_sequences"], 1)

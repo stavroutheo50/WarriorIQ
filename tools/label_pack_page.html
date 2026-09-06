@@ -1,0 +1,161 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WarriorIQ label pack</title>
+<!--
+  Opened straight off the filesystem, so the candidate list is injected into
+  this file rather than fetched: file:// blocks fetch and XHR but not <img>.
+  No server, no network, no database. Progress is kept in localStorage so the
+  tab can be closed mid-way, and nothing leaves the machine until Download.
+-->
+<style>
+  :root { color-scheme: light dark; --bg:#14161a; --fg:#eef1f5; --dim:#98a2b3;
+          --line:#2a2f39; --accent:#ffb020; --ok:#3ddc84; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line);
+           display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0; font-weight:600; }
+  .dim { color:var(--dim); }
+  #strip { display:block; max-width:100%; margin:14px auto; border-radius:6px; }
+  #wrap { padding:0 16px 20px; max-width:1400px; margin:0 auto; }
+  #proposal { font-size:20px; font-weight:600; }
+  #proposal small { font-weight:400; font-size:13px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
+          gap:6px; margin-top:12px; }
+  button { background:#1e222a; color:var(--fg); border:1px solid var(--line);
+           border-radius:5px; padding:8px 10px; font:inherit; cursor:pointer;
+           text-align:left; }
+  button:hover { border-color:var(--accent); }
+  button b { display:inline-block; min-width:1.6em; color:var(--accent); }
+  .bar { height:5px; background:#20242c; border-radius:3px; overflow:hidden; margin-top:8px; }
+  .bar i { display:block; height:100%; background:var(--ok); }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  .pill { border:1px solid var(--line); border-radius:99px; padding:3px 10px; font-size:12px; }
+  kbd { background:#20242c; border:1px solid var(--line); border-bottom-width:2px;
+        border-radius:4px; padding:1px 5px; font-size:12px; }
+  #done { text-align:center; padding:40px 0; }
+</style>
+
+<header>
+  <h1>WarriorIQ label pack</h1>
+  <span class="dim" id="job"></span>
+  <span class="pill" id="count"></span>
+  <span class="pill" id="kind"></span>
+  <span class="dim">Confirm <kbd>Enter</kbd> &middot; unsure <kbd>x</kbd> &middot; back <kbd>Backspace</kbd></span>
+  <span style="margin-left:auto"><button id="save">Download labels</button></span>
+</header>
+
+<div id="wrap">
+  <div class="bar"><i id="prog"></i></div>
+  <img id="strip" alt="candidate action">
+  <div class="row">
+    <span id="proposal"></span>
+  </div>
+  <div class="grid" id="keys"></div>
+  <div id="done" hidden>
+    <h2>All done.</h2>
+    <p class="dim">Press <b>Download labels</b> and hand the file to ingest_labels.py.</p>
+  </div>
+</div>
+
+<script>
+const DATA = /*__DATA__*/ null;
+
+// Shortcut letters are printed on every button, so nothing has to be memorised.
+const KEYS = [
+  ["1","jab"],["2","cross"],["3","left_hook"],["4","right_hook"],
+  ["5","left_uppercut"],["6","right_uppercut"],["7","backfist"],["8","spinning_backfist"],
+  ["q","left_round_kick"],["w","right_round_kick"],["e","left_front_kick"],["r","right_front_kick"],
+  ["t","left_push_kick"],["y","right_push_kick"],["a","left_knee"],["s","right_knee"],
+  ["n","none"],
+];
+
+const store = "warrioriq-labels-" + DATA.job;
+let labels = {};
+try { labels = JSON.parse(localStorage.getItem(store) || "{}"); } catch (e) { labels = {}; }
+let at = 0;
+const items = DATA.candidates;
+
+function persist() {
+  try { localStorage.setItem(store, JSON.stringify(labels)); } catch (e) {}
+}
+
+function nextUnlabelled(from) {
+  for (let i = from; i < items.length; i++) if (!(items[i].id in labels)) return i;
+  return items.length;
+}
+
+function render() {
+  const done = Object.keys(labels).length;
+  document.getElementById("job").textContent = DATA.job;
+  document.getElementById("count").textContent = done + " / " + items.length + " labelled";
+  document.getElementById("prog").style.width = (100 * done / items.length) + "%";
+  const finished = at >= items.length;
+  document.getElementById("done").hidden = !finished;
+  document.getElementById("strip").hidden = finished;
+  document.getElementById("keys").hidden = finished;
+  if (finished) { document.getElementById("proposal").textContent = "";
+                  document.getElementById("kind").textContent = ""; return; }
+  const item = items[at];
+  document.getElementById("strip").src = item.clip;
+  document.getElementById("kind").textContent =
+    item.source === "quiet" ? "quiet window" : "proposed action";
+  document.getElementById("proposal").innerHTML =
+    "Analysis says: <b>" + item.proposed + "</b> " +
+    "<small class='dim'>at " + item.peak_time.toFixed(2) + "s, fighter " + item.fighter + "</small>";
+}
+
+function choose(technique) {
+  if (at >= items.length) return;
+  labels[items[at].id] = technique;
+  persist();
+  at = nextUnlabelled(at + 1);
+  render();
+}
+
+const grid = document.getElementById("keys");
+for (const [key, name] of KEYS) {
+  const b = document.createElement("button");
+  b.innerHTML = "<b>" + key + "</b> " + name;
+  b.onclick = () => choose(name);
+  grid.appendChild(b);
+}
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const key = ev.key.toLowerCase();
+  if (ev.key === "Enter") { if (at < items.length) choose(items[at].proposed); ev.preventDefault(); return; }
+  if (key === "x") {   // unsure: recorded, but never written as training data
+    if (at < items.length) choose("__unsure__");
+    ev.preventDefault(); return;
+  }
+  if (ev.key === "Backspace") {
+    for (let i = at - 1; i >= 0; i--) {
+      if (items[i].id in labels) { delete labels[items[i].id]; at = i; persist(); render(); break; }
+    }
+    ev.preventDefault(); return;
+  }
+  const hit = KEYS.find(k => k[0] === key);
+  if (hit) { choose(hit[1]); ev.preventDefault(); }
+});
+
+document.getElementById("save").onclick = () => {
+  const payload = {
+    job: DATA.job, video: DATA.video,
+    labels: items.filter(i => i.id in labels && labels[i.id] !== "__unsure__")
+                 .map(i => ({ id: i.id, fighter: i.fighter, peak_time: i.peak_time,
+                              proposed: i.proposed, technique: labels[i.id],
+                              target: i.target, outcome: i.outcome, source: i.source })),
+    unsure: items.filter(i => labels[i.id] === "__unsure__").map(i => i.id),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 1)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = DATA.job + "-labels.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+at = nextUnlabelled(0);
+render();
+</script>

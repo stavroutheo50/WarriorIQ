@@ -53,3 +53,6 @@ fights/*
 # The referee probe is a 1 KB trained artefact, not a downloaded weights file:
 # without it in the repo the filter cannot be enabled on any other machine.
 !models/referee_probe.npz
+
+# Generated labelling packs: clips plus a self-contained page, megabytes each.
+labelpack/
