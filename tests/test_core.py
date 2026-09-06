@@ -2565,3 +2565,104 @@ class RefereeFilterTests(unittest.TestCase):
         before = manager.rejections.get("referee", 0)
         manager._score(manager.a, person(7, 0.99))
         self.assertEqual(manager.rejections.get("referee", 0), before)
+
+
+class HomelessFighterTests(unittest.TestCase):
+    """What the identity manager does when a fighter has nobody to follow."""
+
+    @staticmethod
+    def _manager():
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, 40., x + 30., 100.], dtype=np.float32),
+                confidence=0.8)
+
+        return IdentityManager(person(1, 220.), person(2, 270.), 0, source_fps=30.0)
+
+    def test_no_anchor_does_not_refuse_every_candidate(self):
+        """A discarded anchor must not become "the fighter is unreachable".
+
+        The distance helpers answer 999.0 for the distance to nothing. Left
+        alone, that makes position and size vote against every candidate in
+        the frame, and no amount of matching appearance can outvote them.
+        """
+        import numpy as np
+
+        from core.types import PersonObservation
+
+        manager = self._manager()
+        far = PersonObservation(
+            track_id=9, box=np.asarray([420., 40., 450., 100.], dtype=np.float32),
+            confidence=0.8)
+
+        with_anchor = manager._score(manager.b, far)
+        self.assertLess(with_anchor, -100, "a real jump should still be refused")
+
+        manager.b.last_box = None
+        manager.b.prev_box = None
+        manager.b.velocity = None
+        without_anchor = manager._score(manager.b, far)
+        self.assertGreater(without_anchor, -100)
+
+    def test_releasing_a_spectator_also_drops_where_it_was_sitting(self):
+        """The anchor describes the chair, so it goes with the track id.
+
+        Keeping it turns "we followed the wrong person" into "the right person
+        is now unreachable", because every later candidate is judged on its
+        distance from furniture.
+        """
+        import numpy as np
+
+        from core.types import PersonObservation
+
+        manager = self._manager()
+        seated = np.asarray([300., 40., 330., 100.], dtype=np.float32)
+        manager.b.current_track_id = 5
+        manager.b.last_box = seated.copy()
+        # Six seconds of a person who has not moved at all.
+        for frame in range(0, 200, 2):
+            manager._remember_positions(
+                [PersonObservation(track_id=5, box=seated.copy(), confidence=0.8)], frame)
+
+        self.assertTrue(manager._release_if_furniture(manager.b))
+        self.assertIsNone(manager.b.current_track_id)
+        self.assertIsNone(manager.b.last_box)
+        self.assertIsNone(manager.b.velocity)
+
+    def test_an_empty_slot_is_not_free(self):
+        """Following the wrong person must not beat admitting a gap.
+
+        Fighter A's man is simply not detected this frame - a common event,
+        since the athletes here are 0.3 confidence detections. Scored at zero,
+        an unassigned fighter made any mediocre match look better than
+        honesty, so A took B's man and shoved B onto the nearest stranger.
+        Reproduced from frame 206 of the reference bout, where "A on B's man"
+        beat "A on nobody" by 0.045.
+        """
+        import numpy as np
+
+        from core.types import PersonObservation
+
+        manager = self._manager()
+        manager.a.current_track_id, manager.b.current_track_id = 1, 2
+
+        def person(track_id, x):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, 40., x + 30., 100.], dtype=np.float32),
+                confidence=0.8)
+
+        # Track 1 is missing. B's own man is here, and so is a stranger who is
+        # close enough to B to look superficially plausible.
+        people = [person(2, 271.), person(7, 302.)]
+        a_obs, b_obs = manager.update(people, 10)
+
+        self.assertIsNone(a_obs, "A has nobody to follow and should admit it")
+        self.assertIsNotNone(b_obs)
+        self.assertEqual(b_obs.track_id, 2, "B must keep the man B was following")

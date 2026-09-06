@@ -38,17 +38,27 @@ the analysis previously accepted as fighter A, 241 - fifty-nine per cent - were
 the referee. A's entire output was mostly a measurement of the official.
 Switching the filter on takes that to one per cent.
 
-It is still off by default, because switching it on costs fighter B 356 frames
-of correctly tracking the real fighter. That is not this classifier misfiring:
-none of B's accepted boxes ever scored as the official, and the boxes B loses
-are plainly the blue-corner fighter. Refusing A the referee leaves A with no
-fighter of its own to find, and the identity manager has no rule keeping one
-fighter off the person the other is already following - 233 of those 356 frames
-went to A on B's own track id. Three attempts at that rule (incumbency while
-the other fighter was assigned, a two-second claim memory, and a per-fighter
-furniture ban) each left coverage unchanged or slightly worse, which says B
-loses the track first and A only fills the vacancy afterwards. The cause of
-B's initial loss is not yet found, so enabling this waits on that.
+It is on by default. Enabling it alone was not enough and briefly looked like
+a regression: fighter B lost 356 frames of the real fighter, because the
+official had been acting as a sink for A's homeless slot. Two separate faults
+in the identity manager were hiding behind him, both now fixed - an unassigned
+fighter scored 0.0, so following the wrong person always beat admitting a gap;
+and releasing a fighter from a seated spectator left the positional anchor on
+the chair, so the real fighter was then refused as an implausible jump for the
+rest of the round. With those repaired, on the reference bout: frames spent on
+the referee fall from 242 to 6, while frames spent on somebody who is not the
+referee are 686 against 671 - the same amount of real tracking, without the
+contamination.
+
+Note the coupling. The anchor repair on its own makes matters worse, not
+better: it recovers more readily, and with nothing to refuse the official it
+recovers onto him, taking referee frames from 242 up to 298. These two changes
+are only correct together.
+
+Safe to leave on across sports because of the stand-down below. In a discipline
+whose competitors wear white - a karate gi being the obvious case - both
+fighters are seeded on people who score as officials, both anchors are marked,
+and the filter switches itself off for that bout rather than refusing everyone.
 
 The limit this buys, stated plainly: this is a per-federation model. It
 recognises one specific uniform, and a promotion whose officials wear black -

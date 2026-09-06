@@ -269,8 +269,17 @@ class IdentityManager:
         if state.last_box is not None and distance > SETTINGS.max_normalized_jump:
             return -999.0
         iou = box_iou(reference, candidate.box)
-        position = 1.0 / (1.0 + distance)
-        size = size_similarity(state.last_box, candidate.box)
+        if state.last_box is None:
+            # No positional anchor, because one was just discarded as wrong.
+            # "Unknown" has to score neutral: the helpers return 999.0 for the
+            # distance to nothing, which would make position and size vote
+            # against every candidate in the frame and leave appearance unable
+            # to outvote them. Neutral values rank all candidates equally on
+            # position, so who is chosen is decided by who they look like.
+            position = size = 0.5
+        else:
+            position = 1.0 / (1.0 + distance)
+            size = size_similarity(state.last_box, candidate.box)
         appearance = appearance_similarity(state.appearance, candidate.appearance)
         candidate_sig = candidate.pose_signature if candidate.pose_signature is not None else pose_signature(candidate.keypoints, candidate.box)
         pose = pose_similarity(state.pose_signature, candidate_sig)
@@ -487,8 +496,22 @@ class IdentityManager:
             for bi in [None, *range(len(people))]:
                 if ai is not None and bi is not None and ai == bi:
                     continue
-                sa = 0.0 if ai is None else scores_a[ai]
-                sb = 0.0 if bi is None else scores_b[bi]
+                # An empty slot is worth the weakest match that would have
+                # been accepted, not nothing. Scoring it zero made following
+                # the wrong person strictly better than admitting a gap: at
+                # frame 206 of the reference bout, A's fighter - a 0.3
+                # confidence detection - simply was not detected, and
+                # "A on B's man, B pushed onto a stranger" scored 1.136
+                # against 1.091 for "A holds nobody, B keeps his own man".
+                # A wrong assignment is worth about +0.57 and honesty was
+                # worth 0, so the optimiser manufactured one every time a
+                # fighter went undetected.
+                #
+                # This was invisible while the referee was available: A landed
+                # on him instead, and B was left alone. Refusing A the referee
+                # removed the sink, not the cause.
+                sa = SETTINGS.min_reid_score if ai is None else scores_a[ai]
+                sb = SETTINGS.min_reid_score if bi is None else scores_b[bi]
                 if ai is not None and sa < SETTINGS.min_reid_score:
                     continue
                 if bi is not None and sb < SETTINGS.min_reid_score:
@@ -539,6 +562,17 @@ class IdentityManager:
             return False
         self._furniture.add(int(track_id))
         state.current_track_id = None
+        # And forget where we were, because where we were is the chair. The
+        # anchor is what every later candidate is judged against for distance,
+        # so leaving it in place quietly converts "we followed the wrong
+        # person" into "the right person is now unreachable": measured on the
+        # reference bout, B sat on a spectator at the right of frame, was
+        # released here, and then refused the real fighter 250 px away on the
+        # left as an implausible jump on every remaining frame of the round -
+        # holding one seated man's track from frame 386 to 1786.
+        state.last_box = None
+        state.prev_box = None
+        state.velocity = None
         state.identity_confidence = 0.0
         state.missing_frames += 1
         state.switches_rejected += 1

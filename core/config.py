@@ -129,7 +129,7 @@ class Settings:
     # referee passes every comparative guard honestly, so the only thing that
     # separates him is what he is wearing. See core/referee.py for why this
     # feature is deliberately four numbers wide and per-federation.
-    referee_filter_enabled: bool = env_bool("WARRIORIQ_REFEREE_FILTER", False)
+    referee_filter_enabled: bool = env_bool("WARRIORIQ_REFEREE_FILTER", True)
     referee_probe_path: str = os.getenv(
         "WARRIORIQ_REFEREE_PROBE", "models/referee_probe.npz").strip()
     # Measured on 58 hand-checked crops from real footage: the official scores
