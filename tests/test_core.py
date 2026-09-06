@@ -2321,3 +2321,61 @@ class MetricSampleBasisTests(unittest.TestCase):
         result = self._tracker(900, 928).finalize([], [], 60.0)["A"]
         self.assertIsNotNone(result["guard_index"])
         self.assertTrue(result["measurement"]["confident"])
+
+
+class FurnitureBanLapseTests(unittest.TestCase):
+    """A ban is a statement about the past, and the past can be contradicted."""
+
+    @staticmethod
+    def _manager():
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x, y=100.0):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, y, x + 30, y + 80], dtype=np.float32),
+                confidence=0.9,
+            )
+
+        return IdentityManager(person(1, 100), person(2, 300), 0, source_fps=30.0), person
+
+    def test_a_banned_track_that_starts_moving_is_let_back_in(self):
+        """Two fighters clinching for six seconds ended one for the whole round.
+
+        The ban was permanent and the refusal then repeated on every later
+        frame - 910 of them on one fight, over half of all rejections.
+        """
+        manager, person = self._manager()
+        manager.a.current_track_id = 9
+        # Still long enough to be released as scenery.
+        for frame in range(0, 300, 2):
+            manager._remember_positions([person(9, 200.0)], frame)
+        self.assertTrue(manager._release_if_furniture(manager.a))
+        self.assertIn(9, manager._furniture)
+
+        # Then it crosses the mat, which furniture does not do.
+        for index, frame in enumerate(range(300, 700, 2)):
+            manager._remember_positions([person(9, 120.0 + (index % 50) * 8.0)], frame)
+
+        score = manager._score(manager.b, person(9, 400.0), keep_id_bonus=False)
+        self.assertNotEqual(score, -999.0, "movement contradicts the ban")
+        self.assertNotIn(9, manager._furniture, "and clears it")
+        self.assertEqual(manager.forgiven_furniture, 1)
+
+    def test_something_that_stays_still_stays_banned(self):
+        """A spectator in a chair must not be readmitted for jittering."""
+        manager, person = self._manager()
+        manager.a.current_track_id = 9
+        for frame in range(0, 700, 2):
+            wobble = 3.0 if frame % 4 else -3.0
+            manager._remember_positions([person(9, 200.0 + wobble)], frame)
+        manager._release_if_furniture(manager.a)
+        self.assertIn(9, manager._furniture)
+
+        score = manager._score(manager.b, person(9, 200.0), keep_id_bonus=False)
+        self.assertEqual(score, -999.0, "it never went anywhere, so it is still scenery")
+        self.assertIn(9, manager._furniture)
+        self.assertEqual(manager.forgiven_furniture, 0)

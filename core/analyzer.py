@@ -896,6 +896,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         # appearance gate turning away the real fighter from a motion gate
         # correctly refusing a spectator, and those want opposite fixes.
         "rejected_switch_reasons": dict(manager.rejections),
+        "furniture_tracks_readmitted": manager.forgiven_furniture,
         "sam_available": sam_was_available,
         "sam_failure_reason": sam_recovery.failure_reason,
         "openai_identity_enabled": identity_referee.enabled,

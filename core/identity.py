@@ -153,6 +153,9 @@ class IdentityManager:
         # perfectly still must not be re-acquired on the next frame, or
         # the manager spends the fight letting go of the same chair.
         self._furniture: set[int] = set()
+        # Tracks readmitted after moving again, so the effect of the
+        # ban lapsing is visible rather than inferred.
+        self.forgiven_furniture = 0
         # Why identities were refused, not merely how often. A bare total
         # cannot tell an appearance gate rejecting the real fighter from a
         # motion gate correctly refusing a spectator, and those need
@@ -320,7 +323,18 @@ class IdentityManager:
             and candidate.track_id != state.current_track_id
         ):
             if int(candidate.track_id) in self._furniture:
-                return self._refuse(state, "known_furniture")
+                # A ban is a statement about the past, and the past can be
+                # contradicted. Furniture stays still, so a track that has since
+                # started covering ground is not furniture and is let back in.
+                # Without this the ban was permanent: two fighters clinching for
+                # six seconds was enough to end one of them for the rest of the
+                # round, and the refusal then repeated on every later frame -
+                # 910 of them on one fight, more than half of all rejections.
+                later = self._recent_spread(candidate.track_id, self.source_fps)
+                if later is None or later < SETTINGS.min_switch_spread_body_lengths:
+                    return self._refuse(state, "known_furniture")
+                self._furniture.discard(int(candidate.track_id))
+                self.forgiven_furniture += 1
             travel = self._recent_travel(candidate.track_id, self.source_fps)
             if travel is not None and travel < SETTINGS.min_switch_travel_per_minute:
                 return self._refuse(state, "too_still_travel")
