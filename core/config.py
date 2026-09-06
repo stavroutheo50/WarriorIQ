@@ -304,10 +304,20 @@ class Settings:
     # while reporting 0.93 ankle confidence. RTMPose receives the fighter
     # cropped and rescaled to its full input and gets it right.
     #
-    # Off by default because it is not free: 15.7 ms per person with no
-    # batching benefit, which roughly doubles analysis time. It is better, not
-    # faster, and that trade should be chosen rather than inherited.
-    rtm_pose_enabled: bool = env_bool("WARRIORIQ_RTM_POSE", False)
+    # On, and the cost is smaller than it first looked. 15.7 ms per person with
+    # no batching benefit reads like a doubling, but only the two committed
+    # fighters are refined and the rest of the pipeline dominates: measured end
+    # to end on a 60 s bout, 109.1 s against 122.8 s, or 12.6%. That overruns
+    # the 10 s budget this was asked to fit in, and is worth saying plainly -
+    # but the detector's own head returns skeletons with the torso squeezed to
+    # a sliver and both legs converging on one point while reporting 0.93
+    # ankle confidence, and every metric downstream reads those joints.
+    #
+    # What this does not yet prove is that the techniques it names are more
+    # often right. It resolves twice as many distinct techniques - uppercuts,
+    # low kicks and knees appear where there were none - which is consistent
+    # with better joints and is not evidence of correctness. That needs labels.
+    rtm_pose_enabled: bool = env_bool("WARRIORIQ_RTM_POSE", True)
     rtm_pose_device: str = os.getenv("WARRIORIQ_RTM_POSE_DEVICE", "cuda").strip()
     rtm_pose_model: str = os.getenv(
         "WARRIORIQ_RTM_POSE_MODEL",
