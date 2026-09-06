@@ -41,8 +41,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.config import OUTPUTS
 from core.temporal_model import ACTION_CLASSES
 
-STRIP_FRAMES = 8
-THUMB_HEIGHT = 190
+STRIP_FRAMES = 6
+THUMB_HEIGHT = 230
 
 
 def _read_tracking(job: str) -> dict[int, dict]:
@@ -86,33 +86,100 @@ def _window(record: dict, fighter: str):
                      stacked[:, 2].max(), stacked[:, 3].max()], dtype=np.float32)
 
 
+def _boxes_at(tracking, index, fighter):
+    """The attacker's and opponent's boxes at this frame, if we have them.
+
+    Only from a record close enough to be about this frame. The nearest
+    analysed record can be a second away, and a box from a second away drawn
+    on this frame points at empty mat.
+    """
+    if not tracking:
+        return None, None
+    near = min(tracking, key=lambda f: abs(f - index))
+    if abs(near - index) > 6:
+        return None, None
+    record = tracking[near]
+    def box(key):
+        value = ((record.get(key) or {}).get("observation") or {}).get("box")
+        return None if not value else np.asarray(value, dtype=np.float32)
+    return box("fighter_%s" % fighter), box("fighter_%s" % _other(fighter))
+
+
+def _crop_window(tracking, peak_frame, fighter, shape):
+    """One rectangle for the whole strip, chosen at the peak.
+
+    Recomputing the crop per frame made the strip jump between shots, so eight
+    tiles of the same action looked like eight different moments. The subject
+    also has to be big enough to read: framing on the pair puts two people
+    forty pixels tall at opposite ends of a wide box, which is what made the
+    first pack unusable.
+    """
+    height, width = shape[:2]
+    own, other = _boxes_at(tracking, peak_frame, fighter)
+    if own is None:
+        return None
+    size = max(float(own[2] - own[0]), float(own[3] - own[1]))
+    x1, y1 = float(own[0]) - 0.7 * size, float(own[1]) - 0.45 * size
+    x2, y2 = float(own[2]) + 0.7 * size, float(own[3]) + 0.45 * size
+    own_centre = (float(own[0] + own[2]) / 2, float(own[1] + own[3]) / 2)
+    if other is not None:
+        centre = (float(other[0] + other[2]) / 2, float(other[1] + other[3]) / 2)
+        if abs(centre[0] - own_centre[0]) > 2.6 * size:
+            other = None      # a different exchange; including them shrinks this one
+    if other is not None:
+        # Include the opponent when they are close enough to matter, since
+        # whether a strike landed cannot be judged without them.
+        x1, y1 = min(x1, float(other[0]) - 0.2 * size), min(y1, float(other[1]) - 0.2 * size)
+        x2, y2 = max(x2, float(other[2]) + 0.2 * size), max(y2, float(other[3]) + 0.2 * size)
+    x1, y1 = int(max(0, x1)), int(max(0, y1))
+    x2, y2 = int(min(width, x2)), int(min(height, y2))
+    if x2 - x1 < 20 or y2 - y1 < 20:
+        return None
+    return x1, y1, x2, y2
+
+
 def _filmstrip(cap, tracking, fighter, peak_frame, span_frames):
     first = max(0, peak_frame - span_frames // 2)
     wanted = [first + round(i * span_frames / (STRIP_FRAMES - 1)) for i in range(STRIP_FRAMES)]
+    # One sample must be the peak itself. Evenly spaced frames can miss it, and
+    # then the frame labelled THE MOMENT is one the analysis never looked at -
+    # so it carries no box, on the very frame the labeller is told to judge.
+    nearest = min(range(len(wanted)), key=lambda i: abs(wanted[i] - peak_frame))
+    wanted[nearest] = peak_frame
+    window = None
     tiles = []
     for index in wanted:
         cap.set(cv2.CAP_PROP_POS_FRAMES, index)
         ok, frame = cap.read()
         if not ok or frame is None:
             continue
-        near = min(tracking, key=lambda f: abs(f - index)) if tracking else None
-        box = _window(tracking[near], fighter) if near is not None else None
-        if box is None:
-            continue
-        pad = 0.55 * max(box[2] - box[0], box[3] - box[1])
-        x1, y1 = int(max(0, box[0] - pad)), int(max(0, box[1] - pad))
-        x2 = int(min(frame.shape[1], box[2] + pad))
-        y2 = int(min(frame.shape[0], box[3] + pad))
-        crop = frame[y1:y2, x1:x2]
+        if window is None:
+            window = _crop_window(tracking, peak_frame, fighter, frame.shape)
+            if window is None:
+                return None
+        x1, y1, x2, y2 = window
+        shot = frame.copy()
+        own, other = _boxes_at(tracking, index, fighter)
+        # The subject is marked in every frame. Without it the labeller is
+        # shown three people and asked what "the fighter" did.
+        if other is not None:
+            cv2.rectangle(shot, (int(other[0]), int(other[1])), (int(other[2]), int(other[3])),
+                          (90, 90, 90), 1)
+        if own is not None:
+            cv2.rectangle(shot, (int(own[0]), int(own[1])), (int(own[2]), int(own[3])),
+                          (0, 215, 255), 2)
+        crop = shot[y1:y2, x1:x2]
         if crop.size == 0:
             continue
         scale = THUMB_HEIGHT / crop.shape[0]
         tile = cv2.resize(crop, (max(1, int(crop.shape[1] * scale)), THUMB_HEIGHT),
                           interpolation=cv2.INTER_CUBIC)
-        if abs(index - peak_frame) <= max(1, span_frames // (STRIP_FRAMES * 2)):
-            # Mark where the analysis thinks the action peaks, so a labeller
-            # judging "which technique" is looking at the right moment.
-            cv2.rectangle(tile, (0, 0), (tile.shape[1] - 1, tile.shape[0] - 1), (0, 215, 255), 3)
+        at_peak = index == peak_frame
+        tile = cv2.copyMakeBorder(tile, 22, 4, 2, 2, cv2.BORDER_CONSTANT,
+                                  value=(0, 140, 200) if at_peak else (24, 24, 24))
+        if at_peak:
+            cv2.putText(tile, "THE MOMENT", (6, 15), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.42, (255, 255, 255), 1, cv2.LINE_AA)
         tiles.append(tile)
     if not tiles:
         return None
@@ -127,6 +194,8 @@ def main() -> int:
     parser.add_argument("--negatives", type=int, default=40,
                         help="quiet windows to include, so the set has true negatives")
     parser.add_argument("--out", default="labelpack")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="stop after this many clips; for checking the page quickly")
     parser.add_argument("--no-inline", dest="inline", action="store_false",
                         help="reference the clips as files instead of carrying them "
                              "in the page; smaller, but the page stops working if "
@@ -177,13 +246,15 @@ def main() -> int:
 
     # Shuffled so the order carries no hint about what the answer should be.
     rng.shuffle(candidates)
+    if args.limit:
+        candidates = candidates[:args.limit]
     index = []
     for number, candidate in enumerate(candidates):
         strip = _filmstrip(cap, tracking, candidate["fighter"], candidate["peak_frame"], span)
         if strip is None:
             continue
         name = "%04d.jpg" % number
-        cv2.imwrite(str(clips / name), strip, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        cv2.imwrite(str(clips / name), strip, [cv2.IMWRITE_JPEG_QUALITY, 72])
         candidate["id"] = number
         candidate["clip"] = "clips/%s" % name
         index.append(candidate)
