@@ -236,7 +236,7 @@ class IdentityManager:
             return None
         distance = sum(
             float(np.hypot(b[1] - a[1], b[2] - a[2]))
-            for a, b in zip(history, list(history)[1:])
+            for a, b in zip(history, list(history)[1:])  # noqa: B905 - consecutive pairs, lengths differ by one on purpose
         )
         body = sorted(item[3] for item in history)[len(history) // 2]
         return distance / body / (seconds / 60.0)

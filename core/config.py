@@ -274,6 +274,14 @@ class Settings:
     # miss into a landed strike.
     max_strike_reach_body_lengths: float = float(os.getenv("WARRIORIQ_MAX_STRIKE_REACH", "1.0"))
     # Whether the two people picked are actually the two fighters. Measured on
+    # Whether an action may be reported as a strike when the opponent was never
+    # seen during it. Measured on real footage: of 81 proposed actions, only 9
+    # had the opponent in frame at the peak and 31 never saw them at all, in a
+    # bout where the fighters are on the mat together throughout. Those are not
+    # strikes that missed, they are actions with no observed target - a fighter
+    # shadow-boxing at a gap in the tracking - and they were the bulk of what a
+    # human reviewer called "nothing happening".
+    require_observed_opponent: bool = env_bool("WARRIORIQ_REQUIRE_OPPONENT", True)
     # three real tournament fights, each analysed twice - once with the real
     # pair and once with a plausible mistake (a ringside coach, or the referee):
     #

@@ -248,7 +248,7 @@ def _is_spinning(angles: list[float]) -> bool:
     if len(angles) < 4:
         return False
     travelled = 0.0
-    for before, after in zip(angles, angles[1:]):
+    for before, after in zip(angles, angles[1:]):  # noqa: B905 - consecutive pairs
         step = (after - before + 180.0) % 360.0 - 180.0
         if abs(step) > _MAX_DEGREES_PER_FRAME:
             continue                     # a keypoint swap, not a hip turn
@@ -623,6 +623,12 @@ class ActionEngine:
                             "peak_opponent_keypoints": None if peak_sample.opponent_keypoints is None else peak_sample.opponent_keypoints.tolist(),
                             "peak_opponent_conf": None if peak_sample.opponent_conf is None else peak_sample.opponent_conf.tolist(),
                             "contact_samples": contact_samples,
+                            # How many samples of this action saw the opponent
+                            # at all. A strike is an act aimed at somebody, so
+                            # an action with none of them was not observed to
+                            # be one - see thrown_at_opponent.
+                            "opponent_observed_samples": sum(
+                                1 for item in contact_samples if item.get("opponent_box")),
                             "max_speed_body_lengths_per_s": float(active.max_speed),
                             "extension_gain": float(extension_gain),
                             # Turning and jumping are separately scored actions

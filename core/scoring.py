@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
-from core.config import RULESET_LABELS
 from core.types import KnockdownEvent, StrikeEvent
 
 

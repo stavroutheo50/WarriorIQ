@@ -62,14 +62,14 @@ def main() -> None:
         raise RuntimeError("No human-reviewed annotations exist. Review real fight events before building a regression manifest.")
 
     fights = []
-    for job_id, annotations in grouped.items():
+    for job_id, reviewed in grouped.items():
         video = _video_path(job_id)
         report = _report_path(job_id)
         fights.append({
             "fight_id": job_id,
             "video_sha256": file_sha256(video) if video else None,
             "report_sha256": file_sha256(report) if report else None,
-            "annotations": sorted(annotations, key=lambda item: item["event_time"]),
+            "annotations": sorted(reviewed, key=lambda item: item["event_time"]),
         })
 
     created_at = datetime.now(timezone.utc).isoformat()

@@ -71,7 +71,7 @@ from core.db import (
 )
 from core.evidence_trust import report_evidence_trust
 from core.coaching import build_coaching, build_training_plan
-from core.payments import roster_capacity, plans_for, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
+from core.payments import roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
@@ -4334,7 +4334,7 @@ def delete_account_route(request: Request, password: str = Form(...), confirmati
 def checkout(request: Request, plan_key: str, billing_acceptance: bool = Form(False)):
     account = _account(request)
     if not account:
-        return RedirectResponse(f"/login?next=/pricing", status_code=303)
+        return RedirectResponse("/login?next=/pricing", status_code=303)
     if not billing_acceptance:
         raise HTTPException(400, "Confirm the recurring price, renewal and cancellation terms before checkout.")
     from core.readiness import release_readiness

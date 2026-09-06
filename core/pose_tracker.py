@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import numpy as np
@@ -173,7 +172,9 @@ class PoseTracker:
             # And who the official is, which is a categorical question the
             # comparative guards cannot answer. See core/referee.py.
             verdicts = referee_probabilities(frame, boxes)
-            for person, vector, verdict in zip(people, vectors, verdicts):
+            # Both helpers return one entry per box, including on failure,
+            # so a mismatch here would be a bug rather than a bad frame.
+            for person, vector, verdict in zip(people, vectors, verdicts, strict=True):
                 person.reid = vector
                 person.referee_prob = verdict
         return people
@@ -221,7 +222,9 @@ class PoseTracker:
             verbose=False,
         )
         recovered: list[PersonObservation] = []
-        for (name, guide, offset_x, offset_y, crop), result in zip(requests, results):
+        # One result per request, guaranteed by the batched predict call. A
+        # mismatch would silently drop a recovery rather than fail loudly.
+        for (name, guide, offset_x, offset_y, crop), result in zip(requests, results, strict=True):
             candidates = self.parse(result, crop)
             best = None
             best_score = -1.0

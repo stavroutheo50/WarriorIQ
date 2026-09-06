@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
-from core.config import MODELS, SETTINGS
+from core.config import SETTINGS
 
 
 def _export_device() -> int | str:

@@ -103,8 +103,15 @@ def refine(frame, observations: list[PersonObservation | None]) -> int:
     except Exception as exc:                                        # noqa: BLE001
         LOGGER.warning("rtm_pose_failed error=%s", type(exc).__name__)
         return 0
+    if len(keypoints) != len(targets) or len(scores) != len(targets):
+        # Not fatal - the detector's own keypoints are still there - but it
+        # would otherwise refine some fighters and quietly skip others, which
+        # is worse than refining none because the difference is invisible.
+        LOGGER.warning("rtm_pose_shape_mismatch targets=%d keypoints=%d scores=%d",
+                       len(targets), len(keypoints), len(scores))
+        return 0
     refined = 0
-    for obs, kp, sc in zip(targets, keypoints, scores):
+    for obs, kp, sc in zip(targets, keypoints, scores, strict=True):
         points = np.asarray(kp, dtype=np.float32)
         if points.shape[0] < 17:
             continue

@@ -172,10 +172,21 @@ def thrown_at_opponent(event: StrikeEvent) -> bool:
     close while this particular action finishes nowhere near a legal target,
     which is what stepping, checking and feinting look like to the detector.
     """
+    evidence = event.evidence or {}
+    # An action nobody was there for. Keeping these was a deliberate choice -
+    # "no measurement is not evidence of a miss" - and it is the right instinct
+    # when the opponent is merely untracked for a frame. It is the wrong one
+    # when they were never in view at any point of the action, which on real
+    # footage is most of them: a strike is thrown *at* someone, and with no
+    # target observed there is nothing to support calling it one.
+    if SETTINGS.require_observed_opponent:
+        seen = evidence.get("opponent_observed_samples")
+        if isinstance(seen, int) and seen <= 0:
+            return False
     separation = opponent_separation(event)
     if separation is not None and separation > SETTINGS.max_engagement_body_lengths:
         return False
-    reach = (event.evidence or {}).get("contact_distance_body_lengths")
+    reach = evidence.get("contact_distance_body_lengths")
     if isinstance(reach, (int, float)):
         return float(reach) <= SETTINGS.max_strike_reach_body_lengths
     # No measurement is not evidence of a miss; keep the action.
