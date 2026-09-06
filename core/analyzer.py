@@ -482,6 +482,31 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     # The model is cached across jobs for speed; tracker identities are not.
     pose_tracker.reset_tracking()
 
+    # Watch the seconds before the round for their motion history alone, so
+    # the identity guards are not blind for the opening of every analysis.
+    # See IdentityManager.prime_track_history. Nothing here is scored: these
+    # frames are outside the round and never reach metrics, events or output.
+    warm_samples: list[tuple[int, list]] = []
+    warm_frames = int(round(SETTINGS.identity_warmup_seconds * info.fps))
+    warm_start = max(0, start_frame - warm_frames)
+    if warm_frames > 0 and warm_start < start_frame:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, warm_start)
+        warm_index = warm_start
+        while warm_index < start_frame:
+            warm_ok, warm_frame = cap.read()
+            if not warm_ok or warm_frame is None:
+                break
+            if (warm_index - warm_start) % max(1, quality.stride) == 0:
+                warm_samples.append((warm_index, pose_tracker.track(warm_frame, quality.imgsz)))
+            warm_index += 1
+        # Back to the frame the user actually selected on.
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        warm_ok, rewound = cap.read()
+        if not warm_ok or rewound is None:
+            cap.release()
+            raise RuntimeError("Could not re-read the fight-start frame after warm-up")
+        first_frame = rewound
+
     # Start BoT-SORT on exactly the same frame the user used for A/B selection.
     first_people = pose_tracker.track(first_frame, quality.imgsz)
     initial_a, initial_b, iou_a, iou_b = find_initial_people(
@@ -491,6 +516,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         first_frame,
     )
     manager = IdentityManager(initial_a, initial_b, start_frame, source_fps=info.fps)
+    manager.prime_track_history(warm_samples)
     canonical_a_box = [float(value) for value in initial_a.box]
     canonical_b_box = [float(value) for value in initial_b.box]
     identity_referee = OpenAIIdentityReferee(req.openai_identity_recovery, first_frame, canonical_a_box, canonical_b_box)

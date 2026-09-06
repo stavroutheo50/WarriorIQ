@@ -276,14 +276,27 @@ class Settings:
     )
     # A second, much stricter reading of the same measurement over a much
     # shorter look. The 6 s guard above is calibrated to catch marginal cases
-    # and so must wait; somebody who has not moved at all is decidable far
-    # sooner. Measured over 1.5 s on real footage: seated spectators reach
-    # 0.006 to 0.021 body lengths and the least mobile fighter 0.059. This sits
-    # between them with margin at both ends.
+    # and so must wait; somebody who has not moved at all is decidable sooner.
+    #
+    # Calibrated on *rolling* 1.5 s windows, which is what the guard actually
+    # reads. Measuring each track's opening 1.5 s instead suggested a clean gap
+    # at 0.04 and there is none: a fighter in a clinch or between exchanges is
+    # far stiller mid-round than when first seen, and 0.04 refused one in five
+    # of their windows. Across a full round, per track: seated spectators and
+    # the referee bottom out at 0.003 to 0.031 body lengths, while the least
+    # mobile fighter never goes below 0.029. This sits under every fighter
+    # window measured and still catches the people who never move at all.
     max_stationary_spread_short: float = float(
-        os.getenv("WARRIORIQ_MAX_STATIONARY_SPREAD_SHORT", "0.04"))
+        os.getenv("WARRIORIQ_MAX_STATIONARY_SPREAD_SHORT", "0.02"))
     stationary_short_seconds: float = float(
         os.getenv("WARRIORIQ_STATIONARY_SHORT_SECONDS", "1.5"))
+    # Seconds of video immediately before the round to run through the tracker
+    # for its motion history alone. Without it the guards above cannot judge
+    # anybody until the round is already this far along, and a spectator
+    # acquired in that window is held until they can. Costs one short pass at
+    # the analysis stride; 0 disables it.
+    identity_warmup_seconds: float = float(
+        os.getenv("WARRIORIQ_IDENTITY_WARMUP_SECONDS", "2.0"))
     # A second opinion on the two fighters' joints, from a top-down pose model.
     # The fused detector regresses keypoints from whole-frame features and
     # collapses on small or unusual bodies - measured on real footage it

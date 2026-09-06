@@ -2732,3 +2732,44 @@ class MotionlessTrackTests(unittest.TestCase):
         manager = self._manager()
         self._watch(manager, 8, range(0, 60, 2), 0.0)
         self.assertIsNotNone(manager._recent_spread_short(8, 30.0))
+
+
+class WarmUpPassTests(unittest.TestCase):
+    """Watching the ring before the round, for motion history only."""
+
+    def test_primed_history_lets_the_guard_answer_immediately(self):
+        """The point of the warm-up: no blind opening window.
+
+        Without it the guards cannot judge anybody until the round is already
+        a second and a half old, and whoever is acquired in that window is
+        held until they can.
+        """
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x):
+            return PersonObservation(
+                track_id=track_id,
+                box=np.asarray([x, 40., x + 30., 100.], dtype=np.float32),
+                confidence=0.8)
+
+        manager = IdentityManager(person(1, 220.), person(2, 270.), 100, source_fps=30.0)
+        self.assertFalse(manager._is_motionless(5, 30.0), "nothing seen yet")
+
+        # Two seconds of a seated person, all of it from before the round.
+        samples = [(frame, [person(5, 300.)]) for frame in range(40, 100, 2)]
+        manager.prime_track_history(samples)
+        self.assertTrue(manager._is_motionless(5, 30.0))
+
+    def test_a_fighters_quietest_moments_survive_the_threshold(self):
+        """Calibrated on rolling windows, not on each track's opening seconds.
+
+        A fighter in a clinch is far stiller than when first seen. Measured
+        across a full round, the least mobile fighter's quietest 1.5 s window
+        is 0.029 body lengths; the threshold has to sit below that.
+        """
+        from core.config import SETTINGS
+
+        self.assertLess(SETTINGS.max_stationary_spread_short, 0.029)

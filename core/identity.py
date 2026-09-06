@@ -209,6 +209,22 @@ class IdentityManager:
         body = sorted(item[3] for item in history)[len(history) // 2]
         return distance / body / (seconds / 60.0)
 
+    def prime_track_history(self, samples) -> None:
+        """Give the motion guards a look at the ring before the round starts.
+
+        Every guard that separates a fighter from the furniture asks how much a
+        track has moved lately, and none of them can answer about a track they
+        have only just met. That is not a tuning problem: for the opening
+        seconds of any analysis there is genuinely nothing to measure, so a
+        spectator picked up there is held until enough history accumulates.
+
+        Watching the seconds before the round costs one short pass and removes
+        the blind window entirely. Positions only - no identity decision is
+        made from these frames, and none of them is scored or reported.
+        """
+        for source_frame, people in samples:
+            self._remember_positions(people, source_frame)
+
     def _recent_spread_short(self, track_id: int | None, fps: float) -> float | None:
         """Spread over the last second and a half, not over the whole history.
 
