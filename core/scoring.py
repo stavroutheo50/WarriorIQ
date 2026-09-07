@@ -56,6 +56,13 @@ class RuleProfile:
     # value per target rather than a multiplier. Empty means this ruleset does
     # not distinguish them, and the ordinary table applies.
     turning_kick_points: tuple[tuple[str, int], ...] = ()
+    # How a ten-point-must federation turns a lead into a round score, as
+    # (largest difference in scoring actions, points the loser gets). IFMA
+    # publishes exactly this table for muaythai, so where a federation states
+    # it we use its numbers instead of the generic heuristic below - which is
+    # a pair of fitted constants (a 5.5 lead and a doubling) that no rulebook
+    # contains. Empty means the federation does not publish one.
+    round_margins: tuple[tuple[int, int], ...] = ()
     # Actions this discipline scores that the model cannot observe at all.
     unobserved: tuple[str, ...] = ()
 
@@ -169,8 +176,27 @@ RULESETS: dict[str, RuleProfile] = {
     ),
 
     # ---- Boxing -------------------------------------------------------------
-    # The one discipline the model observes completely: its whole scoring
-    # vocabulary is punches, and every punch class is already detected.
+    # Checked against World Boxing Competition Rules, in force November 2024,
+    # from worldboxing.org on 2026-09-07. Rule 7.1.2 confirms the Ten Point
+    # Must system, and Rule 7.2.1 gives three criteria in order of importance:
+    # number of scoring blows to the target area, then technical and tactical
+    # superiority, then competitiveness. Rule 7.2.2.1 is explicit that
+    # "quantity of the scoring blows should be considered as the most important
+    # factor", which is the one criterion a count can speak to.
+    #
+    # `unobserved` stays empty and that is correct: boxing has no scoring
+    # *action* outside the punch, so there is no family to declare missing and
+    # nothing to warn an uploader about before they spend an hour on a bout.
+    #
+    # But the comment that used to sit here - "the one discipline the model
+    # observes completely" - was wrong twice over, and is worth naming rather
+    # than deleting. Rule 7.2.2 says a blow scores only if it "must connect
+    # with the knuckle surface of the glove" and "must have the weight of the
+    # body or shoulder behind it"; neither is measurable on 480x220 footage, so
+    # what this counts is punches thrown, not scoring blows. And the claim that
+    # "every punch class is already detected" is contradicted by the report
+    # itself, which sets `action_labels_available` false because a jab is not
+    # tellable from a cross at this resolution.
     "BOXING": RuleProfile(
         "BOXING", "Boxing", True, False, False, True, False, frozenset(),
         sport="boxing", sport_label="Boxing",
@@ -179,14 +205,37 @@ RULESETS: dict[str, RuleProfile] = {
     ),
 
     # ---- Muay Thai ----------------------------------------------------------
-    # Punches, kicks and knees are observed. Elbows, clinch work and sweeps are
-    # scored in the sport and are not in the detector's vocabulary, so they are
-    # declared unobserved rather than silently excluded from the count.
+    # Checked against IFMA Muaythai Rules & Regulations v3.057, revised 11 May
+    # 2026, from muaythai.sport on 2026-09-07. IFMA is the international
+    # federation, and three things in it contradicted what was encoded here.
+    #
+    # 1. **Every skill scores the same.** Article 29.1: "A Muaythai skill is a
+    #    punch, kick, knee or elbow applied with force and intent to cause
+    #    effect. One score will be awarded for each Muaythai skill that strikes
+    #    against a scoring target". Punches were weighted 0.9 against 1.25 for
+    #    kicks and knees, which is the folk wisdom about Muay Thai and is not
+    #    IFMA's rule. Those weights also set the coaching emphasis, so the
+    #    advice inherited the invented ratio.
+    # 2. **The round margins are published**, in Article 29.2.1, as a count of
+    #    scoring skills: a lead of 7 or fewer is a small margin, 8 to 14 a
+    #    large one, 15 to 21 total domination, scoring 10-9, 10-8 and 10-7.
+    # 3. **A sweep is a foul, not a score.** Article 31.2.7 makes tripping an
+    #    opponent without a Muaythai skill a prohibited act, and 29.2.2 refuses
+    #    a score for "throwing the opponent without striking". "Sweeps and
+    #    dumps" was listed here as something the sport scores and we cannot
+    #    see, which overstated what the report was missing. Clinch dominance is
+    #    likewise not itself scored - a knee thrown from the clinch scores as a
+    #    knee. Both still matter under professional stadium scoring, which is a
+    #    different rulebook, so they are named as that rather than dropped.
+    #
+    # Article 29.1.1 makes the target "any part of the body except the groin
+    # and cervical spine", which is why leg attacks are legal here.
     "MUAY_THAI": RuleProfile(
         "MUAY_THAI", "Full rules (elbows allowed)", True, True, True, True, False, frozenset({"spinning_backfist"}),
         sport="muay_thai", sport_label="Muay Thai",
-        family_value=(("punch", 0.9), ("kick", 1.25), ("knee", 1.25)),
-        unobserved=("elbow strikes", "clinch control", "sweeps and dumps"),
+        family_value=(("punch", 1.0), ("kick", 1.0), ("knee", 1.0)),
+        round_margins=((7, 9), (14, 8), (21, 7)),
+        unobserved=("elbow strikes", "clinch dominance and sweeps under professional stadium scoring"),
     ),
     # Amateur and many promotional cards bar elbows outright. That is not a
     # cosmetic variant: with elbows barred they stop being a scoring action the
@@ -195,8 +244,9 @@ RULESETS: dict[str, RuleProfile] = {
     "MUAY_THAI_NO_ELBOWS": RuleProfile(
         "MUAY_THAI_NO_ELBOWS", "No elbows", True, True, True, True, False, frozenset({"spinning_backfist"}),
         sport="muay_thai", sport_label="Muay Thai",
-        family_value=(("punch", 0.9), ("kick", 1.25), ("knee", 1.25)),
-        unobserved=("clinch control", "sweeps and dumps"),
+        family_value=(("punch", 1.0), ("kick", 1.0), ("knee", 1.0)),
+        round_margins=((7, 9), (14, 8), (21, 7)),
+        unobserved=("clinch dominance and sweeps under professional stadium scoring",),
     ),
 
     # ---- WT Taekwondo -------------------------------------------------------
@@ -231,6 +281,26 @@ RULESETS: dict[str, RuleProfile] = {
         unobserved=("jumping and spinning bonuses used by some national bodies "
                     "but not by the ITF championship rules",),
     ),
+    # Checked against WT Competition Rules and Interpretation, in force as of
+    # 1 June 2026, downloaded from worldtaekwondo.org on 2026-09-07.
+    #
+    # Article 12.3 "Valid Points", quoted: one point for a punch to the trunk
+    # protector, two for a kick to the trunk protector, three for a kick to the
+    # head, and "when a valid turning kick is delivered to the trunk protector
+    # or the head, the awarded points shall be doubled: four (4) points for a
+    # valid turning kick to the trunk protector, and six (6) points for a valid
+    # turning kick to the head". The head value was **5** here, which is not a
+    # number the rules contain - the rule is a doubling, so it is 6.
+    #
+    # Article 11.2 makes the head a foot-only target and the trunk the only
+    # other one, so a leg scores nothing; Article 14.4.1.8 forbids hitting the
+    # head with the hand, 14.4.1.9 forbids the knee, and 14.4.1.6 forbids
+    # kicking below the waist. Those three flags were already right.
+    #
+    # A caution on the turning bonus: Explanation #1 to Article 12 requires
+    # head *and shoulder* rotation before a back kick counts as a turning kick.
+    # `_turned_into_it` reads a `spinning` flag from the pose evidence, which
+    # is a proxy for that and not a measurement of it.
     "WT_TAEKWONDO": RuleProfile(
         "WT_TAEKWONDO", "WT · World Taekwondo (Olympic)", False, False, False, True, False, frozenset(),
         sport="taekwondo", sport_label="Taekwondo",
@@ -241,8 +311,15 @@ RULESETS: dict[str, RuleProfile] = {
             ("kick", "body", 2), ("kick", "head", 3),
             ("kick", "leg", 0),
         ),
-        turning_kick_points=(("body", 4), ("head", 5)),
-        unobserved=("electronic body and head protector scoring",),
+        turning_kick_points=(("body", 4), ("head", 6)),
+        unobserved=(
+            "electronic body and head protector scoring",
+            # Article 12.3.5: a Gam-jeom against one athlete is a point to the
+            # other, and two points inside the last ten seconds of a round.
+            # Penalties decide close WT rounds and none of them are visible
+            # here - stepping out, falling, grabbing, avoiding.
+            "points awarded from penalties against the opponent",
+        ),
     ),
 
     # ---- MMA ----------------------------------------------------------------
@@ -251,6 +328,21 @@ RULESETS: dict[str, RuleProfile] = {
     # are in the detector's vocabulary; the two-fighter pose model is built for
     # upright athletes. This profile is deliberately explicit that a standing
     # striking read is all it offers.
+    #
+    # Checked against the ABC Unified Rules of Mixed Martial Arts, amended
+    # July 2024, on 2026-09-07. Judging Criteria (A)(b) confirms the ten-point
+    # must system, and (c) orders the criteria: effective striking/grappling
+    # first, then effective aggressiveness, then control of the fighting area,
+    # with the latter two "not taken into consideration unless Plan A is
+    # weighed as being even". `round_margins` stays empty because the Unified
+    # Rules describe the bands in words - a close margin, a large margin by
+    # "damage, dominance, and duration" - and publish no strike differential
+    # to put a number on, unlike IFMA.
+    #
+    # Damage is added to the unobserved list because the rules make it the
+    # thing a 10-8 turns on, and define it as "visible evidence such as
+    # swelling and lacerations" - which is not something 480x220 video shows,
+    # and not something this analysis attempts.
     "MMA": RuleProfile(
         "MMA", "MMA (standing exchanges)", True, True, True, True, False, frozenset({"spinning_backfist"}),
         sport="mma", sport_label="MMA",
@@ -261,6 +353,7 @@ RULESETS: dict[str, RuleProfile] = {
             "ground-and-pound",
             "submission attempts",
             "elbow strikes",
+            "damage, which decides a dominant round",
         ),
     ),
 }
@@ -531,6 +624,27 @@ def _table_points(event: StrikeEvent, profile: RuleProfile) -> int | None:
     return 0
 
 
+def _loser_points(lead: float, profile: RuleProfile, loser_value: float, winner_value: float) -> int:
+    """What the losing side of a ten-point-must round scores.
+
+    Where the federation publishes the margins, they are used verbatim: the
+    first band the lead falls inside decides it, and a lead past the last band
+    takes the last band's value, because a rulebook that stops at "total
+    domination" has no wider category to promote it to.
+
+    Everywhere else this is the generic heuristic, kept because boxing and MMA
+    genuinely do not publish a table - a judge weighs the round. Its two
+    constants were fitted rather than sourced, which is worth knowing when
+    reading a 10-8 it produced.
+    """
+    if profile.round_margins:
+        for limit, points in profile.round_margins:
+            if lead <= limit:
+                return int(points)
+        return int(profile.round_margins[-1][1])
+    return 8 if lead >= 5.5 and winner_value >= loser_value * 2.0 + 2.0 else 9
+
+
 def _one_point_per_landed_action(event: StrikeEvent) -> int:
     """Last resort for a counted discipline that publishes no table.
 
@@ -608,8 +722,19 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
     if profile.ten_point_must:
         total_a_rounds = total_b_rounds = 0
         for r in sorted(by_round):
-            a_value = sum(_effective_value(e, profile) for e in by_round[r]["A"])
-            b_value = sum(_effective_value(e, profile) for e in by_round[r]["B"])
+            if profile.round_margins:
+                # The federation publishes how a lead becomes a round score,
+                # and it counts scoring actions rather than weighing them - so
+                # the count is what the margin is read from. IFMA Article
+                # 29.2.1 is a table of differences in "scoring Muaythai
+                # skills", not of anything weighted, and using the weighted
+                # value here would be applying its thresholds to a different
+                # quantity than the one it defines them over.
+                a_value = float(len(by_round[r]["A"]))
+                b_value = float(len(by_round[r]["B"]))
+            else:
+                a_value = sum(_effective_value(e, profile) for e in by_round[r]["A"])
+                b_value = sum(_effective_value(e, profile) for e in by_round[r]["B"])
             diff = a_value - b_value
             kd_a = kd_counts.get(r, {}).get("A", 0)
             kd_b = kd_counts.get(r, {}).get("B", 0)
@@ -619,14 +744,18 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
             elif kd_a > kd_b:
                 a_score, b_score, winner = max(7, 9 - kd_a), 10, "B"
                 total_b_rounds += 1
-            elif abs(diff) < 0.35:
+            elif (diff == 0 if profile.round_margins else abs(diff) < 0.35):
+                # Equal on count, and IFMA 29.2.1 then separates the round on
+                # which athlete used "more forceful" skills. Force is not
+                # something this measures, so the round stays even rather than
+                # being decided on a tiebreak we cannot see.
                 a_score, b_score, winner = 10, 10, "EVEN"
             elif diff > 0:
-                a_score, b_score = (10, 8) if diff >= 5.5 and a_value >= b_value * 2.0 + 2.0 else (10, 9)
+                a_score, b_score = 10, _loser_points(diff, profile, b_value, a_value)
                 winner = "A"
                 total_a_rounds += 1
             else:
-                a_score, b_score = (8, 10) if -diff >= 5.5 and b_value >= a_value * 2.0 + 2.0 else (9, 10)
+                a_score, b_score = _loser_points(-diff, profile, a_value, b_value), 10
                 winner = "B"
                 total_b_rounds += 1
             result["rounds"].append({

@@ -1762,7 +1762,14 @@ def test_a_jump_needs_the_supporting_foot_to_leave_the_floor():
 
 
 def test_world_taekwondo_pays_more_for_a_turning_kick():
-    """WT scores a turning head kick 5 and a square one 3."""
+    """WT doubles a turning kick: head 3 -> 6, trunk 2 -> 4.
+
+    WT Competition Rules and Interpretation in force as of 1 June 2026,
+    Article 12.3.4: "the awarded points shall be doubled: four (4) points for
+    a valid turning kick to the trunk protector, and six (6) points for a
+    valid turning kick to the head". This test asserted 5 for the head, which
+    is not a number the rules contain - the rule is a doubling of 3.
+    """
     from core.scoring import RULESETS, _table_points
     from core.types import StrikeEvent
 
@@ -1778,7 +1785,7 @@ def test_world_taekwondo_pays_more_for_a_turning_kick():
 
     profile = RULESETS["WT_TAEKWONDO"]
     assert _table_points(kick("head", False), profile) == 3
-    assert _table_points(kick("head", True), profile) == 5
+    assert _table_points(kick("head", True), profile) == 6
     assert _table_points(kick("body", False), profile) == 2
     assert _table_points(kick("body", True), profile) == 4
     # A ruleset with no turning distinction is untouched by the spin flag.
@@ -3557,3 +3564,92 @@ class KickMinimumTests(unittest.TestCase):
         from core.report import kick_minimum_check
 
         self.assertIsNone(kick_minimum_check(self._report("NOT_A_SPORT")))
+
+
+class IfmaRoundMarginTests(unittest.TestCase):
+    """IFMA publishes how a lead in scoring skills becomes a round score.
+
+    IFMA Muaythai Rules & Regulations v3.057 (11 May 2026), Article 29.2.1:
+    a difference of 7 or fewer scoring skills is a small margin, 8 to 14 a
+    large margin, and 15 to 21 total domination - 10-9, 10-8 and 10-7. Before
+    this the round came from two fitted constants (a 5.5 lead and a doubling)
+    that appear in no rulebook, and could never produce a 10-7 at all.
+    """
+
+    @staticmethod
+    def _land(fighter, seconds):
+        from core.types import StrikeEvent
+
+        return StrikeEvent(
+            fighter=fighter, opponent="B" if fighter == "A" else "A", round_number=1,
+            start_frame=0, peak_frame=1, end_frame=2, start_time=seconds,
+            peak_time=seconds, end_time=seconds + .1, technique="x", family="punch",
+            limb="lead", outcome="clean", landed=True, target="body",
+            confidence=.9, contact_confidence=.9,
+        )
+
+    def _round(self, a_count, b_count, ruleset="MUAY_THAI"):
+        events = ([self._land("A", 1.0 + n) for n in range(a_count)]
+                  + [self._land("B", 100.0 + n) for n in range(b_count)])
+        card = score_fight(events, ruleset, [1])
+        return card["rounds"][0]["fighter_A"], card["rounds"][0]["fighter_B"]
+
+    def test_the_published_bands_decide_the_round(self):
+        for a, b, expected in (
+            (10, 10, (10, 10)),   # equal on count; force is the tiebreak and we cannot see it
+            (11, 10, (10, 9)),    # lead of 1  -> small margin
+            (17, 10, (10, 9)),    # lead of 7  -> still small, the band is inclusive
+            (18, 10, (10, 8)),    # lead of 8  -> large margin
+            (24, 10, (10, 8)),    # lead of 14 -> still large
+            (25, 10, (10, 7)),    # lead of 15 -> total domination
+            (10, 25, (7, 10)),    # and the same the other way round
+        ):
+            with self.subTest(lead=a - b):
+                self.assertEqual(self._round(a, b), expected)
+
+    def test_a_lead_past_the_last_band_stays_at_the_last_band(self):
+        """The rulebook stops at total domination, so nothing is wider.
+
+        A 40-strike lead is still 10-7: inventing a 10-6 would be extending
+        the federation's table past where it ends.
+        """
+        self.assertEqual(self._round(50, 10), (10, 7))
+
+    def test_both_muay_thai_variants_use_the_same_margins(self):
+        self.assertEqual(self._round(18, 10, "MUAY_THAI_NO_ELBOWS"), (10, 8))
+
+    def test_every_skill_counts_the_same(self):
+        """IFMA Article 29.1: one score for each punch, kick, knee or elbow.
+
+        Punches were weighted 0.9 against 1.25 for kicks and knees, which is
+        the folk wisdom about Muay Thai and not the federation's rule. The
+        weights also drive the coaching emphasis, so it inherited the ratio.
+        """
+        from core.scoring import RULESETS
+
+        for key in ("MUAY_THAI", "MUAY_THAI_NO_ELBOWS"):
+            with self.subTest(ruleset=key):
+                self.assertEqual({v for _f, v in RULESETS[key].family_value}, {1.0})
+
+    def test_a_sweep_is_not_reported_as_something_the_sport_scores(self):
+        """IFMA 31.2.7 makes an unaccompanied sweep a foul, not a score.
+
+        It was listed as an action the sport scores and we cannot see, which
+        overstated what the report was missing. It still matters under
+        professional stadium scoring, so it is named as that instead.
+        """
+        from core.scoring import unobserved_actions
+
+        for key in ("MUAY_THAI", "MUAY_THAI_NO_ELBOWS"):
+            with self.subTest(ruleset=key):
+                actions = unobserved_actions(key)
+                self.assertNotIn("sweeps and dumps", actions)
+                self.assertTrue(any("stadium" in a for a in actions))
+
+    def test_boxing_and_mma_keep_the_generic_heuristic(self):
+        """Neither federation publishes a margin table, so none is invented."""
+        from core.scoring import RULESETS
+
+        for key in ("BOXING", "MMA"):
+            with self.subTest(ruleset=key):
+                self.assertEqual(RULESETS[key].round_margins, ())
