@@ -3305,15 +3305,12 @@ class ObservedSummaryTests(unittest.TestCase):
     """The middle setting between a scorecard and a blank page."""
 
     @staticmethod
-    def _report(cov_a=0.40, cov_b=0.30, events=None):
-        return {
-            "tracking": {"fighter_A_coverage": cov_a, "fighter_B_coverage": cov_b},
-            "events": events if events is not None else [
-                {"fighter": "A", "technique": "jab"},
-                {"fighter": "A", "technique": "left_round_kick"},
-                {"fighter": "B", "technique": "right_knee"},
-            ],
-        }
+    def _report(cov_a=0.40, cov_b=0.30, a=(1, 1, 0), b=(0, 0, 1)):
+        def fighter(cov, counts):
+            return {"observation_coverage": cov, "punch_attempts": counts[0],
+                    "kick_attempts": counts[1], "knee_attempts": counts[2],
+                    "total_strikes": sum(counts)}
+        return {"statistics": {"fighters": {"A": fighter(cov_a, a), "B": fighter(cov_b, b)}}}
 
     def test_it_counts_per_fighter_by_family(self):
         from core.report import observed_summary
@@ -3323,9 +3320,21 @@ class ObservedSummaryTests(unittest.TestCase):
         self.assertEqual(seen["A"]["families"], {"punch": 1, "kick": 1, "knee": 0})
         self.assertEqual(seen["B"]["families"], {"punch": 0, "kick": 0, "knee": 1})
 
+    def test_it_agrees_with_the_statistics_the_rest_of_the_page_shows(self):
+        """Two honest numbers for one thing is worse than either alone.
+
+        The counts are read from the same statistics block rather than
+        recounted from the raw event list, which has not been through the
+        confidence bar the statistics apply.
+        """
+        from core.report import observed_summary
+
+        report = self._report(a=(3, 2, 1))
+        seen = observed_summary(report)["fighters"]["A"]
+        self.assertEqual(seen["actions_evidenced"],
+                         report["statistics"]["fighters"]["A"]["total_strikes"])
+
     def test_the_share_of_the_round_travels_with_the_count(self):
-        """A count without its denominator is a claim about the fight rather
-        than about the footage, and only the second one is true."""
         from core.report import observed_summary
 
         seen = observed_summary(self._report(cov_a=0.4))["fighters"]
@@ -3339,27 +3348,32 @@ class ObservedSummaryTests(unittest.TestCase):
         self.assertIn("A", seen)
         self.assertNotIn("B", seen)
 
+    def test_a_fighter_with_nothing_evidenced_is_left_out(self):
+        from core.report import observed_summary
+
+        seen = observed_summary(self._report(a=(0, 0, 0)))["fighters"]
+        self.assertNotIn("A", seen)
+
     def test_nothing_followed_means_no_summary_at_all(self):
         from core.report import observed_summary
 
         self.assertIsNone(observed_summary(self._report(cov_a=0.02, cov_b=0.01)))
 
+    def test_it_reports_families_and_never_a_technique(self):
+        """Naming a jab against a cross needs a classifier this footage cannot
+        support, which is why the technique breakdown is already empty."""
+        from core.report import observed_summary
+
+        blob = json.dumps(observed_summary(self._report()))
+        for word in ("jab", "cross", "hook", "uppercut", "landed", "missed"):
+            self.assertNotIn(word, blob)
+        self.assertIn("punch", blob)
+        self.assertIn("kick", blob)
+
     def test_it_is_marked_as_a_floor(self):
         from core.report import observed_summary
 
         self.assertTrue(observed_summary(self._report())["is_a_floor"])
-
-    def test_it_reports_no_outcomes(self):
-        """Whether a strike landed rests on unvalidated contact classification.
-
-        The honest unit here is the action attempted, not the point scored.
-        """
-        from core.report import observed_summary
-
-        payload = observed_summary(self._report())
-        blob = json.dumps(payload)
-        for word in ("landed", "clean", "missed", "score"):
-            self.assertNotIn(word, blob)
 
     def test_the_page_shows_it_only_when_the_score_is_withheld(self):
         from pathlib import Path

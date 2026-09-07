@@ -62,42 +62,52 @@ def observed_summary(report: dict) -> dict | None:
 
     A scorecard is a comparative claim - this fighter beat that one - and it
     needs both fighters followed well enough to compare. That bar is often not
-    met, and the page then said "Not scored" and nothing else, which throws
-    away everything the analysis did establish.
+    met, and the page then said "Not scored" and nothing else, throwing away
+    everything the analysis did establish.
 
     This is the middle setting the report never had. It is deliberately not a
     score and never a comparison:
 
-      * every count is a floor, not a total. We report actions we can evidence
-        during the part of the round we could follow that fighter, so the true
-        number is higher and the wording has to say so.
+      * every count is a floor, not a total. These are actions we could
+        evidence during the part of the round we could follow that fighter, so
+        the true number is higher and the wording has to say so.
       * the denominator travels with the number. "Twelve actions" is a claim
         about the fight; "twelve in the 40% we could follow you" is a claim
         about the footage, and only the second one is true.
       * a fighter followed too little to have a meaningful denominator is left
         out entirely rather than given a small number that reads as a quiet one.
-      * outcomes are omitted. Whether a strike landed rests on contact
-        classification that is not validated, so the honest unit here is the
-        action attempted, not the point scored.
+      * punch, kick and knee only. Naming a jab against a cross needs a
+        classifier this footage cannot support, which is why
+        `action_labels_available` is false and the technique breakdown is
+        already empty; this reports the families that survive that gate.
+      * no outcomes. Whether a strike landed rests on contact classification
+        that is not validated, so the unit is the action attempted.
+
+    The counts come from the same statistics block the rest of the report uses
+    rather than being recounted from the raw event list. Two honest numbers for
+    the same thing on one page is worse than either of them alone, and the raw
+    list has not been through the confidence bar the statistics apply.
     """
-    tracking = report.get("tracking") or {}
-    events = report.get("events") or []
+    statistics = (report.get("statistics") or {}).get("fighters") or {}
+    if not statistics:
+        return None
     out = {}
     for fighter in ("A", "B"):
-        coverage = float(tracking.get(f"fighter_{fighter}_coverage", 0.0) or 0.0)
+        item = statistics.get(fighter) or {}
+        coverage = float(item.get("observation_coverage") or 0.0)
         if coverage < MIN_COVERAGE_TO_REPORT_OBSERVED:
             continue
-        own = [event for event in events if (event.get("fighter") if isinstance(event, dict)
-                                            else getattr(event, "fighter", None)) == fighter]
-        families = {"punch": 0, "kick": 0, "knee": 0}
-        for event in own:
-            technique = (event.get("technique") if isinstance(event, dict)
-                         else getattr(event, "technique", "")) or ""
-            key = "kick" if "kick" in technique else "knee" if "knee" in technique else "punch"
-            families[key] += 1
+        families = {
+            "punch": int(item.get("punch_attempts") or 0),
+            "kick": int(item.get("kick_attempts") or 0),
+            "knee": int(item.get("knee_attempts") or 0),
+        }
+        total = int(item.get("total_strikes") or 0)
+        if total <= 0:
+            continue
         out[fighter] = {
             "followed_share": coverage,
-            "actions_evidenced": len(own),
+            "actions_evidenced": total,
             "families": families,
         }
     if not out:
