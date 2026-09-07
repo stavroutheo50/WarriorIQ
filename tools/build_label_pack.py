@@ -187,6 +187,46 @@ def _filmstrip(cap, tracking, fighter, peak_frame, span_frames):
     return cv2.hconcat([t[:, :width] for t in tiles])
 
 
+# Below this, over three seconds, the subject is not a fighter having a quiet
+# moment - they are sitting down. Measured on real tournament footage: seated
+# people reach 0.006 to 0.021 body lengths of centre spread, and the least
+# mobile fighter 0.059. Anything under 0.03 is a chair.
+STILL_BODY_LENGTHS = 0.03
+
+
+def _is_moving(tracking: dict, frame: int, fps: float, seconds: float = 1.5) -> bool:
+    """Was the tracked subject moving at all around this frame?
+
+    A quiet window is meant to teach the model what "no strike" looks like on a
+    fighter. When identity has drifted onto a spectator, it teaches it what a
+    chair looks like instead - and costs the person labelling it a real answer
+    to a question that was never worth asking. Measured on the three reference
+    packs, this was 13 of 40 quiet clips in one of them.
+
+    Judged on the spread of the box centre in body lengths, which is scale-free,
+    rather than on pixels - a distant fighter moves few pixels and a great many
+    body lengths.
+    """
+    window = max(1, int(fps * seconds))
+    centres, heights = [], []
+    for offset in range(-window, window + 1):
+        record = tracking.get(frame + offset)
+        if not record:
+            continue
+        box = ((record.get("fighter_A") or {}).get("observation") or {}).get("box")
+        if not box:
+            continue
+        centres.append(((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0))
+        heights.append(max(1.0, box[3] - box[1]))
+    if len(centres) < 5:
+        # Too little to judge. Keep it: a missing measurement is not evidence
+        # of a chair, and the labeller can always answer "nothing".
+        return True
+    points = np.asarray(centres, dtype=np.float32)
+    spread = float(np.linalg.norm(points.std(axis=0)) / float(np.mean(heights)))
+    return spread >= STILL_BODY_LENGTHS
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build a clip pack for fast labelling.")
     parser.add_argument("--job", required=True, help="job id under outputs/")
@@ -233,7 +273,8 @@ def main() -> int:
     busy = [c["peak_frame"] for c in candidates]
     quiet = [f for f in sorted(tracking)
              if all(abs(f - b) > fps for b in busy)
-             and ((tracking[f].get("fighter_A") or {}).get("observation") or {}).get("keypoints")]
+             and ((tracking[f].get("fighter_A") or {}).get("observation") or {}).get("keypoints")
+             and _is_moving(tracking, f, fps)]
     rng = random.Random(0)
     for frame in rng.sample(quiet, min(args.negatives, len(quiet))):
         candidates.append({
