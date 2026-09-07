@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import cv2
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -43,6 +43,10 @@ from core.auth import (
     session_token, token_digest, valid_email, valid_password,
 )
 from core.identity import fighter_pair_similarity
+from core.csrf import (
+    issue_token as issue_csrf_token, tokens_match as csrf_tokens_match,
+    usable_token as usable_csrf_token,
+)
 from core.config import (
     DATA_ROOT, DATASET, OUTPUTS, ROOT, RULESET_LABELS, RULESET_SHORT, RULESET_SPORTS, SETTINGS, UPLOADS,
 )
@@ -214,6 +218,22 @@ ACTIVE_ANALYSIS_COOKIE = "warrioriq_active_analysis"
 ACTIVE_SPORT_COOKIE = "warrioriq_sport"
 LAST_COMPLETED_ANALYSIS_COOKIE = "warrioriq_last_completed_analysis"
 COOKIE_PREFERENCES_COOKIE = "warrioriq_cookie_preferences"
+CSRF_COOKIE = "warrioriq_csrf"
+# Routes that a browser never posts to, and that therefore cannot carry a
+# token: the worker authenticates with a bearer token compared in constant
+# time, and Stripe signs its webhook body. Both are checked before anything
+# happens, so a forged request from a browser fails there instead. Exempting
+# them is not a hole; requiring a cookie-derived token from a machine client
+# that has no cookies would simply break them.
+CSRF_EXEMPT_PREFIXES = ("/api/worker/", "/stripe/")
+# The OAuth callback is a cross-site POST *by design*: providers using the
+# form_post response mode post the result straight from their own origin, so it
+# can never carry a token of ours. It has the defence the OAuth spec prescribes
+# instead - a `state` value signed into the session cookie, matched against the
+# provider and refused after 600 seconds, all before anything happens. This is
+# an exact path, not a prefix, because /auth/{provider}/start posts from our
+# own form and must stay protected.
+CSRF_EXEMPT_PATHS = ("/auth/{provider}/callback",)
 _last_guest_cleanup = 0.0
 _last_saved_video_cleanup = 0.0
 _rate_windows: dict[str, list[float]] = {}
@@ -568,6 +588,39 @@ def _is_admin(request: Request) -> bool:
     return bool(account and account.get("email", "").lower() in SETTINGS.admin_emails)
 
 
+async def require_csrf(request: Request) -> None:
+    """Refuse a state-changing request that cannot echo the visitor's token.
+
+    Applied per route rather than in middleware, deliberately. Checking this in
+    middleware means reading the request body before the endpoint does, and
+    getting that wrong silently empties uploads; a dependency runs inside the
+    normal request lifecycle, and FastAPI hands the endpoint the same parsed
+    form it hands this. `test_every_browser_mutation_requires_a_csrf_token`
+    is what makes "per route" safe - it walks the route table and fails if any
+    unsafe route is missing this, so a new endpoint cannot quietly skip it.
+
+    The header is checked first so that fetch callers never pay for form
+    parsing. For a JSON body `request.form()` returns empty without touching
+    the stream, because Starlette dispatches on the content type - so asking
+    for the field costs nothing on those routes and cannot consume the body.
+    """
+    submitted = request.headers.get("x-csrf-token")
+    if not submitted:
+        form = await request.form()
+        submitted = form.get("csrf_token")
+    expected = usable_csrf_token(request.cookies.get(CSRF_COOKIE))
+    if csrf_tokens_match(expected, submitted if isinstance(submitted, str) else None):
+        return
+    record_security_event(
+        "csrf_token_rejected", severity="warning",
+        resource_type="route", resource_id=request.url.path[:200],
+    )
+    # 403 rather than 400: the request was understood and refused. The wording
+    # has to be usable by somebody who simply left a tab open overnight, which
+    # is the common cause by a wide margin - not an attack.
+    raise HTTPException(403, "This form expired or came from another site. Reload the page and try again.")
+
+
 def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int) -> None:
     """Small single-process safety limit; production should add an edge/shared limiter too."""
     now = time.monotonic()
@@ -763,6 +816,13 @@ async def viewer_context(request: Request, call_next):
     guest_id = request.cookies.get(GUEST_COOKIE)
     new_guest = not guest_id or len(guest_id) < 24 or len(guest_id) > 96
     request.state.guest_id = session_token() if new_guest else guest_id
+    # The CSRF token is per visitor, not per form, and is issued to signed-out
+    # visitors too - the login and signup posts are exactly the ones that need
+    # it, and neither has an account yet. A cookie of the wrong shape counts as
+    # absent and is replaced, so a stale value cannot lock somebody out.
+    existing_csrf = usable_csrf_token(request.cookies.get(CSRF_COOKIE))
+    new_csrf = existing_csrf is None
+    request.state.csrf_token = issue_csrf_token() if new_csrf else existing_csrf
     request.state.analysis_navigation = _analysis_navigation_state(
         _owner_key(request),
         request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
@@ -895,6 +955,15 @@ f"img-src {img_src}; media-src 'self'; connect-src {connect_src}; frame-src {fra
     if new_guest:
         response.set_cookie(
             GUEST_COOKIE, request.state.guest_id, max_age=60 * 60 * 24,
+            httponly=True, samesite="lax", secure=_request_is_secure(request),
+        )
+    if new_csrf:
+        # httponly on purpose. The usual double-submit recipe makes this
+        # readable so scripts can copy it, which hands the token to any
+        # injected script as well; the page carries the value instead, from
+        # server state. See core/csrf.py.
+        response.set_cookie(
+            CSRF_COOKIE, request.state.csrf_token, max_age=60 * 60 * 24 * 30,
             httponly=True, samesite="lax", secure=_request_is_secure(request),
         )
     return response
@@ -1462,7 +1531,7 @@ def _social_auth_error(request: Request, intent: dict | None, message: str):
     )
 
 
-@app.post("/auth/{provider}/start")
+@app.post("/auth/{provider}/start", dependencies=[Depends(require_csrf)])
 async def social_auth_start(
     request: Request,
     provider: str,
@@ -1701,7 +1770,7 @@ def signup_page(request: Request, next: str = "/dashboard"):
     return _auth_page(request, "signup", next_path=next)
 
 
-@app.post("/signup")
+@app.post("/signup", dependencies=[Depends(require_csrf)])
 def signup(
     request: Request,
     email: str = Form(...),
@@ -1761,7 +1830,7 @@ def login_page(request: Request, next: str = "/dashboard"):
     return _auth_page(request, "login", next_path=next)
 
 
-@app.post("/login")
+@app.post("/login", dependencies=[Depends(require_csrf)])
 def login(
     request: Request,
     email: str = Form(...),
@@ -1817,7 +1886,7 @@ def verify_email_token(request: Request, token: str):
     return RedirectResponse("/login?verified=1", status_code=303)
 
 
-@app.post("/verify-email", response_class=HTMLResponse)
+@app.post("/verify-email", response_class=HTMLResponse, dependencies=[Depends(require_csrf)])
 def resend_verification_email(request: Request, email: str = Form(...)):
     _enforce_rate_limit(request, "email-verification", 5, 3600)
     account = get_account_by_email(email.strip().lower()) if valid_email(email) else None
@@ -1833,7 +1902,7 @@ def resend_verification_email(request: Request, email: str = Form(...)):
     )
 
 
-@app.post("/logout")
+@app.post("/logout", dependencies=[Depends(require_csrf)])
 def logout(request: Request):
     end_session(request.cookies.get(SESSION_COOKIE))
     response = RedirectResponse("/", status_code=303)
@@ -1849,7 +1918,7 @@ def forgot_password_page(request: Request):
     )
 
 
-@app.post("/forgot-password", response_class=HTMLResponse)
+@app.post("/forgot-password", response_class=HTMLResponse, dependencies=[Depends(require_csrf)])
 def request_password_reset(request: Request, email: str = Form(...)):
     _enforce_rate_limit(request, "password-reset", 8, 900)
     account = get_account_by_email(email.strip().lower()) if valid_email(email) else None
@@ -1886,7 +1955,7 @@ def reset_password_page(request: Request, token: str):
     )
 
 
-@app.post("/reset-password/{token}")
+@app.post("/reset-password/{token}", dependencies=[Depends(require_csrf)])
 def reset_password(request: Request, token: str, password: str = Form(...)):
     if not valid_password(password):
         raise HTTPException(400, "Password must contain between 10 and 1,024 characters.")
@@ -2030,7 +2099,7 @@ def sport_setup(request: Request, sport: str):
     return response
 
 
-@app.post("/upload")
+@app.post("/upload", dependencies=[Depends(require_csrf)])
 async def upload(
     request: Request,
     video: UploadFile = File(...),
@@ -2326,7 +2395,7 @@ def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float
     return seconds, frame_number
 
 
-@app.post("/api/selection-frame/{job_id}")
+@app.post("/api/selection-frame/{job_id}", dependencies=[Depends(require_csrf)])
 def set_selection_frame(request: Request, job_id: str, payload: SelectionFramePayload):
     job = _authorized_job(request, job_id)
     if not job:
@@ -2732,7 +2801,7 @@ def remote_worker_failed(request: Request, job_id: str, payload: WorkerFailurePa
     return {"ok": True}
 
 
-@app.post("/api/start/{job_id}")
+@app.post("/api/start/{job_id}", dependencies=[Depends(require_csrf)])
 def start(request: Request, job_id: str, payload: StartPayload):
     _enforce_rate_limit(request, "analysis-start", 12, 600)
     job = _authorized_job(request, job_id)
@@ -2818,7 +2887,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
                                       looks_alike=float(alike) if looks_alike else None)
 
 
-@app.post("/api/restart/{job_id}")
+@app.post("/api/restart/{job_id}", dependencies=[Depends(require_csrf)])
 def restart_interrupted_analysis(request: Request, job_id: str):
     job = _authorized_job(request, job_id)
     if not job:
@@ -3134,7 +3203,7 @@ def result_page(request: Request, job_id: str):
     return response
 
 
-@app.post("/api/annotations/{job_id}")
+@app.post("/api/annotations/{job_id}", dependencies=[Depends(require_csrf)])
 def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
     if not _account(request) or not _authorized_job(request, job_id) or not _request_plan(request).get("can_correct"):
         raise HTTPException(403, "Evidence corrections are available with a complete-report plan.")
@@ -3286,7 +3355,7 @@ def review_evidence_page(request: Request, job_id: str, page: int = 1, mode: str
     })
 
 
-@app.post("/review/{job_id}/complete")
+@app.post("/review/{job_id}/complete", dependencies=[Depends(require_csrf)])
 def complete_evidence_review(
     request: Request,
     job_id: str,
@@ -3548,7 +3617,7 @@ def settings_page(request: Request, section: str, notice: str = ""):
     )
 
 
-@app.post("/settings/marketing")
+@app.post("/settings/marketing", dependencies=[Depends(require_csrf)])
 def save_marketing_preference(request: Request, enabled: bool = Form(False)):
     account = _account(request)
     if not account:
@@ -3562,7 +3631,7 @@ def save_marketing_preference(request: Request, enabled: bool = Form(False)):
     return RedirectResponse("/settings/privacy?notice=Marketing+preference+saved", status_code=303)
 
 
-@app.post("/settings/sessions/revoke")
+@app.post("/settings/sessions/revoke", dependencies=[Depends(require_csrf)])
 def revoke_other_sessions(request: Request):
     account = _account(request)
     if not account:
@@ -3573,7 +3642,7 @@ def revoke_other_sessions(request: Request):
     return RedirectResponse("/settings/privacy?notice=Other+sessions+signed+out", status_code=303)
 
 
-@app.post("/settings/videos/{job_id}/delete")
+@app.post("/settings/videos/{job_id}/delete", dependencies=[Depends(require_csrf)])
 def delete_original_video(request: Request, job_id: str):
     account = _account(request)
     fight = get_fight(job_id)
@@ -3589,7 +3658,7 @@ def delete_original_video(request: Request, job_id: str):
     return RedirectResponse("/settings/privacy?notice=Original+video+deleted", status_code=303)
 
 
-@app.post("/settings/billing/cancel")
+@app.post("/settings/billing/cancel", dependencies=[Depends(require_csrf)])
 def cancel_subscription(request: Request):
     session_account = _account(request)
     if not session_account:
@@ -3618,7 +3687,7 @@ def cancel_subscription(request: Request):
     return RedirectResponse("/settings/billing?notice=Cancellation+scheduled", status_code=303)
 
 
-@app.post("/settings/billing/withdraw")
+@app.post("/settings/billing/withdraw", dependencies=[Depends(require_csrf)])
 def request_contract_withdrawal(request: Request, confirm: bool = Form(False)):
     account = _account(request)
     if not account or not confirm:
@@ -3640,7 +3709,7 @@ def request_contract_withdrawal(request: Request, confirm: bool = Form(False)):
     return RedirectResponse("/settings/billing?notice=Withdrawal+request+recorded+for+review", status_code=303)
 
 
-@app.post("/profile")
+@app.post("/profile", dependencies=[Depends(require_csrf)])
 async def save_profile(
     request: Request,
     display_name: str = Form(...),
@@ -3752,7 +3821,7 @@ def _remove_profile_file(value: str | None) -> None:
         path.unlink(missing_ok=True)
 
 
-@app.post("/delete/{job_id}")
+@app.post("/delete/{job_id}", dependencies=[Depends(require_csrf)])
 def delete_fight_route(request: Request, job_id: str):
     profile_id = _profile_id(request)
     existing = get_fight(job_id)
@@ -3826,7 +3895,7 @@ def coach_page(request: Request):
     )
 
 
-@app.post("/coach/fighters")
+@app.post("/coach/fighters", dependencies=[Depends(require_csrf)])
 def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/coach#squad")):
     """Add someone to the roster without having to analyse a fight first.
 
@@ -3854,7 +3923,7 @@ def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = 
     return RedirectResponse(_safe_next(next_path, "/coach#squad"), status_code=303)
 
 
-@app.post("/coach/fights/{job_id}/fighter")
+@app.post("/coach/fights/{job_id}/fighter", dependencies=[Depends(require_csrf)])
 def assign_fight_to_fighter(
     request: Request,
     job_id: str,
@@ -3876,7 +3945,7 @@ def assign_fight_to_fighter(
     return RedirectResponse(_safe_next(next_path, "/coach#squad"), status_code=303)
 
 
-@app.post("/coach/assignments")
+@app.post("/coach/assignments", dependencies=[Depends(require_csrf)])
 def create_coach_assignment(
     request: Request,
     title: str = Form(...),
@@ -3893,7 +3962,7 @@ def create_coach_assignment(
     return RedirectResponse(_safe_next(next_path, "/coach#assignments"), status_code=303)
 
 
-@app.post("/coach/assignments/{assignment_id}/toggle")
+@app.post("/coach/assignments/{assignment_id}/toggle", dependencies=[Depends(require_csrf)])
 def update_coach_assignment(
     request: Request,
     assignment_id: int,
@@ -3918,7 +3987,7 @@ def privacy_page(request: Request):
     )
 
 
-@app.post("/cookie-preferences")
+@app.post("/cookie-preferences", dependencies=[Depends(require_csrf)])
 def save_cookie_preferences(
     request: Request,
     choice: str = Form(...),
@@ -3999,7 +4068,7 @@ def copyright_report_page(request: Request):
     )
 
 
-@app.post("/copyright-report", response_class=HTMLResponse)
+@app.post("/copyright-report", response_class=HTMLResponse, dependencies=[Depends(require_csrf)])
 def submit_copyright_report(
     request: Request,
     email: str = Form(...),
@@ -4033,7 +4102,7 @@ def admin_page(request: Request, q: str = ""):
     )
 
 
-@app.post("/admin/accounts/{account_id}/status")
+@app.post("/admin/accounts/{account_id}/status", dependencies=[Depends(require_csrf)])
 def admin_account_status(request: Request, account_id: int, status: str = Form(...)):
     if not _is_admin(request):
         raise HTTPException(404)
@@ -4049,7 +4118,7 @@ def admin_account_status(request: Request, account_id: int, status: str = Form(.
     return RedirectResponse("/admin", status_code=303)
 
 
-@app.post("/admin/reports/{report_id}/resolve")
+@app.post("/admin/reports/{report_id}/resolve", dependencies=[Depends(require_csrf)])
 def admin_resolve_report(request: Request, report_id: int):
     if not _is_admin(request):
         raise HTTPException(404)
@@ -4063,7 +4132,7 @@ def admin_resolve_report(request: Request, report_id: int):
     return RedirectResponse("/admin", status_code=303)
 
 
-@app.post("/admin/videos/delete")
+@app.post("/admin/videos/delete", dependencies=[Depends(require_csrf)])
 def admin_delete_prohibited_video(request: Request, job_id: str = Form(...)):
     if not _is_admin(request):
         raise HTTPException(404)
@@ -4260,7 +4329,7 @@ def pricing_page(request: Request):
     )
 
 
-@app.post("/share/{job_id}")
+@app.post("/share/{job_id}", dependencies=[Depends(require_csrf)])
 def share_report(request: Request, job_id: str):
     _enforce_rate_limit(request, "report-share", 20, 3600)
     profile_id = _profile_id(request)
@@ -4296,7 +4365,7 @@ def shared_report(request: Request, token: str):
     )
 
 
-@app.post("/shares/{job_id}/revoke")
+@app.post("/shares/{job_id}/revoke", dependencies=[Depends(require_csrf)])
 def revoke_shares(request: Request, job_id: str):
     profile_id = _profile_id(request)
     fight = get_fight(job_id)
@@ -4306,7 +4375,7 @@ def revoke_shares(request: Request, job_id: str):
     return RedirectResponse(f"/result/{job_id}?revoked={revoked}", status_code=303)
 
 
-@app.post("/account/export")
+@app.post("/account/export", dependencies=[Depends(require_csrf)])
 def export_account_data(request: Request, password: str = Form(...)):
     _enforce_rate_limit(request, "account-export", 5, 3600)
     account = _account(request)
@@ -4361,7 +4430,7 @@ def export_account_data(request: Request, password: str = Form(...)):
     )
 
 
-@app.post("/account/delete")
+@app.post("/account/delete", dependencies=[Depends(require_csrf)])
 def delete_account_route(request: Request, password: str = Form(...), confirmation: str = Form(...)):
     account = _account(request)
     if not account:
@@ -4396,7 +4465,7 @@ def delete_account_route(request: Request, password: str = Form(...), confirmati
     return response
 
 
-@app.post("/checkout/{plan_key}")
+@app.post("/checkout/{plan_key}", dependencies=[Depends(require_csrf)])
 def checkout(request: Request, plan_key: str, billing_acceptance: bool = Form(False)):
     account = _account(request)
     if not account:

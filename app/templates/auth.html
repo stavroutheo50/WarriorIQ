@@ -13,7 +13,7 @@
     <div class="eyebrow">{% if mode == 'signup' %}Create account{% else %}Sign in{% endif %}</div>
     <h2>{% if mode == 'signup' %}Start your athlete profile{% else %}Open your workspace{% endif %}</h2>
     {% if error %}<div class="notice bad-notice" role="alert">{{error}}</div>{% endif %}
-    <form class="auth-form" method="post" action="/{% if mode == 'signup' %}signup{% else %}login{% endif %}">
+    <form class="auth-form" method="post" action="/{% if mode == 'signup' %}signup{% else %}login{% endif %}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <input type="hidden" name="mode" value="{{mode}}">
       <input type="hidden" name="next_path" value="{{next_path}}">
       <div class="auth-required-choices">

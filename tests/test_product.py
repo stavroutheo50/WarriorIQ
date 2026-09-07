@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import cv2
 import numpy as np
-from fastapi.testclient import TestClient
+from browser_client import BrowserClient as TestClient
 from starlette.responses import RedirectResponse
 
 import app.main as webapp

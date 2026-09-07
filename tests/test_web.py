@@ -12,7 +12,7 @@ from unittest import mock
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from browser_client import BrowserClient as TestClient
 
 import app.main as webapp
 from app.main import (
@@ -1939,3 +1939,153 @@ class InterruptedVideoTransferTests(unittest.TestCase):
         self.assertIn("memory", _public_analysis_error(MemoryError("out of memory")).lower())
         self.assertIn("unavailable", _public_analysis_error(ImportError("no module")).lower())
         self.assertIn("could not finish", _public_analysis_error(ValueError("something else")).lower())
+
+
+class CsrfTests(unittest.TestCase):
+    """Cross-site request forgery: the second lock, and the one that catches
+    login CSRF.
+
+    The session cookie is SameSite=Lax and every mutation is a POST, so the
+    classic attack was already refused. What Lax does not stop is an attacker
+    giving you *their* session: a cross-site POST to /login sends no cookie,
+    it only sets one, and the victim then uploads private footage into the
+    attacker's library. See core/csrf.py.
+    """
+
+    def setUp(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        self.client = TestClient(app)
+
+    def test_every_browser_mutation_requires_a_token(self):
+        """The guarantee that makes per-route enforcement safe.
+
+        Enforcement is a dependency rather than middleware, because checking
+        this in middleware means reading the body before the endpoint does and
+        getting that wrong silently empties uploads. The cost of per-route is
+        that a new route can forget it - so this walks the route table instead
+        of trusting anybody to remember.
+        """
+        from app.main import CSRF_EXEMPT_PATHS, CSRF_EXEMPT_PREFIXES, app, require_csrf
+
+        unsafe = {"POST", "PUT", "PATCH", "DELETE"}
+        missing = []
+        for route in app.routes:
+            methods = getattr(route, "methods", set()) or set()
+            path = getattr(route, "path", "")
+            if not (methods & unsafe):
+                continue
+            if path.startswith(CSRF_EXEMPT_PREFIXES) or path in CSRF_EXEMPT_PATHS:
+                continue
+            deps = [d.dependency for d in getattr(route, "dependencies", [])]
+            if require_csrf not in deps:
+                missing.append(f"{sorted(methods & unsafe)} {path}")
+        self.assertEqual(missing, [], "these routes change state without a CSRF check")
+
+    def test_the_exempt_routes_are_only_machine_clients(self):
+        """A browser never posts to these, and they authenticate their own way.
+
+        The worker sends a bearer token compared in constant time and Stripe
+        signs its body, both checked before anything happens. Requiring a
+        cookie-derived token from a client that has no cookies would break
+        them for no gain - but the exemption list must stay this short.
+        """
+        from app.main import CSRF_EXEMPT_PATHS, CSRF_EXEMPT_PREFIXES, app, require_csrf
+
+        self.assertEqual(CSRF_EXEMPT_PREFIXES, ("/api/worker/", "/stripe/"))
+        self.assertEqual(CSRF_EXEMPT_PATHS, ("/auth/{provider}/callback",))
+        # The callback is exempt; the start of the same flow is not, because
+        # that one posts from our own sign-in form.
+        start = next(r for r in app.routes if getattr(r, "path", "") == "/auth/{provider}/start")
+        self.assertIn(require_csrf, [d.dependency for d in start.dependencies])
+
+    def test_a_post_without_a_token_is_refused(self):
+        response = self.client.post("/login", data={"email": "a@b.co", "password": "x" * 12})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("another site", response.text)
+
+    def test_a_post_with_the_wrong_token_is_refused(self):
+        self.client.get("/login")
+        response = self.client.post(
+            "/login", data={"email": "a@b.co", "password": "x" * 12,
+                            "csrf_token": "n" * 43},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_login_csrf_is_what_this_closes(self):
+        """The attacker cannot sign a victim into the attacker's account.
+
+        Lax does not cover this: the forged POST needs no cookie sent, only
+        one set. Without a token the attacker's credentials would be accepted
+        and the victim's next upload would land in the attacker's library.
+        """
+        response = self.client.post(
+            "/login", data={"email": "attacker@example.com", "password": "x" * 12},
+            headers={"origin": "https://evil.example"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn("warrioriq_session", response.cookies)
+
+    def test_a_page_carries_a_token_the_visitor_can_return(self):
+        """The token reaches the page from server state, not from the cookie.
+
+        The cookie stays httponly on purpose: the usual double-submit recipe
+        makes it script-readable so forms can copy it, which hands the token
+        to any injected script too.
+        """
+        page = self.client.get("/login")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('name="csrf-token"', page.text)
+        self.assertIn('name="csrf_token"', page.text)
+        cookie = self.client.cookies.get("warrioriq_csrf")
+        self.assertTrue(cookie)
+        self.assertIn(cookie, page.text)
+
+    def test_the_token_cookie_is_httponly_and_samesite_lax(self):
+        response = self.client.get("/login")
+        header = " ".join(
+            v for k, v in response.headers.items()
+            if k.lower() == "set-cookie" and "warrioriq_csrf" in v
+        ).lower()
+        self.assertIn("httponly", header)
+        self.assertIn("samesite=lax", header)
+
+    def test_a_matching_token_passes_through(self):
+        """A real submission still works - the point is not to break the app."""
+        self.client.get("/login")
+        token = self.client.cookies.get("warrioriq_csrf")
+        response = self.client.post(
+            "/login", data={"email": "nobody@example.com", "password": "x" * 12,
+                            "csrf_token": token},
+            follow_redirects=False,
+        )
+        # Wrong credentials, but it got past the CSRF gate rather than 403.
+        self.assertNotEqual(response.status_code, 403)
+
+    def test_a_stale_cookie_shape_is_replaced_rather_than_rejected(self):
+        """A visitor carrying junk gets a working token, not a wall of 403s.
+
+        A cookie of the wrong shape is treated as absent, so the middleware
+        issues a fresh one on the next page load. Rejecting it instead would
+        leave somebody stuck with no way to clear it from inside the browser.
+        """
+        from core.csrf import issue_token, usable_token
+
+        for junk in ("", None, "short", "!" * 40, "x" * 400, "has spaces in it here"):
+            with self.subTest(cookie=junk):
+                self.assertIsNone(usable_token(junk))
+        token = issue_token()
+        self.assertEqual(usable_token(token), token)
+        self.assertEqual(usable_token("  %s  " % token), token)
+
+    def test_an_absent_token_never_compares_equal(self):
+        """Two missing values must not satisfy the check."""
+        from core.csrf import tokens_match
+
+        self.assertFalse(tokens_match(None, None))
+        self.assertFalse(tokens_match("", ""))
+        self.assertFalse(tokens_match("abc", None))
+        self.assertFalse(tokens_match(None, "abc"))
+        self.assertTrue(tokens_match("abc", "abc"))

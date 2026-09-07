@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from browser_client import BrowserClient as TestClient
 from fastapi.responses import HTMLResponse
 
 from app import state

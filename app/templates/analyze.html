@@ -22,7 +22,7 @@
     <div class="console-head"><div><div class="eyebrow">Your fight</div><h2>Drop in a {{sport_label}} bout</h2></div><span class="console-badge">{% if allowance and allowance.remaining == 0 %}Limit reached{% elif allowance and allowance.remaining is not none %}{{allowance.remaining}} left{% else %}Ready{% endif %}</span></div>
     {% if allowance %}<div class="console-allowance"><span>{{allowance.plan.label}}</span><strong>{{allowance.plan.limit_label}}</strong></div>{% endif %}
     {% set allowance_exhausted = allowance and allowance.remaining == 0 %}
-    <form id="fightUploadForm" action="/upload" method="post" enctype="multipart/form-data" data-sport="{{sport}}">
+    <form id="fightUploadForm" action="/upload" method="post" enctype="multipart/form-data" data-sport="{{sport}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <div class="field upload-field"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="video/*" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}Resets automatically{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% else %}MP4, MOV, MKV, AVI, M4V or WEBM{% endif %}</div></div>
 
       {# The ruleset is the only thing a person has to decide, because it is the

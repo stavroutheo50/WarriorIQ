@@ -8,7 +8,7 @@
     {% if message %}<div class="notice" role="status">{{message}}</div>{% endif %}
     <p class="muted">Use the link in the WarriorIQ email. It expires after 24 hours.</p>
     <details class="advanced-option"><summary><span><strong>Need another link?</strong><small>Enter the same account email</small></span><b aria-hidden="true">+</b></summary>
-      <form method="post" action="/verify-email"><div class="field"><label for="verifyEmail">Email</label><input id="verifyEmail" type="email" name="email" autocomplete="email" required></div><button class="btn" type="submit">Send a new link</button></form>
+      <form method="post" action="/verify-email"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="field"><label for="verifyEmail">Email</label><input id="verifyEmail" type="email" name="email" autocomplete="email" required></div><button class="btn" type="submit">Send a new link</button></form>
     </details>
     <p class="small"><a class="text-link" href="/login">Return to sign in</a></p>
   </section>

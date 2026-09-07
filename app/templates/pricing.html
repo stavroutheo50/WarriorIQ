@@ -62,7 +62,7 @@
     {% elif too_small %}
       <button class="btn secondary" type="button" disabled aria-describedby="blocked-{{key}}">Not enough room</button>
     {% elif payments_enabled and plan.stripe_price_id %}
-      <form method="post" action="/checkout/{{key}}"><label class="check billing-check"><input type="checkbox" name="billing_acceptance" value="true" required> I understand {{plan.price}} {{plan.period}}, recurring until cancelled, with {{plan.limit_label|lower}}. I accept the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms</a> and <a class="text-link" href="/refunds" target="_blank" rel="noopener">cancellation policy</a>.</label><button class="btn" type="submit" data-loading-label="Opening secure checkout…">Continue to secure payment</button></form>
+      <form method="post" action="/checkout/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="check billing-check"><input type="checkbox" name="billing_acceptance" value="true" required> I understand {{plan.price}} {{plan.period}}, recurring until cancelled, with {{plan.limit_label|lower}}. I accept the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms</a> and <a class="text-link" href="/refunds" target="_blank" rel="noopener">cancellation policy</a>.</label><button class="btn" type="submit" data-loading-label="Opening secure checkout…">Continue to secure payment</button></form>
     {% elif account %}
       <a class="btn secondary" href="{% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Preview this plan</a>
     {% else %}
