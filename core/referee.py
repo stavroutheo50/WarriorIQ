@@ -19,6 +19,15 @@ in uniform and the fighters are not. On all three tournament recordings the
 official wears a bright, near-white shirt over dark trousers, while the athletes
 wear saturated singlets and shorts with bare legs.
 
+That uniform is not a coincidence of these three recordings, which is worth
+knowing before trusting the feature anywhere else. WAKO Referee Rules, Article
+14 "Referee's clothes", requires a "White official IF WAKO shirt with short
+sleeves" and "Black trousers without turn-ups" - checked against the document
+published at wako.sport/rules-overview on 2026-09-07. So pale-over-dark is the
+mandated dress for every WAKO event, and the two measured fractions below are
+reading the rule rather than a local habit. The article binds WAKO officials
+only, though, which is the limit restated at the end of this docstring.
+
 That is four numbers, not five hundred. The dimension is the point. With around
 a hundred and forty hand-labelled crops, a probe over a 512-d embedding reaches
 0.96 on the frames it trained on and 0.57 on later frames of the same round -
@@ -68,8 +77,8 @@ fighters are seeded on people who score as officials, both anchors are marked,
 and the filter switches itself off for that bout rather than refusing everyone.
 
 The limit this buys, stated plainly: this is a per-federation model. It
-recognises one specific uniform, and a promotion whose officials wear black -
-most MMA - needs its own labels. It is deliberately off by default and refuses
+recognises one specific uniform - the WAKO one quoted above - and a promotion
+whose officials wear black, which is most MMA, needs its own labels. It refuses
 to load rather than guess when its weights are absent.
 """
 

@@ -244,3 +244,25 @@
 .observed-card strong{font-size:26px;line-height:1.1;font-weight:800}
 .observed-basis{font-size:12.5px;color:#98a2b3}
 .observed-families{margin-top:5px;font-size:12.5px;color:#c7cede}
+
+/* WAKO Full Contact obliges six kicks a round. The two states are deliberately
+   not a pass and a fail: our kick count is a floor, so it can confirm a round
+   was met but can never establish that one was not. "Met" is therefore the
+   only coloured state, and the other is neutral grey rather than red - a red
+   cell would read as a penalty against the fighter when it is a statement
+   about our own coverage. */
+.kick-minimum{margin-top:18px;padding:16px 18px;border:1px solid rgba(255,255,255,.10);
+  border-radius:12px;background:rgba(0,0,0,.16)}
+.kick-minimum h3{margin:0 0 4px;font-size:15px;font-weight:700}
+.kick-minimum-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
+.kick-minimum-table th{text-align:left;font-size:11px;letter-spacing:1.2px;
+  text-transform:uppercase;color:#98a2b3;font-weight:800;padding:6px 10px 6px 0}
+/* An explicit colour, because without one the round-number cells inherit
+   black and vanish into the dark report background - caught by reading the
+   computed style rather than by looking at the page, where a missing number
+   reads as an empty column. */
+.kick-minimum-table td{padding:7px 10px 7px 0;border-top:1px solid rgba(255,255,255,.07);
+  color:#c7cede}
+.kick-minimum-table td.met{color:#3ddc84}
+.kick-minimum-table td.unconfirmed{color:#98a2b3}
+.kick-minimum .small{margin:10px 0 0}

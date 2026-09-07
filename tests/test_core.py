@@ -1511,14 +1511,82 @@ class FederationPointTableTests(unittest.TestCase):
     def test_sports_judged_round_by_round_keep_no_table(self):
         """A ten-point-must sport has no per-strike value to publish.
 
-        Muay Thai, kickboxing, boxing and MMA are judged on the round, so a
-        fixed table would be inventing a rule the federation does not have.
+        Boxing, Muay Thai and MMA are judged on the round, so a fixed table
+        would be inventing a rule the federation does not have.
+
+        K-1 used to be asserted here too, and that was this test enforcing a
+        mistake: WAKO counts points in every discipline including its three
+        ring ones. Chapter 7, Article 8.1 - "Each legal technique will be
+        scored as 1 point" - and Article 7.1 decides the bout by who scored
+        more of them. Checked against the WAKO rulebook on 2026-09-07.
         """
         from core.scoring import RULESETS
 
-        for key in ("K1", "BOXING", "MUAY_THAI", "MMA"):
+        for key in ("BOXING", "MUAY_THAI", "MUAY_THAI_NO_ELBOWS", "MMA"):
             with self.subTest(ruleset=key):
                 self.assertEqual(RULESETS[key].point_table, ())
+                self.assertTrue(RULESETS[key].ten_point_must)
+
+    def test_every_counted_ruleset_publishes_a_table(self):
+        """A discipline decided on points must say what each one is worth.
+
+        Without this the scorer silently falls back to one point per landed
+        action, which is how light contact and kick light were scored for as
+        long as they had no table - by a hand-written helper that nobody
+        reading the profile could see, and that disagreed with the published
+        rule (a head kick is 2, not 1).
+        """
+        from core.scoring import RULESETS
+
+        for key, profile in RULESETS.items():
+            if profile.ten_point_must:
+                continue
+            with self.subTest(ruleset=key):
+                self.assertTrue(profile.point_table, "%s is counted but publishes no table" % key)
+
+    def test_wako_ring_disciplines_value_every_legal_technique_at_one(self):
+        """WAKO Chapter 7, Article 8.1, verbatim: one point per legal technique.
+
+        So a head kick in Full Contact is worth exactly what a jab is worth.
+        These three were previously scored on a 10-9 card with kicks weighted
+        1.15 against punches - a weighting that reads plausibly and appears
+        nowhere in the rules.
+        """
+        from core.scoring import RULESETS
+
+        for key in ("K1", "LOW_KICK", "FULL_CONTACT"):
+            with self.subTest(ruleset=key):
+                profile = RULESETS[key]
+                self.assertFalse(profile.ten_point_must)
+                self.assertEqual(
+                    sorted({points for _f, _t, points in profile.point_table}), [1])
+
+    def test_head_kick_scores_two_in_every_wako_tatami_discipline(self):
+        """Point fighting, light contact and kick light all pay a head kick 2.
+
+        Point fighting states it in a point table (Chapter 2, Article 8.3);
+        the other two state it as a judge pressing the button twice (Chapter 3
+        Article 6.3, Chapter 5 Article 6). Same number, three sources.
+        """
+        for ruleset in ("POINT_FIGHTING", "LIGHT_CONTACT", "KICK_LIGHT"):
+            with self.subTest(ruleset=ruleset):
+                head = score_fight([self._land("kick", "head", 1)], ruleset, [1])
+                body = score_fight([self._land("kick", "body", 1)], ruleset, [1])
+                self.assertEqual(head["rounds"][0]["fighter_A"], 2)
+                self.assertEqual(body["rounds"][0]["fighter_A"], 1)
+
+    def test_full_contact_is_the_only_discipline_with_a_kick_minimum(self):
+        """WAKO Chapter 8, Article 6: six kicks a round, and only there.
+
+        "minimum of N kicks" appears exactly once in the 190-page rulebook.
+        """
+        from core.scoring import minimum_kicks_per_round
+
+        self.assertEqual(minimum_kicks_per_round("FULL_CONTACT"), 6)
+        for key in ("K1", "LOW_KICK", "POINT_FIGHTING", "LIGHT_CONTACT",
+                    "KICK_LIGHT", "BOXING", "MUAY_THAI", "MMA"):
+            with self.subTest(ruleset=key):
+                self.assertIsNone(minimum_kicks_per_round(key))
 
 
 def test_attempt_gate_sits_inside_the_producible_confidence_range():
@@ -3401,3 +3469,91 @@ class ObservedSummaryTests(unittest.TestCase):
 
         page = Path("app/templates/result.html").read_text(encoding="utf-8")
         self.assertIn("not report.scorecard.available and observed", page)
+
+
+class KickMinimumTests(unittest.TestCase):
+    """WAKO Full Contact obliges six kicks a round; we can only ever confirm it.
+
+    Checked against the WAKO rulebook, Chapter 8 Article 6, on 2026-09-07. The
+    rule counts kicks thrown, not landed, which is why this reads attempts.
+    """
+
+    @staticmethod
+    def _report(ruleset, a_kicks=(7, 2), b_kicks=(6, 6), a_knees=(0, 0)):
+        rounds = [
+            {
+                "round": n + 1,
+                "fighters": {
+                    "A": {"families": {"kick": {"attempts": a_kicks[n]},
+                                       "knee": {"attempts": a_knees[n]},
+                                       "punch": {"attempts": 10}}},
+                    "B": {"families": {"kick": {"attempts": b_kicks[n]},
+                                       "knee": {"attempts": 0},
+                                       "punch": {"attempts": 10}}},
+                },
+            }
+            for n in range(2)
+        ]
+        return {"scorecard": {"ruleset": ruleset}, "statistics": {"rounds": rounds}}
+
+    def test_only_full_contact_carries_the_obligation(self):
+        from core.report import kick_minimum_check
+
+        self.assertIsNotNone(kick_minimum_check(self._report("FULL_CONTACT")))
+        for ruleset in ("K1", "LOW_KICK", "POINT_FIGHTING", "BOXING", "MMA"):
+            with self.subTest(ruleset=ruleset):
+                self.assertIsNone(kick_minimum_check(self._report(ruleset)))
+
+    def test_a_round_over_the_minimum_is_confirmed(self):
+        from core.report import kick_minimum_check
+
+        seen = kick_minimum_check(self._report("FULL_CONTACT"))["rounds"]
+        self.assertTrue(seen[0]["fighters"]["A"]["minimum_confirmed_met"])
+        self.assertEqual(seen[0]["fighters"]["A"]["kicks_evidenced"], 7)
+        self.assertTrue(seen[0]["fighters"]["B"]["minimum_confirmed_met"])
+
+    def test_a_round_under_the_minimum_is_never_called_a_shortfall(self):
+        """Two evidenced kicks is a statement about our coverage, not the fighter.
+
+        Coverage on real tournament footage runs well under half, so a count
+        below six is what we saw, not what was thrown. The payload carries no
+        key that asserts a failure, and the note says so in words.
+        """
+        from core.report import kick_minimum_check
+
+        card = kick_minimum_check(self._report("FULL_CONTACT"))
+        short = card["rounds"][1]["fighters"]["A"]
+        self.assertFalse(short["minimum_confirmed_met"])
+        self.assertEqual(short["kicks_evidenced"], 2)
+        # The per-round data is the part a page could render as a verdict, so
+        # it carries a count and a confirmation and nothing that reads as one.
+        self.assertEqual(set(short), {"kicks_evidenced", "minimum_confirmed_met"})
+        rounds = json.dumps(card["rounds"]).lower()
+        for word in ("shortfall", "failed", "penalty", "violation", "under"):
+            self.assertNotIn(word, rounds)
+        # And the payload says in words why an unconfirmed round is not one.
+        self.assertIn("not a shortfall by the fighter", card["note"])
+        self.assertTrue(card["is_a_floor"])
+
+    def test_a_knee_counts_toward_the_kick_minimum(self):
+        """Knees are illegal in Full Contact, so a knee there is a misread kick.
+
+        Kick against knee is a coin flip on this footage, and folding them is
+        what `observed_summary` already does for the same reason.
+        """
+        from core.report import kick_minimum_check
+
+        card = kick_minimum_check(self._report("FULL_CONTACT", a_kicks=(3, 2), a_knees=(3, 0)))
+        self.assertTrue(card["rounds"][0]["fighters"]["A"]["minimum_confirmed_met"])
+        self.assertEqual(card["rounds"][0]["fighters"]["A"]["kicks_evidenced"], 6)
+
+    def test_a_report_without_rounds_yields_nothing(self):
+        from core.report import kick_minimum_check
+
+        self.assertIsNone(kick_minimum_check({"scorecard": {"ruleset": "FULL_CONTACT"}}))
+        self.assertIsNone(kick_minimum_check({}))
+
+    def test_an_unknown_ruleset_does_not_raise(self):
+        from core.report import kick_minimum_check
+
+        self.assertIsNone(kick_minimum_check(self._report("NOT_A_SPORT")))

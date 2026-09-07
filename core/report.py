@@ -10,7 +10,10 @@ from core.coaching import (
 from core.sport_profiles import build_sport_coaching
 from core.config import SETTINGS
 from core.evidence_trust import automated_evidence_trust
-from core.scoring import event_legality, is_legal_event, is_verified_scoring_event, score_fight
+from core.scoring import (
+    event_legality, is_legal_event, is_verified_scoring_event,
+    minimum_kicks_per_round, score_fight,
+)
 from core.types import AnalysisRequest, DefenseEvent, RoundSpec, StrikeEvent
 
 
@@ -121,6 +124,75 @@ def observed_summary(report: dict) -> dict | None:
         "fighters": out,
         "basis": "actions we could evidence while we had sight of that fighter",
         "is_a_floor": True,
+    }
+
+
+def kick_minimum_check(report: dict) -> dict | None:
+    """Whether each round meets its discipline's obligatory kick count.
+
+    WAKO Full Contact, Chapter 8 Article 6: a kickboxer "is obliged to deliver
+    a minimum of 6 kicks per round", and a shortfall not made up in the next
+    round costs a minus point. It is the only WAKO obligation this analysis can
+    check, because it is a count of kicks *thrown* - the rule asks only that
+    the kickboxer "clearly show the intention to hit the opponent by kicking" -
+    and attempts are what the model produces.
+
+    **This can confirm compliance and can never allege a shortfall**, and the
+    asymmetry is the whole design. Every count here is a floor: it is what we
+    could evidence while we had sight of that fighter, and coverage on real
+    tournament footage runs well under half. Six or more evidenced means the
+    obligation was met, whatever we missed. Three evidenced means three that we
+    saw, and the fighter may well have thrown nine. Reporting that as a
+    shortfall would be accusing an athlete of a penalty on the strength of our
+    own dropped frames.
+
+    Knees count toward the kick total here. In Full Contact a knee strike is
+    illegal, so a leg arriving is a kick that the family classifier called a
+    knee - judged by eye on real footage that distinction is a coin flip, which
+    is the same reason `observed_summary` reports two families rather than
+    three.
+    """
+    ruleset = ((report.get("scorecard") or {}).get("ruleset")
+               or (report.get("request") or {}).get("ruleset"))
+    if not ruleset:
+        return None
+    try:
+        minimum = minimum_kicks_per_round(ruleset)
+    except ValueError:
+        return None
+    if not minimum:
+        return None
+    rounds = (report.get("statistics") or {}).get("rounds") or []
+    if not rounds:
+        return None
+
+    out = []
+    for item in rounds:
+        fighters = {}
+        for fighter in ("A", "B"):
+            families = ((item.get("fighters") or {}).get(fighter) or {}).get("families") or {}
+            evidenced = (int((families.get("kick") or {}).get("attempts") or 0)
+                         + int((families.get("knee") or {}).get("attempts") or 0))
+            fighters[fighter] = {
+                "kicks_evidenced": evidenced,
+                # True only when the floor alone clears the bar. False here
+                # means "not established from this footage", never "failed",
+                # which is why the key is not called `met` on its own.
+                "minimum_confirmed_met": evidenced >= minimum,
+            }
+        out.append({"round": item.get("round"), "fighters": fighters})
+
+    return {
+        "minimum": minimum,
+        "rule": "WAKO Full Contact, Chapter 8 Article 6: minimum 6 kicks per round, 18 per bout.",
+        "rounds": out,
+        "basis": "kicks we could evidence while we had sight of that fighter",
+        "is_a_floor": True,
+        "note": (
+            "A round can be confirmed as meeting the minimum but never shown to have "
+            "missed it: an unconfirmed round is one we could not follow closely enough, "
+            "not a shortfall by the fighter."
+        ),
     }
 
 

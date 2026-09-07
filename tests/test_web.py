@@ -789,7 +789,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("rather than being chosen per upload", privacy)
 
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
-                       scorecard_available=None, measurement=None):
+                       scorecard_available=None, measurement=None, kick_minimum=None):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -828,7 +828,46 @@ class PublicPageTests(unittest.TestCase):
             report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
             analysis_quality=_analysis_quality_summary(report), can_share=can_share,
             sharing=sharing, score_withheld=score_withheld, unavailable=[],
+            kick_minimum=kick_minimum,
         )
+
+    def test_the_kick_minimum_block_renders_and_never_alleges_a_shortfall(self):
+        """WAKO Full Contact obliges six kicks a round, and we can only confirm it.
+
+        Our kick count is a floor, so six or more proves the round was met and
+        fewer proves nothing about the fighter. The unconfirmed cell therefore
+        has to read as our limitation, not as a penalty against them - it must
+        not say "failed", and it must not be styled as a failure.
+        """
+        card = {
+            "minimum": 6,
+            "rule": "WAKO Full Contact, Chapter 8 Article 6: minimum 6 kicks per round, 18 per bout.",
+            "rounds": [
+                {"round": 1, "fighters": {"A": {"kicks_evidenced": 7, "minimum_confirmed_met": True},
+                                          "B": {"kicks_evidenced": 2, "minimum_confirmed_met": False}}},
+            ],
+            "basis": "kicks we could evidence while we had sight of that fighter",
+            "is_a_floor": True,
+            "note": "not a shortfall by the fighter",
+        }
+        html = self._render_result(None, kick_minimum=card)
+        self.assertIn("Kick minimum", html)
+        self.assertIn("Met &mdash; 7 kicks seen", html.replace("—", "&mdash;"))
+        self.assertIn("Not confirmed", html)
+        self.assertIn("Chapter 8 Article 6", html)
+        # The fighter is never told they fell short, and the cell that could
+        # imply it is the neutral class rather than an error one.
+        for word in ("failed", "penalty", "violation"):
+            self.assertNotIn(word, html.lower())
+        self.assertIn('class="unconfirmed"', html)
+
+    def test_the_kick_minimum_block_is_absent_for_every_other_discipline(self):
+        """Only Full Contact carries the obligation, so the block must not render.
+
+        A kick-minimum table on a K-1 report would be inventing a rule.
+        """
+        html = self._render_result(None, kick_minimum=None)
+        self.assertNotIn("Kick minimum", html)
 
     def test_no_page_explains_itself_by_naming_an_internal_component(self):
         """An internal component name is not a reason a fighter can use.

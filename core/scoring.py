@@ -21,7 +21,14 @@ OBSERVABLE_FAMILIES = frozenset({"punch", "kick", "knee"})
 class RuleProfile:
     key: str
     label: str
-    ring_sport: bool
+    # Is a round judged as a whole on a ten-point-must card, or is the bout
+    # decided by counting scoring techniques? This was called `ring_sport`,
+    # and the name caused the error it was named after: WAKO's three ring
+    # disciplines were set True because they are fought in a ring, when the
+    # WAKO rules count points and never score a round 10-9 (Chapter 7,
+    # Articles 7.1 and 8.1). Boxing, Muay Thai and MMA are the ten-point-must
+    # sports here; the venue has nothing to do with it.
+    ten_point_must: bool
     allow_low_kick: bool
     allow_knee: bool
     allow_full_power: bool
@@ -57,11 +64,68 @@ def _weights(profile: RuleProfile) -> dict[str, float]:
     return dict(profile.family_value)
 
 
+# Every WAKO discipline below was checked line by line on 2026-09-07 against
+# the two documents WAKO publishes at wako.sport/rules-overview: the "WAKO
+# Rules" book (190 pages) and the "WAKO Referee Rules" (50 pages). Article
+# numbers in the comments are that book's, so a future reader can disagree
+# with the source rather than with me.
+#
+# The finding that mattered: **WAKO does not use the ten-point-must system in
+# any discipline.** Chapter 7 (ring rules) Article 8.1 says "Each legal
+# technique will be scored as 1 point", and Article 7.1 decides the bout by
+# "the kickboxer who scored more points". So a WAKO ring bout is counted, and
+# every legal technique counts the same - a head kick is not worth more than a
+# jab in Full Contact, Low Kick or K-1. That is the opposite of what was
+# encoded here, which scored those three on a 10-9 card with kicks weighted
+# 1.15 against punches. The weighting was plausible and invented.
+JUMP_BONUS = ("jumping-kick bonuses, which score 2 to the body and 3 to the head",)
+
 RULESETS: dict[str, RuleProfile] = {
     # ---- Kickboxing (WAKO disciplines) -------------------------------------
-    "K1": RuleProfile("K1", "K-1", True, True, True, True, False, frozenset({"spinning_backfist"})),
-    "LOW_KICK": RuleProfile("LOW_KICK", "Low Kick", True, True, False, True, False, frozenset()),
-    "FULL_CONTACT": RuleProfile("FULL_CONTACT", "Full Contact", True, False, False, True, False, frozenset()),
+    # The three ring disciplines share Chapter 7. Every legal technique is one
+    # point, to any legal target, so the tables differ only in which targets
+    # each discipline makes legal - which is Article 3 of each chapter.
+    #
+    # K-1: legs are legal in full ("Legs (all parts including joints)"), knees
+    # are a listed technique (Article 4.3), and the spinning back fist is a
+    # listed hand technique.
+    "K1": RuleProfile(
+        "K1", "K-1", False, True, True, True, False, frozenset({"spinning_backfist"}),
+        point_table=(
+            ("punch", "head", 1), ("punch", "body", 1),
+            ("kick", "head", 1), ("kick", "body", 1), ("kick", "leg", 1),
+            ("knee", "head", 1), ("knee", "body", 1), ("knee", "leg", 1),
+        ),
+    ),
+    # Low Kick: thigh only ("below the waist and above the knee"), no knees,
+    # no back fist. Kicks to the knee and below are explicitly illegal, which
+    # `event_legality` cannot separate from a thigh kick on this footage - the
+    # table therefore values a leg kick, and the legality check is what refuses
+    # the ones it can recognise by technique name.
+    "LOW_KICK": RuleProfile(
+        "LOW_KICK", "Low Kick", False, True, False, True, False, frozenset(),
+        point_table=(
+            ("punch", "head", 1), ("punch", "body", 1),
+            ("kick", "head", 1), ("kick", "body", 1), ("kick", "leg", 1),
+        ),
+    ),
+    # Full Contact: above the waist only; the foot is a target at ankle level
+    # for sweeping alone, which is not a kick this model emits, so there is no
+    # leg row. Article 6 of Chapter 8 also obliges each kickboxer to throw a
+    # minimum of six kicks per round - see MINIMUM_KICKS_PER_ROUND.
+    "FULL_CONTACT": RuleProfile(
+        "FULL_CONTACT", "Full Contact", False, False, False, True, False, frozenset(),
+        point_table=(
+            ("punch", "head", 1), ("punch", "body", 1),
+            ("kick", "head", 1), ("kick", "body", 1),
+        ),
+    ),
+    # Point Fighting: Chapter 2, Article 8.3 "Points", verbatim -
+    #   Punch 1 pt / Kick to the body 1 pt / Foot sweep 1 pt /
+    #   Kick to head 2 pts / Jumping kick to body 2 pts /
+    #   Jumping kick to head 3 pts.
+    # All four values already here were right. The back fist is legal and the
+    # spinning back fist is not, which Article 4.1 states in those words.
     "POINT_FIGHTING": RuleProfile(
         "POINT_FIGHTING", "Point Fighting", False, False, False, False, True,
         frozenset({"backfist"}),
@@ -70,10 +134,39 @@ RULESETS: dict[str, RuleProfile] = {
             ("kick", "body", 1), ("kick", "head", 2),
             ("kick", "leg", 1),          # foot sweeps score 1
         ),
-        unobserved=("jumping-kick bonuses, which score 2 to the body and 3 to the head",),
+        unobserved=JUMP_BONUS,
     ),
-    "LIGHT_CONTACT": RuleProfile("LIGHT_CONTACT", "Light Contact", False, False, False, False, False, frozenset()),
-    "KICK_LIGHT": RuleProfile("KICK_LIGHT", "Kick Light", False, True, False, False, False, frozenset()),
+    # Light Contact and Kick Light are scored by judges pressing a button, and
+    # the rules say how many times: Chapter 3 Article 6.3 and Chapter 5
+    # Article 6, in identical words -
+    #   once   for a hand and leg technique to body, and hand technique to head
+    #   twice  for a jump kick to body or head kick
+    #   three  for a jump kick to head
+    # so a head kick is 2 in both, exactly as in point fighting. Neither had a
+    # table at all before; both were being scored by the generic weighting.
+    "LIGHT_CONTACT": RuleProfile(
+        "LIGHT_CONTACT", "Light Contact", False, False, False, False, False, frozenset(),
+        point_table=(
+            ("punch", "head", 1), ("punch", "body", 1),
+            ("kick", "body", 1), ("kick", "head", 2),
+            ("kick", "leg", 1),          # foot sweeps, as in point fighting
+        ),
+        unobserved=JUMP_BONUS,
+    ),
+    # Kick Light is the one tatami discipline where the thigh is a legal
+    # target ("Legs - Thigh, inside, outside and back"). The button rule does
+    # not name a thigh kick, and the only techniques it lifts above one point
+    # are head kicks and jumping kicks, so a thigh kick scores 1. That is a
+    # reading of the rule rather than a quotation of it, and is marked as such.
+    "KICK_LIGHT": RuleProfile(
+        "KICK_LIGHT", "Kick Light", False, True, False, False, False, frozenset(),
+        point_table=(
+            ("punch", "head", 1), ("punch", "body", 1),
+            ("kick", "body", 1), ("kick", "head", 2),
+            ("kick", "leg", 1),          # inferred: not lifted above 1 by the button rule
+        ),
+        unobserved=JUMP_BONUS,
+    ),
 
     # ---- Boxing -------------------------------------------------------------
     # The one discipline the model observes completely: its whole scoring
@@ -171,6 +264,24 @@ RULESETS: dict[str, RuleProfile] = {
         ),
     ),
 }
+
+
+# WAKO Chapter 8, Article 6 "Number of kicks per round": in Full Contact each
+# kickboxer "is obliged to deliver a minimum of 6 kicks per round", 18 across
+# the bout, and a shortfall not made up in the following round costs a minus
+# point. It is the one WAKO obligation this analysis can genuinely check, and
+# it is a count of kicks *thrown* - the rule asks only that they "clearly show
+# the intention to hit the opponent by kicking" - so it is measured against
+# attempts, not landed strikes.
+#
+# Only Full Contact carries it. Searched the whole rulebook: "minimum of N
+# kicks" appears once, in Chapter 8.
+MINIMUM_KICKS_PER_ROUND: dict[str, int] = {"FULL_CONTACT": 6}
+
+
+def minimum_kicks_per_round(ruleset: str) -> int | None:
+    """How many kicks a round this discipline obliges, if it obliges any."""
+    return MINIMUM_KICKS_PER_ROUND.get(normalize_ruleset(ruleset))
 
 
 SPORTS: dict[str, tuple[str, ...]] = {
@@ -420,28 +531,18 @@ def _table_points(event: StrikeEvent, profile: RuleProfile) -> int | None:
     return 0
 
 
-def _point_fighting_points(event: StrikeEvent) -> int:
-    """Conservative point-fighting mapping.
+def _one_point_per_landed_action(event: StrikeEvent) -> int:
+    """Last resort for a counted discipline that publishes no table.
 
-    WarriorIQ currently does not classify jumping techniques reliably, so it
-    never invents 2/3-point jump bonuses. Hand techniques score 1, body kicks
-    1, and head kicks 2 when contact is clean/likely and the technique is legal.
+    There is no such discipline today - `test_every_counted_ruleset_publishes_a_table`
+    holds that line - and this exists so that adding one cannot silently
+    inherit somebody else's point values. Two hand-written mappings used to
+    live here, one per tatami discipline, duplicating numbers that the
+    profiles above already state; they disagreed with the published tables for
+    light contact and kick light for as long as they existed, because nobody
+    reading a profile could see that a second copy was what actually ran.
     """
-    if event.outcome not in {"clean", "likely_landed"}:
-        return 0
-    if event.family == "punch":
-        return 1
-    if event.family == "kick":
-        return 2 if event.target == "head" else 1
-    return 0
-
-
-def _continuous_tatami_points(event: StrikeEvent) -> int:
-    if event.outcome not in {"clean", "likely_landed"}:
-        return 0
-    if event.family == "kick" and event.target == "head":
-        return 2
-    return 1
+    return 1 if event.outcome in {"clean", "likely_landed"} else 0
 
 
 def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iterable[int], knockdowns: Iterable[KnockdownEvent] | None = None, *, reliable: bool = True) -> dict:
@@ -486,7 +587,7 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
             + ", ".join(profile.unobserved)
             + ", which this analysis cannot see."
         ) if profile.unobserved else "",
-        "mode": "estimated_10_point_must" if profile.ring_sport else "estimated_points",
+        "mode": "estimated_10_point_must" if profile.ten_point_must else "estimated_points",
         "rounds": [],
         "totals": {"A": 0, "B": 0},
         "illegal_or_non_scoring_events": illegal,
@@ -504,7 +605,7 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
         result["disclaimer"] = "No score is shown because fighter tracking was not reliable enough for a fair estimate. Re-select both fighters on a clearer frame and analyze again."
         return result
 
-    if profile.ring_sport:
+    if profile.ten_point_must:
         total_a_rounds = total_b_rounds = 0
         for r in sorted(by_round):
             a_value = sum(_effective_value(e, profile) for e in by_round[r]["A"])
@@ -542,11 +643,9 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
             result["totals"]["B"] += b_score
         result["rounds_won"] = {"A": total_a_rounds, "B": total_b_rounds}
     else:
-        generic = _point_fighting_points if key == "POINT_FIGHTING" else _continuous_tatami_points
-
-        def scorer(event, _profile=profile, _generic=generic):
+        def scorer(event, _profile=profile):
             table = _table_points(event, _profile)
-            return _generic(event) if table is None else table
+            return _one_point_per_landed_action(event) if table is None else table
         for r in sorted(by_round):
             a_points = sum(scorer(e) for e in by_round[r]["A"])
             b_points = sum(scorer(e) for e in by_round[r]["B"])

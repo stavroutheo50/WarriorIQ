@@ -59,6 +59,43 @@
     </div>
   </div>
   {% endif %}
+  {# WAKO Full Contact obliges six kicks a round (Chapter 8, Article 6), and it
+     is the one federation obligation this analysis can check. It only ever
+     confirms: our kick count is a floor, so six or more proves the round was
+     met, while fewer proves nothing about the fighter and everything about our
+     coverage. A round we cannot confirm is therefore shown as unconfirmed, in
+     those words, and never as a shortfall. #}
+  {% if kick_minimum %}
+  <div class="kick-minimum">
+    <h3>Kick minimum &mdash; {{kick_minimum.minimum}} per round</h3>
+    <p class="observed-note">{{kick_minimum.rule}}
+      We count kicks we could evidence while we had sight of each fighter, so a round can be
+      confirmed as meeting the minimum but never shown to have missed it &mdash; an unconfirmed
+      round is one we could not follow closely enough, not a shortfall by the fighter.</p>
+    <table class="kick-minimum-table">
+      <thead><tr><th>Round</th><th>Fighter A</th><th>Fighter B</th></tr></thead>
+      <tbody>
+        {% for item in kick_minimum.rounds %}
+        <tr>
+          <td>{{item.round}}</td>
+          {% for who in ['A', 'B'] %}
+          {% set seen = item.fighters[who] %}
+          <td class="{{ 'met' if seen.minimum_confirmed_met else 'unconfirmed' }}">
+            {% if seen.minimum_confirmed_met %}
+              Met &mdash; {{seen.kicks_evidenced}} kicks seen
+            {% else %}
+              Not confirmed &mdash; {{seen.kicks_evidenced}} seen of {{kick_minimum.minimum}}
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted">Knees are counted as kicks here: a knee strike is illegal in Full
+      Contact, so a leg arriving is a kick this analysis named a knee.</p>
+  </div>
+  {% endif %}
 </section>
 {# The fighter's own numbers, first. These are measured from pose and survive
    the gate that hides strike counts, so they are the part of the report that
