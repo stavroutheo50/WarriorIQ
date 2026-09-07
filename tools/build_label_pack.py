@@ -331,9 +331,10 @@ def main() -> int:
     (root / "label.html").write_text(page, encoding="utf-8")
 
     proposed = sum(1 for c in index if c["source"] == "event")
+    print("run:  .venv/Scripts/python.exe tools/serve_label_pack.py --job %s" % args.job)
     print("%d clips in %s  (%d proposed actions, %d quiet windows)"
           % (len(index), root, proposed, len(index) - proposed))
-    print("open %s in a browser, label, then press Download labels" % (root / "label.html"))
+    print("      answers save to disk as you give them; no button to remember.")
     return 0
 
 

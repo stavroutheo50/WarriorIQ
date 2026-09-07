@@ -2899,15 +2899,28 @@ class LabelPackTests(unittest.TestCase):
         """The two halves agree through one placeholder and nothing else."""
         self.assertIn("/*__DATA__*/ null", self._page())
 
-    def test_the_page_does_not_fetch_anything(self):
-        """It is opened from the filesystem, where fetch and XHR are blocked.
+    def test_the_page_never_fetches_from_a_file_url(self):
+        """It has to work both ways, and the file:// way has no server.
 
-        If either ever appears here the page will look fine to whoever wrote
-        it, served over http, and be blank for the person actually labelling.
+        This used to forbid `fetch(` outright, because the pack was only ever
+        opened from the filesystem where fetch is blocked - a page that called
+        it would look fine to whoever wrote it, served over http, and be blank
+        for the person actually labelling. The pack is now normally served by
+        tools/serve_label_pack.py so answers reach disk as they are given, and
+        fetch is how they get there. The invariant that matters is unchanged:
+        **nothing may be fetched unless there is a server to fetch from.**
         """
         page = self._page()
-        for forbidden in ("fetch(", "XMLHttpRequest", "import("):
-            self.assertNotIn(forbidden, page)
+        self.assertNotIn("XMLHttpRequest", page)
+        self.assertNotIn("import(", page)
+        # Exactly one fetch, and it is reached only through the SERVED guard.
+        self.assertEqual(page.count("fetch("), 1)
+        self.assertIn('const SERVED = location.protocol === "http:"', page)
+        guard = page.index("if (SERVED) {")
+        self.assertLess(guard, page.index("fetch("),
+                        "the fetch is not behind the SERVED guard")
+        # And the file:// path still has somewhere to put the answers.
+        self.assertIn("localStorage.setItem(store", page)
 
     def test_injected_payload_cannot_close_the_script_tag(self):
         """A technique name is free text by the time it reaches the page."""
@@ -3761,3 +3774,78 @@ class WorkerTimeoutTests(unittest.TestCase):
         self.assertIsNone(signature.parameters["timeout"].default)
         source = inspect.getsource(RemoteWorkerClient._request)
         self.assertIn("WORKER_HTTP_TIMEOUT_SECONDS if timeout is None else timeout", source)
+
+
+class LabelPackServerTests(unittest.TestCase):
+    """Answers must reach disk as they are given.
+
+    Opening the pack as a file:// page lost a finished set of answers: Chrome
+    would not keep localStorage for that origin, the page's save swallowed the
+    failure, and the counter read "60 of 60" while nothing was written. The
+    download did not rescue it either - `URL.revokeObjectURL` ran on the line
+    after `click()`, destroying the blob before the browser read it, which is
+    a blank tab and no file.
+    """
+
+    def test_the_download_is_not_revoked_before_the_browser_reads_it(self):
+        page = (Path(__file__).resolve().parents[1] / "tools" / "label_pack_page.html").read_text(encoding="utf-8")
+        self.assertIn("document.body.appendChild(a)", page)
+        self.assertIn("setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }", page)
+        # The exact shape of the original bug: revoke on the line after click.
+        self.assertNotIn("a.click();\n  URL.revokeObjectURL", page)
+
+    def test_a_failed_save_is_shown_rather_than_swallowed(self):
+        """The counter must never claim progress that is not being kept."""
+        page = (Path(__file__).resolve().parents[1] / "tools" / "label_pack_page.html").read_text(encoding="utf-8")
+        self.assertIn('id="savestate"', page)
+        self.assertIn("NOT SAVING", page)
+        self.assertIn('saveState = "none"', page)
+
+    def test_the_server_writes_answers_and_refuses_the_rest(self):
+        import json as _json
+        import tempfile
+        import threading
+        import urllib.error
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+
+        import tools.serve_label_pack as serve
+
+        root = Path(tempfile.mkdtemp())
+        pack = root / "demo"
+        pack.mkdir()
+        (pack / "label.html").write_text("<html>pack</html>", encoding="utf-8")
+        with mock.patch.object(serve, "PACKS", root), mock.patch.object(serve, "PROJECT_ROOT", root):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            base = "http://127.0.0.1:%d" % server.server_address[1]
+            try:
+                payload = {"job": "demo", "labels": [{"id": 1, "technique": "kick"}], "unsure": [2]}
+                req = urllib.request.Request(
+                    base + "/demo/save", data=_json.dumps(payload).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST")
+                self.assertEqual(urllib.request.urlopen(req, timeout=10).status, 200)
+                saved = _json.loads((pack / "demo-labels.json").read_text(encoding="utf-8"))
+                self.assertEqual(saved["labels"][0]["technique"], "kick")
+                self.assertEqual(saved["unsure"], [2])
+                # A payload for another pack must not overwrite this one.
+                other = _json.dumps(dict(payload, job="elsewhere")).encode()
+                req = urllib.request.Request(
+                    base + "/demo/save", data=other,
+                    headers={"Content-Type": "application/json"}, method="POST")
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(req, timeout=10)
+                self.assertEqual(caught.exception.code, 400)
+                # And a job name must not walk out of labelpack/.
+                with self.assertRaises(urllib.error.HTTPError):
+                    urllib.request.urlopen(base + "/nosuchpack/", timeout=10)
+            finally:
+                server.shutdown()
+
+    def test_it_listens_only_on_this_machine(self):
+        """Nothing here is authenticated, so nothing here is reachable."""
+        import inspect
+
+        import tools.serve_label_pack as serve
+
+        self.assertIn('("127.0.0.1", args.port)', inspect.getsource(serve.main))
