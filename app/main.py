@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import json
 import html
 import hmac
@@ -621,10 +622,77 @@ async def require_csrf(request: Request) -> None:
     raise HTTPException(403, "This form expired or came from another site. Reload the page and try again.")
 
 
+def _peer_is_routable(host: str) -> bool:
+    """Is this an address a visitor could actually have reached us from?
+
+    `is_global` is exactly the question: it is false for loopback, private and
+    link-local ranges - the addresses a reverse proxy on this machine connects
+    from - and also for the documentation ranges, which nobody browses from
+    either. Anything true here reached us directly, so the socket is the truth.
+    """
+    try:
+        return ipaddress.ip_address(host).is_global
+    except ValueError:
+        return False
+
+
+def _client_ip(request: Request) -> str:
+    """The visitor's address, as far as it can be trusted.
+
+    This matters more than it looks. The rate limiter used `request.client.host`
+    directly, and warrioriq.eu runs behind Apache and Passenger - so every
+    visitor arrives from 127.0.0.1 and shares **one** bucket. One person
+    failing to sign in thirty times would lock every other visitor out of the
+    login page for five minutes, and no per-visitor limit was ever really in
+    force. That is worse than having no limiter.
+
+    `X-Forwarded-For` cannot simply be believed either: anyone can send it, and
+    trusting it turns every limit into an opt-out. The rule here is to believe
+    the socket whenever the connection came from a public address - an attacker
+    on the internet cannot make their own connection appear to come from
+    loopback - and to read the header only when the peer is a local proxy.
+
+    The **rightmost** entry is used, not the leftmost. A proxy appends the
+    address it actually saw to the end of the chain, so the right-hand end is
+    the nearest hop's own observation; everything to the left of it is whatever
+    the client chose to send. `_forwarded_header` takes the leftmost for host
+    and scheme, which is the convention for those and the wrong one here.
+    """
+    peer = request.client.host if request.client else ""
+    if peer and _peer_is_routable(peer):
+        return peer
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        nearest = forwarded.rsplit(",", 1)[-1].strip()
+        if nearest:
+            return nearest[:64]
+    return peer or "unknown"
+
+
+# How many rate-limit buckets to keep. Each is a scope plus a client address,
+# and the dict never used to drop any of them - a process serving a month of
+# traffic accumulated an entry per address per endpoint and never freed one.
+# Passenger keeps a worker alive for a long time, so this was a slow leak.
+MAX_RATE_WINDOWS = 20000
+
+
+def _prune_rate_windows(now: float) -> None:
+    """Drop buckets whose newest timestamp is older than any window in use."""
+    stale = [key for key, stamps in _rate_windows.items() if not stamps or now - stamps[-1] > 3600]
+    for key in stale:
+        _rate_windows.pop(key, None)
+    if len(_rate_windows) > MAX_RATE_WINDOWS:
+        # Still too many: drop the least recently touched. Losing a bucket
+        # forgives requests already counted, which is the safe direction to
+        # fail - it can let somebody through, never lock somebody out.
+        for key in sorted(_rate_windows, key=lambda k: _rate_windows[k][-1])[:len(_rate_windows) - MAX_RATE_WINDOWS]:
+            _rate_windows.pop(key, None)
+
+
 def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int) -> None:
     """Small single-process safety limit; production should add an edge/shared limiter too."""
     now = time.monotonic()
-    client = request.client.host if request.client else "unknown"
+    client = _client_ip(request)
     key = f"{scope}:{client}"
     recent = [stamp for stamp in _rate_windows.get(key, []) if now - stamp < window_seconds]
     if len(recent) >= limit:
@@ -635,6 +703,8 @@ def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds
         raise HTTPException(429, "Too many requests. Wait a little and try again.")
     recent.append(now)
     _rate_windows[key] = recent
+    if len(_rate_windows) > MAX_RATE_WINDOWS:
+        _prune_rate_windows(now)
 
 
 def _cookie_preferences(request: Request) -> dict:
@@ -1957,6 +2027,11 @@ def reset_password_page(request: Request, token: str):
 
 @app.post("/reset-password/{token}", dependencies=[Depends(require_csrf)])
 def reset_password(request: Request, token: str, password: str = Form(...)):
+    # /forgot-password is limited, but consuming the token was not - so the
+    # token itself could be guessed at without limit. It is 32 random bytes
+    # and not realistically guessable, which is a reason to keep the limit
+    # loose rather than a reason to have none.
+    _enforce_rate_limit(request, "password-reset-complete", 15, 900)
     if not valid_password(password):
         raise HTTPException(400, "Password must contain between 10 and 1,024 characters.")
     account_id = consume_password_reset_token(token_digest(token))
@@ -2397,6 +2472,10 @@ def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float
 
 @app.post("/api/selection-frame/{job_id}", dependencies=[Depends(require_csrf)])
 def set_selection_frame(request: Request, job_id: str, payload: SelectionFramePayload):
+    # Each call seeks and decodes a frame from the uploaded video. Cheap
+    # once, not cheap in a loop, and it is reachable before any analysis
+    # allowance is spent. Generous enough to scrub through a round.
+    _enforce_rate_limit(request, "selection-frame", 90, 300)
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
@@ -2889,6 +2968,10 @@ def start(request: Request, job_id: str, payload: StartPayload):
 
 @app.post("/api/restart/{job_id}", dependencies=[Depends(require_csrf)])
 def restart_interrupted_analysis(request: Request, job_id: str):
+    # Restarting queues GPU work. Without a cap one account can fill the
+    # analysis queue by holding a key down, and the machine doing the work
+    # is a single RTX 5060 - there is no second one to absorb it.
+    _enforce_rate_limit(request, "analysis-restart", 12, 600)
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
@@ -3205,6 +3288,11 @@ def result_page(request: Request, job_id: str):
 
 @app.post("/api/annotations/{job_id}", dependencies=[Depends(require_csrf)])
 def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
+    # Every correction writes an .npz sequence to disk, so this is the one
+    # authenticated endpoint that grows storage without an upload. The cap
+    # is deliberately high: labelling a round legitimately means dozens of
+    # saves in a few minutes, and blocking that would cost real data.
+    _enforce_rate_limit(request, "annotations", 300, 300)
     if not _account(request) or not _authorized_job(request, job_id) or not _request_plan(request).get("can_correct"):
         raise HTTPException(403, "Evidence corrections are available with a complete-report plan.")
     report_path = OUTPUTS / job_id / "report.json"
@@ -4432,6 +4520,9 @@ def export_account_data(request: Request, password: str = Form(...)):
 
 @app.post("/account/delete", dependencies=[Depends(require_csrf)])
 def delete_account_route(request: Request, password: str = Form(...), confirmation: str = Form(...)):
+    # Takes a password, so it is a place to guess one. Nobody deletes their
+    # account five times an hour.
+    _enforce_rate_limit(request, "account-delete", 5, 3600)
     account = _account(request)
     if not account:
         raise HTTPException(403)

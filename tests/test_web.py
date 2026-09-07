@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import contextlib
 import json
+import time
 import os
 import subprocess
 import sys
@@ -2089,3 +2090,149 @@ class CsrfTests(unittest.TestCase):
         self.assertFalse(tokens_match("abc", None))
         self.assertFalse(tokens_match(None, "abc"))
         self.assertTrue(tokens_match("abc", "abc"))
+
+
+class RateLimitClientTests(unittest.TestCase):
+    """Who a rate limit counts against.
+
+    The limiter keyed on `request.client.host`, and warrioriq.eu runs behind
+    Apache and Passenger - so every visitor arrives from 127.0.0.1 and shared
+    one bucket. Thirty failed sign-ins by one person locked the login page for
+    everybody, and no per-visitor limit was ever really in force.
+    """
+
+    @staticmethod
+    def _request(peer, forwarded=None):
+        headers = []
+        if forwarded is not None:
+            headers.append((b"x-forwarded-for", forwarded.encode()))
+        scope = {
+            "type": "http", "method": "GET", "path": "/", "headers": headers,
+            "client": (peer, 1234) if peer else None, "query_string": b"",
+        }
+        from starlette.requests import Request
+
+        return Request(scope)
+
+    def test_a_public_peer_is_believed_over_the_header(self):
+        """An attacker cannot opt out of a limit by sending a header.
+
+        Anyone can put anything in X-Forwarded-For. It is only worth reading
+        when the connection itself came from a proxy we run.
+        """
+        from app.main import _client_ip
+
+        self.assertEqual(
+            _client_ip(self._request("8.8.4.4", forwarded="198.51.100.1")),
+            "8.8.4.4",
+        )
+
+    def test_a_peer_nobody_could_browse_from_is_not_treated_as_public(self):
+        """Loopback, private, link-local and the documentation ranges.
+
+        All of them mean the connection came from something in front of us
+        rather than from a visitor, which is when the header is worth reading.
+        """
+        from app.main import _peer_is_routable
+
+        for host in ("127.0.0.1", "10.0.0.5", "192.168.1.9", "169.254.1.1",
+                     "203.0.113.7", "::1", "not-an-address", ""):
+            with self.subTest(peer=host):
+                self.assertFalse(_peer_is_routable(host))
+        for host in ("8.8.4.4", "1.1.1.1"):
+            with self.subTest(peer=host):
+                self.assertTrue(_peer_is_routable(host))
+
+    def test_behind_a_local_proxy_the_header_is_read(self):
+        from app.main import _client_ip
+
+        self.assertEqual(
+            _client_ip(self._request("127.0.0.1", forwarded="203.0.113.7")),
+            "203.0.113.7",
+        )
+
+    def test_the_rightmost_entry_wins(self):
+        """The nearest proxy appends what it actually saw; the rest is client input.
+
+        A client sending `X-Forwarded-For: 1.2.3.4` gets that value kept and
+        the proxy's own observation appended after it. Taking the leftmost
+        entry would let the client pick its own bucket - which is what
+        `_forwarded_header` does for host and scheme, correctly for those and
+        wrongly for this.
+        """
+        from app.main import _client_ip
+
+        self.assertEqual(
+            _client_ip(self._request("10.0.0.5", forwarded="1.2.3.4, 203.0.113.7")),
+            "203.0.113.7",
+        )
+
+    def test_no_header_behind_a_proxy_falls_back_to_the_peer(self):
+        from app.main import _client_ip
+
+        self.assertEqual(_client_ip(self._request("127.0.0.1")), "127.0.0.1")
+        self.assertEqual(_client_ip(self._request(None)), "unknown")
+
+    def test_two_visitors_behind_one_proxy_get_separate_buckets(self):
+        """The actual bug, stated as a test."""
+        from app.main import _client_ip
+
+        first = _client_ip(self._request("127.0.0.1", forwarded="203.0.113.7"))
+        second = _client_ip(self._request("127.0.0.1", forwarded="203.0.113.8"))
+        self.assertNotEqual(first, second)
+
+    def test_the_bucket_store_does_not_grow_without_bound(self):
+        """Passenger keeps a worker alive for a long time.
+
+        Every scope-and-address pair used to add an entry that was never
+        removed, so a month of traffic was a month of accumulated keys.
+        """
+        import app.main as main
+
+        saved = dict(main._rate_windows)
+        try:
+            main._rate_windows.clear()
+            now = time.monotonic()
+            for n in range(50):
+                main._rate_windows[f"scope:{n}"] = [now - 7200]
+            main._rate_windows["fresh"] = [now]
+            main._prune_rate_windows(now)
+            self.assertEqual(list(main._rate_windows), ["fresh"])
+        finally:
+            main._rate_windows.clear()
+            main._rate_windows.update(saved)
+
+    def test_pruning_forgives_rather_than_locks_out(self):
+        """Dropping a bucket must fail in the safe direction.
+
+        Losing the record of requests already counted can let somebody
+        through; it can never lock somebody out who should be allowed in.
+        """
+        import app.main as main
+
+        saved = dict(main._rate_windows)
+        try:
+            main._rate_windows.clear()
+            now = time.monotonic()
+            main._rate_windows["scope:x"] = [now - 7200] * 99
+            main._prune_rate_windows(now)
+            self.assertNotIn("scope:x", main._rate_windows)
+        finally:
+            main._rate_windows.clear()
+            main._rate_windows.update(saved)
+
+    def test_the_expensive_endpoints_are_limited(self):
+        """Restart queues GPU work; corrections write files; both were open."""
+        import inspect
+
+        import app.main as main
+
+        for name, scope in (
+            ("restart_interrupted_analysis", "analysis-restart"),
+            ("set_selection_frame", "selection-frame"),
+            ("annotate_event", "annotations"),
+            ("reset_password", "password-reset-complete"),
+            ("delete_account_route", "account-delete"),
+        ):
+            with self.subTest(route=name):
+                self.assertIn(scope, inspect.getsource(getattr(main, name)))
