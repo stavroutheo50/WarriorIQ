@@ -2236,3 +2236,71 @@ class RateLimitClientTests(unittest.TestCase):
         ):
             with self.subTest(route=name):
                 self.assertIn(scope, inspect.getsource(getattr(main, name)))
+
+
+class KeyboardFighterSelectionTests(unittest.TestCase):
+    """Fighter selection has to be possible without a pointer.
+
+    Drawing a box is a pointer-only action and nothing in WarriorIQ works
+    until two fighters are chosen, so "draw a box" alone makes the whole
+    product unusable by keyboard - not one feature, all of it. The launch
+    checklist asks for this by name.
+    """
+
+    @staticmethod
+    def _template():
+        return (Path(__file__).resolve().parents[1] / "app" / "templates" / "select.html").read_text(encoding="utf-8")
+
+    def test_there_is_a_way_through_without_drawing(self):
+        page = self._template()
+        self.assertIn('id="pickFromList"', page)
+        # Native radios in a fieldset with a legend, so the grouping is
+        # announced. A cleverer control would not survive being read aloud.
+        self.assertIn("<fieldset", page)
+        self.assertIn("<legend>Fighter A</legend>", page)
+        self.assertIn("<legend>Fighter B</legend>", page)
+
+    def test_each_person_is_described_in_words(self):
+        """The list must be usable by somebody who cannot see the frame.
+
+        "Person 2" alone identifies nobody. Position and size are what
+        actually separate two athletes from a referee standing between them.
+        """
+        page = self._template()
+        self.assertIn("function describeDetection", page)
+        for word in ("far left", "left of centre", "centre", "right of centre",
+                     "far right", "fills the frame", "large", "medium", "small"):
+            with self.subTest(word=word):
+                self.assertIn(word, page)
+
+    def test_it_reads_the_box_off_the_detection_object(self):
+        """A detection is {box, confidence}, not a bare array.
+
+        Treating it as an array set both fighters to undefined and broke the
+        page on the first click. It was caught by driving the page in a
+        browser, which is the only place this shape shows up - and it is the
+        same shape detectorMatch already reads.
+        """
+        page = self._template()
+        self.assertIn("item.box", page)
+        self.assertNotIn("[...detections].sort", page)
+
+    def test_the_two_paths_cannot_disagree(self):
+        """Drawing after picking, or starting over, must clear the list.
+
+        Otherwise a radio stays checked next to a box it no longer describes,
+        and a screen reader is told the wrong thing.
+        """
+        page = self._template()
+        self.assertIn("function clearPicked", page)
+        # Start over, redraw B, and both branches of finishSelection.
+        self.assertGreaterEqual(page.count("clearPicked("), 6)
+
+    def test_the_control_has_a_visible_focus_ring(self):
+        """It exists for keyboard users, so focus has to be visible.
+
+        The default ring is invisible against the dark panel.
+        """
+        css = (Path(__file__).resolve().parents[1] / "app" / "static" / "fighter-selection.css").read_text(encoding="utf-8")
+        self.assertIn(".pick-fighter input:focus-visible", css)
+        self.assertIn("outline", css)

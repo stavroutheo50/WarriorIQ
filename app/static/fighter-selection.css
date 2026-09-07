@@ -57,3 +57,22 @@
     flex: 1;
   }
 }
+
+/* The keyboard path to fighter selection. Drawing a box needs a pointer, and
+   nothing in WarriorIQ works until two fighters are chosen - so this is not a
+   nicety, it is the difference between the product being usable and not.
+   Styled as a plain radio list on purpose: it has to survive being read aloud
+   and being zoomed to 400%, which a cleverer control would not. */
+.selection-without-drawing{margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,.09)}
+.selection-without-drawing .panel-kicker{display:block;margin-bottom:4px}
+.selection-without-drawing .small{margin:0 0 10px}
+.pick-fighter{border:1px solid rgba(255,255,255,.10);border-radius:9px;
+  padding:9px 12px 11px;margin:0 0 10px;min-width:0}
+.pick-fighter legend{padding:0 6px;font-size:11px;letter-spacing:1.3px;
+  text-transform:uppercase;font-weight:800;color:#98a2b3}
+.pick-fighter label{display:flex;align-items:center;gap:9px;padding:5px 2px;
+  font-size:13.5px;cursor:pointer;line-height:1.4}
+.pick-fighter input{flex:none;width:16px;height:16px;accent-color:#8794ff}
+/* A visible focus ring, because this control exists for people navigating by
+   keyboard and the default ring is invisible against the dark panel. */
+.pick-fighter input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}

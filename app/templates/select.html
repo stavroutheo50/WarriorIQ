@@ -26,6 +26,24 @@
       <div class="fighter-key"><div class="fighter-key-item fighter-a"><span>A</span><div><strong>Fighter A</strong><small>Draw this fighter first</small></div></div><div class="fighter-key-item fighter-b"><span>B</span><div><strong>Fighter B</strong><small>Draw this fighter second</small></div></div></div>
       <div class="selection-rules"><span class="panel-kicker">For the strongest lock</span><ul><li>Include the full body, head to feet.</li><li>Keep the referee outside both boxes.</li><li>Do not overlap Fighter A and Fighter B.</li></ul></div>
       <p class="selection-reassurance"><span aria-hidden="true">✓</span> WarriorIQ follows both identities after you start. No more manual work is needed in the report.</p>
+      {#- Drawing a box is a pointer-only action, and fighter selection is not
+          an optional flourish - nothing in the product works until it is done.
+          So there has to be a way through without a mouse. WarriorIQ already
+          detects the people in this frame to check drawn boxes against, and
+          those detections are the natural alternative: choose a person rather
+          than draw one. Each is described by where it stands and how much of
+          the frame it fills, so the list is usable read aloud, without seeing
+          the picture. Both paths set the same two boxes. -#}
+      <div class="selection-without-drawing" id="pickFromList" hidden>
+        <span class="panel-kicker">Or choose without drawing</span>
+        <p class="small muted" id="pickFromListHelp">WarriorIQ found these people in the frame. Pick one for each fighter instead of drawing a box.</p>
+        <fieldset class="pick-fighter" id="pickA" aria-describedby="pickFromListHelp">
+          <legend>Fighter A</legend>
+        </fieldset>
+        <fieldset class="pick-fighter" id="pickB" aria-describedby="pickFromListHelp">
+          <legend>Fighter B</legend>
+        </fieldset>
+      </div>
     </aside>
   </div>
   <section class="analysis-choice">
@@ -65,12 +83,54 @@ function draw(){
 }
 function pointFromEvent(event,clampToImage=false){const rect=canvas.getBoundingClientRect(),view=imageViewport();let x=event.clientX-rect.left,y=event.clientY-rect.top;const inside=x>=view.left&&x<=view.left+view.width&&y>=view.top&&y<=view.top+view.height;if(!inside&&!clampToImage)return null;x=Math.max(view.left,Math.min(view.left+view.width,x));y=Math.max(view.top,Math.min(view.top+view.height,y));return[x,y]}
 function flashLock(){stage.classList.remove('selection-lock-flash');requestAnimationFrame(()=>stage.classList.add('selection-lock-flash'))}
-function finishSelection(event){if(!dragStart||!tempBox)return;const selected=toVideo(tempBox),minWidth=Math.max(16,videoWidth*.025),minHeight=Math.max(32,videoHeight*.1);if(selected[2]-selected[0]>=minWidth&&selected[3]-selected[1]>=minHeight){if(mode==='A_DRAW'){boxA=selected;boxB=null;mode='B_DRAW'}else{boxB=selected;mode='READY'}flashLock();window.WarriorIQMotion?.impact(stage)}dragStart=tempBox=null;pointerPosition=event?pointFromEvent(event,true):pointerPosition;draw()}
+function finishSelection(event){if(!dragStart||!tempBox)return;const selected=toVideo(tempBox),minWidth=Math.max(16,videoWidth*.025),minHeight=Math.max(32,videoHeight*.1);if(selected[2]-selected[0]>=minWidth&&selected[3]-selected[1]>=minHeight){if(mode==='A_DRAW'){boxA=selected;boxB=null;mode='B_DRAW';clearPicked('A');clearPicked('B')}else{boxB=selected;mode='READY';clearPicked('B')}flashLock();window.WarriorIQMotion?.impact(stage)}dragStart=tempBox=null;pointerPosition=event?pointFromEvent(event,true):pointerPosition;draw()}
 canvas.onpointerdown=event=>{if(!mode.endsWith('_DRAW'))return;const point=pointFromEvent(event);if(!point)return;event.preventDefault();canvas.setPointerCapture?.(event.pointerId);dragStart=point;pointerPosition=point;tempBox=[...point,...point];draw()};
 canvas.onpointermove=event=>{const point=pointFromEvent(event,Boolean(dragStart));pointerPosition=point;if(dragStart&&point)tempBox=[Math.min(dragStart[0],point[0]),Math.min(dragStart[1],point[1]),Math.max(dragStart[0],point[0]),Math.max(dragStart[1],point[1])];draw()};
 canvas.onpointerup=finishSelection;canvas.onpointercancel=()=>{dragStart=tempBox=null;pointerPosition=null;draw()};canvas.onpointerleave=()=>{if(!dragStart){pointerPosition=null;draw()}};
-redrawA.onclick=()=>{boxA=boxB=null;dragStart=tempBox=pointerPosition=null;mode='A_DRAW';draw()};redrawB.onclick=()=>{boxB=null;dragStart=tempBox=pointerPosition=null;mode=boxA?'B_DRAW':'A_DRAW';draw()};
-async function loadDetectionCandidates(){try{const response=await fetch(`/api/detect/${jobId}`);if(!response.ok)return;detections=(await response.json()).people||[];draw()}catch(error){detections=[]}}
+function clearPicked(side){document.querySelectorAll(`input[name="pick${side}"]`).forEach(input=>{input.checked=false})}
+redrawA.onclick=()=>{boxA=boxB=null;dragStart=tempBox=pointerPosition=null;mode='A_DRAW';clearPicked('A');clearPicked('B');draw()};redrawB.onclick=()=>{boxB=null;dragStart=tempBox=pointerPosition=null;mode=boxA?'B_DRAW':'A_DRAW';clearPicked('B');draw()};
+async function loadDetectionCandidates(){try{const response=await fetch(`/api/detect/${jobId}`);if(!response.ok)return;detections=(await response.json()).people||[];buildPickList();draw()}catch(error){detections=[]}}
+// Describe a detection in words, because this list has to work when nobody
+// can see the frame. Position is read off the box centre and size off the
+// share of frame height, which is what actually distinguishes two athletes
+// from a referee standing between them.
+function describeDetection(box,index){
+  const centre=(box[0]+box[2])/2/videoWidth,share=(box[3]-box[1])/videoHeight;
+  const where=centre<0.2?'far left':centre<0.4?'left of centre':centre<0.6?'centre':centre<0.8?'right of centre':'far right';
+  const size=share>0.75?'fills the frame':share>0.5?'large':share>0.3?'medium':'small';
+  return `Person ${index+1}: ${where}, ${size}`;
+}
+function buildPickList(){
+  const wrap=document.getElementById('pickFromList');
+  if(!detections.length){wrap.hidden=true;return}
+  // Left to right, so the spoken order matches the order somebody would be
+  // told about them ("the one on the left").
+  // A detection is {box:[x1,y1,x2,y2], confidence}, the same shape
+  // detectorMatch reads - not a bare array. Treating it as one set both
+  // fighters to undefined and broke the page on the first click.
+  const ordered=[...detections].map(item=>item.box).filter(Boolean)
+    .sort((a,b)=>(a[0]+a[2])-(b[0]+b[2]));
+  if(!ordered.length){document.getElementById('pickFromList').hidden=true;return}
+  for(const [side,id] of [['A','pickA'],['B','pickB']]){
+    const group=document.getElementById(id);
+    group.querySelectorAll('label').forEach(node=>node.remove());
+    ordered.forEach((box,index)=>{
+      const label=document.createElement('label');
+      const input=document.createElement('input');
+      input.type='radio';input.name=`pick${side}`;input.value=String(index);
+      input.onchange=()=>{
+        if(side==='A'){boxA=[...box]}else{boxB=[...box]}
+        mode=boxA&&boxB?'READY':boxA?'B_DRAW':'A_DRAW';
+        draw();
+      };
+      const text=document.createElement('span');
+      text.textContent=describeDetection(box,index);
+      label.append(input,text);
+      group.appendChild(label);
+    });
+  }
+  wrap.hidden=false;
+}
 async function startAnalysis(){if(!selectionIsValid()||starting)return;starting=true;startFeedback.hidden=true;draw();try{const focusFighter=document.querySelector('input[name="focusFighter"]:checked').value,response=await fetch(`/api/start/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({fighter_a_box:boxA,fighter_b_box:boxB,focus_fighter:focusFighter})});let data={};try{data=await response.json()}catch(error){}if(!response.ok)throw new Error(data.detail||'Could not start the analysis.');if(data.deferred&&data.notice)window.wiqToast?.(data.notice,'info');location.href=data.progress_url}catch(error){starting=false;const message=error.message||'Could not start the analysis.';statusBox.textContent=message;statusBox.dataset.state='warning';startBtn.disabled=false;startFeedback.textContent=message;startFeedback.hidden=false;window.wiqToast?.(message,'error')}}
 startBtn.onclick=startAnalysis;
 function initializeSelection(){if(initialized)return;initialized=true;fit();draw();void loadDetectionCandidates()}
