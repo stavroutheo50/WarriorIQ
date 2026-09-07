@@ -191,6 +191,13 @@ def _classify_punch(start: Sample, peak: Sample, limb: str) -> str:
     return "jab" if limb == _lead_hand(peak) else "cross"
 
 
+# How much further one kind of limb must travel before the named family is
+# overruled. Measured on real footage, the clear contradictions sit well above
+# this; below it an arm swinging with a kick, or a step taken with a punch,
+# would start flipping honest labels.
+FAMILY_MARGIN = 1.6
+
+
 # How far the shoulder line must swing for a kick to count as turning. A round
 # kick thrown square moves it well under this; a turning kick puts the back to
 # the opponent and takes it past a right angle.
@@ -530,6 +537,47 @@ class ActionEngine:
                     # a frame during crossings. Confirm the named leg against
                     # which ankle actually travelled farther over the action.
                     event_limb = limb
+                    # The same question one level up: not which side, but
+                    # whether it was an arm or a leg at all. Measured across
+                    # three bouts, 23 of 61 events named a family that the
+                    # movement contradicts - a "right hook" whose foot
+                    # travelled three and a half times further than the hand.
+                    # The limb that moved is the limb that acted.
+                    # Path length over the whole action, not start-to-peak
+                    # displacement. A kick's foot goes out and comes back, so
+                    # where it ends up says little; how far it travelled says
+                    # everything. Measured both ways on the same events, the
+                    # displacement version disagreed with the path version
+                    # often enough to be the weaker signal.
+                    action_samples = [
+                        item for item in state.samples
+                        if start_sample.frame <= item.frame <= sample.frame
+                    ]
+
+                    def _travel(index: int) -> float:
+                        points = [_point(item.keypoints, index) for item in action_samples]
+                        points = [q for q in points if q is not None]
+                        if len(points) < 2:
+                            return 0.0
+                        return float(sum(
+                            np.linalg.norm(points[i + 1] - points[i])
+                            for i in range(len(points) - 1)
+                        ))
+
+                    hand_travel = max(_travel(L_WRIST), _travel(R_WRIST))
+                    # Knees included: a knee strike drives the knee forward
+                    # while the ankle stays tucked, so measuring feet alone
+                    # reads a knee as though the leg never moved.
+                    foot_travel = max(_travel(L_ANKLE), _travel(R_ANKLE),
+                                      _travel(L_KNEE), _travel(R_KNEE))
+                    if family == "punch" and foot_travel > FAMILY_MARGIN * max(0.01, hand_travel):
+                        family = "kick"
+                        side = "left" if _travel(L_ANKLE) >= _travel(R_ANKLE) else "right"
+                        event_limb = f"{side}_leg"
+                    elif family in {"kick", "knee"} and hand_travel > FAMILY_MARGIN * max(0.01, foot_travel):
+                        family = "punch"
+                        side = "left" if _travel(L_WRIST) >= _travel(R_WRIST) else "right"
+                        event_limb = f"{side}_hand"
                     if family in {"kick", "knee"}:
                         left_idx = L_KNEE if family == "knee" else L_ANKLE
                         right_idx = R_KNEE if family == "knee" else R_ANKLE

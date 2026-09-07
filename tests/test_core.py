@@ -3258,3 +3258,44 @@ class AttributionTests(unittest.TestCase):
         with mock.patch.object(contact, "SETTINGS", off):
             events = [self._event("A", 10.0, 0.10), self._event("B", 10.05, 0.90)]
             self.assertEqual(contact.resolve_simultaneous_attribution(events)[1], 0)
+
+
+class LimbFamilyTests(unittest.TestCase):
+    """Whether an action was an arm or a leg, decided by what moved."""
+
+    def test_the_margin_is_wide_enough_not_to_flip_honest_labels(self):
+        """An arm swings during a kick and a foot steps during a punch.
+
+        The margin has to sit above that ordinary co-movement, or the
+        correction becomes its own source of wrong families.
+        """
+        from core.action import FAMILY_MARGIN
+
+        self.assertGreaterEqual(FAMILY_MARGIN, 1.5)
+
+    def test_the_leg_measurement_includes_the_knee(self):
+        """A knee strike drives the knee while the ankle stays tucked.
+
+        Measuring feet alone reads a knee as a leg that never moved, and the
+        family check then flips it to a punch.
+        """
+        from pathlib import Path
+
+        source = Path("core/action.py").read_text(encoding="utf-8")
+        window = source[source.index("hand_travel = max("):source.index("if family == \"punch\" and foot_travel")]
+        for name in ("L_ANKLE", "R_ANKLE", "L_KNEE", "R_KNEE"):
+            self.assertIn(name, window)
+
+    def test_travel_is_path_length_not_displacement(self):
+        """A kick's foot goes out and comes back.
+
+        Where it ends up says little; how far it travelled says everything.
+        Measured both ways on the same events, displacement was the weaker
+        signal and left nine more events with a contradicted family.
+        """
+        from pathlib import Path
+
+        source = Path("core/action.py").read_text(encoding="utf-8")
+        window = source[source.index("action_samples = ["):source.index("hand_travel = max(")]
+        self.assertIn("range(len(points) - 1)", window,
+                      "travel must sum the path, not subtract two endpoints")
