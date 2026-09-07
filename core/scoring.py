@@ -115,6 +115,16 @@ RULESETS: dict[str, RuleProfile] = {
     # full, and points run 1 for a punch to any legal target, 2 for a kick to the
     # body and 3 for a kick to the head. Jumping-kick bonuses vary between ITF
     # bodies, so they are declared unobserved rather than guessed at.
+    # Checked against the Official ITF Rules of Competition, Version 2022v1,
+    # T 34 "Point Awards": one point for any legal hand attack to mid or high
+    # section, two for a foot attack to mid-section, three for a foot attack to
+    # high-section. T 33 "Target Area" limits targets to the head (front, sides
+    # and top, excluding the neck and the back) and the frontal trunk from
+    # shoulder to navel - so a leg is not a target and scores nothing.
+    #
+    # There is no jumping or spinning bonus in the championship rules. Those
+    # exist in some national bodies, which is why they are named below as
+    # something this ruleset does not model rather than invented into the table.
     "ITF_TAEKWONDO": RuleProfile(
         "ITF_TAEKWONDO", "ITF · International Taekwon-Do Federation", False, False, False, False, False, frozenset(),
         sport="taekwondo", sport_label="Taekwondo",
@@ -125,7 +135,8 @@ RULESETS: dict[str, RuleProfile] = {
             ("kick", "body", 2), ("kick", "head", 3),
             ("kick", "leg", 0),          # legs are not a legal ITF target
         ),
-        unobserved=("organisation-specific jumping and spinning kick bonuses",),
+        unobserved=("jumping and spinning bonuses used by some national bodies "
+                    "but not by the ITF championship rules",),
     ),
     "WT_TAEKWONDO": RuleProfile(
         "WT_TAEKWONDO", "WT · World Taekwondo (Olympic)", False, False, False, True, False, frozenset(),
