@@ -25,8 +25,30 @@ knowing before trusting the feature anywhere else. WAKO Referee Rules, Article
 sleeves" and "Black trousers without turn-ups" - checked against the document
 published at wako.sport/rules-overview on 2026-09-07. So pale-over-dark is the
 mandated dress for every WAKO event, and the two measured fractions below are
-reading the rule rather than a local habit. The article binds WAKO officials
-only, though, which is the limit restated at the end of this docstring.
+reading the rule rather than a local habit.
+
+All five federations' rulebooks were read on 2026-09-07 to find where else
+that holds. It is a shorter list than it looks:
+
+  * **WAKO** - white shirt, black trousers. Referee Rules, Article 14.
+  * **World Boxing** - "White, short-sleeved, button-down collared shirt,
+    tucked into trousers" and "Black trousers (no denim)". Competition Rules
+    in force November 2024, Rule 6.4.1. The same pale-over-dark structure,
+    stated just as plainly, so this feature should transfer to boxing - though
+    it has not been tested on boxing footage, and 6.4.4 lets an event mandate
+    different attire.
+  * **IFMA muaythai** - "dark blue or black trousers, black flat shoes ...
+    IFMA Official's shirt" (Rules & Regulations v3.057, 21.12). The trousers
+    are specified and **the shirt colour is not**: it is a branded garment the
+    document never gives a colour for. Half the feature is confirmed and half
+    is unknown.
+  * **World Taekwondo** - "the referees and judges shall wear the uniform
+    designated by the WT" (Competition Rules, 3.6.1). No colour at all.
+  * **MMA** - the ABC Unified Rules say nothing about official dress; it is
+    left to each commission.
+
+So the rule is documented for two federations, contradicted by none, and
+simply absent for three. Do not read that absence as agreement.
 
 That is four numbers, not five hundred. The dimension is the point. With around
 a hundred and forty hand-labelled crops, a probe over a 512-d embedding reaches
@@ -77,9 +99,10 @@ fighters are seeded on people who score as officials, both anchors are marked,
 and the filter switches itself off for that bout rather than refusing everyone.
 
 The limit this buys, stated plainly: this is a per-federation model. It
-recognises one specific uniform - the WAKO one quoted above - and a promotion
-whose officials wear black, which is most MMA, needs its own labels. It refuses
-to load rather than guess when its weights are absent.
+recognises one specific uniform - the WAKO one quoted above, which World Boxing
+also mandates - and a promotion whose officials wear black, which is most MMA
+and is not ruled out by any of the five rulebooks, needs its own labels. It
+refuses to load rather than guess when its weights are absent.
 """
 
 from __future__ import annotations
