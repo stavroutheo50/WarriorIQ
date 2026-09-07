@@ -77,7 +77,7 @@ from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
 from core.upload_security import scan_upload
-from core.report import build_preliminary_scorecard, refresh_identity_integrity
+from core.report import build_preliminary_scorecard, observed_summary, refresh_identity_integrity
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
@@ -3120,6 +3120,7 @@ def result_page(request: Request, job_id: str):
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
         "score_withheld": _score_withheld(report, job_id),
+        "observed": observed_summary(report) if not (report.get("scorecard") or {}).get("available") else None,
     })
     response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
     if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:

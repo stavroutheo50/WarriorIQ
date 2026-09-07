@@ -54,6 +54,61 @@ def _identity_seed_safe(tracking: dict, fighter: str) -> bool:
     return source == "pose_detector" and float(overlap or 0.0) >= SETTINGS.min_initial_iou
 
 
+MIN_COVERAGE_TO_REPORT_OBSERVED = 0.15
+
+
+def observed_summary(report: dict) -> dict | None:
+    """What we can stand behind when the scorecard cannot be given.
+
+    A scorecard is a comparative claim - this fighter beat that one - and it
+    needs both fighters followed well enough to compare. That bar is often not
+    met, and the page then said "Not scored" and nothing else, which throws
+    away everything the analysis did establish.
+
+    This is the middle setting the report never had. It is deliberately not a
+    score and never a comparison:
+
+      * every count is a floor, not a total. We report actions we can evidence
+        during the part of the round we could follow that fighter, so the true
+        number is higher and the wording has to say so.
+      * the denominator travels with the number. "Twelve actions" is a claim
+        about the fight; "twelve in the 40% we could follow you" is a claim
+        about the footage, and only the second one is true.
+      * a fighter followed too little to have a meaningful denominator is left
+        out entirely rather than given a small number that reads as a quiet one.
+      * outcomes are omitted. Whether a strike landed rests on contact
+        classification that is not validated, so the honest unit here is the
+        action attempted, not the point scored.
+    """
+    tracking = report.get("tracking") or {}
+    events = report.get("events") or []
+    out = {}
+    for fighter in ("A", "B"):
+        coverage = float(tracking.get(f"fighter_{fighter}_coverage", 0.0) or 0.0)
+        if coverage < MIN_COVERAGE_TO_REPORT_OBSERVED:
+            continue
+        own = [event for event in events if (event.get("fighter") if isinstance(event, dict)
+                                            else getattr(event, "fighter", None)) == fighter]
+        families = {"punch": 0, "kick": 0, "knee": 0}
+        for event in own:
+            technique = (event.get("technique") if isinstance(event, dict)
+                         else getattr(event, "technique", "")) or ""
+            key = "kick" if "kick" in technique else "knee" if "knee" in technique else "punch"
+            families[key] += 1
+        out[fighter] = {
+            "followed_share": coverage,
+            "actions_evidenced": len(own),
+            "families": families,
+        }
+    if not out:
+        return None
+    return {
+        "fighters": out,
+        "basis": "actions we could evidence while we had sight of that fighter",
+        "is_a_floor": True,
+    }
+
+
 def refresh_identity_integrity(report: dict) -> dict:
     """Apply the current identity safety gate to new and legacy reports.
 

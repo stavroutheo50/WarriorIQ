@@ -3299,3 +3299,70 @@ class LimbFamilyTests(unittest.TestCase):
         window = source[source.index("action_samples = ["):source.index("hand_travel = max(")]
         self.assertIn("range(len(points) - 1)", window,
                       "travel must sum the path, not subtract two endpoints")
+
+
+class ObservedSummaryTests(unittest.TestCase):
+    """The middle setting between a scorecard and a blank page."""
+
+    @staticmethod
+    def _report(cov_a=0.40, cov_b=0.30, events=None):
+        return {
+            "tracking": {"fighter_A_coverage": cov_a, "fighter_B_coverage": cov_b},
+            "events": events if events is not None else [
+                {"fighter": "A", "technique": "jab"},
+                {"fighter": "A", "technique": "left_round_kick"},
+                {"fighter": "B", "technique": "right_knee"},
+            ],
+        }
+
+    def test_it_counts_per_fighter_by_family(self):
+        from core.report import observed_summary
+
+        seen = observed_summary(self._report())["fighters"]
+        self.assertEqual(seen["A"]["actions_evidenced"], 2)
+        self.assertEqual(seen["A"]["families"], {"punch": 1, "kick": 1, "knee": 0})
+        self.assertEqual(seen["B"]["families"], {"punch": 0, "kick": 0, "knee": 1})
+
+    def test_the_share_of_the_round_travels_with_the_count(self):
+        """A count without its denominator is a claim about the fight rather
+        than about the footage, and only the second one is true."""
+        from core.report import observed_summary
+
+        seen = observed_summary(self._report(cov_a=0.4))["fighters"]
+        self.assertAlmostEqual(seen["A"]["followed_share"], 0.4)
+
+    def test_a_barely_followed_fighter_is_left_out(self):
+        """A small number reads as a quiet fighter, not as a short look."""
+        from core.report import observed_summary
+
+        seen = observed_summary(self._report(cov_a=0.40, cov_b=0.04))["fighters"]
+        self.assertIn("A", seen)
+        self.assertNotIn("B", seen)
+
+    def test_nothing_followed_means_no_summary_at_all(self):
+        from core.report import observed_summary
+
+        self.assertIsNone(observed_summary(self._report(cov_a=0.02, cov_b=0.01)))
+
+    def test_it_is_marked_as_a_floor(self):
+        from core.report import observed_summary
+
+        self.assertTrue(observed_summary(self._report())["is_a_floor"])
+
+    def test_it_reports_no_outcomes(self):
+        """Whether a strike landed rests on unvalidated contact classification.
+
+        The honest unit here is the action attempted, not the point scored.
+        """
+        from core.report import observed_summary
+
+        payload = observed_summary(self._report())
+        blob = json.dumps(payload)
+        for word in ("landed", "clean", "missed", "score"):
+            self.assertNotIn(word, blob)
+
+    def test_the_page_shows_it_only_when_the_score_is_withheld(self):
+        from pathlib import Path
+
+        page = Path("app/templates/result.html").read_text(encoding="utf-8")
+        self.assertIn("not report.scorecard.available and observed", page)

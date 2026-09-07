@@ -33,6 +33,32 @@
   <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="Fighter A portrait" onerror="this.hidden=true"><span><small>Red corner</small><strong>Fighter A</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="Fighter B portrait" onerror="this.hidden=true"><span><small>Blue corner</small><strong>Fighter B</strong></span></div></div>
   <div class="result-context"><div><span>Ruleset</span><strong>{{report.scorecard.ruleset_label}}</strong></div><div><span>Format</span><strong>{{report.setup.round_count}} × {{report.setup.round_duration_seconds|int}}s</strong></div><div><span>Report focus</span><strong>Fighter {{report.video.focus_fighter|default(report.video.analysis_target, true)}}</strong></div></div>
   <div class="result-scoreline">{% if report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}Fighter {{report.scorecard.winner_estimate}} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
+  {# When the score is withheld the page used to stop here. It knows more than
+     nothing: what each fighter was seen doing, and over how much of the round.
+     Every number below is a floor with its denominator attached, and none of
+     it compares the two - comparing is what the withheld scorecard does. #}
+  {% if not report.scorecard.available and observed %}
+  <div class="observed">
+    <h3>What we could actually see</h3>
+    <p class="observed-note">Not a score, and not a total. These are actions we can evidence
+      during the part of the round we kept sight of each fighter, so the real numbers are higher.</p>
+    <div class="observed-grid">
+      {% for who, seen in observed.fighters.items() %}
+      <div class="observed-card">
+        <span class="observed-who">Fighter {{who}}</span>
+        <strong>at least {{seen.actions_evidenced}}</strong>
+        <span class="observed-basis">action{{ '' if seen.actions_evidenced == 1 else 's' }}
+          in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
+        <span class="observed-families">
+          {{seen.families.punch}} punch{{ '' if seen.families.punch == 1 else 'es' }} ·
+          {{seen.families.kick}} kick{{ '' if seen.families.kick == 1 else 's' }} ·
+          {{seen.families.knee}} knee{{ '' if seen.families.knee == 1 else 's' }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 </section>
 {# The fighter's own numbers, first. These are measured from pose and survive
    the gate that hides strike counts, so they are the part of the report that
