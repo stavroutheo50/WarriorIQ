@@ -3722,3 +3722,42 @@ class IfmaRoundMarginTests(unittest.TestCase):
         for key in ("BOXING", "MMA"):
             with self.subTest(ruleset=key):
                 self.assertEqual(RULESETS[key].round_margins, ())
+
+
+class WorkerTimeoutTests(unittest.TestCase):
+    """The worker has to outlast a slow host, not give up on it.
+
+    Measured against warrioriq.eu on 2026-09-07: /health answered in 8.4 to
+    26.9 seconds warm, while the `Server-Timing: app;dur=` header the app sets
+    from its own clock read 24-46 **milliseconds**. A static favicon was just
+    as slow as a rendered page. The application is not what is slow; the
+    seconds are spent in front of it, on the shared host. At a 30-second
+    timeout the worker was giving up on a site that was going to answer.
+    """
+
+    def test_the_timeout_outlasts_the_slowest_measured_response(self):
+        from core.worker_client import WORKER_HTTP_TIMEOUT_SECONDS
+
+        self.assertGreaterEqual(WORKER_HTTP_TIMEOUT_SECONDS, 60.0)
+
+    def test_it_can_be_raised_further_without_a_code_change(self):
+        """A host that gets worse should not need a deploy to keep working."""
+        import importlib
+        import os
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"WARRIORIQ_WORKER_HTTP_TIMEOUT": "150"}):
+            module = importlib.reload(importlib.import_module("core.worker_client"))
+            self.assertEqual(module.WORKER_HTTP_TIMEOUT_SECONDS, 150.0)
+        importlib.reload(importlib.import_module("core.worker_client"))
+
+    def test_an_explicit_timeout_still_wins(self):
+        """Long calls - uploading a report, downloading a video - set their own."""
+        import inspect
+
+        from core.worker_client import RemoteWorkerClient
+
+        signature = inspect.signature(RemoteWorkerClient._request)
+        self.assertIsNone(signature.parameters["timeout"].default)
+        source = inspect.getsource(RemoteWorkerClient._request)
+        self.assertIn("WORKER_HTTP_TIMEOUT_SECONDS if timeout is None else timeout", source)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import re
 import shutil
 import socket
@@ -20,6 +21,22 @@ class RemoteWorkerError(RuntimeError):
     pass
 
 
+# How long to wait for the web side to answer.
+#
+# Was 30 seconds, and that is not enough for the host this actually talks to.
+# Measured against warrioriq.eu on 2026-09-07: /health answered in 8.4 to 26.9
+# seconds across repeated warm requests. The application is not what is slow -
+# the `Server-Timing: app;dur=` header it sets from its own clock reads 24 to
+# 46 **milliseconds**, and a static favicon takes just as long as a rendered
+# page. The seconds are spent in front of the app, on the shared host.
+#
+# So the worker was timing out on a site that was going to answer, logging
+# "Worker API connection failed: TimeoutError" and sleeping - which is why no
+# job was being claimed. A worker that waits a minute for a slow host costs
+# nothing; one that gives up at thirty seconds does not run the fight at all.
+WORKER_HTTP_TIMEOUT_SECONDS = float(os.getenv("WARRIORIQ_WORKER_HTTP_TIMEOUT", "90"))
+
+
 class RemoteWorkerClient:
     """Small authenticated client for the WarriorIQ web/GPU boundary."""
 
@@ -28,7 +45,7 @@ class RemoteWorkerClient:
         self.token = token
         self.worker_id = worker_id
 
-    def _request(self, method: str, path: str, payload: dict | None = None, *, timeout: float = 30.0):
+    def _request(self, method: str, path: str, payload: dict | None = None, *, timeout: float | None = None):
         data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode("utf-8")
         request = urllib.request.Request(
             f"{self.base_url}{path}", data=data, method=method,
@@ -39,7 +56,9 @@ class RemoteWorkerClient:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(
+                request, timeout=WORKER_HTTP_TIMEOUT_SECONDS if timeout is None else timeout,
+            ) as response:
                 body = response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]
