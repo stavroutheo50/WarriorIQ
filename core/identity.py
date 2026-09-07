@@ -369,7 +369,12 @@ class IdentityManager:
         reference = self._predicted_box(state)
         distance = normalized_distance(reference, candidate.box)
         if state.last_box is not None and distance > SETTINGS.max_normalized_jump:
-            return -999.0
+            # Recorded like every other refusal. Measured on one round, this is
+            # the largest single reason a candidate is turned away - 623 of
+            # them, more than the referee filter - and it was the only refusal
+            # that never appeared in the diagnostics, so it was never looked at
+            # while every other guard was tuned around it.
+            return self._refuse(state, "too_far_to_be_them")
         iou = box_iou(reference, candidate.box)
         if state.last_box is None:
             # No positional anchor, because one was just discarded as wrong.
