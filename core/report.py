@@ -76,7 +76,8 @@ def observed_summary(report: dict) -> dict | None:
         about the footage, and only the second one is true.
       * a fighter followed too little to have a meaningful denominator is left
         out entirely rather than given a small number that reads as a quiet one.
-      * punch, kick and knee only. Naming a jab against a cross needs a
+      * punches and kicks only, where a kick is any leg strike. Naming a
+        jab against a cross needs a
         classifier this footage cannot support, which is why
         `action_labels_available` is false and the technique breakdown is
         already empty; this reports the families that survive that gate.
@@ -97,10 +98,14 @@ def observed_summary(report: dict) -> dict | None:
         coverage = float(item.get("observation_coverage") or 0.0)
         if coverage < MIN_COVERAGE_TO_REPORT_OBSERVED:
             continue
+        # Two families, not three. A knee and a round kick are both a leg
+        # arriving, and judged by eye on real footage the two are a coin flip -
+        # five right and five wrong. Reporting them separately would name a
+        # distinction the footage does not carry, which is the same reason a
+        # jab is not named against a cross.
         families = {
             "punch": int(item.get("punch_attempts") or 0),
-            "kick": int(item.get("kick_attempts") or 0),
-            "knee": int(item.get("knee_attempts") or 0),
+            "kick": int(item.get("kick_attempts") or 0) + int(item.get("knee_attempts") or 0),
         }
         total = int(item.get("total_strikes") or 0)
         if total <= 0:

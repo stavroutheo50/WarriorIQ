@@ -3317,8 +3317,29 @@ class ObservedSummaryTests(unittest.TestCase):
 
         seen = observed_summary(self._report())["fighters"]
         self.assertEqual(seen["A"]["actions_evidenced"], 2)
-        self.assertEqual(seen["A"]["families"], {"punch": 1, "kick": 1, "knee": 0})
-        self.assertEqual(seen["B"]["families"], {"punch": 0, "kick": 0, "knee": 1})
+        self.assertEqual(seen["A"]["families"], {"punch": 1, "kick": 1})
+
+    def test_a_knee_is_counted_as_a_leg_strike(self):
+        """A knee and a round kick are both a leg arriving.
+
+        Judged by eye on real footage the two are a coin flip, so reporting
+        them apart would name a distinction the footage does not carry - and
+        knees were previously dropped entirely while a knee column that could
+        only ever read zero stayed on the page.
+        """
+        from core.report import observed_summary
+
+        seen = observed_summary(self._report(b=(0, 0, 1)))["fighters"]
+        self.assertEqual(seen["B"]["families"], {"punch": 0, "kick": 1})
+        self.assertEqual(seen["B"]["actions_evidenced"], 1)
+
+    def test_knees_reach_the_attempt_tier_at_all(self):
+        from pathlib import Path
+
+        source = Path("core/analyzer.py").read_text(encoding="utf-8")
+        start = source.index("def _live_attempt_reliable")
+        window = source[start:source.index("return (", start) + 900]
+        self.assertIn(chr(34) + "knee" + chr(34), window)
 
     def test_it_agrees_with_the_statistics_the_rest_of_the_page_shows(self):
         """Two honest numbers for one thing is worse than either alone.

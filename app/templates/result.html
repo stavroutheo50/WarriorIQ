@@ -51,8 +51,8 @@
           in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
         <span class="observed-families">
           {{seen.families.punch}} punch{{ '' if seen.families.punch == 1 else 'es' }} ·
-          {{seen.families.kick}} kick{{ '' if seen.families.kick == 1 else 's' }} ·
-          {{seen.families.knee}} knee{{ '' if seen.families.knee == 1 else 's' }}
+          {{seen.families.kick}} kick{{ '' if seen.families.kick == 1 else 's' }}
+          <em>(knees counted as kicks)</em>
         </span>
       </div>
       {% endfor %}

@@ -82,7 +82,12 @@ def _live_attempt_reliable(event) -> bool:
     """
     return (
         bool(getattr(event, "attempted", True))
-        and getattr(event, "family", None) in {"punch", "kick"}
+        # Knees included. They were excluded here while knee_attempts was
+        # still computed downstream, so the report carried a knee column that
+        # could never be anything but zero while real knees were discarded -
+        # five of twelve events on one bout. At this tier the claim is only
+        # "a limb was thrown", and a knee is evidenced exactly as a punch is.
+        and getattr(event, "family", None) in {"punch", "kick", "knee"}
         and math.isfinite(float(getattr(event, "peak_time", -1.0)))
         and float(getattr(event, "peak_time", -1.0)) >= 0.0
         and float(getattr(event, "confidence", 0.0)) >= ATTEMPT_CONFIDENCE
