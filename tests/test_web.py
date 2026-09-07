@@ -2304,3 +2304,33 @@ class KeyboardFighterSelectionTests(unittest.TestCase):
         css = (Path(__file__).resolve().parents[1] / "app" / "static" / "fighter-selection.css").read_text(encoding="utf-8")
         self.assertIn(".pick-fighter input:focus-visible", css)
         self.assertIn("outline", css)
+
+
+class ReflowTests(unittest.TestCase):
+    """The page must not scroll sideways at 320px.
+
+    WCAG 2.2 AA 1.4.10 Reflow, and the same thing 400% zoom on a laptop
+    produces. Measured in a browser on 2026-09-07: the home page had 27px of
+    horizontal scroll and every other public page was clean.
+    """
+
+    @staticmethod
+    def _css(name):
+        return (Path(__file__).resolve().parents[1] / "app" / "static" / name).read_text(encoding="utf-8")
+
+    def test_the_hero_buttons_can_shrink(self):
+        """`1fr` is `minmax(auto,1fr)`, and `auto` will not go below min-width.
+
+        fixes.css sets `min-width:145px` on these buttons in the same
+        breakpoint, left from when this was a flex row that wrapped. Two of
+        them plus the gap demanded 302px inside a 288px column, so the home
+        page scrolled. Both halves have to stay fixed: a shrinkable track, and
+        the stale minimum cleared.
+        """
+        css = self._css("product.css")
+        self.assertIn("grid-template-columns:minmax(0,1fr) minmax(0,1fr)", css)
+        self.assertIn(".hero-actions .btn{width:100%;min-width:0}", css)
+
+    def test_the_stale_minimum_is_still_the_reason(self):
+        """If fixes.css ever drops it, the comment above stops making sense."""
+        self.assertIn("min-width:145px", self._css("fixes.css"))

@@ -55,9 +55,13 @@ This checklist is an engineering and operations control, not a substitute for le
 ## Accessibility and product quality
 
 - [ ] Test keyboard-only use, focus order, screen readers, 200–400% zoom, reduced motion, colour contrast, form errors and mobile orientation against WCAG 2.2 AA.
-      *(Partly addressed only. A skip link, reduced-motion rules and focus-visible styles are in place, and fighter
-      selection was made keyboard-operable on 2026-09-07 — but no screen reader, zoom level or contrast ratio has
-      actually been tested. Do not read the item above as covering this one.)*
+      *(Partly addressed. Measured in a browser on 2026-09-07 across the public pages: **contrast** passes AA
+      everywhere checked (0 failures), every control has an accessible name, every input has a label, no image
+      is missing alt text and no heading level is skipped. **Reflow at 320px** — the same as 400% zoom — found
+      one real failure on the home page, now fixed. A skip link, reduced-motion rules and focus-visible styles
+      were already in place, and fighter selection was made keyboard-operable. **Still untested: an actual
+      screen reader, and manual testing by people who use assistive technology.** Automated checks are a floor,
+      not this item.)*
 - [x] Provide an accessible alternative for canvas fighter selection and skeleton overlays.
       *(Done 2026-09-07. Fighter selection can be completed from a described list of detected people instead of drawing —
       without it the whole product was unusable by keyboard. The skeleton overlay is marked decorative: the replay chapter

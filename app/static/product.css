@@ -249,8 +249,17 @@ table td{font-size:12px}
   body[data-page=home] .hero{gap:36px;padding-top:34px}
   body[data-page=home] .hero h1{font-size:clamp(43px,13vw,54px);line-height:.94}
   body[data-page=home] .hero p{font-size:15px}
-  .hero-actions{display:grid;grid-template-columns:1fr 1fr}
-  .hero-actions .btn{width:100%}
+  /* `minmax(0,1fr)`, and the buttons' min-width cleared with it.
+     `1fr` is shorthand for `minmax(auto,1fr)`, and an `auto` minimum
+     cannot go below the item's own min-width - which fixes.css sets to
+     145px in this same breakpoint, left over from when this was a flex
+     row that wrapped. So the pair demanded 145+145+12 = 302px inside a
+     288px column at a 320px viewport and the home page scrolled
+     sideways: WCAG 2.2 AA 1.4.10 Reflow, which is also what 400% zoom
+     on a laptop looks like. Clearing both keeps the two-column design
+     the breakpoint was written for, at any width. */
+  .hero-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .hero-actions .btn{width:100%;min-width:0}
   .pricing-hero h1{font-size:44px}
   .pricing-promise{display:grid;gap:8px}
   .pricing-card,.pricing-card[data-plan=coach],.pricing-card.gym-featured{padding:20px}
