@@ -39,8 +39,12 @@ This checklist is an engineering and operations control, not a substitute for le
 
 - [ ] Run production behind HTTPS only; enable HSTS after confirming every subdomain supports HTTPS.
 - [ ] Store secrets outside source control; rotate them; separate development, staging and production.
-- [ ] Add rate limiting for signup, login, uploads, analysis start, sharing, export and support endpoints.
-- [ ] Add CSRF protection for every authenticated state-changing form and API, including login-CSRF protection.
+- [x] Add rate limiting for signup, login, uploads, analysis start, sharing, export and support endpoints.
+      *(Code side done 2026-09-07. Limits count against the visitor, not the proxy: keying on `request.client.host` put every
+      visitor behind Apache in one bucket. Still single-process, so an edge or shared limiter is the remaining piece.)*
+- [x] Add CSRF protection for every authenticated state-changing form and API, including login-CSRF protection.
+      *(Done 2026-09-07. Double submit with an httponly cookie; a test walks the route table so a new route cannot skip it.
+      Exempt: the worker API, the Stripe webhook, and the OAuth callback — each authenticates its own way and has no cookie.)*
 - [ ] Add email verification, password reset, session/device management and optional MFA before public accounts.
 - [ ] Scan uploads for malware, validate decoded media, isolate media processing, keep generated storage names and enforce byte/duration/resolution limits.
 - [ ] Encrypt production data at rest and in transit; restrict staff access by role; maintain auditable access logs without logging raw video or secrets.
@@ -51,7 +55,13 @@ This checklist is an engineering and operations control, not a substitute for le
 ## Accessibility and product quality
 
 - [ ] Test keyboard-only use, focus order, screen readers, 200–400% zoom, reduced motion, colour contrast, form errors and mobile orientation against WCAG 2.2 AA.
-- [ ] Provide an accessible alternative for canvas fighter selection and skeleton overlays.
+      *(Partly addressed only. A skip link, reduced-motion rules and focus-visible styles are in place, and fighter
+      selection was made keyboard-operable on 2026-09-07 — but no screen reader, zoom level or contrast ratio has
+      actually been tested. Do not read the item above as covering this one.)*
+- [x] Provide an accessible alternative for canvas fighter selection and skeleton overlays.
+      *(Done 2026-09-07. Fighter selection can be completed from a described list of detected people instead of drawing —
+      without it the whole product was unusable by keyboard. The skeleton overlay is marked decorative: the replay chapter
+      buttons already carry everything it conveys that anybody can act on.)*
 - [ ] Caption instructional media and provide transcripts where audio conveys information.
 - [ ] Test every CTA, link, form, upload, checkout, replay control, deletion/export flow and error page on supported browsers and devices.
 - [ ] Run automated accessibility checks plus manual testing by people who use assistive technology.

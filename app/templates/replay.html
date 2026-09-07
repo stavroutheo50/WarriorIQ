@@ -3,11 +3,17 @@
 {% block title %}Replay · WarriorIQ{% endblock %}
 {% block content %}
 <div class="section-title"><div><div class="eyebrow">Fighter {{focus}} replay</div><h2>Movement with skeletons</h2></div><div class="selection-tools"><button class="btn secondary" id="overlay" type="button" aria-pressed="{{'true' if identity_safe else 'false'}}" {% if not identity_safe %}disabled{% endif %}>{{'Hide overlay' if identity_safe else 'Overlay blocked'}}</button><button class="btn secondary" id="skeleton" type="button" aria-pressed="false" {% if not identity_safe %}disabled{% endif %}>Skeleton only</button><a class="btn secondary" href="/result/{{job_id}}">Back to report</a></div></div>
-<div class="replay-wrap" id="wrap"><video id="video" controls preload="metadata" src="/media/{{job_id}}"></video><canvas id="canvas"></canvas></div>
+<div class="replay-wrap" id="wrap"><video id="video" controls preload="metadata" src="/media/{{job_id}}"></video><canvas id="canvas" aria-hidden="true"></canvas></div>
 <p class="small muted" id="replay-status">{% if identity_safe %}Loading tracking evidence…{% else %}Skeleton hidden because the fighter identity check failed. Choose the fighters again from the report.{% endif %}</p>
 <div class="replay-actions"><button class="btn" id="playFull" type="button" data-time="{{replay_chapters[0].time if replay_chapters else report.setup.start_seconds|default(0)}}">▶ Play full fight</button><span class="small muted">Use the video controls to pause, seek, change volume, or enter full screen.</span></div>
 <div class="replay-chapter-heading"><div><div class="eyebrow">{% if replay_mode == 'verified_actions' %}Verified moments{% else %}Fight chapters{% endif %}</div><h3>{% if replay_mode == 'verified_actions' %}Evidence-supported actions{% else %}Jump anywhere in the fight{% endif %}</h3></div><span class="pill">{{replay_chapters|length}} chapters</span></div>
-<div class="timeline replay-timeline" id="timeline">{% for chapter in replay_chapters %}<button type="button" data-time="{{chapter.time}}" data-lead="{{chapter.lead_seconds}}"><strong>{{chapter.label}}</strong><span>{{chapter.detail}}</span></button>{% endfor %}</div>
+{#- The skeleton overlay is drawn on a canvas, and a canvas cannot be
+    read. It is marked decorative rather than described, because these
+    chapter buttons already carry everything it conveys that anybody can
+    act on - each is a real button, reachable by tab, that seeks the
+    video to that moment. Narrating joint positions frame by frame would
+    be noise, not an alternative. -#}
+<div class="timeline replay-timeline" id="timeline" role="group" aria-label="Jump to a moment in the fight">{% for chapter in replay_chapters %}<button type="button" data-time="{{chapter.time}}" data-lead="{{chapter.lead_seconds}}"><strong>{{chapter.label}}</strong><span>{{chapter.detail}}</span></button>{% endfor %}</div>
 {% if replay_mode == 'verified_actions' %}<div class="notice">Each timestamp is an evidence-supported action instant. Selecting it starts one second earlier so you can see the setup and impact.</div>{% else %}<div class="notice"><strong>Skeleton replay is ready.</strong> No action label passed the verification gate for this fight, so WarriorIQ provides neutral navigation chapters instead of guessing a technique. The video and Fighter {{focus}} skeleton still play normally.</div>{% endif %}
 {% endblock %}
 {% block scripts %}
