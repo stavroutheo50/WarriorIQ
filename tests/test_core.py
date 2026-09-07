@@ -3119,6 +3119,75 @@ class WorkerSingleInstanceTests(unittest.TestCase):
         except OSError:
             pass
 
+    def test_the_heartbeat_survives_a_long_analysis(self):
+        """A worker running a fight must not read as a dead one.
+
+        The heartbeat used to be written once per poll iteration, and
+        `run_claimed_job` runs the whole analysis inside one iteration. So
+        between claiming a job and finishing it - minutes - nothing wrote the
+        lock, it went stale after ninety seconds, and the next worker to start
+        announced "taking over" and began a second analysis on the same 8 GB
+        card. Every job longer than a minute and a half hit this.
+
+        The thread is what makes the heartbeat mean "this process is alive",
+        which is what `_claim_sole_worker` already claimed it meant.
+        """
+        import time
+        from unittest import mock
+
+        self.worker._heartbeat_started = False
+        self.addCleanup(setattr, self.worker, "_heartbeat_started", False)
+        # A tenth of a second stands in for the thirty the worker uses.
+        with mock.patch.object(self.worker, "LOCK_HEARTBEAT_SECONDS", 0.1):
+            self.assertTrue(self.worker._claim_sole_worker())
+            first = self.worker._read_lock()[1]
+            # Simulate the analysis: the poll loop is not running, so nothing
+            # in the old design would have written the lock at all.
+            time.sleep(0.45)
+            later = self.worker._read_lock()[1]
+        self.assertGreaterEqual(
+            later, first,
+            "the lock was not refreshed while the worker was busy")
+        self.assertLess(
+            time.time() - later, self.worker.LOCK_STALE_SECONDS,
+            "a busy worker still reads as stale")
+
+    def test_the_heartbeat_beats_faster_than_the_staleness_limit(self):
+        """Two beats have to be missable before anyone declares this worker gone."""
+        self.assertLessEqual(
+            self.worker.LOCK_HEARTBEAT_SECONDS * 2, self.worker.LOCK_STALE_SECONDS)
+
+    def test_the_heartbeat_thread_never_holds_the_process_open(self):
+        """A worker exiting to pick up new code must still exit promptly.
+
+        `EXIT_CODE_CHANGED` is how a worker adopts a fix; a non-daemon thread
+        would keep it running the old code forever.
+        """
+        import threading
+        from unittest import mock
+
+        self.worker._heartbeat_started = False
+        self.addCleanup(setattr, self.worker, "_heartbeat_started", False)
+        with mock.patch.object(self.worker, "LOCK_HEARTBEAT_SECONDS", 30):
+            self.worker.start_lock_heartbeat()
+        beat = [t for t in threading.enumerate() if t.name == "warrioriq-lock-heartbeat"]
+        self.assertTrue(beat, "no heartbeat thread was started")
+        self.assertTrue(all(t.daemon for t in beat))
+
+    def test_starting_the_heartbeat_twice_makes_one_thread(self):
+        """_claim_sole_worker can be reached more than once in a process."""
+        import threading
+        from unittest import mock
+
+        self.worker._heartbeat_started = False
+        self.addCleanup(setattr, self.worker, "_heartbeat_started", False)
+        before = len([t for t in threading.enumerate() if t.name == "warrioriq-lock-heartbeat"])
+        with mock.patch.object(self.worker, "LOCK_HEARTBEAT_SECONDS", 30):
+            self.worker.start_lock_heartbeat()
+            self.worker.start_lock_heartbeat()
+        after = len([t for t in threading.enumerate() if t.name == "warrioriq-lock-heartbeat"])
+        self.assertEqual(after - before, 1)
+
     def test_a_live_holder_keeps_the_lock(self):
         import os
         import time

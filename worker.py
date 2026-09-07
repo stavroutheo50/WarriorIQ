@@ -329,11 +329,49 @@ def _read_lock() -> "tuple[int, float] | None":
 
 
 def refresh_worker_lock() -> None:
-    """Say the holder is still here. Called from the poll loop."""
+    """Say the holder is still here."""
     try:
         _lock_path().write_text(f"{os.getpid()} {time.time():.0f}", encoding="utf-8")
     except OSError:
         pass
+
+
+# A third of the staleness limit, so two beats can be missed before anyone
+# concludes this worker is gone.
+LOCK_HEARTBEAT_SECONDS = LOCK_STALE_SECONDS / 3.0
+_heartbeat_started = False
+
+
+def start_lock_heartbeat() -> None:
+    """Keep the lock warm from a thread, not from the poll loop.
+
+    This was the poll loop's job, and the poll loop is the one place that
+    cannot do it. `run_claimed_job` runs the entire analysis inside a single
+    iteration, and an analysis takes minutes - so between claiming a job and
+    finishing it, nothing wrote the lock. After ninety seconds a working
+    worker read as a dead one, and the next worker to start would announce
+    "taking over the worker lock" and begin a second analysis on the same 8 GB
+    card. That is the exact failure the lock was built to prevent, and it fired
+    on every job longer than a minute and a half, which is all of them.
+
+    A thread makes the heartbeat mean what `_claim_sole_worker` already says it
+    means: this process is alive. Not "this process is between jobs".
+
+    Daemon, so it never holds the process open - a worker exiting to pick up
+    new code (EXIT_CODE_CHANGED) must still exit promptly, and a lock left
+    behind by a process that has genuinely gone goes stale on its own.
+    """
+    global _heartbeat_started
+    if _heartbeat_started:
+        return
+    _heartbeat_started = True
+
+    def beat() -> None:
+        while True:
+            time.sleep(LOCK_HEARTBEAT_SECONDS)
+            refresh_worker_lock()
+
+    threading.Thread(target=beat, name="warrioriq-lock-heartbeat", daemon=True).start()
 
 
 def _claim_sole_worker() -> bool:
@@ -368,6 +406,7 @@ def _claim_sole_worker() -> bool:
                 "Taking over the worker lock from process %s (last seen %.0fs ago).",
                 pid, age)
     refresh_worker_lock()
+    start_lock_heartbeat()
     return True
 
 
