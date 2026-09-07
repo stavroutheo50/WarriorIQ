@@ -63,3 +63,8 @@ worker.lock
 # Generated signing key when WARRIORIQ_OAUTH_STATE_SECRET is unset. Never commit.
 session-secret.txt
 data/
+
+# Rotated application logs. They can carry request detail and user email.
+*.log
+*.log.[0-9]
+logs/
