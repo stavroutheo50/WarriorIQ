@@ -3130,3 +3130,67 @@ class LabelGranularityTests(unittest.TestCase):
         self.assertLess(source.index("if technique in FAMILIES"),
                         source.index("kept[_temporal_label(technique)]"),
                         "families must be diverted before reaching _temporal_label")
+
+
+class RedirectSafetyTests(unittest.TestCase):
+    """Where a login is allowed to send somebody afterwards."""
+
+    def test_only_paths_on_this_site_are_followed(self):
+        from app.main import _safe_next
+
+        self.assertEqual(_safe_next("/dashboard"), "/dashboard")
+        self.assertEqual(_safe_next("/result/abc?share=1"), "/result/abc?share=1")
+
+    def test_the_backslash_bypass_is_refused(self):
+        """The reason "starts with / and not //" is not enough.
+
+        A browser normalises the backslash to a forward slash before resolving
+        the URL, so this passes that check and then leaves the site.
+        """
+        from app.main import _safe_next
+
+        self.assertEqual(_safe_next("/" + chr(92) + "evil.example"), "/dashboard")
+        self.assertEqual(_safe_next(chr(92) + chr(92) + "evil.example"), "/dashboard")
+
+    def test_protocol_relative_and_absolute_are_refused(self):
+        from app.main import _safe_next
+
+        self.assertEqual(_safe_next("//evil.example"), "/dashboard")
+        self.assertEqual(_safe_next("https://evil.example"), "/dashboard")
+
+    def test_control_characters_are_refused(self):
+        from app.main import _safe_next
+
+        for ch in (chr(13), chr(10), chr(9), chr(0), chr(127)):
+            self.assertEqual(_safe_next("/ok" + ch + "x"), "/dashboard")
+
+    def test_nothing_falls_back(self):
+        from app.main import _safe_next
+
+        self.assertEqual(_safe_next(None), "/dashboard")
+        self.assertEqual(_safe_next("   "), "/dashboard")
+
+
+class SessionSecretTests(unittest.TestCase):
+    """The key that signs the OAuth state cookie."""
+
+    def test_it_is_the_same_key_every_time(self):
+        """A fresh key per process breaks sign-in and looks like a provider fault.
+
+        The state cookie is signed with it, so a callback landing on another
+        worker - or any restart - fails a sign-in that was perfectly valid.
+        """
+        from app.main import _session_secret
+
+        self.assertEqual(_session_secret(), _session_secret())
+        self.assertGreaterEqual(len(_session_secret()), 32)
+
+    def test_an_explicit_setting_wins(self):
+        import dataclasses
+        from unittest import mock
+
+        import app.main as main
+
+        with mock.patch.object(main, "SETTINGS",
+                               dataclasses.replace(main.SETTINGS, oauth_state_secret="from-the-environment")):
+            self.assertEqual(main._session_secret(), "from-the-environment")

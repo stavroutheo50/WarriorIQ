@@ -92,9 +92,54 @@ from core.video import get_video_info, pick_selection_frame, read_frame
 app = FastAPI(title="WarriorIQ")
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 _oauth_cookie_secure = SETTINGS.public_base_url.lower().startswith("https://")
+def _session_secret() -> str:
+    """A signing key that survives a restart and is shared across processes.
+
+    This used to fall back to secrets.token_urlsafe(48) when the setting was
+    missing, which reads as a safe default and is not one: the key is what
+    signs the OAuth state cookie, so a fresh key per process means a sign-in
+    begun on one worker cannot be finished on another, and every restart
+    invalidates every login in flight. The symptom is an intermittent "the
+    identity provider could not verify this sign in" that no amount of
+    checking the provider's console explains.
+
+    Set WARRIORIQ_OAUTH_STATE_SECRET in production. Without it, a key is
+    generated once and kept beside the database so that at least it is stable
+    for this host, and the warning says what to do.
+    """
+    configured = (SETTINGS.oauth_state_secret or "").strip()
+    if configured:
+        return configured
+    path = DATA_ROOT / "session-secret.txt"
+    try:
+        if path.exists():
+            stored = path.read_text(encoding="utf-8").strip()
+            if stored:
+                return stored
+        generated = secrets.token_urlsafe(48)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(generated, encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        logging.getLogger("warrioriq").warning(
+            "WARRIORIQ_OAUTH_STATE_SECRET is not set; generated one at %s. "
+            "Set it in the environment instead - a key on disk is fine for a "
+            "single host and wrong the moment there is a second one.", path)
+        return generated
+    except OSError:
+        logging.getLogger("warrioriq").error(
+            "WARRIORIQ_OAUTH_STATE_SECRET is not set and %s is not writable. "
+            "Falling back to a per-process key: sign-in will fail whenever a "
+            "callback lands on a different process than the one that started "
+            "it, and after every restart.", path)
+        return secrets.token_urlsafe(48)
+
+
 app.add_middleware(
     SessionMiddleware,
-    secret_key=SETTINGS.oauth_state_secret or secrets.token_urlsafe(48),
+    secret_key=_session_secret(),
     session_cookie="warrioriq_oauth",
     max_age=600,
     same_site="none" if _oauth_cookie_secure else "lax",
@@ -497,8 +542,22 @@ def _analysis_navigation_url(job: dict) -> str:
 
 
 def _safe_next(value: str | None, fallback: str = "/dashboard") -> str:
+    r"""Only ever redirect to a path on this site.
+
+    "starts with / and not //" is the usual rule and it is not enough. A
+    browser normalises the backslash in "/\evil.example" to a forward slash
+    before resolving it, so that value passes the test and then leaves the
+    site - the classic bypass. Control characters can be used the same way,
+    to smuggle something past a check that reads only the first two.
+    """
     value = (value or "").strip()
-    return value if value.startswith("/") and not value.startswith("//") else fallback
+    if not value.startswith("/") or value.startswith("//"):
+        return fallback
+    if chr(92) in value:                      # any backslash at all
+        return fallback
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        return fallback
+    return value
 
 
 def _is_admin(request: Request) -> bool:
