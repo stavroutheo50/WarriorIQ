@@ -283,6 +283,20 @@ class Settings:
     # human reviewer called "nothing happening".
     require_observed_opponent: bool = env_bool("WARRIORIQ_REQUIRE_OPPONENT", True)
     # three real tournament fights, each analysed twice - once with the real
+    # When a strike lands, the fighter receiving it moves too - the guard is
+    # driven back, the head turns, an arm is displaced - and the detector reads
+    # that as an action by the defender. Measured on three bouts: 72% to 86% of
+    # accepted events sit in a pair with the other fighter peaking within a
+    # third of a second, which is what that looks like from outside.
+    #
+    # Real simultaneous exchanges also happen, so the pair is only split when
+    # one limb clearly got closer to the opponent than the other. At a margin
+    # of 0.2 body lengths that is about half of pairs; the rest are left alone.
+    resolve_simultaneous_attribution: bool = env_bool("WARRIORIQ_RESOLVE_ATTRIBUTION", True)
+    simultaneous_window_seconds: float = float(
+        os.getenv("WARRIORIQ_SIMULTANEOUS_WINDOW", "0.35"))
+    attribution_reach_margin: float = float(
+        os.getenv("WARRIORIQ_ATTRIBUTION_MARGIN", "0.20"))
     # pair and once with a plausible mistake (a ringside coach, or the referee):
     #
     #   fight       correct pair   mistaken pair

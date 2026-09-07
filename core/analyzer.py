@@ -23,6 +23,7 @@ from core.contact import (
     assess_selection,
     classify_contact,
     opponent_separation,
+    resolve_simultaneous_attribution,
     thrown_at_opponent,
 )
 from core.db import save_fight
@@ -835,6 +836,10 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     #
     # Only when the whole video was asked for. Someone who requested round 2 of
     # 5 meant it, and re-cutting the fight underneath them would be wrong.
+    # Both fighters move when one of them is hit. Decide which of the two was
+    # the aggressor before anything downstream counts, scores or reports them.
+    events, defender_actions = resolve_simultaneous_attribution(events)
+
     detected_round_spans = round_detector.rounds()
     rounds_from_footage = bool(detected_round_spans) and all(spec.selected for spec in rounds)
     if rounds_from_footage:
@@ -934,6 +939,9 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             None if pair_similarity is None
             else bool(pair_similarity < SETTINGS.max_fighter_pair_similarity)),
         "identity_confusions": int(manager.confusions),
+        # Actions credited to the fighter who was being hit rather than the one
+        # hitting, and removed. See core.contact.resolve_simultaneous_attribution.
+        "defender_actions_dropped": int(defender_actions),
         "last_identity_confusion_frame": manager.last_confusion_frame,
         "sam_available": sam_was_available,
         "sam_failure_reason": sam_recovery.failure_reason,

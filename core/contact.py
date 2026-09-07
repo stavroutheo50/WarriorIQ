@@ -193,6 +193,55 @@ def thrown_at_opponent(event: StrikeEvent) -> bool:
     return True
 
 
+def resolve_simultaneous_attribution(events: list) -> tuple[list, int]:
+    """Drop the defender when both fighters are credited for one exchange.
+
+    A landed strike moves the person receiving it. Their guard is driven back,
+    their head turns, an arm is displaced - and a detector watching limb speed
+    and extension reads that as an action of their own. From outside it looks
+    like both fighters attacked at the same instant, which is why 72% to 86% of
+    accepted events on real footage sit in such a pair.
+
+    The one whose limb actually got closer to the opponent is the one who threw
+    it. That is already measured for every event, and since an action with no
+    observed opponent is no longer reported at all, it is now measured for all
+    of them rather than for a quarter.
+
+    Fighters do genuinely trade at the same moment, so a pair is only split
+    when the difference is clear; an ambiguous pair keeps both. Returns the
+    surviving events and how many were dropped.
+    """
+    if not SETTINGS.resolve_simultaneous_attribution or len(events) < 2:
+        return events, 0
+
+    def reach(event) -> float | None:
+        value = (event.evidence or {}).get("contact_distance_body_lengths")
+        return float(value) if isinstance(value, (int, float)) else None
+
+    ordered = sorted(range(len(events)), key=lambda i: float(events[i].peak_time))
+    dropped: set[int] = set()
+    for position, index in enumerate(ordered):
+        if index in dropped:
+            continue
+        for other in ordered[position + 1:]:
+            gap = float(events[other].peak_time) - float(events[index].peak_time)
+            if gap > SETTINGS.simultaneous_window_seconds:
+                break
+            if other in dropped or events[other].fighter == events[index].fighter:
+                continue
+            here, there = reach(events[index]), reach(events[other])
+            if here is None or there is None:
+                continue
+            if abs(here - there) < SETTINGS.attribution_reach_margin:
+                continue          # too close to call; a real trade looks like this
+            dropped.add(other if there > here else index)
+            if index in dropped:
+                break
+    if not dropped:
+        return events, 0
+    return [event for i, event in enumerate(events) if i not in dropped], len(dropped)
+
+
 def assess_selection(
     separations: list[float], kept: int, discarded: int, landed: int,
     travel_per_minute: dict[str, float | None] | None = None,

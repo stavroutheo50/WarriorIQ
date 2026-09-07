@@ -3194,3 +3194,67 @@ class SessionSecretTests(unittest.TestCase):
         with mock.patch.object(main, "SETTINGS",
                                dataclasses.replace(main.SETTINGS, oauth_state_secret="from-the-environment")):
             self.assertEqual(main._session_secret(), "from-the-environment")
+
+
+class AttributionTests(unittest.TestCase):
+    """Which of the two fighters actually threw it."""
+
+    @staticmethod
+    def _event(fighter, time, reach):
+        from core.types import StrikeEvent
+
+        return StrikeEvent(
+            fighter=fighter, opponent="B" if fighter == "A" else "A", round_number=1,
+            start_frame=0, peak_frame=int(time * 30), end_frame=0,
+            start_time=time, peak_time=time, end_time=time,
+            technique="cross", family="punch", limb="left_hand",
+            evidence={"contact_distance_body_lengths": reach})
+
+    def test_the_defender_is_dropped_when_the_reach_is_clear(self):
+        """A landed strike moves the person receiving it, and that reads as an
+        action of their own. The limb that got closer threw it."""
+        from core.contact import resolve_simultaneous_attribution
+
+        events = [self._event("A", 10.0, 0.10), self._event("B", 10.08, 0.90)]
+        kept, dropped = resolve_simultaneous_attribution(events)
+        self.assertEqual(dropped, 1)
+        self.assertEqual([e.fighter for e in kept], ["A"])
+
+    def test_a_real_trade_keeps_both(self):
+        """Fighters do land at the same instant; an ambiguous pair is left alone."""
+        from core.contact import resolve_simultaneous_attribution
+
+        events = [self._event("A", 10.0, 0.30), self._event("B", 10.05, 0.34)]
+        kept, dropped = resolve_simultaneous_attribution(events)
+        self.assertEqual(dropped, 0)
+        self.assertEqual(len(kept), 2)
+
+    def test_actions_far_apart_in_time_are_untouched(self):
+        from core.contact import resolve_simultaneous_attribution
+
+        events = [self._event("A", 10.0, 0.10), self._event("B", 14.0, 0.90)]
+        self.assertEqual(resolve_simultaneous_attribution(events)[1], 0)
+
+    def test_one_fighter_throwing_twice_is_untouched(self):
+        """A quick double from the same fighter is not an attribution problem."""
+        from core.contact import resolve_simultaneous_attribution
+
+        events = [self._event("A", 10.0, 0.10), self._event("A", 10.08, 0.90)]
+        self.assertEqual(resolve_simultaneous_attribution(events)[1], 0)
+
+    def test_an_unmeasured_reach_never_decides(self):
+        from core.contact import resolve_simultaneous_attribution
+
+        events = [self._event("A", 10.0, 0.10), self._event("B", 10.05, None)]
+        self.assertEqual(resolve_simultaneous_attribution(events)[1], 0)
+
+    def test_it_can_be_switched_off(self):
+        import dataclasses
+        from unittest import mock
+
+        import core.contact as contact
+
+        off = dataclasses.replace(contact.SETTINGS, resolve_simultaneous_attribution=False)
+        with mock.patch.object(contact, "SETTINGS", off):
+            events = [self._event("A", 10.0, 0.10), self._event("B", 10.05, 0.90)]
+            self.assertEqual(contact.resolve_simultaneous_attribution(events)[1], 0)
