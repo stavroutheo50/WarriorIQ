@@ -16,3 +16,15 @@ stripe>=11.0
 openai>=2.0
 a2wsgi>=1.10,<2
 rtmlib>=0.0.16  # optional: top-down pose refinement, see core/rtm_pose.py
+# onnx arrives as an ultralytics dependency, which is happy with 1.17 - and
+# 1.17 carries eleven known CVEs, all fixed by 1.21/1.22. None is reachable
+# through WarriorIQ (onnx parses model files, and people upload video, not
+# models), but the fix is free, so it is pinned here rather than left to
+# whatever the transitive resolver picks.
+#
+# On Windows this needs `--only-binary :all:`, and it still fails with
+# WinError 206 unless long paths are enabled or the install runs through a
+# short path: onnx ships test data with names like
+# test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask_causal_expanded,
+# which no amount of care in this repo can shorten.
+onnx>=1.22
