@@ -109,11 +109,31 @@ class Settings:
     # How much a candidate must still resemble the fighter the user selected.
     # Real footage puts three to eleven people in frame - referees, corners,
     # crowd - at sizes close enough that position alone cannot separate them.
-    # Measured on a busy ring: the same fighter across frames scores 0.67 at
-    # worst and 0.94 typically; two different people score 0.56 typically and
-    # 0.48 at the low end. A threshold of 0.30 sat below every pair in the ring
-    # and could never fire. This sits under the worst same-person score with
-    # margin, and still refuses roughly half of the impostors outright.
+    # **This gate cannot tell the two fighters apart, and the numbers that said
+    # it could were measured on one bout.** That comment read: "the same
+    # fighter scores 0.67 at worst and 0.94 typically; two different people
+    # score 0.56 typically and 0.48 at the low end" - a clean gap, with this
+    # threshold sitting safely under it.
+    #
+    # Re-measured on 926 comparisons across all six fighter tracks in the three
+    # reference fights:
+    #
+    #     same fighter    median 0.789   min 0.494
+    #     other fighter   median 0.683   max 0.964
+    #
+    # The worst same-fighter score is 0.494, not 0.67 - every track dips below
+    # the claimed floor - and **100% of impostor scores land above it**. As a
+    # discriminator the histogram is AUC 0.667, which is barely a signal at
+    # all. No threshold separates these distributions, so do not go tuning this
+    # number expecting one to.
+    #
+    # What 0.55 actually is: a floor that refuses the crowd, who look nothing
+    # like either athlete. It refuses the *correct* fighter in 2-9% of frames
+    # as the cost of that. Raising it refuses more of the right person;
+    # lowering it admits more of the wrong one. Telling the two athletes apart
+    # is not this gate's job and it never managed it - see
+    # project-validated-on-three-fights for the pooled-ReID equivalent, which
+    # is 0.89-0.90 between the two fighters and no better.
     min_anchor_appearance_similarity: float = float(
         os.getenv("WARRIORIQ_MIN_ANCHOR_SIMILARITY", "0.55"))
     # How alike the two selected fighters may look before per-fighter results

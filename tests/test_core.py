@@ -4029,3 +4029,33 @@ class RefereeThresholdTests(unittest.TestCase):
         from core.config import SETTINGS
 
         self.assertGreater(SETTINGS.min_referee_probability, 0.07)
+
+
+class AppearanceGateHonestyTests(unittest.TestCase):
+    """The anchor-appearance gate cannot separate the two fighters.
+
+    Its comment used to claim a clean gap - same fighter never below 0.67,
+    impostors around 0.56 - measured on one bout. Across all six fighter
+    tracks in the three reference fights the worst same-fighter score is
+    0.494, every track dips below 0.67, and every impostor score lands above
+    that floor. AUC 0.667.
+    """
+
+    def test_the_reasoning_does_not_claim_a_gap_that_is_not_there(self):
+        from pathlib import Path
+
+        config = Path("core/config.py").read_text(encoding="utf-8")
+        block = config[config.index("min_anchor_appearance_similarity") - 2000:
+                       config.index("min_anchor_appearance_similarity")]
+        self.assertNotIn("the same fighter across frames scores 0.67 at", block)
+        self.assertIn("cannot tell the two fighters apart", block)
+        self.assertIn("all six fighter tracks", block)
+
+    def test_the_threshold_is_still_a_crowd_floor_not_a_discriminator(self):
+        """Kept where it is on purpose: no value separates the distributions."""
+        from core.config import SETTINGS
+
+        # Below the worst same-fighter score measured (0.494) it would stop
+        # refusing anybody; far above it, it refuses the right person.
+        self.assertGreater(SETTINGS.min_anchor_appearance_similarity, 0.49)
+        self.assertLess(SETTINGS.min_anchor_appearance_similarity, 0.70)
