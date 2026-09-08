@@ -2570,3 +2570,60 @@ class NoPunchClaimLeaksTests(unittest.TestCase):
         text = self._render(self._report())
         self.assertIn("leg strikes", text.lower())
         self.assertNotIn("Fighter A attempts", text)
+
+
+class NoUnsupportedClaimSurvivesTests(NoPunchClaimLeaksTests):
+    """Every claim that rests on the strike detector, checked in one place.
+
+    Individually gated claims kept slipping through one at a time - punch
+    counts on four separate surfaces, then a round score computed from the
+    same punches. Each was found by a different ad-hoc check. This renders
+    the page once and asserts the whole family is absent, so the next one
+    cannot hide in a branch nobody thought to look at.
+
+    The detector is 29% precise overall and its punch family 14%. Nothing
+    derived from it may state a number while that is true.
+    """
+
+    @staticmethod
+    def _untrusted_report():
+        report = NoPunchClaimLeaksTests._report(trusted=False)
+        report["scorecard"] = {
+            "available": False, "status": "punch_counting_unavailable",
+            "ruleset_label": "K-1", "totals": {"A": None, "B": None},
+            "rounds": [], "winner_estimate": None,
+            "disclaimer": "No score is shown.",
+        }
+        return report
+
+    def test_nothing_derived_from_the_strike_detector_states_a_number(self):
+        import re
+
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " | ", self._render(self._untrusted_report())))
+        claims = (
+            ("landed count",      r"\blanded\b\s*\|?\s*\d"),
+            ("accuracy percent",  r"accuracy\s*\|?\s*\d+\s*%"),
+            ("combinations",      r"combinations?\s*\|?\s*\d"),
+            ("counters",          r"counters?\s*\|?\s*\d"),
+            ("blocked or evaded", r"(blocked|evaded)\s*\|?\s*\d"),
+            ("a technique name",  r"\b(jab|cross|uppercut|hook|backfist)\b"),
+            ("rounds won",        r"rounds won"),
+            ("a round scoreline", r"\b10\s*[-\u2013:]\s*9\b"),
+        )
+        for label, pattern in claims:
+            with self.subTest(claim=label):
+                found = re.search(pattern, text, re.I)
+                self.assertIsNone(found, "%s reached the page: %r" % (
+                    label, text[max(0, found.start() - 45):found.end() + 20] if found else ""))
+
+    def test_the_measured_numbers_do_survive(self):
+        """The withholding must not quietly become "show nothing".
+
+        These come from pose rather than the strike detector, so they are the
+        report when everything else is withheld. If this fails the product has
+        no content left.
+        """
+        text = self._render(self._untrusted_report()).lower()
+        for shown in ("movement", "pressure", "centre", "guard", "balance", "leg strikes"):
+            with self.subTest(number=shown):
+                self.assertIn(shown, text)
