@@ -2436,3 +2436,106 @@ class ReportOrderTests(unittest.TestCase):
         page = self._page()
         self.assertIn("The part that is true leads", page)
         self.assertIn("promoting it opened the report with a refusal", page)
+
+
+class NoPunchClaimLeaksTests(unittest.TestCase):
+    """Render the page and look, rather than reading the guards.
+
+    Punch counts are withheld because they were overstated by eleven in two
+    of three checked bouts. Getting that right means every branch of a large
+    template agreeing, and auditing it by reading `{% if %}` blocks missed a
+    whole section the first time - the headline numbers under `stats_ready`,
+    which carry Landed, Accuracy, Combinations, a named "Best weapon" and a
+    "Punches landed" comparison row.
+
+    So this renders the real template with a report that *does* contain punch
+    data and asserts none of it reaches the page.
+    """
+
+    @staticmethod
+    def _render(report):
+        import json as _json
+
+        from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
+        from app.main import _analysis_quality_summary
+        from core.report import kick_minimum_check, observed_summary
+
+        class Stub:
+            def __init__(self, **kw): self.__dict__.update(kw)
+            def __getattr__(self, k): return Stub()
+            def __getitem__(self, k): return Stub()
+            def __str__(self): return ""
+            def __bool__(self): return False
+            def __iter__(self): return iter(())
+
+        env = Environment(loader=FileSystemLoader("app/templates"), undefined=ChainableUndefined)
+        env.policies["json.dumps_function"] = _json.dumps
+        return env.get_template("result.html").render(
+            request=Stub(url=Stub(path="/result/x"), state=Stub(csrf_token="t" * 43, account=None)),
+            report=report, job_id="x", observed=observed_summary(report),
+            kick_minimum=kick_minimum_check(report), asset_version="t",
+            analysis_quality=_analysis_quality_summary(report),
+            report_access={"report_tier": "full"}, can_share=False, sharing=None)
+
+    @staticmethod
+    def _report(trusted=False):
+        """The committed sample, with punch data put back in.
+
+        Built from tests/fixtures/report_sample.json rather than by hand: the
+        page reads dozens of fields and a hand-made stub only proves the
+        branches it happens to reach.
+        """
+        import json as _json
+
+        report = _json.loads(
+            Path("tests/fixtures/report_sample.json").read_text(encoding="utf-8"))
+        report.setdefault("integrity", {}).update({
+            "action_metrics_trusted": trusted,
+            "identity_evidence_trusted": trusted,
+            "fighter_identity_trusted": {"A": trusted, "B": trusted},
+        })
+        stats = report.setdefault("statistics", {})
+        stats["action_labels_available"] = trusted
+        stats["attempt_counts_available"] = True
+        for who in ("A", "B"):
+            item = stats.setdefault("fighters", {}).setdefault(who, {})
+            item.update({"observation_coverage": 0.55, "total_strikes": 9,
+                         "punch_attempts": 6, "kick_attempts": 3, "knee_attempts": 0,
+                         "punches_landed": 4, "accuracy": 0.44, "combinations": 2})
+            metrics = report.setdefault("metrics", {}).setdefault(who, {})
+            metrics["strongest_weapon"] = "jab"
+            attacks = metrics.setdefault("attacks", {})
+            attacks.update({"attempts": 9, "landed": 4, "accuracy": 0.44,
+                            "families": {"punch": 6, "kick": 3},
+                            "techniques": {"jab": 4, "right_hook": 2},
+                            "landed_techniques": {"jab": 3}})
+        return report
+
+    def test_an_untrusted_report_shows_no_punch_claim_anywhere(self):
+        import re
+
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", self._render(self._report())))
+        # Anchored to a count label, not any digit before the word: the
+        # score line "10-9" sits directly before the sentence saying punch
+        # counting is switched off, and a looser pattern read that as a leak.
+        for pattern, what in ((r"punch(es)?[ :]*\d+", "a punch count"),
+                              (r"Punches landed\s*\d", "punches landed"),
+                              (r"\b(jab|cross|uppercut|hook|backfist)\b", "a named punch"),
+                              (r"(Best|Strongest) weapon\s*[A-Za-z]", "a named weapon")):
+            with self.subTest(claim=what):
+                found = re.search(pattern, text, re.I)
+                self.assertIsNone(found, "%s reached the page: %r" % (
+                    what, text[max(0, found.start() - 40):found.end() + 20] if found else ""))
+
+    def test_the_leg_strike_count_does_reach_the_page(self):
+        """The withholding must not be so broad that nothing is reported.
+
+        The sample report has a scorecard, so the "Kicks we could count"
+        panel - which appears only *instead* of a scorecard - is not on
+        this page. The leg-strike count still is, in the numbers row, and
+        that row used to print total attempts including punches.
+        """
+        text = self._render(self._report())
+        self.assertIn("leg strikes", text.lower())
+        self.assertNotIn("Fighter A attempts", text)
