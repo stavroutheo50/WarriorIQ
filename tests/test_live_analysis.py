@@ -395,9 +395,18 @@ class DurableAnalysisStateTests(TestCase):
         self.assertIn('id="liveVideo"', template)
         self.assertIn('id="eventFeed"', template)
         self.assertIn('id="analysisMarkers"', template)
-        # The page must still say the strike numbers are not trustworthy yet,
-        # in words a fighter can use rather than by naming a component.
-        self.assertIn("strike counting is not accurate enough to trust yet", template)
+        # The page must still say the strike numbers are not trustworthy, in
+        # words a fighter can use rather than by naming a component. The
+        # wording is now more specific than it was: checked against the video,
+        # the kick count is right and the punch count is not, so punches are
+        # shown in neither place.
+        self.assertIn("the kick count comes out right and the punch count does not", template)
+        self.assertIn("leg strikes only", template.lower())
+        # And the live view must not show a punch number the report withholds -
+        # a coach used to watch eleven accumulate and then get a report with
+        # none.
+        for leaked in ("punchAttempts", "punchLanded", "punchAccuracy"):
+            self.assertNotIn(leaked, template)
         self.assertNotIn("action model", template)
         self.assertIn("Restart preserved analysis", template)
         self.assertIn("Leave analysis running", template)
