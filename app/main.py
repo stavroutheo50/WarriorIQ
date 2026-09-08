@@ -2518,7 +2518,14 @@ def detect_people(request: Request, job_id: str):
     boxes = []
     result = results[0]
     if result.boxes is not None:
-        for box, conf in zip(result.boxes.xyxy.detach().cpu().numpy(), result.boxes.conf.detach().cpu().numpy()):
+        # Same tensor's attributes, so equal length by construction - strict
+        # says so, and would complain loudly if a future ultralytics ever
+        # returned them mismatched instead of quietly dropping detections.
+        for box, conf in zip(
+            result.boxes.xyxy.detach().cpu().numpy(),
+            result.boxes.conf.detach().cpu().numpy(),
+            strict=True,
+        ):
             boxes.append({"box": [float(x) for x in box], "confidence": float(conf)})
     return {
         "people": boxes, "width": job["video_width"], "height": job["video_height"],
@@ -3560,7 +3567,10 @@ def _build_replay_chapters(
     chapters: list[dict] = []
     labels = ("Opening", "Early section", "Middle section", "Closing section")
     fractions = (0.0, .25, .50, .75)
-    for label, fraction in zip(labels, fractions):
+    # strict, because these two must stay the same length: adding a fifth
+    # label and forgetting a fifth fraction would silently drop a chapter
+    # rather than say anything.
+    for label, fraction in zip(labels, fractions, strict=True):
         moment = start + (end - start) * fraction
         if chapters and moment - chapters[-1]["time"] < 2.0:
             continue
