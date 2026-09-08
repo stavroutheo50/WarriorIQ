@@ -226,19 +226,29 @@ class Settings:
     #        0.12           8 / 10            15 / 469  (3.2%)
     #        0.05          10 / 10            far more
     #
-    # 0.15 and not 0.12: the three officials that 0.50 missed all score
-    # exactly 0.15, so anything lower buys no extra catch and only costs more
-    # fighter frames. A referee tracked as a fighter corrupts every number in
-    # that fighter's report; 2.6% of observations is a small coverage cost
-    # against that, and a refused frame is recoverable where a wrong identity
-    # is not.
+    # **0.15 was tried on that evidence and reverted.** Do not try it again
+    # without reading this.
     #
-    # Fight 3's two officials score 0.06-0.07 and are still missed. Reaching
-    # them needs 0.05, which refuses fighters in bulk - that is a probe
-    # trained across venues, not a threshold, and it is not fixed here.
-    # See project-detector-measured-on-178-clips.
+    # The table above is real but it is the wrong table. Both columns were
+    # measured on boxes the tracker had already *chosen* - and this gate does
+    # not filter chosen boxes, it filters every candidate offered during
+    # tracking. Two full runs of fight 1, identical code, only the threshold
+    # different, then the frames where they disagreed rendered and looked at:
+    #
+    #     89 frames changed. Only 6 of them were the referee being removed.
+    #     51 lost their box entirely. Of six sampled by eye, one dropped an
+    #     official and three dropped a real fighter.
+    #
+    # Coverage said it was a wash (A 0.192 -> 0.235, B 0.397 -> 0.360), which
+    # is exactly why coverage is not the test. Three athletes lost for one
+    # official removed is a bad trade, so the gate stays where it was.
+    #
+    # What survives from the measurement: the probe *ranks* officials well
+    # (AUC 0.993 across three venues) and 0.50 catches only five of ten. The
+    # five it misses are not reachable by moving this number - they need a
+    # probe trained across venues. See project-detector-measured-on-178-clips.
     min_referee_probability: float = float(
-        os.getenv("WARRIORIQ_MIN_REFEREE_PROB", "0.15"))
+        os.getenv("WARRIORIQ_MIN_REFEREE_PROB", "0.50"))
     # Fighter motion between sampled frames is often larger than generic
     # pedestrian motion. These values still reject distant bystanders, while
     # allowing a fighter to be recovered after a tracker-ID reset.

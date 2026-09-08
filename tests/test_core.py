@@ -3985,15 +3985,18 @@ class RefereeThresholdTests(unittest.TestCase):
     0.50 it caught five of ten.
     """
 
-    def test_the_gate_sits_where_the_measurement_put_it(self):
+    def test_the_gate_was_not_lowered(self):
+        """0.15 was tried on labelled clips and reverted on a full run.
+
+        The clip measurement sampled boxes the tracker had already chosen;
+        this gate filters every candidate offered during tracking. Two full
+        runs of fight 1 differing only in this number changed 89 frames, of
+        which just 6 were the referee being removed and 51 lost their box.
+        By eye: one official dropped, three real fighters dropped.
+        """
         from core.config import SETTINGS
 
-        # The three officials 0.50 missed score exactly 0.15, so the gate has
-        # to be at or below that to catch them - and no lower, because lower
-        # buys no extra catch and refuses more real fighter frames.
-        self.assertLessEqual(SETTINGS.min_referee_probability, 0.15)
-        # Below about 0.05 it starts flagging fighters in bulk (14 of 168).
-        self.assertGreater(SETTINGS.min_referee_probability, 0.05)
+        self.assertEqual(SETTINGS.min_referee_probability, 0.50)
 
     def test_the_reasoning_records_what_it_was_measured_on(self):
         """The old comment asserted a gap that only existed in one bout.
@@ -4011,24 +4014,26 @@ class RefereeThresholdTests(unittest.TestCase):
         # trade is how it ended up at 0.50 in the first place.
         self.assertIn("469 tracked fighter boxes", config)
 
-    def test_an_official_scoring_low_is_still_rejected(self):
-        """The measured failure: a referee at 0.15 used to pass the gate."""
-        from core.config import SETTINGS
+    def test_half_the_officials_are_known_to_pass_the_gate(self):
+        """Recorded so nobody mistakes 0.50 for a solved problem.
 
-        for score in (0.15, 0.66, 0.93, 0.99):   # the officials 0.50 let through
-            with self.subTest(referee_score=score):
-                self.assertGreaterEqual(score, SETTINGS.min_referee_probability)
-
-    def test_fight_threes_officials_are_known_to_be_missed(self):
-        """Not fixed here, and not pretended otherwise.
-
-        Two officials in fight 3 score 0.06-0.07. Reaching them needs 0.05,
-        which flags fourteen fighters - that is a probe trained across venues,
-        not a threshold.
+        Five of the ten hand-labelled officials score below it. They are not
+        reachable by moving this number - that was tried - they need a probe
+        trained across venues.
         """
         from core.config import SETTINGS
 
-        self.assertGreater(SETTINGS.min_referee_probability, 0.07)
+        officials = (0.06, 0.07, 0.15, 0.15, 0.15, 0.66, 0.67, 0.70, 0.93, 0.99)
+        missed = [s for s in officials if s < SETTINGS.min_referee_probability]
+        self.assertEqual(len(missed), 5)
+
+    def test_the_revert_reason_is_written_down(self):
+        """The next person to see AUC 0.993 will want to lower this."""
+        from pathlib import Path
+
+        config = Path("core/config.py").read_text(encoding="utf-8")
+        self.assertIn("was tried on that evidence and reverted", config)
+        self.assertIn("filters every candidate offered during", config)
 
 
 class AppearanceGateHonestyTests(unittest.TestCase):
