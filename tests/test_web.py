@@ -2399,3 +2399,40 @@ class WorkerAuthOrderingTests(unittest.TestCase):
             if self.main._require_remote_worker not in deps:
                 missing.append(path)
         self.assertEqual(missing, [], "worker routes without the auth dependency")
+
+
+class ReportOrderTests(unittest.TestCase):
+    """The part that is true comes first.
+
+    The report used to open with strike counts. Measured against the video,
+    the punch count was overstated by eleven in two of three bouts, while the
+    pose metrics - footwork, pressure, centre, guard, balance - are measured
+    and always available. Leading with the striking read put the weakest
+    claim at the top of the page.
+    """
+
+    @staticmethod
+    def _page():
+        return Path("app/templates/result.html").read_text(encoding="utf-8")
+
+    def test_the_fighters_own_numbers_come_before_the_strike_count(self):
+        page = self._page()
+        vitals = page.index('class="fight-vitals"')
+        strikes = page.index("Kicks we could count")
+        self.assertLess(vitals, strikes,
+                        "the strike count is above the pose metrics again")
+
+    def test_the_movement_scorecard_does_not_open_the_report(self):
+        """It needs 85% coverage and real footage gives 19-40%.
+
+        Promoting it put a refusal above the numbers that always work, which
+        is what happened on the first attempt at this reshape.
+        """
+        page = self._page()
+        self.assertLess(page.index('class="fight-vitals"'),
+                        page.index("Movement scorecard"))
+
+    def test_the_order_is_explained_where_someone_would_change_it(self):
+        page = self._page()
+        self.assertIn("The part that is true leads", page)
+        self.assertIn("promoting it opened the report with a refusal", page)

@@ -37,35 +37,6 @@
      nothing: what each fighter was seen doing, and over how much of the round.
      Every number below is a floor with its denominator attached, and none of
      it compares the two - comparing is what the withheld scorecard does. #}
-  {% if not report.scorecard.available and observed %}
-  <div class="observed">
-    <h3>Kicks we could count</h3>
-    {#- This used to end "so the real numbers are higher", presenting the count
-        as a floor. Hand-checking 178 clips showed the opposite: about a third
-        of displayed actions were real, the rest being the opponent's strike
-        credited to the defender, a moment where nothing happened, or the
-        referee. An inflated count must not be sold as a minimum. -#}
-    <p class="observed-note">Not a score. <strong>Leg strikes only</strong> &mdash; kicks and knees
-      together. We checked every strike this analysis proposed across three real bouts against the
-      video: the kick count came out right in all three, and the punch count was overstated by
-      eleven in two of them. At this camera distance an arm extension is a few pixels, so punches
-      are counted internally and deliberately not shown until that changes.</p>
-    <div class="observed-grid">
-      {% for who, seen in observed.fighters.items() %}
-      <div class="observed-card">
-        <span class="observed-who">Fighter {{who}}</span>
-        <strong>{{seen.actions_evidenced}}</strong>
-        <span class="observed-basis">leg strike{{ '' if seen.actions_evidenced == 1 else 's' }}
-          in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
-        <span class="observed-families">
-          <em>knees counted as kicks</em>{% if seen.punches_withheld %} &middot;
-          punches not shown{% endif %}
-        </span>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
   {# WAKO Full Contact obliges six kicks a round (Chapter 8, Article 6), and it
      is the one federation obligation this analysis can check. It only ever
      confirms: our kick count is a floor, so six or more proves the round was
@@ -122,6 +93,80 @@
   {% if seen and seen.measured_frames %}
   <p class="vitals-basis small muted">Measured across {{'{:,}'.format(seen.measured_frames)}} of {{'{:,}'.format(seen.analyzed_frames)}} analysed frames{% if not seen.confident %} &mdash; just over {{'%.0f'|format(seen.share * 100)}}% of the fight, so read these as the part of the round WarriorIQ could see rather than the whole of it{% endif %}.</p>
   {% endif %}
+{#- Strikes come after the fighter's own numbers, deliberately. The pose
+    metrics above are measured and always available; the strike count is
+    one family out of two, because the punch count was overstated by
+    eleven in two of three checked bouts. The part that is true leads. -#}
+  {% if not report.scorecard.available and observed %}
+  <div class="observed">
+    <h3>Kicks we could count</h3>
+    {#- This used to end "so the real numbers are higher", presenting the count
+        as a floor. Hand-checking 178 clips showed the opposite: about a third
+        of displayed actions were real, the rest being the opponent's strike
+        credited to the defender, a moment where nothing happened, or the
+        referee. An inflated count must not be sold as a minimum. -#}
+    <p class="observed-note">Not a score. <strong>Leg strikes only</strong> &mdash; kicks and knees
+      together. We checked every strike this analysis proposed across three real bouts against the
+      video: the kick count came out right in all three, and the punch count was overstated by
+      eleven in two of them. At this camera distance an arm extension is a few pixels, so punches
+      are counted internally and deliberately not shown until that changes.</p>
+    <div class="observed-grid">
+      {% for who, seen in observed.fighters.items() %}
+      <div class="observed-card">
+        <span class="observed-who">Fighter {{who}}</span>
+        <strong>{{seen.actions_evidenced}}</strong>
+        <span class="observed-basis">leg strike{{ '' if seen.actions_evidenced == 1 else 's' }}
+          in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
+        <span class="observed-families">
+          <em>knees counted as kicks</em>{% if seen.punches_withheld %} &middot;
+          punches not shown{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+{#- The movement scorecard sits *below* the fighter's own numbers, not
+    above them. It needs 85% tracking coverage on both fighters and real
+    footage rarely reaches that - all three reference bouts produced 19%
+    to 40% - so promoting it opened the report with a refusal, sitting on
+    top of the pose numbers that are always available and always true. -#}
+{% set movement = report.movement_scorecard|default({}, true) %}
+{% if movement %}
+<section class="card" id="report-movement-score">
+  <div class="section-title" style="margin-top:0">
+    <h2>Movement scorecard</h2>
+    <span class="pill">{{movement.criteria_scored|length|default(3)}} of 4 judging criteria</span>
+  </div>
+  {% if movement.available %}
+  <div class="grid">
+    <div><div class="score">{{movement.totals.A}}</div><div class="muted">Fighter A{% if movement.leader == 'A' %} · ahead{% endif %}</div></div>
+    <div><div class="score">{{movement.totals.B}}</div><div class="muted">Fighter B{% if movement.leader == 'B' %} · ahead{% endif %}</div></div>
+  </div>
+  <p class="small">Scored on <b>{{movement.criteria_scored|join(', ')}}</b>.
+     Not scored: <b>{{movement.criteria_excluded|join(', ')}}</b>.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Round</th><th>A</th><th>B</th><th>Pressed forward</th><th>Held the middle</th><th>Took ground</th><th>Read</th></tr></thead>
+    <tbody>
+    {% for r in movement.rounds %}
+      <tr>
+        <td>{{r.number}}</td><td>{{r.A}}</td><td>{{r.B}}</td>
+        <td>{% if r.aggression %}{{'%.0f'|format(r.aggression.A*100)}}% / {{'%.0f'|format(r.aggression.B*100)}}%{% else %}—{% endif %}</td>
+        <td>{% if r.generalship %}{{'%.0f'|format(r.generalship.A*100)}}% / {{'%.0f'|format(r.generalship.B*100)}}%{% else %}—{% endif %}</td>
+        <td>{% if r.territory %}{{'%.0f'|format(r.territory.A*100)}}% / {{'%.0f'|format(r.territory.B*100)}}%{% else %}—{% endif %}</td>
+        <td class="small">{{r.note}}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="small muted">{{movement.disclaimer}}</p>
+  {% else %}
+  <div class="notice">{{movement.reason}}</div>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if report.scorecard.coverage_note %}<aside class="notice coverage-notice"><strong>Striking read only.</strong> {{report.scorecard.sport_label}} also scores {% for action in report.scorecard.unobserved_actions %}{{action}}{% if not loop.last %}, {% endif %}{% endfor %}. WarriorIQ cannot see any of that, so the score below counts the punches, kicks and knees it observed and nothing else. Read it as a striking summary, not as the round.</aside>{% endif %}
 
 {% if report_access.report_tier != 'full' %}<div class="report-access-banner"><div><span class="eyebrow">{{report_access.report_label}}</span><strong>{{report_access.label}} report depth</strong><p>{% if report_access.report_tier == 'compact' %}This view includes the essential summary, estimated scorecard, three key moments, and one coaching priority.{% else %}This view includes core performance, scorecard, coaching highlights, and a short training plan.{% endif %}</p></div><a class="btn secondary" href="/pricing">Compare report levels</a></div>{% endif %}
@@ -426,40 +471,6 @@
    the striking scorecard: that one is withheld because strikes cannot be
    detected reliably, and this one is the part WarriorIQ can actually stand
    behind. See core/generalship.py. #}
-{% set movement = report.movement_scorecard|default({}, true) %}
-{% if movement %}
-<section class="card" id="report-movement-score">
-  <div class="section-title" style="margin-top:0">
-    <h2>Movement scorecard</h2>
-    <span class="pill">{{movement.criteria_scored|length|default(3)}} of 4 judging criteria</span>
-  </div>
-  {% if movement.available %}
-  <div class="grid">
-    <div><div class="score">{{movement.totals.A}}</div><div class="muted">Fighter A{% if movement.leader == 'A' %} · ahead{% endif %}</div></div>
-    <div><div class="score">{{movement.totals.B}}</div><div class="muted">Fighter B{% if movement.leader == 'B' %} · ahead{% endif %}</div></div>
-  </div>
-  <p class="small">Scored on <b>{{movement.criteria_scored|join(', ')}}</b>.
-     Not scored: <b>{{movement.criteria_excluded|join(', ')}}</b>.</p>
-  <div class="table-wrap"><table>
-    <thead><tr><th>Round</th><th>A</th><th>B</th><th>Pressed forward</th><th>Held the middle</th><th>Took ground</th><th>Read</th></tr></thead>
-    <tbody>
-    {% for r in movement.rounds %}
-      <tr>
-        <td>{{r.number}}</td><td>{{r.A}}</td><td>{{r.B}}</td>
-        <td>{% if r.aggression %}{{'%.0f'|format(r.aggression.A*100)}}% / {{'%.0f'|format(r.aggression.B*100)}}%{% else %}—{% endif %}</td>
-        <td>{% if r.generalship %}{{'%.0f'|format(r.generalship.A*100)}}% / {{'%.0f'|format(r.generalship.B*100)}}%{% else %}—{% endif %}</td>
-        <td>{% if r.territory %}{{'%.0f'|format(r.territory.A*100)}}% / {{'%.0f'|format(r.territory.B*100)}}%{% else %}—{% endif %}</td>
-        <td class="small">{{r.note}}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
-  <p class="small muted">{{movement.disclaimer}}</p>
-  {% else %}
-  <div class="notice">{{movement.reason}}</div>
-  {% endif %}
-</section>
-{% endif %}
 
 <section class="card" id="report-scorecard">
   <div class="section-title" style="margin-top:0"><h2>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary automatic scorecard{% else %}Automatic estimated scorecard{% endif %}</h2><span class="pill">{{report.scorecard.ruleset_label}}</span></div>
