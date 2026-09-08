@@ -1,0 +1,112 @@
+[
+ {
+  "id": 7,
+  "fighter": "B",
+  "peak_time": 39.400000000000006,
+  "proposed": "jab",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 5,
+  "fighter": "B",
+  "peak_time": 10.133333333333335,
+  "proposed": "cross",
+  "technique": "punch",
+  "target": "head",
+  "outcome": "clean",
+  "source": "event"
+ },
+ {
+  "id": 9,
+  "fighter": "B",
+  "peak_time": 10.8,
+  "proposed": "right_hook",
+  "technique": "kick",
+  "target": "head",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 17,
+  "fighter": "A",
+  "peak_time": 8.466666666666667,
+  "proposed": "left_front_kick",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "clean",
+  "source": "event"
+ },
+ {
+  "id": 25,
+  "fighter": "B",
+  "peak_time": 10.333333333333334,
+  "proposed": "left_body_kick",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 27,
+  "fighter": "A",
+  "peak_time": 8.600000000000001,
+  "proposed": "left_knee",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "clean",
+  "source": "event"
+ },
+ {
+  "id": 42,
+  "fighter": "A",
+  "peak_time": 38.2,
+  "proposed": "jab",
+  "technique": "punch",
+  "target": "head",
+  "outcome": "likely_landed",
+  "source": "event"
+ },
+ {
+  "id": 45,
+  "fighter": "A",
+  "peak_time": 9.266666666666667,
+  "proposed": "cross",
+  "technique": "punch",
+  "target": "body",
+  "outcome": "clean",
+  "source": "event"
+ },
+ {
+  "id": 49,
+  "fighter": "B",
+  "peak_time": 39.266666666666666,
+  "proposed": "left_front_kick",
+  "technique": "kick",
+  "target": "leg",
+  "outcome": "likely_landed",
+  "source": "event"
+ },
+ {
+  "id": 19,
+  "fighter": "A",
+  "peak_time": 27.8,
+  "proposed": "none",
+  "technique": "kick",
+  "target": "none",
+  "outcome": "uncertain",
+  "source": "quiet"
+ },
+ {
+  "id": 55,
+  "fighter": "A",
+  "peak_time": 27.400000000000002,
+  "proposed": "none",
+  "technique": "kick",
+  "target": "none",
+  "outcome": "uncertain",
+  "source": "quiet"
+ }
+]

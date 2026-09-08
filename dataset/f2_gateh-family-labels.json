@@ -1,0 +1,62 @@
+[
+ {
+  "id": 13,
+  "fighter": "B",
+  "peak_time": 15.466666666666667,
+  "proposed": "jab",
+  "technique": "punch",
+  "target": "head",
+  "outcome": "likely_landed",
+  "source": "event"
+ },
+ {
+  "id": 18,
+  "fighter": "A",
+  "peak_time": 17.26666666666667,
+  "proposed": "none",
+  "technique": "punch",
+  "target": "none",
+  "outcome": "uncertain",
+  "source": "quiet"
+ },
+ {
+  "id": 21,
+  "fighter": "A",
+  "peak_time": 45.46666666666667,
+  "proposed": "none",
+  "technique": "kick",
+  "target": "none",
+  "outcome": "uncertain",
+  "source": "quiet"
+ },
+ {
+  "id": 35,
+  "fighter": "A",
+  "peak_time": 45.66666666666667,
+  "proposed": "none",
+  "technique": "kick",
+  "target": "none",
+  "outcome": "uncertain",
+  "source": "quiet"
+ },
+ {
+  "id": 40,
+  "fighter": "A",
+  "peak_time": 45.53333333333334,
+  "proposed": "none",
+  "technique": "kick",
+  "target": "none",
+  "outcome": "uncertain",
+  "source": "quiet"
+ },
+ {
+  "id": 42,
+  "fighter": "A",
+  "peak_time": 45.400000000000006,
+  "proposed": "none",
+  "technique": "kick",
+  "target": "none",
+  "outcome": "uncertain",
+  "source": "quiet"
+ }
+]

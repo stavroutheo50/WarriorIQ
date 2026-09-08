@@ -1,0 +1,72 @@
+[
+ {
+  "id": 2,
+  "fighter": "A",
+  "peak_time": 7.916666666666667,
+  "proposed": "right_knee",
+  "technique": "kick",
+  "target": "leg",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 9,
+  "fighter": "B",
+  "peak_time": 20.338333333333335,
+  "proposed": "right_hook",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 14,
+  "fighter": "A",
+  "peak_time": 7.916666666666667,
+  "proposed": "right_hook",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 55,
+  "fighter": "A",
+  "peak_time": 7.916666666666667,
+  "proposed": "left_low_kick",
+  "technique": "kick",
+  "target": "leg",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 38,
+  "fighter": "B",
+  "peak_time": 20.471666666666668,
+  "proposed": "left_front_kick",
+  "technique": "kick",
+  "target": "leg",
+  "outcome": "likely_landed",
+  "source": "event"
+ },
+ {
+  "id": 39,
+  "fighter": "B",
+  "peak_time": 13.951666666666668,
+  "proposed": "left_body_kick",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 52,
+  "fighter": "A",
+  "peak_time": 6.0166666666666675,
+  "proposed": "cross",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "missed",
+  "source": "event"
+ }
+]
