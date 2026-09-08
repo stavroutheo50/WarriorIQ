@@ -542,6 +542,42 @@ def is_verified_scoring_event(event: StrikeEvent, ruleset: str) -> bool:
     )
 
 
+# One fighter cannot throw two different techniques at the same instant. The
+# detector does emit exactly that - measured on the three reference fights, one
+# frame was filed simultaneously as a right knee, a right hook *and* a left low
+# kick - so somewhere the alternatives have to be collapsed to one.
+SAME_INSTANT_SECONDS = 0.02
+
+
+def collapse_simultaneous_labels(events: Iterable[StrikeEvent]) -> tuple[list[StrikeEvent], int]:
+    """Keep the best-supported label per fighter per instant.
+
+    Split out so the report and the scorecard obey the same rule. They used
+    not to: scoring collapsed these, the live feed grouped by limb-or-family
+    instead, and a moment labelled both a punch and a kick therefore survived
+    as **two** entries in the feed a coach reads. On fight 1 that inflated one
+    fighter's count by two, and on fight 3 by one - and all three of those
+    moments turned out, on inspection, not to be strikes at all.
+
+    A real combination is not affected: two techniques a fighter genuinely
+    threw are tenths of a second apart, and this window is under one frame.
+    """
+    kept: list[StrikeEvent] = []
+    removed = 0
+    for fighter in ("A", "B"):
+        own = sorted((e for e in events if e.fighter == fighter), key=lambda e: e.peak_time)
+        groups: list[list[StrikeEvent]] = []
+        for event in own:
+            if groups and event.peak_time - groups[-1][0].peak_time <= SAME_INSTANT_SECONDS:
+                groups[-1].append(event)
+            else:
+                groups.append([event])
+        for group in groups:
+            kept.append(max(group, key=lambda e: (float(e.contact_confidence), float(e.confidence))))
+            removed += len(group) - 1
+    return sorted(kept, key=lambda event: event.peak_time), removed
+
+
 def deduplicate_scoring_events(events: Iterable[StrikeEvent], window_seconds: float = 0.48) -> tuple[list[StrikeEvent], int]:
     """Keep one candidate for each physical action without erasing combinations.
 
@@ -563,14 +599,10 @@ def deduplicate_scoring_events(events: Iterable[StrikeEvent], window_seconds: fl
         own = sorted((event for event in events if event.fighter == fighter), key=lambda event: event.peak_time)
 
         # Alternative labels produced for the same instant cannot represent two
-        # separate techniques by the same fighter.
-        instant_groups: list[list[StrikeEvent]] = []
-        for event in own:
-            if instant_groups and event.peak_time - instant_groups[-1][0].peak_time <= 0.02:
-                instant_groups[-1].append(event)
-            else:
-                instant_groups.append([event])
-        instant_kept, instant_removed = collapse(instant_groups)
+        # separate techniques by the same fighter. Shared with the live feed via
+        # collapse_simultaneous_labels, so the report and the scorecard cannot
+        # disagree about how many actions happened.
+        instant_kept, instant_removed = collapse_simultaneous_labels(own)
         removed += instant_removed
 
         motion_buckets: dict[tuple[str, str], list[StrikeEvent]] = defaultdict(list)

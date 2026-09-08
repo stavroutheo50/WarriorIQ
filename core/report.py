@@ -60,6 +60,21 @@ def _identity_seed_safe(tracking: dict, fighter: str) -> bool:
 MIN_COVERAGE_TO_REPORT_OBSERVED = 0.15
 
 
+# Has anybody established how often a flagged action really happened?
+#
+# No. Measured once, by hand, on 178 clips across the three reference fights:
+# **about a third** of displayed actions were real. The rest were the
+# opponent's strike credited to the defender, a moment where nothing happened,
+# or the referee. Three fights labelled by one reader is a finding, not a
+# validated precision figure - but it is far more than enough to stop the
+# report claiming these counts are minimums, and to stop it confirming a
+# federation obligation from them.
+#
+# Flip this to True only when precision has been measured on held-out footage
+# nobody tuned against. See project-detector-measured-on-178-clips.
+STRIKE_COUNTS_PRECISION_VALIDATED = False
+
+
 def observed_summary(report: dict) -> dict | None:
     """What we can stand behind when the scorecard cannot be given.
 
@@ -71,9 +86,13 @@ def observed_summary(report: dict) -> dict | None:
     This is the middle setting the report never had. It is deliberately not a
     score and never a comparison:
 
-      * every count is a floor, not a total. These are actions we could
-        evidence during the part of the round we could follow that fighter, so
-        the true number is higher and the wording has to say so.
+      * **the count is not a floor.** It was written as one - "at least N,
+        so the real number is higher" - and 178 hand-checked clips across the
+        three reference fights say the opposite: of the actions the report
+        displayed, roughly a third were real. Two in three were the opponent's
+        strike credited to the defender, a moment where nothing happened, or
+        the referee. A count that is inflated must never be presented as a
+        minimum, so the wording claims neither direction now.
       * the denominator travels with the number. "Twelve actions" is a claim
         about the fight; "twelve in the 40% we could follow you" is a claim
         about the footage, and only the second one is true.
@@ -122,8 +141,14 @@ def observed_summary(report: dict) -> dict | None:
         return None
     return {
         "fighters": out,
-        "basis": "actions we could evidence while we had sight of that fighter",
-        "is_a_floor": True,
+        "basis": "actions the analysis flagged while it had sight of that fighter",
+        # Precision has been measured once, by hand, on three fights: about a
+        # third of displayed actions were real. That is too small a sample to
+        # publish as a product claim and far too weak to call the count a
+        # minimum. Neither direction is asserted until there is a validated
+        # number to assert. See project-detector-measured-on-178-clips.
+        "is_a_floor": STRIKE_COUNTS_PRECISION_VALIDATED,
+        "precision_validated": STRIKE_COUNTS_PRECISION_VALIDATED,
     }
 
 
@@ -178,7 +203,18 @@ def kick_minimum_check(report: dict) -> dict | None:
                 # True only when the floor alone clears the bar. False here
                 # means "not established from this footage", never "failed",
                 # which is why the key is not called `met` on its own.
-                "minimum_confirmed_met": evidenced >= minimum,
+                #
+                # And it stays False entirely while the count is unvalidated.
+                # "You met the minimum" is an affirmative claim about a rule,
+                # and it was safe only because the count was assumed to be a
+                # floor. Measurement says the count is inflated, not
+                # conservative, so confirming compliance from it could tell a
+                # kickboxer they satisfied WAKO Article 6 when they did not.
+                # Refusing to confirm costs a feature; confirming wrongly
+                # costs somebody a bout.
+                "minimum_confirmed_met": (
+                    STRIKE_COUNTS_PRECISION_VALIDATED and evidenced >= minimum
+                ),
             }
         out.append({"round": item.get("round"), "fighters": fighters})
 
@@ -186,8 +222,9 @@ def kick_minimum_check(report: dict) -> dict | None:
         "minimum": minimum,
         "rule": "WAKO Full Contact, Chapter 8 Article 6: minimum 6 kicks per round, 18 per bout.",
         "rounds": out,
-        "basis": "kicks we could evidence while we had sight of that fighter",
-        "is_a_floor": True,
+        "basis": "kicks the analysis flagged while it had sight of that fighter",
+        "is_a_floor": STRIKE_COUNTS_PRECISION_VALIDATED,
+        "precision_validated": STRIKE_COUNTS_PRECISION_VALIDATED,
         "note": (
             "A round can be confirmed as meeting the minimum but never shown to have "
             "missed it: an unconfirmed round is one we could not follow closely enough, "

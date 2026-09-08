@@ -3548,10 +3548,34 @@ class ObservedSummaryTests(unittest.TestCase):
         self.assertIn("punch", blob)
         self.assertIn("kick", blob)
 
-    def test_it_is_marked_as_a_floor(self):
+    def test_it_is_not_claimed_to_be_a_floor(self):
+        """It was, and the claim was backwards.
+
+        "at least N, so the real number is higher" is only safe if the count
+        under-reports. Hand-checking 178 clips across the three reference
+        fights found the opposite: about a third of displayed actions were
+        real, the rest being the opponent's strike credited to the defender, a
+        moment where nothing happened, or the referee. An inflated count must
+        never be presented as a minimum, so neither direction is asserted
+        until precision is measured on footage nobody tuned against.
+        """
         from core.report import observed_summary
 
-        self.assertTrue(observed_summary(self._report())["is_a_floor"])
+        card = observed_summary(self._report())
+        self.assertFalse(card["is_a_floor"])
+        self.assertFalse(card["precision_validated"])
+
+    def test_the_page_does_not_say_at_least(self):
+        import re
+        from pathlib import Path
+
+        page = Path("app/templates/result.html").read_text(encoding="utf-8")
+        # Strip the Jinja comments first: one of them quotes the old wording to
+        # record why it went, and that explanation must not itself trip this.
+        rendered = re.sub(r"\{#.*?#\}", "", page, flags=re.S)
+        self.assertNotIn("at least {{seen.actions_evidenced}}", rendered)
+        self.assertNotIn("the real numbers are higher", rendered)
+        self.assertIn("have not been checked against the video", rendered)
 
     def test_the_page_shows_it_only_when_the_score_is_withheld(self):
         from pathlib import Path
@@ -3597,9 +3621,25 @@ class KickMinimumTests(unittest.TestCase):
         from core.report import kick_minimum_check
 
         seen = kick_minimum_check(self._report("FULL_CONTACT"))["rounds"]
-        self.assertTrue(seen[0]["fighters"]["A"]["minimum_confirmed_met"])
+        # The count is still reported...
         self.assertEqual(seen[0]["fighters"]["A"]["kicks_evidenced"], 7)
-        self.assertTrue(seen[0]["fighters"]["B"]["minimum_confirmed_met"])
+        # ...but compliance is not confirmed from an unvalidated count. Saying
+        # "you met WAKO Article 6" was safe only while the count was assumed to
+        # under-report; measurement says it over-reports, so a confirmation
+        # could tell a kickboxer they satisfied a rule they did not.
+        self.assertFalse(seen[0]["fighters"]["A"]["minimum_confirmed_met"])
+        self.assertFalse(seen[0]["fighters"]["B"]["minimum_confirmed_met"])
+
+    def test_it_would_confirm_again_once_precision_is_established(self):
+        """The feature is switched off, not deleted."""
+        from unittest import mock
+
+        from core import report as report_module
+
+        with mock.patch.object(report_module, "STRIKE_COUNTS_PRECISION_VALIDATED", True):
+            seen = report_module.kick_minimum_check(self._report("FULL_CONTACT"))["rounds"]
+        self.assertTrue(seen[0]["fighters"]["A"]["minimum_confirmed_met"])
+        self.assertFalse(seen[1]["fighters"]["A"]["minimum_confirmed_met"])
 
     def test_a_round_under_the_minimum_is_never_called_a_shortfall(self):
         """Two evidenced kicks is a statement about our coverage, not the fighter.
@@ -3622,7 +3662,7 @@ class KickMinimumTests(unittest.TestCase):
             self.assertNotIn(word, rounds)
         # And the payload says in words why an unconfirmed round is not one.
         self.assertIn("not a shortfall by the fighter", card["note"])
-        self.assertTrue(card["is_a_floor"])
+        self.assertFalse(card["is_a_floor"])
 
     def test_a_knee_counts_toward_the_kick_minimum(self):
         """Knees are illegal in Full Contact, so a knee there is a misread kick.
@@ -3633,7 +3673,8 @@ class KickMinimumTests(unittest.TestCase):
         from core.report import kick_minimum_check
 
         card = kick_minimum_check(self._report("FULL_CONTACT", a_kicks=(3, 2), a_knees=(3, 0)))
-        self.assertTrue(card["rounds"][0]["fighters"]["A"]["minimum_confirmed_met"])
+        # The folding is what this test is about; confirmation is gated
+        # separately on whether the count has been validated at all.
         self.assertEqual(card["rounds"][0]["fighters"]["A"]["kicks_evidenced"], 6)
 
     def test_a_report_without_rounds_yields_nothing(self):
@@ -3849,3 +3890,86 @@ class LabelPackServerTests(unittest.TestCase):
         import tools.serve_label_pack as serve
 
         self.assertIn('("127.0.0.1", args.port)', inspect.getsource(serve.main))
+
+
+class SimultaneousLabelTests(unittest.TestCase):
+    """One fighter, one instant, one action.
+
+    The detector emits mutually exclusive alternatives at a single frame -
+    measured on the reference fights, frame 246 of fight 1 is filed as a right
+    knee, a right hook *and* a left low kick, all for the same fighter. Scoring
+    collapsed those; the live feed grouped by limb-or-family instead, so a
+    moment labelled both a punch and a kick survived as **two** entries in the
+    feed a coach reads while the scorecard counted it once.
+    """
+
+    @staticmethod
+    def _event(fighter, frame, technique, family, limb, contact=0.5, confidence=0.5):
+        from core.types import StrikeEvent
+
+        return StrikeEvent(
+            fighter=fighter, opponent="B" if fighter == "A" else "A", round_number=1,
+            start_frame=frame - 4, peak_frame=frame, end_frame=frame + 4,
+            start_time=(frame - 4) / 30.0, peak_time=frame / 30.0, end_time=(frame + 4) / 30.0,
+            technique=technique, family=family, limb=limb,
+            outcome="clean", landed=True, target="body",
+            confidence=confidence, contact_confidence=contact,
+        )
+
+    def test_a_punch_and_a_kick_at_one_frame_become_one_action(self):
+        from core.scoring import collapse_simultaneous_labels
+
+        kept, removed = collapse_simultaneous_labels([
+            self._event("A", 246, "right_hook", "punch", "right_hand", contact=0.4),
+            self._event("A", 246, "right_knee", "knee", "right_leg", contact=0.9),
+            self._event("A", 246, "left_low_kick", "kick", "left_leg", contact=0.6),
+        ])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(removed, 2)
+        # The best-supported label survives, not the first one seen.
+        self.assertEqual(kept[0].technique, "right_knee")
+
+    def test_a_real_combination_is_left_alone(self):
+        """Two techniques a fighter actually threw are tenths of a second apart.
+
+        The window is under one frame at 30fps, so a genuine combination
+        cannot be swallowed by this.
+        """
+        from core.scoring import collapse_simultaneous_labels
+
+        kept, removed = collapse_simultaneous_labels([
+            self._event("A", 246, "left_hook", "punch", "left_hand"),
+            self._event("A", 252, "right_body_kick", "kick", "right_leg"),
+        ])
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(removed, 0)
+
+    def test_the_two_fighters_are_collapsed_separately(self):
+        """A simultaneous exchange is two actions, not one."""
+        from core.scoring import collapse_simultaneous_labels
+
+        kept, _ = collapse_simultaneous_labels([
+            self._event("A", 246, "jab", "punch", "left_hand"),
+            self._event("B", 246, "cross", "punch", "right_hand"),
+        ])
+        self.assertEqual({e.fighter for e in kept}, {"A", "B"})
+
+    def test_the_feed_and_the_scorecard_use_the_same_rule(self):
+        """They disagreed, which is how the double count reached a coach."""
+        import inspect
+
+        from core import analyzer, scoring
+
+        self.assertIn("collapse_simultaneous_labels",
+                      inspect.getsource(analyzer._live_event_payload))
+        self.assertIn("collapse_simultaneous_labels",
+                      inspect.getsource(scoring.deduplicate_scoring_events))
+
+    def test_the_live_feed_no_longer_counts_one_moment_twice(self):
+        from core.analyzer import _live_event_payload
+
+        feed = _live_event_payload([
+            self._event("A", 246, "right_hook", "punch", "right_hand", contact=0.9, confidence=0.9),
+            self._event("A", 246, "left_low_kick", "kick", "left_leg", contact=0.4, confidence=0.4),
+        ], "K1", True, limit=None)
+        self.assertEqual(len(feed), 1, "one moment produced two entries in the feed")

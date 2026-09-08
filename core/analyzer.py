@@ -53,7 +53,7 @@ from core.report import build_report, write_report
 from core.rtm_pose import refine as refine_fighter_pose
 from core.sam_recovery import SamRecovery, nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
-from core.scoring import is_legal_event, normalize_ruleset
+from core.scoring import collapse_simultaneous_labels, is_legal_event, normalize_ruleset
 from core.types import AnalysisProgress, AnalysisRequest, PersonObservation, PoseFrame, RoundSpec
 from core.video import build_round_schedule, get_video_info, requested_segment_end, round_at_time
 
@@ -104,6 +104,12 @@ def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | 
         ),
         key=lambda item: item.peak_time,
     )
+    # One fighter, one instant, one action. The detector emits mutually
+    # exclusive alternatives at a single frame, and the loop below groups by
+    # limb-or-family - so a moment labelled both a punch and a kick used to
+    # survive as two entries here while the scorecard counted it once. Same
+    # rule as scoring now, from the same function.
+    reliable, _simultaneous = collapse_simultaneous_labels(reliable)
     deduplicated = []
     for event in reliable:
         duplicate_index = next((
