@@ -616,30 +616,63 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
             return f"{value:.3f}"
         return escape(str(value))
 
+    # This file is written beside the analysis on the machine that ran it and
+    # is not served to anybody. It still has to say the same thing the web
+    # report says. Twice today a claim was corrected in one surface and left
+    # standing in another - the scorecard against the live feed, then the
+    # report against the live view - and a stale copy of a retracted number is
+    # exactly how a wrong figure gets quoted back later.
+    trusted = bool((report.get("integrity") or {}).get("action_metrics_trusted", False))
+
     def fighter_card(name: str) -> str:
         m = report["metrics"][name]
         attacks = m["attacks"]
-        accuracy = "Unavailable" if attacks["accuracy"] is None else f"{attacks['accuracy']*100:.1f}%"
+        # Leg strikes only, and no outcomes unless the analysis passed its own
+        # integrity gate. Checked against the video on three bouts: the kick
+        # count was right in all three and the punch count overstated by eleven
+        # in two, so punches are not shown here either.
+        kicks = int((attacks.get("families") or {}).get("kick") or 0)
+        rows = [
+            f"<tr><td>Leg strikes flagged</td><td>{kicks}</td></tr>",
+            f"<tr><td>Pose coverage</td><td>{m['pose_coverage']*100:.1f}%</td></tr>",
+            f"<tr><td>Footwork (body lengths/s)</td><td>{fmt(m.get('footwork_body_lengths_per_second'))}</td></tr>",
+            f"<tr><td>Guard</td><td>{fmt(m.get('guard_index'))}</td></tr>",
+            f"<tr><td>Balance</td><td>{fmt(m.get('balance_index'))}</td></tr>",
+            f"<tr><td>Centre control</td><td>{fmt(m.get('ring_center_control'))}</td></tr>",
+        ]
+        if trusted:
+            accuracy = "Unavailable" if attacks["accuracy"] is None else f"{attacks['accuracy']*100:.1f}%"
+            rows += [
+                f"<tr><td>Landed / attempts</td><td>{attacks['landed']} / {attacks['attempts']}</td></tr>",
+                f"<tr><td>Accuracy</td><td>{accuracy}</td></tr>",
+                f"<tr><td>Strongest weapon</td><td>{fmt(m['strongest_weapon'])}</td></tr>",
+                f"<tr><td>Combinations</td><td>{m['combinations']['count']}</td></tr>",
+                f"<tr><td>Counters</td><td>{m['counters']['count']}</td></tr>",
+            ]
+        note = "" if trusted else (
+            "<div class='muted'>Landed, accuracy, strongest weapon and technique names are "
+            "withheld: this analysis did not pass the identity and action integrity gate. "
+            "Punches are not counted at any confidence.</div>")
         return f"""
         <section class='card'>
           <h2>Fighter {name}</h2>
-          <div class='big'>{attacks['landed']} / {attacks['attempts']}</div>
-          <div class='muted'>clean/likely landed / detected attempts</div>
-          <table>
-            <tr><td>Accuracy</td><td>{accuracy}</td></tr>
-            <tr><td>Pose coverage</td><td>{m['pose_coverage']*100:.1f}%</td></tr>
-            <tr><td>Strongest weapon</td><td>{fmt(m['strongest_weapon'])}</td></tr>
-            <tr><td>Combinations</td><td>{m['combinations']['count']}</td></tr>
-            <tr><td>Counters</td><td>{m['counters']['count']}</td></tr>
-          </table>
+          <div class='big'>{kicks}</div>
+          <div class='muted'>leg strikes flagged (kicks and knees)</div>
+          <table>{''.join(rows)}</table>
+          {note}
         </section>
         """
 
+    # Named techniques and outcomes only where the analysis earned them. A
+    # "jab" on footage that cannot resolve an arm is a guess with a confident
+    # label on it.
     event_rows = "".join(
         f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
-        f"<td>{escape(e['technique'].replace('_',' '))}</td><td>{escape(e['outcome'])}</td><td>{escape(str(e['target']))}</td></tr>"
+        f"<td>{escape(e['technique'].replace('_',' ')) if trusted else escape(e.get('family') or 'action')}</td>"
+        f"<td>{escape(e['outcome']) if trusted else 'not classified'}</td>"
+        f"<td>{escape(str(e['target'])) if trusted else '-'}</td></tr>"
         for e in report["key_moments"]
-    )
+    ) if report.get("key_moments") else ""
 
     coaching_html = ""
     for fighter in ("A", "B"):

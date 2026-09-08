@@ -4089,3 +4089,63 @@ class AppearanceGateHonestyTests(unittest.TestCase):
         # refusing anybody; far above it, it refuses the right person.
         self.assertGreater(SETTINGS.min_anchor_appearance_similarity, 0.49)
         self.assertLess(SETTINGS.min_anchor_appearance_similarity, 0.70)
+
+
+class StandaloneReportHonestyTests(unittest.TestCase):
+    """The file written beside the analysis must say what the web report says.
+
+    It is not served to anybody, which is exactly why it drifted: it printed
+    landed/attempts, an accuracy percentage, a "strongest weapon" and named
+    techniques with no integrity gate at all. On fight 1 that meant a file
+    claiming a strongest weapon of "jab" for a bout containing no punches.
+
+    Twice today a claim was corrected in one surface and left standing in
+    another - the scorecard against the live feed, then the report against
+    the live view. A stale copy of a retracted number is how a wrong figure
+    gets quoted back later.
+    """
+
+    def _write(self, trusted):
+        import json
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        from core.report import write_report
+
+        report = json.loads(Path("outputs/fam3/report.json").read_text(encoding="utf-8"))
+        report.setdefault("integrity", {})["action_metrics_trusted"] = trusted
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        _, html_path = write_report(out, report)
+        return html_path.read_text(encoding="utf-8")
+
+    def test_an_untrusted_analysis_withholds_what_the_web_report_withholds(self):
+        html = self._write(trusted=False)
+        for claim in ("Strongest weapon", "Accuracy", "jab", "uppercut"):
+            with self.subTest(claim=claim):
+                self.assertNotIn(claim, html)
+        self.assertIn("leg strikes flagged", html)
+        self.assertIn("Punches are not counted", html)
+
+    def test_the_pose_numbers_are_shown_either_way(self):
+        """These are measured and survive the gate, so they always appear."""
+        for trusted in (True, False):
+            html = self._write(trusted=trusted)
+            with self.subTest(trusted=trusted):
+                for shown in ("Pose coverage", "Footwork", "Guard", "Balance", "Centre control"):
+                    self.assertIn(shown, html)
+
+    def test_a_trusted_analysis_may_still_show_outcomes(self):
+        """The gate is what decides, not a blanket ban."""
+        html = self._write(trusted=True)
+        self.assertIn("Landed / attempts", html)
+        self.assertIn("Strongest weapon", html)
+
+    def test_punches_are_never_counted_even_when_trusted(self):
+        """Kicks survived checking; punches did not, at any confidence."""
+        for trusted in (True, False):
+            html = self._write(trusted=trusted)
+            with self.subTest(trusted=trusted):
+                self.assertNotIn("Punch attempts", html)
+                self.assertNotIn("punches landed", html.lower())
