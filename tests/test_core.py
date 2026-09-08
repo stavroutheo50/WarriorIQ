@@ -3469,12 +3469,33 @@ class ObservedSummaryTests(unittest.TestCase):
                     "total_strikes": sum(counts)}
         return {"statistics": {"fighters": {"A": fighter(cov_a, a), "B": fighter(cov_b, b)}}}
 
-    def test_it_counts_per_fighter_by_family(self):
+    def test_it_reports_kicks_and_withholds_punches(self):
+        """Punches are counted internally and deliberately not shown.
+
+        Every proposed strike in three fights was checked against the video:
+
+            fight 1   punches reported 11, actually thrown  0
+            fight 2   punches reported  3, actually thrown  2
+            fight 3   punches reported 14, actually thrown  3
+            fight 1   kicks   reported  7, actually thrown  7
+            fight 2   kicks   reported  4, actually thrown  4
+            fight 3   kicks   reported  9, actually thrown  8
+
+        The kick count is right in all three and the punch count is inflated
+        by eleven in two. Individual kick events are only 27% precise, but the
+        errors cancel - false kicks offset missed ones - so the count survives
+        where the events do not. Punches have no such luck.
+        """
         from core.report import observed_summary
 
         seen = observed_summary(self._report())["fighters"]
-        self.assertEqual(seen["A"]["actions_evidenced"], 2)
-        self.assertEqual(seen["A"]["families"], {"punch": 1, "kick": 1})
+        self.assertEqual(seen["A"]["families"], {"kick": 1})
+        self.assertNotIn("punch", seen["A"]["families"])
+        self.assertEqual(seen["A"]["actions_evidenced"], 1)
+        # The withheld number is carried so the page can say the omission is
+        # deliberate rather than leaving a coach thinking their boxer threw
+        # nothing with the hands.
+        self.assertEqual(seen["A"]["punches_withheld"], 1)
 
     def test_a_knee_is_counted_as_a_leg_strike(self):
         """A knee and a round kick are both a leg arriving.
@@ -3487,7 +3508,7 @@ class ObservedSummaryTests(unittest.TestCase):
         from core.report import observed_summary
 
         seen = observed_summary(self._report(b=(0, 0, 1)))["fighters"]
-        self.assertEqual(seen["B"]["families"], {"punch": 0, "kick": 1})
+        self.assertEqual(seen["B"]["families"], {"kick": 1})
         self.assertEqual(seen["B"]["actions_evidenced"], 1)
 
     def test_knees_reach_the_attempt_tier_at_all(self):
@@ -3508,9 +3529,12 @@ class ObservedSummaryTests(unittest.TestCase):
         from core.report import observed_summary
 
         report = self._report(a=(3, 2, 1))
+        stats = report["statistics"]["fighters"]["A"]
         seen = observed_summary(report)["fighters"]["A"]
+        # Kicks and knees, from the same statistics block - not the punch
+        # total, and not a recount of the raw event list.
         self.assertEqual(seen["actions_evidenced"],
-                         report["statistics"]["fighters"]["A"]["total_strikes"])
+                         stats["kick_attempts"] + stats["knee_attempts"])
 
     def test_the_share_of_the_round_travels_with_the_count(self):
         from core.report import observed_summary
@@ -3575,7 +3599,8 @@ class ObservedSummaryTests(unittest.TestCase):
         rendered = re.sub(r"\{#.*?#\}", "", page, flags=re.S)
         self.assertNotIn("at least {{seen.actions_evidenced}}", rendered)
         self.assertNotIn("the real numbers are higher", rendered)
-        self.assertIn("have not been checked against the video", rendered)
+        self.assertIn("Leg strikes only", rendered)
+        self.assertIn("punch count was overstated", rendered)
 
     def test_the_page_shows_it_only_when_the_score_is_withheld(self):
         from pathlib import Path

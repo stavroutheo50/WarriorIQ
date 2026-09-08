@@ -98,11 +98,28 @@ def observed_summary(report: dict) -> dict | None:
         about the footage, and only the second one is true.
       * a fighter followed too little to have a meaningful denominator is left
         out entirely rather than given a small number that reads as a quiet one.
-      * punches and kicks only, where a kick is any leg strike. Naming a
-        jab against a cross needs a
-        classifier this footage cannot support, which is why
-        `action_labels_available` is false and the technique breakdown is
-        already empty; this reports the families that survive that gate.
+      * **kicks only.** Punches are counted internally and deliberately not
+        reported. Hand-checking every proposed event in three fights against
+        the video gave this:
+
+              fight 1   punches reported 11, actually thrown  0
+              fight 2   punches reported  3, actually thrown  2
+              fight 3   punches reported 14, actually thrown  3
+
+              fight 1   kicks   reported  7, actually thrown  7
+              fight 2   kicks   reported  4, actually thrown  4
+              fight 3   kicks   reported  9, actually thrown  8
+
+        The kick count is right in all three bouts and the punch count is
+        inflated by eleven in two of them. Individual kick events are only 27%
+        precise, but the errors cancel almost exactly - false kicks are offset
+        by missed ones - so the *count* survives even though the *events* do
+        not. Punches have no such luck: at this framing an arm extension is a
+        few pixels and the detector proposes them from noise.
+
+        Naming a jab against a cross is a separate and even weaker claim, which
+        is why `action_labels_available` is false and the technique breakdown
+        is already empty.
       * no outcomes. Whether a strike landed rests on contact classification
         that is not validated, so the unit is the action attempted.
 
@@ -120,28 +137,28 @@ def observed_summary(report: dict) -> dict | None:
         coverage = float(item.get("observation_coverage") or 0.0)
         if coverage < MIN_COVERAGE_TO_REPORT_OBSERVED:
             continue
-        # Two families, not three. A knee and a round kick are both a leg
-        # arriving, and judged by eye on real footage the two are a coin flip -
-        # five right and five wrong. Reporting them separately would name a
-        # distinction the footage does not carry, which is the same reason a
-        # jab is not named against a cross.
-        families = {
-            "punch": int(item.get("punch_attempts") or 0),
-            "kick": int(item.get("kick_attempts") or 0) + int(item.get("knee_attempts") or 0),
-        }
-        total = int(item.get("total_strikes") or 0)
-        if total <= 0:
+        # A knee and a round kick are both a leg arriving, and judged by eye
+        # the two are a coin flip - five right and five wrong - so they are one
+        # family. Punches are excluded entirely; see the docstring for the
+        # counts that decided it.
+        kicks = int(item.get("kick_attempts") or 0) + int(item.get("knee_attempts") or 0)
+        punches_withheld = int(item.get("punch_attempts") or 0)
+        if kicks <= 0:
             continue
         out[fighter] = {
             "followed_share": coverage,
-            "actions_evidenced": total,
-            "families": families,
+            "actions_evidenced": kicks,
+            "families": {"kick": kicks},
+            # Surfaced so the page can say the omission is deliberate rather
+            # than leaving a coach wondering why their boxer threw nothing.
+            "punches_withheld": punches_withheld,
         }
     if not out:
         return None
     return {
         "fighters": out,
-        "basis": "actions the analysis flagged while it had sight of that fighter",
+        "basis": "leg strikes the analysis flagged while it had sight of that fighter",
+        "punches_reported": False,
         # Precision has been measured once, by hand, on three fights: about a
         # third of displayed actions were real. That is too small a sample to
         # publish as a product claim and far too weak to call the count a

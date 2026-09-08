@@ -39,26 +39,27 @@
      it compares the two - comparing is what the withheld scorecard does. #}
   {% if not report.scorecard.available and observed %}
   <div class="observed">
-    <h3>What we could actually see</h3>
+    <h3>Kicks we could count</h3>
     {#- This used to end "so the real numbers are higher", presenting the count
         as a floor. Hand-checking 178 clips showed the opposite: about a third
         of displayed actions were real, the rest being the opponent's strike
         credited to the defender, a moment where nothing happened, or the
         referee. An inflated count must not be sold as a minimum. -#}
-    <p class="observed-note">Not a score, and not a total. These are the actions the analysis
-      flagged while it kept sight of each fighter. They have not been checked against the video,
-      so treat them as a starting point for review rather than a count you can rely on.</p>
+    <p class="observed-note">Not a score. <strong>Leg strikes only</strong> &mdash; kicks and knees
+      together. We checked every strike this analysis proposed across three real bouts against the
+      video: the kick count came out right in all three, and the punch count was overstated by
+      eleven in two of them. At this camera distance an arm extension is a few pixels, so punches
+      are counted internally and deliberately not shown until that changes.</p>
     <div class="observed-grid">
       {% for who, seen in observed.fighters.items() %}
       <div class="observed-card">
         <span class="observed-who">Fighter {{who}}</span>
         <strong>{{seen.actions_evidenced}}</strong>
-        <span class="observed-basis">action{{ '' if seen.actions_evidenced == 1 else 's' }} flagged
+        <span class="observed-basis">leg strike{{ '' if seen.actions_evidenced == 1 else 's' }}
           in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
         <span class="observed-families">
-          {{seen.families.punch}} punch{{ '' if seen.families.punch == 1 else 'es' }} ·
-          {{seen.families.kick}} kick{{ '' if seen.families.kick == 1 else 's' }}
-          <em>(knees counted as kicks)</em>
+          <em>knees counted as kicks</em>{% if seen.punches_withheld %} &middot;
+          punches not shown{% endif %}
         </span>
       </div>
       {% endfor %}
