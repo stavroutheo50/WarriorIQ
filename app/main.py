@@ -2678,7 +2678,7 @@ def _save_remote_fight(job_id: str, job: dict, report: dict) -> None:
     )
 
 
-@app.post("/api/worker/heartbeat")
+@app.post("/api/worker/heartbeat", dependencies=[Depends(_require_remote_worker)])
 def remote_worker_heartbeat(request: Request, payload: WorkerIdentityPayload):
     _require_remote_worker(request)
     worker_id = _validated_worker_id(payload.worker_id)
@@ -2686,7 +2686,7 @@ def remote_worker_heartbeat(request: Request, payload: WorkerIdentityPayload):
     return {"ok": True}
 
 
-@app.post("/api/worker/claim")
+@app.post("/api/worker/claim", dependencies=[Depends(_require_remote_worker)])
 def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
     _require_remote_worker(request)
     worker_id = _validated_worker_id(payload.worker_id)
@@ -2699,7 +2699,7 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
     return {"job": _remote_job_payload(job_id, job)}
 
 
-@app.get("/api/worker/jobs/{job_id}/video")
+@app.get("/api/worker/jobs/{job_id}/video", dependencies=[Depends(_require_remote_worker)])
 def remote_worker_video(request: Request, job_id: str, worker_id: str, analysis_run_id: str):
     _require_remote_worker(request)
     worker_id = _validated_worker_id(worker_id)
@@ -2711,7 +2711,7 @@ def remote_worker_video(request: Request, job_id: str, worker_id: str, analysis_
     return FileResponse(video_path, filename=f"{job_id}{video_path.suffix.lower()}", media_type="video/mp4")
 
 
-@app.post("/api/worker/dataset/backfill")
+@app.post("/api/worker/dataset/backfill", dependencies=[Depends(_require_remote_worker)])
 def remote_worker_dataset_backfill(request: Request):
     """Write the pose windows for labels that were saved without one.
 
@@ -2757,7 +2757,7 @@ def remote_worker_dataset_backfill(request: Request):
     }
 
 
-@app.get("/api/worker/dataset")
+@app.get("/api/worker/dataset", dependencies=[Depends(_require_remote_worker)])
 def remote_worker_dataset(request: Request):
     """Hand the labelled training set to the machine that does the training.
 
@@ -2791,7 +2791,7 @@ def remote_worker_dataset(request: Request):
     )
 
 
-@app.post("/api/worker/jobs/{job_id}/progress")
+@app.post("/api/worker/jobs/{job_id}/progress", dependencies=[Depends(_require_remote_worker)])
 def remote_worker_progress(request: Request, job_id: str, payload: WorkerProgressPayload):
     _require_remote_worker(request)
     worker_id = _validated_worker_id(payload.worker_id)
@@ -2807,7 +2807,7 @@ def remote_worker_progress(request: Request, job_id: str, payload: WorkerProgres
     return {"ok": True}
 
 
-@app.post("/api/worker/jobs/{job_id}/complete", status_code=201)
+@app.post("/api/worker/jobs/{job_id}/complete", status_code=201, dependencies=[Depends(_require_remote_worker)])
 async def remote_worker_complete(
     request: Request,
     job_id: str,
@@ -2861,7 +2861,7 @@ async def remote_worker_complete(
         archive_path.unlink(missing_ok=True)
 
 
-@app.post("/api/worker/jobs/{job_id}/failed")
+@app.post("/api/worker/jobs/{job_id}/failed", dependencies=[Depends(_require_remote_worker)])
 def remote_worker_failed(request: Request, job_id: str, payload: WorkerFailurePayload):
     _require_remote_worker(request)
     worker_id = _validated_worker_id(payload.worker_id)

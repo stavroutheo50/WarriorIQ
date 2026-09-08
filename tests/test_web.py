@@ -2334,3 +2334,68 @@ class ReflowTests(unittest.TestCase):
     def test_the_stale_minimum_is_still_the_reason(self):
         """If fixes.css ever drops it, the comment above stops making sense."""
         self.assertIn("min-width:145px", self._css("fixes.css"))
+
+
+class WorkerAuthOrderingTests(unittest.TestCase):
+    """An unauthenticated request must be refused before its body is parsed.
+
+    Found on the live site: posting `{}` to /api/worker/heartbeat with no
+    bearer token returned **422 with the full field list**, because the auth
+    check ran inside the handler and FastAPI validates the body first. Not a
+    hole - a well-formed body still got 401 - but an anonymous caller learned
+    the request schema, and the server did work for a request it was going to
+    refuse. Auth is now a route dependency, which FastAPI solves first.
+    """
+
+    def setUp(self):
+        import importlib
+
+        self._env = mock.patch.dict(os.environ, {
+            "WARRIORIQ_WORKER_MODE": "remote",
+            "WARRIORIQ_WORKER_TOKEN": "unit-test-worker-token",
+        })
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        import core.config
+        import app.main
+        importlib.reload(core.config)
+        self.main = importlib.reload(app.main)
+        self.addCleanup(lambda: (importlib.reload(core.config), importlib.reload(app.main)))
+        from fastapi.testclient import TestClient
+        self.client = TestClient(self.main.app)
+
+    def test_no_token_is_refused_before_the_body_is_validated(self):
+        response = self.client.post("/api/worker/heartbeat", json={})
+        self.assertEqual(response.status_code, 401)
+        # And the refusal must not describe the schema it never looked at.
+        self.assertNotIn("worker_id", response.text)
+
+    def test_auth_passing_still_validates_the_body(self):
+        response = self.client.post(
+            "/api/worker/heartbeat", json={},
+            headers={"Authorization": "Bearer unit-test-worker-token"})
+        self.assertEqual(response.status_code, 422)
+
+    def test_a_correct_call_still_works(self):
+        response = self.client.post(
+            "/api/worker/heartbeat", json={"worker_id": "unit-test"},
+            headers={"Authorization": "Bearer unit-test-worker-token"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_every_worker_route_declares_the_auth_dependency(self):
+        """The guarantee, the same shape as the CSRF one.
+
+        Eight routes carry it today; a ninth added without it would be
+        authenticated only by whatever the handler remembers to call.
+        """
+        from fastapi import Depends  # noqa: F401  (documents the mechanism)
+
+        missing = []
+        for route in self.main.app.routes:
+            path = getattr(route, "path", "")
+            if not path.startswith("/api/worker/"):
+                continue
+            deps = [d.dependency for d in getattr(route, "dependencies", [])]
+            if self.main._require_remote_worker not in deps:
+                missing.append(path)
+        self.assertEqual(missing, [], "worker routes without the auth dependency")
