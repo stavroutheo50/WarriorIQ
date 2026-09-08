@@ -183,12 +183,42 @@ class Settings:
     referee_filter_enabled: bool = env_bool("WARRIORIQ_REFEREE_FILTER", True)
     referee_probe_path: str = os.getenv(
         "WARRIORIQ_REFEREE_PROBE", "models/referee_probe.npz").strip()
-    # Measured on 58 hand-checked crops from real footage: the official scores
-    # 0.56 to 0.997 and everyone else 0.003 to 0.091. The gap is wide enough
-    # that the midpoint costs nothing at either end, and on two unseen fights
-    # the crops that land near it are seated table officials, not fighters.
+    # Was 0.50, on the reasoning that "the official scores 0.56 to 0.997 and
+    # everyone else 0.003 to 0.091, so the midpoint costs nothing". That gap
+    # was real on the 58 crops it was measured on - all from one bout - and it
+    # is not the gap on other footage.
+    #
+    # Re-measured on **178 hand-labelled clips across all three fights**, ten
+    # of them the official. The probe still *ranks* beautifully (AUC 0.993),
+    # but referees score anywhere from 0.06 to 0.99, so at 0.50 it caught only
+    # five of ten. What separates them is not a wide margin, it is that
+    # everyone else scores lower still:
+    #
+    # The gate is applied to **every candidate during tracking**, not just the
+    # seed, so the cost of lowering it is real fighter observations refused.
+    # Both sides were measured - officials against the ten hand-labelled ones,
+    # cost against all 469 tracked fighter boxes across the three fights:
+    #
+    #     threshold   officials caught   real fighter boxes refused
+    #        0.50           5 / 10             1 / 469  (0.2%)
+    #        0.16           5 / 10            11 / 469  (2.3%)
+    #        0.15           8 / 10            12 / 469  (2.6%)
+    #        0.12           8 / 10            15 / 469  (3.2%)
+    #        0.05          10 / 10            far more
+    #
+    # 0.15 and not 0.12: the three officials that 0.50 missed all score
+    # exactly 0.15, so anything lower buys no extra catch and only costs more
+    # fighter frames. A referee tracked as a fighter corrupts every number in
+    # that fighter's report; 2.6% of observations is a small coverage cost
+    # against that, and a refused frame is recoverable where a wrong identity
+    # is not.
+    #
+    # Fight 3's two officials score 0.06-0.07 and are still missed. Reaching
+    # them needs 0.05, which refuses fighters in bulk - that is a probe
+    # trained across venues, not a threshold, and it is not fixed here.
+    # See project-detector-measured-on-178-clips.
     min_referee_probability: float = float(
-        os.getenv("WARRIORIQ_MIN_REFEREE_PROB", "0.50"))
+        os.getenv("WARRIORIQ_MIN_REFEREE_PROB", "0.15"))
     # Fighter motion between sampled frames is often larger than generic
     # pedestrian motion. These values still reject distant bystanders, while
     # allowing a fighter to be recovered after a tracker-ID reset.

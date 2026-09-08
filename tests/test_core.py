@@ -3973,3 +3973,59 @@ class SimultaneousLabelTests(unittest.TestCase):
             self._event("A", 246, "left_low_kick", "kick", "left_leg", contact=0.4, confidence=0.4),
         ], "K1", True, limit=None)
         self.assertEqual(len(feed), 1, "one moment produced two entries in the feed")
+
+
+class RefereeThresholdTests(unittest.TestCase):
+    """The probe ranks well; the gate was cut in the wrong place.
+
+    0.50 came from 58 crops of a single bout, where officials scored 0.56+
+    and nobody else cleared 0.10. Re-measured on 178 hand-labelled clips
+    across all three fights, referees score 0.06 to 0.99 - the probe still
+    separates them (AUC 0.993) but by ranking, not by a wide margin, and at
+    0.50 it caught five of ten.
+    """
+
+    def test_the_gate_sits_where_the_measurement_put_it(self):
+        from core.config import SETTINGS
+
+        # The three officials 0.50 missed score exactly 0.15, so the gate has
+        # to be at or below that to catch them - and no lower, because lower
+        # buys no extra catch and refuses more real fighter frames.
+        self.assertLessEqual(SETTINGS.min_referee_probability, 0.15)
+        # Below about 0.05 it starts flagging fighters in bulk (14 of 168).
+        self.assertGreater(SETTINGS.min_referee_probability, 0.05)
+
+    def test_the_reasoning_records_what_it_was_measured_on(self):
+        """The old comment asserted a gap that only existed in one bout.
+
+        That is the mistake this project keeps repeating, so the replacement
+        has to name the sample it came from.
+        """
+        from pathlib import Path
+
+        config = Path("core/config.py").read_text(encoding="utf-8")
+        self.assertIn("178 hand-labelled clips", config)
+        self.assertIn("all three fights", config)
+        # And the cost side, not just the benefit: this gate refuses real
+        # fighter frames too, and a threshold argued from one side of that
+        # trade is how it ended up at 0.50 in the first place.
+        self.assertIn("469 tracked fighter boxes", config)
+
+    def test_an_official_scoring_low_is_still_rejected(self):
+        """The measured failure: a referee at 0.15 used to pass the gate."""
+        from core.config import SETTINGS
+
+        for score in (0.15, 0.66, 0.93, 0.99):   # the officials 0.50 let through
+            with self.subTest(referee_score=score):
+                self.assertGreaterEqual(score, SETTINGS.min_referee_probability)
+
+    def test_fight_threes_officials_are_known_to_be_missed(self):
+        """Not fixed here, and not pretended otherwise.
+
+        Two officials in fight 3 score 0.06-0.07. Reaching them needs 0.05,
+        which flags fourteen fighters - that is a probe trained across venues,
+        not a threshold.
+        """
+        from core.config import SETTINGS
+
+        self.assertGreater(SETTINGS.min_referee_probability, 0.07)
