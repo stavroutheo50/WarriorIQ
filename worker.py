@@ -28,10 +28,19 @@ def _missing_requirements() -> list[str]:
     job and fail it, and - now that there is a single-worker lock - can hold
     that lock against the one interpreter that could have done the work.
 
-    Seen on the machine that runs this: worker.py was being launched with an
-    unrelated Python that had none of torch, OpenCV or ultralytics. It died on
-    the first third-party import with a bare traceback, over and over, which
-    reads as a broken worker rather than as the wrong Python.
+    Seen on the machine that runs this: worker.py was being launched with a
+    Python that had none of torch, OpenCV or ultralytics. It died on the first
+    third-party import with a bare traceback, over and over, which reads as a
+    broken worker rather than as the wrong Python.
+
+    **That Python is usually not a stranger.** On this machine `.venv` was
+    created from an interpreter under `.cache/codex-runtimes/`, so that path
+    *is* the venv's own base - `pyvenv.cfg` names it as `home`. A child process
+    spawned from a venv worker can appear under the base interpreter while
+    still having the venv's packages on its path, and it will pass this check
+    correctly. Do not go killing worker processes because their executable is
+    not literally `.venv/Scripts/python.exe`; check `pyvenv.cfg` first, and
+    check whether the process is a child of the real worker.
     """
     import importlib.util
 
@@ -49,7 +58,10 @@ if __name__ == "__main__":
             "",
             "Start the worker with the project's own environment instead:",
             "    .venv/Scripts/python.exe worker.py     (or start-worker.bat)",
-            "and close whatever launched this one.",
+            "",
+            "If that path looks like the venv's own base interpreter, check",
+            ".venv/pyvenv.cfg - `home` names it - and check whether this is a",
+            "child of a running worker before assuming it is a stray.",
         ]), file=sys.stderr)
         raise SystemExit(2)
 
