@@ -404,6 +404,37 @@ def build_preliminary_scorecard(
                 else "No preliminary score is shown because the automatic action engine found no scoring candidates with enough evidence."
             ),
         })
+    elif not STRIKE_COUNTS_PRECISION_VALIDATED:
+        # **A kickboxing round cannot be scored on kicks alone.**
+        #
+        # Every ruleset here scores hands and feet, and K-1 weights a punch at
+        # 1.0 against a kick at 1.15 - so a punch is most of what decides a
+        # close round. Checked against video on three bouts, the punch count
+        # was overstated by eleven in two of them and the family is 14%
+        # precise; the report stopped publishing it for that reason.
+        #
+        # Scoring from it anyway would be the same number wearing a different
+        # hat. Dropping punches from the maths is no better: it would score a
+        # boxing-heavy round as though nobody threw a hand, which is a
+        # different wrong answer rather than a right one.
+        #
+        # So no score while punches cannot be counted. The kick count, the
+        # movement numbers and the action timeline are unaffected - they are
+        # measured, and none of them claims to say who won.
+        scorecard.update({
+            "available": False,
+            "totals": {"A": None, "B": None},
+            "rounds": [],
+            "winner_estimate": None,
+            "status": "punch_counting_unavailable",
+            "disclaimer": (
+                "No score is shown. Scoring a round needs both hands and feet counted, and "
+                "WarriorIQ's punch counting is not accurate enough yet - checked against video, "
+                "the kick count came out right and the punch count did not. Scoring on kicks "
+                "alone would understate anyone who boxes. Movement, coverage, the leg-strike "
+                "count and the action timeline below are unaffected."
+            ),
+        })
     else:
         scorecard["available"] = True
         scorecard["status"] = "preliminary_unvalidated"

@@ -1439,7 +1439,21 @@ class PublicPageTests(unittest.TestCase):
         self.assertFalse(report["scorecard"]["available"])
         self.assertFalse(report["integrity"]["action_metrics_trusted"])
 
-    def test_high_coverage_unvalidated_actions_get_preliminary_not_verified_score(self):
+    def test_no_score_is_shown_while_punches_cannot_be_counted(self):
+        """Was: high coverage plus enough candidates gave a preliminary score.
+
+        It no longer does, and the reason is not coverage. Every ruleset here
+        scores hands and feet - K-1 weights a punch at 1.0 against a kick at
+        1.15 - so a punch decides most close rounds. Checked against video on
+        three bouts the punch count was overstated by eleven in two of them,
+        and the report stopped publishing it. A score computed from that
+        family is the same number wearing a different hat, and dropping
+        punches from the maths would score a boxing-heavy round as though
+        nobody threw a hand.
+
+        Turning STRIKE_COUNTS_PRECISION_VALIDATED on restores the score, so
+        this is switched off rather than deleted.
+        """
         candidate = {
             "peak_time": 4.2, "start_time": 4.0, "end_time": 4.4,
             "round_number": 1, "fighter": "A", "technique": "left_head_kick",
@@ -1461,11 +1475,28 @@ class PublicPageTests(unittest.TestCase):
             "events": candidates, "key_moments": candidates, "illegal_moves": [], "metrics": {},
         }
         _apply_report_annotations(report, [])
-        self.assertTrue(report["scorecard"]["available"])
-        self.assertEqual(report["scorecard"]["status"], "preliminary_unvalidated")
-        self.assertEqual(report["scorecard"]["evidence"]["evidence_source"], "unvalidated_action_candidates")
-        self.assertNotIn("verified_scoring_actions", report["scorecard"]["evidence"])
+        card = report["scorecard"]
+        self.assertFalse(card["available"])
+        self.assertEqual(card["status"], "punch_counting_unavailable")
+        self.assertIsNone(card["totals"]["A"])
+        self.assertIn("punch counting is not accurate enough", card["disclaimer"])
+        # The coverage was fine and there were candidates - the refusal has to
+        # say which of the two reasons it is, or it reads as a coverage problem.
+        self.assertNotIn("observation coverage", card["disclaimer"])
+        self.assertEqual(card["evidence"]["evidence_source"], "unvalidated_action_candidates")
         self.assertEqual(report["key_moments"], [])
+
+        # And the switch is a switch, not a deletion.
+        from unittest import mock
+
+        from core import report as report_module
+
+        second = dict(report, scorecard=None)
+        second.pop("scorecard")
+        with mock.patch.object(report_module, "STRIKE_COUNTS_PRECISION_VALIDATED", True):
+            _apply_report_annotations(second, [])
+        self.assertTrue(second["scorecard"]["available"])
+        self.assertEqual(second["scorecard"]["status"], "preliminary_unvalidated")
         self.assertFalse(report["integrity"]["action_metrics_trusted"])
 
     def test_a_round_is_not_scored_from_a_couple_of_actions(self):
