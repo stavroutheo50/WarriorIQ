@@ -86,6 +86,13 @@ REFERENCE_PEOPLE_IN_FRAME = (13, 18)
 # problem; at or above it and still short of pixels, the resolution is.
 WELL_FRAMED_SHARE = 0.30
 
+# Under two seconds there is no movement to measure: the action window used
+# throughout core/ is 0.6-1.5s, so a shorter clip cannot hold one exchange.
+MIN_USABLE_SECONDS = 2.0
+# A limb on a person filling a 256px-tall frame is a few pixels across. This is
+# not the "too far away" case - it is the case where no framing would save it.
+MIN_USABLE_LONG_EDGE = 256
+
 
 @dataclass
 class Preflight:
@@ -191,6 +198,27 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     if report.fps <= 0:
         report.fps = 30.0
         report.warnings.append("The frame rate could not be read; assuming 30 fps.")
+
+    # Say the real reason. Tested with a one-frame file and a 64x48 file: both
+    # fell through to "no people could be found... the camera is too far away",
+    # which is true but is not why, and sends the filmer off to fix the wrong
+    # thing. Duration and frame size are knowable before any model runs, so
+    # they are answered before any model runs.
+    duration = report.frame_count / report.fps
+    if duration < MIN_USABLE_SECONDS:
+        report.blocking.append(
+            f"This video is only {duration:.1f} seconds long. A round needs at "
+            f"least {MIN_USABLE_SECONDS:.0f} seconds of continuous footage to "
+            "measure anything.")
+        capture.release()
+        return report
+    if long_edge < MIN_USABLE_LONG_EDGE:
+        report.blocking.append(
+            f"This video is {report.width}x{report.height}, which is too small "
+            "to make out a fighter's arms and legs however close the camera "
+            "was. Send the original file rather than a shrunken copy.")
+        capture.release()
+        return report
 
     first = int(max(0.0, start_seconds) * report.fps)
     last = int((end_seconds if end_seconds else report.frame_count / report.fps) * report.fps)

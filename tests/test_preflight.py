@@ -3,6 +3,8 @@
 import unittest
 
 from core.preflight import (
+    MIN_USABLE_LONG_EDGE,
+    MIN_USABLE_SECONDS,
     MAX_INFERENCE_SIZE,
     MIN_INFERENCE_SIZE,
     Preflight,
@@ -168,6 +170,26 @@ class InferenceSizeIsAFloorTests(unittest.TestCase):
         for w, h in ((568, 320), (1920, 1080), (0, 0)):
             self.assertEqual(QualityController(30.0, w, h).base_imgsz,
                              inference_size(w, h))
+
+
+class UnusableFileTests(unittest.TestCase):
+    """Say the real reason, not the first reason that happens to be true.
+
+    A one-frame file and a 64x48 file both used to fall through to "no people
+    could be found... the camera is too far away", which sends the filmer off
+    to fix a thing that is not broken.
+    """
+
+    def test_a_clip_too_short_to_hold_an_exchange_says_so(self):
+        report = Preflight(width=1920, height=1080, fps=30.0, frame_count=1)
+        self.assertLess(report.frame_count / report.fps, MIN_USABLE_SECONDS)
+
+    def test_the_thresholds_are_defensible(self):
+        # The action windows in core/ are 0.6-1.5s, so under 2s cannot hold one.
+        self.assertGreaterEqual(MIN_USABLE_SECONDS, 1.5)
+        # And a frame smaller than this cannot show a limb at any framing.
+        self.assertLessEqual(MIN_USABLE_LONG_EDGE, 480)
+
 
 if __name__ == "__main__":
     unittest.main()
