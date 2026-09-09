@@ -48,6 +48,8 @@ ATTEMPT_CONFIDENCE = CONFIDENCE_FLOOR + 0.25 * (CONFIDENCE_CEILING - CONFIDENCE_
 
 from core.identity import IdentityManager, fighter_pair_similarity
 from core.metrics import MetricsAccumulator
+from core.preflight import Preflight
+from core.preflight import probe as probe_video
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
 from core.report import build_report, write_report
 from core.rtm_pose import refine as refine_fighter_pose
@@ -467,7 +469,20 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     action_engine = ActionEngine()
     defense_engine = DefenseEngine()
     metrics = MetricsAccumulator(info.width, info.height)
-    quality = QualityController(info.fps, info.width, info.height)
+    # Measure the footage before choosing how to look at it. A second of
+    # sampling buys the inference size, and the same numbers tell the person who
+    # filmed it what to do differently. Never fatal: if the probe cannot read
+    # the file the analysis proceeds on the old resolution rule and says so.
+    try:
+        preflight = probe_video(
+            req.video_path, pose_tracker.model,
+            start_seconds=req.start_seconds, end_seconds=segment_end_seconds)
+    except Exception as error:  # noqa: BLE001 - a probe must never block a paid run
+        preflight = Preflight()
+        preflight.warnings.append("The video could not be measured before analysis: %s" % error)
+    quality = QualityController(
+        info.fps, info.width, info.height,
+        measured_imgsz=preflight.recommended_inference_size if preflight.measured else None)
     classifier = {
         "action_classifier": "warrioriq_temporal_model" if action_engine.temporal.available else "multi_frame_temporal_rules",
         "custom_temporal_checkpoint_loaded": bool(action_engine.temporal.available),
@@ -944,6 +959,10 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         # Counted per lost fighter rather than per candidate, so it says which
         # gate is actually costing coverage. Read this one, not the line above.
         "blocked_recovery_reasons": dict(manager.blocked_recovery),
+        # What the recording itself looks like, and what the person holding the
+        # camera could do differently. Kept beside the tracking numbers because
+        # it is usually the explanation for them.
+        "recording": preflight.as_dict(),
         "furniture_tracks_readmitted": manager.forgiven_furniture,
         # How alike the two chosen fighters are, and how often the analysis
         # could not tell which was which. Reported whether or not they cross

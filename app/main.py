@@ -906,6 +906,7 @@ async def viewer_context(request: Request, call_next):
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
     request.state.cookie_preferences = _cookie_preferences(request)
     request.state.analytics_measurement_id = SETTINGS.analytics_measurement_id
+    request.state.site_verification_token = SETTINGS.site_verification_token
     request.state.gtm_container_id = SETTINGS.gtm_container_id
     request.state.is_admin = _is_admin(request)
     request.state.noindex = (

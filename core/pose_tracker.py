@@ -29,13 +29,32 @@ def inference_size(source_width: int, source_height: int) -> int:
 class QualityController:
     """Adaptive analysis quality while respecting the <= video-length target."""
 
-    def __init__(self, source_fps: float, source_width: int = 0, source_height: int = 0):
+    def __init__(self, source_fps: float, source_width: int = 0, source_height: int = 0,
+                 measured_imgsz: int | None = None):
         self.source_fps = max(1.0, float(source_fps))
         self.target_fps = min(self.source_fps, SETTINGS.target_tracking_fps)
         self.min_fps = min(self.source_fps, SETTINGS.min_tracking_fps)
         self.max_fps = min(self.source_fps, SETTINGS.max_tracking_fps)
         self.stride = max(1, round(self.source_fps / self.target_fps))
-        self.base_imgsz = self.imgsz = inference_size(source_width, source_height)
+        # A size measured from how tall the subject actually is beats one
+        # guessed from the source resolution - see core/preflight.py for the
+        # calibration and for why the resolution rule is backwards on anything
+        # a phone produces. `inference_size` remains the fallback for when
+        # there was no probe: a fixture, a still, a file the probe could not
+        # read.
+        #
+        # **Never below what the old rule would have chosen.** The measured
+        # size aims a subject at 200 px in the network, and on fight 3 that is
+        # 1440 against the old rule's 1600 - which cost coverage: A 0.4451 ->
+        # 0.3973, B 0.1987 -> 0.1598, one run each and the pipeline is
+        # deterministic. The calibration curve is still climbing at 240 px, so
+        # 200 is a floor worth guaranteeing and not a ceiling worth enforcing.
+        # Taking the larger of the two means this change can only add size
+        # where the old rule under-served - which is the high-resolution case
+        # it was written for - and can never take it away from the footage the
+        # old rule already suited.
+        rule_imgsz = inference_size(source_width, source_height)
+        self.base_imgsz = self.imgsz = max(int(measured_imgsz or 0), rule_imgsz)
         self.mode = "balanced"
         self.last_adjust = 0
 

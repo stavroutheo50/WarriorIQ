@@ -42,6 +42,12 @@
     gtag('config', {{analytics_id|tojson}}, {anonymize_ip: true});
   </script>
 {% endif %}
+{% if request.state.site_verification_token %}
+  {#- Search Console ownership. Rendered on every page rather than only the
+     home page: Google re-checks the token later, and a tag that disappears
+     after verification un-verifies the property. -#}
+  <meta name="google-site-verification" content="{{ request.state.site_verification_token }}">
+{% endif %}
   <meta name="csrf-token" content="{{ request.state.csrf_token }}">
   {#- Scripts read the token from here rather than from the cookie, which
      stays httponly. wiqCsrfHeaders() exists so a future fetch cannot

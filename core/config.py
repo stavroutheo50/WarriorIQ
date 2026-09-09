@@ -664,7 +664,28 @@ class Settings:
     # Google Analytics measurement ID (G-XXXXXXXXXX). The tag is rendered only
     # for visitors who accept analytics cookies; leaving this empty disables
     # analytics entirely and keeps the strict Content-Security-Policy.
+    #
+    # **The default below does not exist in Google's system.** Checked
+    # 2026-09-09 against the live site: `googletagmanager.com/gtag/js?id=` for
+    # this ID returns **HTTP 404**, six times, with and without a Referer. A
+    # completely made-up ID (G-ZZZZZZZZZZ) returns 200 and a working 428 KB
+    # script, so a 404 is not what an unknown ID looks like - this string is
+    # rejected outright. The consequence, confirmed in the browser: gtag is
+    # defined, the config command reaches the dataLayer, consent is granted,
+    # and **no /g/collect request is ever sent**, which is why every report is
+    # empty however many devices are tested.
+    #
+    # Replace it with the Measurement ID from the GA4 property itself:
+    # Admin -> Data streams -> the web stream -> Measurement ID, top right.
+    # Set WARRIORIQ_ANALYTICS_ID rather than editing this line, so the value
+    # lives with the deployment and not in the repository.
     analytics_measurement_id: str = os.getenv("WARRIORIQ_ANALYTICS_ID", "G-5V5Q4H30LD").strip()
+    # Search Console ownership token: the `content` value of the
+    # <meta name="google-site-verification"> tag Google offers under
+    # "HTML tag" verification. Empty renders no tag, which is the honest
+    # default - an empty or invented token fails verification silently and
+    # looks identical to not having tried.
+    site_verification_token: str = os.getenv("WARRIORIQ_SITE_VERIFICATION", "").strip()
     # Google Tag Manager container. GTM loads whatever tags the container holds,
     # so if a GA4 tag inside it uses the same measurement ID as
     # WARRIORIQ_ANALYTICS_ID, every page view is counted twice. Run one or the
