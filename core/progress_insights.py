@@ -22,18 +22,28 @@ def _point(record: dict, fighter: str) -> dict | None:
     attacks = metrics.get("attacks", {})
     dashboard = metrics.get("dashboard", {})
     ruleset = report.get("setup", {}).get("ruleset", "K1")
-    action_trusted = report.get("integrity", {}).get("action_metrics_trusted")
-    # Older imported reports did not carry the integrity flag. Preserve their
-    # already-measured fields, while new reports explicitly fail closed.
-    if action_trusted is None:
-        action_trusted = attacks.get("accuracy") is not None or bool(attacks.get("attempts"))
+    # Missing means unknown, and unknown means withheld.
+    #
+    # This used to fail *open*: a report with no integrity flag - anything
+    # analysed before the flag existed - was trusted if it had any attempts at
+    # all, which is nearly every report. The reasoning was that those fields
+    # were "already measured", but the detector that measured them is the same
+    # one measured at 29% precision, so an older report is not a more reliable
+    # one. It is the same numbers with less provenance.
+    action_trusted = bool(report.get("integrity", {}).get("action_metrics_trusted", False))
     return {
         "job_id": record.get("job_id"),
         "created_at": record.get("created_at", ""),
         "ruleset": RULESET_LABELS.get(ruleset, ruleset.replace("_", " ").title()),
         "action_trusted": bool(action_trusted),
         "accuracy": _number(attacks.get("accuracy")) if action_trusted else None,
-        "attempts": _number(attacks.get("attempts")) if action_trusted else None,
+        # Leg strikes, not every attempt. The report stopped publishing punch
+        # counts because they were overstated by eleven in two of three bouts
+        # checked against video; a progress chart summing them across fights
+        # inherits that error and compounds it over time.
+        "attempts": _number(
+            (attacks.get("families") or {}).get("kick")
+        ) if action_trusted else None,
         "activity": _number(dashboard.get("activity_attempts_per_minute")) if action_trusted else None,
         "combinations": _number(dashboard.get("combinations_per_minute")) if action_trusted else None,
         "coverage": _number(metrics.get("pose_coverage")),

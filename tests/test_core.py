@@ -318,6 +318,7 @@ class ProductFoundationTests(unittest.TestCase):
         reports = [
             {"created_at": "2026-08-01T00:00:00+00:00", "job_id": "one", "report": {
                 "video": {"analysis_target": "BOTH"}, "setup": {"ruleset": "K1"},
+                "integrity": {"action_metrics_trusted": True},
                 "tracking": {"fighter_A_coverage": .88},
                 "metrics": {"A": {"pose_coverage": .88, "attacks": {"accuracy": None, "attempts": 8},
                                   "dashboard": {"activity_attempts_per_minute": 4.0, "combinations_per_minute": 1.0}}},
@@ -325,6 +326,7 @@ class ProductFoundationTests(unittest.TestCase):
             }},
             {"created_at": "2026-08-10T00:00:00+00:00", "job_id": "two", "report": {
                 "video": {"analysis_target": "BOTH"}, "setup": {"ruleset": "K1"},
+                "integrity": {"action_metrics_trusted": True},
                 "tracking": {"fighter_A_coverage": .93},
                 "metrics": {"A": {"pose_coverage": .93, "attacks": {"accuracy": .62, "attempts": 12},
                                   "dashboard": {"activity_attempts_per_minute": 6.0, "combinations_per_minute": 1.5}}},
@@ -345,6 +347,47 @@ class ProductFoundationTests(unittest.TestCase):
         self.assertIsNone(result["trends"]["accuracy"])
         self.assertEqual(result["trends"]["activity"], 2.0)
         self.assertEqual(result["focus"][0]["title"], "Guard recovery")
+
+    def test_a_report_with_no_integrity_flag_is_not_trusted(self):
+        """Missing means unknown, and unknown means withheld.
+
+        This used to fail *open*: a report carrying no integrity flag - which
+        is anything analysed before the flag existed - was trusted whenever it
+        had any attempts at all, which is nearly every report. The reasoning
+        was that those fields were already measured. They were measured by the
+        same detector later found to be 29% precise, so an older report is not
+        a more reliable one; it is the same numbers with less provenance.
+        """
+        records = [{"created_at": "2026-08-10T00:00:00+00:00", "job_id": "old", "report": {
+            "video": {"analysis_target": "BOTH", "focus_fighter": "A"},
+            "setup": {"ruleset": "K1"}, "tracking": {"fighter_A_coverage": .9},
+            "metrics": {"A": {"pose_coverage": .9, "guard_index": .4,
+                              "attacks": {"accuracy": .62, "attempts": 12,
+                                          "families": {"punch": 8, "kick": 4}},
+                              "dashboard": {"activity_attempts_per_minute": 6.0}}},
+            "coaching": {"A": {"improvements": []}}, "training_plan": {"A": []},
+        }}]
+        latest = build_progress(records, "A")["latest"]
+        self.assertFalse(latest["action_trusted"])
+        self.assertIsNone(latest["accuracy"])
+        self.assertIsNone(latest["attempts"])
+        # The pose measurements are unaffected - they never needed the flag.
+        self.assertEqual(latest["guard"], .4)
+        self.assertEqual(latest["coverage"], .9)
+
+    def test_progress_counts_leg_strikes_not_every_attempt(self):
+        """A progress chart summing punches compounds their error over time."""
+        records = [{"created_at": "2026-08-10T00:00:00+00:00", "job_id": "new", "report": {
+            "video": {"analysis_target": "BOTH", "focus_fighter": "A"},
+            "setup": {"ruleset": "K1"}, "tracking": {"fighter_A_coverage": .9},
+            "integrity": {"action_metrics_trusted": True},
+            "metrics": {"A": {"pose_coverage": .9,
+                              "attacks": {"accuracy": .5, "attempts": 12,
+                                          "families": {"punch": 8, "kick": 4}},
+                              "dashboard": {}}},
+            "coaching": {"A": {"improvements": []}}, "training_plan": {"A": []},
+        }}]
+        self.assertEqual(build_progress(records, "A")["latest"]["attempts"], 4)
 
     def test_progress_keeps_pose_baselines_but_hides_untrusted_action_candidates(self):
         records = [{"created_at": "2026-08-10T00:00:00+00:00", "job_id": "pose", "report": {
