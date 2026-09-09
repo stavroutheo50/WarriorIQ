@@ -401,6 +401,21 @@ h1 em, h2 em {
   box-shadow: none;
 }
 
+/* Keep the page clear of the fixed cookie notice at every width.
+
+   Measured on the live site with the notice showing and the page scrolled
+   fully down: at 1280x800 the notice covers **every legal link the site has** -
+   Terms, Privacy, Cookies, Video Upload Policy, Refunds & Withdrawal,
+   Acceptable Use and Contact - and at 375x812 it covers those plus the
+   copyright line. A consent banner that hides the cookie policy behind itself
+   is the one thing it must not do, and until the visitor answers it there is
+   no way to read what they are answering about.
+
+   There was already a rule for this, but it padded `main`. The footer is
+   main's sibling, so it never moved. The mobile override lives with the
+   notice's own max-height cap further down this file. */
+body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
+
 /* ===========================================================================
    Depth, second pass.
 
@@ -668,8 +683,19 @@ h1 em, h2 em {
   .cookie-notice .btn { padding: 9px 4px; font-size: 11px; }
   /* Reserve room underneath the page for the fixed notice. Without this the
      upload button - the one control the page exists to offer - sat behind the
-     banner on a 375px screen and could not be reached at all. */
-  body:has(.cookie-notice:not([hidden])) main { padding-bottom: 300px; }
+     banner on a 375px screen and could not be reached at all.
+
+     Padded on the body, not on main. The footer is main's sibling, so padding
+     main moved the upload button clear and left the footer exactly where it
+     was: measured on the live site at 375x812, scrolled fully to the bottom,
+     the notice covered the last 150px - which is every legal link the site
+     has (Terms, Privacy, **Cookies**, Video Upload Policy, Refunds &
+     Withdrawal, Acceptable Use, Contact) and the copyright line. A cookie
+     banner that hides the cookie policy is the one thing it must never do.
+
+     Sized from the notice's own cap above rather than a round number, so the
+     two cannot drift apart. */
+  body:has(.cookie-notice:not([hidden])) { padding-bottom: calc(42vh + 24px); }
 }
 
 /* --- Social sign-in -------------------------------------------------------

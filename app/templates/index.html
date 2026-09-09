@@ -6,7 +6,15 @@
   <div class="hero-copy">
     <div class="eyebrow">For fighters and coaches</div>
     <h1><span>Upload your fight.</span> <em>See it in numbers.</em></h1>
-    <p>WarriorIQ follows both fighters through the whole round and measures how much ground you covered, who took the centre, how often your guard stayed up, and how balanced you finished. You get a round-by-round score estimate under your own sport&rsquo;s rules, and a four-week plan built from your numbers.</p>
+    {#- "You get a round-by-round score estimate" was unconditional, and the
+       product does not honour it on real footage: the scorecard needs 85% of
+       the round with the fighter tracked, and the best of the three reference
+       bouts reaches 44.5%, so the report prints "Not scored - tracking was not
+       steady enough for a fair score". The rest of this page already says
+       scorecards are confidence-gated and that unsupported claims are
+       withheld, so the hero was contradicting the fine print. Conditioned
+       rather than removed: the feature is real, the guarantee was not. -#}
+    <p>WarriorIQ follows both fighters through the whole round and measures how much ground you covered, who took the centre, how often your guard stayed up, and how balanced you finished. When the footage lets us follow both fighters closely enough, you also get a round-by-round score estimate under your own sport&rsquo;s rules and a four-week plan built from your numbers &mdash; and when it does not, WarriorIQ tells you that instead of guessing.</p>
     {#- Analysing a fight needs an account: the upload endpoint refuses an
        anonymous request, because footage carries identifiable athletes and the
        allowance is counted per account. The button says so rather than sending
