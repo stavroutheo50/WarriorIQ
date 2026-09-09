@@ -104,6 +104,13 @@ class FighterState:
     anchor_is_referee: bool = False
     anchor_pose: np.ndarray | None = None
     switches_rejected: int = 0
+    # Why the *last* candidate scored was refused. Diagnostics only - it is
+    # overwritten constantly and means nothing on its own. It exists so the
+    # recovery path can report which gate turned away the person standing
+    # where the fighter was, which the aggregate counts cannot: those are per
+    # candidate per frame, so with fifteen people in shot they are dominated
+    # by the crowd being correctly ignored and cannot identify a binding gate.
+    last_refusal: str | None = None
 
 
 @dataclass

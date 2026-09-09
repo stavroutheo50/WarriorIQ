@@ -194,6 +194,47 @@ class Settings:
     #
     # 0.78 is the middle. Raising it buys precision on a busy hall and costs
     # frames everywhere; lowering it gives the crowd back.
+    #
+    # **Lowering it was tried properly on 2026-09-09 and it is a downgrade at
+    # every value tested. Do not try it again.** This gate is the binding
+    # constraint on coverage - measured per lost fighter rather than per
+    # candidate, it accounts for **61%** of the frames where a fighter is
+    # unassigned (753 of ~1,243 on fight 3), far ahead of the referee filter at
+    # 9%. So relaxing it looks like the obvious move, and the coverage numbers
+    # agree loudly. They are wrong.
+    #
+    #     threshold   A coverage   B coverage   both held
+    #     0.78          0.445        0.199       83 frames
+    #     0.70          0.492        0.475      ---
+    #     0.60          0.529        0.611      243 frames
+    #
+    # Twelve gained boxes per run were rendered with the boxes drawn and judged
+    # by eye - the only test that has ever caught this:
+    #
+    #     0.60   8 of 12 right overall, but split by fighter A is 7/8 and B is
+    #            1/4: B's tripled coverage is a kneeling official, a coach by
+    #            the chairs, a spectator in red.
+    #     0.70   B is right in about 2 of 12, and the dominant failure is new -
+    #            **B locks onto fighter A**. Frames 896, 1206, 1214, 1222, 1224
+    #            and 1240 all put B's box on A's man.
+    #
+    # That last line is why this stays where it is. Hand labelling all 178 clips
+    # at 0.78 found ten referees, eight bystanders, six id-swaps and **zero**
+    # A-versus-B confusions; lowering the gate manufactures the one failure the
+    # product had never made. An A/B swap is the worst outcome available here,
+    # because it silently credits one fighter's work to the other and coverage
+    # rises while it happens.
+    #
+    # The asymmetry is not a tuning accident. Fighter A wears light blue and
+    # white; fighter B wears black in a hall where the officials, the coaches
+    # and half the crowd wear black. Compared against every other person
+    # detected in the opening exchange, 17% of them clear this gate against B's
+    # anchor and only 5% against A's. A single global number cannot serve both
+    # fighters of the same bout, and the honest fix - if there is one - is a
+    # per-fighter gate set from how separable that fighter is from the room,
+    # not a different constant. (Those two percentages are single-crop
+    # comparisons, while the gate itself compares pooled embeddings, so treat
+    # them as the direction of the effect and not its size.)
     min_anchor_reid_similarity: float = float(
         os.getenv("WARRIORIQ_MIN_ANCHOR_REID", "0.78"))
     # A categorical refusal rather than another threshold on similarity. The

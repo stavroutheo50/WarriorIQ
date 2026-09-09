@@ -941,6 +941,9 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         # appearance gate turning away the real fighter from a motion gate
         # correctly refusing a spectator, and those want opposite fixes.
         "rejected_switch_reasons": dict(manager.rejections),
+        # Counted per lost fighter rather than per candidate, so it says which
+        # gate is actually costing coverage. Read this one, not the line above.
+        "blocked_recovery_reasons": dict(manager.blocked_recovery),
         "furniture_tracks_readmitted": manager.forgiven_furniture,
         # How alike the two chosen fighters are, and how often the analysis
         # could not tell which was which. Reported whether or not they cross

@@ -193,6 +193,9 @@ class IdentityManager:
         # motion gate correctly refusing a spectator, and those need
         # opposite fixes.
         self.rejections: dict[str, int] = {}
+        # The same question asked per *lost fighter* rather than per candidate.
+        # See _recover for why the two differ and why this one is the useful one.
+        self.blocked_recovery: dict[str, int] = {}
         # Frames where A and B were equally plausible either way round.
         self.confusions = 0
         self.last_confusion_frame: int | None = None
@@ -311,9 +314,14 @@ class IdentityManager:
         short = self._recent_spread_short(track_id, fps)
         return short is not None and short < SETTINGS.max_stationary_spread_short
 
+    def _blocked(self, reason: str) -> None:
+        """Record why one fighter is unassigned in one frame. Diagnostics only."""
+        self.blocked_recovery[reason] = self.blocked_recovery.get(reason, 0) + 1
+
     def _refuse(self, state: FighterState, reason: str) -> float:
         """Record a refused identity takeover and why."""
         state.switches_rejected += 1
+        state.last_refusal = reason
         self.rejections[reason] = self.rejections.get(reason, 0) + 1
         return -999.0
 
@@ -527,22 +535,58 @@ class IdentityManager:
         return obs
 
     def _recover(self, state: FighterState, people: list[PersonObservation], forbidden_id: int | None) -> tuple[PersonObservation | None, float]:
+        # Which gate turned away the person standing closest to where this
+        # fighter was last seen. `self.rejections` cannot answer that: it counts
+        # every candidate in every frame, so on a multi-mat hall with fifteen
+        # people in shot it is dominated by the crowd being correctly refused
+        # for distance, and the reason with the largest count is not the reason
+        # the fighter was lost. Measured on fight 3: `too_far_to_be_them` is 68%
+        # of all refusals, and yet a detection sits within 1.65 body lengths of
+        # the last known box in **100%** of untracked frames. Counting per
+        # candidate answers a question nobody asked.
+        #
+        # This counts once per failed recovery, against the nearest candidate
+        # only, so the denominator is "times this fighter was lost".
+        reference = self._predicted_box(state)
+        nearest = None
+        if reference is not None and people:
+            nearest = min(people, key=lambda p: normalized_distance(reference, p.box))
+
         scored: list[tuple[float, PersonObservation]] = []
+        nearest_refusal: str | None = None
         for candidate in people:
             if forbidden_id is not None and candidate.track_id == forbidden_id:
+                if candidate is nearest:
+                    nearest_refusal = "held_by_the_other_fighter"
                 continue
+            state.last_refusal = None
             score = self._score(state, candidate, keep_id_bonus=False)
+            if candidate is nearest and score <= -100:
+                nearest_refusal = state.last_refusal or "refused"
             if score > -100:
                 scored.append((score, candidate))
+
         if not scored:
+            self._blocked(nearest_refusal or "no_candidates")
             return None, 0.0
         scored.sort(key=lambda item: item[0], reverse=True)
         best_score, best = scored[0]
         second = scored[1][0] if len(scored) > 1 else -999.0
+        # Neither of these two was recorded anywhere before. A refusal invisible
+        # to the diagnostics is one nobody tunes around - the same way
+        # `too_far_to_be_them` went unexamined while every other guard was
+        # adjusted.
         if best_score < SETTINGS.min_reid_score:
+            self._blocked(nearest_refusal or "below_min_reid_score")
             return None, best_score
         if len(scored) > 1 and best_score - second < SETTINGS.min_reid_margin:
+            self._blocked(nearest_refusal or "two_candidates_too_alike")
             return None, best_score
+        if nearest is not None and best is not nearest:
+            # Recovered, but onto somebody other than the person standing where
+            # the fighter was. Worth seeing separately: it is the shape of a
+            # lock sliding onto a bystander.
+            self._blocked("recovered_onto_someone_else")
         return best, best_score
 
     def _update_one(self, state: FighterState, people: list[PersonObservation], source_frame: int, forbidden_id: int | None) -> PersonObservation | None:
@@ -607,8 +651,17 @@ class IdentityManager:
                     score -= 0.55
             return score
 
-        scores_a = [candidate_score(self.a, p) for p in people]
-        scores_b = [candidate_score(self.b, p) for p in people]
+        def scored_with_reasons(state: FighterState) -> tuple[list[float], list[str | None]]:
+            scores: list[float] = []
+            reasons: list[str | None] = []
+            for person in people:
+                state.last_refusal = None
+                scores.append(candidate_score(state, person))
+                reasons.append(state.last_refusal)
+            return scores, reasons
+
+        scores_a, reasons_a = scored_with_reasons(self.a)
+        scores_b, reasons_b = scored_with_reasons(self.b)
         assignments: list[tuple[float, int | None, int | None]] = []
         for ai in [None, *range(len(people))]:
             for bi in [None, *range(len(people))]:
@@ -638,6 +691,7 @@ class IdentityManager:
         assignments.sort(reverse=True, key=lambda x: x[0])
         _, ai, bi = assignments[0] if assignments else (0.0, None, None)
 
+        ambiguous = False
         # If the opposite permutation is almost equally plausible, do not
         # guess. Missing evidence is safer than silently exchanging A and B.
         if ai is not None and bi is not None:
@@ -650,6 +704,7 @@ class IdentityManager:
                 self.confusions += 1
                 self.last_confusion_frame = source_frame
                 ai = bi = None
+                ambiguous = True
 
         a_obs = self._commit(self.a, people[ai], source_frame, scores_a[ai], recovered=people[ai].track_id != self.a.current_track_id) if ai is not None else None
         b_obs = self._commit(self.b, people[bi], source_frame, scores_b[bi], recovered=people[bi].track_id != self.b.current_track_id) if bi is not None else None
@@ -657,8 +712,46 @@ class IdentityManager:
             if obs is None:
                 state.missing_frames += 1
                 state.identity_confidence = 0.0
-        a_obs = None if self._release_if_furniture(self.a) else a_obs
-        b_obs = None if self._release_if_furniture(self.b) else b_obs
+        furniture_a = self._release_if_furniture(self.a)
+        furniture_b = self._release_if_furniture(self.b)
+        a_obs = None if furniture_a else a_obs
+        b_obs = None if furniture_b else b_obs
+
+        # Why *this fighter* is unassigned in *this frame*, judged against the
+        # one person standing closest to where they were last seen. Counted
+        # once per lost fighter per frame, so the denominator is "frames this
+        # fighter was missing" and the shares are comparable. `self.rejections`
+        # cannot answer this - it counts every candidate against every fighter,
+        # so on a hall with fifteen people in shot it is dominated by the crowd
+        # being correctly refused for distance. Measured on fight 3:
+        # `too_far_to_be_them` is 68% of those refusals while a detection sits
+        # within the jump limit of the last known box in 100% of missing frames.
+        for state, obs, scores, reasons, furniture in (
+                (self.a, a_obs, scores_a, reasons_a, furniture_a),
+                (self.b, b_obs, scores_b, reasons_b, furniture_b)):
+            if obs is not None:
+                continue
+            if furniture:
+                self._blocked("released_as_furniture")
+                continue
+            if ambiguous:
+                self._blocked("cannot_tell_a_from_b")
+                continue
+            reference = self._predicted_box(state)
+            if reference is None:
+                self._blocked("no_anchor_to_search_from")
+                continue
+            k = min(range(len(people)),
+                    key=lambda i: normalized_distance(reference, people[i].box))
+            if scores[k] < -100:
+                self._blocked(reasons[k] or "refused_by_a_gate")
+            elif scores[k] < SETTINGS.min_reid_score:
+                # Nothing refused them outright; they simply did not look enough
+                # like the fighter to beat an empty slot. This one is invisible
+                # in every existing counter.
+                self._blocked("scored_below_empty_slot")
+            else:
+                self._blocked("lost_to_the_other_fighter")
         return a_obs, b_obs
 
     def _release_if_furniture(self, state: FighterState) -> bool:
