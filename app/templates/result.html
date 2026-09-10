@@ -533,7 +533,18 @@
 {% if report_access.report_tier == 'full' %}
 <section class="card">
   <div class="section-title" style="margin-top:0"><h2>Illegal moves · {{report.scorecard.ruleset_label}}</h2>{% set sport_label = report.scorecard.sport_label|default("Kickboxing", true) %}{% if sport_label not in report.scorecard.ruleset_label %}<span class="pill">{{sport_label}} rules</span>{% endif %}</div>
+  {#- Naming a fighter for an illegal act is the strongest per-fighter claim on
+     this page, so it is gated exactly like the scorecard. It was not: the only
+     condition was the report tier, so a bout where identity failed and the
+     action model is untrusted still printed "Fighter A - Left Push - Illegal"
+     with a timestamp. Found on 1947 boxing footage, where a colour histogram
+     scores the two boxers as identical (pair similarity 1.0) and the report
+     already said fighters_separable false and withheld the whole scorecard. -#}
+  {% if not action_ready or report.scorecard.status == 'identity_integrity_failed' %}
+  <p class="muted">Illegal-move flags are switched off for this fight. {% if report.scorecard.status == 'identity_integrity_failed' %}WarriorIQ could not tell the two fighters apart well enough, so putting a foul on one of them would be a guess.{% else %}WarriorIQ cannot read strikes accurately enough yet to call a foul on anyone, so it does not.{% endif %}</p>
+  {% else %}
   {% for e in report.illegal_moves|default([]) %}{% if focus == 'BOTH' or focus == e.fighter %}<div class="event"><div>R{{e.round_number or '-'}}</div><div class="time">{{'%.2f'|format(e.peak_time)}}s</div><div><strong>Fighter {{e.fighter}}</strong> · {{e.technique.replace('_',' ')|title}}</div><div class="bad">Illegal</div><div class="small muted">{{e.legality_reason}}</div></div>{% endif %}{% else %}<p class="muted">Nothing was read clearly enough to flag as illegal for Fighter {{focus}} under this ruleset.</p>{% endfor %}
+  {% endif %}
   <p class="small muted">{{report.integrity.rules_reference}}</p>
 </section>
 {% endif %}

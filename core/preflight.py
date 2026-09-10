@@ -93,6 +93,12 @@ MIN_USABLE_SECONDS = 2.0
 # not the "too far away" case - it is the case where no framing would save it.
 MIN_USABLE_LONG_EDGE = 256
 
+# When this share of sampled frames contains no person at all, the camera is
+# off the fight rather than the fight being hard to see. Set low deliberately:
+# a fight video should hold people in nearly every frame, so even a third being
+# empty is worth saying out loud.
+NOBODY_VISIBLE_SHARE = 0.33
+
 
 @dataclass
 class Preflight:
@@ -107,6 +113,10 @@ class Preflight:
     subject_height_px: float = 0.0
     subject_share_of_height: float = 0.0
     people_in_frame: float = 0.0
+    # Share of sampled frames holding nobody at all. Separate from the median
+    # above, which hides this entirely: a clip that is half empty and half busy
+    # reports a healthy median and an empty half.
+    frames_without_anybody: float = 0.0
     camera_shift_percent: float = 0.0
 
     recommended_inference_size: int = SETTINGS.default_imgsz
@@ -131,6 +141,7 @@ class Preflight:
             "subject_height_px": round(self.subject_height_px, 1),
             "subject_share_of_height": round(self.subject_share_of_height, 3),
             "people_in_frame": round(self.people_in_frame, 1),
+            "frames_without_anybody": round(self.frames_without_anybody, 3),
             "camera_shift_percent": round(self.camera_shift_percent, 2),
             "recommended_inference_size": self.recommended_inference_size,
             "subject_px_in_network": round(self.subject_px_in_network, 0),
@@ -272,6 +283,8 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     report.subject_height_px = float(np.median(heights))
     report.subject_share_of_height = report.subject_height_px / max(1, report.height)
     report.people_in_frame = float(np.median(counts))
+    report.frames_without_anybody = (
+        sum(1 for c in counts if c == 0) / len(counts) if counts else 0.0)
     report.recommended_inference_size = inference_size_for_subject(
         long_edge, report.subject_height_px)
     report.subject_px_in_network = (
@@ -309,24 +322,43 @@ def _judge(report: Preflight) -> None:
             "this system was measured on. On that footage it followed a fighter "
             "for under half the round, could not count punches at all, and "
             "missed a knockdown.")
-        # Two different causes with two different fixes, and telling them apart
-        # matters. Fight 2's fighters already fill 34% of the picture and are
-        # still only 75 px tall, because the picture is 220 px tall: standing
-        # closer would not help at all. Advising "get closer" on the strength of
-        # pixel height alone is wrong for exactly the case a phone user hits
-        # when a clip has been shrunk on its way to us.
-        if report.subject_share_of_height < WELL_FRAMED_SHARE:
-            report.advice.append(
-                "One fighter should fill about a third of the height of the "
-                f"picture. Here they fill about {100 * report.subject_share_of_height:.0f}%, "
-                "so film from closer to the mat or zoom in.")
-        else:
-            report.advice.append(
-                f"The framing is fine - one fighter fills {100 * report.subject_share_of_height:.0f}% "
-                f"of the picture - but the video is only {report.height} pixels "
-                "tall, so there is not enough detail. Send the original file "
-                "from the phone rather than a copy shared through a messaging "
-                "app, and record at 1080p or better.")
+
+    # Two different causes with two different fixes, and telling them apart
+    # matters. Fight 2's fighters already fill 34% of the picture and are still
+    # only 75 px tall, because the picture is 220 px tall: standing closer would
+    # not help at all. Advising "get closer" on pixel height alone is wrong for
+    # exactly the case a phone user hits when a clip has been shrunk on the way.
+    #
+    # Framing is judged on its own, not nested under the pixel-height warning.
+    # Nesting it meant a badly framed video whose subject happened to clear the
+    # reference band got no framing advice at all: the WT Taekwondo test clip
+    # fills 17% of the height at 83 px and was told nothing.
+    if report.subject_share_of_height < WELL_FRAMED_SHARE:
+        report.advice.append(
+            "One fighter should fill about a third of the height of the "
+            f"picture. Here they fill about {100 * report.subject_share_of_height:.0f}%, "
+            "so film from closer to the mat or zoom in.")
+    elif report.subject_height_px <= reference_high:
+        report.advice.append(
+            f"The framing is fine - one fighter fills {100 * report.subject_share_of_height:.0f}% "
+            f"of the picture - but the video is only {report.height} pixels "
+            "tall, so there is not enough detail. Send the original file "
+            "from the phone rather than a copy shared through a messaging "
+            "app, and record at 1080p or better.")
+
+    # The camera being off the fight is not the same as the fight being hard to
+    # see, and only this catches it. The WT Taekwondo tournament clip reported
+    # "0 people" beside "subject 246 px" - a median of zero because most sampled
+    # frames held nobody at all, while the few that did held someone large. Read
+    # alone either number is reassuring and the pair is a contradiction.
+    if report.frames_without_anybody >= NOBODY_VISIBLE_SHARE:
+        report.warnings.append(
+            f"Nobody at all is visible in about {100 * report.frames_without_anybody:.0f}% "
+            "of this video. The camera is off the fight, or the recording "
+            "includes long stretches that are not the bout.")
+        report.advice.append(
+            "Trim the clip to the round itself, and keep both fighters in "
+            "the picture throughout.")
 
     if report.people_in_frame >= min(REFERENCE_PEOPLE_IN_FRAME):
         report.warnings.append(

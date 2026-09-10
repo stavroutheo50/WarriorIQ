@@ -832,6 +832,62 @@ class PublicPageTests(unittest.TestCase):
             kick_minimum=kick_minimum,
         )
 
+    def test_a_foul_is_never_pinned_on_a_fighter_the_analysis_cannot_identify(self):
+        """Naming a fighter for an illegal act is the strongest claim on the page.
+
+        It was gated only by the report tier. Found on 1947 boxing footage,
+        where a colour histogram scores the two boxers as identical (pair
+        similarity 1.0 on black-and-white film): the report already said
+        fighters_separable false, withheld the entire scorecard, and still
+        printed "Fighter A - Left Push - Illegal" with a timestamp.
+
+        Rendered rather than grepped, in all four trust combinations, because
+        reading the template is what let the punch counts through six separate
+        surfaces before.
+        """
+        from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
+        from app.main import _analysis_quality_summary, sport_identity
+
+        class Stub:
+            def __init__(self, **kw): self.__dict__.update(kw)
+            def __getattr__(self, key): return Stub()
+            def __getitem__(self, key): return Stub()
+            def __str__(self): return ""
+            def __bool__(self): return False
+            def __iter__(self): return iter(())
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        env = Environment(loader=FileSystemLoader(str(templates)), undefined=ChainableUndefined)
+        fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
+        base = json.loads(fixture.read_text(encoding="utf-8"))
+
+        def render(trusted, status):
+            report = json.loads(json.dumps(base))
+            report.setdefault("integrity", {})["action_metrics_trusted"] = trusted
+            report.setdefault("scorecard", {})["status"] = status
+            report["illegal_moves"] = [{
+                "fighter": "A", "round_number": 1, "peak_time": 30.44,
+                "technique": "left_push", "legality_reason": "push"}]
+            return env.get_template("result.html").render(
+                request=Stub(url=Stub(path="/report/abc"), state=Stub(account=None),
+                             cookies={}, headers={}),
+                job_id="abc", report=report, identity=sport_identity("boxing"),
+                report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
+                analysis_quality=_analysis_quality_summary(report), can_share=False,
+                sharing=None, score_withheld=None, unavailable=[], kick_minimum=None)
+
+        for trusted, status in ((False, "identity_integrity_failed"),
+                                (False, "ok"), (True, "identity_integrity_failed")):
+            html = render(trusted, status)
+            self.assertNotIn("Left Push", html,
+                             f"a foul was pinned on a fighter with trusted={trusted} status={status}")
+            self.assertIn("Illegal-move flags are switched off", html)
+
+        allowed = render(True, "ok")
+        self.assertIn("Left Push", allowed,
+                      "a fully trusted fight must still show its fouls")
+
     def test_the_kick_minimum_block_renders_and_never_alleges_a_shortfall(self):
         """WAKO Full Contact obliges six kicks a round, and we can only confirm it.
 
