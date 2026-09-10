@@ -65,6 +65,31 @@ def _report_execution_providers(encoder) -> None:
     the GPU through torch. But a log line that names a provider it is not using
     is the kind of thing that costs an afternoon later, so the truth is
     recorded here at load time.
+
+    **Chased properly on 2026-09-10 and closed: leave it on the CPU.** A profile
+    put ONNX Runtime at 13.5 s of a 91 s analysis, about 15%, so the CPU
+    fallback looked like the cheapest win available. There were two separate
+    faults behind it, and both are real:
+
+      1. onnxruntime-gpu 1.29 is built for CUDA 13 while torch here is cu128, so
+         `cublasLt64_13.dll` is missing and the provider cannot load.
+      2. Underneath that, `device=SETTINGS.reid_device or None` passed **None**
+         whenever the setting was empty, which is always by default. ONNX
+         Runtime receives `{'device_id': None}`, fails to parse it and falls
+         back to the CPU. So even with the right build it would not have used
+         the GPU. (Ultralytics wants a torch-style string here: "cuda:0", not
+         "0", which it rejects as an invalid device string.)
+
+    Both were fixed and benchmarked, and **the GPU is not faster**:
+
+        cpu      7.79 ms for one person    7.14 ms per person, batch of 5
+        cuda:0   9.04 ms for one person    7.28 ms per person, batch of 5
+
+    Slower alone, identical in a batch, and the embeddings are numerically the
+    same (0.741 either way on the reference pair). The reason is in this
+    docstring already: the time goes on cropping, not on the network, and this
+    encoder is nano-sized. Both changes were reverted rather than shipped for
+    nothing. Do not spend the afternoon this comment exists to save.
     """
     session = getattr(encoder, "session", None) or getattr(
         getattr(encoder, "model", None), "session", None)
