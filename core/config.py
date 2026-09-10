@@ -308,19 +308,52 @@ class Settings:
     # YOLO pose/ReID must still confirm a person before metrics are accepted.
     sam_recovery_enabled: bool = env_bool("WARRIORIQ_SAM_RECOVERY", not IS_RENDER)
     # Continuous mode propagates SAM2 masks across the whole segment before the
-    # main pass, which doubles the work for guidance the tracker usually does
-    # not need. Measured on a real 480x220 WAKO bout, same 60-second segment:
+    # main pass. **On by default since 2026-09-10.** It was off, on this:
     #
     #   continuous on   188.8s   coverage A 0.997  B 0.916
     #   continuous off   62.6s   coverage A 0.985  B 0.987
     #
-    # Identity trust and the initial-lock check were satisfied either way, and
-    # fighter B was tracked better without it. Recovery stays enabled, so the
-    # fallback buffer in analyzer.py still engages when continuous tracks are
-    # absent: the safety net for hard footage remains, only the unconditional
-    # second pass is gone. Set this true to force the exhaustive pass on footage
-    # where identities genuinely swap.
-    sam_continuous_enabled: bool = env_bool("WARRIORIQ_SAM_CONTINUOUS", False)
+    # Those are 98-99% coverage figures, which is what this project reported
+    # while it was following a seated spectator - see
+    # project-coverage-can-mean-failure. The comparison that retired this
+    # feature was measuring the wrong people, and "fighter B was tracked better
+    # without it" was a spectator being held more steadily than an athlete.
+    #
+    # Turning it on also crashed until today (see recover_from_guidance in
+    # core/pose_tracker.py), so nobody could have checked.
+    #
+    # Re-measured across all three reference fights, one variable, same seeds
+    # and windows:
+    #
+    #     fight   A off -> on      B off -> on       time
+    #     fam3    0.198 -> 0.637   0.459 -> 0.671    159 -> 179s
+    #     f2      0.182 -> 0.438   0.105 -> 0.213    106 -> 148s
+    #     f3      0.445 -> 0.605   0.199 -> 0.544    223 -> 264s
+    #
+    # Coverage is not the reason. The changed frames were rendered and looked at
+    # in **both** directions, which is what the referee-threshold A/B further up
+    # this file did and what makes the difference:
+    #
+    #   * gained boxes are mostly the right fighter - on f3, five of six, one
+    #     of them inside the 58.6-59.6s knockdown the old settings missed
+    #     entirely
+    #   * **every one of six sampled lost boxes was on the wrong person** - two
+    #     bystanders and a seated spectator in the chairs. The coverage the old
+    #     settings reported was partly crowd, and this drops it
+    #   * moved boxes stay on the correct athlete
+    #
+    # The cost is 13-40% more time, not the doubling above; that figure is as
+    # stale as the coverage it sits beside.
+    #
+    # Known costs, not hidden: degenerate narrow boxes rise from 0% to 6% on
+    # fam3 and 3% to 6% on f2 (a mask collapsing to a sliver), fam3 gains one
+    # identity confusion where it had none, and one sampled fam3 box landed on
+    # the referee. None of that outweighs dropping spectators, but it is the
+    # thing to look at next.
+    #
+    # This does **not** unlock scoring: 0.54-0.67 is still under the 0.85
+    # min_tracking_coverage_for_score gate.
+    sam_continuous_enabled: bool = env_bool("WARRIORIQ_SAM_CONTINUOUS", True)
     sam_continuous_fps: float = float(os.getenv("WARRIORIQ_SAM_FPS", "4"))
     sam_continuous_max_frames: int = int(os.getenv("WARRIORIQ_SAM_MAX_FRAMES", "360"))
     # Keep the bounded two-minute guidance pass in one memory state. Short
