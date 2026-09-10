@@ -232,17 +232,31 @@ class PoseTracker:
             # tracking model changes its internal source geometry and breaks
             # BoT-SORT camera-motion state on the next full frame.
             self._focus_model = YOLO(self.model_path)
-        results = self._focus_model.predict(
-            [request[4] for request in requests],
-            device=self.device,
-            imgsz=384 if self.uses_cuda else 320,
-            conf=max(0.10, SETTINGS.detection_conf * 0.65),
-            classes=[0],
-            verbose=False,
-        )
+        # One crop per call rather than one batched call over the list.
+        #
+        # The batch was not "guaranteed one result per request" as the comment
+        # here used to claim: the crops are cut to each fighter and so have
+        # different shapes, and Ultralytics returned fewer results than inputs,
+        # dying inside its own predictor at `self.results[i].speed = {` with
+        # `IndexError: list index out of range`. That took the whole analysis
+        # with it, which is why WARRIORIQ_SAM_CONTINUOUS=true crashed on the
+        # first fighter it tried to recover - a setting core/config.py invites
+        # the reader to turn on.
+        #
+        # This path only runs where SAM sees a fighter YOLO missed, a handful of
+        # frames in a round, so looping costs nothing worth protecting.
+        results = [
+            self._focus_model.predict(
+                request[4],
+                device=self.device,
+                imgsz=384 if self.uses_cuda else 320,
+                conf=max(0.10, SETTINGS.detection_conf * 0.65),
+                classes=[0],
+                verbose=False,
+            )[0]
+            for request in requests
+        ]
         recovered: list[PersonObservation] = []
-        # One result per request, guaranteed by the batched predict call. A
-        # mismatch would silently drop a recovery rather than fail loudly.
         for (name, guide, offset_x, offset_y, crop), result in zip(requests, results, strict=True):
             candidates = self.parse(result, crop)
             best = None
