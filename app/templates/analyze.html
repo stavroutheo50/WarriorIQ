@@ -270,8 +270,9 @@
     }
     // The file goes up exactly as filmed. Shrinking it here first would be the
     // single biggest thing available to an upload - a phone films 1080p at
-    // around 17 Mbps, so two minutes is 144 MB against a host that refuses a
-    // body over 130 MiB - but re-encoding changes the pixels the analysis
+    // 8 to 17 Mbps, so two minutes is 140 to 260 MB against a host that
+    // refuses a body over 130 MiB, which is 136 MB. Most full rounds filmed at
+    // 1080p therefore cannot be uploaded at all - but re-encoding changes the pixels the analysis
     // reads, and a re-encode of the same fight has already been measured
     // moving coverage by 28 points. It goes in when that has been measured on
     // real footage, not before.
