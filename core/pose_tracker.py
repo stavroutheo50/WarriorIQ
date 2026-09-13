@@ -15,6 +15,33 @@ from core.types import PersonObservation
 LOGGER = logging.getLogger("warrioriq.pose")
 
 
+# Cropping to the action does not work on this footage, and it was measured
+# rather than assumed, because the prize looks obvious: over full bouts of both
+# real recordings the fighters occupy only 57% of the width and 58% of the
+# height, and every frame pays for the rest.
+#
+# The difficulty is knowing which 57% before the fight has been analysed.
+#
+#   * From the seed boxes the coach drew: too small. The measured span over a
+#     round is 4.3x the width of the seed union on fight 1, so a crop padded
+#     generously enough for fight 3 still ended at x=390 while the fighters
+#     reached x=400 - clipping fighter B for part of the round, which costs the
+#     coverage the crop was meant to buy.
+#   * From a motion heat map over the segment: cannot discriminate. On fight 3
+#     the crowd, the officials and the scoreboard move as much as the mat does,
+#     and the motion region is the entire frame at every threshold that
+#     contains the fighters.
+#
+# Where it can be made safe it is not worth having: the best honest case was a
+# long edge of 0.80 on fight 1, which is pose cost 0.64, and pose is around 17%
+# of a run - six percent end to end, against the risk of losing a fighter who
+# runs wide. Spending the same crop on resolution instead would give subjects
+# 1.25x more pixels, which is real but small.
+#
+# This would work on tightly-framed footage with a still crowd. It does not
+# work here.
+
+
 def inference_size(source_width: int, source_height: int) -> int:
     """Choose the detector input size for a source resolution.
 
