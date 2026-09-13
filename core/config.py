@@ -92,6 +92,11 @@ class Settings:
     # 0.12 to 0.19 detections for the tracker to trip over.
     low_resolution_imgsz: int = int(os.getenv("WARRIORIQ_LOW_RES_IMGSZ", "1600"))
     detection_conf: float = float(os.getenv("WARRIORIQ_DET_CONF", "0.20"))
+    # Refuse joint positions no body could reach between two sampled frames.
+    # The pose model fails by returning a confident wrong skeleton rather than
+    # an uncertain one, so no confidence threshold downstream can catch it;
+    # speed can. Limits are per joint and measured - see core/pose_smoothing.py.
+    pose_gate_enabled: bool = env_bool("WARRIORIQ_POSE_GATE", True)
     # Fighter drawing is fully manual. Candidate detection is only a visual
     # advisory, so free-tier web instances can skip loading YOLO on this page.
     selection_detection_enabled: bool = env_bool("WARRIORIQ_SELECTION_DETECTION", not IS_RENDER)

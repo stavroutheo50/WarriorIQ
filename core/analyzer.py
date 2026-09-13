@@ -50,6 +50,7 @@ from core.identity import IdentityManager, fighter_pair_similarity
 from core.metrics import MetricsAccumulator
 from core.preflight import Preflight
 from core.preflight import probe as probe_video
+from core.pose_smoothing import JointGate
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
 from core.report import build_report, write_report
 from core.rtm_pose import refine as refine_fighter_pose
@@ -468,6 +469,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     sam_recovery = SamRecovery()
     action_engine = ActionEngine()
     defense_engine = DefenseEngine()
+    joint_gate = JointGate() if SETTINGS.pose_gate_enabled else None
     metrics = MetricsAccumulator(info.width, info.height)
     # Measure the footage before choosing how to look at it. A second of
     # sampling buys the inference size, and the same numbers tell the person who
@@ -733,6 +735,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             window["A"] += int(fighter_a is not None)
             window["B"] += int(fighter_b is not None)
 
+            # Between identity and everything that measures. The metrics, the
+            # action engine and the defence engine all read these keypoints, so
+            # one collapsed skeleton corrupts guard, balance, centre and travel
+            # at once; identity above keeps the raw observation, because its
+            # job is deciding who this is rather than measuring them.
+            if joint_gate is not None:
+                joint_gate.apply("A", seconds, fighter_a)
+                joint_gate.apply("B", seconds, fighter_b)
+
             defense_engine.update_pose("A", source_frame, seconds, fighter_a)
             defense_engine.update_pose("B", source_frame, seconds, fighter_b)
 
@@ -921,6 +932,11 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "seed": 0,
     }
     tracking = {
+        # How often the pose model returned a joint the body could not have
+        # reached. A quality signal rather than a performance one: a rising
+        # share is the detector degrading on footage it finds hard, and that is
+        # worth seeing before the metrics built on those joints start drifting.
+        "pose_gate": None if joint_gate is None else joint_gate.summary(),
         "metric_definition": "Observation coverage: accepted fighter observations divided by analyzed frames. This is not ground-truth identity accuracy.",
         "selection_source_frame": start_frame,
         "selection_source_seconds": start_frame / info.fps,
