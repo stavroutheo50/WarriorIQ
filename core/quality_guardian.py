@@ -52,7 +52,18 @@ def quality_summary(width: int, height: int, fps: float, brightness: float, shar
     }
 
 
-def inspect_video_quality(path: str | Path, info: VideoInfo) -> dict:
+def inspect_video_quality(path: str | Path, info: VideoInfo,
+                          samples: list[tuple[float, float]] | None = None) -> dict:
+    """Judge whether footage is bright and sharp enough to be worth analysing.
+
+    `samples` lets the caller hand over (brightness, sharpness) pairs it has
+    already measured. The upload path does: it reads the opening once for the
+    fighter-selection frame and takes these from the same frames, rather than
+    seeking through the file a second time. Left out, the file is sampled here
+    as before.
+    """
+    if samples:
+        return _verdict(info, [b for b, _ in samples], [s for _, s in samples])
     capture = cv2.VideoCapture(str(path))
     brightness_values: list[float] = []
     sharpness_values: list[float] = []
@@ -71,6 +82,11 @@ def inspect_video_quality(path: str | Path, info: VideoInfo) -> dict:
             sharpness_values.append(float(cv2.Laplacian(gray, cv2.CV_64F).var()))
     finally:
         capture.release()
+    return _verdict(info, brightness_values, sharpness_values)
+
+
+def _verdict(info: VideoInfo, brightness_values: list[float],
+             sharpness_values: list[float]) -> dict:
     brightness = float(np.median(brightness_values)) if brightness_values else 0.0
     sharpness = float(np.median(sharpness_values)) if sharpness_values else 0.0
     result = quality_summary(info.width, info.height, info.fps, brightness, sharpness)

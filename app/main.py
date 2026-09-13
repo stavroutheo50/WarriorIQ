@@ -95,7 +95,7 @@ from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.squad import build_squad_view, compare_with_previous
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
-from core.video import get_video_info, pick_selection_frame, read_frame
+from core.video import get_video_info, probe_upload, read_frame
 
 app = FastAPI(title="WarriorIQ")
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
@@ -2288,7 +2288,15 @@ async def upload(
                 "Please upload the original MP4 or MOV from your phone or camera "
                 "rather than a converted or re-wrapped copy.",
             )
-        quality = await run_in_threadpool(inspect_video_quality, video_path, info)
+        # One read of the opening answers both questions this asks - is the
+        # footage usable, and where should the fighter picker open - because
+        # both come from the same frames. Asking them separately meant seeking
+        # through the file twice, which is cheap on an MP4 and ruinous on a
+        # WebM: measured 78 s of an upload on a sixty-second 1080p WebM, all
+        # of it after the last byte had arrived.
+        probed_frame, quality_samples = await run_in_threadpool(probe_upload, video_path, info)
+        quality = await run_in_threadpool(
+            inspect_video_quality, video_path, info, quality_samples)
     except Exception:
         video_path.unlink(missing_ok=True)
         raise
@@ -2303,7 +2311,7 @@ async def upload(
     # the two are actually working. The uploader can still scrub anywhere.
     selection_frame = int(round(start * info.fps))
     if start <= 0.0:
-        selection_frame = await run_in_threadpool(pick_selection_frame, video_path, info)
+        selection_frame = probed_frame
         start = selection_frame / info.fps if info.fps > 0 else 0.0
     job_dir = OUTPUTS / job_id
     selection_path = job_dir / "selection.jpg"

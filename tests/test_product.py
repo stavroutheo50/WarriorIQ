@@ -1308,7 +1308,7 @@ class PlanRosterLimitTests(unittest.TestCase):
         with patch.object(webapp, "get_video_info", return_value=info), \
              patch.object(webapp, "scan_upload", return_value={"clean": True, "status": "clean"}), \
              patch.object(webapp, "inspect_video_quality", return_value={"status": "good", "score": 90}), \
-             patch.object(webapp, "pick_selection_frame", return_value=0), \
+             patch.object(webapp, "probe_upload", return_value=(0, [])), \
              patch.object(webapp, "read_frame", return_value=np.zeros((360, 640, 3), np.uint8)):
             return self.client.post(
                 "/upload",
