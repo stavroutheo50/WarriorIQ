@@ -1,14 +1,67 @@
+# WarriorIQ on Render.
+#
+# This file used to say `plan: free` and install `requirements.txt`, and both
+# would have lost data or failed the build:
+#
+#   * A free service has **no persistent disk**. WarriorIQ keeps its SQLite
+#     database, the uploaded fights and every report on disk, so a free plan
+#     erases the lot on each deploy and each idle restart - measured on the
+#     current install, that is a 4.1 MB database holding 229 fights and 692 MB
+#     of reports. There is no warning; it is simply gone.
+#   * A free service also spins down when idle and pays a full Python import on
+#     the next request. That is the same cold start that makes the current
+#     shared host answer in 33 s, so it would not fix the problem it was
+#     reached for.
+#   * `requirements.txt` is the GPU analysis stack - torch, ultralytics, SAM2 -
+#     several gigabytes that the web service never imports. The web host runs
+#     `requirements-web.txt`, which is why that file exists. Analysis happens on
+#     a separate GPU machine that polls this one; see README "remote worker".
+#
+# So: a paid instance with a disk mounted at WARRIORIQ_DATA_DIR, or do not use
+# this file. The disk is the part that is not optional.
+
 services:
   - type: web
     name: warrioriq
     runtime: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
+    # Free has no disk and sleeps. Starter is the cheapest plan that keeps both
+    # the service and the data alive.
+    plan: starter
+    region: frankfurt
+    buildCommand: pip install -r requirements-web.txt
     startCommand: python run.py
     healthCheckPath: /health
     autoDeploy: true
+
+    # Everything WarriorIQ writes lives under one directory so a single mount
+    # covers it: core/config.py resolves DATA_ROOT from WARRIORIQ_DATA_DIR and
+    # hangs the database, uploads and outputs off it.
+    disk:
+      name: warrioriq-data
+      mountPath: /var/warrioriq
+      # 692 MB of reports today across 229 fights, roughly 3 MB each, plus
+      # uploaded video held for WARRIORIQ_VIDEO_RETENTION_DAYS (30) at up to
+      # 130 MB a fight. 10 GB leaves room to notice before it runs out.
+      sizeGB: 10
+
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11
       - key: PYTHONUNBUFFERED
         value: "1"
+      # Must match the disk mountPath above, or the database is written to
+      # ephemeral container storage and disappears on the next deploy.
+      - key: WARRIORIQ_DATA_DIR
+        value: /var/warrioriq
+      # The GPU machine polls this server for queued fights. Without remote
+      # mode the web service would try to analyse fights itself, which it
+      # cannot: it has no GPU and none of the vision stack installed above.
+      - key: WARRIORIQ_WORKER_MODE
+        value: remote
+      # sync: false means Render prompts for the value and keeps it out of the
+      # repository. This is the shared secret the GPU worker authenticates
+      # with; it must never be committed here.
+      - key: WARRIORIQ_WORKER_TOKEN
+        sync: false
+      - key: WARRIORIQ_PUBLIC_BASE_URL
+        sync: false

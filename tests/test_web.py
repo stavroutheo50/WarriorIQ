@@ -548,6 +548,43 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("healthCheckPath: /health", blueprint)
         self.assertIn("startCommand: python run.py", blueprint)
 
+    def test_render_blueprint_keeps_the_data_and_skips_the_gpu_stack(self):
+        """Three ways this file loses data or fails to build, all of them quiet.
+
+        A free Render service has no persistent disk, so the SQLite database
+        and every stored report are erased on each deploy and each idle
+        restart - 4.1 MB holding 229 fights and 692 MB of reports, at the time
+        this was written, gone with no warning. A free service also sleeps and
+        pays a cold start, which is the problem someone reaching for this file
+        is usually trying to escape. And `requirements.txt` is the GPU analysis
+        stack: gigabytes of torch and ultralytics the web service never
+        imports, while `requirements-web.txt` is the one that exists for it.
+
+        None of that announces itself, so it is pinned here rather than left to
+        be rediscovered.
+        """
+        import yaml
+
+        blueprint = yaml.safe_load(
+            (Path(__file__).resolve().parents[1] / "render.yaml").read_text(encoding="utf-8"))
+        service = blueprint["services"][0]
+
+        self.assertNotEqual(service["plan"], "free",
+                            "a free service has no disk: the database and every report are erased")
+        disk = service.get("disk")
+        self.assertIsNotNone(disk, "without a mounted disk WarriorIQ writes to ephemeral storage")
+
+        env = {item["key"]: item for item in service["envVars"]}
+        self.assertEqual(env["WARRIORIQ_DATA_DIR"]["value"], disk["mountPath"],
+                         "the data directory must be the mounted disk, or nothing persists")
+        self.assertIn("requirements-web.txt", service["buildCommand"])
+        self.assertNotIn("-r requirements.txt", service["buildCommand"],
+                         "that is the GPU stack; the web service never imports it")
+        self.assertIs(env["WARRIORIQ_WORKER_TOKEN"].get("sync"), False,
+                      "the worker token must be prompted for, never committed")
+        self.assertNotIn("value", env["WARRIORIQ_WORKER_TOKEN"],
+                         "a token value in the repository is a leaked credential")
+
     def test_https_proxy_origin_and_secure_cookie_work_on_render(self):
         response = self.client.post(
             "/cookie-preferences",
