@@ -806,6 +806,16 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             # Adapt pose inference to pose-pass throughput. The SAM2 primary
             # pass is already complete and must not force lower pose quality.
             quality.maybe_adjust(analyzed_frames, processed_seconds, time.perf_counter() - pose_pass_start)
+            # One planned decision rather than a controller chasing machine
+            # load: measure what a frame really costs here, then fix the stride
+            # for the rest of the run so the analysis fits inside the video's
+            # own length. Deliberately separate from maybe_adjust, which is off
+            # by default because continuous adaptation makes identical fights
+            # follow different frame paths.
+            if SETTINGS.hard_realtime_budget:
+                quality.plan_for_budget(
+                    analyzed_frames, processed_seconds,
+                    time.perf_counter() - pose_pass_start, segment_duration)
             current_imgsz = quality.imgsz
 
             if analyzed_frames - last_progress_emit >= SETTINGS.progress_interval_frames:
@@ -988,6 +998,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "analysis_seconds": analysis_seconds,
         "realtime_speed": realtime_speed,
         "within_video_length_budget": within_budget,
+        # What the budget governor decided, and whether it expected to succeed.
+        # Published because sampling less is a real cost to the analysis and the
+        # reader is entitled to know it was paid: "budget_met_expected" false
+        # means this machine cannot analyse this footage in real time without
+        # going below min_tracking_fps, and the stride stopped at that floor.
+        "realtime_budget_enforced": SETTINGS.hard_realtime_budget,
+        "budget_plan": quality.budget_reason,
+        "budget_met_expected": quality.budget_expected_met,
+        "planned_stride": quality.planned_stride,
         "final_analysis_fps": quality.effective_fps,
         "final_imgsz": quality.imgsz,
         "quality_mode": quality.mode,

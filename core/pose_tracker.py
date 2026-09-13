@@ -57,10 +57,90 @@ class QualityController:
         self.base_imgsz = self.imgsz = max(int(measured_imgsz or 0), rule_imgsz)
         self.mode = "balanced"
         self.last_adjust = 0
+        # Budget planning state. See plan_for_budget.
+        self.planned = False
+        self.planned_stride: int | None = None
+        self.budget_reason = "not_planned"
+        self.budget_expected_met: bool | None = None
 
     @property
     def effective_fps(self) -> float:
         return self.source_fps / self.stride
+
+    def plan_for_budget(self, analyzed_frames: int, processed_seconds: float,
+                        elapsed_seconds: float, segment_duration: float) -> None:
+        """Choose one sampling stride that finishes inside the video's length.
+
+        The product's stated target is that analysis never takes longer than the
+        video. Nothing enforced it: `hard_realtime_budget` was read nowhere at
+        all, and `adaptive_quality` - the only real mechanism - is off by
+        default and rightly so, because adapting continuously to momentary
+        machine load makes identical fights follow different frame paths.
+
+        So this plans **once**. It measures the true cost of a frame on this
+        machine over a short calibration, works out how many frames the
+        remaining budget affords, and fixes the stride for the rest of the run.
+        One decision, recorded in the report, rather than a controller chasing
+        load for the whole analysis.
+
+        It will not go below `min_tracking_fps`. A round sampled too sparsely
+        cannot hold a strike - the action windows in core/ are 0.6-1.5s - so
+        buying the budget past that point buys a number and loses the analysis.
+        When the floor is not enough, the stride stops there and
+        `budget_expected_met` goes False, which the report publishes. Measured
+        on this machine: 480x220 footage with a 59px subject needs imgsz 1632,
+        costs 0.194s per analysed frame, and cannot finish in real time at 10
+        fps whatever this method does. Saying so is the honest outcome.
+
+        **Reproducibility, which is why the continuous controller stays off.**
+        Planning reads a clock, and a clock moves with machine load. Measured on
+        fight 1, twice: wall time differed by 23 s (208.4 s against 231.6 s) and
+        the plan did not - stride 3 both times, and coverage identical to four
+        decimals (A 0.6188, B 0.6450). It is stable here because the required
+        stride exceeds the floor and clamps to it, which is not stability in
+        general. For A/B work, pin it with WARRIORIQ_FORCE_STRIDE rather than
+        trusting that.
+        """
+        if self.planned or analyzed_frames < 40 or elapsed_seconds <= 0:
+            return
+        self.planned = True
+        if SETTINGS.force_tracking_stride > 0:
+            self.stride = int(SETTINGS.force_tracking_stride)
+            self.planned_stride = self.stride
+            self.budget_reason = "stride_pinned"
+            self.budget_expected_met = None
+            return
+
+        per_frame = elapsed_seconds / max(1, analyzed_frames)
+        remaining_video = max(0.0, segment_duration - processed_seconds)
+        remaining_budget = segment_duration - elapsed_seconds
+        if remaining_video <= 0:
+            self.budget_reason = "already_finished"
+            self.budget_expected_met = True
+            return
+        if remaining_budget <= 0:
+            affordable = 0.0
+        else:
+            affordable = remaining_budget / per_frame
+
+        wanted = remaining_video * self.source_fps / max(1, self.stride)
+        if wanted <= affordable:
+            self.budget_reason = "on_track"
+            self.budget_expected_met = True
+            self.planned_stride = self.stride
+            return
+
+        needed = remaining_video * self.source_fps / max(1e-6, affordable)
+        floor_stride = max(1, int(self.source_fps / max(1e-6, self.min_fps)))
+        chosen = max(1, min(int(needed) + 1, floor_stride))
+        self.stride = chosen
+        self.planned_stride = chosen
+        self.mode = "deadline"
+        affordable_at_chosen = remaining_video * self.source_fps / max(1, chosen)
+        self.budget_expected_met = affordable_at_chosen <= affordable
+        self.budget_reason = (
+            "sampling_reduced" if self.budget_expected_met
+            else "cannot_meet_budget_above_quality_floor")
 
     def maybe_adjust(self, analyzed_index: int, processed_seconds: float, elapsed_seconds: float) -> tuple[int, int, str]:
         if not SETTINGS.adaptive_quality or elapsed_seconds < 2.0 or analyzed_index - self.last_adjust < 60:

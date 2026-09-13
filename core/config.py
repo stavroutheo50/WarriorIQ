@@ -91,7 +91,22 @@ class Settings:
     target_tracking_fps: float = float(os.getenv("WARRIORIQ_TARGET_FPS", "15"))
     min_tracking_fps: float = float(os.getenv("WARRIORIQ_MIN_FPS", "10"))
     max_tracking_fps: float = float(os.getenv("WARRIORIQ_MAX_FPS", "30"))
+    # Hold the analysis to the length of the video by planning the sampling
+    # stride once, early, from measured throughput. Until 2026-09-10 this
+    # setting was defined here and **read nowhere in the codebase** - a switch
+    # named for the product's headline performance promise that did nothing,
+    # while a two-minute video took five and a half minutes. See
+    # QualityController.plan_for_budget: it never samples below
+    # min_tracking_fps, and when the floor is not enough it says so in the
+    # report rather than quietly returning a worse analysis.
     hard_realtime_budget: bool = env_bool("WARRIORIQ_HARD_REALTIME", True)
+    # Pin the sampling stride and skip planning entirely. The governor decides
+    # from measured throughput, and measured throughput moves with machine load,
+    # so a video whose required stride sits near a rounding boundary could be
+    # planned differently on two runs. Everything this project concludes is
+    # decided by A/B, and an A/B across a changed frame path is worthless - set
+    # this for that work. 0 means plan normally.
+    force_tracking_stride: int = int(os.getenv("WARRIORIQ_FORCE_STRIDE", "0"))
     # Fixed sampling is the reproducible default. Adaptive sampling depends on
     # momentary machine load and can make identical fights follow different
     # frame paths; it remains available as an explicit speed opt-in.
