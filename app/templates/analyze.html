@@ -268,14 +268,33 @@
       restore(`This video is ${fmtMB(file.size)} and the upload limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p rather than 4K, or upload one round at a time — either fits, and neither costs the analysis anything.`);
       return;
     }
-    // The file goes up exactly as filmed. Shrinking it here first would be the
-    // single biggest thing available to an upload - a phone films 1080p at
-    // 8 to 17 Mbps, so two minutes is 140 to 260 MB against a host that
-    // refuses a body over 130 MiB, which is 136 MB. Most full rounds filmed at
-    // 1080p therefore cannot be uploaded at all - but re-encoding changes the pixels the analysis
-    // reads, and a re-encode of the same fight has already been measured
-    // moving coverage by 28 points. It goes in when that has been measured on
-    // real footage, not before.
+    // The file goes up exactly as filmed, and it has to.
+    //
+    // Shrinking it here looks like the single biggest thing available to an
+    // upload: a phone films 1080p at 8 to 17 Mbps, so two minutes is 140 to
+    // 260 MB against a host that refuses a body over 130 MiB, which is 136 MB.
+    // Most full rounds filmed at 1080p therefore cannot be uploaded at all.
+    //
+    // It was measured on 2026-09-13 and it is not safe. Both real bouts were
+    // re-encoded H.264 -crf 23 at the same resolution and frame count, then
+    // analysed against their originals:
+    //
+    //   fight 1   11.2 -> 2.6 MB   A 0.642 -> 0.369   B 0.778 -> 0.585   events 89 -> 17
+    //   fight 3   23.8 -> 13.5 MB  A 0.613 -> 0.616   B 0.545 -> 0.638   events 49 -> 70
+    //
+    // The same setting moved two files in opposite directions. Fight 1 lost
+    // 43% of fighter A's coverage and 81% of its events; fight 3 moved the
+    // other way, which is not an improvement but the analysis reading a
+    // different fight. CRF is a quality target rather than a ratio, so how
+    // much is actually removed depends on the source: fight 1 was already
+    // 0.78 Mbps and came out at 0.18. On footage where a fighter is sixty
+    // pixels tall, what a re-encode discards is what the detector needs -
+    // which is why the inference size is already straining at 1600 to upscale
+    // them.
+    //
+    // A re-encode here would therefore destroy some uploaders' analyses and
+    // not others', with nothing to say which. The upload-size problem belongs
+    // to the host's request-body cap, and that is where it gets fixed.
     const body=new FormData(form);body.set('video',file);
     const request=new XMLHttpRequest();
     showProgress('active');progressBar.style.width='2%';progressText.textContent='Uploading fight video…';uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');uploadSubmit.textContent='Uploading 0%';
