@@ -493,6 +493,12 @@ class PublicPageTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
             environment = dict(os.environ)
+            # This asks what DATA_ROOT alone does, so the narrower per-path
+            # overrides have to come off first - tests/conftest.py sets all
+            # three, and inheriting them would have the subprocess answer a
+            # different question and fail for the wrong reason.
+            for narrower in ("WARRIORIQ_DB_PATH", "WARRIORIQ_UPLOADS_DIR", "WARRIORIQ_OUTPUTS_DIR"):
+                environment.pop(narrower, None)
             environment.update({"PYTHONPATH": str(root), "WARRIORIQ_DATA_DIR": temporary})
             completed = subprocess.run(
                 [sys.executable, "-c", "from core.config import DATA_ROOT,UPLOADS,OUTPUTS,DB_PATH; print(DATA_ROOT); print(UPLOADS.parent==DATA_ROOT, OUTPUTS.parent==DATA_ROOT, DB_PATH.parent==DATA_ROOT)"],
@@ -505,6 +511,37 @@ class PublicPageTests(unittest.TestCase):
             )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("True True True", completed.stdout)
+
+    def test_each_written_path_can_be_moved_on_its_own(self):
+        """A narrower override must beat DATA_ROOT, or the test suite is not isolated.
+
+        tests/conftest.py leans on exactly this: it points the database,
+        uploads and outputs at a scratch directory while leaving MODELS and
+        DATASET on the real DATA_ROOT, so a test that needs the pose engine
+        still finds it. Without that precedence the suite writes into the
+        development database and job queue, which is how 196 test accounts and
+        725 phantom jobs accumulated there before anyone looked.
+        """
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as data_root, tempfile.TemporaryDirectory() as scratch:
+            environment = dict(os.environ)
+            environment.update({
+                "PYTHONPATH": str(root),
+                "WARRIORIQ_DATA_DIR": data_root,
+                "WARRIORIQ_DB_PATH": str(Path(scratch) / "test.sqlite3"),
+                "WARRIORIQ_UPLOADS_DIR": str(Path(scratch) / "uploads"),
+                "WARRIORIQ_OUTPUTS_DIR": str(Path(scratch) / "outputs"),
+            })
+            completed = subprocess.run(
+                [sys.executable, "-c",
+                 "from core.config import DATA_ROOT,UPLOADS,OUTPUTS,DB_PATH,MODELS,DATASET;"
+                 "print(DB_PATH.parent!=DATA_ROOT, UPLOADS.parent!=DATA_ROOT, OUTPUTS.parent!=DATA_ROOT,"
+                 "MODELS.parent==DATA_ROOT, DATASET.parent==DATA_ROOT)"],
+                cwd=root, env=environment, capture_output=True, text=True, timeout=15, check=False,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("True True True True True", completed.stdout,
+                      "the written paths must move independently while models and dataset stay put")
 
     def test_render_blueprint_uses_health_probe_and_port_aware_entrypoint(self):
         blueprint = (Path(__file__).resolve().parents[1] / "render.yaml").read_text(encoding="utf-8")

@@ -6,11 +6,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = Path(os.getenv("WARRIORIQ_DATA_DIR", str(ROOT))).expanduser().resolve()
-UPLOADS = DATA_ROOT / "uploads"
-OUTPUTS = DATA_ROOT / "outputs"
+# The three things this build *writes* can each be pointed somewhere else on
+# their own, rather than only by moving DATA_ROOT wholesale. Two reasons, one
+# of them measured. The web host and the GPU worker do not share a disk, so
+# uploads and outputs genuinely belong on separate volumes. And the test suite
+# had no isolation at all: it wrote into the development database and the real
+# job queue, which by 2026-09-13 held 196 test accounts and 725 phantom jobs -
+# each of the latter a session file the worker would claim and fail on, naming
+# a video in a temp directory Windows had long since cleared. tests/conftest.py
+# now points these at a scratch directory. MODELS and DATASET stay on
+# DATA_ROOT deliberately: they are read, not written, and a test that needs the
+# pose engine must still find it.
+UPLOADS = Path(os.getenv("WARRIORIQ_UPLOADS_DIR", str(DATA_ROOT / "uploads"))).expanduser()
+OUTPUTS = Path(os.getenv("WARRIORIQ_OUTPUTS_DIR", str(DATA_ROOT / "outputs"))).expanduser()
 MODELS = DATA_ROOT / "models"
 DATASET = DATA_ROOT / "dataset"
-DB_PATH = DATA_ROOT / "warrioriq.sqlite3"
+DB_PATH = Path(os.getenv("WARRIORIQ_DB_PATH", str(DATA_ROOT / "warrioriq.sqlite3"))).expanduser()
 ULTRALYTICS_CONFIG = DATA_ROOT / ".ultralytics"
 HUGGINGFACE_CACHE = DATA_ROOT / ".huggingface"
 
