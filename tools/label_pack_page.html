@@ -102,11 +102,13 @@
     <li>Our guess is shown, and it is <b>frequently wrong</b>. Do not let it lead you.</li>
     <li>Some clips are moments we think <b>nothing happened</b>. If we missed a strike there,
       saying so is the most valuable answer in the pack.</li>
-    <li><b>If the yellow box is on the referee</b> &mdash; white shirt, dark trousers &mdash;
-      press <kbd>x</kbd>. The analysis sometimes follows the official instead of a fighter,
-      and your skip is the only way we find out how often. Same for anyone at the mat edge
-      who clearly is not competing.</li>
-    <li>Can't tell? <kbd>x</kbd>. Skipped clips never become training data.</li>
+    <li><b>Is the yellow box even on a fighter?</b> If it is on the referee &mdash; white shirt,
+      dark trousers &mdash; or on anyone at the mat edge who is not competing, press
+      <kbd>w</kbd>. That is an answer, not a skip: the analysis following the wrong person
+      is the failure most likely to be hiding here, and <kbd>w</kbd> is the only instrument
+      that can see it. Do not judge the technique of someone who is not fighting.</li>
+    <li>Can't tell what happened, but the right person is boxed? <kbd>x</kbd>. Skipped clips
+      never become training data.</li>
   </ul>
 </main>
 
@@ -139,7 +141,10 @@ const store = "warrioriq-labels-" + DATA.job;
 // pretending. It used to fail silently, which is how a finished pack of
 // answers was lost: the counter read "60 of 60" the whole time.
 const SERVED = location.protocol === "http:" || location.protocol === "https:";
-let saveState = SERVED ? "server" : "local";
+// "unproven" until a save actually returns ok. It used to start at "server",
+// so a page that had never once written to disk showed "saving to disk" in
+// green from the moment it loaded.
+let saveState = SERVED ? "unproven" : "local";
 let labels = {};
 try { labels = JSON.parse(localStorage.getItem(store) || "{}"); } catch (e) { labels = {}; }
 const items = DATA.candidates;
@@ -151,6 +156,7 @@ function showSaveState() {
   const el = document.getElementById("savestate");
   if (!el) return;
   if (saveState === "server") { el.textContent = "saving to disk"; el.className = "pill ok"; }
+  else if (saveState === "unproven") { el.textContent = "not saved yet"; el.className = "pill warn"; }
   else if (saveState === "local") { el.textContent = "browser only — press Download labels when done"; el.className = "pill warn"; }
   else { el.textContent = "NOT SAVING — press Download labels now"; el.className = "pill bad"; }
 }
@@ -159,7 +165,12 @@ const persist = () => {
   if (SERVED) {
     // Fire and forget, but notice failure. The answers are already right in
     // memory; what matters is being told when they are not reaching disk.
-    fetch("save", {
+    // Absolute, built from the job. The target used to be the bare relative
+    // "save", which the browser resolves against the *directory* of the page.
+    // Served at /<job> with no trailing slash that directory is "/", so every
+    // answer was POSTed to /save, which the server does not route, and 32
+    // answers were lost while the pill read "saving to disk".
+    fetch("/" + encodeURIComponent(DATA.job) + "/save", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(buildPayload()),
     }).then((r) => { saveState = r.ok ? "server" : "none"; showSaveState(); })
@@ -254,7 +265,11 @@ function render() {
   skip.className = "big";
   skip.innerHTML = "<kbd>x</kbd><span>I can't tell &mdash; skip it</span>";
   skip.onclick = () => record("__unsure__");
-  other.append(no, skip);
+  const wrong = document.createElement("button");
+  wrong.className = "big";
+  wrong.innerHTML = "<kbd>w</kbd><span>Wrong person &mdash; that is not the fighter</span>";
+  wrong.onclick = () => record("__wrongperson__");
+  other.append(no, skip, wrong);
   keys.appendChild(other);
 }
 
@@ -267,6 +282,10 @@ document.addEventListener("keydown", (ev) => {
     ev.preventDefault(); return;
   }
   if (key === "x") { record("__unsure__"); ev.preventDefault(); return; }
+  // Not a skip. "The box is on the wrong person" is a measurement of identity,
+  // which is the thing most likely to be wrong here, and skipping threw it
+  // away - the one answer nobody could give was the one worth most.
+  if (key === "w") { record("__wrongperson__"); ev.preventDefault(); return; }
   if (ev.key === "Backspace") {
     if (pending) { pending = null; render(); ev.preventDefault(); return; }
     for (let i = at - 1; i >= 0; i--) {
@@ -287,11 +306,19 @@ document.addEventListener("keydown", (ev) => {
 function buildPayload() {
   return {
     job: DATA.job, video: DATA.video,
-    labels: items.filter((i) => i.id in labels && labels[i.id] !== "__unsure__")
+    labels: items.filter((i) => i.id in labels
+                              && labels[i.id] !== "__unsure__"
+                              && labels[i.id] !== "__wrongperson__")
                  .map((i) => ({ id: i.id, fighter: i.fighter, peak_time: i.peak_time,
                                 proposed: i.proposed, technique: labels[i.id],
                                 target: i.target, outcome: i.outcome, source: i.source })),
     unsure: items.filter((i) => labels[i.id] === "__unsure__").map((i) => i.id),
+    // Kept whole rather than as ids: this is the identity error rate, measured
+    // by the only instrument that can see it, and it needs the time and the
+    // fighter to be useful later.
+    wrong_person: items.filter((i) => labels[i.id] === "__wrongperson__")
+                       .map((i) => ({ id: i.id, fighter: i.fighter, peak_time: i.peak_time,
+                                      source: i.source })),
   };
 }
 

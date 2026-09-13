@@ -41,7 +41,21 @@ def main() -> int:
     if payload.get("job") != args.job:
         raise SystemExit("label file is for job %r, not %r" % (payload.get("job"), args.job))
     entries = payload.get("labels", [])
+    wrong = payload.get("wrong_person") or []
+    unsure = payload.get("unsure") or []
     if not entries:
+        # A pack answered entirely "wrong person" produces no training data and
+        # is the most informative file the labeller can hand back, so it is
+        # reported rather than refused. Bailing here printed "no labels in that
+        # file" over the measurement that mattered.
+        if wrong:
+            judged = len(wrong) + len(unsure)
+            print("%d of %d judged clips were the WRONG PERSON (%.0f%%)."
+                  % (len(wrong), judged, 100.0 * len(wrong) / max(1, judged)))
+            print("No technique labels, and none are worth collecting from this fight")
+            print("until identity holds: a technique recorded against the wrong person")
+            print("is training data pointing the wrong way.")
+            raise SystemExit(0)
         raise SystemExit("no labels in that file")
 
     FAMILIES = {"punch", "kick", "knee"}
@@ -89,6 +103,16 @@ def main() -> int:
           % (len(entries), len(entries) - len(coarse), len(coarse), agreed))
     if payload.get("unsure"):
         print("%d marked unsure and skipped" % len(payload["unsure"]))
+    # Not training data, and the most important number in the file. A clip
+    # whose box is on the referee or a spectator says the analysis lost the
+    # fighter there - and unlike coverage, which only counts whether *something*
+    # was tracked, this says whether it was the right something.
+    if wrong:
+        judged = len(entries) + len(unsure) + len(wrong)
+        print("%d of %d clips were the WRONG PERSON (%.0f%%) - identity, not technique,"
+              % (len(wrong), judged, 100.0 * len(wrong) / max(1, judged)))
+        print("   is what those clips measure. Nothing trained on this fight is")
+        print("   trustworthy while that share is high.")
     print("class balance after kick heights collapse:")
     for name, n in kept.most_common():
         print("   %-22s %4d" % (name, n))
