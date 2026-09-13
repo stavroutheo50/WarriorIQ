@@ -184,9 +184,13 @@
       restore(`This video is ${fmtMB(file.size)} and the upload limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p rather than 4K, or upload one round at a time — either fits, and neither costs the analysis anything.`);
       return;
     }
-    // Shrink oversized phone footage before it crosses a mobile uplink. The
-    // analyser infers at 1280 and samples at most 15fps, so a 4K source is
-    // bandwidth the analysis never reads. Any failure returns the original.
+    // The file goes up exactly as filmed. Shrinking it here first would be the
+    // single biggest thing available to an upload - a phone films 1080p at
+    // around 17 Mbps, so two minutes is 144 MB against a host that refuses a
+    // body over 130 MiB - but re-encoding changes the pixels the analysis
+    // reads, and a re-encode of the same fight has already been measured
+    // moving coverage by 28 points. It goes in when that has been measured on
+    // real footage, not before.
     const body=new FormData(form);body.set('video',file);
     const request=new XMLHttpRequest();
     showProgress('active');progressBar.style.width='2%';progressText.textContent='Uploading fight video…';uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');uploadSubmit.textContent='Uploading 0%';

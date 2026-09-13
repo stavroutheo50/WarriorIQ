@@ -33,6 +33,21 @@ The nano encoder is used on purpose: it separates better than the medium one
 (0.996 against 0.989) and costs the same, because the time goes on cropping
 rather than on the network. There is not enough detail in a person this small
 for the larger model's extra capacity to describe.
+
+Two further things were measured on 2026-09-13, because "embed only the
+candidates that could win" looked like an obvious saving and is not one.
+
+Every detection in the frame is embedded, and on real 480x220 tournament
+footage that is **3.5 people per frame**, not the thirteen to eighteen the
+1080p framing calibration reports - those are different footage. Embedding
+costs 3.5 ms per person and **6.5% of the analysis**. Of the candidates the
+identity manager then scores, 62% already pass its geometric gate, so at most
+about 2.5% of a run is spent on embeddings that could never have been chosen.
+
+Skipping them would also cost something real: a track's embedding is pooled
+over time, and a fighter who is lost and reappears somewhere unexpected is
+recovered from that pool. Refusing to embed the far-away people is exactly
+refusing to build the pool for the tracks recovery needs most.
 """
 
 from __future__ import annotations

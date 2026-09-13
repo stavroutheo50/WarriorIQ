@@ -18,6 +18,87 @@ def sam_sampling_stride(source_fps: float, total_source_frames: int) -> int:
     return max(fps_stride, budget_stride)
 
 
+class _DecodedClip:
+    """Frames already in memory, in the form SAM2's own loader would return.
+
+    SAM2 reads a clip from a folder of JPEGs or from an MP4, and both mean the
+    frames leave memory and come back. The continuous path decoded every frame
+    with OpenCV, wrote it out as a quality-86 JPEG, and SAM2 then reopened it
+    with PIL and resized it again. Measured on a sixty-second bout that round
+    trip cost 8.5 s of a 131 s analysis - and it also put a lossy re-encode in
+    front of the one component that finds a fighter the detector missed, on
+    footage where a fighter is already only sixty pixels tall.
+
+    The tensor allocated here is the same one SAM2 allocates: frames are
+    resized and normalised straight into it, one chunk at a time, so nothing
+    is held that the JPEG path did not already hold.
+    """
+
+    def __init__(self, image_size: int, capacity: int, height: int, width: int):
+        self.image_size = max(1, int(image_size))
+        self.images = torch.zeros(max(1, int(capacity)), 3,
+                                  self.image_size, self.image_size, dtype=torch.float32)
+        self.height, self.width = int(height), int(width)
+        self.count = 0
+
+    @property
+    def full(self) -> bool:
+        return self.count >= int(self.images.shape[0])
+
+    def add(self, frame_bgr: np.ndarray) -> None:
+        if self.full:
+            return
+        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        # PIL resizes with bicubic by default, which is what SAM2's loader got
+        # from Image.resize, so the model sees the filter it was tuned on.
+        resized = cv2.resize(rgb, (self.image_size, self.image_size),
+                             interpolation=cv2.INTER_CUBIC)
+        frame = torch.from_numpy(np.ascontiguousarray(resized))
+        self.images[self.count] = frame.permute(2, 0, 1).float().div_(255.0)
+        self.count += 1
+
+    def taken(self) -> torch.Tensor:
+        return self.images[: self.count]
+
+
+def _install_in_memory_loader() -> None:
+    """Teach SAM2's frame loader to accept a clip we already hold.
+
+    Patching rather than reimplementing init_state: everything else that call
+    does is bookkeeping this module has no business copying, and a future SAM2
+    that adds a field would silently lose it.
+    """
+    import sam2.sam2_video_predictor as predictor_module
+
+    if getattr(predictor_module, "_warrioriq_in_memory_loader", False):
+        return
+    original = predictor_module.load_video_frames
+
+    def load_video_frames(video_path, image_size, offload_video_to_cpu,
+                          img_mean=(0.485, 0.456, 0.406), img_std=(0.229, 0.224, 0.225),
+                          async_loading_frames=False, compute_device=None):
+        if not isinstance(video_path, _DecodedClip):
+            return original(
+                video_path=video_path, image_size=image_size,
+                offload_video_to_cpu=offload_video_to_cpu, img_mean=img_mean,
+                img_std=img_std, async_loading_frames=async_loading_frames,
+                compute_device=compute_device if compute_device is not None else torch.device("cuda"),
+            )
+        images = video_path.taken()
+        mean = torch.tensor(img_mean, dtype=torch.float32)[:, None, None]
+        std = torch.tensor(img_std, dtype=torch.float32)[:, None, None]
+        if not offload_video_to_cpu and compute_device is not None:
+            images = images.to(compute_device)
+            mean, std = mean.to(compute_device), std.to(compute_device)
+        # In place: the clip is finished with, and a copy of this tensor is
+        # gigabytes on a long chunk.
+        images = images.sub_(mean).div_(std)
+        return images, video_path.height, video_path.width
+
+    predictor_module.load_video_frames = load_video_frames
+    predictor_module._warrioriq_in_memory_loader = True
+
+
 class SamRecovery:
     """Best-effort short-window SAM2.1 identity recovery.
 
@@ -124,6 +205,51 @@ class SamRecovery:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def _propagate_clip(self, clip, source_frames, seeds, tracks,
+                        progress_callback, completed, total) -> None:
+        """Run one chunk and carry its last good boxes forward as the next seed."""
+        state = self.predictor.init_state(
+            video_path=clip,
+            offload_video_to_cpu=True,
+            offload_state_to_cpu=False,
+            async_loading_frames=False,
+        )
+        try:
+            self.predictor.reset_state(state)
+            for object_id, name in ((1, "A"), (2, "B")):
+                self.predictor.add_new_points_or_box(
+                    inference_state=state,
+                    frame_idx=0,
+                    obj_id=object_id,
+                    box=seeds[name],
+                )
+            last_guided: dict[str, np.ndarray] = {}
+            with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                for frame_index, object_ids, mask_logits in self.predictor.propagate_in_video(state):
+                    if not (0 <= int(frame_index) < len(source_frames)):
+                        continue
+                    guided: dict[str, np.ndarray] = {}
+                    for j, object_id in enumerate(object_ids):
+                        box = self._mask_to_box((mask_logits[j] > 0.0).detach().cpu().numpy())
+                        if box is not None:
+                            guided["A" if int(object_id) == 1 else "B"] = box
+                    if guided:
+                        tracks[source_frames[int(frame_index)]] = guided
+                        last_guided = guided
+                    if progress_callback is not None and int(frame_index) % 15 == 0:
+                        progress_callback(min(total, completed + int(frame_index) + 1), total)
+            for name in ("A", "B"):
+                if name in last_guided:
+                    seeds[name] = last_guided[name]
+        finally:
+            try:
+                self.predictor.reset_state(state)
+            except Exception:
+                pass
+            del state
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
     def track_segment(
         self,
         video_path: str,
@@ -138,85 +264,60 @@ class SamRecovery:
 
         Returned boxes are identity guidance only. Downstream code still
         requires a detector/pose observation before counting a visible frame.
+
+        Each chunk is propagated as soon as it is full rather than writing the
+        whole segment out first. The decode is one forward pass either way, and
+        only one chunk is ever resident - which is what the folder of JPEGs was
+        buying, at the price of encoding every frame, writing it to disk and
+        having SAM2 decode it again.
         """
         if not SETTINGS.sam_continuous_enabled or not self._load():
             return {}
+        _install_in_memory_loader()
+        start_frame, end_frame = int(start_frame), int(end_frame)
         stride = sam_sampling_stride(source_fps, end_frame - start_frame)
-        temp_dir = Path(tempfile.mkdtemp(prefix="warrioriq_sam_primary_"))
-        frame_chunks: list[tuple[Path, list[int]]] = []
+        chunk_frames = max(1, SETTINGS.sam_continuous_chunk_frames)
+        # Only used to size chunks and to drive the progress bar. Frames can
+        # run out early on a truncated file, which shortens the last chunk.
+        expected = max(0, (end_frame - start_frame + stride - 1) // stride)
+        image_size = int(getattr(self.predictor, "image_size", 1024) or 1024)
+        tracks: dict[int, dict[str, np.ndarray]] = {}
+        seeds = {"A": np.asarray(fighter_a_box, dtype=np.float32),
+                 "B": np.asarray(fighter_b_box, dtype=np.float32)}
         cap = cv2.VideoCapture(video_path)
         try:
             if not cap.isOpened():
                 raise RuntimeError("Could not open video for SAM2 propagation")
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             source = start_frame
             saved = 0
+            completed = 0
+            clip = None
+            chunk_sources: list[int] = []
             while source < end_frame:
                 ok, frame = cap.read()
                 if not ok or frame is None:
                     break
                 if (source - start_frame) % stride == 0:
-                    chunk_index = saved // max(1, SETTINGS.sam_continuous_chunk_frames)
-                    local_index = saved % max(1, SETTINGS.sam_continuous_chunk_frames)
-                    if chunk_index >= len(frame_chunks):
-                        chunk_dir = temp_dir / f"chunk_{chunk_index:04d}"
-                        chunk_dir.mkdir(parents=True, exist_ok=True)
-                        frame_chunks.append((chunk_dir, []))
-                    chunk_dir, chunk_sources = frame_chunks[chunk_index]
-                    if not cv2.imwrite(str(chunk_dir / f"{local_index:06d}.jpg"), frame, [cv2.IMWRITE_JPEG_QUALITY, 86]):
-                        raise RuntimeError("Could not prepare frames for SAM2")
+                    if clip is None:
+                        capacity = min(chunk_frames, max(1, expected - saved))
+                        clip = _DecodedClip(image_size, capacity,
+                                            height or frame.shape[0], width or frame.shape[1])
+                        chunk_sources = []
+                    clip.add(frame)
                     chunk_sources.append(source)
                     saved += 1
+                    if clip.full:
+                        self._propagate_clip(clip, chunk_sources, seeds, tracks,
+                                             progress_callback, completed, expected)
+                        completed += len(chunk_sources)
+                        clip, chunk_sources = None, []
                 source += 1
-            if not frame_chunks:
-                return {}
-            tracks: dict[int, dict[str, np.ndarray]] = {}
-            seeds = {"A": np.asarray(fighter_a_box, dtype=np.float32), "B": np.asarray(fighter_b_box, dtype=np.float32)}
-            total = sum(len(sources) for _, sources in frame_chunks)
-            completed = 0
-            for chunk_dir, source_frames in frame_chunks:
-                state = self.predictor.init_state(
-                    video_path=str(chunk_dir),
-                    offload_video_to_cpu=True,
-                    offload_state_to_cpu=False,
-                    async_loading_frames=False,
-                )
-                try:
-                    self.predictor.reset_state(state)
-                    for object_id, name in ((1, "A"), (2, "B")):
-                        self.predictor.add_new_points_or_box(
-                            inference_state=state,
-                            frame_idx=0,
-                            obj_id=object_id,
-                            box=seeds[name],
-                        )
-                    last_guided: dict[str, np.ndarray] = {}
-                    with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                        for frame_index, object_ids, mask_logits in self.predictor.propagate_in_video(state):
-                            if not (0 <= int(frame_index) < len(source_frames)):
-                                continue
-                            guided: dict[str, np.ndarray] = {}
-                            for j, object_id in enumerate(object_ids):
-                                box = self._mask_to_box((mask_logits[j] > 0.0).detach().cpu().numpy())
-                                if box is not None:
-                                    guided["A" if int(object_id) == 1 else "B"] = box
-                            if guided:
-                                tracks[source_frames[int(frame_index)]] = guided
-                                last_guided = guided
-                            if progress_callback is not None and int(frame_index) % 15 == 0:
-                                progress_callback(completed + int(frame_index) + 1, total)
-                    for name in ("A", "B"):
-                        if name in last_guided:
-                            seeds[name] = last_guided[name]
-                finally:
-                    try:
-                        self.predictor.reset_state(state)
-                    except Exception:
-                        pass
-                    del state
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                completed += len(source_frames)
+            if clip is not None and clip.count:
+                self._propagate_clip(clip, chunk_sources, seeds, tracks,
+                                     progress_callback, completed, expected)
             self.continuous_frames = len(tracks)
             return tracks
         except Exception as exc:
@@ -224,7 +325,6 @@ class SamRecovery:
             return {}
         finally:
             cap.release()
-            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def nearest_guidance(
