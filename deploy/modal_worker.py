@@ -73,16 +73,63 @@ def _prepare_runtime() -> None:
     os.environ.update({
         "WARRIORIQ_DATA_DIR": DATA_DIR,
         "WARRIORIQ_WORKER_MODE": "remote",
-        # The .engine is a TensorRT build tied to one GPU model. Leaving it unset
-        # makes pose_tracker fall back to the portable .pt weights.
-        "WARRIORIQ_POSE_ENGINE": f"{models}/absent.engine",
         "HF_HOME": f"{DATA_DIR}/.huggingface",
         "YOLO_CONFIG_DIR": f"{DATA_DIR}/.ultralytics",
     })
 
 
+def _prepare_engine() -> None:
+    """Build this GPU's TensorRT engine once, then reuse it from the Volume.
+
+    This used to point WARRIORIQ_POSE_ENGINE at a file called `absent.engine`
+    to force the fallback to the portable .pt checkpoint, on the reasoning that
+    an engine is tied to one GPU model and none could ship in the image. Both
+    halves of that are true and the conclusion still cost every remote run its
+    TensorRT speed, every time, with nothing in the logs to say so.
+
+    An engine cannot ship, but it can be built here and kept. The filename
+    carries the GPU so two container types cannot be handed each other's
+    engine - which is not a performance question but a correctness one, since
+    a close-enough architecture may accept a foreign engine rather than refuse
+    it. The build costs minutes on the first cold start of a given GPU type and
+    nothing afterwards; `weights.commit()` at the end of the run persists it.
+    """
+    import logging
+
+    from core.trt_engine import ensure_pose_engine
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+    engine = ensure_pose_engine(f"{DATA_DIR}/models")
+    if engine is not None:
+        os.environ["WARRIORIQ_POSE_ENGINE"] = str(engine)
+
+
+def _report_backend() -> str:
+    """Say which backend actually loaded, rather than which one was intended.
+
+    There are three separate ways to lose TensorRT here and all of them were
+    silent: no engine file, no CUDA device, or an engine this runtime refuses.
+    The tracker logs each at load, and this repeats the answer as the function's
+    return value so it is visible in Modal's run output without reading logs.
+    """
+    import logging
+
+    from core.analyzer import get_pose_tracker
+
+    tracker = get_pose_tracker()
+    backend = "tensorrt" if str(tracker.model_path).endswith(".engine") else "pytorch"
+    logging.getLogger("warrioriq.modal").info(
+        "startup_backend=%s model=%s cuda=%s", backend, tracker.model_path, tracker.uses_cuda)
+    return f"{backend}:{tracker.model_path}"
+
+
 @app.function(
-    gpu="T4",
+    # A10G over T4: the T4 has no usable fp16 tensor throughput for this stack
+    # and 16 GB it cannot feed, while the engine is built dynamic at imgsz 1600
+    # for small-source footage. Changing this string is safe - the engine cache
+    # is keyed by GPU name, so a new GPU type builds its own rather than
+    # loading one it cannot deserialise.
+    gpu="A10G",
     volumes={DATA_DIR: weights},
     secrets=[modal.Secret.from_name("warrioriq")],
     timeout=3600,
@@ -97,6 +144,8 @@ def drain_queue() -> int:
     sys.path.insert(0, "/app")
     os.chdir("/app")
     _prepare_runtime()
+    _prepare_engine()
+    print("WarriorIQ pose backend:", _report_backend())
 
     from worker import run_worker
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,8 @@ from core.identity import appearance_hist, pose_signature
 from core.referee import referee_probabilities
 from core.reid import embed
 from core.types import PersonObservation
+
+LOGGER = logging.getLogger("warrioriq.pose")
 
 
 def inference_size(source_width: int, source_height: int) -> int:
@@ -183,6 +186,19 @@ class PoseTracker:
         engine_path = Path(SETTINGS.pose_model_engine)
         model_path = str(engine_path) if self.uses_cuda and engine_path.exists() else SETTINGS.pose_model_pt
         self.model_path = model_path
+        # Whether TensorRT is carrying this run is the difference between a
+        # fight finishing inside its own length and not, and every way of
+        # losing it was silent: a path that does not exist, a CPU device, an
+        # engine built for another GPU. Say which one is loaded, out loud, once.
+        if model_path.endswith(".engine"):
+            LOGGER.info("pose_backend=tensorrt engine=%s", model_path)
+        elif not self.uses_cuda:
+            LOGGER.warning("pose_backend=pytorch_cpu model=%s - no CUDA device", model_path)
+        else:
+            LOGGER.warning(
+                "pose_backend=pytorch model=%s - no TensorRT engine at %s, so this "
+                "analysis runs slower than it needs to", model_path, engine_path,
+            )
         self.model = YOLO(model_path)
         self._focus_model = None
         self._warmed = False
@@ -199,11 +215,19 @@ class PoseTracker:
                 classes=[0],
                 verbose=False,
             )
-        except Exception:
+        except Exception as exc:                                    # noqa: BLE001
             if not self.model_path.endswith(".engine"):
                 raise
             # TensorRT engines are tied to compatible NVIDIA runtimes. Fall
-            # back to the original PyTorch checkpoint on another device.
+            # back to the original PyTorch checkpoint on another device. This
+            # is the second silent way to lose TensorRT and the harder one to
+            # spot: the engine file is right there, it just will not run here.
+            LOGGER.warning(
+                "pose_backend=pytorch_fallback engine=%s rejected error=%s detail=%s - "
+                "the engine exists but this runtime cannot load it, most likely built "
+                "for a different GPU or TensorRT version",
+                self.model_path, type(exc).__name__, str(exc)[:200],
+            )
             self.model_path = SETTINGS.pose_model_pt
             self.model = YOLO(self.model_path)
             self._focus_model = None
