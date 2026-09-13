@@ -1584,6 +1584,26 @@ class SocialSignInCspTests(unittest.TestCase):
         for origin in SOCIAL_AUTH.form_action_origins:
             self.assertIn(origin, policy, "a configured provider must be reachable")
 
+    def test_a_visitor_can_play_the_fight_they_just_chose(self):
+        """media-src must carry blob:, or the upload page's picker is dead.
+
+        The fighter-selection frame is chosen against the file on the visitor's
+        own device while the upload runs, which means a blob: URL this page
+        made from their own <input type=file>. With media-src 'self' alone the
+        browser refuses it - silently, as a console warning nobody sees - and
+        every upload falls back to waiting out the transfer first. Found that
+        way, so it is pinned here.
+        """
+        from fastapi.testclient import TestClient
+
+        import app.main as webapp
+
+        with TestClient(webapp.app) as client:
+            policy = client.get("/login").headers["Content-Security-Policy"]
+        directive = next(
+            (part for part in policy.split(";") if part.strip().startswith("media-src")), "")
+        self.assertIn("blob:", directive, "the local frame picker cannot play the chosen file")
+
 
 class TransactionalEmailConfigTests(unittest.TestCase):
     """Password resets were silently going nowhere in production."""

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><link rel="stylesheet" href="/static/frame-picker.css?v=20260831-ui4">{% endblock %}
 {% block title %}{{sport_label}} fight analysis · WarriorIQ{% endblock %}
 {% block description %}Upload a {{sport_label}} bout to WarriorIQ for evidence-linked analysis scored under {{sport_label}} rules, with coaching priorities and a fighter-specific training plan.{% endblock %}
 {% block content %}
@@ -84,6 +84,28 @@
       <div class="upload-progress" id="uploadProgress" role="status" aria-live="polite" hidden><span><i id="uploadProgressBar"></i></span><b id="uploadProgressText">Uploading fight video…</b><small id="uploadProgressHint">Keep this tab open — you can keep reading the page. WarriorIQ moves you on by itself.</small></div>
       {% if request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Analysis needs a free account, so your fights stay private to you. <a class="text-link" href="/signup?next=/analyze/{{sport}}">Create one in a moment.</a></p>{% endif %}
     </form>
+    {#- Choosing the frame happens here, against the file on the coach's own
+        device, while the upload is still running. It used to happen on
+        /frame/{job_id} after the transfer finished, which meant two waits: the
+        upload itself, and then a <video> streaming the same footage back down
+        from the server to be scrubbed. Drawing the two boxes is 20-60 seconds
+        of work either way, so the transfer now hides behind it.
+
+        Every part of this is optional. A browser that cannot play the file
+        locally, a failed frame save, or no choice made at all falls through to
+        the server-rendered picker, which is unchanged. -#}
+    <section class="frame-player-panel local-picker" id="localPicker" hidden aria-labelledby="localPickerTitle">
+      <div class="panel-heading">
+        <div><span class="panel-kicker">While your fight uploads</span><h2 id="localPickerTitle">Find one clear moment</h2></div>
+        <span class="live-indicator"><i></i> On your device</span>
+      </div>
+      <p class="small muted" id="localPickerNote">This plays from your own phone or computer, so it does not wait for the upload. Pause where both fighters are visible from head to toe.</p>
+      <video id="localVideo" controls preload="metadata" playsinline></video>
+      <div class="frame-action-row">
+        <div class="frame-time" id="localFrameStatus" role="status" aria-live="polite"><span>Selected moment</span><strong>0.0s</strong></div>
+        <button class="btn" id="useLocalFrame" type="button" data-motion-primary>Use this frame <span aria-hidden="true">&#8594;</span></button>
+      </div>
+    </section>
   </div>
 </section>
 {% endblock %}
@@ -140,7 +162,7 @@
     :b>104857600?{tone:'note',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data. Wi-Fi will be quicker.`}
     :{tone:'ok',text:`${fmtMB(b)} — ready for WarriorIQ analysis`};
   const setReady=()=>{const file=videoInput.files[0],ready=Boolean(file);fileButtonText.textContent=ready?'Fight video uploaded':'Choose fight video';fileStatus.textContent=ready?sizeAdvice(file.size).text:'MP4, MOV, MKV, AVI, M4V or WEBM';if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';if(ready){window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video uploaded. You’re ready to continue.','success')}};
-  const restore=(message)=>{showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
+  const restore=(message)=>{if(typeof picker!=='undefined'&&picker){picker.hidden=true;pickerOpen=false;chosenSeconds=null;form.hidden=false;if(localUrl){URL.revokeObjectURL(localUrl);localUrl=null}}showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
   // Rounds are no longer asked for, but they still decide where the round
   // lines fall for per-round scoring, so they are derived rather than guessed.
   // The browser already knows the video's duration; read it and fill the
@@ -173,6 +195,68 @@
     fighterPick.addEventListener('change',syncFighter);syncFighter();
   }
   videoInput.addEventListener('change',()=>{setReady();const file=videoInput.files[0];if(file)applyDuration(file)});
+  // --- Choosing the frame while the bytes are still going ------------------
+  //
+  // The upload and the frame choice are independent, and either can finish
+  // first, so neither drives the other: both write into `ready` and
+  // `chosenSeconds` and then call advance(), which acts only once it has both.
+  const picker=document.getElementById('localPicker'),localVideo=document.getElementById('localVideo'),
+        localFrameStatus=document.getElementById('localFrameStatus'),useLocalFrame=document.getElementById('useLocalFrame'),
+        localPickerNote=document.getElementById('localPickerNote');
+  let ready=null,chosenSeconds=null,pickerOpen=false,advancing=false,localUrl=null;
+  const setPickStatus=(label,value)=>{const caption=document.createElement('span'),reading=document.createElement('strong');caption.textContent=label;reading.textContent=value;localFrameStatus.replaceChildren(caption,reading)};
+  const showPickedTime=()=>{if(chosenSeconds===null)setPickStatus('Frame at',`${(localVideo.currentTime||0).toFixed(1)}s`)};
+  // The server-rendered picker is the ground truth and is untouched, so every
+  // failure here is a fall-through rather than a dead end.
+  const pickerUnavailable=note=>{
+    pickerOpen=false;chosenSeconds=null;
+    localVideo.hidden=true;useLocalFrame.hidden=true;localFrameStatus.hidden=true;
+    if(note)localPickerNote.textContent=note;
+    if(localUrl){URL.revokeObjectURL(localUrl);localUrl=null}
+    advance();
+  };
+  function advance(){
+    if(!ready||advancing)return;
+    if(chosenSeconds===null){
+      // Nothing chosen yet. If they are still looking, let them look - the
+      // button carries them on. Otherwise this is the old route, unchanged.
+      if(pickerOpen){
+        useLocalFrame.disabled=false;useLocalFrame.removeAttribute('aria-busy');
+        progressText.textContent='Upload complete. Take your time choosing the frame.';
+        return;
+      }
+      advancing=true;location.assign(ready.nextUrl);return;
+    }
+    advancing=true;
+    useLocalFrame.disabled=true;useLocalFrame.setAttribute('aria-busy','true');
+    useLocalFrame.textContent='Opening fighter selection…';
+    setPickStatus('Selected moment','Saving…');
+    fetch(`/api/selection-frame/${ready.jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({seconds:chosenSeconds})})
+      .then(response=>{if(!response.ok)throw new Error('frame');location.assign(`/select/${ready.jobId}`)})
+      .catch(()=>location.assign(ready.nextUrl));
+  }
+  const openPicker=file=>{
+    if(!picker||!localVideo||!window.URL||!URL.createObjectURL)return false;
+    // A browser that cannot play this container says so on the media element,
+    // not here, so the listeners go on before the source does.
+    localVideo.addEventListener('error',()=>pickerUnavailable('Your fight is uploading. You will choose the frame on the next screen.'),{once:true});
+    localVideo.addEventListener('loadedmetadata',()=>{if(!(localVideo.duration>0))pickerUnavailable('Your fight is uploading. You will choose the frame on the next screen.');else showPickedTime()},{once:true});
+    localVideo.addEventListener('timeupdate',showPickedTime);
+    localVideo.addEventListener('seeked',showPickedTime);
+    try{localUrl=URL.createObjectURL(file);localVideo.src=localUrl}catch{return false}
+    form.hidden=true;picker.hidden=false;pickerOpen=true;
+    return true;
+  };
+  useLocalFrame.addEventListener('click',()=>{
+    if(!pickerOpen)return;
+    chosenSeconds=Math.max(0,localVideo.currentTime||0);
+    setPickStatus('Selected moment',`${chosenSeconds.toFixed(1)}s`);
+    if(ready){advance();return}
+    useLocalFrame.disabled=true;useLocalFrame.setAttribute('aria-busy','true');
+    useLocalFrame.textContent='Waiting for the upload…';
+    progressText.textContent='Frame chosen. Finishing the upload…';
+  });
+
   form.addEventListener('submit',async event=>{
     if(!videoInput.files[0]||!form.reportValidity())return;
     event.preventDefault();
@@ -241,11 +325,14 @@
       if(!status)return 'The upload stopped before it reached WarriorIQ. Check your signal and try again.';
       return `WarriorIQ could not prepare this video (error ${status}). Please try again, and tell support that number if it keeps happening.`;
     };
-    request.addEventListener('load',()=>{releasePage();let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';location.assign(payload.next_url);return}restore(payload.detail||uploadFailureFor(request.status))});
+    request.addEventListener('load',()=>{releasePage();let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';ready={jobId:payload.job_id,nextUrl:payload.next_url};advance();return}restore(payload.detail||uploadFailureFor(request.status))});
     request.addEventListener('error',()=>restore('The upload connection stopped. Check your signal and try again.'));
     request.addEventListener('abort',()=>restore('The upload was cancelled. Your video is still selected.'));
     uploadInFlight=true;
     request.send(body);
+    // After send(), so a browser that stalls decoding the local file
+    // never delays the bytes leaving.
+    openPicker(file);
   });
 })();
 </script>{% endblock %}

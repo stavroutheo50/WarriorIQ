@@ -1011,10 +1011,15 @@ async def viewer_context(request: Request, call_next):
     # that redirect: with 'self' alone every social button is blocked by the
     # browser before it leaves the page.
     form_action = " ".join(["'self'", *SOCIAL_AUTH.form_action_origins])
+    # blob: in media-src is the fight the visitor just chose, played from their
+    # own device while it uploads. A blob: URL names something this page itself
+    # created from a file the person picked - it cannot address anything remote
+    # - so it widens nothing an attacker can reach, and without it the browser
+    # refuses to play the file its owner is sitting in front of.
     response.headers.setdefault(
         "Content-Security-Policy",
         f"default-src 'self' data:; script-src {script_src}; style-src 'self' 'unsafe-inline'; "
-f"img-src {img_src}; media-src 'self'; connect-src {connect_src}; frame-src {frame_src}; "
+        f"img-src {img_src}; media-src 'self' blob:; connect-src {connect_src}; frame-src {frame_src}; "
         f"frame-ancestors 'none'; form-action {form_action}",
     )
     if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/s/")):
