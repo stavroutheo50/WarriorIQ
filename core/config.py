@@ -105,7 +105,19 @@ class Settings:
     # Performance target
     # ------------------------------------------------------------
     target_tracking_fps: float = float(os.getenv("WARRIORIQ_TARGET_FPS", "15"))
-    min_tracking_fps: float = float(os.getenv("WARRIORIQ_MIN_FPS", "10"))
+    # The floor the budget governor may sample down to. Measured on fight 1,
+    # full video, the two candidates were:
+    #
+    #   10.4 fps   1.91x realtime   A 0.619  B 0.645   123 events   0 confusions
+    #    6.2 fps   1.47x realtime   A 0.642  B 0.745   121 events   2 confusions
+    #
+    # 6 costs two identity confusions and two events, and buys 23% of the run
+    # back. It is the right trade while punch counting is off and kicks are 29%
+    # precise: what the report actually publishes is movement, which is an
+    # average over tracked frames and clears min_metric_samples at either rate.
+    # Absolute tracked frames do fall by about 38%, so revisit this the moment
+    # strike timing starts being measured rather than estimated.
+    min_tracking_fps: float = float(os.getenv("WARRIORIQ_MIN_FPS", "6"))
     max_tracking_fps: float = float(os.getenv("WARRIORIQ_MAX_FPS", "30"))
     # Hold the analysis to the length of the video by planning the sampling
     # stride once, early, from measured throughput. Until 2026-09-10 this
