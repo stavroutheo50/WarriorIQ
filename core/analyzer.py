@@ -630,19 +630,46 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                 source_frame, frame, people, fighter_a, fighter_b = pending.pop(0)
             else:
                 source_frame = current_frame + 1
-                ok, frame = cap.read()
-                if not ok or frame is None:
+                # Decode, but do not pay to *convert* a frame nobody wants.
+                #
+                # At the 6 fps floor on 60 fps phone footage this loop walks
+                # nine frames for every one it analyses, and it used to call
+                # read() on all of them - which decodes the packet and then
+                # converts YUV to BGR into a fresh 1920x1080x3 buffer that is
+                # dropped on the next line. grab() stops after the decode;
+                # retrieve() does the conversion, and is only worth calling for
+                # a frame something is going to look at.
+                #
+                # Measured over 1200 frames, stride 9:
+                #
+                #     phone 1080p60     read 5.28 s -> grab 2.05 s   -61%
+                #     fight 1 480x220   read 0.19 s -> grab 0.13 s   negligible
+                #
+                # So this is a high-resolution win and nearly nothing on the
+                # old broadcast captures, which is the right shape: the cost it
+                # removes is per pixel, and SD frames have few.
+                if not cap.grab():
                     break
                 current_frame = source_frame
                 pts_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC))
                 decoded_seconds = pts_ms / 1000.0 if pts_ms > 0.0 else source_frame / info.fps
+                # Three things can want this frame, and the cheap check has to
+                # consider all of them or a feature silently stops being fed.
+                wants_history = bool(
+                    identity_referee.enabled and source_frame >= next_ai_history_frame)
+                wants_inference = source_frame >= next_inference_frame
+                if not (fallback_buffer_enabled or wants_history or wants_inference):
+                    continue
+                ok, frame = cap.retrieve()
+                if not ok or frame is None:
+                    break
                 if fallback_buffer_enabled:
                     frame_buffer.append((source_frame, frame.copy()))
-                if identity_referee.enabled and source_frame >= next_ai_history_frame:
+                if wants_history:
                     ai_history.append(cv2.resize(frame, (640, max(1, round(frame.shape[0] * 640 / frame.shape[1])))))
                     next_ai_history_frame = source_frame + max(1, round(info.fps))
 
-                if source_frame < next_inference_frame:
+                if not wants_inference:
                     continue
 
                 seconds = decoded_seconds
