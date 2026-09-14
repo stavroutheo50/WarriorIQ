@@ -45,6 +45,29 @@ class _Refiner:
     """Holds the loaded model. Built once, on first use, never at import."""
 
     def __init__(self) -> None:
+        # Import torch before onnxruntime builds its session, or this model
+        # silently runs on the CPU.
+        #
+        # onnxruntime's CUDA provider needs cublasLt64_12.dll, which this venv
+        # has - inside torch/lib, which is not on the Windows DLL search path.
+        # Importing torch puts it there, and does so by actually loading those
+        # libraries: `os.add_dll_directory` on the same folder was measured and
+        # is **not** enough. All three were tried on 2026-09-14:
+        #
+        #     onnxruntime first   ['CPUExecutionProvider']
+        #     torch first         ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        #     add_dll_directory   ['CPUExecutionProvider']
+        #
+        # core/analyzer.py already imports torch above this module, so
+        # production happened to be one line-ordering away from working. That
+        # is not a guarantee - a tool or a test importing core.rtm_pose
+        # directly would not get it - so the dependency is stated here, where
+        # the session is actually created.
+        #
+        # None of this raises. A wrong onnxruntime build just falls back to the
+        # CPU and says so in a log line nobody reads, which is how RTMPose ran
+        # at 15.6 ms per person for months while `rtm_pose_device` said "cuda".
+        import torch  # noqa: F401
         from rtmlib import RTMPose
 
         self.model = RTMPose(
