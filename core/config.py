@@ -200,8 +200,38 @@ class Settings:
     # A learned appearance space for the same gate. The histogram above cannot
     # separate a referee from a fighter - measured, their ranges overlap almost
     # completely - while an embedding puts the referee at 0.695-0.741 and the
-    # fighters at 0.724-0.828. See core/reid.py. Off until measured end to end.
-    reid_enabled: bool = env_bool("WARRIORIQ_REID", True)
+    # fighters at 0.724-0.828. See core/reid.py.
+    #
+    # **Default off since 2026-09-14: it was measured end to end and it changes
+    # nothing, for up to 30% of the runtime.** Two bouts, each run with the
+    # encoder on and off, everything else identical:
+    #
+    #     iPhone 1080p, 36.7 s   130.0 s -> 90.2 s   (30.6% faster)
+    #     fight 1, 480x220, 100 s   150.1 s -> 136.5 s   (9.0% faster)
+    #
+    # and in both cases `tracking.jsonl` came back **byte-identical** - same
+    # md5, not merely the same coverage number, which this project has learned
+    # not to trust on its own.
+    #
+    # The mechanism, which is why this is expected to generalise rather than
+    # being a property of two clips: the encoder does refuse candidates - 8
+    # `appearance_reid` refusals on fight 1 - but those candidates are refused
+    # anyway by a gate that costs nothing. Turning it off moved exactly those 8
+    # onto other reasons (+3 known_furniture, +4 lost_to_the_other_fighter, +1
+    # too_still_travel) and the refusal total stayed at 408. Appearance was
+    # deciding nothing that geometry had not already decided.
+    #
+    # That is consistent with what core/reid.py measured when it was built: two
+    # athletes in the same uniform under the same lights are not separable by
+    # appearance, and 62% of candidates clear the geometric gate before
+    # appearance is ever consulted.
+    #
+    # The cost grew with the footage. It is ~10 ms per person on a 60 px crop
+    # and far more on a 300 px one, so the better the video gets the more this
+    # charges for an answer nobody uses. The machinery is kept and
+    # `WARRIORIQ_REID=1` restores it: the claim is that it is redundant on the
+    # footage measured, not that a learned appearance gate can never help.
+    reid_enabled: bool = env_bool("WARRIORIQ_REID", False)
     # A purpose-trained re-identification encoder, not the detector. The old
     # default here was "yolo26m.pt", which is the detector: Ultralytics routes
     # a .pt through the YOLO predictor and reads the second-to-last layer, so

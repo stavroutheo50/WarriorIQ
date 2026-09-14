@@ -99,6 +99,33 @@ def _install_in_memory_loader() -> None:
     predictor_module._warrioriq_in_memory_loader = True
 
 
+def _silence_progress_bar() -> None:
+    """Stop SAM2 drawing a progress bar nobody reads.
+
+    `propagate_in_video` wraps its frame loop in `tqdm(..., desc="propagate in
+    video")`. Under the worker nothing is attached to stdout - the output goes
+    to a pipe or a log - so every refresh is a blocking write that renders for
+    no one.
+
+    **It is not free, and it is not small.** Profiling a real 1080p bout
+    (2026-09-14, 156 analysed frames, 110 s total) put `tqdm` at **5.3 s, or
+    4.9% of the entire analysis** - 81 refreshes at 66 ms each. For comparison
+    the YOLO pose detector, the part everyone assumes is the cost, was 4.2 s.
+    A progress bar was more expensive than the pose model.
+
+    Patched at the module SAM2 resolves it from, so the loop still iterates
+    exactly the same objects in the same order and only the drawing is gone.
+    """
+    import sam2.sam2_video_predictor as predictor_module
+
+    if getattr(predictor_module, "_warrioriq_quiet_progress", False):
+        return
+    predictor_module.tqdm = lambda iterable=None, *args, **kwargs: (
+        iterable if iterable is not None else ()
+    )
+    predictor_module._warrioriq_quiet_progress = True
+
+
 class SamRecovery:
     """Best-effort short-window SAM2.1 identity recovery.
 
@@ -155,6 +182,8 @@ class SamRecovery:
     def recover(self, frames: list[np.ndarray], seed_box) -> np.ndarray | None:
         if not frames or seed_box is None or not self._load():
             return None
+        # The other propagating path. Same reasoning as in track_segment.
+        _silence_progress_bar()
 
         # Bound recovery work even if the caller supplied a larger buffer.
         frames = frames[-SETTINGS.sam_buffer_frames :]
@@ -274,6 +303,7 @@ class SamRecovery:
         if not SETTINGS.sam_continuous_enabled or not self._load():
             return {}
         _install_in_memory_loader()
+        _silence_progress_bar()
         start_frame, end_frame = int(start_frame), int(end_frame)
         stride = sam_sampling_stride(source_fps, end_frame - start_frame)
         chunk_frames = max(1, SETTINGS.sam_continuous_chunk_frames)
