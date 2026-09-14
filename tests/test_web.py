@@ -906,6 +906,20 @@ class PublicPageTests(unittest.TestCase):
             kick_minimum=kick_minimum,
         )
 
+    def test_evidence_timestamps_are_links_a_reader_can_actually_follow(self):
+        """They were a raw Python list, and before that a button with no handler.
+
+        The coaching section printed `Evidence: [8.42, 17.27, 25.44]` straight
+        at the reader, and the scorecard section rendered <button data-time=...>
+        which nothing on the report page has ever listened for - grep the
+        templates: replay.html and review.html wire their own, result.html
+        wires none. Both are now anchors to /replay?t=, which the replay page
+        already honours, so they work with no script at all.
+        """
+        html = self._render_result(None)
+        self.assertNotIn("Evidence: [", html, "a python list is not evidence a coach can use")
+        self.assertNotIn('data-time=', html, "a button nothing listens for is a dead control")
+
     def test_a_foul_is_never_pinned_on_a_fighter_the_analysis_cannot_identify(self):
         """Naming a fighter for an illegal act is the strongest claim on the page.
 

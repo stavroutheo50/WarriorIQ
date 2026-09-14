@@ -215,7 +215,7 @@
     <li data-tone="{{item.tone}}">
       <strong>{{item.title}}</strong>
       <span>{{item.detail}}</span>
-      {% if item.evidence_times %}<div class="timeline">{% for t in item.evidence_times %}<button type="button" data-time="{{t}}" data-lead="1">{{'%d:%02d'|format((t//60)|int, (t%60)|int)}}</button>{% endfor %}</div>{% endif %}
+      {% if item.evidence_times %}<div class="timeline">{% for t in item.evidence_times %}<a class="evidence-jump" href="/replay/{{job_id}}?t={{t}}">{{'%d:%02d'|format((t//60)|int, (t%60)|int)}}</a>{% endfor %}</div>{% endif %}
     </li>
     {% endfor %}
   </ul>
@@ -493,8 +493,8 @@
 {% for fighter in ['A','B'] %}
 {% if focus == 'BOTH' or focus == fighter %}
 <section class="card"><div class="eyebrow">Coach report · Fighter {{fighter}}</div>{% if report.coaching[fighter].evidence_type|default('') == 'pose_only' %}<p class="muted">Built from this fighter's identity-safe pose measurements. Strike-specific advice remains hidden until action labels are validated.</p>{% elif not action_ready %}<p class="muted">Coach advice is withheld because this fighter did not pass the identity check.</p>{% endif %}
-  {% if report_access.report_tier != 'compact' %}{% set strengths = report.coaching[fighter].strengths if report_access.report_tier == 'full' else report.coaching[fighter].strengths[:report_access.coaching_items] %}<h3>Strengths</h3><ul class="list-clean">{% for x in strengths %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span>{% if x.evidence_times %}<div class="small">Evidence: {{x.evidence_times}}</div>{% endif %}</li>{% else %}<li class="muted">No evidence-backed strength item available yet.</li>{% endfor %}</ul>{% endif %}
-  {% set improvements = report.coaching[fighter].improvements if report_access.report_tier == 'full' else report.coaching[fighter].improvements[:report_access.coaching_items] %}<h3>{% if report_access.report_tier == 'compact' %}Top coaching priority{% else %}Improvements{% endif %}</h3><ul class="list-clean">{% for x in improvements %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span>{% if x.evidence_times %}<div class="small">Evidence: {{x.evidence_times}}</div>{% endif %}</li>{% else %}<li class="muted">No evidence-backed improvement item available yet.</li>{% endfor %}</ul>
+  {% if report_access.report_tier != 'compact' %}{% set strengths = report.coaching[fighter].strengths if report_access.report_tier == 'full' else report.coaching[fighter].strengths[:report_access.coaching_items] %}<h3>Strengths</h3><ul class="list-clean">{% for x in strengths %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span>{% if x.evidence_times %}<div class="small muted">Watch it</div><div class="timeline">{% for t in x.evidence_times %}<a class="evidence-jump" href="/replay/{{job_id}}?t={{t}}">{{'%d:%02d'|format((t//60)|int, (t%60)|int)}}</a>{% endfor %}</div>{% endif %}</li>{% else %}<li class="muted">No evidence-backed strength item available yet.</li>{% endfor %}</ul>{% endif %}
+  {% set improvements = report.coaching[fighter].improvements if report_access.report_tier == 'full' else report.coaching[fighter].improvements[:report_access.coaching_items] %}<h3>{% if report_access.report_tier == 'compact' %}Top coaching priority{% else %}Improvements{% endif %}</h3><ul class="list-clean">{% for x in improvements %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span>{% if x.evidence_times %}<div class="small muted">Watch it</div><div class="timeline">{% for t in x.evidence_times %}<a class="evidence-jump" href="/replay/{{job_id}}?t={{t}}">{{'%d:%02d'|format((t//60)|int, (t%60)|int)}}</a>{% endfor %}</div>{% endif %}</li>{% else %}<li class="muted">No evidence-backed improvement item available yet.</li>{% endfor %}</ul>
 </section>
 {% endif %}
 {% endfor %}
