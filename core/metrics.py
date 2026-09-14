@@ -56,6 +56,14 @@ class MetricsAccumulator:
         self.positions = {"A": [], "B": []}
         self.guard_samples = {"A": [], "B": []}
         self.balance_samples = {"A": [], "B": []}
+        # The same readings kept with the moment they came from. A coaching
+        # claim that says "Guard 39%" and points at nothing is a number a coach
+        # cannot check; with these it can name the seconds to watch. Pressure
+        # and position were already timed for round judging - guard and balance
+        # were not, which is why every movement claim shipped with an empty
+        # evidence list while the report template had the buttons ready.
+        self.timed_guard = {"A": [], "B": []}
+        self.timed_balance = {"A": [], "B": []}
         self.round_frames = defaultdict(lambda: {"A": 0, "B": 0})
         self.round_visible = defaultdict(lambda: {"A": 0, "B": 0})
         # When each fighter was and was not visible, so per-round evidence can
@@ -131,7 +139,9 @@ class MetricsAccumulator:
                 if wrist is not None:
                     distances.append(float(np.linalg.norm(wrist - nose)) / body)
             if distances:
-                self.guard_samples[fighter].append(1.0 - min(1.0, min(distances) / 0.48))
+                value = 1.0 - min(1.0, min(distances) / 0.48)
+                self.guard_samples[fighter].append(value)
+                self.timed_guard[fighter].append((float(seconds), value))
 
         ls, rs, lh, rh, la, ra = (_p(kp, i) for i in (L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, L_ANKLE, R_ANKLE))
         if all(x is not None for x in (ls, rs, lh, rh)):
@@ -140,10 +150,61 @@ class MetricsAccumulator:
             base = float(np.linalg.norm(la - ra)) / body if la is not None and ra is not None else 0.22
             base_score = 1.0 - min(1.0, abs(base - 0.28) / 0.35)
             tilt_score = 1.0 - min(1.0, (shoulder_tilt + hip_tilt) / 0.35)
-            self.balance_samples[fighter].append(0.55 * tilt_score + 0.45 * base_score)
+            value = 0.55 * tilt_score + 0.45 * base_score
+            self.balance_samples[fighter].append(value)
+            self.timed_balance[fighter].append((float(seconds), value))
 
         self.last_center[fighter] = center
         self.last_time[fighter] = seconds
+
+    @staticmethod
+    def _extremes(samples, want_low: bool, limit: int = 4, apart: float = 3.0) -> list[float]:
+        """The moments that best evidence a claim, spread out across the bout.
+
+        Spread matters: the lowest four guard readings are usually four frames
+        of the same exchange, which shows a coach one moment four times. Anything
+        within `apart` seconds of a moment already chosen is skipped.
+        """
+        if not samples:
+            return []
+        # Filtering these by the identity manager's own confidence was tried
+        # and changed nothing: it scores around 0.7 when it is wrong as readily
+        # as when it is right, which is the same reason no threshold downstream
+        # can catch a referee. 4 of 20 cited moments land on the wrong fighter
+        # either way, and that is the identity error rate showing through
+        # rather than anything this picker can fix.
+        ordered = sorted(samples, key=lambda row: row[1], reverse=not want_low)
+        picked: list[float] = []
+        for row in ordered:
+            seconds = row[0]
+            if any(abs(seconds - chosen) < apart for chosen in picked):
+                continue
+            picked.append(round(float(seconds), 2))
+            if len(picked) >= limit:
+                break
+        return sorted(picked)
+
+    def _moments(self, fighter: str) -> dict:
+        """Where to look, per movement measurement, at both ends."""
+        timed_footwork = []
+        previous = None
+        for seconds, who, x, y in self.timed_positions:
+            if who != fighter:
+                continue
+            if previous is not None and seconds > previous[0]:
+                step = float(np.hypot(x - previous[1], y - previous[2])) / max(1e-6, seconds - previous[0])
+                timed_footwork.append((seconds, step))
+            previous = (seconds, x, y)
+        sources = {
+            "guard_index": self.timed_guard[fighter],
+            "balance_index": self.timed_balance[fighter],
+            "pressure_index": [(t, v) for t, who, v in self.timed_pressure if who == fighter],
+            "footwork_body_lengths_per_second": timed_footwork,
+        }
+        return {
+            key: {"low": self._extremes(values, True), "high": self._extremes(values, False)}
+            for key, values in sources.items()
+        }
 
     def _center_control(self, fighter: str) -> float | None:
         """How much of the fight this fighter spent in the middle of it.
@@ -317,6 +378,9 @@ class MetricsAccumulator:
                 "ring_center_control": ring_control,
                 "guard_index": guard,
                 "balance_index": balance,
+                # Seconds a coach can click, at both ends of each measurement.
+                # Empty when there was not enough to average in the first place.
+                "moments": self._moments(fighter) if enough else {},
                 "dashboard": {
                     "technique_execution_confidence": technique_execution,
                     "defense_response_rate": defense_rate,

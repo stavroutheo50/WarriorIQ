@@ -13,6 +13,23 @@ def _event_times(events: list[StrikeEvent], fighter: str, predicate, limit: int 
     return [round(e.peak_time, 2) for e in events if e.fighter == fighter and predicate(e)][:limit]
 
 
+def _moment_times(own: dict, key: str, want_low: bool) -> list[float]:
+    """Seconds that evidence a movement claim, from core/metrics.py.
+
+    A strike claim has always pointed at the moments behind it; a movement
+    claim shipped with an empty list, so the only claims that survive on
+    pose-only footage - which is most real footage - were the ones a coach
+    could not check. The report template has rendered these as clickable
+    timestamps the whole time and simply never received any.
+
+    Low moments evidence something to work on, high moments a strength.
+    """
+    moments = (own or {}).get("moments") or {}
+    entry = moments.get(key) or {}
+    times = entry.get("low" if want_low else "high") or []
+    return [float(t) for t in times]
+
+
 def _measured_baseline_drills(fighter: str, own: dict) -> list[dict]:
     """Choose fallback work from this fighter's measured weakest dimensions."""
     attacks = own.get("attacks", {})
@@ -191,7 +208,7 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
     strengths = [{
         "title": strength_title,
         "detail": strength_detail,
-        "evidence_times": [],
+        "evidence_times": _moment_times(own, strongest[2], want_low=False),
     }]
     improvements = []
     drills = []
@@ -211,7 +228,7 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
         improvements.append({
             "title": f"Work on: {title}",
             "detail": detail,
-            "evidence_times": [],
+            "evidence_times": _moment_times(own, _key, want_low=True),
         })
         drills.append({
             "name": f"Fighter {fighter} · {drill}",

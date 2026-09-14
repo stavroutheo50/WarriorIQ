@@ -79,3 +79,55 @@ class JointGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MovementEvidenceTests(unittest.TestCase):
+    """A movement claim has to point at the video, or a coach cannot check it."""
+
+    def _engine(self):
+        from core.metrics import MetricsAccumulator
+        return MetricsAccumulator(480, 220)
+
+    def test_extremes_spread_out_instead_of_citing_one_exchange(self):
+        """The four lowest readings are usually four frames of the same moment.
+
+        Showing a coach the same second four times is showing them one piece of
+        evidence and claiming four.
+        """
+        engine = self._engine()
+        samples = [(10.0, 0.10), (10.1, 0.11), (10.2, 0.12), (10.3, 0.13),
+                   (40.0, 0.20), (70.0, 0.25), (95.0, 0.30)]
+        picked = engine._extremes(samples, want_low=True, limit=4)
+        self.assertEqual(len(picked), 4)
+        self.assertEqual(picked, sorted(picked), "times are given in order")
+        for earlier, later in zip(picked, picked[1:]):
+            self.assertGreaterEqual(later - earlier, 3.0, "two citations from the same exchange")
+
+    def test_low_and_high_pick_opposite_ends(self):
+        engine = self._engine()
+        samples = [(5.0, 0.9), (20.0, 0.1), (35.0, 0.8), (50.0, 0.2)]
+        self.assertEqual(engine._extremes(samples, want_low=True, limit=1), [20.0])
+        self.assertEqual(engine._extremes(samples, want_low=False, limit=1), [5.0])
+
+    def test_no_samples_cites_nothing_rather_than_guessing(self):
+        self.assertEqual(self._engine()._extremes([], want_low=True), [])
+
+    def test_a_movement_claim_carries_its_moments(self):
+        """The regression this exists for: evidence_times was hardcoded empty.
+
+        On pose-only footage - which is most real footage - movement claims are
+        the only ones shown, so every claim a coach saw was unverifiable.
+        """
+        from core.coaching import build_pose_coaching
+        own = {
+            "guard_index": 0.39, "balance_index": 0.6, "pressure_index": 0.12,
+            "footwork_body_lengths_per_second": 0.8, "pose_coverage": 0.9,
+            "moments": {"guard_index": {"low": [3.0, 9.0], "high": [8.42, 25.44]},
+                        "pressure_index": {"low": [50.18, 65.98], "high": [1.0]}},
+        }
+        other = {"guard_index": 0.14, "balance_index": 0.7, "pressure_index": 0.30,
+                 "footwork_body_lengths_per_second": 0.9, "pose_coverage": 0.9}
+        coaching = build_pose_coaching("A", own, other)
+        cited = [t for group in ("strengths", "improvements")
+                 for item in coaching[group] for t in item["evidence_times"]]
+        self.assertTrue(cited, "a movement claim with no moments is what this fixed")
