@@ -1,0 +1,49 @@
+tracker_type: botsort
+track_high_thresh: 0.28
+track_low_thresh: 0.08
+new_track_thresh: 0.30
+track_buffer: 90
+match_thresh: 0.78
+fuse_score: true
+gmc_method: sparseOptFlow
+proximity_thresh: 0.45
+appearance_thresh: 0.72
+
+# Appearance matching is OFF, and it was switched off because it was making the
+# tracking worse as well as slower (2026-09-14).
+#
+# BoT-SORT's own re-ID is separate from core/reid.py: this one matches
+# detections to tracks between frames, while that one decides which fighter is
+# A and which is B. They were both running, on the same boxes, every frame,
+# neither aware of the other.
+#
+# Measured with the frame stride and imgsz pinned, so both arms analysed
+# **identical frames** - without pinning, the faster run has budget left over,
+# lowers its stride and analyses more frames, which makes any comparison
+# meaningless and did fool an earlier attempt at this:
+#
+#     iPhone 1080p, 301 frames   74.60 s -> 58.13 s   fighter B 0.4617 -> 0.4684
+#     fight 1 480x220, 621 frames  ~92 s -> ~80 s     fighter B 0.6247 -> 0.7793
+#
+# **Coverage went up, and the extra boxes were checked by eye rather than
+# trusted.** On the phone bout the difference is 2 frames gained and 0 lost,
+# both squarely on fighter B mid-technique. On fight 1 it is **97 gained and 1
+# lost**, every sampled one on the blue-kit athlete with the dark-kit athlete
+# correctly held as A beside him, and the referee - who stands in frame
+# throughout - boxed in none of them. See project-coverage-can-mean-failure for
+# why a coverage number alone would not have been enough.
+#
+# Why switching it off *helps*: two athletes in the same weight class under the
+# same lights are barely separable by appearance at all - core/reid.py measured
+# that directly - and at 56 px tall the embedding is mostly noise. With
+# `appearance_thresh: 0.72` that noise was refusing correct associations, so
+# the tracker dropped a fighter it had every geometric reason to keep. The
+# thresholds above are left in place so that setting with_reid back to true
+# restores the previous behaviour exactly.
+with_reid: false
+# Required even when with_reid is false: ultralytics reads `args.model`
+# unconditionally at bot_sort.py:174 before it looks at with_reid, so omitting
+# this raises AttributeError and every analysis dies at tracker construction.
+# Dropping this line while editing the file above did exactly that, and no test
+# caught it because none of them runs a real bout through the tracker.
+model: auto

@@ -12,7 +12,11 @@ __pycache__/
 .huggingface/
 .ultralytics/
 Ultralytics/
-models/
+# `models/*` rather than `models/`: git cannot re-include a file whose parent
+# directory is excluded, so with the directory form the `!models/...` lines
+# further down were silently dead. referee_probe.npz only survived because it
+# was committed before the rule existed.
+models/*
 *.pt
 *.engine
 *.onnx
@@ -53,6 +57,13 @@ fights/*
 # The referee probe is a 1 KB trained artefact, not a downloaded weights file:
 # without it in the repo the filter cannot be enabled on any other machine.
 !models/referee_probe.npz
+
+# Same reasoning: the tracker config is measured settings, not weights. It had
+# been sitting untracked on one machine, which meant the thresholds every
+# identity decision depends on existed in exactly one place, could not be
+# reviewed in a diff, and were missing from any fresh checkout - including for
+# tests/test_core.py, which asserts on its contents.
+!models/warrioriq_botsort.yaml
 
 # Generated labelling packs: clips plus a self-contained page, megabytes each.
 labelpack/

@@ -411,10 +411,60 @@ class ProductFoundationTests(unittest.TestCase):
 
 
 class IdentityTests(unittest.TestCase):
-    def test_default_tracker_enables_reid(self):
+    def test_default_tracker_disables_appearance_matching(self):
+        """BoT-SORT's appearance matching is off, and must not drift back on.
+
+        This used to assert the opposite. It was changed on 2026-09-14 after
+        measuring both ways with the frame stride pinned, so each arm analysed
+        identical frames: appearance matching was slower *and* worse. On fight 1
+        fighter B went 0.6247 -> 0.7793 with it off, and the extra boxes were
+        checked by eye - 97 frames gained, 1 lost, every sampled one on the
+        right athlete rather than on the referee standing in shot.
+
+        Two athletes in one weight class are barely separable by appearance at
+        56 px, so `appearance_thresh` was refusing associations geometry had
+        every reason to accept. The thresholds stay in the file so that turning
+        this back on restores the old behaviour exactly.
+        """
         tracker = Path(SETTINGS.tracker)
         self.assertTrue(tracker.is_file())
-        self.assertIn("with_reid: true", tracker.read_text(encoding="utf-8"))
+        text = tracker.read_text(encoding="utf-8")
+        self.assertIn("with_reid: false", text)
+        self.assertNotIn("with_reid: true", text)
+        # Kept deliberately: re-enabling must not also need these re-derived.
+        self.assertIn("appearance_thresh:", text)
+        self.assertIn("proximity_thresh:", text)
+
+    def test_default_tracker_config_actually_builds_a_tracker(self):
+        """Build the tracker from the config, rather than grepping its text.
+
+        Added 2026-09-14 after a commit deleted `model: auto` from the config
+        while editing the comments around it. Ultralytics reads `args.model` in
+        BOTSORT.__init__ before it ever looks at `with_reid`, so the tracker
+        raised AttributeError and **every analysis died at startup** - while all
+        586 tests passed, because the only test touching this file checked for
+        substrings.
+
+        A config every analysis depends on should not be validated by string
+        matching. This constructs the real tracker, which fails in under a
+        second on a missing or misspelled key instead of at the next upload.
+
+        Cheap on purpose: with appearance matching off, build_encoder returns
+        immediately, so nothing is downloaded and no model is loaded.
+        """
+        import yaml
+        from ultralytics.trackers.bot_sort import BOTSORT
+        from ultralytics.utils import IterableSimpleNamespace
+
+        # Plain safe_load rather than ultralytics' own loader: that one has
+        # already moved once (`yaml_load` -> `YAML`), and a test guarding a
+        # config should not break when an unrelated helper is renamed.
+        config = yaml.safe_load(Path(SETTINGS.tracker).read_text(encoding="utf-8"))
+        tracker = BOTSORT(args=IterableSimpleNamespace(**config))
+        self.assertEqual(config.get("tracker_type"), "botsort")
+        # None because with_reid is off; the point is that construction got
+        # far enough to decide that, having read every attribute it needs.
+        self.assertIsNone(tracker.encoder)
 
     def test_track_id_change_keeps_warrioriq_identity(self):
         manager = IdentityManager(_person(1, 100, 200, 1), _person(2, 400, 500, 2), 0)
