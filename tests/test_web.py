@@ -3248,3 +3248,61 @@ class EmptyStateTests(unittest.TestCase):
         disagree about which filter is pressed."""
         self.assertIn("const setFilter=", self.page)
         self.assertEqual(self.page.count("aria-pressed',String(item===button)"), 1)
+
+
+class AssetVersionTests(unittest.TestCase):
+    """The cache token moved on every deploy even when no stylesheet changed.
+
+    _asset_version hashed st_mtime_ns, and .cpanel.yml deploys with `cp -R`,
+    which writes a fresh mtime on every file whether or not its contents moved.
+    So each deploy threw away the stylesheet cache of everybody who had ever
+    visited - the opposite of what the function was written to do.
+    """
+
+    def test_touching_a_stylesheet_does_not_move_the_token(self):
+        """A deploy copies the tree; that must not look like a change."""
+        import os
+
+        from app.main import ROOT, _asset_version
+
+        sheet = ROOT / "app" / "static" / "style.css"
+        if not sheet.exists():
+            self.skipTest("no style.css in this checkout")
+        before = _asset_version()
+        original = sheet.stat()
+        try:
+            # Exactly what `cp` does to the mtime, without touching contents.
+            os.utime(sheet, ns=(original.st_atime_ns, original.st_mtime_ns + 10_000_000_000))
+            self.assertEqual(
+                _asset_version(), before,
+                "a deploy that only copies files still busts every visitor's cache")
+        finally:
+            os.utime(sheet, ns=(original.st_atime_ns, original.st_mtime_ns))
+
+    def test_a_real_stylesheet_change_does_move_the_token(self):
+        """The token still has to do its job: a changed sheet must invalidate."""
+        from app.main import ROOT, _asset_version
+
+        sheet = ROOT / "app" / "static" / "style.css"
+        if not sheet.exists():
+            self.skipTest("no style.css in this checkout")
+        before = _asset_version()
+        original = sheet.read_bytes()
+        try:
+            sheet.write_bytes(original + b"\n/* cache token probe */\n")
+            self.assertNotEqual(
+                _asset_version(), before,
+                "a changed stylesheet would be served from a stale cache")
+        finally:
+            sheet.write_bytes(original)
+        self.assertEqual(_asset_version(), before, "the probe was not cleaned up")
+
+    def test_it_is_cheap_enough_to_run_at_import(self):
+        import time
+
+        from app.main import _asset_version
+
+        _asset_version()                      # warm the page cache
+        start = time.perf_counter()
+        _asset_version()
+        self.assertLess(time.perf_counter() - start, 0.25)

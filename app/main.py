@@ -208,14 +208,24 @@ def _asset_version() -> str:
     Hashing the files themselves means the token moves on its own with every
     real change and stays put when nothing changed, so caches still do their
     job between deploys.
+
+    The contents, not the modification time. This read st_mtime_ns, and the
+    deploy copies the tree with `cp -R` (see .cpanel.yml), which writes a fresh
+    mtime on every file whether or not it changed. So the token moved on every
+    single deploy and threw away the stylesheet cache of everybody who had ever
+    visited - the exact opposite of the sentence above it, and the reason this
+    was worth fixing on a host where the server already answers in 8 to 27
+    seconds against an application that takes 25 to 46 milliseconds.
+
+    Reading 231 KB of CSS and JS at import costs about a millisecond and
+    happens once per process.
     """
     digest = hashlib.sha256()
     static_dir = ROOT / "app" / "static"
     for path in sorted(static_dir.glob("*.css")) + sorted(static_dir.glob("*.js")):
         try:
             digest.update(path.name.encode())
-            digest.update(str(path.stat().st_mtime_ns).encode())
-            digest.update(str(path.stat().st_size).encode())
+            digest.update(path.read_bytes())
         except OSError:
             continue
     return digest.hexdigest()[:12]
