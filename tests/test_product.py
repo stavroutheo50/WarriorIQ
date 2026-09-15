@@ -1894,3 +1894,33 @@ class PlanInterestTests(unittest.TestCase):
         # Guarded in the route: there is nothing to be notified about.
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
         self.assertIn('plan_key not in PLANS or plan_key == "free"', source)
+
+
+class AccountDeletionCoverageTests(unittest.TestCase):
+    """Deleting an account has to take the account's rows with it.
+
+    Enumerated rather than listed by hand: a table added later is exactly the
+    one that gets forgotten, which is what happened to plan_interest.
+    """
+
+    # Deliberately retained: abuse reports and payment records are kept for
+    # reasons that outlive the account, and both are reviewed separately.
+    RETAINED = {"moderation_reports", "payment_events"}
+
+    def test_every_table_holding_account_data_is_cleared(self):
+        import re
+
+        source = (Path(__file__).resolve().parents[1] / "core" / "db.py").read_text(encoding="utf-8")
+        tables = {m.group(1) for m in re.finditer(r"CREATE TABLE IF NOT EXISTS (\w+)", source)}
+        body = source[source.index("def delete_account"):][:3000]
+        cleared = {m.group(1) for m in re.finditer(r"(?:DELETE FROM|UPDATE) (\w+)", body)}
+        missed = tables - cleared - self.RETAINED
+        # Known and outstanding: the roster survives account deletion, so the
+        # names of real athletes outlive the workspace that held them.
+        # Reported, not fixed - deletion behaviour is the owner's call. Subset
+        # rather than equality, so closing that gap keeps this green while a
+        # newly added table that forgets deletion still fails it.
+        self.assertLessEqual(
+            missed, {"fighters"},
+            "a table holding account data is not cleared on deletion: "
+            f"{sorted(missed - {'fighters'})}")

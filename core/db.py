@@ -1405,6 +1405,7 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM legal_acceptances WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM analysis_usage WHERE account_id=?", (account_id,))
+        con.execute("DELETE FROM plan_interest WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM subscription_actions WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM outbound_messages WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM password_reset_tokens WHERE account_id=?", (account_id,))
