@@ -4563,3 +4563,76 @@ class WebVideoDerivativeTests(unittest.TestCase):
         # be preceded by handing the file to ffmpeg.
         self.assertLess(guard, normalise)
         self.assertLess(scan, normalise)
+
+
+class RefereeProbeLocationTests(unittest.TestCase):
+    """The referee filter switched itself off unless the process started in the
+    project root.
+
+    referee_probe_path defaults to the relative "models/referee_probe.npz" and
+    was resolved against the working directory, while every other data path in
+    core/config.py goes through DATA_ROOT. A process started anywhere else
+    logged one warning and then ran with no official filtering at all - which
+    is what every benchmark run from a scratch directory did, and why none of
+    them ever recorded a "referee" refusal.
+    """
+
+    def setUp(self):
+        import core.referee as referee
+
+        self.referee = referee
+        self.probe = Path(__file__).resolve().parents[1] / "models" / "referee_probe.npz"
+        referee.reset_for_tests()
+
+    def tearDown(self):
+        self.referee.reset_for_tests()
+
+    def test_the_probe_is_found_from_any_working_directory(self):
+        import os
+        import tempfile
+
+        if not self.probe.exists():
+            self.skipTest("no referee probe in this checkout")
+        here = os.getcwd()
+        elsewhere = tempfile.mkdtemp()
+        try:
+            os.chdir(elsewhere)
+            self.referee.reset_for_tests()
+            self.assertIsNotNone(
+                self.referee._load(),
+                "the referee filter disables itself outside the project root")
+        finally:
+            # Back out before removing it: Windows refuses to delete a
+            # directory that a process is sitting in.
+            os.chdir(here)
+            try:
+                os.rmdir(elsewhere)
+            except OSError:
+                pass
+
+    def test_a_genuinely_missing_probe_still_disables_cleanly(self):
+        """Absent is different from merely unresolved: it must stand down
+        rather than raise partway through a fight."""
+        from core.config import SETTINGS
+
+        before = getattr(SETTINGS, "referee_probe_path")
+        try:
+            object.__setattr__(SETTINGS, "referee_probe_path",
+                               "models/definitely-not-here.npz")
+            self.referee.reset_for_tests()
+            self.assertIsNone(self.referee._load())
+        finally:
+            object.__setattr__(SETTINGS, "referee_probe_path", before)
+
+    def test_an_absolute_path_is_still_honoured(self):
+        from core.config import SETTINGS
+
+        if not self.probe.exists():
+            self.skipTest("no referee probe in this checkout")
+        before = getattr(SETTINGS, "referee_probe_path")
+        try:
+            object.__setattr__(SETTINGS, "referee_probe_path", str(self.probe))
+            self.referee.reset_for_tests()
+            self.assertIsNotNone(self.referee._load())
+        finally:
+            object.__setattr__(SETTINGS, "referee_probe_path", before)
