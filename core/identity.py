@@ -774,7 +774,12 @@ class IdentityManager:
         if track_id is None:
             return False
         spread = self._recent_spread(track_id, self.source_fps)
-        patient = spread is not None and spread < SETTINGS.min_switch_spread_body_lengths
+        # `max_release_spread_body_lengths`, not the switch threshold. Letting
+        # go of a fighter and refusing to take a new track are different
+        # decisions with different costs, and sharing one number meant the
+        # cautious value chosen for the second was dropping athletes all
+        # through the first. See core/config.py for the measured populations.
+        patient = spread is not None and spread < SETTINGS.max_release_spread_body_lengths
         # Six seconds is the right amount of patience for a fighter who might
         # merely be resting. It is far too much for a person in a chair, and
         # the wait is not free: it is a wait spent measuring the wrong human

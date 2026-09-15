@@ -554,6 +554,38 @@ class Settings:
     min_switch_spread_body_lengths: float = float(
         os.getenv("WARRIORIQ_MIN_SWITCH_SPREAD", "0.5")
     )
+    # The same measurement, but for *releasing* a fighter already held rather
+    # than for letting a new track take the identity. It needs its own number
+    # and much lower, and using the 0.5 above for both was the single largest
+    # source of lost fighters on real phone footage.
+    #
+    # Measured 2026-09-15 on the user's own 1080p bout, every track with six
+    # seconds of history:
+    #
+    #     spectators, large boxes at the frame edges   0.048 - 0.077
+    #     the fighters                                 0.26 - 0.87
+    #
+    # 0.5 sits above every fighter in that bout, so both were released
+    # constantly: 376 releases across 378 frames, 167 of them the same track.
+    # It reads as one wrong judgement and is a loop. `_recent_spread` measures
+    # the track's whole history, so spread *grows* over a track's life - a
+    # fighter's young track is always small, gets released, is re-acquired, and
+    # is small again. Every released box was checked by eye: all were athletes,
+    # several mid-technique, none a spectator or the referee.
+    #
+    # Why 0.5 was ever reasonable: it was calibrated on 480x220 broadcast
+    # captures, where the camera is tight on one mat and a fighter sweeps a
+    # large share of a small frame. Film the same bout from the back of a hall
+    # and the athlete barely moves relative to their own height, while the
+    # threshold does not know the difference.
+    #
+    # 0.12 sits between the two populations with margin either side. Releasing
+    # is still worth doing - see _release_if_furniture for the seated spectator
+    # held at "98% coverage" - but it must be rare and certain, and the short
+    # motionless test below is the one calibrated to be both.
+    max_release_spread_body_lengths: float = float(
+        os.getenv("WARRIORIQ_MAX_RELEASE_SPREAD", "0.12")
+    )
     # A second, much stricter reading of the same measurement over a much
     # shorter look. The 6 s guard above is calibrated to catch marginal cases
     # and so must wait; somebody who has not moved at all is decidable sooner.
