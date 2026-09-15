@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 import cv2
+import numpy as np
 
 from core.types import AnalysisRequest, RoundSpec, VideoInfo
 
@@ -450,3 +451,100 @@ def normalize_container(path: str | Path) -> Path | None:
         target.unlink(missing_ok=True)
         return None
     return target
+
+
+# --- shot changes -----------------------------------------------------------
+#
+# An analysis assumes one continuous view of one bout. Nothing checked that.
+# A 60-second file in this project's own library turned out to be an edited
+# event reel - announcer, crowd, a table of medals, a fight-card poster - and
+# the pipeline processed it without complaint, producing a confident report of
+# a tracker that spent part of the run following a photograph of a man on a
+# poster.
+#
+# Two signals, both required, because either alone is wrong on real footage:
+#
+#   mean difference   A hard cut moves every pixel. So does a broadcast
+#                     scoreboard appearing, which is why this is not enough on
+#                     its own - measured on fight 1, a graphics overlay
+#                     shrinking at 112s scores 59.4, higher than some real cuts.
+#
+#   changed area      The share of the frame that moved. A cut replaces all of
+#                     it; a caption band replaces a strip. Also not enough
+#                     alone: a fast pan across a busy hall moves most cells.
+#
+# Requiring both is deliberately conservative. It is tuned to find the obvious
+# case - a reel of unrelated shots - and will miss a soft dissolve.
+#
+# THE EVIDENCE HERE IS THIN. These thresholds are fitted against five files, of
+# which exactly one is an edited reel. That is the same shape of mistake this
+# project has made four times already: appearance_thresh, min_switch_spread,
+# max_stationary_spread_short and the referee probe were each measured honestly
+# on footage too narrow to generalise. Treat the numbers below as a starting
+# point to be re-measured once more real uploads exist, and note that this
+# reports rather than refuses precisely because it is not trustworthy enough to
+# reject somebody's fight on.
+_CUT_MEAN_DIFFERENCE = 35.0
+_CUT_CHANGED_AREA = 0.55
+_CUT_SAMPLE_EVERY = 3
+
+
+def detect_shot_changes(path: str | Path, sample_every: int = _CUT_SAMPLE_EVERY) -> dict:
+    """Where the camera cuts, and how long the longest single shot runs.
+
+    Cheap by construction: every third frame, decoded to a 96x54 grey image and
+    a 16x9 grid. On a two-minute clip this is a few seconds of CPU, which is
+    why it can sit in the upload path rather than in the analysis.
+    """
+    capture = cv2.VideoCapture(str(path))
+    if not capture.isOpened():
+        # Same keys as the success path. A caller in the upload route should
+        # not have to know which branch it got, and an unreadable file must
+        # never be the thing that fails somebody's upload.
+        return {"available": False, "cuts": [], "cut_count": 0,
+                "longest_shot_seconds": 0.0, "duration_seconds": 0.0,
+                "looks_edited": False}
+    fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
+    previous_small = previous_cells = None
+    cuts: list[float] = []
+    index = 0
+    try:
+        while True:
+            # grab() advances without decoding; only the sampled frame is
+            # retrieved. Decoding every frame of a 1080p upload to look at one
+            # in three cost 23 seconds, which is too much to sit in front of
+            # somebody waiting for an upload to finish.
+            if not capture.grab():
+                break
+            index += 1
+            if index % sample_every:
+                continue
+            ok, frame = capture.retrieve()
+            if not ok:
+                break
+            grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(grey, (96, 54)).astype(np.int16)
+            cells = cv2.resize(grey, (16, 9)).astype(np.int16)
+            if previous_small is not None:
+                mean = float(np.mean(np.abs(small - previous_small)))
+                area = float(np.mean(np.abs(cells - previous_cells) > 25))
+                if mean > _CUT_MEAN_DIFFERENCE and area > _CUT_CHANGED_AREA:
+                    cuts.append(index / fps)
+            previous_small, previous_cells = small, cells
+    finally:
+        capture.release()
+
+    duration = index / fps if fps else 0.0
+    # The longest stretch with no cut in it: what is actually analysable.
+    edges = [0.0, *cuts, duration]
+    longest = max((b - a for a, b in zip(edges, edges[1:])), default=duration)
+    return {
+        "available": True,
+        "cuts": [round(c, 2) for c in cuts],
+        "cut_count": len(cuts),
+        "longest_shot_seconds": round(longest, 2),
+        "duration_seconds": round(duration, 2),
+        # One cut near the end of a broadcast is a replay tag; a dozen spread
+        # through the file is somebody's highlight reel.
+        "looks_edited": len(cuts) >= 3 and longest < duration * 0.6,
+    }

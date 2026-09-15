@@ -98,7 +98,8 @@ from core.squad import build_squad_view, compare_movement, compare_with_previous
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import (
-    get_video_info, normalize_container, playback_file, probe_upload,
+    detect_shot_changes, get_video_info, normalize_container, playback_file,
+    probe_upload,
     read_frame, remove_derivative,
 )
 
@@ -2395,6 +2396,17 @@ async def upload(
         probed_frame, quality_samples = await run_in_threadpool(probe_upload, video_path, info)
         quality = await run_in_threadpool(
             inspect_video_quality, video_path, info, quality_samples)
+        # An analysis assumes one continuous view of one bout, and until now
+        # nothing checked. A sixty-second file in this project's own library is
+        # an edited event reel - announcer, crowd, a table of medals, a
+        # fight-card poster - and it went through the pipeline without
+        # complaint, producing a confident report of a tracker that spent part
+        # of the run following a photograph of a man on a poster.
+        #
+        # Reported, not refused. The thresholds are fitted against five files
+        # of which exactly one is edited, which is not a basis for rejecting
+        # somebody's fight; see core/video.py.
+        shots = await run_in_threadpool(detect_shot_changes, video_path)
     except Exception:
         video_path.unlink(missing_ok=True)
         raise
@@ -2407,6 +2419,16 @@ async def upload(
     # which is exactly the "it analysed the referee" failure people report. So
     # when no explicit start was asked for, open the picker on a moment where
     # the two are actually working. The uploader can still scrub anywhere.
+    if shots.get("looks_edited"):
+        LOGGER.info(
+            "upload_looks_edited job_id=%s cuts=%s longest_shot=%.1fs of %.1fs",
+            job_id, shots["cut_count"], shots["longest_shot_seconds"],
+            shots["duration_seconds"])
+        record_security_event(
+            "upload_looks_edited", severity="info",
+            resource_type="fight", resource_id=job_id,
+            metadata={"cuts": shots["cut_count"],
+                      "longest_shot_seconds": shots["longest_shot_seconds"]})
     selection_frame = int(round(start * info.fps))
     if start <= 0.0:
         selection_frame = probed_frame

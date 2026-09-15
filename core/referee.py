@@ -113,7 +113,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from core.config import SETTINGS
+from core.config import DATA_ROOT, SETTINGS
 
 LOGGER = logging.getLogger("warrioriq.referee")
 
@@ -197,7 +197,18 @@ def _load() -> dict | None:
     if _unavailable or not SETTINGS.referee_filter_enabled:
         return None
     if _probe is None:
+        # Resolved against the project, not the working directory. The
+        # setting defaults to the relative "models/referee_probe.npz",
+        # and every other data path in core/config.py goes through
+        # DATA_ROOT - this one did not. The effect was that the filter
+        # silently switched itself off for any process not started from
+        # the project root: it warns and carries on with no official
+        # filtering at all. Every benchmark run from a scratch directory
+        # today had it disabled, which is why none of them ever recorded
+        # a "referee" refusal.
         path = Path(SETTINGS.referee_probe_path)
+        if not path.is_absolute():
+            path = DATA_ROOT / path
         if not path.exists():
             _unavailable = True
             LOGGER.warning("referee_probe_missing path=%s filter disabled", path)

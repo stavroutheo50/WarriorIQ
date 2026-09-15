@@ -4563,3 +4563,142 @@ class WebVideoDerivativeTests(unittest.TestCase):
         # be preceded by handing the file to ffmpeg.
         self.assertLess(guard, normalise)
         self.assertLess(scan, normalise)
+
+
+class RefereeProbeLocationTests(unittest.TestCase):
+    """The referee filter switched itself off unless the process started in the
+    project root.
+
+    referee_probe_path defaults to the relative "models/referee_probe.npz" and
+    was resolved against the working directory, while every other data path in
+    core/config.py goes through DATA_ROOT. A process started anywhere else
+    logged one warning and then ran with no official filtering at all - which
+    is what every benchmark run from a scratch directory did, and why none of
+    them ever recorded a "referee" refusal.
+    """
+
+    def setUp(self):
+        import core.referee as referee
+
+        self.referee = referee
+        self.probe = Path(__file__).resolve().parents[1] / "models" / "referee_probe.npz"
+        referee.reset_for_tests()
+
+    def tearDown(self):
+        self.referee.reset_for_tests()
+
+    def test_the_probe_is_found_from_any_working_directory(self):
+        import os
+        import tempfile
+
+        if not self.probe.exists():
+            self.skipTest("no referee probe in this checkout")
+        here = os.getcwd()
+        elsewhere = tempfile.mkdtemp()
+        try:
+            os.chdir(elsewhere)
+            self.referee.reset_for_tests()
+            self.assertIsNotNone(
+                self.referee._load(),
+                "the referee filter disables itself outside the project root")
+        finally:
+            # Back out before removing it: Windows refuses to delete a
+            # directory that a process is sitting in.
+            os.chdir(here)
+            try:
+                os.rmdir(elsewhere)
+            except OSError:
+                pass
+
+    def test_a_genuinely_missing_probe_still_disables_cleanly(self):
+        """Absent is different from merely unresolved: it must stand down
+        rather than raise partway through a fight."""
+        from core.config import SETTINGS
+
+        before = getattr(SETTINGS, "referee_probe_path")
+        try:
+            object.__setattr__(SETTINGS, "referee_probe_path",
+                               "models/definitely-not-here.npz")
+            self.referee.reset_for_tests()
+            self.assertIsNone(self.referee._load())
+        finally:
+            object.__setattr__(SETTINGS, "referee_probe_path", before)
+
+    def test_an_absolute_path_is_still_honoured(self):
+        from core.config import SETTINGS
+
+        if not self.probe.exists():
+            self.skipTest("no referee probe in this checkout")
+        before = getattr(SETTINGS, "referee_probe_path")
+        try:
+            object.__setattr__(SETTINGS, "referee_probe_path", str(self.probe))
+            self.referee.reset_for_tests()
+            self.assertIsNotNone(self.referee._load())
+        finally:
+            object.__setattr__(SETTINGS, "referee_probe_path", before)
+
+
+class ShotChangeTests(unittest.TestCase):
+    """An analysis assumes one continuous view of one bout; nothing checked.
+
+    A sixty-second file in this project's own library is an edited event reel -
+    announcer, crowd, a table of medals, a fight-card poster - and it went
+    through the pipeline without complaint. Rendering the tracked boxes showed
+    fighter B holding a photograph of a man on a poster at t=30s.
+    """
+
+    SCRATCH = Path(r"C:\Users\User\AppData\Local\Temp\claude") 
+
+    def _fixture(self, *parts):
+        path = Path(__file__).resolve().parents[1].joinpath(*parts)
+        if not path.exists():
+            self.skipTest(f"{path.name} not in this checkout")
+        return path
+
+    def test_a_continuous_bout_reports_no_cuts(self):
+        from core.video import detect_shot_changes
+
+        path = self._fixture("fights", "1.mp4")
+        result = detect_shot_changes(path)
+        self.assertTrue(result["available"])
+        self.assertFalse(result["looks_edited"])
+        # One graphics overlay change near the end is not an edit: the longest
+        # shot still covers almost the whole file.
+        self.assertGreater(result["longest_shot_seconds"],
+                           result["duration_seconds"] * 0.9)
+
+    def test_the_longest_shot_never_exceeds_the_duration(self):
+        from core.video import detect_shot_changes
+
+        for name in ("1.mp4",):
+            result = detect_shot_changes(self._fixture("fights", name))
+            self.assertLessEqual(result["longest_shot_seconds"],
+                                 result["duration_seconds"] + 0.5)
+
+    def test_a_missing_file_reports_unavailable_rather_than_raising(self):
+        """This sits in the upload path; it must never be the thing that fails
+        an upload."""
+        from core.video import detect_shot_changes
+
+        result = detect_shot_changes(Path("does-not-exist.mp4"))
+        self.assertFalse(result["available"])
+        self.assertEqual(result["cut_count"], 0)
+        self.assertFalse(result["looks_edited"])
+
+    def test_one_cut_in_a_long_file_is_not_called_edited(self):
+        """A broadcast replay tag or a caption change is one cut. An edited
+        reel is a dozen, and no single shot covers much of the file."""
+        from core.video import detect_shot_changes
+
+        result = detect_shot_changes(self._fixture("fights", "1.mp4"))
+        self.assertLessEqual(result["cut_count"], 2)
+        self.assertFalse(result["looks_edited"])
+
+    def test_the_upload_route_reports_rather_than_refuses(self):
+        """The thresholds are fitted against five files of which exactly one is
+        edited. That is not a basis for rejecting somebody's fight."""
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        marker = source.index("shots = await run_in_threadpool(detect_shot_changes")
+        following = source[marker:marker + 1200]
+        self.assertIn("upload_looks_edited", following)
+        self.assertNotIn("raise HTTPException", following)
