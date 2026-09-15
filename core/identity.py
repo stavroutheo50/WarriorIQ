@@ -779,12 +779,35 @@ class IdentityManager:
         # decisions with different costs, and sharing one number meant the
         # cautious value chosen for the second was dropping athletes all
         # through the first. See core/config.py for the measured populations.
-        patient = spread is not None and spread < SETTINGS.max_release_spread_body_lengths
+        #
         # Six seconds is the right amount of patience for a fighter who might
         # merely be resting. It is far too much for a person in a chair, and
         # the wait is not free: it is a wait spent measuring the wrong human
         # and attributing the result to a fighter.
-        if not patient and not self._is_motionless(track_id, self.source_fps):
+        patient = spread is not None and spread < SETTINGS.max_release_spread_body_lengths
+        # **`_is_motionless` is deliberately not consulted here**, though it is
+        # still consulted when a new track wants to *take* an identity, above.
+        #
+        # This module already states the principle for the travel gate: refusing
+        # a switch is cheap and being wrong about it is not, so those gates
+        # "only block moving onto a new track, never drop the one already held".
+        # The short motionless reading was breaking that rule, and it cost more
+        # than everything else left.
+        #
+        # Measured 2026-09-15 on the user's own bout, after the release
+        # threshold was separated out: 78 releases remained, all of them in the
+        # opening 1.5-7.3 s, on the two tracks holding the two fighters, whose
+        # boxes moved about 80 px in six seconds. Their short spread ran
+        # 0.008-0.012 against a 0.02 threshold whose calibration note says "the
+        # least mobile fighter never goes below 0.029". **That was measured
+        # mid-round.** At the start of a bout the athletes stand still while the
+        # referee sets them - genuinely motionless, and not furniture.
+        #
+        # What is lost: a spectator acquired early can now be held for up to the
+        # six seconds the patient reading needs, instead of 1.5. That is a
+        # bounded cost on a rare case. What is gained is not dropping both
+        # fighters through the opening of every bout.
+        if not patient:
             return False
         self._furniture.add(int(track_id))
         state.current_track_id = None
