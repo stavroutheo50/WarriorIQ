@@ -147,7 +147,13 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             follow_redirects=False,
         )
         self.assertEqual(saved.status_code, 303)
-        self.assertEqual(self.client.cookies.get(webapp.COOKIE_PREFERENCES_COOKIE), "custom-analytics")
+        # The choice, stamped with the policy version it answered, so that
+        # bumping the version re-opens the banner instead of being recorded
+        # only in the acceptance log while the live cookie says "decided".
+        from core.config import SETTINGS
+        self.assertEqual(
+            self.client.cookies.get(webapp.COOKIE_PREFERENCES_COOKIE),
+            f"custom-analytics:{SETTINGS.policy_version}")
         self.assertNotIn("Accept All", self.client.get("/").text)
         guest_id = self.client.cookies.get(GUEST_COOKIE)
         records = database.list_legal_acceptances(guest_id=guest_id)

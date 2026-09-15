@@ -92,7 +92,7 @@ from core.retention import (
 )
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_unobserved
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
-from core.squad import build_squad_view, compare_with_previous
+from core.squad import build_squad_view, compare_movement, compare_with_previous
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import get_video_info, probe_upload, read_frame
@@ -708,7 +708,22 @@ def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds
 
 
 def _cookie_preferences(request: Request) -> dict:
+    """Read the stored cookie choice, and whether it still applies.
+
+    The choice is stored as "<choice>:<policy version>". A choice made
+    against a superseded policy version is treated as undecided, which is
+    what re-opens the banner - previously the cookie recorded only the
+    choice, so bumping WARRIORIQ_POLICY_VERSION re-prompted nobody.
+
+    A cookie with no version was written before this and is honoured as it
+    stands. Those visitors did answer the question; re-asking all of them
+    once to backfill a version would be a worse reading of "re-prompt when
+    the policy changes" than simply recording it from here on.
+    """
     raw = request.cookies.get(COOKIE_PREFERENCES_COOKIE, "")
+    raw, _, version = raw.partition(":")
+    if version and version != SETTINGS.policy_version:
+        return {"decided": False, "analytics": False, "marketing": False}
     if raw == "all":
         return {"decided": True, "analytics": True, "marketing": True}
     if raw == "custom-analytics":
@@ -4046,7 +4061,13 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     return templates.TemplateResponse(
         request=request,
         name="compare.html",
-        context={"request": request, "fights": fights, "a": a, "b": b, "reports": reports, "signed_in": profile_id is not None},
+        context={
+            "request": request, "fights": fights, "a": a, "b": b, "reports": reports,
+            "signed_in": profile_id is not None,
+            # The page promised a movement comparison "below" and rendered
+            # nothing. These are the numbers that survive the strike gate.
+            "movement": compare_movement(reports),
+        },
     )
 
 
@@ -4207,7 +4228,8 @@ def save_cookie_preferences(
     )
     response = RedirectResponse(_safe_next(next_path, "/"), status_code=303)
     response.set_cookie(
-        COOKIE_PREFERENCES_COOKIE, value, max_age=60 * 60 * 24 * 365,
+        COOKIE_PREFERENCES_COOKIE, f"{value}:{SETTINGS.policy_version}",
+        max_age=60 * 60 * 24 * 365,
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response

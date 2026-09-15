@@ -4321,3 +4321,73 @@ class StandaloneReportHonestyTests(unittest.TestCase):
             with self.subTest(trusted=trusted):
                 self.assertNotIn("Punch attempts", html)
                 self.assertNotIn("punches landed", html.lower())
+
+
+class CompareMovementTests(unittest.TestCase):
+    """/compare told the reader movement was "compared below" and showed nothing.
+
+    Both cards ended with that sentence, the page went straight to the footer,
+    and since the strike half is deliberately withheld until strike counting is
+    release-validated, movement was the only thing the page had to offer.
+    """
+
+    @staticmethod
+    def _report(focus="A", coverage=0.95, **metrics):
+        return {
+            "video": {"focus_fighter": focus},
+            "tracking": {"fighter_A_coverage": coverage, "fighter_B_coverage": coverage},
+            "metrics": {focus: dict(metrics)},
+        }
+
+    def test_two_fights_are_compared_on_the_numbers_that_survive_the_strike_gate(self):
+        from core.squad import compare_movement
+
+        result = compare_movement([
+            self._report(pressure_index=0.10, ring_center_control=0.60,
+                         footwork_body_lengths_per_second=1.20, guard_index=0.20,
+                         balance_index=0.70),
+            self._report(pressure_index=0.30, ring_center_control=0.40,
+                         footwork_body_lengths_per_second=1.20, guard_index=0.20,
+                         balance_index=0.70),
+        ])
+        self.assertTrue(result["available"])
+        rows = {row["key"]: row for row in result["rows"]}
+        self.assertEqual(set(rows), {
+            "pressure_index", "ring_center_control", "footwork_body_lengths_per_second",
+            "guard_index", "balance_index"})
+        # Pressure is shown on the 0-100 scale the report uses, where 50 is
+        # neither forward nor back: 0.10 -> 55, 0.30 -> 65.
+        self.assertEqual(rows["pressure_index"]["a"], "55")
+        self.assertEqual(rows["pressure_index"]["b"], "65")
+        self.assertEqual(rows["pressure_index"]["leader"], "b")
+        self.assertEqual(rows["ring_center_control"]["leader"], "a")
+        # Identical numbers are level, not a winner by a rounding error.
+        self.assertEqual(rows["guard_index"]["leader"], "level")
+        self.assertEqual(rows["footwork_body_lengths_per_second"]["delta"], "level")
+
+    def test_a_metric_missing_from_both_fights_is_left_out_rather_than_shown_empty(self):
+        from core.squad import compare_movement
+
+        result = compare_movement([
+            self._report(pressure_index=0.1), self._report(pressure_index=0.2)])
+        self.assertEqual([row["key"] for row in result["rows"]], ["pressure_index"])
+
+    def test_a_badly_tracked_fight_is_flagged_rather_than_silently_compared(self):
+        """A tracking failure is not a fighter having a bad week.
+
+        The same rule the squad view applies: show it, but say which fight the
+        analysis could not follow.
+        """
+        from core.squad import compare_movement
+
+        result = compare_movement([
+            self._report(coverage=0.40, pressure_index=0.1),
+            self._report(coverage=0.95, pressure_index=0.2)])
+        self.assertEqual(result["untrusted"], [True, False])
+        self.assertEqual(result["coverage"], [0.4, 0.95])
+
+    def test_one_missing_report_means_no_comparison(self):
+        from core.squad import compare_movement
+
+        self.assertFalse(compare_movement([self._report(pressure_index=0.1), None])["available"])
+        self.assertFalse(compare_movement([None, None])["available"])

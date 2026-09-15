@@ -231,3 +231,108 @@ def compare_with_previous(report: dict, fights: list[dict], job_id: str) -> dict
         "previous_name": previous.get("name"),
         "previous_date": (previous.get("created_at") or "")[:10],
     }
+
+
+# The five identity-safe pose dimensions, in the order core/coaching.py
+# declares them. Higher is better for all five: build_pose_coaching ranks them
+# with reverse=True and calls the top one the fighter's strength, so a
+# comparison treating any of them as lower-is-better would contradict the
+# coaching shown on the same fight.
+_MOVEMENT_DIMENSIONS: tuple[tuple[str, str], ...] = (
+    ("pressure_index", "Walking them down"),
+    ("ring_center_control", "Holding the middle"),
+    ("footwork_body_lengths_per_second", "Moving your feet"),
+    ("guard_index", "Guard"),
+    ("balance_index", "Balance"),
+)
+
+
+def _display_value(key: str, value: float | None) -> tuple[str, float | None]:
+    """Format one pose metric the way the report and coaching already do.
+
+    The same three conventions as core/coaching.py's _phrase: pressure mapped
+    onto 0-100 where 50 is neither forward nor back, footwork in body lengths a
+    second, everything else a percentage. A second scale for the same number
+    would make the comparison page disagree with the report it compares.
+    """
+    if value is None:
+        return "—", None
+    if key == "pressure_index":
+        shown = (value + 1) / 2 * 100
+        return f"{shown:.0f}", shown
+    if key == "footwork_body_lengths_per_second":
+        return f"{value:.1f}", value
+    return f"{value * 100:.0f}%", value * 100
+
+
+def compare_movement(reports: list) -> dict:
+    """Fight 1 against fight 2 on the movement numbers, for /compare.
+
+    That page withholds the strike-by-strike half until strike counting is
+    release-validated, told the reader movement was "compared below", and then
+    rendered nothing below. These are the numbers that survive the gate: they
+    come from pose and tracking alone, so none of them depends on the action
+    labels being trustworthy.
+
+    Deliberately not phrased as progress. The two fights are whichever two the
+    reader picked, in whatever order, so "improved" would be a claim about
+    chronology this page has no basis for. It reports which fight leads each
+    number and by how much, and leaves the reading to the coach.
+    """
+    if len(reports) != 2 or not all(reports):
+        return {"available": False}
+
+    sides = []
+    for report in reports:
+        video = report.get("video") or {}
+        focus = video.get("focus_fighter") or video.get("analysis_target") or "A"
+        if focus not in {"A", "B"}:
+            focus = "A"
+        tracking = report.get("tracking") or {}
+        coverage = min(
+            float(tracking.get("fighter_A_coverage", 0.0) or 0.0),
+            float(tracking.get("fighter_B_coverage", 0.0) or 0.0),
+        )
+        sides.append({
+            "report": report, "focus": focus,
+            "coverage": round(coverage, 3), "usable": coverage >= _MIN_COVERAGE,
+        })
+
+    rows = []
+    for key, label in _MOVEMENT_DIMENSIONS:
+        first = _metric(sides[0]["report"], sides[0]["focus"], key)
+        second = _metric(sides[1]["report"], sides[1]["focus"], key)
+        if first is None and second is None:
+            continue
+        first_text, first_shown = _display_value(key, first)
+        second_text, second_shown = _display_value(key, second)
+        delta_text, leader = "—", "level"
+        if first_shown is not None and second_shown is not None:
+            gap = second_shown - first_shown
+            # The same noise floor the trend uses, read on the displayed scale
+            # so a 5% band means 5 points of what the reader can actually see.
+            floor = _MEANINGFUL_CHANGE * (1.0 if key == "footwork_body_lengths_per_second" else 100.0)
+            if abs(gap) < floor:
+                delta_text, leader = "level", "level"
+            else:
+                leader = "b" if gap > 0 else "a"
+                sign = "+" if gap > 0 else "−"
+                digits = 1 if key == "footwork_body_lengths_per_second" else 0
+                delta_text = f"{sign}{abs(gap):.{digits}f}"
+        rows.append({
+            "key": key, "label": label,
+            "a": first_text, "b": second_text,
+            "delta": delta_text, "leader": leader,
+        })
+
+    if not rows:
+        return {"available": False}
+    return {
+        "available": True,
+        "rows": rows,
+        # Surfaced rather than used to suppress: a fight the tracker could not
+        # follow is still worth showing beside one it could, so long as the
+        # reader is told which is which.
+        "coverage": [sides[0]["coverage"], sides[1]["coverage"]],
+        "untrusted": [not sides[0]["usable"], not sides[1]["usable"]],
+    }

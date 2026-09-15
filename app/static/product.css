@@ -109,7 +109,7 @@ body[data-page=result] .report-path{border-radius:12px;background:#0b1422}body[d
 @keyframes wiq-button-wait{to{transform:rotate(360deg)}}
 
 @media(max-width:1120px){
-  .navlinks>a{padding-left:8px;padding-right:8px}.nav-more{display:none}.profile-email{display:none}
+  .navlinks>a{padding-left:8px;padding-right:8px}.profile-email{display:none}
   .fight-record{grid-template-columns:170px minmax(230px,1fr) 135px}.fight-record-actions{grid-column:2/-1;flex-direction:row;align-items:center}.fight-record-actions .btn{width:auto}.result-overview{grid-template-columns:1fr 1fr}.result-scoreline{grid-column:1/-1;text-align:left}
 }
 @media(max-width:900px){

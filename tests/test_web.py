@@ -48,6 +48,50 @@ class AnalyticsPolicyTests(unittest.TestCase):
         self.assertIn("'analytics_storage': 'denied'", response.text)
         self.assertNotIn("'analytics_storage': 'granted'", response.text)
 
+    def test_a_choice_made_against_an_older_policy_version_is_asked_again(self):
+        """The cookie recorded the choice but not the version it answered.
+
+        So bumping WARRIORIQ_POLICY_VERSION re-prompted nobody: `decided` stayed
+        true forever and the banner never came back, while the acceptance log
+        recorded a version the live cookie had no link to.
+        """
+        from core.config import SETTINGS
+
+        current = self.client.get("/", cookies={
+            "warrioriq_cookie_preferences": f"all:{SETTINGS.policy_version}"})
+        self.assertIn("'analytics_storage': 'granted'", current.text)
+        self.assertNotIn('id="cookieNotice"', current.text)
+
+        stale = self.client.get("/", cookies={
+            "warrioriq_cookie_preferences": "all:1999-01-01"})
+        self.assertIn('id="cookieNotice"', stale.text)
+        self.assertNotIn("'analytics_storage': 'granted'", stale.text)
+
+    def test_a_choice_made_before_versions_were_recorded_is_not_asked_again(self):
+        """Cookies written by the previous format carry no version.
+
+        Those visitors did answer the question. Treating a missing version as
+        undecided would re-open the banner for every existing visitor at once,
+        which is not what "re-prompt when the policy changes" asks for.
+        """
+        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
+        self.assertIn("'analytics_storage': 'granted'", response.text)
+        self.assertNotIn('id="cookieNotice"', response.text)
+
+    def test_saving_a_choice_stamps_it_with_the_policy_version(self):
+        from core.config import SETTINGS
+
+        page = self.client.get("/")
+        token = re.search(r'name="csrf-token" content="([^"]+)"', page.text).group(1)
+        response = self.client.post(
+            "/cookie-preferences",
+            data={"choice": "essential", "next_path": "/", "csrf_token": token},
+            headers={"X-CSRF-Token": token}, follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(
+            f"warrioriq_cookie_preferences={'essential'}:{SETTINGS.policy_version}",
+            response.headers["set-cookie"])
+
     def test_accepting_analytics_grants_storage(self):
         response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
         policy = response.headers["content-security-policy"]
@@ -864,7 +908,8 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("rather than being chosen per upload", privacy)
 
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
-                       scorecard_available=None, measurement=None, kick_minimum=None):
+                       scorecard_available=None, measurement=None, kick_minimum=None,
+                       action_labels_available=None, report_access=None):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -896,11 +941,13 @@ class PublicPageTests(unittest.TestCase):
                 report.setdefault("metrics", {}).setdefault(fighter, {})["measurement"] = measurement
         if scorecard_available is not None:
             report.setdefault("scorecard", {})["available"] = scorecard_available
+        if action_labels_available is not None:
+            report.setdefault("statistics", {})["action_labels_available"] = action_labels_available
         request = Stub(url=Stub(path="/report/abc"), state=Stub(account=None), cookies={}, headers={})
         return env.get_template("result.html").render(
             request=request, job_id="abc", report=report,
             identity=sport_identity("kickboxing"),
-            report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
+            report_access=report_access or {"report_tier": "full", "report_label": "Full", "label": "Full"},
             analysis_quality=_analysis_quality_summary(report), can_share=can_share,
             sharing=sharing, score_withheld=score_withheld, unavailable=[],
             kick_minimum=kick_minimum,
@@ -1367,13 +1414,60 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("Verify scorecard", template)
 
     def test_result_guides_people_through_only_the_core_training_path(self):
-        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
-        self.assertIn('class="report-path"', template)
+        """Rendered, not grepped: the chips are generated from the section gates.
+
+        Matching source text stopped proving anything once the strip stopped
+        being a hardcoded list - and a hardcoded list was the defect. Three
+        chips pointed at #report-strikes, #report-combinations and
+        #report-key-moments, which are only emitted for a full report with
+        verified strike counting, so on every other report they were links to
+        an anchor that did not exist.
+        """
+        page = self._render_result({"status": "ok"})
+        self.assertIn('class="report-path"', page)
         for anchor in ("report-performance", "report-scorecard", "report-coaching", "report-training"):
-            self.assertIn(f'href="#{anchor}"', template)
-            self.assertIn(f'id="{anchor}"', template)
-        self.assertNotIn('id="report-evidence"', template)
-        self.assertIn("Replay with skeletons", template)
+            self.assertIn(f'href="#{anchor}"', page)
+            self.assertIn(f'id="{anchor}"', page)
+        self.assertNotIn('id="report-evidence"', page)
+        self.assertIn("Replay with skeletons", page)
+
+    def test_no_report_chip_points_at_a_section_the_page_did_not_render(self):
+        """The invariant, checked on the rendered page in both gate states.
+
+        Every in-page jump link must resolve to an id on the same page. This
+        is the general form of the bug, so it holds whatever the tier and
+        whatever strike counting reports.
+        """
+        import re
+
+        from core.payments import PLANS
+
+        # Every real plan tier, not an invented one: the chips depend on
+        # report_tier, and compact and expanded carry item limits that full
+        # does not.
+        seen = set()
+        for plan in PLANS.values():
+            if plan["report_tier"] in seen:
+                continue
+            seen.add(plan["report_tier"])
+            access = dict(plan, report_label="R", label="R")
+            page = self._render_result({"status": "ok"}, report_access=access)
+            targets = set(re.findall(r'href="#(report-[a-z-]+)"', page))
+            present = set(re.findall(r'id="(report-[a-z-]+)"', page))
+            self.assertTrue(targets, f"no chips rendered at tier={plan['report_tier']}")
+            self.assertEqual(
+                targets - present, set(),
+                f"dead jump links at tier={plan['report_tier']}: {sorted(targets - present)}")
+        self.assertEqual(seen, {"compact", "expanded", "full"})
+
+    def test_a_chip_whose_section_is_withheld_says_why_instead_of_linking(self):
+        page = self._render_result({"status": "ok"}, action_labels_available=False)
+        self.assertNotIn('href="#report-strikes"', page)
+        self.assertIn("hidden until strike counting is verified", page)
+        # ...and comes back as a real link once the gate opens.
+        opened = self._render_result({"status": "ok"}, action_labels_available=True)
+        self.assertIn('href="#report-strikes"', opened)
+        self.assertIn('id="report-strikes"', opened)
 
     def test_result_explains_analysis_quality_without_calling_coverage_accuracy(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
@@ -2771,3 +2865,66 @@ class NoUnsupportedClaimSurvivesTests(NoPunchClaimLeaksTests):
         for shown in ("movement", "pressure", "centre", "guard", "balance", "leg strikes"):
             with self.subTest(number=shown):
                 self.assertIn(shown, text)
+
+
+class NavigationReachabilityTests(unittest.TestCase):
+    """The desktop nav and the hamburger have to hand over at the same width.
+
+    Between 901px and 1180px a signed-in visitor had neither: .account-nav was
+    hidden at 1180, .nav-more at 1120, and .navlinks and .mobile-menu-button
+    only swapped at 900. Athlete profile, Fight library, Compare fights and
+    Sign out were all unreachable for 280px of viewport width.
+    """
+
+    SELECTORS = (".navlinks", ".nav-more", ".account-nav", ".mobile-menu-button")
+
+    def _enclosing_breakpoint(self, css: str, index: int) -> str:
+        """The @media condition the rule at `index` sits inside.
+
+        The stylesheets are minified onto single lines, so the nearest media
+        query opening before the match is the one that governs it.
+        """
+        opened = css.rfind("@media", 0, index)
+        self.assertNotEqual(opened, -1, "rule is not inside any media query")
+        return css[opened:css.index("{", opened)]
+
+    def test_all_four_nav_selectors_collapse_on_one_breakpoint(self):
+        # The shipped bundle, not the source files: the cascade that reaches a
+        # browser is the concatenation, and a stray rule in a later file would
+        # win without appearing wrong in its own file.
+        from app.main import CSS_BUNDLE_TEXT
+
+        css = "\n".join(CSS_BUNDLE_TEXT.values())
+        found = {}
+        for selector in self.SELECTORS:
+            rules = [m.start() for m in re.finditer(
+                re.escape(selector) + r"\{display:[a-z]+\}", css)]
+            self.assertEqual(
+                len(rules), 1,
+                f"{selector} has {len(rules)} display rules; there must be exactly one")
+            found[selector] = self._enclosing_breakpoint(css, rules[0])
+        self.assertEqual(
+            len(set(found.values())), 1,
+            f"the nav collapses at more than one width: {found}")
+
+    def test_the_mobile_menu_carries_everything_the_collapsed_bars_held(self):
+        base = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                / "base.html").read_text(encoding="utf-8")
+
+        def region(start: str, end: str) -> str:
+            opened = base.index(start)
+            return base[opened:base.index(end, opened)]
+
+        desktop = (region('<div class="account-nav">', '<button class="mobile-menu-button"')
+                   + region('<details class="nav-more"', "</details>"))
+        menu = region('<div class="mobile-menu" id="mobileMenu"', "<main id=")
+
+        hidden = set(re.findall(r'href="(/[^"#]*)"', desktop))
+        reachable = set(re.findall(r'href="(/[^"#]*)"', menu))
+        self.assertIn("/compare", hidden, "nav-more no longer holds the compare link")
+        self.assertEqual(
+            hidden - reachable, set(),
+            f"hidden behind the hamburger but missing from it: {sorted(hidden - reachable)}")
+        # Sign out is a form, not a link, in both places.
+        self.assertIn('action="/logout"', desktop)
+        self.assertIn('action="/logout"', menu)
