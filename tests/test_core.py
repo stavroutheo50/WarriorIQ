@@ -3163,6 +3163,41 @@ class FighterSeparabilityTests(unittest.TestCase):
         self.assertNotIn("fighters_look_alike\"", source.split("LOGGER.info")[0][-400:])
 
 
+    def test_a_seed_on_the_referee_is_flagged_but_not_refused(self):
+        """Seeding the referee does not degrade a report, it invalidates it.
+
+        Measured 2026-09-15 on three bouts, against boxes whose subject was
+        known because the frames had been rendered and looked at: the referee
+        scores a median of 0.993 while 119 fighter samples top out at 0.084 and
+        none reaches the 0.5 threshold. The gap is wide, which is why this can
+        be asked at all.
+
+        It warns rather than refuses, like the look-alike check beside it. A
+        wrong refusal blocks an upload with no way round it; a wrong warning
+        costs a sentence. And the margin, while wide, is three bouts - the
+        repeated lesson here is that numbers measured on narrow footage do not
+        transfer.
+        """
+        from app.main import _seed_official_warning
+
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        a_box, b_box = [10.0, 10.0, 60.0, 180.0], [200.0, 10.0, 250.0, 180.0]
+
+        with mock.patch("core.referee.referee_probabilities", return_value=[0.97, 0.02]):
+            warning = _seed_official_warning(frame, a_box, b_box)
+        self.assertIsNotNone(warning)
+        self.assertEqual(warning["fighters"], ["A"])
+        self.assertIn("official", warning["message"])
+
+        with mock.patch("core.referee.referee_probabilities", return_value=[0.02, 0.03]):
+            self.assertIsNone(_seed_official_warning(frame, a_box, b_box))
+
+        # A seed check must never be the reason a fight cannot be analysed.
+        with mock.patch("core.referee.referee_probabilities", side_effect=RuntimeError("boom")):
+            self.assertIsNone(_seed_official_warning(frame, a_box, b_box))
+        self.assertIsNone(_seed_official_warning(None, a_box, b_box))
+
+
 class IdentityRecheckTests(unittest.TestCase):
     """Getting from "we mixed them up" back to the moment it happened."""
 

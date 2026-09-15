@@ -1553,7 +1553,8 @@ def _wake_analysis_worker(job_id: str) -> None:
 
 
 def _analysis_started_response(request: Request, job_id: str, deferred: bool = False,
-                              looks_alike: float | None = None) -> JSONResponse:
+                              looks_alike: float | None = None,
+                              on_official: dict | None = None) -> JSONResponse:
     response = JSONResponse({
         "ok": True,
         "progress_url": f"/progress/{job_id}",
@@ -1568,6 +1569,7 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
                 "headguards differ most."
             ),
         }} if looks_alike is not None else {}),
+        **({"seed_looks_like_official": on_official} if on_official else {}),
     })
     response.set_cookie(
         ACTIVE_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
@@ -2948,6 +2950,13 @@ def start(request: Request, job_id: str, payload: StartPayload):
     )
     if looks_alike:
         LOGGER.info("fighters_look_alike job=%s similarity=%.3f", job_id, float(alike))
+    # Asked in the same breath and for the same reason: the seed decides who
+    # the report is about, and this is the last moment the person who knows is
+    # still looking at the frame.
+    on_official = _seed_official_warning(chosen_frame, fighter_a_box, fighter_b_box)
+    if on_official:
+        LOGGER.info("seed_looks_like_official job=%s fighters=%s probability=%.3f",
+                    job_id, ",".join(on_official["fighters"]), on_official["probability"])
     # A/B is the report focus, not a tracking shortcut. WarriorIQ always
     # analyzes both selected fighters so identity context and the scorecard do
     # not disappear when the user asks for a detailed report on one athlete.
@@ -2984,7 +2993,8 @@ def start(request: Request, job_id: str, payload: StartPayload):
     else:
         _wake_analysis_worker(job_id)
     return _analysis_started_response(request, job_id, capacity["deferred"],
-                                      looks_alike=float(alike) if looks_alike else None)
+                                      looks_alike=float(alike) if looks_alike else None,
+                                      on_official=on_official)
 
 
 @app.post("/api/restart/{job_id}", dependencies=[Depends(require_csrf)])
@@ -3101,6 +3111,62 @@ def active_analysis(request: Request):
         "status": job.get("status"),
         "percent": float(job.get("percent", 0.0)),
         "url": _analysis_navigation_url(job),
+    }
+
+
+def _seed_official_warning(image, fighter_a_box, fighter_b_box) -> dict | None:
+    """Is either selection on an official rather than on a competitor?
+
+    The seed decides everything downstream, and seeding the referee does not
+    produce a slightly worse report - it produces a confident report about the
+    wrong person. It is also easy to do by accident: the referee stands between
+    the fighters, so on a small frame their box is a few pixels from a
+    fighter's, and on a paused video the fighters move between the moment a
+    frame is chosen and the moment the boxes are drawn.
+
+    Measured 2026-09-15 across three bouts, scoring boxes whose subject was
+    known because the frames had been rendered and looked at:
+
+        known referee        median 0.993   p10 0.657
+        119 fighter samples  median 0.007-0.044   max 0.084   none above 0.5
+
+    So `min_referee_probability` (0.5) separates them with a wide margin, and
+    the classifier never called a fighter an official on any footage here.
+
+    **Warned, never refused**, the same as the look-alike check beside it. The
+    margin is wide but it is three bouts, and the lesson of the last two days
+    is that a number measured on narrow footage does not transfer - see
+    core/config.py on the release threshold. A false refusal would block a
+    legitimate upload with no way round it; a false warning costs a sentence.
+    """
+    import numpy as np
+
+    from core.referee import referee_probabilities
+
+    if image is None:
+        return None
+    try:
+        scores = referee_probabilities(
+            image, np.asarray([fighter_a_box, fighter_b_box], dtype=np.float32))
+    except Exception:                                               # noqa: BLE001
+        # A seed check must never be the reason a fight cannot be analysed.
+        return None
+    flagged = [
+        (name, float(score)) for name, score in zip(("A", "B"), list(scores) + [None, None])
+        if score is not None and score >= SETTINGS.min_referee_probability
+    ]
+    if not flagged:
+        return None
+    which = " and ".join(f"Fighter {name}" for name, _ in flagged)
+    return {
+        "fighters": [name for name, _ in flagged],
+        "probability": round(max(score for _, score in flagged), 3),
+        "message": (
+            f"The box drawn for {which} looks like an official rather than a "
+            "competitor - the kit reads as a referee's. We will still analyse it, "
+            "but if that is the referee the whole report will describe the wrong "
+            "person, and it will look confident while doing it. Worth picking again."
+        ),
     }
 
 
