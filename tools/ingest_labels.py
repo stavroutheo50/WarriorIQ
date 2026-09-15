@@ -32,14 +32,26 @@ ID_BASE = 500000
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Write .npz sequences from a label pack.")
-    parser.add_argument("--job", required=True)
+    parser.add_argument("--job", default=None,
+                        help="the job this pack came from; not needed for a "
+                             "pack built across several fights, where every "
+                             "label carries its own")
     parser.add_argument("--labels", required=True, help="the file the page downloaded")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     payload = json.loads(Path(args.labels).read_text(encoding="utf-8"))
-    if payload.get("job") != args.job:
+    # A pack can now span many fights - one sitting across a hundred bouts
+    # instead of a hundred separate packs - so the job belongs to the label,
+    # not to the file. A single-job pack still names itself at the top level
+    # and is still checked against --job when one is given.
+    mixed = payload.get("job") == "mixed" or bool(payload.get("jobs"))
+    if not mixed and args.job and payload.get("job") != args.job:
         raise SystemExit("label file is for job %r, not %r" % (payload.get("job"), args.job))
+    if not mixed and not args.job:
+        args.job = payload.get("job")
+        if not args.job:
+            raise SystemExit("that label file names no job; pass --job")
     entries = payload.get("labels", [])
     wrong = payload.get("wrong_person") or []
     unsure = payload.get("unsure") or []
@@ -80,7 +92,7 @@ def main() -> int:
         if args.dry_run:
             continue
         written = export_sequence(
-            args.job, ID_BASE + int(entry["id"]),
+            entry.get("job") or args.job, ID_BASE + int(entry["id"]),
             {"fighter": entry.get("fighter", "A"), "technique": technique,
              "target": entry.get("target"), "outcome": entry.get("outcome")},
             float(entry["peak_time"]),
@@ -91,7 +103,7 @@ def main() -> int:
     if coarse and not args.dry_run:
         # Kept for a family-level model, which is the granularity this footage
         # can actually support. The 17-class trainer cannot use them.
-        path = DATASET / ("%s-family-labels.json" % args.job)
+        path = DATASET / ("%s-family-labels.json" % (args.job or "mixed"))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(coarse, indent=1), encoding="utf-8")
         print("%d answered only as punch/kick/knee -> %s" % (len(coarse), path))
