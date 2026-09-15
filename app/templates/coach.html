@@ -68,7 +68,7 @@
           {% if roster %}
           <form class="fighter-assign" method="post" action="/coach/fights/{{f.job_id}}/fighter"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <input type="hidden" name="next_path" value="/coach#squad">
-            <select name="fighter_id" aria-label="Fighter for {{f.name|truncate(20, true)}}">
+            <select name="fighter_id" aria-label="Fighter for {{f.label}}">
               <option value="">{% if f.fighter_name %}Unfile{% else %}Not filed{% endif %}</option>
               {% for r in roster %}<option value="{{r.id}}" {% if f.fighter_id == r.id %}selected{% endif %}>{{r.name}}</option>{% endfor %}
             </select>
@@ -77,9 +77,9 @@
           {% elif f.fighter_name %}<b>{{f.fighter_name}}</b>
           {% else %}<span class="muted">Not filed</span>{% endif %}
         </td>
-        <td>{{f.name|truncate(22, true)}}<br><small class="muted">{{f.created_at[:10] if f.created_at else ''}}</small></td>
+        <td>{{f.label}}</td>
         <td class="small">{{f.sport_label}}</td>
-        <td class="small">{{f.ruleset}}</td>
+        <td class="small">{{f.ruleset_label}}</td>
         <td>{{'%.0f'|format(f.coverage*100)}}%{% if not f.usable %} <small class="muted">too low to compare</small>{% endif %}</td>
         <td class="small">{{f.movement_verdict or '—'}}</td>
         <td>{% if f.pressure is not none %}{{'%.2f'|format(f.pressure)}}{% else %}—{% endif %}</td>
@@ -93,7 +93,7 @@
 </section>
 {% endif %}
 
-{% if latest %}<section class="card coach-focus-card"><div class="coach-focus-head"><div><div class="eyebrow">Latest detailed report</div><h2>Fighter {{focus}} coaching focus</h2></div><a class="btn secondary" href="/result/{{fights[0].job_id}}#report-coaching">Open fight report</a></div><div class="grid coach-evidence-grid"><div><h3>Priority improvements</h3><ul class="list-clean">{% for x in latest.coaching[focus].improvements %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span></li>{% else %}<li class="muted">No identity-safe coaching priority was available.</li>{% endfor %}</ul></div><div><h3>Recommended drills</h3><ul class="list-clean">{% for x in latest.coaching[focus].drills %}<li><strong>{{x.name}}</strong><br><span class="muted">{{x.prescription}}</span></li>{% else %}<li class="muted">No drill was generated without supporting evidence.</li>{% endfor %}</ul></div></div></section>{% else %}<div class="card muted">Analyze a fight to build the coach report.</div>{% endif %}
+{% if latest %}<section class="card coach-focus-card"><div class="coach-focus-head"><div><div class="eyebrow">Latest detailed report</div><h2>{% if fights and fights[0].fighter_name %}{{fights[0].fighter_name}}{% else %}Fighter {{focus}}{% endif %} coaching focus</h2>{% if fights and fights[0].fighter_name %}<span class="small muted">Fighter {{focus}} in this fight</span>{% endif %}</div><a class="btn secondary" href="/result/{{fights[0].job_id}}#report-coaching">Open fight report</a></div><div class="grid coach-evidence-grid"><div><h3>Priority improvements</h3><ul class="list-clean">{% for x in latest.coaching[focus].improvements %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span></li>{% else %}<li class="muted">No identity-safe coaching priority was available.</li>{% endfor %}</ul></div><div><h3>Recommended drills</h3><ul class="list-clean">{% for x in latest.coaching[focus].drills %}<li><strong>{{x.name}}</strong><br><span class="muted">{{x.prescription}}</span></li>{% else %}<li class="muted">No drill was generated without supporting evidence.</li>{% endfor %}</ul></div></div></section>{% else %}<div class="card muted">Analyze a fight to build the coach report.</div>{% endif %}
 
 <section class="card" id="assignments">
   {% set active_assignments = assignments|selectattr('status','equalto','active')|list %}{% set completed_assignments = assignments|selectattr('status','equalto','complete')|list %}{% set active_count = active_assignments|length %}{% set completed_count = completed_assignments|length %}
@@ -106,7 +106,7 @@
   <div class="assignment-board"><div><h3>Active work</h3><ul class="list-clean assignment-list">{% for item in active_assignments %}<li class="assignment-row"><span><strong>{{item.title}}</strong><br><span class="muted">{{item.detail or 'Complete this assignment before the next review.'}}</span></span><form action="/coach/assignments/{{item.id}}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">✓ Mark complete</button></form></li>{% else %}<li class="muted">No active assignments. Add one from the latest plan above.</li>{% endfor %}</ul></div><div><h3>Completed work</h3><ul class="list-clean assignment-list completed-list">{% for item in completed_assignments %}<li class="assignment-row completed"><span><strong>{{item.title}}</strong><br><span class="muted">{{item.detail or 'Completed assignment.'}}</span></span><form action="/coach/assignments/{{item.id}}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Reopen</button></form></li>{% else %}<li class="muted">Completed assignments will stay here for the next coach review.</li>{% endfor %}</ul></div></div>
 </section>
 
-<section class="card"><div class="eyebrow">Saved evidence</div><h3>Fight library</h3><ul class="list-clean">{% for f in fights[:12] %}<li><a class="text-link" href="/result/{{f.job_id}}"><strong>Fight analysis</strong></a> · <span class="muted">{{f.ruleset}}</span></li>{% else %}<li class="muted">No fights saved.</li>{% endfor %}</ul></section>
+<section class="card"><div class="eyebrow">Saved evidence</div><h3>Fight library</h3><ul class="list-clean">{% for f in fights[:12] %}<li><a class="text-link" href="/result/{{f.job_id}}"><strong>Fight analysis</strong></a> · <span class="muted">{{f.choice_label}}</span></li>{% else %}<li class="muted">No fights saved.</li>{% endfor %}</ul></section>
 {% endif %}
 {% endblock %}
 {% block scripts %}<script>

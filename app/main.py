@@ -71,6 +71,7 @@ from core.db import (
     revoke_report_shares, save_annotation,
     save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
     set_account_status, set_annotation_sequence,
+    plan_interest_counts, plans_wanted_by, record_plan_interest,
     set_fight_review_status, toggle_assignment, update_cookie_preferences,
     update_marketing_consent, update_password_hash, update_profile,
 )
@@ -81,7 +82,7 @@ from core.legal import LEGAL_DOCUMENTS, launch_readiness
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
-from core.upload_security import scan_upload
+from core.upload_security import looks_like_video, scan_upload
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
     refresh_identity_integrity,
@@ -90,9 +91,9 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_unobserved
+from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_unobserved
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
-from core.squad import build_squad_view, compare_movement, compare_with_previous
+from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import get_video_info, probe_upload, read_frame
@@ -2085,6 +2086,14 @@ def home(request: Request):
     )
 
 
+def _prose_list(items) -> str:
+    """"a, b and c" - built here rather than with a chain of template filters."""
+    items = [str(item) for item in items if item]
+    if len(items) <= 1:
+        return items[0] if items else ""
+    return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
 def _sport_context(request: Request, sport: str) -> dict:
     """Everything a single sport's setup page needs to describe itself."""
     account = _account(request)
@@ -2114,6 +2123,8 @@ def _sport_context(request: Request, sport: str) -> dict:
         # asked which one this fight is about.
         "single_fighter": (_request_plan(request) or {}).get("roster_limit") == 1,
         "unobserved": sport_unobserved(sport),
+        # What this sport can actually score, rather than a fixed sentence.
+        "counted_families": _prose_list(sport_counted_families(sport)),
         # True when every ruleset in the sport shares the same blind spot. When
         # only one does - jumping-kick bonuses exist in Point Fighting and
         # nowhere else in kickboxing - the page has to say "depending on the
@@ -2261,6 +2272,18 @@ async def upload(
     # UploadFile uses a spooled file. Keep the blocking disk copy outside the
     # event loop so one large phone upload cannot freeze every other request.
     await run_in_threadpool(_save_upload_limited, video, video_path, MAX_FIGHT_BYTES)
+
+    # Before the scanner and before the decoder: the suffix is chosen by
+    # whoever names the file, so it says nothing about what is inside it.
+    # An eleven-byte text file called fight.mp4 was accepted this far.
+    if not await run_in_threadpool(looks_like_video, video_path):
+        video_path.unlink(missing_ok=True)
+        raise HTTPException(
+            400,
+            "That file is not a video. The name ends in a video extension but the "
+            "contents are not MP4, MOV, MKV, WEBM or AVI. Pick the clip straight "
+            "from your camera roll.",
+        )
 
     scan = await run_in_threadpool(scan_upload, video_path)
     if not scan["clean"]:
@@ -4049,6 +4072,11 @@ def delete_fight_route(request: Request, job_id: str):
 def compare_page(request: Request, a: str = "", b: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
+    for fight in fights:
+        # Every option read "Fight analysis · <date>", so a reader with six
+        # fights on one day was choosing between six identical lines.
+        fight["choice_label"] = fight_choice_label(
+            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"))
     allowed = {fight["job_id"] for fight in fights}
     reports = []
     for job_id in (a, b):
@@ -4076,6 +4104,11 @@ def coach_page(request: Request):
     profile_id = _profile_id(request)
     profile = get_profile(profile_id) if profile_id is not None else None
     fights = list_fights(profile_id) if profile_id is not None else []
+    for fight in fights:
+        # The saved-evidence list printed the raw ruleset enum beside every
+        # entry: "Fight analysis · KICK_LIGHT".
+        fight["choice_label"] = fight_choice_label(
+            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"))
     latest = None
     focus = (profile or {}).get("default_fighter", "A")
     suggested_assignments: list[dict] = []
@@ -4539,8 +4572,36 @@ def pricing_page(request: Request):
             "roster_held": len(list_fighters(int(account["profile_id"]))) if account else 0,
             "payments_enabled": SETTINGS.payments_enabled, "account": account,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
+            # The strip read analysis_allowance (which resolves through
+            # effective_plan_key) while the card badge compared
+            # plan_override or plan by hand - a second copy of the same
+            # lookup, missing its complimentary-grant branch. So an account
+            # holding a granted plan was told "Your current plan: Gym" above
+            # a Starter card badged "Current plan". One resolver, both places.
+            "current_plan_key": effective_plan_key(
+                account.get("plan"), account.get("plan_override"), account.get("email"),
+            ) if account else None,
+            "plans_wanted": plans_wanted_by(int(account["id"])) if account else set(),
         },
     )
+
+
+@app.post("/plan-interest/{plan_key}", dependencies=[Depends(require_csrf)])
+def register_plan_interest(request: Request, plan_key: str, next_path: str = Form("/pricing")):
+    """Record that somebody wants a paid plan that is not open yet.
+
+    Every button on a paid card opened the workspace the visitor already had,
+    so during early access there was no way to say which plan you actually
+    wanted and no way to find out afterwards that anybody had.
+    """
+    account = _account(request)
+    if not account:
+        return RedirectResponse("/login?next=/pricing", status_code=303)
+    if plan_key not in PLANS or plan_key == "free":
+        raise HTTPException(404, "Unknown plan.")
+    _enforce_rate_limit(request, "plan-interest", 30, 3600)
+    record_plan_interest(int(account["id"]), plan_key)
+    return RedirectResponse(f"{_safe_next(next_path, '/pricing')}#plan-{plan_key}", status_code=303)
 
 
 @app.post("/share/{job_id}", dependencies=[Depends(require_csrf)])

@@ -14,8 +14,9 @@
   <div class="athlete-id">
     <span class="athlete-avatar" aria-hidden="true">{{profile.display_name[:1]|upper}}</span>
     <div>
-      <div class="eyebrow">Athlete progress · Fighter {{progress.fighter}}</div>
+      <div class="eyebrow">Athlete progress</div>
       <h1>{{profile.display_name}}</h1>
+      <p class="small muted">Followed as Fighter {{progress.fighter}} in reports</p>
       <p class="athlete-sub">{% if progress.fight_count %}{{progress.fight_count}} measured fight{{'' if progress.fight_count == 1 else 's'}}{% if progress.action_fight_count %} · {{progress.action_fight_count}} with validated actions{% endif %}{% else %}No measured fights yet{% endif %}</p>
     </div>
   </div>

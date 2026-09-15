@@ -4391,3 +4391,96 @@ class CompareMovementTests(unittest.TestCase):
 
         self.assertFalse(compare_movement([self._report(pressure_index=0.1), None])["available"])
         self.assertFalse(compare_movement([None, None])["available"])
+
+
+class SportCoverageSentenceTests(unittest.TestCase):
+    """The setup page said "We count punches, kicks and knees" for every sport.
+
+    Neither taekwondo ruleset scores a knee, so a taekwondo competitor was told
+    WarriorIQ counts something their federation does not award - a claim about
+    their own sport that they can check and find wrong.
+    """
+
+    def test_a_sport_is_never_credited_with_a_family_it_cannot_score(self):
+        from core.scoring import RULESETS, SPORTS, sport_counted_families
+
+        for sport, keys in SPORTS.items():
+            counted = sport_counted_families(sport)
+            for label, attribute in (("punches", "allow_punch"), ("kicks", "allow_kick"),
+                                     ("knees", "allow_knee")):
+                allowed = any(getattr(RULESETS[key], attribute) for key in keys)
+                self.assertEqual(
+                    label in counted, allowed,
+                    f"{sport} counted={counted} but {attribute}={allowed}")
+
+    def test_taekwondo_no_longer_claims_knees(self):
+        from core.scoring import sport_counted_families
+
+        self.assertEqual(sport_counted_families("taekwondo"), ("punches", "kicks"))
+        self.assertEqual(sport_counted_families("boxing"), ("punches",))
+        self.assertIn("knees", sport_counted_families("mma"))
+
+
+class UploadContainerCheckTests(unittest.TestCase):
+    """An 11-byte text file renamed .mp4 was accepted as a fight video.
+
+    The upload route checked the filename suffix and nothing else, so the drop
+    zone turned green, the submit button enabled, and the failure only arrived
+    from the decoder much later.
+    """
+
+    def _written(self, payload: bytes) -> bool:
+        import os
+        import tempfile
+
+        from core.upload_security import looks_like_video
+
+        handle = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            handle.write(payload)
+            handle.close()
+            return looks_like_video(handle.name)
+        finally:
+            os.unlink(handle.name)
+
+    def test_a_text_file_with_a_video_extension_is_not_a_video(self):
+        self.assertFalse(self._written(b"hello world"))
+        self.assertFalse(self._written(b""))
+        self.assertFalse(self._written(bytes([0x89]) + b"PNG" + bytes(12)))
+
+    def test_the_containers_the_upload_form_advertises_are_accepted(self):
+        self.assertTrue(self._written(bytes(4) + b"ftypisom" + bytes(8)))
+        self.assertTrue(self._written(bytes([0x1A, 0x45, 0xDF, 0xA3]) + bytes(12)))
+        self.assertTrue(self._written(b"RIFF" + bytes(4) + b"AVI " + bytes(4)))
+
+    def test_a_real_fight_file_still_passes(self):
+        from core.upload_security import looks_like_video
+
+        sample = Path(__file__).resolve().parents[1] / "fights" / "1.mp4"
+        if not sample.exists():
+            self.skipTest("no sample fight available")
+        self.assertTrue(looks_like_video(sample))
+
+
+class FightLabelTests(unittest.TestCase):
+    """/pricing promises "No video filename shown"; /coach printed IMG_4554.mov."""
+
+    def test_a_fight_is_named_by_what_it_was_not_by_the_file_it_came_from(self):
+        from core.squad import fight_label
+
+        self.assertEqual(
+            fight_label("Kickboxing", "KICK_LIGHT", "2026-09-14T15:52:56+00:00"),
+            "Kickboxing · Kick Light · 14 Sep")
+        # Nothing known is still not a filename.
+        self.assertEqual(fight_label(None, None, None), "Fight analysis")
+
+    def test_compare_options_differ_from_one_another(self):
+        from core.squad import fight_choice_label
+
+        same_day = [
+            fight_choice_label("KICK_LIGHT", "2026-09-02T18:54:00+00:00", "competition"),
+            fight_choice_label("KICK_LIGHT", "2026-09-02T09:05:00+00:00", "sparring"),
+            fight_choice_label("K1", "2026-09-02T18:54:00+00:00", "competition"),
+        ]
+        self.assertEqual(len(set(same_day)), 3, same_day)
+        self.assertEqual(same_day[0], "Kick Light · 2 Sep, 18:54 · competition")

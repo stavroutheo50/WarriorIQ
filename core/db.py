@@ -262,6 +262,26 @@ def init_db() -> None:
                 UNIQUE(profile_id, name)
             );
             CREATE INDEX IF NOT EXISTS idx_fighters_profile ON fighters(profile_id);
+
+            -- Who asked to be told when a paid plan opens.
+            --
+            -- Paid checkout is blocked during early access, so every button on
+            -- a paid card led to the workspace the visitor already had. There
+            -- was no way to say "this is the one I want" and no way to find out
+            -- afterwards which plans anyone had wanted.
+            --
+            -- One row per account per plan: asking twice is the same request,
+            -- not two, so the pair is unique and a repeat updates the time
+            -- rather than inflating a count that would then read as demand.
+            CREATE TABLE IF NOT EXISTS plan_interest (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                plan_key TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(account_id, plan_key),
+                FOREIGN KEY(account_id) REFERENCES accounts(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_plan_interest_plan ON plan_interest(plan_key);
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -1466,3 +1486,48 @@ def set_account_type(profile_id: int, account_type: str) -> str:
     with connection() as con:
         con.execute("UPDATE profiles SET account_type=? WHERE id=?", (chosen, profile_id))
     return chosen
+
+
+def record_plan_interest(account_id: int, plan_key: str) -> bool:
+    """Note that this account wants to hear when a plan opens.
+
+    Returns True when this is a new request. Asking again is the same request,
+    so the timestamp moves and nothing is added: a count of rows here has to
+    mean "people who want this", or it is not worth keeping.
+    """
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        existing = con.execute(
+            "SELECT id FROM plan_interest WHERE account_id=? AND plan_key=?",
+            (int(account_id), str(plan_key)),
+        ).fetchone()
+        if existing:
+            con.execute(
+                "UPDATE plan_interest SET created_at=? WHERE id=?", (now, int(existing["id"])))
+            return False
+        con.execute(
+            "INSERT INTO plan_interest(account_id,plan_key,created_at) VALUES(?,?,?)",
+            (int(account_id), str(plan_key), now),
+        )
+    return True
+
+
+def plans_wanted_by(account_id: int) -> set[str]:
+    """Which plans this account has already asked about, for the page to mark."""
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT plan_key FROM plan_interest WHERE account_id=?", (int(account_id),)
+        ).fetchall()
+    return {str(row["plan_key"]) for row in rows}
+
+
+def plan_interest_counts() -> dict[str, int]:
+    """How many accounts asked for each plan. For the operator, not the visitor."""
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT plan_key, COUNT(*) AS total FROM plan_interest GROUP BY plan_key"
+        ).fetchall()
+    return {str(row["plan_key"]): int(row["total"]) for row in rows}

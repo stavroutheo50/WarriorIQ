@@ -18,7 +18,10 @@ detection, so nothing here is withheld for the reason the striking scorecard is.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
+
+from core.config import RULESET_LABELS
 
 # Below this the fight was not watched well enough for its numbers to belong in
 # a comparison. Showing it anyway would let a badly tracked fight look like a
@@ -26,6 +29,63 @@ from pathlib import Path
 _MIN_COVERAGE = 0.85
 # A change smaller than this is noise between two fights, not a trend.
 _MEANINGFUL_CHANGE = 0.05
+
+
+def _short_date(created_at: str | None) -> str:
+    """"14 Sep" from a stored ISO timestamp, or "" if there is not one.
+
+    Stored values carry a timezone; a malformed or missing one is not worth an
+    exception on a page listing somebody's whole squad.
+    """
+    if not created_at:
+        return ""
+    try:
+        return datetime.fromisoformat(str(created_at)).strftime("%-d %b")
+    except (TypeError, ValueError):
+        try:
+            return datetime.fromisoformat(str(created_at)).strftime("%d %b").lstrip("0")
+        except (TypeError, ValueError):
+            return str(created_at)[:10]
+
+
+def fight_label(sport_label: str | None, ruleset: str | None, created_at: str | None) -> str:
+    """What to call a fight in front of a person.
+
+    The squad table printed the uploaded file's name - IMG_4554.mov, 2.mp4, a
+    camera's hash - while /pricing carries the check-marked promise "No video
+    filename shown". The filename stays in the database, where reprocessing
+    needs it; it stops being what a coach reads.
+    """
+    parts = [
+        (sport_label or "").strip(),
+        RULESET_LABELS.get(ruleset or "", (ruleset or "").replace("_", " ").title()).strip(),
+        _short_date(created_at),
+    ]
+    return " · ".join(part for part in parts if part) or "Fight analysis"
+
+
+def fight_choice_label(ruleset: str | None, created_at: str | None,
+                       fight_type: str | None) -> str:
+    """What to call a fight in a dropdown, built from what differs between them.
+
+    The /compare selects listed "Fight analysis · 2026-09-02" six times and
+    "· 2026-09-01" three times, which is not a choice but nine identical rows.
+    Ruleset, time of day and fight type are all stored on the row already and
+    are exactly what tells one from another.
+    """
+    stamp = ""
+    if created_at:
+        try:
+            moment = datetime.fromisoformat(str(created_at))
+            stamp = f"{_short_date(created_at)}, {moment:%H:%M}"
+        except (TypeError, ValueError):
+            stamp = str(created_at)[:10]
+    parts = [
+        RULESET_LABELS.get(ruleset or "", (ruleset or "").replace("_", " ").title()).strip(),
+        stamp,
+        (fight_type or "").replace("_", " ").strip(),
+    ]
+    return " · ".join(part for part in parts if part) or "Fight analysis"
 
 
 def _metric(report: dict, fighter: str, key: str) -> float | None:
@@ -72,9 +132,16 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
         "fighter_name": fight.get("fighter_name"),
         "sport": scorecard.get("sport") or "unknown",
         "sport_label": scorecard.get("sport_label") or scorecard.get("sport") or "—",
+        # Kept for anything that needs the source file; not for display.
         "name": fight.get("original_name"),
         "created_at": fight.get("created_at"),
         "ruleset": fight.get("ruleset"),
+        "ruleset_label": RULESET_LABELS.get(
+            fight.get("ruleset") or "",
+            str(fight.get("ruleset") or "").replace("_", " ").title()),
+        "label": fight_label(
+            scorecard.get("sport_label") or scorecard.get("sport"),
+            fight.get("ruleset"), fight.get("created_at")),
         "focus": focus,
         "coverage": round(min(coverage["A"], coverage["B"]), 3),
         "usable": min(coverage["A"], coverage["B"]) >= _MIN_COVERAGE,

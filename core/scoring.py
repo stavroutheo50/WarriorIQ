@@ -399,6 +399,25 @@ def unobserved_actions(ruleset: str) -> tuple[str, ...]:
     return RULESETS[normalize_ruleset(ruleset)].unobserved
 
 
+def sport_counted_families(sport: str) -> tuple[str, ...]:
+    """The strike families this sport can score, unioned across its rulesets.
+
+    The setup page stated "We count punches, kicks and knees" for every sport.
+    Neither taekwondo ruleset scores a knee, so that page told a taekwondo
+    competitor WarriorIQ counts something their federation does not award -
+    a claim about their own sport that they can check and find wrong.
+
+    Unioned rather than intersected, matching sport_unobserved: the page is
+    shown before a ruleset is picked, so it describes what the sport may score.
+    """
+    families = []
+    for label, attribute in (("punches", "allow_punch"), ("kicks", "allow_kick"),
+                             ("knees", "allow_knee")):
+        if any(getattr(RULESETS[key], attribute) for key in SPORTS.get(sport, ())):
+            families.append(label)
+    return tuple(families)
+
+
 def sport_unobserved(sport: str) -> tuple[str, ...]:
     """Everything a sport scores that the analysis cannot see, deduplicated.
 

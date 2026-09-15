@@ -874,7 +874,9 @@ class PublicPageTests(unittest.TestCase):
     def test_upload_never_displays_selected_filename(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
         self.assertIn("fileButton.classList.toggle('uploaded',ready)", template)
-        self.assertIn("Fight video uploaded", template)
+        # "uploaded" at selection described a transfer that had not started.
+        self.assertIn("Fight video selected", template)
+        self.assertNotIn("Fight video uploaded", template)
         self.assertNotIn("file.name", template)
 
     def test_replay_overlay_does_not_block_video_controls(self):
@@ -2928,3 +2930,89 @@ class NavigationReachabilityTests(unittest.TestCase):
         # Sign out is a form, not a link, in both places.
         self.assertIn('action="/logout"', desktop)
         self.assertIn('action="/logout"', menu)
+
+
+class PlanBadgeTests(unittest.TestCase):
+    """/pricing showed two different current plans at once.
+
+    The strip read analysis_allowance, which resolves through
+    effective_plan_key and so honours a complimentary grant. The card badge
+    compared `plan_override or plan` by hand - the same lookup, minus the
+    grant branch - so an account holding a granted Gym plan was told "Your
+    current plan: Gym" directly above a Starter card badged "Current plan".
+    """
+
+    def _render(self, current_plan_key, stored_plan="free"):
+        from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
+        from core.payments import PLANS, plan_for_key
+
+        class Stub:
+            def __init__(self, **kw): self.__dict__.update(kw)
+            def __getattr__(self, key): return Stub()
+            def __getitem__(self, key): return Stub()
+            def __str__(self): return ""
+            def __bool__(self): return False
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        env = Environment(loader=FileSystemLoader(str(templates)),
+                          undefined=ChainableUndefined)
+        return env.get_template("pricing.html").render(
+            request=Stub(url=Stub(path="/pricing"), state=Stub(account=None), cookies={}),
+            plans=PLANS, roster_held=0, payments_enabled=False,
+            account={"plan": stored_plan, "plan_override": None, "email": "a@b.c"},
+            allowance={"plan": plan_for_key(current_plan_key), "remaining": None},
+            current_plan_key=current_plan_key,
+        )
+
+    def _badged(self, page):
+        import re
+
+        # Each card carries data-plan="<key>"; find the one holding the badge.
+        cards = re.split(r'(?=<section class="card pricing-card)', page)
+        return {
+            re.search(r'data-plan="([^"]+)"', card).group(1)
+            for card in cards
+            if 'data-plan="' in card and "Current plan</span>" in card
+        }
+
+    def test_the_badged_card_is_the_plan_the_strip_names(self):
+        page = self._render("gym", stored_plan="free")
+        self.assertIn("Gym", page)
+        self.assertEqual(
+            self._badged(page), {"gym"},
+            "the badge follows the stored plan instead of the effective one")
+
+    def test_exactly_one_card_is_ever_badged(self):
+        from core.payments import PLANS
+
+        for key in PLANS:
+            self.assertEqual(
+                len(self._badged(self._render(key))), 1,
+                f"{key} did not badge exactly one card")
+
+    def test_a_signed_out_visitor_sees_no_current_plan(self):
+        self.assertEqual(self._badged(self._render(None)), set())
+
+    def test_no_button_claims_to_preview_a_plan_it_cannot_show(self):
+        page = self._render("free")
+        self.assertNotIn("Preview this plan", page)
+
+
+class CoachFilenameTests(unittest.TestCase):
+    """/pricing carries the check-marked promise "No video filename shown"."""
+
+    def test_the_squad_table_shows_a_fight_label_not_the_uploaded_filename(self):
+        coach = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                 / "coach.html").read_text(encoding="utf-8")
+        self.assertNotIn("f.name", coach)
+        self.assertIn("{{f.label}}", coach)
+        # The raw enum went with it: KICK_LIGHT is not a thing to show a coach.
+        self.assertNotIn("{{f.ruleset}}", coach)
+        self.assertIn("{{f.ruleset_label}}", coach)
+
+    def test_the_promise_that_makes_this_a_defect_is_still_on_the_pricing_page(self):
+        pricing = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                   / "pricing.html").read_text(encoding="utf-8")
+        self.assertIn("No video filename shown", pricing,
+                      "the promise moved; this test should follow it")

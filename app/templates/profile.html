@@ -12,6 +12,7 @@
     <div>
       <div class="eyebrow">Athlete profile</div>
       <h1>{{profile.display_name}}</h1>
+      {% if profile.display_name == 'My Athlete' %}<p class="small muted">That is the name WarriorIQ starts everyone with. Change it below and it is used on your progress and coaching pages.</p>{% endif %}
       <p class="athlete-facts">
         <span>Fighter {{profile.default_fighter|default('A', true)}} corner</span>
         {% if request.state.active_sport %}<span>{{request.state.active_sport.label}}</span>{% endif %}

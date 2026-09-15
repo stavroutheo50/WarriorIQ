@@ -24,6 +24,15 @@ from core.payments import PLANS
 from core.social_auth import SocialIdentity
 
 
+# A real container header followed by padding: enough to pass the magic-byte
+# check in core/upload_security.py and still fail the decoder, which is the
+# state these uploads are meant to exercise. Plain b'0' * 4096 is not a
+# container at all, so it now stops at the guard and never reaches the
+# behaviour under test.
+UNDECODABLE_MP4 = bytes([0, 0, 0, 0x18]) + b'ftypmp42' + b'0' * 4096
+UNDECODABLE_WEBM = bytes([0x1A, 0x45, 0xDF, 0xA3]) + b'0' * 4096
+
+
 class _FakeSocialClient:
     async def authorize_redirect(self, request, redirect_uri, **kwargs):
         return RedirectResponse("https://identity.example/authorize?state=test-state")
@@ -1079,7 +1088,7 @@ class UndecodableUploadTests(unittest.TestCase):
                 "/upload",
                 data={"rights_confirmed": "true", "people_permissions_confirmed": "true",
                       "minor_permission_status": "no_minors"},
-                files={"video": ("fight.webm", b"0" * 4096, "video/webm")},
+                files={"video": ("fight.webm", UNDECODABLE_WEBM, "video/webm")},
                 follow_redirects=False,
             )
         self.assertEqual(response.status_code, 400)
@@ -1320,7 +1329,7 @@ class PlanRosterLimitTests(unittest.TestCase):
                 "/upload",
                 data={"rights_confirmed": "true", "people_permissions_confirmed": "true",
                       "minor_permission_status": "no_minors", "fighter_name": name},
-                files={"video": ("f.mp4", b"0" * 4096, "video/mp4")},
+                files={"video": ("f.mp4", UNDECODABLE_MP4, "video/mp4")},
                 follow_redirects=False,
             )
 
@@ -1803,3 +1812,45 @@ class OAuthFailureLoggingTests(unittest.TestCase):
     def test_the_callback_logs_that_shape(self):
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
         self.assertIn('"social_auth_rejected provider=%s error=%s code=%s detail=%s"', source)
+
+
+class PlanInterestTests(unittest.TestCase):
+    """Paid checkout is closed during early access, so every button on a paid
+    card opened the workspace the visitor already had. There was no way to say
+    which plan you wanted, and no way to find out afterwards that anyone had.
+    """
+
+    def test_asking_twice_is_one_request_not_two(self):
+        from core.db import plan_interest_counts, plans_wanted_by, record_plan_interest
+
+        account = 424242
+        try:
+            self.assertTrue(record_plan_interest(account, "gym"))
+            self.assertFalse(record_plan_interest(account, "gym"))
+            self.assertEqual(plans_wanted_by(account), {"gym"})
+            self.assertEqual(plan_interest_counts().get("gym"), 1)
+            # A different plan from the same account is a separate request.
+            self.assertTrue(record_plan_interest(account, "coach"))
+            self.assertEqual(plans_wanted_by(account), {"coach", "gym"})
+        finally:
+            from core.db import connection
+
+            with connection() as con:
+                con.execute("DELETE FROM plan_interest WHERE account_id=?", (account,))
+
+    def test_a_signed_out_visitor_is_sent_to_sign_in_rather_than_recorded(self):
+        from fastapi.testclient import TestClient
+
+        import app.main as webapp
+
+        response = TestClient(webapp.app).post(
+            "/plan-interest/gym", data={"next_path": "/pricing"}, follow_redirects=False)
+        self.assertIn(response.status_code, (302, 303, 403))
+
+    def test_the_free_plan_cannot_be_waited_for(self):
+        from core.payments import PLANS
+
+        self.assertIn("free", PLANS)
+        # Guarded in the route: there is nothing to be notified about.
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn('plan_key not in PLANS or plan_key == "free"', source)
