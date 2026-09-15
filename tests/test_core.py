@@ -4636,3 +4636,69 @@ class RefereeProbeLocationTests(unittest.TestCase):
             self.assertIsNotNone(self.referee._load())
         finally:
             object.__setattr__(SETTINGS, "referee_probe_path", before)
+
+
+class ShotChangeTests(unittest.TestCase):
+    """An analysis assumes one continuous view of one bout; nothing checked.
+
+    A sixty-second file in this project's own library is an edited event reel -
+    announcer, crowd, a table of medals, a fight-card poster - and it went
+    through the pipeline without complaint. Rendering the tracked boxes showed
+    fighter B holding a photograph of a man on a poster at t=30s.
+    """
+
+    SCRATCH = Path(r"C:\Users\User\AppData\Local\Temp\claude") 
+
+    def _fixture(self, *parts):
+        path = Path(__file__).resolve().parents[1].joinpath(*parts)
+        if not path.exists():
+            self.skipTest(f"{path.name} not in this checkout")
+        return path
+
+    def test_a_continuous_bout_reports_no_cuts(self):
+        from core.video import detect_shot_changes
+
+        path = self._fixture("fights", "1.mp4")
+        result = detect_shot_changes(path)
+        self.assertTrue(result["available"])
+        self.assertFalse(result["looks_edited"])
+        # One graphics overlay change near the end is not an edit: the longest
+        # shot still covers almost the whole file.
+        self.assertGreater(result["longest_shot_seconds"],
+                           result["duration_seconds"] * 0.9)
+
+    def test_the_longest_shot_never_exceeds_the_duration(self):
+        from core.video import detect_shot_changes
+
+        for name in ("1.mp4",):
+            result = detect_shot_changes(self._fixture("fights", name))
+            self.assertLessEqual(result["longest_shot_seconds"],
+                                 result["duration_seconds"] + 0.5)
+
+    def test_a_missing_file_reports_unavailable_rather_than_raising(self):
+        """This sits in the upload path; it must never be the thing that fails
+        an upload."""
+        from core.video import detect_shot_changes
+
+        result = detect_shot_changes(Path("does-not-exist.mp4"))
+        self.assertFalse(result["available"])
+        self.assertEqual(result["cut_count"], 0)
+        self.assertFalse(result["looks_edited"])
+
+    def test_one_cut_in_a_long_file_is_not_called_edited(self):
+        """A broadcast replay tag or a caption change is one cut. An edited
+        reel is a dozen, and no single shot covers much of the file."""
+        from core.video import detect_shot_changes
+
+        result = detect_shot_changes(self._fixture("fights", "1.mp4"))
+        self.assertLessEqual(result["cut_count"], 2)
+        self.assertFalse(result["looks_edited"])
+
+    def test_the_upload_route_reports_rather_than_refuses(self):
+        """The thresholds are fitted against five files of which exactly one is
+        edited. That is not a basis for rejecting somebody's fight."""
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        marker = source.index("shots = await run_in_threadpool(detect_shot_changes")
+        following = source[marker:marker + 1200]
+        self.assertIn("upload_looks_edited", following)
+        self.assertNotIn("raise HTTPException", following)
