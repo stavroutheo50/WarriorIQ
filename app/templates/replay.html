@@ -27,7 +27,34 @@ function transform(){const scale=Math.min(canvas.width/video.videoWidth,canvas.h
 function skeleton(k,color,tr){if(!k)return;ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=3*devicePixelRatio;for(const[a,b]of edges){if(!k[a]||!k[b])continue;ctx.beginPath();ctx.moveTo(tr.ox+k[a][0]*tr.scale,tr.oy+k[a][1]*tr.scale);ctx.lineTo(tr.ox+k[b][0]*tr.scale,tr.oy+k[b][1]*tr.scale);ctx.stroke()}for(const p of k){if(!p)continue;ctx.beginPath();ctx.arc(tr.ox+p[0]*tr.scale,tr.oy+p[1]*tr.scale,3.2*devicePixelRatio,0,Math.PI*2);ctx.fill()}}
 function draw(renderedTime){ctx.clearRect(0,0,canvas.width,canvas.height);if(mode==='off'||!video.videoWidth)return;const tr=transform(),shown=Number.isFinite(renderedTime)?renderedTime:video.currentTime,t=Math.max(0,shown-skeletonDelay);if(target==='A'||target==='BOTH')skeleton(poseAt('fighter_A',t),'#55a7ff',tr);if(target==='B'||target==='BOTH')skeleton(poseAt('fighter_B',t),'#f1b84b',tr)}
 if(identitySafe)fetch(`/api/tracking/${jobId}`).then(r=>{if(!r.ok)throw new Error(`tracking request failed (${r.status})`);return r.json()}).then(d=>{frames=(d.frames||[]).sort((a,b)=>a.time_seconds-b.time_seconds);statusEl.textContent=frames.length?`Skeleton overlay ready · ${frames.length} analyzed frames`:'Video replay is ready, but no tracking frames were saved.';resize()}).catch(err=>statusEl.textContent=`Video replay is ready. Skeleton overlay unavailable: ${err.message}`);
-video.addEventListener('error',()=>statusEl.textContent='Replay unavailable: the saved video could not be loaded.');video.addEventListener('timeupdate',()=>{if(!('requestVideoFrameCallback' in video))draw()});video.addEventListener('play',()=>{if('requestVideoFrameCallback' in video){const tick=(now,metadata)=>{if(!video.paused){draw(metadata.mediaTime);video.requestVideoFrameCallback(tick)}};video.requestVideoFrameCallback(tick)}else{const tick=()=>{if(!video.paused){draw();requestAnimationFrame(tick)}};tick()}});video.addEventListener('seeked',()=>draw(video.currentTime));video.addEventListener('loadedmetadata',()=>{resize();if(Number.isFinite(requestedTime)){video.currentTime=Math.max(0,requestedTime-1)}});window.addEventListener('resize',resize);
+// A replay that never arrives used to leave a spinner and 0:00 on screen
+// forever: 'error' fires when the browser rejects the file outright, but a
+// transfer that simply stalls fires nothing at all, and neither told the
+// reader what to do next. Three states, one message each, and a link to the
+// original either way - a coach with the file on their desk is not blocked
+// on this page working.
+const SLOW_AFTER_MS=15000;
+const original=`/media/${jobId}`;
+let replayFailed=false,slowTimer=null;
+const failReplay=(message)=>{if(replayFailed)return;replayFailed=true;clearTimeout(slowTimer);
+  statusEl.innerHTML='';
+  const said=document.createElement('span');said.textContent=message+' ';
+  const link=document.createElement('a');link.className='text-link';link.href=original;
+  link.setAttribute('download','');link.textContent='Download the original video';
+  statusEl.append(said,link);statusEl.dataset.tone='bad'};
+video.addEventListener('error',()=>{
+  // MediaError 3 and 4 are decode and source-not-supported: the browser has
+  // the bytes and will not play them. QuickTime containers land here.
+  const code=video.error&&video.error.code;
+  failReplay(code===4||code===3
+    ? 'This browser cannot play the saved video in the format it was uploaded in.'
+    : 'The saved video could not be loaded.')});
+video.addEventListener('stalled',()=>{if(!replayFailed&&video.readyState<2)
+  statusEl.textContent='The video is taking a while to load…'});
+slowTimer=setTimeout(()=>{if(!replayFailed&&video.readyState<2)
+  failReplay('The video has not loaded. It may still be processing, or the connection dropped.')},SLOW_AFTER_MS);
+video.addEventListener('loadeddata',()=>{clearTimeout(slowTimer)});
+video.addEventListener('timeupdate',()=>{if(!('requestVideoFrameCallback' in video))draw()});video.addEventListener('play',()=>{if('requestVideoFrameCallback' in video){const tick=(now,metadata)=>{if(!video.paused){draw(metadata.mediaTime);video.requestVideoFrameCallback(tick)}};video.requestVideoFrameCallback(tick)}else{const tick=()=>{if(!video.paused){draw();requestAnimationFrame(tick)}};tick()}});video.addEventListener('seeked',()=>draw(video.currentTime));video.addEventListener('loadedmetadata',()=>{resize();if(Number.isFinite(requestedTime)){video.currentTime=Math.max(0,requestedTime-1)}});window.addEventListener('resize',resize);
 function playAt(time,lead=0){video.currentTime=Math.max(0,Number(time)-Number(lead||0));video.play().catch(()=>window.wiqToast('Press the video play button to start.'))}const overlayButton=document.getElementById('overlay'),skeletonButton=document.getElementById('skeleton'),playFullButton=document.getElementById('playFull');overlayButton.onclick=()=>{mode=mode==='overlay'?'off':'overlay';wrap.classList.remove('skeleton-only');overlayButton.textContent=mode==='overlay'?'Hide overlay':'Show overlay';overlayButton.setAttribute('aria-pressed',String(mode==='overlay'));skeletonButton.textContent='Skeleton only';skeletonButton.setAttribute('aria-pressed','false');draw()};skeletonButton.onclick=()=>{mode='overlay';const active=wrap.classList.toggle('skeleton-only');overlayButton.textContent='Hide overlay';overlayButton.setAttribute('aria-pressed','true');skeletonButton.textContent=active?'Show video':'Skeleton only';skeletonButton.setAttribute('aria-pressed',String(active));draw()};playFullButton.onclick=()=>playAt(playFullButton.dataset.time);document.querySelectorAll('#timeline button').forEach(b=>b.onclick=()=>playAt(b.dataset.time,b.dataset.lead));
 </script>
 {% endblock %}

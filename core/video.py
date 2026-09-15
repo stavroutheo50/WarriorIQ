@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+import subprocess
 from pathlib import Path
 from typing import Iterable
 
 import cv2
 
 from core.types import AnalysisRequest, RoundSpec, VideoInfo
+
+LOGGER = logging.getLogger("warrioriq")
 
 
 def get_video_info(path: str | Path) -> VideoInfo:
@@ -298,3 +302,151 @@ def requested_segment_end(req: AnalysisRequest, info: VideoInfo, rounds: list[Ro
     if rounds:
         return min(info.duration, max(r.end_seconds for r in rounds))
     return info.duration
+# --- container normalisation ------------------------------------------------
+#
+# Phone footage arrives in a QuickTime container. Measured on a real 101 MB
+# iPhone upload: the streams inside are already H.264 High / yuv420p and AAC -
+# only the wrapper is QuickTime - so copying them into a standard MP4 takes
+# 0.17 s and loses nothing, while re-encoding the same file takes 22.35 s and
+# throws away three quarters of the data to arrive at a format it was already
+# in. The expensive path is kept for the footage that actually needs it:
+# ProRes, HEVC and anything else a browser will not decode.
+#
+# Chrome does play the original QuickTime file - canPlayType('video/quicktime')
+# returns "" but that is a question about a MIME string, not about whether the
+# bytes decode. The reason to normalise anyway is the players that are stricter
+# than Chrome, and the containers that genuinely do not play.
+
+# Containers a browser is expected to handle as-is.
+_PLAYABLE_CONTAINERS = {".mp4", ".m4v", ".webm"}
+# Streams that can be copied into MP4 rather than re-encoded.
+_COPYABLE_VIDEO = {"h264", "avc1"}
+_COPYABLE_AUDIO = {"aac", "mp3", ""}
+
+
+# The derivative sits beside the original under a name derived from it, rather
+# than in a database column. A column would have to be kept in step with three
+# separate deletion paths - the delete route and both retention sweeps - and a
+# derivative that outlives its original is somebody's fight footage left on
+# disk after they asked for it to be gone.
+_DERIVATIVE_SUFFIX = "_web"
+
+
+def derivative_for(original: str | Path) -> Path:
+    """Where the browser-friendly copy of `original` belongs."""
+    source = Path(original)
+    return source.with_name(f"{source.stem}{_DERIVATIVE_SUFFIX}.mp4")
+
+
+def playback_file(original: str | Path) -> Path:
+    """The file to serve: the derivative when one was made, else the original."""
+    derivative = derivative_for(original)
+    return derivative if derivative.exists() else Path(original)
+
+
+def owning_stem(path: str | Path) -> str:
+    """The job a file in uploads/ belongs to, derivative or not.
+
+    The retention sweep protects by stem, and "<job>_web" is not "<job>" - so
+    without this a live fight's derivative is aged out from under it while the
+    original is correctly kept.
+    """
+    stem = Path(path).stem
+    return stem[: -len(_DERIVATIVE_SUFFIX)] if stem.endswith(_DERIVATIVE_SUFFIX) else stem
+
+
+def remove_derivative(original: str | Path) -> None:
+    """Delete the derivative, if there is one. Never touches the original."""
+    try:
+        derivative_for(original).unlink(missing_ok=True)
+    except OSError:
+        # Windows can hold a file a player still has open; the retention sweep
+        # will reach it later.
+        pass
+
+
+def _ffmpeg_exe() -> str | None:
+    try:
+        import imageio_ffmpeg
+    except ImportError:
+        return None
+    try:
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
+def _stream_codecs(ffmpeg: str, path: Path) -> tuple[str, str] | None:
+    """(video codec, audio codec) as ffmpeg names, or None if it cannot tell.
+
+    Read from ffmpeg's own report rather than a separate ffprobe binary, which
+    imageio-ffmpeg does not ship.
+    """
+    result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-i", str(path)],
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    text = result.stderr or ""
+    video = audio = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("Stream #") and " Video: " in line and not video:
+            video = line.split(" Video: ", 1)[1].split()[0].strip(",")
+        elif line.startswith("Stream #") and " Audio: " in line and not audio:
+            audio = line.split(" Audio: ", 1)[1].split()[0].strip(",")
+    return (video, audio) if video else None
+
+
+def normalize_container(path: str | Path) -> Path | None:
+    """Write a browser-friendly MP4 beside `path`, or None if none is needed.
+
+    The original is never touched: reprocessing reads it, and a derivative is
+    only ever an extra file. Returns the derivative's path when one was made.
+
+    Deliberately does not re-encode on the web host. A copy is I/O-bound and
+    finishes in a fraction of a second; a re-encode ran at 0.61x realtime on a
+    desktop with a discrete GPU, which on a shared host means minutes of CPU
+    per upload. When the streams cannot be copied this returns None and the
+    replay page falls back to the original, which it now handles out loud.
+    """
+    source = Path(path)
+    if source.suffix.lower() in _PLAYABLE_CONTAINERS or not source.exists():
+        return None
+    ffmpeg = _ffmpeg_exe()
+    if ffmpeg is None:
+        LOGGER.info("transcode_skipped reason=no_ffmpeg path=%s", source.name)
+        return None
+    codecs = _stream_codecs(ffmpeg, source)
+    if codecs is None:
+        return None
+    video_codec, audio_codec = codecs
+    if video_codec.lower() not in _COPYABLE_VIDEO:
+        # ProRes, HEVC and friends. Worth re-encoding, but not here and not
+        # synchronously: it is minutes of shared-host CPU on a request that a
+        # person is waiting on.
+        LOGGER.info(
+            "transcode_needs_reencode video=%s audio=%s path=%s",
+            video_codec, audio_codec, source.name)
+        return None
+
+    target = derivative_for(source)
+    arguments = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+        # Only the first video and audio track. iPhone QuickTime files carry
+        # `mebx` metadata tracks that MP4 will not accept.
+        "-map", "0:v:0",
+    ]
+    if audio_codec.lower() in _COPYABLE_AUDIO and audio_codec:
+        arguments += ["-map", "0:a:0?"]
+    arguments += ["-c", "copy", "-movflags", "+faststart", str(target)]
+    try:
+        result = subprocess.run(arguments, capture_output=True, text=True,
+                                timeout=300, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        LOGGER.warning("transcode_failed path=%s error=%s", source.name, type(exc).__name__)
+        return None
+    if result.returncode != 0 or not target.exists() or target.stat().st_size == 0:
+        LOGGER.warning("transcode_failed path=%s rc=%s", source.name, result.returncode)
+        target.unlink(missing_ok=True)
+        return None
+    return target

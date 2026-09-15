@@ -96,7 +96,10 @@ from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
-from core.video import get_video_info, probe_upload, read_frame
+from core.video import (
+    get_video_info, normalize_container, playback_file, probe_upload,
+    read_frame, remove_derivative,
+)
 
 app = FastAPI(title="WarriorIQ")
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
@@ -1039,6 +1042,9 @@ async def viewer_context(request: Request, call_next):
         f"frame-ancestors 'none'; form-action {form_action}",
     )
     if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/s/")):
+        # setdefault, so a route that has already chosen keeps its value.
+        # /media/ does exactly that: a fight video is private but not
+        # volatile, and re-sending 101 MB on every seek is not privacy.
         response.headers.setdefault("Cache-Control", "no-store")
     elif request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "public, max-age=604800")
@@ -2292,6 +2298,13 @@ async def upload(
             record_security_event("malware_upload_blocked", severity="warning")
             raise HTTPException(400, "This file did not pass the upload safety scan.")
         raise HTTPException(503, "Fight uploads are paused because the safety scanner is unavailable.")
+
+    # Copy the streams into a standard MP4 when the container is not one a
+    # browser expects. Measured at 0.20 s on a 101 MB iPhone upload, because
+    # nothing is re-encoded: the streams inside are already H.264 and AAC.
+    # Footage that genuinely needs re-encoding is left alone here rather than
+    # spending minutes of shared-host CPU on a request somebody is waiting on.
+    await run_in_threadpool(normalize_container, video_path)
 
     try:
         info = await run_in_threadpool(get_video_info, video_path)
@@ -3800,7 +3813,21 @@ def media(request: Request, job_id: str):
         path = Path(fight["video_path"]) if fight else Path("missing")
     if not path.exists():
         raise HTTPException(404)
-    return FileResponse(path)
+    # A QuickTime upload has a browser-friendly copy beside it; the original
+    # stays on disk because reprocessing reads it, and is what the replay
+    # page offers for download when playback fails.
+    path = playback_file(path)
+    # no-store meant every seek re-downloaded the whole file. Measured at about
+    # 460 KB/s, a 101 MB replay is three and a half minutes, paid again on every
+    # scrub and every revisit - on footage the viewer has already been sent once.
+    #
+    # `private` keeps it out of shared caches; the URL is account-scoped by
+    # _authorized_job above and the prefix is robots-disallowed, so the copy
+    # lives in the one browser that was already allowed to see it.
+    #
+    # Set here rather than in the middleware, which uses setdefault: this wins,
+    # while a 404 on the same prefix still falls through to no-store.
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.get("/profile", response_class=HTMLResponse)
@@ -4040,6 +4067,7 @@ def _remove_fight_files(fight: dict) -> None:
         shutil.rmtree(job_dir, ignore_errors=True)
     video = Path(fight["video_path"]).resolve()
     if video.parent == UPLOADS.resolve():
+        remove_derivative(video)
         video.unlink(missing_ok=True)
 
 

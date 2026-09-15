@@ -3057,3 +3057,64 @@ class BackNavigationTests(unittest.TestCase):
         for bundle, text in CSS_BUNDLE_TEXT.items():
             with self.subTest(bundle=bundle):
                 self.assertNotIn("global-back", text)
+
+
+class MediaCachingTests(unittest.TestCase):
+    """/media/<id> sent Cache-Control: no-store.
+
+    So every seek and every revisit re-downloaded the whole file. At the ~460
+    KB/s measured against the host that is about three and a half minutes for a
+    101 MB replay, paid again on every scrub, for footage the viewer had
+    already been sent once.
+    """
+
+    def test_the_media_route_asks_for_a_private_cache_not_none_at_all(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        marker = source.index("def media(request: Request, job_id: str):")
+        body = source[marker:marker + 2000]
+        self.assertIn('"Cache-Control": "private, max-age=3600"', body)
+        # private, never public: the URL is account-scoped and must not be held
+        # by a shared cache between two people's browsers.
+        self.assertNotIn('"public', body)
+
+    def test_the_pages_that_must_not_be_cached_still_are_not(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn('"/result/", "/replay/", "/media/", "/api/"', source)
+        self.assertIn('response.headers.setdefault("Cache-Control", "no-store")', source)
+        # setdefault is what lets the media route keep its own value while
+        # every other prefix, and a 404 on /media/, still gets no-store.
+        self.assertNotIn('response.headers["Cache-Control"] = "no-store"', source)
+
+
+class ReplayFailurePathTests(unittest.TestCase):
+    """A replay that never arrived left a spinner and 0:00 on screen forever."""
+
+    def setUp(self):
+        self.page = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                     / "replay.html").read_text(encoding="utf-8")
+
+    def test_a_stalled_transfer_is_noticed_even_though_it_fires_no_error(self):
+        # 'error' only fires when the browser rejects the file. A transfer that
+        # simply stops fires nothing, which is the case that hung.
+        self.assertIn("'stalled'", self.page)
+        self.assertIn("SLOW_AFTER_MS", self.page)
+        self.assertIn("setTimeout", self.page)
+        # ...and the timer must be cancelled when the video does arrive.
+        self.assertIn("clearTimeout(slowTimer)", self.page)
+        self.assertIn("'loadeddata'", self.page)
+
+    def test_a_format_the_browser_refuses_says_so_rather_than_blaming_the_load(self):
+        # MediaError 3 (decode) and 4 (src not supported) mean the bytes are
+        # here and unplayable - which is exactly what a QuickTime replay does.
+        self.assertIn("video.error", self.page)
+        self.assertIn("cannot play the saved video in the format", self.page)
+
+    def test_every_failure_offers_the_original_file(self):
+        self.assertIn("Download the original video", self.page)
+        self.assertIn("setAttribute('download'", self.page)
+
+    def test_the_failure_message_is_built_as_nodes_not_interpolated_html(self):
+        """statusEl gets a job id in it; building that as an HTML string would
+        put a URL fragment into innerHTML on every failure path."""
+        self.assertIn("createElement('a')", self.page)
+        self.assertNotIn("statusEl.innerHTML=`", self.page)

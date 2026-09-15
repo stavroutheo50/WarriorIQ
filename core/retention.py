@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.config import OUTPUTS, UPLOADS
+from core.video import owning_stem, remove_derivative
 
 
 GUEST_RETENTION_HOURS = 2
@@ -71,6 +72,7 @@ def cleanup_expired_guest_jobs(protected_job_ids: set[str] | None = None) -> lis
             video = Path(video_text).resolve()
             if video.parent == uploads_root:
                 try:
+                    remove_derivative(video)
                     video.unlink(missing_ok=True)
                 except OSError:
                     # A browser or decoder may still hold the file on Windows.
@@ -102,7 +104,10 @@ def cleanup_abandoned_processing_files(
     uploads_root = UPLOADS.resolve()
     outputs_root = OUTPUTS.resolve()
     for video in UPLOADS.iterdir():
-        if not video.is_file() or video.stem in protected:
+        # A derivative belongs to its original: "<job>_web" is not "<job>",
+        # so matching on stem alone ages out a live fight's playable copy
+        # while correctly keeping the original.
+        if not video.is_file() or owning_stem(video) in protected:
             continue
         try:
             if video.stat().st_mtime <= cutoff and video.resolve().parent == uploads_root:

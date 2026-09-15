@@ -4484,3 +4484,82 @@ class FightLabelTests(unittest.TestCase):
         ]
         self.assertEqual(len(set(same_day)), 3, same_day)
         self.assertEqual(same_day[0], "Kick Light · 2 Sep, 18:54 · competition")
+
+
+class WebVideoDerivativeTests(unittest.TestCase):
+    """Phone footage arrives in a QuickTime container.
+
+    Chrome does play it - canPlayType('video/quicktime') returns "" but that
+    asks about a MIME string, not about whether the bytes decode, and a real
+    101 MB iPhone upload loaded fine over HTTP with Content-Type
+    video/quicktime. What the container costs is the stricter players and the
+    formats that genuinely will not decode, so the copy is worth making at
+    0.2 s and not worth a 22 s re-encode.
+    """
+
+    def test_a_derivative_is_named_from_its_original(self):
+        from core.video import derivative_for
+
+        self.assertEqual(derivative_for("uploads/abc.mov").name, "abc_web.mp4")
+        self.assertEqual(derivative_for("uploads/abc.mkv").name, "abc_web.mp4")
+
+    def test_a_derivative_is_owned_by_the_job_of_its_original(self):
+        """The retention sweep protects by stem, and "<job>_web" is not "<job>".
+
+        Without this it ages out a live fight's playable copy while correctly
+        keeping the original, and the replay silently reverts to the container
+        the copy existed to avoid.
+        """
+        from core.video import owning_stem
+
+        self.assertEqual(owning_stem("uploads/abc_web.mp4"), "abc")
+        self.assertEqual(owning_stem("uploads/abc.mov"), "abc")
+        # A job whose own name ends in _web is not mistaken for a derivative's.
+        self.assertEqual(owning_stem("uploads/xyz.mp4"), "xyz")
+
+    def test_playback_prefers_the_derivative_and_falls_back_to_the_original(self):
+        import tempfile
+
+        from core.video import derivative_for, playback_file
+
+        with tempfile.TemporaryDirectory() as folder:
+            original = Path(folder) / "job.mov"
+            original.write_bytes(b"x")
+            self.assertEqual(playback_file(original), original)
+            derivative_for(original).write_bytes(b"y")
+            self.assertEqual(playback_file(original), derivative_for(original))
+
+    def test_a_container_a_browser_already_expects_is_left_alone(self):
+        from core.video import normalize_container
+
+        for name in ("a.mp4", "a.webm", "a.m4v"):
+            self.assertIsNone(normalize_container(Path(name)))
+
+    def test_a_missing_file_is_not_an_error(self):
+        from core.video import normalize_container
+
+        self.assertIsNone(normalize_container(Path("does-not-exist.mov")))
+
+    def test_deleting_a_fight_deletes_the_derivative_too(self):
+        """A copy of somebody's fight left in uploads/ after they deleted the
+        fight is the privacy problem the deletion was for."""
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        marker = source.index("def _remove_fight_files(")
+        body = source[marker:marker + 600]
+        self.assertIn("remove_derivative(video)", body)
+
+    def test_both_retention_sweeps_account_for_the_derivative(self):
+        source = (Path(__file__).resolve().parents[1] / "core" / "retention.py").read_text(encoding="utf-8")
+        self.assertIn("remove_derivative(video)", source)
+        self.assertIn("owning_stem(video) in protected", source)
+        self.assertNotIn("video.stem in protected", source)
+
+    def test_the_upload_route_normalises_before_it_probes(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        normalise = source.index("run_in_threadpool(normalize_container")
+        guard = source.index("run_in_threadpool(looks_like_video")
+        scan = source.index("run_in_threadpool(scan_upload")
+        # Never before the container check or the malware scan: neither should
+        # be preceded by handing the file to ffmpeg.
+        self.assertLess(guard, normalise)
+        self.assertLess(scan, normalise)
