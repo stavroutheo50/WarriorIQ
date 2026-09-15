@@ -187,7 +187,11 @@ class PublicPageTests(unittest.TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("WARRIOR", response.text)
-                self.assertIn("globalBack", response.text)
+                # The floating back pill was removed: position:fixed inside a
+                # transformed .shell, sitting on top of the bottom-left corner
+                # of six pages. Nothing should bring it back.
+                self.assertNotIn("globalBack", response.text)
+                self.assertNotIn("global-back", response.text)
 
     def test_legal_center_and_every_policy_render(self):
         paths = (
@@ -3016,3 +3020,40 @@ class CoachFilenameTests(unittest.TestCase):
                    / "pricing.html").read_text(encoding="utf-8")
         self.assertIn("No video filename shown", pricing,
                       "the promise moved; this test should follow it")
+
+
+class BackNavigationTests(unittest.TestCase):
+    """The floating Back pill is gone; what replaced it has to actually exist.
+
+    It was position:fixed with an opaque background and no reserved space, and
+    .shell carries a transform - which makes .shell the containing block for a
+    fixed descendant - so it sat on top of whatever occupied the bottom-left
+    corner. It covered content on six pages.
+
+    The audit's reason for removing it was that "every page already has an
+    inline back link". Five of thirty templates did. The flow pages are the
+    ones that need it, and /result had nothing at all.
+    """
+
+    FLOW_TEMPLATES = ("analyze.html", "select.html", "progress.html",
+                      "replay.html", "review.html", "result.html")
+
+    def test_every_page_in_the_analysis_flow_offers_a_way_back(self):
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        for name in self.FLOW_TEMPLATES:
+            with self.subTest(template=name):
+                page = (templates / name).read_text(encoding="utf-8")
+                # Any of the three shapes the flow pages use: the quiet-back
+                # class, a back-arrow link, or a named return to the report.
+                self.assertTrue(
+                    "quiet-back" in page
+                    or "← " in page
+                    or "Back to report" in page,
+                    f"{name} has no inline way back and the pill is gone")
+
+    def test_the_pill_is_not_reintroduced_by_any_stylesheet(self):
+        from app.main import CSS_BUNDLE_TEXT
+
+        for bundle, text in CSS_BUNDLE_TEXT.items():
+            with self.subTest(bundle=bundle):
+                self.assertNotIn("global-back", text)

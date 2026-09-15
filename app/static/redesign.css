@@ -382,17 +382,7 @@ h1 em, h2 em {
 
 .file-button.uploaded { border-color: rgb(var(--sport-accent) / .55) !important; }
 
-/* The global back control and toast belong to the same neutral chrome. */
-.global-back {
-  border-radius: 3px;
-  border-color: var(--wiq-line);
-  background: var(--wiq-canvas-raised);
-  color: var(--wiq-text-secondary);
-  backdrop-filter: none;
-  box-shadow: none;
-}
-.global-back:hover { background: var(--wiq-panel); border-color: #3a3a40; color: var(--wiq-text); transform: none; }
-
+/* The toast and cookie notice share the neutral chrome. */
 .app-toast, .cookie-notice {
   border-radius: 4px;
   border-color: var(--wiq-line);

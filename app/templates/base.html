@@ -82,7 +82,6 @@
 {% endif %}
   <div class="page-scroll-progress" id="pageScrollProgress" aria-hidden="true"><i></i></div>
   <a class="skip-link" href="#main-content">Skip to main content</a>
-  <button class="global-back" id="globalBack" type="button" aria-label="Go to the previous WarriorIQ page">← <span>Back</span></button>
   <div class="shell">
     <nav class="nav" aria-label="Main navigation">
       <a class="brand" href="/"><img class="brand-logo" src="/static/warrioriq-logo-96.png" width="38" height="38" decoding="async" alt="WarriorIQ logo">WARRIOR<span>IQ</span></a>
@@ -109,10 +108,7 @@
   {% block scripts %}{% endblock %}
   <script>
   (()=>{
-    const path=location.pathname,back=document.getElementById('globalBack'),menuButton=document.getElementById('mobileMenuButton'),mobileMenu=document.getElementById('mobileMenu'),navMore=document.getElementById('navMore'),toast=document.getElementById('appToast');
-    const fallback=()=>{const match=path.match(/^\/(frame|select|progress|result|replay|review)\/([^/]+)/);if(match){const[,page,id]=match;if(page==='select')return`/frame/${id}`;if(page==='progress')return`/select/${id}`;if(page==='replay'||page==='review')return`/result/${id}`;if(page==='result')return'/history'}return'/'};
-    if(path==='/')back.hidden=true;
-    back.addEventListener('click',()=>{let previous=null;try{previous=document.referrer?new URL(document.referrer):null}catch{}if(previous&&previous.origin===location.origin&&previous.pathname!==path)history.back();else location.href=fallback()});
+    const path=location.pathname,menuButton=document.getElementById('mobileMenuButton'),mobileMenu=document.getElementById('mobileMenu'),navMore=document.getElementById('navMore'),toast=document.getElementById('appToast');
     menuButton.addEventListener('click',()=>{const open=mobileMenu.hidden;mobileMenu.hidden=!open;menuButton.setAttribute('aria-expanded',String(open));menuButton.setAttribute('aria-label',open?'Close navigation':'Open navigation');document.body.classList.toggle('menu-open',open)});
     document.addEventListener('click',event=>{if(navMore?.open&&!navMore.contains(event.target))navMore.open=false});
     document.addEventListener('keydown',event=>{if(event.key==='Escape'){if(navMore)navMore.open=false;if(!mobileMenu.hidden){mobileMenu.hidden=true;menuButton.setAttribute('aria-expanded','false');menuButton.setAttribute('aria-label','Open navigation');document.body.classList.remove('menu-open')}}});

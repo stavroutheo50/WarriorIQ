@@ -2,6 +2,7 @@
 {% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
 {% block title %}Fight Report · WarriorIQ{% endblock %}
 {% block content %}
+<a class="quiet-back" href="/history">← Fight library</a>
 <div class="section-title result-hero" data-reveal>
   <div><div class="eyebrow">Analysis complete</div><h2>Fight analysis</h2></div>
   <div class="selection-tools">{% if can_share %}<form action="/share/{{job_id}}" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
