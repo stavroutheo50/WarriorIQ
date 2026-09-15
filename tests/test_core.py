@@ -3208,6 +3208,40 @@ class FighterSeparabilityTests(unittest.TestCase):
         self.assertIsNone(_seed_official_warning(None, a_box, b_box))
 
 
+    def test_the_referee_classifier_abstains_on_a_greyscale_source(self):
+        """Saying nothing beats saying something confident and wrong.
+
+        Two of the four features in uniform_feature are about colour. On a
+        desaturated print both collapse and the probe inverts: measured on 1947
+        black-and-white boxing, the two boxers scored 0.997 and the actual
+        referee 0.989.
+
+        That is worse than silence, because a high score on the *seeded* box
+        sets anchor_is_referee in core/identity.py, which switches the referee
+        filter off for the whole bout on the reasoning that the user must have
+        meant to follow the official.
+
+        Whole-frame median saturation separates the cases with an enormous
+        margin - 0 on the greyscale print against 102 to 150 on every colour
+        bout measured - so this costs nothing on footage the probe can read.
+        """
+        from core import referee
+
+        boxes = np.array([[10.0, 10.0, 60.0, 180.0]], dtype=np.float32)
+        grey = np.zeros((240, 320, 3), dtype=np.uint8)
+        grey[:] = 120                      # equal channels: saturation 0
+        self.assertEqual(referee.referee_probabilities(grey, boxes), [None])
+
+        colour = np.zeros((240, 320, 3), dtype=np.uint8)
+        colour[:, :, 0] = 200              # strongly blue: saturated
+        # Without the trained probe every answer is None and the contrast this
+        # test is making does not exist, so there would be nothing to assert.
+        # The sibling probe tests above skip for the same reason.
+        if referee.referee_probabilities(colour, boxes) == [None]:
+            self.skipTest("trained probe not present in this checkout")
+        self.assertNotEqual(referee.referee_probabilities(colour, boxes), [None])
+
+
 class IdentityRecheckTests(unittest.TestCase):
     """Getting from "we mixed them up" back to the moment it happened."""
 

@@ -133,6 +133,26 @@ def _room_brightness(frame: np.ndarray) -> float:
     return float(np.median(cv2.cvtColor(small, cv2.COLOR_BGR2HSV)[:, :, 2]))
 
 
+# Halfway between the greyscale print (0) and the least colourful footage
+# measured (102), so it takes a genuinely monochrome source to trip it.
+_MIN_SATURATION_TO_JUDGE = 24.0
+
+
+def _median_saturation(frame: np.ndarray) -> float:
+    """How much colour is in this frame at all.
+
+    Subsampled: this is asked once per frame and the answer does not need
+    every pixel, while a full 1920x1080 conversion every frame would not be
+    free.
+    """
+    if frame is None or frame.size == 0:
+        return 0.0
+    small = frame[::8, ::8]
+    if small.size == 0:
+        return 0.0
+    return float(np.median(cv2.cvtColor(small, cv2.COLOR_BGR2HSV)[:, :, 1]))
+
+
 def uniform_feature(frame: np.ndarray, box, room: float | None = None) -> np.ndarray:
     """Four numbers describing shirt-over-trousers, read from box fractions.
 
@@ -213,6 +233,35 @@ def referee_probabilities(frame: np.ndarray, boxes) -> list[float | None]:
         return []
     probe = _load()
     if probe is None:
+        return [None] * len(boxes)
+    # Say nothing rather than something confident and wrong.
+    #
+    # Two of the four features in `uniform_feature` are about colour - "shirt
+    # pale *and* brighter than the room" and "a singlet is saturated, a shirt
+    # is not". On a desaturated print both collapse: everybody's torso is
+    # unsaturated, so a bare-chested boxer in dark trunks reads exactly like a
+    # white-shirted official.
+    #
+    # Measured 2026-09-15 on 1947 black-and-white boxing: the two boxers scored
+    # **0.997** and the actual referee 0.989. Not merely useless - inverted,
+    # and confident.
+    #
+    # That is worse than no answer, because a high score on the *seeded* box
+    # sets `anchor_is_referee` in core/identity.py, which switches the referee
+    # filter off for the whole bout on the reasoning that the user must have
+    # meant to follow the official. So one wrong reading at seed time quietly
+    # removes the defence, and fighter B then drifted onto the real referee
+    # with nothing left to refuse him.
+    #
+    # Whole-frame median saturation separates the cases with an enormous
+    # margin, so this costs nothing on any footage the classifier can read:
+    #
+    #     1947 greyscale print          0
+    #     WAKO livestream capture     122
+    #     fight 1 broadcast           106
+    #     user's phone 1080p          150
+    #     Muay Thai 1080p             102
+    if _median_saturation(frame) < _MIN_SATURATION_TO_JUDGE:
         return [None] * len(boxes)
     room = _room_brightness(frame)
     out: list[float | None] = []
