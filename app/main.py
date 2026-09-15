@@ -3155,7 +3155,21 @@ def _seed_official_warning(image, fighter_a_box, fighter_b_box) -> dict | None:
         (name, float(score)) for name, score in zip(("A", "B"), list(scores) + [None, None])
         if score is not None and score >= SETTINGS.min_referee_probability
     ]
-    if not flagged:
+    # **Exactly one, never both.** The score is not an absolute reading of
+    # "official"; it is a reading of uniform brightness against the room, and
+    # on footage it was not calibrated for it can say "official" about
+    # everybody. Tried on 1947 black-and-white boxing, where the print is
+    # desaturated and every person is pale against a dark ring: the two boxers
+    # scored 0.997 and the white-clad referee 0.989, so the absolute test
+    # flagged the correct selection more confidently than the wrong one.
+    #
+    # The signal that survives is relative. One of two boxes looking like an
+    # official while the other does not is informative; both looking like one
+    # means the classifier has no discrimination on this footage and the honest
+    # thing is to say nothing. A warning that fires on every upload is worse
+    # than no warning, because it teaches the user to dismiss it - and the one
+    # time it is right is the time it is dismissed.
+    if len(flagged) != 1:
         return None
     which = " and ".join(f"Fighter {name}" for name, _ in flagged)
     return {

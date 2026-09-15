@@ -3192,6 +3192,16 @@ class FighterSeparabilityTests(unittest.TestCase):
         with mock.patch("core.referee.referee_probabilities", return_value=[0.02, 0.03]):
             self.assertIsNone(_seed_official_warning(frame, a_box, b_box))
 
+        # Both flagged means the classifier has no discrimination on this
+        # footage, not that both selections are officials. Found on 1947
+        # black-and-white boxing, where the print is desaturated and everyone
+        # reads as pale against a dark ring: the two boxers scored 0.997 and the
+        # white-clad referee 0.989, so an absolute test flagged the *correct*
+        # selection more confidently than the wrong one. A warning that fires on
+        # every upload teaches the user to dismiss it.
+        with mock.patch("core.referee.referee_probabilities", return_value=[0.997, 0.989]):
+            self.assertIsNone(_seed_official_warning(frame, a_box, b_box))
+
         # A seed check must never be the reason a fight cannot be analysed.
         with mock.patch("core.referee.referee_probabilities", side_effect=RuntimeError("boom")):
             self.assertIsNone(_seed_official_warning(frame, a_box, b_box))
