@@ -28,6 +28,7 @@ import argparse
 import base64
 import json
 import random
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -38,7 +39,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.config import OUTPUTS
+from core.config import DB_PATH, OUTPUTS
 from core.temporal_model import ACTION_CLASSES
 
 STRIP_FRAMES = 6
@@ -227,37 +228,51 @@ def _is_moving(tracking: dict, frame: int, fps: float, seconds: float = 1.5) -> 
     return spread >= STILL_BODY_LENGTHS
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Build a clip pack for fast labelling.")
-    parser.add_argument("--job", required=True, help="job id under outputs/")
-    parser.add_argument("--video", required=True, help="the fight video that job analysed")
-    parser.add_argument("--negatives", type=int, default=40,
-                        help="quiet windows to include, so the set has true negatives")
-    parser.add_argument("--out", default="labelpack")
-    parser.add_argument("--limit", type=int, default=0,
-                        help="stop after this many clips; for checking the page quickly")
-    parser.add_argument("--no-inline", dest="inline", action="store_false",
-                        help="reference the clips as files instead of carrying them "
-                             "in the page; smaller, but the page stops working if "
-                             "it is moved away from its clips folder")
-    parser.set_defaults(inline=True)
-    args = parser.parse_args()
+def _video_for(job):
+    """Where the fight that produced this job actually lives.
 
-    tracking = _read_tracking(args.job)
-    events = _read_events(args.job)
-    cap = cv2.VideoCapture(args.video)
+    Passing --video by hand meant knowing which of 126 analysed jobs came from
+    which file. The fights table already records it, so the answer is looked up
+    rather than remembered. Footage ages out after the retention window, so a
+    job whose video is gone is skipped rather than guessed at.
+    """
+    try:
+        with sqlite3.connect(str(DB_PATH)) as con:
+            row = con.execute(
+                "SELECT video_path FROM fights WHERE job_id=?", (job,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row or not row[0]:
+        return None
+    return row[0] if Path(row[0]).exists() else None
+
+
+def _packable_jobs():
+    """Every analysed job whose video is still on disk, newest first."""
+    found = []
+    reports = sorted(Path("outputs").glob("*/report.json"),
+                     key=lambda q: q.stat().st_mtime, reverse=True)
+    for report in reports:
+        job = report.parent.name
+        video = _video_for(job)
+        if video:
+            found.append((job, video))
+    return found
+
+
+def _candidates_for(job, video, negatives, rng):
+    """The proposed actions and quiet windows for one job."""
+    tracking = _read_tracking(job)
+    events = _read_events(job)
+    cap = cv2.VideoCapture(video)
     if not cap.isOpened():
-        raise SystemExit("could not open %s" % args.video)
+        return None, None, None
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    span = max(6, int(round(0.8 * fps)))
-
-    root = Path(args.out) / args.job
-    clips = root / "clips"
-    clips.mkdir(parents=True, exist_ok=True)
 
     candidates = []
     for event in events:
         candidates.append({
+            "job": job,
             "fighter": event.get("fighter", "A"),
             "peak_frame": int(event.get("peak_frame", 0)),
             "peak_time": float(event.get("peak_time", 0.0)),
@@ -267,42 +282,111 @@ def main() -> int:
             "source": "event",
         })
 
-    # Quiet windows: at least a second from any proposed action, and only where
-    # a fighter was actually being followed, so "none" means "nothing happened"
-    # rather than "nobody was tracked".
     busy = [c["peak_frame"] for c in candidates]
     quiet = [f for f in sorted(tracking)
              if all(abs(f - b) > fps for b in busy)
              and ((tracking[f].get("fighter_A") or {}).get("observation") or {}).get("keypoints")
              and _is_moving(tracking, f, fps)]
-    rng = random.Random(0)
-    for frame in rng.sample(quiet, min(args.negatives, len(quiet))):
+    for frame in rng.sample(quiet, min(negatives, len(quiet))):
         candidates.append({
-            "fighter": "A",
-            "peak_frame": int(frame),
+            "job": job, "fighter": "A", "peak_frame": int(frame),
             "peak_time": float(tracking[frame].get("time_seconds", frame / fps)),
             "proposed": "none", "target": "none", "outcome": "uncertain",
             "source": "quiet",
         })
+    return candidates, tracking, cap
 
-    # Shuffled so the order carries no hint about what the answer should be.
-    rng.shuffle(candidates)
-    if args.limit:
-        candidates = candidates[:args.limit]
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Build a clip pack for fast labelling.")
+    parser.add_argument("--job", nargs="*", default=[],
+                        help="job ids under outputs/; repeat for several")
+    parser.add_argument("--all", action="store_true",
+                        help="every analysed job whose video is still on disk")
+    parser.add_argument("--video", default=None,
+                        help="the fight video, when it cannot be looked up "
+                             "(only meaningful with a single --job)")
+    parser.add_argument("--negatives", type=int, default=40,
+                        help="quiet windows per job, so the set has true negatives")
+    parser.add_argument("--out", default="labelpack")
+    parser.add_argument("--name", default=None,
+                        help="folder name for a multi-job pack (default: mixed)")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="stop after this many clips in total")
+    parser.add_argument("--no-inline", dest="inline", action="store_false",
+                        help="reference the clips as files instead of carrying them "
+                             "in the page; smaller, but the page stops working if "
+                             "it is moved away from its clips folder")
+    parser.set_defaults(inline=True)
+    args = parser.parse_args()
+
+    if args.all:
+        jobs = _packable_jobs()
+    elif args.job:
+        jobs = []
+        for job in args.job:
+            video = args.video if (args.video and len(args.job) == 1) else _video_for(job)
+            if not video:
+                print("skipping %s: no video on disk" % job)
+                continue
+            jobs.append((job, video))
+    else:
+        raise SystemExit("give --job <id> [<id> ...] or --all")
+    if not jobs:
+        raise SystemExit("nothing to pack: no job had a video still on disk")
+
+    single = len(jobs) == 1
+    root = Path(args.out) / (jobs[0][0] if single else (args.name or "mixed"))
+    clips = root / "clips"
+    clips.mkdir(parents=True, exist_ok=True)
+
+    rng = random.Random(0)
+    # A budget per job rather than first-come, so a pack spread over a hundred
+    # fights is not ninety percent the first one. A model trained on one bout
+    # learns that bout: 142 sequences memorised, which is why the note in
+    # core/model_validation.py says label broadly before training anything.
+    per_job = max(1, args.limit // len(jobs)) if args.limit else 0
+
     index = []
-    for number, candidate in enumerate(candidates):
-        strip = _filmstrip(cap, tracking, candidate["fighter"], candidate["peak_frame"], span)
-        if strip is None:
+    number = 0
+    for job, video in jobs:
+        candidates, tracking, cap = _candidates_for(job, video, args.negatives, rng)
+        if candidates is None:
+            print("skipping %s: could not open %s" % (job, video))
             continue
-        name = "%04d.jpg" % number
-        cv2.imwrite(str(clips / name), strip, [cv2.IMWRITE_JPEG_QUALITY, 72])
-        candidate["id"] = number
-        candidate["clip"] = "clips/%s" % name
-        index.append(candidate)
-    cap.release()
+        rng.shuffle(candidates)          # order carries no hint about the answer
+        if per_job:
+            candidates = candidates[:per_job]
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        span = max(6, int(round(0.8 * fps)))
+        for candidate in candidates:
+            if args.limit and len(index) >= args.limit:
+                break
+            strip = _filmstrip(cap, tracking, candidate["fighter"],
+                               candidate["peak_frame"], span)
+            if strip is None:
+                continue
+            name = "%05d.jpg" % number
+            cv2.imwrite(str(clips / name), strip, [cv2.IMWRITE_JPEG_QUALITY, 72])
+            candidate["id"] = number
+            candidate["clip"] = "clips/%s" % name
+            index.append(candidate)
+            number += 1
+        cap.release()
+        if args.limit and len(index) >= args.limit:
+            break
 
-    payload = {"job": args.job, "video": args.video, "classes": ACTION_CLASSES,
-               "candidates": index}
+    if not index:
+        raise SystemExit("no clips could be cut from those jobs")
+
+    # Interleaved so a session moves between fights instead of sitting in one
+    # for an hour, the same reason the order within a job is shuffled.
+    rng.shuffle(index)
+
+    payload = {"job": jobs[0][0] if single else "mixed",
+               "jobs": [j for j, _ in jobs],
+               "video": jobs[0][1] if single else None,
+               "classes": ACTION_CLASSES, "candidates": index}
     (root / "index.json").write_text(json.dumps(payload, indent=1), encoding="utf-8")
 
     # The candidate list is injected rather than fetched, because the page is
@@ -331,9 +415,9 @@ def main() -> int:
     (root / "label.html").write_text(page, encoding="utf-8")
 
     proposed = sum(1 for c in index if c["source"] == "event")
-    print("run:  .venv/Scripts/python.exe tools/serve_label_pack.py --job %s" % args.job)
-    print("%d clips in %s  (%d proposed actions, %d quiet windows)"
-          % (len(index), root, proposed, len(index) - proposed))
+    print("%d clips in %s  (%d proposed actions, %d quiet windows, %d fights)"
+          % (len(index), root, proposed, len(index) - proposed, len(jobs)))
+    print("open: %s" % (root / "label.html"))
     print("      answers save to disk as you give them; no button to remember.")
     return 0
 

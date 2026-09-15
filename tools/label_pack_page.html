@@ -309,7 +309,7 @@ function buildPayload() {
     labels: items.filter((i) => i.id in labels
                               && labels[i.id] !== "__unsure__"
                               && labels[i.id] !== "__wrongperson__")
-                 .map((i) => ({ id: i.id, fighter: i.fighter, peak_time: i.peak_time,
+                 .map((i) => ({ id: i.id, job: i.job, fighter: i.fighter, peak_time: i.peak_time,
                                 proposed: i.proposed, technique: labels[i.id],
                                 target: i.target, outcome: i.outcome, source: i.source })),
     unsure: items.filter((i) => labels[i.id] === "__unsure__").map((i) => i.id),
@@ -317,7 +317,7 @@ function buildPayload() {
     // by the only instrument that can see it, and it needs the time and the
     // fighter to be useful later.
     wrong_person: items.filter((i) => labels[i.id] === "__wrongperson__")
-                       .map((i) => ({ id: i.id, fighter: i.fighter, peak_time: i.peak_time,
+                       .map((i) => ({ id: i.id, job: i.job, fighter: i.fighter, peak_time: i.peak_time,
                                       source: i.source })),
   };
 }
