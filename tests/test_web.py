@@ -48,6 +48,50 @@ class AnalyticsPolicyTests(unittest.TestCase):
         self.assertIn("'analytics_storage': 'denied'", response.text)
         self.assertNotIn("'analytics_storage': 'granted'", response.text)
 
+    def test_a_choice_made_against_an_older_policy_version_is_asked_again(self):
+        """The cookie recorded the choice but not the version it answered.
+
+        So bumping WARRIORIQ_POLICY_VERSION re-prompted nobody: `decided` stayed
+        true forever and the banner never came back, while the acceptance log
+        recorded a version the live cookie had no link to.
+        """
+        from core.config import SETTINGS
+
+        current = self.client.get("/", cookies={
+            "warrioriq_cookie_preferences": f"all:{SETTINGS.policy_version}"})
+        self.assertIn("'analytics_storage': 'granted'", current.text)
+        self.assertNotIn('id="cookieNotice"', current.text)
+
+        stale = self.client.get("/", cookies={
+            "warrioriq_cookie_preferences": "all:1999-01-01"})
+        self.assertIn('id="cookieNotice"', stale.text)
+        self.assertNotIn("'analytics_storage': 'granted'", stale.text)
+
+    def test_a_choice_made_before_versions_were_recorded_is_not_asked_again(self):
+        """Cookies written by the previous format carry no version.
+
+        Those visitors did answer the question. Treating a missing version as
+        undecided would re-open the banner for every existing visitor at once,
+        which is not what "re-prompt when the policy changes" asks for.
+        """
+        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
+        self.assertIn("'analytics_storage': 'granted'", response.text)
+        self.assertNotIn('id="cookieNotice"', response.text)
+
+    def test_saving_a_choice_stamps_it_with_the_policy_version(self):
+        from core.config import SETTINGS
+
+        page = self.client.get("/")
+        token = re.search(r'name="csrf-token" content="([^"]+)"', page.text).group(1)
+        response = self.client.post(
+            "/cookie-preferences",
+            data={"choice": "essential", "next_path": "/", "csrf_token": token},
+            headers={"X-CSRF-Token": token}, follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(
+            f"warrioriq_cookie_preferences={'essential'}:{SETTINGS.policy_version}",
+            response.headers["set-cookie"])
+
     def test_accepting_analytics_grants_storage(self):
         response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
         policy = response.headers["content-security-policy"]
@@ -143,7 +187,11 @@ class PublicPageTests(unittest.TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("WARRIOR", response.text)
-                self.assertIn("globalBack", response.text)
+                # The floating back pill was removed: position:fixed inside a
+                # transformed .shell, sitting on top of the bottom-left corner
+                # of six pages. Nothing should bring it back.
+                self.assertNotIn("globalBack", response.text)
+                self.assertNotIn("global-back", response.text)
 
     def test_legal_center_and_every_policy_render(self):
         paths = (
@@ -170,20 +218,31 @@ class PublicPageTests(unittest.TestCase):
             self.assertIn("Launch is blocked", self.client.get("/legal").text)
         self.assertIn("does not register", self.client.get("/dmca").text)
 
-    def test_choosing_a_sport_signed_out_goes_to_sign_in_first(self):
+    def test_choosing_a_sport_signed_out_says_why_before_spending_an_upload(self):
         """A guest analysis is deleted after two hours and never saved.
 
         Letting someone pick a sport, upload a fight and wait for the analysis
-        before mentioning that spends the one thing they cannot get back. The
-        sign-in page carries the destination so they land back on the chooser.
+        before mentioning that spends the one thing they cannot get back - so
+        it is said first. It used to be said by redirecting to /login, while
+        the five other workspace routes answered 200 with a signed-out shell.
+        Someone who bookmarked /history got a sales page and someone who
+        bookmarked /analyze got a login form, for the same signed-out state.
         """
         response = self.client.get("/analyze", follow_redirects=False)
-        self.assertEqual(response.status_code, 303)
-        self.assertEqual(response.headers["location"], "/login?next=/analyze")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("deleted after two hours", response.text)
+        # The destination survives whichever way they go.
+        self.assertIn("/signup?next=/analyze", response.text)
+        self.assertIn("/login?next=/analyze", response.text)
+        # ...and the sport grid is not offered to somebody who cannot use it.
+        self.assertNotIn("chooser-head", response.text)
 
-        landed = self.client.get("/analyze").text
-        self.assertIn('name="next_path" value="/analyze"', landed)
-        self.assertIn("/signup?next=/analyze", landed, "creating an account keeps the destination")
+    def test_every_workspace_route_answers_a_guest_the_same_way(self):
+        for path in ("/analyze", "/dashboard", "/history", "/coach", "/profile", "/compare"):
+            with self.subTest(path=path):
+                response = self.client.get(path, follow_redirects=False)
+                self.assertEqual(response.status_code, 200, f"{path} still redirects")
+                self.assertIn("empty-workspace", response.text)
 
     def test_every_sport_states_what_the_analysis_cannot_see(self):
         """Coverage is disclosed at the point of choice, not after the upload.
@@ -297,9 +356,14 @@ class PublicPageTests(unittest.TestCase):
             elsewhere = client.get("/history").text
             self.assertIn('class="sport-switch"', elsewhere)
             self.assertIn("Muay Thai", elsewhere)
-            # The chip carries the sport's own accent and leads to the switcher.
+            # The chip carries the sport's own accent and is the switcher.
             self.assertIn("--sport-accent:226 154 74", elsewhere)
-            self.assertIn('class="sport-switch" href="/analyze"', elsewhere)
+            # It looked like a dropdown - bordered pill, chevron - and was a
+            # plain link to /analyze, so pressing it left the page being read.
+            self.assertIn('<details class="sport-menu"', elsewhere)
+            self.assertNotIn('class="sport-switch" href="/analyze"', elsewhere)
+            for key in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
+                self.assertIn(f'href="/analyze/{key}"', elsewhere)
 
             # Switching sport switches the shell.
             client.get("/analyze/boxing")
@@ -680,7 +744,11 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("request.upload.addEventListener('progress'", home)
         signup = self.client.get("/signup").text
         self.assertIn('name="accept_terms"', signup)
-        self.assertIn('name="accept_policies"', self.client.get("/login").text)
+        # Signing in no longer re-asks: acceptance is taken at signup, and an
+        # account behind the current policy version is asked once afterwards,
+        # when there is finally an account to compare against.
+        self.assertNotIn('name="accept_policies"', self.client.get("/login").text)
+        self.assertIn("Acceptable Use Policy", signup)
         self.assertIn("Terms of Service", signup)
         self.assertIn("Privacy Policy", signup)
         self.assertIn('name="age_confirmed"', signup)
@@ -830,7 +898,9 @@ class PublicPageTests(unittest.TestCase):
     def test_upload_never_displays_selected_filename(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
         self.assertIn("fileButton.classList.toggle('uploaded',ready)", template)
-        self.assertIn("Fight video uploaded", template)
+        # "uploaded" at selection described a transfer that had not started.
+        self.assertIn("Fight video selected", template)
+        self.assertNotIn("Fight video uploaded", template)
         self.assertNotIn("file.name", template)
 
     def test_replay_overlay_does_not_block_video_controls(self):
@@ -864,7 +934,8 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("rather than being chosen per upload", privacy)
 
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
-                       scorecard_available=None, measurement=None, kick_minimum=None):
+                       scorecard_available=None, measurement=None, kick_minimum=None,
+                       action_labels_available=None, report_access=None):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -896,11 +967,13 @@ class PublicPageTests(unittest.TestCase):
                 report.setdefault("metrics", {}).setdefault(fighter, {})["measurement"] = measurement
         if scorecard_available is not None:
             report.setdefault("scorecard", {})["available"] = scorecard_available
+        if action_labels_available is not None:
+            report.setdefault("statistics", {})["action_labels_available"] = action_labels_available
         request = Stub(url=Stub(path="/report/abc"), state=Stub(account=None), cookies={}, headers={})
         return env.get_template("result.html").render(
             request=request, job_id="abc", report=report,
             identity=sport_identity("kickboxing"),
-            report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
+            report_access=report_access or {"report_tier": "full", "report_label": "Full", "label": "Full"},
             analysis_quality=_analysis_quality_summary(report), can_share=can_share,
             sharing=sharing, score_withheld=score_withheld, unavailable=[],
             kick_minimum=kick_minimum,
@@ -1367,13 +1440,60 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("Verify scorecard", template)
 
     def test_result_guides_people_through_only_the_core_training_path(self):
-        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
-        self.assertIn('class="report-path"', template)
+        """Rendered, not grepped: the chips are generated from the section gates.
+
+        Matching source text stopped proving anything once the strip stopped
+        being a hardcoded list - and a hardcoded list was the defect. Three
+        chips pointed at #report-strikes, #report-combinations and
+        #report-key-moments, which are only emitted for a full report with
+        verified strike counting, so on every other report they were links to
+        an anchor that did not exist.
+        """
+        page = self._render_result({"status": "ok"})
+        self.assertIn('class="report-path"', page)
         for anchor in ("report-performance", "report-scorecard", "report-coaching", "report-training"):
-            self.assertIn(f'href="#{anchor}"', template)
-            self.assertIn(f'id="{anchor}"', template)
-        self.assertNotIn('id="report-evidence"', template)
-        self.assertIn("Replay with skeletons", template)
+            self.assertIn(f'href="#{anchor}"', page)
+            self.assertIn(f'id="{anchor}"', page)
+        self.assertNotIn('id="report-evidence"', page)
+        self.assertIn("Replay with skeletons", page)
+
+    def test_no_report_chip_points_at_a_section_the_page_did_not_render(self):
+        """The invariant, checked on the rendered page in both gate states.
+
+        Every in-page jump link must resolve to an id on the same page. This
+        is the general form of the bug, so it holds whatever the tier and
+        whatever strike counting reports.
+        """
+        import re
+
+        from core.payments import PLANS
+
+        # Every real plan tier, not an invented one: the chips depend on
+        # report_tier, and compact and expanded carry item limits that full
+        # does not.
+        seen = set()
+        for plan in PLANS.values():
+            if plan["report_tier"] in seen:
+                continue
+            seen.add(plan["report_tier"])
+            access = dict(plan, report_label="R", label="R")
+            page = self._render_result({"status": "ok"}, report_access=access)
+            targets = set(re.findall(r'href="#(report-[a-z-]+)"', page))
+            present = set(re.findall(r'id="(report-[a-z-]+)"', page))
+            self.assertTrue(targets, f"no chips rendered at tier={plan['report_tier']}")
+            self.assertEqual(
+                targets - present, set(),
+                f"dead jump links at tier={plan['report_tier']}: {sorted(targets - present)}")
+        self.assertEqual(seen, {"compact", "expanded", "full"})
+
+    def test_a_chip_whose_section_is_withheld_says_why_instead_of_linking(self):
+        page = self._render_result({"status": "ok"}, action_labels_available=False)
+        self.assertNotIn('href="#report-strikes"', page)
+        self.assertIn("hidden until strike counting is verified", page)
+        # ...and comes back as a real link once the gate opens.
+        opened = self._render_result({"status": "ok"}, action_labels_available=True)
+        self.assertIn('href="#report-strikes"', opened)
+        self.assertIn('id="report-strikes"', opened)
 
     def test_result_explains_analysis_quality_without_calling_coverage_accuracy(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
@@ -2771,3 +2891,360 @@ class NoUnsupportedClaimSurvivesTests(NoPunchClaimLeaksTests):
         for shown in ("movement", "pressure", "centre", "guard", "balance", "leg strikes"):
             with self.subTest(number=shown):
                 self.assertIn(shown, text)
+
+
+class NavigationReachabilityTests(unittest.TestCase):
+    """The desktop nav and the hamburger have to hand over at the same width.
+
+    Between 901px and 1180px a signed-in visitor had neither: .account-nav was
+    hidden at 1180, .nav-more at 1120, and .navlinks and .mobile-menu-button
+    only swapped at 900. Athlete profile, Fight library, Compare fights and
+    Sign out were all unreachable for 280px of viewport width.
+    """
+
+    SELECTORS = (".navlinks", ".nav-more", ".account-nav", ".mobile-menu-button")
+
+    def _enclosing_breakpoint(self, css: str, index: int) -> str:
+        """The @media condition the rule at `index` sits inside.
+
+        The stylesheets are minified onto single lines, so the nearest media
+        query opening before the match is the one that governs it.
+        """
+        opened = css.rfind("@media", 0, index)
+        self.assertNotEqual(opened, -1, "rule is not inside any media query")
+        return css[opened:css.index("{", opened)]
+
+    def test_all_four_nav_selectors_collapse_on_one_breakpoint(self):
+        # The shipped bundle, not the source files: the cascade that reaches a
+        # browser is the concatenation, and a stray rule in a later file would
+        # win without appearing wrong in its own file.
+        from app.main import CSS_BUNDLE_TEXT
+
+        css = "\n".join(CSS_BUNDLE_TEXT.values())
+        found = {}
+        for selector in self.SELECTORS:
+            rules = [m.start() for m in re.finditer(
+                re.escape(selector) + r"\{display:[a-z]+\}", css)]
+            self.assertEqual(
+                len(rules), 1,
+                f"{selector} has {len(rules)} display rules; there must be exactly one")
+            found[selector] = self._enclosing_breakpoint(css, rules[0])
+        self.assertEqual(
+            len(set(found.values())), 1,
+            f"the nav collapses at more than one width: {found}")
+
+    def test_the_mobile_menu_carries_everything_the_collapsed_bars_held(self):
+        base = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                / "base.html").read_text(encoding="utf-8")
+
+        def region(start: str, end: str) -> str:
+            opened = base.index(start)
+            return base[opened:base.index(end, opened)]
+
+        desktop = (region('<div class="account-nav">', '<button class="mobile-menu-button"')
+                   + region('<details class="nav-more"', "</details>"))
+        menu = region('<div class="mobile-menu" id="mobileMenu"', "<main id=")
+
+        hidden = set(re.findall(r'href="(/[^"#]*)"', desktop))
+        reachable = set(re.findall(r'href="(/[^"#]*)"', menu))
+        self.assertIn("/compare", hidden, "nav-more no longer holds the compare link")
+        self.assertEqual(
+            hidden - reachable, set(),
+            f"hidden behind the hamburger but missing from it: {sorted(hidden - reachable)}")
+        # Sign out is a form, not a link, in both places.
+        self.assertIn('action="/logout"', desktop)
+        self.assertIn('action="/logout"', menu)
+
+
+class PlanBadgeTests(unittest.TestCase):
+    """/pricing showed two different current plans at once.
+
+    The strip read analysis_allowance, which resolves through
+    effective_plan_key and so honours a complimentary grant. The card badge
+    compared `plan_override or plan` by hand - the same lookup, minus the
+    grant branch - so an account holding a granted Gym plan was told "Your
+    current plan: Gym" directly above a Starter card badged "Current plan".
+    """
+
+    def _render(self, current_plan_key, stored_plan="free"):
+        from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
+        from core.payments import PLANS, plan_for_key
+
+        class Stub:
+            def __init__(self, **kw): self.__dict__.update(kw)
+            def __getattr__(self, key): return Stub()
+            def __getitem__(self, key): return Stub()
+            def __str__(self): return ""
+            def __bool__(self): return False
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        env = Environment(loader=FileSystemLoader(str(templates)),
+                          undefined=ChainableUndefined)
+        return env.get_template("pricing.html").render(
+            request=Stub(url=Stub(path="/pricing"), state=Stub(account=None), cookies={}),
+            plans=PLANS, roster_held=0, payments_enabled=False,
+            account={"plan": stored_plan, "plan_override": None, "email": "a@b.c"},
+            allowance={"plan": plan_for_key(current_plan_key), "remaining": None},
+            current_plan_key=current_plan_key,
+        )
+
+    def _badged(self, page):
+        import re
+
+        # Each card carries data-plan="<key>"; find the one holding the badge.
+        cards = re.split(r'(?=<section class="card pricing-card)', page)
+        return {
+            re.search(r'data-plan="([^"]+)"', card).group(1)
+            for card in cards
+            if 'data-plan="' in card and "Current plan</span>" in card
+        }
+
+    def test_the_badged_card_is_the_plan_the_strip_names(self):
+        page = self._render("gym", stored_plan="free")
+        self.assertIn("Gym", page)
+        self.assertEqual(
+            self._badged(page), {"gym"},
+            "the badge follows the stored plan instead of the effective one")
+
+    def test_exactly_one_card_is_ever_badged(self):
+        from core.payments import PLANS
+
+        for key in PLANS:
+            self.assertEqual(
+                len(self._badged(self._render(key))), 1,
+                f"{key} did not badge exactly one card")
+
+    def test_a_signed_out_visitor_sees_no_current_plan(self):
+        self.assertEqual(self._badged(self._render(None)), set())
+
+    def test_no_button_claims_to_preview_a_plan_it_cannot_show(self):
+        page = self._render("free")
+        self.assertNotIn("Preview this plan", page)
+
+
+class CoachFilenameTests(unittest.TestCase):
+    """/pricing carries the check-marked promise "No video filename shown"."""
+
+    def test_the_squad_table_shows_a_fight_label_not_the_uploaded_filename(self):
+        coach = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                 / "coach.html").read_text(encoding="utf-8")
+        self.assertNotIn("f.name", coach)
+        self.assertIn("{{f.label}}", coach)
+        # The raw enum went with it: KICK_LIGHT is not a thing to show a coach.
+        self.assertNotIn("{{f.ruleset}}", coach)
+        # The ruleset rides in the label now - "Kickboxing · Kick Light ·
+        # 14 Sep" - so the separate Sport and Ruleset columns were repeating
+        # it twice more in a table that had nine columns in 969px.
+        self.assertNotIn("<th>Ruleset</th>", coach)
+        self.assertNotIn("<th>Sport</th>", coach)
+
+    def test_the_promise_that_makes_this_a_defect_is_still_on_the_pricing_page(self):
+        pricing = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                   / "pricing.html").read_text(encoding="utf-8")
+        self.assertIn("No video filename shown", pricing,
+                      "the promise moved; this test should follow it")
+
+
+class BackNavigationTests(unittest.TestCase):
+    """The floating Back pill is gone; what replaced it has to actually exist.
+
+    It was position:fixed with an opaque background and no reserved space, and
+    .shell carries a transform - which makes .shell the containing block for a
+    fixed descendant - so it sat on top of whatever occupied the bottom-left
+    corner. It covered content on six pages.
+
+    The audit's reason for removing it was that "every page already has an
+    inline back link". Five of thirty templates did. The flow pages are the
+    ones that need it, and /result had nothing at all.
+    """
+
+    FLOW_TEMPLATES = ("analyze.html", "select.html", "progress.html",
+                      "replay.html", "review.html", "result.html")
+
+    def test_every_page_in_the_analysis_flow_offers_a_way_back(self):
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        for name in self.FLOW_TEMPLATES:
+            with self.subTest(template=name):
+                page = (templates / name).read_text(encoding="utf-8")
+                # Any of the three shapes the flow pages use: the quiet-back
+                # class, a back-arrow link, or a named return to the report.
+                self.assertTrue(
+                    "quiet-back" in page
+                    or "← " in page
+                    or "Back to report" in page,
+                    f"{name} has no inline way back and the pill is gone")
+
+    def test_the_pill_is_not_reintroduced_by_any_stylesheet(self):
+        from app.main import CSS_BUNDLE_TEXT
+
+        for bundle, text in CSS_BUNDLE_TEXT.items():
+            with self.subTest(bundle=bundle):
+                self.assertNotIn("global-back", text)
+
+
+class MediaCachingTests(unittest.TestCase):
+    """/media/<id> sent Cache-Control: no-store.
+
+    So every seek and every revisit re-downloaded the whole file. At the ~460
+    KB/s measured against the host that is about three and a half minutes for a
+    101 MB replay, paid again on every scrub, for footage the viewer had
+    already been sent once.
+    """
+
+    def test_the_media_route_asks_for_a_private_cache_not_none_at_all(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        marker = source.index("def media(request: Request, job_id: str):")
+        body = source[marker:marker + 2000]
+        self.assertIn('"Cache-Control": "private, max-age=3600"', body)
+        # private, never public: the URL is account-scoped and must not be held
+        # by a shared cache between two people's browsers.
+        self.assertNotIn('"public', body)
+
+    def test_the_pages_that_must_not_be_cached_still_are_not(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn('"/result/", "/replay/", "/media/", "/api/"', source)
+        self.assertIn('response.headers.setdefault("Cache-Control", "no-store")', source)
+        # setdefault is what lets the media route keep its own value while
+        # every other prefix, and a 404 on /media/, still gets no-store.
+        self.assertNotIn('response.headers["Cache-Control"] = "no-store"', source)
+
+
+class ReplayFailurePathTests(unittest.TestCase):
+    """A replay that never arrived left a spinner and 0:00 on screen forever."""
+
+    def setUp(self):
+        self.page = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                     / "replay.html").read_text(encoding="utf-8")
+
+    def test_a_stalled_transfer_is_noticed_even_though_it_fires_no_error(self):
+        # 'error' only fires when the browser rejects the file. A transfer that
+        # simply stops fires nothing, which is the case that hung.
+        self.assertIn("'stalled'", self.page)
+        self.assertIn("SLOW_AFTER_MS", self.page)
+        self.assertIn("setTimeout", self.page)
+        # ...and the timer must be cancelled when the video does arrive.
+        self.assertIn("clearTimeout(slowTimer)", self.page)
+        self.assertIn("'loadeddata'", self.page)
+
+    def test_a_format_the_browser_refuses_says_so_rather_than_blaming_the_load(self):
+        # MediaError 3 (decode) and 4 (src not supported) mean the bytes are
+        # here and unplayable - which is exactly what a QuickTime replay does.
+        self.assertIn("video.error", self.page)
+        self.assertIn("cannot play the saved video in the format", self.page)
+
+    def test_every_failure_offers_the_original_file(self):
+        self.assertIn("Download the original video", self.page)
+        self.assertIn("setAttribute('download'", self.page)
+
+    def test_the_failure_message_is_built_as_nodes_not_interpolated_html(self):
+        """statusEl gets a job id in it; building that as an HTML string would
+        put a URL fragment into innerHTML on every failure path."""
+        self.assertIn("createElement('a')", self.page)
+        self.assertNotIn("statusEl.innerHTML=`", self.page)
+
+
+class ReadableValueTests(unittest.TestCase):
+    """/profile printed "KICK_LIGHT · 2026-09-14T15:52:56.914959+00:00"."""
+
+    def test_the_formatters_turn_stored_values_into_readable_ones(self):
+        from app.main import _fight_moment, _ruleset_label
+
+        self.assertEqual(_fight_moment("2026-09-14T15:52:56.914959+00:00"), "14 Sep 2026, 15:52")
+        self.assertEqual(_fight_moment("2026-09-04T09:05:00+00:00", False), "4 Sep 2026")
+        self.assertEqual(_ruleset_label("KICK_LIGHT"), "Kick Light")
+        # A value with no mapping is still not shown as an enum.
+        self.assertEqual(_ruleset_label("SOME_NEW_ONE"), "Some New One")
+
+    def test_nothing_unparseable_becomes_an_exception_on_somebody_s_page(self):
+        from app.main import _fight_moment, _ruleset_label
+
+        for bad in (None, "", "not-a-date", "2026-13-45"):
+            self.assertIsInstance(_fight_moment(bad), str)
+        self.assertEqual(_ruleset_label(None), "\u2014")
+
+    def test_no_page_renders_a_raw_enum_or_iso_string(self):
+        import re
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        # Text renders only. An attribute value - datetime="..." for the
+        # local-time script, data-date="..." for the sort - holds the stored
+        # value on purpose; that is machine data, not something a reader sees.
+        raw = re.compile(r'(?<!=")\{\{\s*[a-z_]+\.(?:created_at(?:\[[^\]]*\])?|ruleset)\s*\}\}')
+        for name in ("profile.html", "history.html", "dashboard.html", "settings.html",
+                     "coach.html", "compare.html"):
+            page = (templates / name).read_text(encoding="utf-8")
+            self.assertEqual(
+                raw.findall(page), [],
+                f"{name} renders a stored value straight at the reader")
+
+    def test_timestamps_carry_what_the_local_time_script_needs(self):
+        base = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                / "base.html").read_text(encoding="utf-8")
+        # The audit expected a `timezone` cookie to read. There is none, and no
+        # timezone handling anywhere - the browser already knows, so nothing
+        # has to be stored to ask it.
+        self.assertIn("time[data-local]", base)
+        self.assertIn("toLocaleString", base)
+        main = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertNotIn("timezone_cookie", main)
+
+
+class DeleteAffordanceTests(unittest.TestCase):
+    """Delete sat beside Replay at 11px and 4.04:1, guarded by confirm()."""
+
+    def test_the_delete_control_clears_the_contrast_minimum(self):
+        css = (Path(__file__).resolve().parents[1] / "app" / "static"
+               / "product.css").read_text(encoding="utf-8")
+        self.assertIn("color:var(--wiq-danger)", css)
+        self.assertNotIn("color:#8d6670", css)
+        self.assertIn(".record-delete{padding:2px 0;border:0;background:none;"
+                      "color:var(--wiq-danger);font-size:13px", css)
+
+    def test_wiq_danger_actually_passes_on_this_ground(self):
+        """Measured, not assumed - the previous colour failed at 4.04:1."""
+        def channel(value):
+            value /= 255
+            return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+
+        def luminance(colour):
+            r, g, b = (channel(c) for c in colour)
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+        foreground, background = (0xEF, 0x78, 0x91), (9, 9, 11)
+        high, low = sorted((luminance(foreground), luminance(background)), reverse=True)
+        self.assertGreaterEqual((high + 0.05) / (low + 0.05), 4.5)
+
+    def test_the_dialog_names_the_fight_and_what_goes_with_it(self):
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                / "history.html").read_text(encoding="utf-8")
+        self.assertIn("{{f.ruleset|ruleset_label}} fight from", page)
+        self.assertIn("video, report and corrections", page)
+        self.assertNotIn("Delete this saved fight and its analysis files?", page)
+
+
+class EmptyStateTests(unittest.TestCase):
+    """Clicking Sparring with no sparring fights said "No saved fights match
+    this search" - nothing had been searched, and the only way back to
+    everything was to notice the All fights button."""
+
+    def setUp(self):
+        self.page = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                     / "history.html").read_text(encoding="utf-8")
+
+    def test_the_three_states_have_their_own_message(self):
+        self.assertIn("No saved fights match", self.page)      # searched
+        self.assertIn("fights match \u201c", self.page)        # searched within a filter
+        self.assertIn("have not saved any", self.page)          # filtered, nothing there
+        self.assertNotIn("No saved fights match this search.</p>", self.page)
+
+    def test_each_state_offers_the_action_that_undoes_it(self):
+        for action in ("Clear search", "Show all fights", "Clear search and show all fights"):
+            self.assertIn(action, self.page)
+        self.assertIn("historyNoResultsAction", self.page)
+
+    def test_the_filter_is_set_in_one_place(self):
+        """The empty state's buttons and the filter row must not be able to
+        disagree about which filter is pressed."""
+        self.assertIn("const setFilter=", self.page)
+        self.assertEqual(self.page.count("aria-pressed',String(item===button)"), 1)

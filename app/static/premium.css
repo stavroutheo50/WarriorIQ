@@ -36,7 +36,7 @@ body { background: transparent; }
    shell needs a position; the overlays are already fixed and must keep that, so
    they are raised by z-index alone. */
 .shell { position: relative; z-index: 1; }
-.cookie-notice, .app-toast, .global-back, .page-scroll-progress { z-index: 40; }
+.cookie-notice, .app-toast, .page-scroll-progress { z-index: 40; }
 
 /* --- Atmosphere -----------------------------------------------------------
    Three oversized, heavily feathered colour fields behind everything. Fixed so

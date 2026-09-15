@@ -4321,3 +4321,245 @@ class StandaloneReportHonestyTests(unittest.TestCase):
             with self.subTest(trusted=trusted):
                 self.assertNotIn("Punch attempts", html)
                 self.assertNotIn("punches landed", html.lower())
+
+
+class CompareMovementTests(unittest.TestCase):
+    """/compare told the reader movement was "compared below" and showed nothing.
+
+    Both cards ended with that sentence, the page went straight to the footer,
+    and since the strike half is deliberately withheld until strike counting is
+    release-validated, movement was the only thing the page had to offer.
+    """
+
+    @staticmethod
+    def _report(focus="A", coverage=0.95, **metrics):
+        return {
+            "video": {"focus_fighter": focus},
+            "tracking": {"fighter_A_coverage": coverage, "fighter_B_coverage": coverage},
+            "metrics": {focus: dict(metrics)},
+        }
+
+    def test_two_fights_are_compared_on_the_numbers_that_survive_the_strike_gate(self):
+        from core.squad import compare_movement
+
+        result = compare_movement([
+            self._report(pressure_index=0.10, ring_center_control=0.60,
+                         footwork_body_lengths_per_second=1.20, guard_index=0.20,
+                         balance_index=0.70),
+            self._report(pressure_index=0.30, ring_center_control=0.40,
+                         footwork_body_lengths_per_second=1.20, guard_index=0.20,
+                         balance_index=0.70),
+        ])
+        self.assertTrue(result["available"])
+        rows = {row["key"]: row for row in result["rows"]}
+        self.assertEqual(set(rows), {
+            "pressure_index", "ring_center_control", "footwork_body_lengths_per_second",
+            "guard_index", "balance_index"})
+        # Pressure is shown on the 0-100 scale the report uses, where 50 is
+        # neither forward nor back: 0.10 -> 55, 0.30 -> 65.
+        self.assertEqual(rows["pressure_index"]["a"], "55")
+        self.assertEqual(rows["pressure_index"]["b"], "65")
+        self.assertEqual(rows["pressure_index"]["leader"], "b")
+        self.assertEqual(rows["ring_center_control"]["leader"], "a")
+        # Identical numbers are level, not a winner by a rounding error.
+        self.assertEqual(rows["guard_index"]["leader"], "level")
+        self.assertEqual(rows["footwork_body_lengths_per_second"]["delta"], "level")
+
+    def test_a_metric_missing_from_both_fights_is_left_out_rather_than_shown_empty(self):
+        from core.squad import compare_movement
+
+        result = compare_movement([
+            self._report(pressure_index=0.1), self._report(pressure_index=0.2)])
+        self.assertEqual([row["key"] for row in result["rows"]], ["pressure_index"])
+
+    def test_a_badly_tracked_fight_is_flagged_rather_than_silently_compared(self):
+        """A tracking failure is not a fighter having a bad week.
+
+        The same rule the squad view applies: show it, but say which fight the
+        analysis could not follow.
+        """
+        from core.squad import compare_movement
+
+        result = compare_movement([
+            self._report(coverage=0.40, pressure_index=0.1),
+            self._report(coverage=0.95, pressure_index=0.2)])
+        self.assertEqual(result["untrusted"], [True, False])
+        self.assertEqual(result["coverage"], [0.4, 0.95])
+
+    def test_one_missing_report_means_no_comparison(self):
+        from core.squad import compare_movement
+
+        self.assertFalse(compare_movement([self._report(pressure_index=0.1), None])["available"])
+        self.assertFalse(compare_movement([None, None])["available"])
+
+
+class SportCoverageSentenceTests(unittest.TestCase):
+    """The setup page said "We count punches, kicks and knees" for every sport.
+
+    Neither taekwondo ruleset scores a knee, so a taekwondo competitor was told
+    WarriorIQ counts something their federation does not award - a claim about
+    their own sport that they can check and find wrong.
+    """
+
+    def test_a_sport_is_never_credited_with_a_family_it_cannot_score(self):
+        from core.scoring import RULESETS, SPORTS, sport_counted_families
+
+        for sport, keys in SPORTS.items():
+            counted = sport_counted_families(sport)
+            for label, attribute in (("punches", "allow_punch"), ("kicks", "allow_kick"),
+                                     ("knees", "allow_knee")):
+                allowed = any(getattr(RULESETS[key], attribute) for key in keys)
+                self.assertEqual(
+                    label in counted, allowed,
+                    f"{sport} counted={counted} but {attribute}={allowed}")
+
+    def test_taekwondo_no_longer_claims_knees(self):
+        from core.scoring import sport_counted_families
+
+        self.assertEqual(sport_counted_families("taekwondo"), ("punches", "kicks"))
+        self.assertEqual(sport_counted_families("boxing"), ("punches",))
+        self.assertIn("knees", sport_counted_families("mma"))
+
+
+class UploadContainerCheckTests(unittest.TestCase):
+    """An 11-byte text file renamed .mp4 was accepted as a fight video.
+
+    The upload route checked the filename suffix and nothing else, so the drop
+    zone turned green, the submit button enabled, and the failure only arrived
+    from the decoder much later.
+    """
+
+    def _written(self, payload: bytes) -> bool:
+        import os
+        import tempfile
+
+        from core.upload_security import looks_like_video
+
+        handle = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            handle.write(payload)
+            handle.close()
+            return looks_like_video(handle.name)
+        finally:
+            os.unlink(handle.name)
+
+    def test_a_text_file_with_a_video_extension_is_not_a_video(self):
+        self.assertFalse(self._written(b"hello world"))
+        self.assertFalse(self._written(b""))
+        self.assertFalse(self._written(bytes([0x89]) + b"PNG" + bytes(12)))
+
+    def test_the_containers_the_upload_form_advertises_are_accepted(self):
+        self.assertTrue(self._written(bytes(4) + b"ftypisom" + bytes(8)))
+        self.assertTrue(self._written(bytes([0x1A, 0x45, 0xDF, 0xA3]) + bytes(12)))
+        self.assertTrue(self._written(b"RIFF" + bytes(4) + b"AVI " + bytes(4)))
+
+    def test_a_real_fight_file_still_passes(self):
+        from core.upload_security import looks_like_video
+
+        sample = Path(__file__).resolve().parents[1] / "fights" / "1.mp4"
+        if not sample.exists():
+            self.skipTest("no sample fight available")
+        self.assertTrue(looks_like_video(sample))
+
+
+class FightLabelTests(unittest.TestCase):
+    """/pricing promises "No video filename shown"; /coach printed IMG_4554.mov."""
+
+    def test_a_fight_is_named_by_what_it_was_not_by_the_file_it_came_from(self):
+        from core.squad import fight_label
+
+        self.assertEqual(
+            fight_label("Kickboxing", "KICK_LIGHT", "2026-09-14T15:52:56+00:00"),
+            "Kickboxing · Kick Light · 14 Sep")
+        # Nothing known is still not a filename.
+        self.assertEqual(fight_label(None, None, None), "Fight analysis")
+
+    def test_compare_options_differ_from_one_another(self):
+        from core.squad import fight_choice_label
+
+        same_day = [
+            fight_choice_label("KICK_LIGHT", "2026-09-02T18:54:00+00:00", "competition"),
+            fight_choice_label("KICK_LIGHT", "2026-09-02T09:05:00+00:00", "sparring"),
+            fight_choice_label("K1", "2026-09-02T18:54:00+00:00", "competition"),
+        ]
+        self.assertEqual(len(set(same_day)), 3, same_day)
+        self.assertEqual(same_day[0], "Kick Light · 2 Sep, 18:54 · competition")
+
+
+class WebVideoDerivativeTests(unittest.TestCase):
+    """Phone footage arrives in a QuickTime container.
+
+    Chrome does play it - canPlayType('video/quicktime') returns "" but that
+    asks about a MIME string, not about whether the bytes decode, and a real
+    101 MB iPhone upload loaded fine over HTTP with Content-Type
+    video/quicktime. What the container costs is the stricter players and the
+    formats that genuinely will not decode, so the copy is worth making at
+    0.2 s and not worth a 22 s re-encode.
+    """
+
+    def test_a_derivative_is_named_from_its_original(self):
+        from core.video import derivative_for
+
+        self.assertEqual(derivative_for("uploads/abc.mov").name, "abc_web.mp4")
+        self.assertEqual(derivative_for("uploads/abc.mkv").name, "abc_web.mp4")
+
+    def test_a_derivative_is_owned_by_the_job_of_its_original(self):
+        """The retention sweep protects by stem, and "<job>_web" is not "<job>".
+
+        Without this it ages out a live fight's playable copy while correctly
+        keeping the original, and the replay silently reverts to the container
+        the copy existed to avoid.
+        """
+        from core.video import owning_stem
+
+        self.assertEqual(owning_stem("uploads/abc_web.mp4"), "abc")
+        self.assertEqual(owning_stem("uploads/abc.mov"), "abc")
+        # A job whose own name ends in _web is not mistaken for a derivative's.
+        self.assertEqual(owning_stem("uploads/xyz.mp4"), "xyz")
+
+    def test_playback_prefers_the_derivative_and_falls_back_to_the_original(self):
+        import tempfile
+
+        from core.video import derivative_for, playback_file
+
+        with tempfile.TemporaryDirectory() as folder:
+            original = Path(folder) / "job.mov"
+            original.write_bytes(b"x")
+            self.assertEqual(playback_file(original), original)
+            derivative_for(original).write_bytes(b"y")
+            self.assertEqual(playback_file(original), derivative_for(original))
+
+    def test_a_container_a_browser_already_expects_is_left_alone(self):
+        from core.video import normalize_container
+
+        for name in ("a.mp4", "a.webm", "a.m4v"):
+            self.assertIsNone(normalize_container(Path(name)))
+
+    def test_a_missing_file_is_not_an_error(self):
+        from core.video import normalize_container
+
+        self.assertIsNone(normalize_container(Path("does-not-exist.mov")))
+
+    def test_deleting_a_fight_deletes_the_derivative_too(self):
+        """A copy of somebody's fight left in uploads/ after they deleted the
+        fight is the privacy problem the deletion was for."""
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        marker = source.index("def _remove_fight_files(")
+        body = source[marker:marker + 600]
+        self.assertIn("remove_derivative(video)", body)
+
+    def test_both_retention_sweeps_account_for_the_derivative(self):
+        source = (Path(__file__).resolve().parents[1] / "core" / "retention.py").read_text(encoding="utf-8")
+        self.assertIn("remove_derivative(video)", source)
+        self.assertIn("owning_stem(video) in protected", source)
+        self.assertNotIn("video.stem in protected", source)
+
+    def test_the_upload_route_normalises_before_it_probes(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        normalise = source.index("run_in_threadpool(normalize_container")
+        guard = source.index("run_in_threadpool(looks_like_video")
+        scan = source.index("run_in_threadpool(scan_upload")
+        # Never before the container check or the malware scan: neither should
+        # be preceded by handing the file to ffmpeg.
+        self.assertLess(guard, normalise)
+        self.assertLess(scan, normalise)

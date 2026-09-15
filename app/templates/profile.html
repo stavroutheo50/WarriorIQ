@@ -12,6 +12,7 @@
     <div>
       <div class="eyebrow">Athlete profile</div>
       <h1>{{profile.display_name}}</h1>
+      {% if profile.display_name == 'My Athlete' %}<p class="small muted">That is the name WarriorIQ starts everyone with. Change it below and it is used on your progress and coaching pages.</p>{% endif %}
       <p class="athlete-facts">
         <span>Fighter {{profile.default_fighter|default('A', true)}} corner</span>
         {% if request.state.active_sport %}<span>{{request.state.active_sport.label}}</span>{% endif %}
@@ -58,7 +59,7 @@
     <button class="btn" type="submit">Save profile</button>
   </form>
 </section>
-<section class="card"><div class="eyebrow">Fight library</div><h3>{{fights|length}} saved analyses</h3><ul class="list-clean">{% for f in fights[:8] %}<li><a href="/result/{{f.job_id}}"><strong>Fight analysis</strong></a><br><span class="small muted">{{f.ruleset}} · {{f.created_at}}</span></li>{% else %}<li class="muted">No saved fights yet.</li>{% endfor %}</ul><p><a class="btn secondary" href="/history">Open full history</a></p></section>
+<section class="card"><div class="eyebrow">Fight library</div><h3>{{fights|length}} saved analyses</h3><ul class="list-clean">{% for f in fights[:8] %}<li><a href="/result/{{f.job_id}}"><strong>Fight analysis</strong></a><br><span class="small muted">{{f.ruleset|ruleset_label}} · <time datetime="{{f.created_at}}" data-local>{{f.created_at|fight_moment}}</time></span></li>{% else %}<li class="muted">No saved fights yet.</li>{% endfor %}</ul><p><a class="btn secondary" href="/history">Open full history</a></p></section>
 </div>
 <section class="card"><div class="eyebrow">Your data</div><h3>Download an account copy</h3><p class="muted">Export your profile, fight metadata, corrections, assignments and legal acceptance history. The download does not include password secrets or the video files themselves.</p><form action="/account/export" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="field"><label for="exportPassword">Current password</label><input id="exportPassword" type="password" name="password" autocomplete="current-password" required></div><button class="btn secondary" type="submit" data-keep-label="true">Download my data</button></form></section>
 <section class="card account-danger"><div class="eyebrow">Account and data</div><h3>Delete account</h3><p class="muted">This permanently removes the account, profile, saved fight videos, reports, corrections, assignments, acceptance records, and share links held for this account.</p><form action="/account/delete" method="post" onsubmit="return confirm('Permanently delete this WarriorIQ account and every saved fight?')"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="row"><div class="field"><label>Type DELETE</label><input name="confirmation" autocomplete="off" required></div><div class="field"><label>Current password</label><input type="password" name="password" autocomplete="current-password" required></div></div><button class="btn danger" type="submit">Delete account and saved data</button></form></section>

@@ -20,7 +20,7 @@ from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import cv2
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -71,6 +71,8 @@ from core.db import (
     revoke_report_shares, save_annotation,
     save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
     set_account_status, set_annotation_sequence,
+    plan_interest_counts, plans_wanted_by, policies_outdated,
+    record_plan_interest, record_policy_reacceptance,
     set_fight_review_status, toggle_assignment, update_cookie_preferences,
     update_marketing_consent, update_password_hash, update_profile,
 )
@@ -81,7 +83,7 @@ from core.legal import LEGAL_DOCUMENTS, launch_readiness
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
-from core.upload_security import scan_upload
+from core.upload_security import looks_like_video, scan_upload
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
     refresh_identity_integrity,
@@ -90,12 +92,15 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_unobserved
+from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_unobserved
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
-from core.squad import build_squad_view, compare_with_previous
+from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
-from core.video import get_video_info, probe_upload, read_frame
+from core.video import (
+    get_video_info, normalize_container, playback_file, probe_upload,
+    read_frame, remove_derivative,
+)
 
 app = FastAPI(title="WarriorIQ")
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
@@ -155,6 +160,40 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "app" / "templates"))
+
+
+def _fight_moment(value: str | None, with_time: bool = True) -> str:
+    """A stored timestamp as a person reads it.
+
+    Pages were printing the ISO string straight out of the database -
+    "2026-09-14T15:52:56.914959+00:00" on /profile - beside a raw ruleset
+    enum. Rendered in UTC here and relabelled to the reader's own zone by
+    the script in base.html, which is why the markup is a <time> element.
+
+    The audit expected a `timezone` cookie to read; there is none, and there
+    is no timezone handling anywhere in the app. The browser already knows,
+    so nothing has to be stored to ask it.
+    """
+    if not value:
+        return "—"
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return str(value)[:10]
+    day = f"{moment.day} {moment:%b %Y}"
+    return f"{day}, {moment:%H:%M}" if with_time else day
+
+
+def _ruleset_label(value: str | None) -> str:
+    """"KICK_LIGHT" is a database value, not a thing to show somebody."""
+    key = str(value or "").strip()
+    if not key:
+        return "—"
+    return RULESET_LABELS.get(key, key.replace("_", " ").title())
+
+
+templates.env.filters["fight_moment"] = _fight_moment
+templates.env.filters["ruleset_label"] = _ruleset_label
 
 
 def _asset_version() -> str:
@@ -708,7 +747,22 @@ def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds
 
 
 def _cookie_preferences(request: Request) -> dict:
+    """Read the stored cookie choice, and whether it still applies.
+
+    The choice is stored as "<choice>:<policy version>". A choice made
+    against a superseded policy version is treated as undecided, which is
+    what re-opens the banner - previously the cookie recorded only the
+    choice, so bumping WARRIORIQ_POLICY_VERSION re-prompted nobody.
+
+    A cookie with no version was written before this and is honoured as it
+    stands. Those visitors did answer the question; re-asking all of them
+    once to backfill a version would be a worse reading of "re-prompt when
+    the policy changes" than simply recording it from here on.
+    """
     raw = request.cookies.get(COOKIE_PREFERENCES_COOKIE, "")
+    raw, _, version = raw.partition(":")
+    if version and version != SETTINGS.policy_version:
+        return {"decided": False, "analytics": False, "marketing": False}
     if raw == "all":
         return {"decided": True, "analytics": True, "marketing": True}
     if raw == "custom-analytics":
@@ -901,6 +955,11 @@ async def viewer_context(request: Request, call_next):
     request.state.active_analysis = request.state.analysis_navigation["display"]
     chosen_sport = (request.cookies.get(ACTIVE_SPORT_COOKIE) or "").strip().lower()
     request.state.active_sport = sport_identity(chosen_sport) if chosen_sport in SPORTS else None
+    # The switcher is a real menu now, so it needs something to list. It
+    # looked like a dropdown - bordered pill, chevron - and was a plain link
+    # to /analyze, so pressing it left whatever the reader was in the middle
+    # of to show them a page of five sports.
+    request.state.sports = [sport_identity(key) for key in SPORTS]
     request.state.launch = launch_readiness()
     request.state.minimum_account_age = SETTINGS.minimum_account_age
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
@@ -1023,6 +1082,9 @@ async def viewer_context(request: Request, call_next):
         f"frame-ancestors 'none'; form-action {form_action}",
     )
     if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/s/")):
+        # setdefault, so a route that has already chosen keeps its value.
+        # /media/ does exactly that: a fight video is private but not
+        # volatile, and re-sending 101 MB on every seek is not privacy.
         response.headers.setdefault("Cache-Control", "no-store")
     elif request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "public, max-age=604800")
@@ -1635,13 +1697,8 @@ async def social_auth_start(
             f"Confirm that you are at least {SETTINGS.minimum_account_age} and accept the Terms of Service and Privacy Policy.",
             next_path,
         )
-    if mode == "login" and not accept_policies:
-        return _auth_page(
-            request,
-            "login",
-            "Confirm the Terms, Privacy Policy, and Acceptable Use Policy to sign in.",
-            next_path,
-        )
+    # Signing in is not the moment to collect consent: see login(). An account
+    # whose accepted version is behind is asked once, after it is known.
     authorize_options = {"response_mode": "form_post"} if provider == "apple" else {}
     try:
         response = await client.authorize_redirect(
@@ -1914,15 +1971,17 @@ def login(
     email: str = Form(...),
     password: str = Form(...),
     next_path: str = Form("/dashboard"),
-    accept_policies: bool = Form(False),
 ):
+    """Sign in.
+
+    This asked for the Terms, Privacy Policy and Acceptable Use Policy to be
+    accepted on every sign-in. Acceptance belongs at signup; re-accepting on
+    each login records nothing new and is asked of everybody because at the
+    form nobody has been identified yet. The account row carries the version
+    it accepted, so the question is now asked after authentication, only of
+    the accounts whose version is behind - see /policies.
+    """
     _enforce_rate_limit(request, "login", 30, 300)
-    if not accept_policies:
-        return _auth_page(
-            request, "login",
-            "Confirm the Terms, Privacy Policy, and Acceptable Use Policy to sign in.",
-            next_path,
-        )
     account = authenticate(email, password)
     if not account:
         record_security_event("login_failed", severity="warning", metadata={"email_hash": token_digest(email.strip().lower())[:16]})
@@ -1933,12 +1992,10 @@ def login(
             "Verify your email before signing in. You can request a fresh verification link below.",
             next_path,
         )
-    record_legal_acceptance(
-        "account_signin_policies", SETTINGS.policy_version,
-        profile_id=int(account["profile_id"]),
-        metadata={"source": "login"},
-    )
-    response = RedirectResponse(_safe_next(next_path), status_code=303)
+    destination = _safe_next(next_path)
+    if policies_outdated(account):
+        destination = f"/policies?next={quote(destination, safe='')}"
+    response = RedirectResponse(destination, status_code=303)
     record_security_event("login_succeeded", account_id=int(account["id"]))
     response.set_cookie(
         SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
@@ -2070,6 +2127,14 @@ def home(request: Request):
     )
 
 
+def _prose_list(items) -> str:
+    """"a, b and c" - built here rather than with a chain of template filters."""
+    items = [str(item) for item in items if item]
+    if len(items) <= 1:
+        return items[0] if items else ""
+    return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
 def _sport_context(request: Request, sport: str) -> dict:
     """Everything a single sport's setup page needs to describe itself."""
     account = _account(request)
@@ -2099,6 +2164,8 @@ def _sport_context(request: Request, sport: str) -> dict:
         # asked which one this fight is about.
         "single_fighter": (_request_plan(request) or {}).get("roster_limit") == 1,
         "unobserved": sport_unobserved(sport),
+        # What this sport can actually score, rather than a fixed sentence.
+        "counted_families": _prose_list(sport_counted_families(sport)),
         # True when every ruleset in the sport shares the same blind spot. When
         # only one does - jumping-kick bonuses exist in Point Fighting and
         # nowhere else in kickboxing - the page has to say "depending on the
@@ -2138,14 +2205,18 @@ def choose_sport(request: Request):
     sport, so it is asked first and asked on its own rather than as one field
     among ten on a form the reader has already started filling in.
 
-    Signed-out visitors are sent to sign in first. An analysis they start
-    without an account produces a guest report that is deleted after two hours
-    and never joins their fight library, so letting them spend an upload and an
-    analysis before mentioning that wastes the one thing they cannot get back.
+    An analysis started without an account produces a guest report that is
+    deleted after two hours and never joins the fight library, so a signed-out
+    visitor is told that before spending an upload on it - but told here,
+    rather than bounced to /login.
+
+    This route used to redirect while /dashboard, /history, /coach, /profile
+    and /compare all answered 200 with the same signed-out shell, so someone
+    who bookmarked one of the six got a sales page and someone who bookmarked
+    this one got a login form. The shell is the better of the two: the page
+    keeps its address, and its call to action carries the destination.
     """
     account = _account(request)
-    if account is None:
-        return RedirectResponse("/login?next=/analyze", status_code=303)
     return templates.TemplateResponse(
         request=request,
         name="sports.html",
@@ -2154,6 +2225,7 @@ def choose_sport(request: Request):
             # An exhausted allowance is worth knowing before a sport is picked
             # and a video chosen, not two pages later.
             "allowance": analysis_allowance(int(account["id"])) if account else None,
+            "signed_in": account is not None,
             "sports": RULESET_SPORTS,
             # Boxing's single ruleset is named after the sport, so listing it
             # tells the reader nothing; say what is actually true instead.
@@ -2247,6 +2319,18 @@ async def upload(
     # event loop so one large phone upload cannot freeze every other request.
     await run_in_threadpool(_save_upload_limited, video, video_path, MAX_FIGHT_BYTES)
 
+    # Before the scanner and before the decoder: the suffix is chosen by
+    # whoever names the file, so it says nothing about what is inside it.
+    # An eleven-byte text file called fight.mp4 was accepted this far.
+    if not await run_in_threadpool(looks_like_video, video_path):
+        video_path.unlink(missing_ok=True)
+        raise HTTPException(
+            400,
+            "That file is not a video. The name ends in a video extension but the "
+            "contents are not MP4, MOV, MKV, WEBM or AVI. Pick the clip straight "
+            "from your camera roll.",
+        )
+
     scan = await run_in_threadpool(scan_upload, video_path)
     if not scan["clean"]:
         video_path.unlink(missing_ok=True)
@@ -2254,6 +2338,13 @@ async def upload(
             record_security_event("malware_upload_blocked", severity="warning")
             raise HTTPException(400, "This file did not pass the upload safety scan.")
         raise HTTPException(503, "Fight uploads are paused because the safety scanner is unavailable.")
+
+    # Copy the streams into a standard MP4 when the container is not one a
+    # browser expects. Measured at 0.20 s on a 101 MB iPhone upload, because
+    # nothing is re-encoded: the streams inside are already H.264 and AAC.
+    # Footage that genuinely needs re-encoding is left alone here rather than
+    # spending minutes of shared-host CPU on a request somebody is waiting on.
+    await run_in_threadpool(normalize_container, video_path)
 
     try:
         info = await run_in_threadpool(get_video_info, video_path)
@@ -3762,7 +3853,21 @@ def media(request: Request, job_id: str):
         path = Path(fight["video_path"]) if fight else Path("missing")
     if not path.exists():
         raise HTTPException(404)
-    return FileResponse(path)
+    # A QuickTime upload has a browser-friendly copy beside it; the original
+    # stays on disk because reprocessing reads it, and is what the replay
+    # page offers for download when playback fails.
+    path = playback_file(path)
+    # no-store meant every seek re-downloaded the whole file. Measured at about
+    # 460 KB/s, a 101 MB replay is three and a half minutes, paid again on every
+    # scrub and every revisit - on footage the viewer has already been sent once.
+    #
+    # `private` keeps it out of shared caches; the URL is account-scoped by
+    # _authorized_job above and the prefix is robots-disallowed, so the copy
+    # lives in the one browser that was already allowed to see it.
+    #
+    # Set here rather than in the middleware, which uses setdefault: this wins,
+    # while a 404 on the same prefix still falls through to no-store.
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.get("/profile", response_class=HTMLResponse)
@@ -4002,6 +4107,7 @@ def _remove_fight_files(fight: dict) -> None:
         shutil.rmtree(job_dir, ignore_errors=True)
     video = Path(fight["video_path"]).resolve()
     if video.parent == UPLOADS.resolve():
+        remove_derivative(video)
         video.unlink(missing_ok=True)
 
 
@@ -4034,6 +4140,11 @@ def delete_fight_route(request: Request, job_id: str):
 def compare_page(request: Request, a: str = "", b: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
+    for fight in fights:
+        # Every option read "Fight analysis · <date>", so a reader with six
+        # fights on one day was choosing between six identical lines.
+        fight["choice_label"] = fight_choice_label(
+            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"))
     allowed = {fight["job_id"] for fight in fights}
     reports = []
     for job_id in (a, b):
@@ -4046,7 +4157,13 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     return templates.TemplateResponse(
         request=request,
         name="compare.html",
-        context={"request": request, "fights": fights, "a": a, "b": b, "reports": reports, "signed_in": profile_id is not None},
+        context={
+            "request": request, "fights": fights, "a": a, "b": b, "reports": reports,
+            "signed_in": profile_id is not None,
+            # The page promised a movement comparison "below" and rendered
+            # nothing. These are the numbers that survive the strike gate.
+            "movement": compare_movement(reports),
+        },
     )
 
 
@@ -4055,6 +4172,11 @@ def coach_page(request: Request):
     profile_id = _profile_id(request)
     profile = get_profile(profile_id) if profile_id is not None else None
     fights = list_fights(profile_id) if profile_id is not None else []
+    for fight in fights:
+        # The saved-evidence list printed the raw ruleset enum beside every
+        # entry: "Fight analysis · KICK_LIGHT".
+        fight["choice_label"] = fight_choice_label(
+            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"))
     latest = None
     focus = (profile or {}).get("default_fighter", "A")
     suggested_assignments: list[dict] = []
@@ -4207,10 +4329,63 @@ def save_cookie_preferences(
     )
     response = RedirectResponse(_safe_next(next_path, "/"), status_code=303)
     response.set_cookie(
-        COOKIE_PREFERENCES_COOKIE, value, max_age=60 * 60 * 24 * 365,
+        COOKIE_PREFERENCES_COOKIE, f"{value}:{SETTINGS.policy_version}",
+        max_age=60 * 60 * 24 * 365,
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
+
+
+@app.get("/policies", response_class=HTMLResponse)
+def policies_updated(request: Request, next: str = "/dashboard"):
+    """Ask an account whose accepted policy version is behind the current one.
+
+    Reached only after authentication, so there is an account to compare
+    against - which is what /login could never do, and why it asked everybody
+    on every sign-in instead.
+    """
+    account = _account(request)
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    if not policies_outdated(account):
+        return RedirectResponse(_safe_next(next), status_code=303)
+    return templates.TemplateResponse(
+        request=request, name="policies.html",
+        context={
+            "request": request, "next_path": _safe_next(next),
+            "accepted_version": account["terms_version"],
+            "policy_version": SETTINGS.policy_version,
+        },
+    )
+
+
+@app.post("/policies", dependencies=[Depends(require_csrf)])
+def accept_updated_policies(
+    request: Request,
+    next_path: str = Form("/dashboard"),
+    accept_policies: bool = Form(False),
+):
+    account = _account(request)
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    if not accept_policies:
+        return templates.TemplateResponse(
+            request=request, name="policies.html",
+            context={
+                "request": request, "next_path": _safe_next(next_path),
+                "accepted_version": account["terms_version"],
+                "policy_version": SETTINGS.policy_version,
+                "error": "Accept the updated policies to continue.",
+            },
+            status_code=400,
+        )
+    record_policy_reacceptance(int(account["id"]))
+    record_legal_acceptance(
+        "account_policy_reacceptance", SETTINGS.policy_version,
+        profile_id=int(account["profile_id"]),
+        metadata={"previous_version": account["terms_version"]},
+    )
+    return RedirectResponse(_safe_next(next_path), status_code=303)
 
 
 @app.get("/legal", response_class=HTMLResponse)
@@ -4517,8 +4692,36 @@ def pricing_page(request: Request):
             "roster_held": len(list_fighters(int(account["profile_id"]))) if account else 0,
             "payments_enabled": SETTINGS.payments_enabled, "account": account,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
+            # The strip read analysis_allowance (which resolves through
+            # effective_plan_key) while the card badge compared
+            # plan_override or plan by hand - a second copy of the same
+            # lookup, missing its complimentary-grant branch. So an account
+            # holding a granted plan was told "Your current plan: Gym" above
+            # a Starter card badged "Current plan". One resolver, both places.
+            "current_plan_key": effective_plan_key(
+                account.get("plan"), account.get("plan_override"), account.get("email"),
+            ) if account else None,
+            "plans_wanted": plans_wanted_by(int(account["id"])) if account else set(),
         },
     )
+
+
+@app.post("/plan-interest/{plan_key}", dependencies=[Depends(require_csrf)])
+def register_plan_interest(request: Request, plan_key: str, next_path: str = Form("/pricing")):
+    """Record that somebody wants a paid plan that is not open yet.
+
+    Every button on a paid card opened the workspace the visitor already had,
+    so during early access there was no way to say which plan you actually
+    wanted and no way to find out afterwards that anybody had.
+    """
+    account = _account(request)
+    if not account:
+        return RedirectResponse("/login?next=/pricing", status_code=303)
+    if plan_key not in PLANS or plan_key == "free":
+        raise HTTPException(404, "Unknown plan.")
+    _enforce_rate_limit(request, "plan-interest", 30, 3600)
+    record_plan_interest(int(account["id"]), plan_key)
+    return RedirectResponse(f"{_safe_next(next_path, '/pricing')}#plan-{plan_key}", status_code=303)
 
 
 @app.post("/share/{job_id}", dependencies=[Depends(require_csrf)])

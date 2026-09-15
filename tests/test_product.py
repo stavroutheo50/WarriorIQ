@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import tempfile
 import unittest
@@ -22,6 +23,15 @@ from app.state import create_job, delete_job
 from core.auth import register
 from core.payments import PLANS
 from core.social_auth import SocialIdentity
+
+
+# A real container header followed by padding: enough to pass the magic-byte
+# check in core/upload_security.py and still fail the decoder, which is the
+# state these uploads are meant to exercise. Plain b'0' * 4096 is not a
+# container at all, so it now stops at the guard and never reaches the
+# behaviour under test.
+UNDECODABLE_MP4 = bytes([0, 0, 0, 0x18]) + b'ftypmp42' + b'0' * 4096
+UNDECODABLE_WEBM = bytes([0x1A, 0x45, 0xDF, 0xA3]) + b'0' * 4096
 
 
 class _FakeSocialClient:
@@ -147,7 +157,13 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             follow_redirects=False,
         )
         self.assertEqual(saved.status_code, 303)
-        self.assertEqual(self.client.cookies.get(webapp.COOKIE_PREFERENCES_COOKIE), "custom-analytics")
+        # The choice, stamped with the policy version it answered, so that
+        # bumping the version re-opens the banner instead of being recorded
+        # only in the acceptance log while the live cookie says "decided".
+        from core.config import SETTINGS
+        self.assertEqual(
+            self.client.cookies.get(webapp.COOKIE_PREFERENCES_COOKIE),
+            f"custom-analytics:{SETTINGS.policy_version}")
         self.assertNotIn("Accept All", self.client.get("/").text)
         guest_id = self.client.cookies.get(GUEST_COOKIE)
         records = database.list_legal_acceptances(guest_id=guest_id)
@@ -277,29 +293,68 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(database.list_moderation_reports()[0]["resource_id"], "fight-123")
         self.assertEqual(self.client.get("/admin").status_code, 404)
 
-    def test_login_requires_and_records_policy_acceptance(self):
-        account = register("athlete@example.com", "Strong-Local-Password")
-        denied = self.client.post(
+    def test_signing_in_does_not_ask_for_consent_that_signup_already_took(self):
+        """Acceptance belongs at signup.
+
+        /login asked for Terms, Privacy and Acceptable Use on every sign-in,
+        and had to ask everybody: at the form nobody has been identified yet,
+        so there is no recorded acceptance to compare against. The account row
+        carries the version it accepted, so the question is asked afterwards,
+        of the accounts it applies to.
+        """
+        register("athlete@example.com", "Strong-Local-Password")
+        response = self.client.post(
             "/login",
             data={"email": "athlete@example.com", "password": "Strong-Local-Password"},
             follow_redirects=False,
         )
-        self.assertEqual(denied.status_code, 400)
-        self.assertNotIn(SESSION_COOKIE, self.client.cookies)
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(SESSION_COOKIE, self.client.cookies)
+        # Straight where they were going, because their version is current.
+        self.assertNotIn("/policies", response.headers["location"])
 
-        accepted = self.client.post(
+    def test_an_account_behind_the_policy_version_is_asked_once_after_signing_in(self):
+        from core.config import SETTINGS
+        from core.db import connection
+
+        account = register("behind@example.com", "Strong-Local-Password")
+        with connection() as con:
+            con.execute("UPDATE accounts SET terms_version='1999-01-01' WHERE id=?",
+                        (int(account["id"]),))
+
+        response = self.client.post(
             "/login",
-            data={
-                "email": "athlete@example.com",
-                "password": "Strong-Local-Password",
-                "accept_policies": "true",
-            },
+            data={"email": "behind@example.com", "password": "Strong-Local-Password"},
             follow_redirects=False,
         )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("/policies", response.headers["location"])
+
+        page = self.client.get("/policies").text
+        self.assertIn("1999-01-01", page)
+        self.assertIn(SETTINGS.policy_version, page)
+
+        token = re.search(r'name="csrf-token" content="([^"]+)"', page).group(1)
+        accepted = self.client.post(
+            "/policies",
+            data={"accept_policies": "true", "next_path": "/dashboard", "csrf_token": token},
+            headers={"X-CSRF-Token": token}, follow_redirects=False)
         self.assertEqual(accepted.status_code, 303)
-        self.assertIn(SESSION_COOKIE, self.client.cookies)
+
         acceptances = database.list_legal_acceptances(profile_id=account["profile_id"])
-        self.assertEqual(acceptances[0]["kind"], "account_signin_policies")
+        self.assertEqual(acceptances[0]["kind"], "account_policy_reacceptance")
+        # ...and not asked again on the next sign-in.
+        self.assertFalse(database.policies_outdated(database.get_account(int(account["id"]))))
+
+    def test_an_account_that_never_recorded_a_version_is_not_treated_as_behind(self):
+        """An account predating the field is not evidence that the policy moved."""
+        from core.db import connection
+
+        account = register("nover@example.com", "Strong-Local-Password")
+        with connection() as con:
+            con.execute("UPDATE accounts SET terms_version=NULL WHERE id=?",
+                        (int(account["id"]),))
+        self.assertFalse(database.policies_outdated(database.get_account(int(account["id"]))))
 
     def test_social_signup_links_stable_identity_without_enabling_password_login(self):
         social_client = TestClient(app, base_url="https://warrioriq.eu")
@@ -1073,7 +1128,7 @@ class UndecodableUploadTests(unittest.TestCase):
                 "/upload",
                 data={"rights_confirmed": "true", "people_permissions_confirmed": "true",
                       "minor_permission_status": "no_minors"},
-                files={"video": ("fight.webm", b"0" * 4096, "video/webm")},
+                files={"video": ("fight.webm", UNDECODABLE_WEBM, "video/webm")},
                 follow_redirects=False,
             )
         self.assertEqual(response.status_code, 400)
@@ -1314,7 +1369,7 @@ class PlanRosterLimitTests(unittest.TestCase):
                 "/upload",
                 data={"rights_confirmed": "true", "people_permissions_confirmed": "true",
                       "minor_permission_status": "no_minors", "fighter_name": name},
-                files={"video": ("f.mp4", b"0" * 4096, "video/mp4")},
+                files={"video": ("f.mp4", UNDECODABLE_MP4, "video/mp4")},
                 follow_redirects=False,
             )
 
@@ -1797,3 +1852,94 @@ class OAuthFailureLoggingTests(unittest.TestCase):
     def test_the_callback_logs_that_shape(self):
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
         self.assertIn('"social_auth_rejected provider=%s error=%s code=%s detail=%s"', source)
+
+
+class PlanInterestTests(unittest.TestCase):
+    """Paid checkout is closed during early access, so every button on a paid
+    card opened the workspace the visitor already had. There was no way to say
+    which plan you wanted, and no way to find out afterwards that anyone had.
+    """
+
+    def test_asking_twice_is_one_request_not_two(self):
+        from core.db import plan_interest_counts, plans_wanted_by, record_plan_interest
+
+        account = 424242
+        try:
+            self.assertTrue(record_plan_interest(account, "gym"))
+            self.assertFalse(record_plan_interest(account, "gym"))
+            self.assertEqual(plans_wanted_by(account), {"gym"})
+            self.assertEqual(plan_interest_counts().get("gym"), 1)
+            # A different plan from the same account is a separate request.
+            self.assertTrue(record_plan_interest(account, "coach"))
+            self.assertEqual(plans_wanted_by(account), {"coach", "gym"})
+        finally:
+            from core.db import connection
+
+            with connection() as con:
+                con.execute("DELETE FROM plan_interest WHERE account_id=?", (account,))
+
+    def test_a_signed_out_visitor_is_sent_to_sign_in_rather_than_recorded(self):
+        from fastapi.testclient import TestClient
+
+        import app.main as webapp
+
+        response = TestClient(webapp.app).post(
+            "/plan-interest/gym", data={"next_path": "/pricing"}, follow_redirects=False)
+        self.assertIn(response.status_code, (302, 303, 403))
+
+    def test_the_free_plan_cannot_be_waited_for(self):
+        from core.payments import PLANS
+
+        self.assertIn("free", PLANS)
+        # Guarded in the route: there is nothing to be notified about.
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn('plan_key not in PLANS or plan_key == "free"', source)
+
+
+class AccountDeletionCoverageTests(unittest.TestCase):
+    """Deleting an account has to take the account's rows with it.
+
+    Enumerated rather than listed by hand: a table added later is exactly the
+    one that gets forgotten. Two were - plan_interest, and the roster, which
+    holds the names of real athletes and outlived the workspace that held them.
+    """
+
+    # Deliberately retained: abuse reports and payment records are kept for
+    # reasons that outlive the account, and both are reviewed separately.
+    RETAINED = {"moderation_reports", "payment_events"}
+
+    def test_deleting_an_account_takes_the_roster_with_it(self):
+        """The names in a roster belong to people, and some of them are minors."""
+        from core.db import (connection, create_fighter, delete_account,
+                             list_fighters, record_plan_interest)
+
+        account = register("roster-owner@example.com", "Strong-Local-Password")
+        profile_id = int(account["profile_id"])
+        create_fighter(profile_id, "Theodoulos")
+        create_fighter(profile_id, "A Second Athlete")
+        record_plan_interest(int(account["id"]), "gym")
+        self.assertEqual(len(list_fighters(profile_id)), 2)
+
+        delete_account(int(account["id"]))
+
+        with connection() as con:
+            remaining = con.execute(
+                "SELECT COUNT(*) FROM fighters WHERE profile_id=?", (profile_id,)
+            ).fetchone()[0]
+            interest = con.execute(
+                "SELECT COUNT(*) FROM plan_interest WHERE account_id=?",
+                (int(account["id"]),)).fetchone()[0]
+        self.assertEqual(remaining, 0, "the roster survived the account")
+        self.assertEqual(interest, 0, "plan interest survived the account")
+
+    def test_every_table_holding_account_data_is_cleared(self):
+        import re
+
+        source = (Path(__file__).resolve().parents[1] / "core" / "db.py").read_text(encoding="utf-8")
+        tables = {m.group(1) for m in re.finditer(r"CREATE TABLE IF NOT EXISTS (\w+)", source)}
+        body = source[source.index("def delete_account"):][:3000]
+        cleared = {m.group(1) for m in re.finditer(r"(?:DELETE FROM|UPDATE) (\w+)", body)}
+        missed = tables - cleared - self.RETAINED
+        self.assertEqual(
+            missed, set(),
+            f"these tables hold account data and survive deletion: {sorted(missed)}")
