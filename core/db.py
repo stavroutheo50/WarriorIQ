@@ -1402,6 +1402,11 @@ def delete_account(account_id: int) -> dict | None:
             con.execute("DELETE FROM fight_reviews WHERE job_id=?", (fight["job_id"],))
             con.execute("DELETE FROM report_shares WHERE job_id=?", (fight["job_id"],))
         con.execute("DELETE FROM fights WHERE profile_id=?", (profile_id,))
+        # The roster holds the names of real athletes, entered by the coach
+        # who is deleting this workspace - and some of them are minors. It
+        # outlived the account it belonged to. Deleted after the fights that
+        # reference it, so nothing is left pointing at a row that is gone.
+        con.execute("DELETE FROM fighters WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM legal_acceptances WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM analysis_usage WHERE account_id=?", (account_id,))

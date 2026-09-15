@@ -1900,12 +1900,37 @@ class AccountDeletionCoverageTests(unittest.TestCase):
     """Deleting an account has to take the account's rows with it.
 
     Enumerated rather than listed by hand: a table added later is exactly the
-    one that gets forgotten, which is what happened to plan_interest.
+    one that gets forgotten. Two were - plan_interest, and the roster, which
+    holds the names of real athletes and outlived the workspace that held them.
     """
 
     # Deliberately retained: abuse reports and payment records are kept for
     # reasons that outlive the account, and both are reviewed separately.
     RETAINED = {"moderation_reports", "payment_events"}
+
+    def test_deleting_an_account_takes_the_roster_with_it(self):
+        """The names in a roster belong to people, and some of them are minors."""
+        from core.db import (connection, create_fighter, delete_account,
+                             list_fighters, record_plan_interest)
+
+        account = register("roster-owner@example.com", "Strong-Local-Password")
+        profile_id = int(account["profile_id"])
+        create_fighter(profile_id, "Theodoulos")
+        create_fighter(profile_id, "A Second Athlete")
+        record_plan_interest(int(account["id"]), "gym")
+        self.assertEqual(len(list_fighters(profile_id)), 2)
+
+        delete_account(int(account["id"]))
+
+        with connection() as con:
+            remaining = con.execute(
+                "SELECT COUNT(*) FROM fighters WHERE profile_id=?", (profile_id,)
+            ).fetchone()[0]
+            interest = con.execute(
+                "SELECT COUNT(*) FROM plan_interest WHERE account_id=?",
+                (int(account["id"]),)).fetchone()[0]
+        self.assertEqual(remaining, 0, "the roster survived the account")
+        self.assertEqual(interest, 0, "plan interest survived the account")
 
     def test_every_table_holding_account_data_is_cleared(self):
         import re
@@ -1915,12 +1940,6 @@ class AccountDeletionCoverageTests(unittest.TestCase):
         body = source[source.index("def delete_account"):][:3000]
         cleared = {m.group(1) for m in re.finditer(r"(?:DELETE FROM|UPDATE) (\w+)", body)}
         missed = tables - cleared - self.RETAINED
-        # Known and outstanding: the roster survives account deletion, so the
-        # names of real athletes outlive the workspace that held them.
-        # Reported, not fixed - deletion behaviour is the owner's call. Subset
-        # rather than equality, so closing that gap keeps this green while a
-        # newly added table that forgets deletion still fails it.
-        self.assertLessEqual(
-            missed, {"fighters"},
-            "a table holding account data is not cleared on deletion: "
-            f"{sorted(missed - {'fighters'})}")
+        self.assertEqual(
+            missed, set(),
+            f"these tables hold account data and survive deletion: {sorted(missed)}")
