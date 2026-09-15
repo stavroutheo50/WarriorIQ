@@ -715,8 +715,12 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
 }
 /* The consent box is enforced on click, not by disabling: a greyed-out button
    reads as broken, and the reason it cannot be used is out of view. */
-.social-auth-gate[data-state="asking"] { color: var(--wiq-warning); }
-.check.needs-attention {
+/* The gate is the reason the buttons above are disabled, so it is visible
+   from the start rather than after a press that already failed. */
+.social-auth-button[disabled] { opacity: .45; cursor: not-allowed; }
+.social-auth-button[disabled]:hover { transform: none; }
+.check.needs-attention,
+fieldset.needs-attention {
   border-radius: 3px;
   box-shadow: 0 0 0 2px var(--wiq-warning);
   transition: box-shadow 160ms var(--wiq-motion-ease, ease);

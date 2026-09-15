@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Policies updated · WarriorIQ{% endblock %}
+{% block description %}WarriorIQ's policies have been updated since you last accepted them.{% endblock %}
+{% block content %}
+<section class="empty-workspace card auth-card-standalone">
+  <div class="eyebrow">Policies updated</div>
+  <h1>Have a look before you carry on.</h1>
+  <p class="muted">WarriorIQ's policies have changed since you last accepted them.
+    You accepted version {{accepted_version}}; the current version is {{policy_version}}.
+    Nothing about your account or your saved fights has changed.</p>
+  {% if error %}<div class="notice bad-notice">{{error}}</div>{% endif %}
+  <form method="post" action="/policies" class="auth-form">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <input type="hidden" name="next_path" value="{{next_path}}">
+    <label class="check legal-check"><input type="checkbox" name="accept_policies" value="true" required>
+      <span>I accept the updated <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms of Service</a>,
+        <a class="text-link" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> and
+        <a class="text-link" href="/acceptable-use" target="_blank" rel="noopener">Acceptable Use Policy</a>.</span></label>
+    <button class="btn" type="submit">Accept and continue</button>
+  </form>
+  <p class="small muted">Prefer not to? <a class="text-link" href="/legal">Read everything first</a>,
+    or sign out:</p>
+  <form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <button class="btn secondary" type="submit">Sign out</button></form>
+</section>
+{% endblock %}

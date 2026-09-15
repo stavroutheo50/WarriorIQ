@@ -18,7 +18,7 @@
       <input type="hidden" name="next_path" value="{{next_path}}">
       <div class="auth-required-choices">
         {% if mode == 'signup' %}<label class="check legal-check"><input type="checkbox" name="age_confirmed" value="true" required><span>I confirm that I am at least {{request.state.minimum_account_age}} years old.</span></label>{% endif %}
-        <label class="check legal-check"><input type="checkbox" name="{% if mode == 'signup' %}accept_terms{% else %}accept_policies{% endif %}" value="true" required><span>{% if mode == 'signup' %}I agree to the{% else %}I accept the{% endif %} <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms of Service</a> and <a class="text-link" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>{% if mode != 'signup' %}, plus the <a class="text-link" href="/acceptable-use" target="_blank" rel="noopener">Acceptable Use Policy</a>{% endif %}.</span></label>
+        {% if mode == 'signup' %}<label class="check legal-check"><input type="checkbox" name="accept_terms" value="true" required><span>I agree to the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms of Service</a>, <a class="text-link" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> and <a class="text-link" href="/acceptable-use" target="_blank" rel="noopener">Acceptable Use Policy</a>.</span></label>{% endif %}
         {% if mode == 'signup' %}<label class="check legal-check optional-choice"><input type="checkbox" name="marketing_consent" value="true"><span>Send product updates. <span class="muted">Optional and off by default.</span></span></label>{% endif %}
       </div>
       {% if request.state.oauth_providers %}
@@ -37,7 +37,7 @@
           </button>
           {% endfor %}
         </div>
-        <p class="social-auth-gate" id="socialGate" role="alert" hidden>Tick the box above first, then press again.</p>
+        {% if mode == 'signup' %}<p class="social-auth-gate" id="socialGate">Accept the policies above to use these.</p>{% endif %}
       </div>
       <div class="auth-divider"><span>or continue with email</span></div>
       {% endif %}
@@ -61,23 +61,23 @@
   const required=[...form.querySelectorAll('input[type="checkbox"][required]')];
   // The server refuses a social sign-in unless the same consent boxes the email
   // form requires are ticked, and it refuses by re-rendering this page - which
-  // reads as "the button does nothing". Catch it here instead.
+  // reads as "the button does nothing".
   //
-  // Deliberately not disabled: a greyed-out button looks broken, and the reason
-  // it cannot be pressed is off-screen. It stays live, and pressing it points
-  // at the box that is missing.
-  socials.forEach(button=>button.addEventListener('click',event=>{
-    const missing=required.find(box=>!box.checked);
-    if(!missing)return;
-    event.preventDefault();
-    if(gate){gate.hidden=false;gate.dataset.state='asking'}
-    missing.focus({preventScroll:false});
-    const holder=missing.closest('.check')||missing;
-    holder.classList.add('needs-attention');
-    setTimeout(()=>holder.classList.remove('needs-attention'),1600);
-  }));
-  required.forEach(box=>box.addEventListener('change',()=>{
-    if(gate&&required.every(item=>item.checked)){gate.hidden=true;delete gate.dataset.state}
-  }));
+  // These were previously left live on the reasoning that a greyed-out button
+  // looks broken and its reason sits off-screen. The second half was the real
+  // problem: the reason only appeared after a press that had already failed, so
+  // the reader was told to "press again" before being told why. The reason is
+  // now on screen from the start, which is what makes disabling honest rather
+  // than mute.
+  const syncSocialGate=()=>{
+    const ready=required.every(box=>box.checked);
+    socials.forEach(button=>{
+      button.disabled=!ready;
+      button.setAttribute('aria-disabled',String(!ready));
+    });
+    if(gate)gate.hidden=ready;
+  };
+  syncSocialGate();
+  required.forEach(box=>box.addEventListener('change',syncSocialGate));
 })();
 </script>{% endblock %}

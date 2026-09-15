@@ -83,7 +83,8 @@
         {% endif %}
       {% endif %}
 
-      <fieldset class="upload-consent card-inset"><legend>Two quick questions</legend><input type="hidden" name="people_permissions_confirmed" value="true"><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>This is my video, and the people in it are OK with me uploading it.</span></label><div class="minor-permission" role="group" aria-labelledby="minorPermissionLabel"><span id="minorPermissionLabel">Is anyone in the video under 18?</span><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No, all 18 or over</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes, and a parent or guardian said OK</span></label></div><p class="small muted">TV footage still needs permission. <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
+      <fieldset class="upload-consent card-inset"><legend>Two quick questions</legend><input type="hidden" name="people_permissions_confirmed" value="true"><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>This is my video, and the people in it are OK with me uploading it.</span></label><fieldset class="minor-permission"><legend id="minorPermissionLabel">Is anyone in the video under 18?</legend><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No, all 18 or over</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes, and a parent or guardian said OK</span></label></fieldset><p class="small muted">TV footage still needs permission. <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
+      <p class="upload-validation" id="uploadValidation" role="status" aria-live="polite" hidden></p>
       <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Starting upload…" data-motion-primary disabled>Choose a video to continue</button>
       <div class="upload-progress" id="uploadProgress" role="status" aria-live="polite" hidden><span><i id="uploadProgressBar"></i></span><b id="uploadProgressText">Uploading fight video…</b><small id="uploadProgressHint">Keep this tab open — you can keep reading the page. WarriorIQ moves you on by itself.</small></div>
       {% if request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Analysis needs a free account, so your fights stay private to you. <a class="text-link" href="/signup?next=/analyze/{{sport}}">Create one in a moment.</a></p>{% endif %}
@@ -186,6 +187,34 @@
       const mins=Math.floor(seconds/60),secs=String(Math.round(seconds%60)).padStart(2,'0');
       fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload`};
     probe.onerror=()=>{URL.revokeObjectURL(url)};probe.src=url};
+// What is still outstanding, named, above the button that refuses to work.
+  // Pressing it fired three native bubbles at once and scrolled the page back
+  // up to the consent block, which is not an explanation.
+  const validation=document.getElementById('uploadValidation');
+  const rightsBox=form.querySelector('[name="rights_confirmed"]');
+  const minorRadios=[...form.querySelectorAll('[name="minor_permission_status"]')];
+  const outstanding=()=>{
+    const missing=[];
+    if(!videoInput.files[0])missing.push({text:'choose a fight video',field:videoInput});
+    if(rightsBox&&!rightsBox.checked)missing.push({text:'confirm the footage is yours',field:rightsBox});
+    if(minorRadios.length&&!minorRadios.some(r=>r.checked))
+      missing.push({text:'answer the under-18 question',field:minorRadios[0]});
+    return missing};
+  const syncSubmit=()=>{
+    const missing=outstanding();
+    uploadSubmit.disabled=missing.length>0;
+    if(!validation)return;
+    form.querySelectorAll('.needs-attention').forEach(el=>el.classList.remove('needs-attention'));
+    if(!missing.length||!videoInput.files[0]){validation.hidden=true;return}
+    const parts=missing.map(item=>item.text);
+    const list=parts.length===1?parts[0]:parts.slice(0,-1).join(', ')+' and '+parts[parts.length-1];
+    validation.textContent=(parts.length===1?'One thing left: ':`${parts.length} things left: `)+list+'.';
+    validation.hidden=false;
+    missing.forEach(item=>{const holder=item.field.closest('.check')||item.field.closest('fieldset');
+      if(holder)holder.classList.add('needs-attention')});
+  };
+  form.addEventListener('change',event=>{
+    if(event.target.name==='rights_confirmed'||event.target.name==='minor_permission_status')syncSubmit()});
   const setReady=()=>{const file=videoInput.files[0];
     if(file){const problem=fileProblem(file);if(problem){rejectFile(problem);return}}
     const ready=Boolean(file);
@@ -193,8 +222,9 @@
     fileStatus.textContent=ready?sizeAdvice(file.size).text:EMPTY_HINT;
     if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;
     fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);
-    uploadCard.dataset.uploadState=ready?'ready':'empty';uploadSubmit.disabled=!ready;
+    uploadCard.dataset.uploadState=ready?'ready':'empty';
     uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';
+    syncSubmit();
     if(ready){checkDuration(file);window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video selected. Press upload to send it.','success')}};
   const restore=(message)=>{if(typeof picker!=='undefined'&&picker){picker.hidden=true;pickerOpen=false;chosenSeconds=null;form.hidden=false;if(localUrl){URL.revokeObjectURL(localUrl);localUrl=null}}showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
   // Rounds are no longer asked for, but they still decide where the round

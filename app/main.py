@@ -20,7 +20,7 @@ from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import cv2
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -71,7 +71,8 @@ from core.db import (
     revoke_report_shares, save_annotation,
     save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
     set_account_status, set_annotation_sequence,
-    plan_interest_counts, plans_wanted_by, record_plan_interest,
+    plan_interest_counts, plans_wanted_by, policies_outdated,
+    record_plan_interest, record_policy_reacceptance,
     set_fight_review_status, toggle_assignment, update_cookie_preferences,
     update_marketing_consent, update_password_hash, update_profile,
 )
@@ -159,6 +160,40 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "app" / "templates"))
+
+
+def _fight_moment(value: str | None, with_time: bool = True) -> str:
+    """A stored timestamp as a person reads it.
+
+    Pages were printing the ISO string straight out of the database -
+    "2026-09-14T15:52:56.914959+00:00" on /profile - beside a raw ruleset
+    enum. Rendered in UTC here and relabelled to the reader's own zone by
+    the script in base.html, which is why the markup is a <time> element.
+
+    The audit expected a `timezone` cookie to read; there is none, and there
+    is no timezone handling anywhere in the app. The browser already knows,
+    so nothing has to be stored to ask it.
+    """
+    if not value:
+        return "—"
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return str(value)[:10]
+    day = f"{moment.day} {moment:%b %Y}"
+    return f"{day}, {moment:%H:%M}" if with_time else day
+
+
+def _ruleset_label(value: str | None) -> str:
+    """"KICK_LIGHT" is a database value, not a thing to show somebody."""
+    key = str(value or "").strip()
+    if not key:
+        return "—"
+    return RULESET_LABELS.get(key, key.replace("_", " ").title())
+
+
+templates.env.filters["fight_moment"] = _fight_moment
+templates.env.filters["ruleset_label"] = _ruleset_label
 
 
 def _asset_version() -> str:
@@ -920,6 +955,11 @@ async def viewer_context(request: Request, call_next):
     request.state.active_analysis = request.state.analysis_navigation["display"]
     chosen_sport = (request.cookies.get(ACTIVE_SPORT_COOKIE) or "").strip().lower()
     request.state.active_sport = sport_identity(chosen_sport) if chosen_sport in SPORTS else None
+    # The switcher is a real menu now, so it needs something to list. It
+    # looked like a dropdown - bordered pill, chevron - and was a plain link
+    # to /analyze, so pressing it left whatever the reader was in the middle
+    # of to show them a page of five sports.
+    request.state.sports = [sport_identity(key) for key in SPORTS]
     request.state.launch = launch_readiness()
     request.state.minimum_account_age = SETTINGS.minimum_account_age
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
@@ -1657,13 +1697,8 @@ async def social_auth_start(
             f"Confirm that you are at least {SETTINGS.minimum_account_age} and accept the Terms of Service and Privacy Policy.",
             next_path,
         )
-    if mode == "login" and not accept_policies:
-        return _auth_page(
-            request,
-            "login",
-            "Confirm the Terms, Privacy Policy, and Acceptable Use Policy to sign in.",
-            next_path,
-        )
+    # Signing in is not the moment to collect consent: see login(). An account
+    # whose accepted version is behind is asked once, after it is known.
     authorize_options = {"response_mode": "form_post"} if provider == "apple" else {}
     try:
         response = await client.authorize_redirect(
@@ -1936,15 +1971,17 @@ def login(
     email: str = Form(...),
     password: str = Form(...),
     next_path: str = Form("/dashboard"),
-    accept_policies: bool = Form(False),
 ):
+    """Sign in.
+
+    This asked for the Terms, Privacy Policy and Acceptable Use Policy to be
+    accepted on every sign-in. Acceptance belongs at signup; re-accepting on
+    each login records nothing new and is asked of everybody because at the
+    form nobody has been identified yet. The account row carries the version
+    it accepted, so the question is now asked after authentication, only of
+    the accounts whose version is behind - see /policies.
+    """
     _enforce_rate_limit(request, "login", 30, 300)
-    if not accept_policies:
-        return _auth_page(
-            request, "login",
-            "Confirm the Terms, Privacy Policy, and Acceptable Use Policy to sign in.",
-            next_path,
-        )
     account = authenticate(email, password)
     if not account:
         record_security_event("login_failed", severity="warning", metadata={"email_hash": token_digest(email.strip().lower())[:16]})
@@ -1955,12 +1992,10 @@ def login(
             "Verify your email before signing in. You can request a fresh verification link below.",
             next_path,
         )
-    record_legal_acceptance(
-        "account_signin_policies", SETTINGS.policy_version,
-        profile_id=int(account["profile_id"]),
-        metadata={"source": "login"},
-    )
-    response = RedirectResponse(_safe_next(next_path), status_code=303)
+    destination = _safe_next(next_path)
+    if policies_outdated(account):
+        destination = f"/policies?next={quote(destination, safe='')}"
+    response = RedirectResponse(destination, status_code=303)
     record_security_event("login_succeeded", account_id=int(account["id"]))
     response.set_cookie(
         SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
@@ -2170,14 +2205,18 @@ def choose_sport(request: Request):
     sport, so it is asked first and asked on its own rather than as one field
     among ten on a form the reader has already started filling in.
 
-    Signed-out visitors are sent to sign in first. An analysis they start
-    without an account produces a guest report that is deleted after two hours
-    and never joins their fight library, so letting them spend an upload and an
-    analysis before mentioning that wastes the one thing they cannot get back.
+    An analysis started without an account produces a guest report that is
+    deleted after two hours and never joins the fight library, so a signed-out
+    visitor is told that before spending an upload on it - but told here,
+    rather than bounced to /login.
+
+    This route used to redirect while /dashboard, /history, /coach, /profile
+    and /compare all answered 200 with the same signed-out shell, so someone
+    who bookmarked one of the six got a sales page and someone who bookmarked
+    this one got a login form. The shell is the better of the two: the page
+    keeps its address, and its call to action carries the destination.
     """
     account = _account(request)
-    if account is None:
-        return RedirectResponse("/login?next=/analyze", status_code=303)
     return templates.TemplateResponse(
         request=request,
         name="sports.html",
@@ -2186,6 +2225,7 @@ def choose_sport(request: Request):
             # An exhausted allowance is worth knowing before a sport is picked
             # and a video chosen, not two pages later.
             "allowance": analysis_allowance(int(account["id"])) if account else None,
+            "signed_in": account is not None,
             "sports": RULESET_SPORTS,
             # Boxing's single ruleset is named after the sport, so listing it
             # tells the reader nothing; say what is actually true instead.
@@ -4294,6 +4334,58 @@ def save_cookie_preferences(
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
+
+
+@app.get("/policies", response_class=HTMLResponse)
+def policies_updated(request: Request, next: str = "/dashboard"):
+    """Ask an account whose accepted policy version is behind the current one.
+
+    Reached only after authentication, so there is an account to compare
+    against - which is what /login could never do, and why it asked everybody
+    on every sign-in instead.
+    """
+    account = _account(request)
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    if not policies_outdated(account):
+        return RedirectResponse(_safe_next(next), status_code=303)
+    return templates.TemplateResponse(
+        request=request, name="policies.html",
+        context={
+            "request": request, "next_path": _safe_next(next),
+            "accepted_version": account["terms_version"],
+            "policy_version": SETTINGS.policy_version,
+        },
+    )
+
+
+@app.post("/policies", dependencies=[Depends(require_csrf)])
+def accept_updated_policies(
+    request: Request,
+    next_path: str = Form("/dashboard"),
+    accept_policies: bool = Form(False),
+):
+    account = _account(request)
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    if not accept_policies:
+        return templates.TemplateResponse(
+            request=request, name="policies.html",
+            context={
+                "request": request, "next_path": _safe_next(next_path),
+                "accepted_version": account["terms_version"],
+                "policy_version": SETTINGS.policy_version,
+                "error": "Accept the updated policies to continue.",
+            },
+            status_code=400,
+        )
+    record_policy_reacceptance(int(account["id"]))
+    record_legal_acceptance(
+        "account_policy_reacceptance", SETTINGS.policy_version,
+        profile_id=int(account["profile_id"]),
+        metadata={"previous_version": account["terms_version"]},
+    )
+    return RedirectResponse(_safe_next(next_path), status_code=303)
 
 
 @app.get("/legal", response_class=HTMLResponse)

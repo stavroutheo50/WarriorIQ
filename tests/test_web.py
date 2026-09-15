@@ -218,20 +218,31 @@ class PublicPageTests(unittest.TestCase):
             self.assertIn("Launch is blocked", self.client.get("/legal").text)
         self.assertIn("does not register", self.client.get("/dmca").text)
 
-    def test_choosing_a_sport_signed_out_goes_to_sign_in_first(self):
+    def test_choosing_a_sport_signed_out_says_why_before_spending_an_upload(self):
         """A guest analysis is deleted after two hours and never saved.
 
         Letting someone pick a sport, upload a fight and wait for the analysis
-        before mentioning that spends the one thing they cannot get back. The
-        sign-in page carries the destination so they land back on the chooser.
+        before mentioning that spends the one thing they cannot get back - so
+        it is said first. It used to be said by redirecting to /login, while
+        the five other workspace routes answered 200 with a signed-out shell.
+        Someone who bookmarked /history got a sales page and someone who
+        bookmarked /analyze got a login form, for the same signed-out state.
         """
         response = self.client.get("/analyze", follow_redirects=False)
-        self.assertEqual(response.status_code, 303)
-        self.assertEqual(response.headers["location"], "/login?next=/analyze")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("deleted after two hours", response.text)
+        # The destination survives whichever way they go.
+        self.assertIn("/signup?next=/analyze", response.text)
+        self.assertIn("/login?next=/analyze", response.text)
+        # ...and the sport grid is not offered to somebody who cannot use it.
+        self.assertNotIn("chooser-head", response.text)
 
-        landed = self.client.get("/analyze").text
-        self.assertIn('name="next_path" value="/analyze"', landed)
-        self.assertIn("/signup?next=/analyze", landed, "creating an account keeps the destination")
+    def test_every_workspace_route_answers_a_guest_the_same_way(self):
+        for path in ("/analyze", "/dashboard", "/history", "/coach", "/profile", "/compare"):
+            with self.subTest(path=path):
+                response = self.client.get(path, follow_redirects=False)
+                self.assertEqual(response.status_code, 200, f"{path} still redirects")
+                self.assertIn("empty-workspace", response.text)
 
     def test_every_sport_states_what_the_analysis_cannot_see(self):
         """Coverage is disclosed at the point of choice, not after the upload.
@@ -345,9 +356,14 @@ class PublicPageTests(unittest.TestCase):
             elsewhere = client.get("/history").text
             self.assertIn('class="sport-switch"', elsewhere)
             self.assertIn("Muay Thai", elsewhere)
-            # The chip carries the sport's own accent and leads to the switcher.
+            # The chip carries the sport's own accent and is the switcher.
             self.assertIn("--sport-accent:226 154 74", elsewhere)
-            self.assertIn('class="sport-switch" href="/analyze"', elsewhere)
+            # It looked like a dropdown - bordered pill, chevron - and was a
+            # plain link to /analyze, so pressing it left the page being read.
+            self.assertIn('<details class="sport-menu"', elsewhere)
+            self.assertNotIn('class="sport-switch" href="/analyze"', elsewhere)
+            for key in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
+                self.assertIn(f'href="/analyze/{key}"', elsewhere)
 
             # Switching sport switches the shell.
             client.get("/analyze/boxing")
@@ -728,7 +744,11 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("request.upload.addEventListener('progress'", home)
         signup = self.client.get("/signup").text
         self.assertIn('name="accept_terms"', signup)
-        self.assertIn('name="accept_policies"', self.client.get("/login").text)
+        # Signing in no longer re-asks: acceptance is taken at signup, and an
+        # account behind the current policy version is asked once afterwards,
+        # when there is finally an account to compare against.
+        self.assertNotIn('name="accept_policies"', self.client.get("/login").text)
+        self.assertIn("Acceptable Use Policy", signup)
         self.assertIn("Terms of Service", signup)
         self.assertIn("Privacy Policy", signup)
         self.assertIn('name="age_confirmed"', signup)
@@ -3013,7 +3033,11 @@ class CoachFilenameTests(unittest.TestCase):
         self.assertIn("{{f.label}}", coach)
         # The raw enum went with it: KICK_LIGHT is not a thing to show a coach.
         self.assertNotIn("{{f.ruleset}}", coach)
-        self.assertIn("{{f.ruleset_label}}", coach)
+        # The ruleset rides in the label now - "Kickboxing · Kick Light ·
+        # 14 Sep" - so the separate Sport and Ruleset columns were repeating
+        # it twice more in a table that had nine columns in 969px.
+        self.assertNotIn("<th>Ruleset</th>", coach)
+        self.assertNotIn("<th>Sport</th>", coach)
 
     def test_the_promise_that_makes_this_a_defect_is_still_on_the_pricing_page(self):
         pricing = (Path(__file__).resolve().parents[1] / "app" / "templates"
@@ -3118,3 +3142,109 @@ class ReplayFailurePathTests(unittest.TestCase):
         put a URL fragment into innerHTML on every failure path."""
         self.assertIn("createElement('a')", self.page)
         self.assertNotIn("statusEl.innerHTML=`", self.page)
+
+
+class ReadableValueTests(unittest.TestCase):
+    """/profile printed "KICK_LIGHT · 2026-09-14T15:52:56.914959+00:00"."""
+
+    def test_the_formatters_turn_stored_values_into_readable_ones(self):
+        from app.main import _fight_moment, _ruleset_label
+
+        self.assertEqual(_fight_moment("2026-09-14T15:52:56.914959+00:00"), "14 Sep 2026, 15:52")
+        self.assertEqual(_fight_moment("2026-09-04T09:05:00+00:00", False), "4 Sep 2026")
+        self.assertEqual(_ruleset_label("KICK_LIGHT"), "Kick Light")
+        # A value with no mapping is still not shown as an enum.
+        self.assertEqual(_ruleset_label("SOME_NEW_ONE"), "Some New One")
+
+    def test_nothing_unparseable_becomes_an_exception_on_somebody_s_page(self):
+        from app.main import _fight_moment, _ruleset_label
+
+        for bad in (None, "", "not-a-date", "2026-13-45"):
+            self.assertIsInstance(_fight_moment(bad), str)
+        self.assertEqual(_ruleset_label(None), "\u2014")
+
+    def test_no_page_renders_a_raw_enum_or_iso_string(self):
+        import re
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        # Text renders only. An attribute value - datetime="..." for the
+        # local-time script, data-date="..." for the sort - holds the stored
+        # value on purpose; that is machine data, not something a reader sees.
+        raw = re.compile(r'(?<!=")\{\{\s*[a-z_]+\.(?:created_at(?:\[[^\]]*\])?|ruleset)\s*\}\}')
+        for name in ("profile.html", "history.html", "dashboard.html", "settings.html",
+                     "coach.html", "compare.html"):
+            page = (templates / name).read_text(encoding="utf-8")
+            self.assertEqual(
+                raw.findall(page), [],
+                f"{name} renders a stored value straight at the reader")
+
+    def test_timestamps_carry_what_the_local_time_script_needs(self):
+        base = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                / "base.html").read_text(encoding="utf-8")
+        # The audit expected a `timezone` cookie to read. There is none, and no
+        # timezone handling anywhere - the browser already knows, so nothing
+        # has to be stored to ask it.
+        self.assertIn("time[data-local]", base)
+        self.assertIn("toLocaleString", base)
+        main = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertNotIn("timezone_cookie", main)
+
+
+class DeleteAffordanceTests(unittest.TestCase):
+    """Delete sat beside Replay at 11px and 4.04:1, guarded by confirm()."""
+
+    def test_the_delete_control_clears_the_contrast_minimum(self):
+        css = (Path(__file__).resolve().parents[1] / "app" / "static"
+               / "product.css").read_text(encoding="utf-8")
+        self.assertIn("color:var(--wiq-danger)", css)
+        self.assertNotIn("color:#8d6670", css)
+        self.assertIn(".record-delete{padding:2px 0;border:0;background:none;"
+                      "color:var(--wiq-danger);font-size:13px", css)
+
+    def test_wiq_danger_actually_passes_on_this_ground(self):
+        """Measured, not assumed - the previous colour failed at 4.04:1."""
+        def channel(value):
+            value /= 255
+            return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+
+        def luminance(colour):
+            r, g, b = (channel(c) for c in colour)
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+        foreground, background = (0xEF, 0x78, 0x91), (9, 9, 11)
+        high, low = sorted((luminance(foreground), luminance(background)), reverse=True)
+        self.assertGreaterEqual((high + 0.05) / (low + 0.05), 4.5)
+
+    def test_the_dialog_names_the_fight_and_what_goes_with_it(self):
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                / "history.html").read_text(encoding="utf-8")
+        self.assertIn("{{f.ruleset|ruleset_label}} fight from", page)
+        self.assertIn("video, report and corrections", page)
+        self.assertNotIn("Delete this saved fight and its analysis files?", page)
+
+
+class EmptyStateTests(unittest.TestCase):
+    """Clicking Sparring with no sparring fights said "No saved fights match
+    this search" - nothing had been searched, and the only way back to
+    everything was to notice the All fights button."""
+
+    def setUp(self):
+        self.page = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                     / "history.html").read_text(encoding="utf-8")
+
+    def test_the_three_states_have_their_own_message(self):
+        self.assertIn("No saved fights match", self.page)      # searched
+        self.assertIn("fights match \u201c", self.page)        # searched within a filter
+        self.assertIn("have not saved any", self.page)          # filtered, nothing there
+        self.assertNotIn("No saved fights match this search.</p>", self.page)
+
+    def test_each_state_offers_the_action_that_undoes_it(self):
+        for action in ("Clear search", "Show all fights", "Clear search and show all fights"):
+            self.assertIn(action, self.page)
+        self.assertIn("historyNoResultsAction", self.page)
+
+    def test_the_filter_is_set_in_one_place(self):
+        """The empty state's buttons and the filter row must not be able to
+        disagree about which filter is pressed."""
+        self.assertIn("const setFilter=", self.page)
+        self.assertEqual(self.page.count("aria-pressed',String(item===button)"), 1)

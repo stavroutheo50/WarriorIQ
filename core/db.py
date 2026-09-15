@@ -767,6 +767,38 @@ def list_oauth_identities(account_id: int) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def policies_outdated(account) -> bool:
+    """Whether this account accepted an older policy version than the current one.
+
+    Signing in is not the moment to collect consent: at the login form nobody
+    has been identified yet, so there is nothing to compare against and the
+    only option is to ask everybody every time. The account row already carries
+    the version it accepted, so the question can be asked once, of the people
+    it actually applies to, after they are known.
+    """
+    if not account:
+        return False
+    try:
+        accepted = account["terms_version"]
+    except (KeyError, IndexError, TypeError):
+        accepted = None
+    # Never accepted anything recorded - an account predating the field - is not
+    # treated as outdated: it is not evidence that the policy moved.
+    return bool(accepted) and str(accepted) != str(SETTINGS.policy_version)
+
+
+def record_policy_reacceptance(account_id: int) -> dict:
+    """Bring an account up to the current policy version."""
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            """UPDATE accounts SET terms_version=?,privacy_version=?,policies_accepted_at=?
+               WHERE id=?""",
+            (SETTINGS.policy_version, SETTINGS.policy_version, now, int(account_id)),
+        )
+    return get_account(account_id) or {}
+
+
 def record_account_signup_acceptance(
     account_id: int,
     *,

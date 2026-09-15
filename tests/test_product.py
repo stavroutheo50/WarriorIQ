@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import tempfile
 import unittest
@@ -292,29 +293,68 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(database.list_moderation_reports()[0]["resource_id"], "fight-123")
         self.assertEqual(self.client.get("/admin").status_code, 404)
 
-    def test_login_requires_and_records_policy_acceptance(self):
-        account = register("athlete@example.com", "Strong-Local-Password")
-        denied = self.client.post(
+    def test_signing_in_does_not_ask_for_consent_that_signup_already_took(self):
+        """Acceptance belongs at signup.
+
+        /login asked for Terms, Privacy and Acceptable Use on every sign-in,
+        and had to ask everybody: at the form nobody has been identified yet,
+        so there is no recorded acceptance to compare against. The account row
+        carries the version it accepted, so the question is asked afterwards,
+        of the accounts it applies to.
+        """
+        register("athlete@example.com", "Strong-Local-Password")
+        response = self.client.post(
             "/login",
             data={"email": "athlete@example.com", "password": "Strong-Local-Password"},
             follow_redirects=False,
         )
-        self.assertEqual(denied.status_code, 400)
-        self.assertNotIn(SESSION_COOKIE, self.client.cookies)
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(SESSION_COOKIE, self.client.cookies)
+        # Straight where they were going, because their version is current.
+        self.assertNotIn("/policies", response.headers["location"])
 
-        accepted = self.client.post(
+    def test_an_account_behind_the_policy_version_is_asked_once_after_signing_in(self):
+        from core.config import SETTINGS
+        from core.db import connection
+
+        account = register("behind@example.com", "Strong-Local-Password")
+        with connection() as con:
+            con.execute("UPDATE accounts SET terms_version='1999-01-01' WHERE id=?",
+                        (int(account["id"]),))
+
+        response = self.client.post(
             "/login",
-            data={
-                "email": "athlete@example.com",
-                "password": "Strong-Local-Password",
-                "accept_policies": "true",
-            },
+            data={"email": "behind@example.com", "password": "Strong-Local-Password"},
             follow_redirects=False,
         )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("/policies", response.headers["location"])
+
+        page = self.client.get("/policies").text
+        self.assertIn("1999-01-01", page)
+        self.assertIn(SETTINGS.policy_version, page)
+
+        token = re.search(r'name="csrf-token" content="([^"]+)"', page).group(1)
+        accepted = self.client.post(
+            "/policies",
+            data={"accept_policies": "true", "next_path": "/dashboard", "csrf_token": token},
+            headers={"X-CSRF-Token": token}, follow_redirects=False)
         self.assertEqual(accepted.status_code, 303)
-        self.assertIn(SESSION_COOKIE, self.client.cookies)
+
         acceptances = database.list_legal_acceptances(profile_id=account["profile_id"])
-        self.assertEqual(acceptances[0]["kind"], "account_signin_policies")
+        self.assertEqual(acceptances[0]["kind"], "account_policy_reacceptance")
+        # ...and not asked again on the next sign-in.
+        self.assertFalse(database.policies_outdated(database.get_account(int(account["id"]))))
+
+    def test_an_account_that_never_recorded_a_version_is_not_treated_as_behind(self):
+        """An account predating the field is not evidence that the policy moved."""
+        from core.db import connection
+
+        account = register("nover@example.com", "Strong-Local-Password")
+        with connection() as con:
+            con.execute("UPDATE accounts SET terms_version=NULL WHERE id=?",
+                        (int(account["id"]),))
+        self.assertFalse(database.policies_outdated(database.get_account(int(account["id"]))))
 
     def test_social_signup_links_stable_identity_without_enabling_password_login(self):
         social_client = TestClient(app, base_url="https://warrioriq.eu")

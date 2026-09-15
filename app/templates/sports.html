@@ -2,6 +2,7 @@
 {% block title %}Choose your sport · WarriorIQ{% endblock %}
 {% block description %}Pick the combat sport you compete in — kickboxing, boxing, Muay Thai, taekwondo or MMA — and WarriorIQ scores the bout under that sport's own rules.{% endblock %}
 {% block content %}
+{% if not signed_in %}<section class="empty-workspace card"><h2>Fight analysis belongs to your private athlete workspace</h2><p class="muted">An analysis started without an account is deleted after two hours and never joins a fight library, so WarriorIQ asks for one before you spend an upload on it. Your footage stays private to you either way.</p><div class="hero-actions"><a class="btn" href="/signup?next=/analyze">Create account</a><a class="btn secondary" href="/login?next=/analyze">Sign in</a></div></section>{% else %}
 <section class="chooser">
   <header class="chooser-head" data-reveal>
     <div class="eyebrow">Step 1 of 3 · Your sport</div>
@@ -38,4 +39,5 @@
     says so here and the report repeats it beside the score.
   </p>
 </section>
+{% endif %}
 {% endblock %}

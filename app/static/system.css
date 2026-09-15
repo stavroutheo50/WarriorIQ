@@ -163,6 +163,16 @@ summary:focus-visible,
 
 .sport-switch-caret { color: var(--wiq-text-tertiary); font-size: 13px; line-height: 1; }
 
+/* The chevron promised a menu and the element was a link. It is a menu now,
+   built the same way .nav-more is, so switching sport happens in place
+   instead of navigating away from whatever was being read. */
+.sport-menu { position: relative; }
+.sport-menu > summary { cursor: pointer; list-style: none; }
+.sport-menu > summary::-webkit-details-marker { display: none; }
+.sport-menu[open] > summary .sport-switch-caret { transform: rotate(180deg); }
+.sport-menu-panel { left: 0; right: auto; width: 232px; }
+.sport-menu-panel a[aria-current="true"] { background: rgb(var(--sport-accent) / .16); }
+
 /* On a phone the crest alone carries it; the name would crowd the logo. */
 @media (max-width: 860px) {
   .sport-switch { padding: 0 7px; gap: 0; }
