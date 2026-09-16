@@ -102,11 +102,27 @@ class AnalyticsPolicyTests(unittest.TestCase):
         self.assertIn("googletagmanager.com/gtag/js", response.text)
         self.assertIn("'analytics_storage': 'granted'", response.text)
 
+    # The Tag Manager container is off by default - the direct gtag.js tag owns
+    # analytics here - so the tests covering the container have to switch it on.
+    # The container still has to work for whoever turns it back on, and dropping
+    # the tests because it stopped being the default would lose the coverage
+    # rather than the requirement.
+    @contextlib.contextmanager
+    def container_enabled(self, container="GTM-TESTONLY"):
+        previous = SETTINGS.gtm_container_id
+        object.__setattr__(SETTINGS, "gtm_container_id", container)
+        try:
+            yield container
+        finally:
+            object.__setattr__(SETTINGS, "gtm_container_id", previous)
+
     def test_consent_default_is_declared_before_any_tag_loads(self):
         """A default pushed after the loader would let a tag store first."""
         page = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"}).text
-        self.assertLess(page.index("gtag('consent', 'default'"), page.index("gtm.js?id="))
         self.assertLess(page.index("gtag('consent', 'default'"), page.index("gtag/js?id="))
+        with self.container_enabled():
+            page = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"}).text
+            self.assertLess(page.index("gtag('consent', 'default'"), page.index("gtm.js?id="))
 
     def test_tag_manager_ships_both_halves_and_a_frame_policy(self):
         """GTM needs the head script, the noscript iframe, and frame-src.
@@ -114,13 +130,14 @@ class AnalyticsPolicyTests(unittest.TestCase):
         The noscript fallback is an iframe, which the site's default-src would
         block, so a container that loads but cannot frame is only half working.
         """
-        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
-        self.assertIn(SETTINGS.gtm_container_id, response.text)
-        self.assertIn("googletagmanager.com/gtm.js", response.text)
-        self.assertIn("googletagmanager.com/ns.html", response.text)
-        policy = response.headers["content-security-policy"]
-        frame = [part for part in policy.split(";") if part.strip().startswith("frame-src")][0]
-        self.assertIn("https://www.googletagmanager.com", frame)
+        with self.container_enabled() as container:
+            response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
+            self.assertIn(container, response.text)
+            self.assertIn("googletagmanager.com/gtm.js", response.text)
+            self.assertIn("googletagmanager.com/ns.html", response.text)
+            policy = response.headers["content-security-policy"]
+            frame = [part for part in policy.split(";") if part.strip().startswith("frame-src")][0]
+            self.assertIn("https://www.googletagmanager.com", frame)
 
     def test_declining_analytics_loads_the_container_with_storage_denied(self):
         """The container is present so it stays verifiable, but stores nothing.
@@ -128,15 +145,16 @@ class AnalyticsPolicyTests(unittest.TestCase):
         Consent Mode is what keeps this compliant: the container may load, and
         it may not write an analytics cookie until consent is granted.
         """
-        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "essential"})
-        self.assertIn(SETTINGS.gtm_container_id, response.text)
-        self.assertIn("'analytics_storage': 'denied'", response.text)
-        self.assertNotIn("'analytics_storage': 'granted'", response.text)
-        # The consent default must be pushed before the container can fire.
-        self.assertLess(
-            response.text.index("gtag('consent', 'default'"),
-            response.text.index("gtm.js?id="),
-        )
+        with self.container_enabled() as container:
+            response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "essential"})
+            self.assertIn(container, response.text)
+            self.assertIn("'analytics_storage': 'denied'", response.text)
+            self.assertNotIn("'analytics_storage': 'granted'", response.text)
+            # The consent default must be pushed before the container can fire.
+            self.assertLess(
+                response.text.index("gtag('consent', 'default'"),
+                response.text.index("gtm.js?id="),
+            )
 
     def test_clearing_both_ids_disables_analytics_entirely(self):
         """Emptying one id must not silently leave the other measuring."""
@@ -144,7 +162,10 @@ class AnalyticsPolicyTests(unittest.TestCase):
         previous_gtm = SETTINGS.gtm_container_id
         try:
             # The container alone still measures, so the policy must stay open.
+            # It is off by default now, so this half has to switch it on before
+            # it can prove that emptying the measurement id alone is not enough.
             object.__setattr__(SETTINGS, "analytics_measurement_id", "")
+            object.__setattr__(SETTINGS, "gtm_container_id", "GTM-TESTONLY")
             response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
             self.assertIn("googletagmanager", response.text)
             self.assertNotIn("gtag/js", response.text)
