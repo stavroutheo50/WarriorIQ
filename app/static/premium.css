@@ -185,6 +185,25 @@ body {
 section + section, .pricing-grid, .grid3 { margin-top: clamp(28px, 5vw, 72px); }
 .pricing-grid, .grid3 { gap: clamp(14px, 1.6vw, 22px); }
 
+/* Grid children are not page sections. The rule above is page-level rhythm,
+   but cards are <section> too, so inside a grid it lands on every card except
+   the first and drops the row out of alignment: on /pricing that is a 72px
+   step between card 1 and the two beside it, and on /compare it is why the
+   second "Fight analysis" card hangs below the first. Each grid already
+   declares a gap, which owns the spacing between its children at every
+   breakpoint including the stacked one, so there is nothing to put back. */
+.pricing-grid > section + section,
+.compare-grid > section + section,
+.grid3 > section + section { margin-top: 0; }
+
+/* The sibling margin was also the only thing separating these cards once they
+   stack, so removing it alone would leave them 14px apart on a phone. Put the
+   space back as row-gap: it applies between rows and never between columns,
+   which is the whole reason the margin misaligned the row. */
+@media (max-width: 950px) {
+  .pricing-grid, .compare-grid, .grid3 { row-gap: clamp(24px, 6vw, 34px); }
+}
+
 /* --- Hierarchy ------------------------------------------------------------
    The eyebrow, heading and body were all competing at similar weight. Pulling
    the eyebrow back to a quiet label and letting the heading carry the page is
