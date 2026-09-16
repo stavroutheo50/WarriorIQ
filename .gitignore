@@ -27,6 +27,11 @@ models/*
 .env.production
 .env.*.local
 warrioriq.sqlite3
+# Measured once per machine and read back by every later analysis, so the
+# same video always plans the same sampling stride. Local hardware fact,
+# not source: committing one machine's timings would plan everybody
+# else's runs from it. See core/machine_profile.py.
+machine_profile.json
 uploads/
 outputs/
 dataset/regression/private/

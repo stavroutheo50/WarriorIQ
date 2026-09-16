@@ -153,6 +153,14 @@ class Settings:
     # decided by A/B, and an A/B across a changed frame path is worthless - set
     # this for that work. 0 means plan normally.
     force_tracking_stride: int = int(os.getenv("WARRIORIQ_FORCE_STRIDE", "0"))
+    # What one analysed frame costs on this machine, in seconds. Planning needs
+    # this number; the only question is where it comes from. Measuring it
+    # inside the run reads a clock, and that made the same video plan stride 3
+    # on some runs and stride 4 on others - worth 0.468 of fighter B's coverage
+    # on one fight and 0.138 the other way on another. Set this to state the
+    # figure outright; leave it 0 and core/machine_profile.py measures it once
+    # and reuses it, which is deterministic from the second analysis onward.
+    frame_cost_seconds: float = float(os.getenv("WARRIORIQ_FRAME_COST_S", "0"))
     # Fixed sampling is the reproducible default. Adaptive sampling depends on
     # momentary machine load and can make identical fights follow different
     # frame paths; it remains available as an explicit speed opt-in.
