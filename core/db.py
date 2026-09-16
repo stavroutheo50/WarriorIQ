@@ -249,6 +249,34 @@ def init_db() -> None:
                 FOREIGN KEY(account_id) REFERENCES accounts(id)
             );
 
+            CREATE TABLE IF NOT EXISTS athlete_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fighter_id INTEGER NOT NULL,
+                job_id TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                accuracy REAL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                landed INTEGER NOT NULL DEFAULT 0,
+                output_per_round REAL,
+                defensive_lapses INTEGER,
+                pose_coverage REAL,
+                evidence_trusted INTEGER NOT NULL DEFAULT 0,
+                rated INTEGER NOT NULL DEFAULT 0,
+                rated_on TEXT NOT NULL DEFAULT '',
+                rating_before REAL,
+                rating_after REAL,
+                rating_delta REAL,
+                UNIQUE(fighter_id, job_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS athlete_ratings (
+                fighter_id INTEGER PRIMARY KEY,
+                rating REAL NOT NULL,
+                rated_sessions INTEGER NOT NULL DEFAULT 0,
+                total_sessions INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS analysis_failures (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id TEXT NOT NULL,
@@ -1165,6 +1193,113 @@ def list_subscription_actions(account_id: int) -> list[dict]:
     return result
 
 
+def record_athlete_session(fighter_id: int, signals, *, occurred_at: str | None = None) -> dict:
+    """File one analysed fight against an athlete, and move the rating if it may.
+
+    Recording and rating are separate on purpose. Every session is kept,
+    because the history is worth having whatever the evidence gate said; only
+    a session carrying signals the scorecard already trusts moves the number.
+    A session that could not be rated is stored with rated=0 and an empty
+    rated_on, so "why did the rating not change" has an answer in the row
+    rather than in somebody's memory.
+
+    Re-filing the same fight replaces its row and leaves the rating alone. An
+    analysis re-run is the same fight, and letting it score twice would let
+    anyone inflate a rating by pressing the button again.
+    """
+    from core.rating import (
+        BASELINE_RATING, next_rating, performance_score,
+    )
+
+    now = occurred_at or datetime.now(timezone.utc).isoformat()
+    score = performance_score(signals)
+    with connection() as con:
+        existing = con.execute(
+            "SELECT id FROM athlete_sessions WHERE fighter_id=? AND job_id=?",
+            (int(fighter_id), signals.job_id),
+        ).fetchone()
+        row = con.execute(
+            "SELECT rating, rated_sessions, total_sessions FROM athlete_ratings WHERE fighter_id=?",
+            (int(fighter_id),),
+        ).fetchone()
+        rating = float(row["rating"]) if row else BASELINE_RATING
+        rated_sessions = int(row["rated_sessions"]) if row else 0
+        total_sessions = int(row["total_sessions"]) if row else 0
+
+        if existing is not None:
+            con.execute(
+                """UPDATE athlete_sessions SET occurred_at=?,accuracy=?,attempts=?,landed=?,
+                   output_per_round=?,defensive_lapses=?,pose_coverage=?,evidence_trusted=?
+                   WHERE id=?""",
+                (now, signals.accuracy, int(signals.attempts), int(signals.landed),
+                 signals.output_per_round, signals.defensive_lapses, signals.pose_coverage,
+                 1 if signals.evidence_trusted else 0, int(existing["id"])),
+            )
+            return {"rating": rating, "rated_sessions": rated_sessions,
+                    "total_sessions": total_sessions, "rated": False, "delta": 0.0,
+                    "reason": "this fight is already filed against this athlete"}
+
+        after, delta = (rating, 0.0)
+        if score is not None:
+            after, delta = next_rating(rating, rated_sessions, score)
+
+        con.execute(
+            """INSERT INTO athlete_sessions(
+               fighter_id,job_id,occurred_at,accuracy,attempts,landed,output_per_round,
+               defensive_lapses,pose_coverage,evidence_trusted,rated,rated_on,
+               rating_before,rating_after,rating_delta
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (int(fighter_id), signals.job_id, now, signals.accuracy, int(signals.attempts),
+             int(signals.landed), signals.output_per_round, signals.defensive_lapses,
+             signals.pose_coverage, 1 if signals.evidence_trusted else 0,
+             1 if score is not None else 0, ",".join(signals.used),
+             rating, after, delta),
+        )
+        total_sessions += 1
+        if score is not None:
+            rated_sessions += 1
+        con.execute(
+            """INSERT INTO athlete_ratings(fighter_id,rating,rated_sessions,total_sessions,updated_at)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(fighter_id) DO UPDATE SET
+                 rating=excluded.rating, rated_sessions=excluded.rated_sessions,
+                 total_sessions=excluded.total_sessions, updated_at=excluded.updated_at""",
+            (int(fighter_id), after, rated_sessions, total_sessions, now),
+        )
+    return {"rating": after, "rated_sessions": rated_sessions, "total_sessions": total_sessions,
+            "rated": score is not None, "delta": delta,
+            "reason": "" if score is not None else "no signal the scorecard trusts"}
+
+
+def athlete_rating(fighter_id: int) -> dict:
+    """The athlete's current standing, with the label to show for it."""
+    from core.rating import BASELINE_RATING, describe, is_provisional
+
+    with connection() as con:
+        row = con.execute(
+            "SELECT * FROM athlete_ratings WHERE fighter_id=?", (int(fighter_id),)).fetchone()
+    if row is None:
+        return {"fighter_id": int(fighter_id), "rating": BASELINE_RATING, "rated_sessions": 0,
+                "total_sessions": 0, "provisional": True, "label": describe(BASELINE_RATING, 0)}
+    rated = int(row["rated_sessions"])
+    return {
+        "fighter_id": int(fighter_id), "rating": float(row["rating"]),
+        "rated_sessions": rated, "total_sessions": int(row["total_sessions"]),
+        "provisional": is_provisional(rated), "label": describe(float(row["rating"]), rated),
+        "updated_at": row["updated_at"],
+    }
+
+
+def athlete_history(fighter_id: int, limit: int = 50) -> list[dict]:
+    """Every session filed against an athlete, newest first."""
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM athlete_sessions WHERE fighter_id=? ORDER BY id DESC LIMIT ?",
+            (int(fighter_id), int(limit)),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def record_analysis_failure(
     job_id: str,
     reason: str,
@@ -1547,6 +1682,15 @@ def delete_account(account_id: int) -> dict | None:
         # who is deleting this workspace - and some of them are minors. It
         # outlived the account it belonged to. Deleted after the fights that
         # reference it, so nothing is left pointing at a row that is gone.
+        # Before the roster goes: athlete history and ratings hang off
+        # fighter_id, and once the fighters are gone there is nothing left to
+        # match them against.
+        con.execute(
+            "DELETE FROM athlete_sessions WHERE fighter_id IN"
+            " (SELECT id FROM fighters WHERE profile_id=?)", (profile_id,))
+        con.execute(
+            "DELETE FROM athlete_ratings WHERE fighter_id IN"
+            " (SELECT id FROM fighters WHERE profile_id=?)", (profile_id,))
         con.execute("DELETE FROM fighters WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM legal_acceptances WHERE profile_id=?", (profile_id,))
