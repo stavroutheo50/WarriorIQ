@@ -115,6 +115,63 @@ def _log_host_memory() -> None:
         LOGGER.info("analysis_host_memory_unavailable error=%s", type(exc).__name__)
 
 
+def _apply_corner_reading(reading, frame, observation_a, observation_b,
+                          manager, pose_tracker, decided_from: str) -> None:
+    """Turn a fight's corner reading into the identity manager's state.
+
+    The region is the fight's answer, over every frame the reader saw. Which
+    fighter wears which colour is read off this one frame, because that is a
+    question about these two boxes rather than about the fight.
+
+    Anything short of two clearly opposite colours leaves the region None,
+    which is the state that makes every identity score exactly what it was
+    before corners existed.
+    """
+    region = reading.region
+    corner_a = corner_b = None
+    if region and observation_a is not None and observation_b is not None:
+        corner_a, corner_b = assign_corners(
+            frame, observation_a.box, getattr(observation_a, "keypoints", None),
+            observation_b.box, getattr(observation_b, "keypoints", None), region)
+    if region and corner_a is None:
+        # The fight found a region and then nobody could be assigned in it.
+        # Worth its own line: the two failures look identical in the result -
+        # corners off either way - and want opposite fixes. Either identity
+        # was not holding both fighters on this frame, or it was and they did
+        # not read as opposite colours on it.
+        if observation_a is None or observation_b is None:
+            LOGGER.info(
+                "analysis_corner_unassigned region=%s reason=fighter_missing "
+                "fighter_a=%s fighter_b=%s", region,
+                observation_a is not None, observation_b is not None)
+        else:
+            from core.corner import score_detection
+
+            try:
+                red_a, blue_a = score_detection(
+                    frame, observation_a.box,
+                    getattr(observation_a, "keypoints", None), region)
+                red_b, blue_b = score_detection(
+                    frame, observation_b.box,
+                    getattr(observation_b, "keypoints", None), region)
+                LOGGER.info(
+                    "analysis_corner_unassigned region=%s reason=not_opposite "
+                    "a_red=%.2f a_blue=%.2f b_red=%.2f b_blue=%.2f",
+                    region, red_a, blue_a, red_b, blue_b)
+            except Exception as exc:            # noqa: BLE001 - diagnostics only
+                LOGGER.info("analysis_corner_unassigned region=%s reason=%s",
+                            region, type(exc).__name__)
+    if corner_a is None:
+        region = None
+    manager.set_corners(region, corner_a, corner_b)
+    pose_tracker.set_corner_region(manager.corner_region)
+    LOGGER.info(
+        "analysis_corner region=%s fighter_a=%s fighter_b=%s decided_from=%s "
+        "frames=%d separation=%.2f reason=%s",
+        manager.corner_region or "none", corner_a or "none", corner_b or "none",
+        decided_from, reading.frames_scored, reading.separation, reading.reason)
+
+
 def _log_gpu_state() -> None:
     """Say what the card looked like before this analysis touched it.
 
@@ -153,6 +210,7 @@ ANALYSIS_PHASE_SPAN = 63.0
 
 from core.identity import IdentityManager, fighter_pair_similarity
 from core.metrics import MetricsAccumulator
+from core.corner import DECIDE_AFTER_FRAMES, CornerReader, assign_corners
 from core.preflight import Preflight
 from core.preflight import probe as probe_video
 from core.pose_smoothing import JointGate
@@ -645,6 +703,13 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     # the identity guards are not blind for the opening of every analysis.
     # See IdentityManager.prime_track_history. Nothing here is scored: these
     # frames are outside the round and never reach metrics, events or output.
+    # Which region carries the corner colour is a question about the whole
+    # fight, not about one frame - measured on this project's footage, a
+    # single frame picks torso or gear depending only on which fighter is
+    # considered first. The warm-up pass is already decoding and tracking
+    # frames for the identity guards, so the evidence is free here. Only the
+    # per-frame numbers are kept; the frames are not held.
+    corner_reader = CornerReader()
     warm_samples: list[tuple[int, list]] = []
     warm_frames = int(round(SETTINGS.identity_warmup_seconds * info.fps))
     warm_start = max(0, start_frame - warm_frames)
@@ -656,7 +721,11 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
             if not warm_ok or warm_frame is None:
                 break
             if (warm_index - warm_start) % max(1, quality.stride) == 0:
-                warm_samples.append((warm_index, pose_tracker.track(warm_frame, quality.imgsz)))
+                warm_people = pose_tracker.track(warm_frame, quality.imgsz)
+                warm_samples.append((warm_index, warm_people))
+                corner_reader.observe(warm_frame, [
+                    person for person in warm_people
+                    if float(getattr(person, "referee_prob", 0.0) or 0.0) < 0.5])
             warm_index += 1
         # Back to the frame the user actually selected on.
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
@@ -675,6 +744,29 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         first_frame,
     )
     manager = IdentityManager(initial_a, initial_b, start_frame, source_fps=info.fps)
+    # Which corner each fighter is in, read once off the frame they were
+    # picked on. Every other identity signal compares a candidate to a
+    # remembered template and therefore drifts with it; this one is fixed by
+    # the competition rules, so it can still disagree after a slide. It is
+    # only ever allowed to refuse - see CORNER_CONFLICT handling in
+    # core/identity.py - and it stays off entirely unless this frame shows
+    # two clearly opposite colours.
+    corner_reading = corner_reader.decide()
+    corner_pending = not corner_reading.decided
+    if corner_pending:
+        # Nothing to decide from yet. A clip analysed from its first frame has
+        # no warm-up at all - warm_start == start_frame, so that loop never
+        # runs - and deciding from the single seed frame is the fragility this
+        # reader exists to remove: measured, one frame picks torso or gear
+        # depending only on which fighter is considered first.
+        #
+        # So corners stay off and the reader keeps watching the round itself,
+        # on frames that are being tracked anyway. See DECIDE_AFTER_FRAMES.
+        manager.set_corners(None, None, None)
+        pose_tracker.set_corner_region(None)
+    else:
+        _apply_corner_reading(corner_reading, first_frame, initial_a, initial_b,
+                              manager, pose_tracker, "warmup")
     # Can these two be told apart in this video at all? Asked once, at the
     # start, because no amount of work downstream recovers from "no".
     pair_similarity = fighter_pair_similarity(initial_a, initial_b)
@@ -812,6 +904,13 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                 next_inference_frame = source_frame + max(1, inference_stride)
 
                 people = pose_tracker.track(frame, current_imgsz)
+                if corner_pending:
+                    # Before the guided detections are folded in below: those
+                    # are per-fighter crops and can duplicate a fighter, and
+                    # the reader compares the two largest people in the frame.
+                    corner_reader.observe(frame, [
+                        person for person in people
+                        if float(getattr(person, "referee_prob", 0.0) or 0.0) < 0.5])
                 guidance = nearest_guidance(sam_tracks, source_frame, sam_stride)
                 focused = pose_tracker.recover_from_guidance(frame, guidance, people)
                 for observation in focused:
@@ -821,6 +920,19 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                         guided_pose_recoveries["B"] += 1
                 people.extend(focused)
                 fighter_a, fighter_b = manager.update(people, source_frame, sam_guidance=guidance)
+                if corner_pending and corner_reader.frames_scored >= DECIDE_AFTER_FRAMES:
+                    # Asked once, and answered whatever the answer is. A fight
+                    # that has not separated over this many frames of its own
+                    # footage does not have a readable corner, and asking again
+                    # later would only be waiting for a frame that agrees.
+                    #
+                    # Which fighter is which comes from the two the manager is
+                    # holding right now, not from the seed frame: identity has
+                    # been following them all the way here.
+                    corner_pending = False
+                    _apply_corner_reading(
+                        corner_reader.decide(), frame, fighter_a, fighter_b,
+                        manager, pose_tracker, "round")
                 # Joints only, and only for the two fighters, only after
                 # identity has already chosen them. See core/rtm_pose.py.
                 refine_fighter_pose(frame, [fighter_a, fighter_b])

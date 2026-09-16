@@ -69,6 +69,19 @@ CLEAR_COLOUR = 0.25
 # lands at 12%. Half is the gap between them.
 DECIDED_FRACTION = 0.40
 
+# How many analysed frames of the round to watch before taking the fight's
+# answer, when there were no warm-up frames to take it from.
+#
+# A clip analysed from frame 0 has no warm-up: warm_start == start_frame, the
+# warm-up loop never runs, and the reader was handed nothing - so every such
+# fight silently fell back to the single seed frame, which is the fragility
+# this reader exists to remove. Sampling the round itself costs no extra
+# decode, because those frames are being tracked anyway.
+#
+# Small enough that corners are on for almost all of the fight, and large
+# enough that the answer is the fight's rather than one frame's.
+DECIDE_AFTER_FRAMES = 40
+
 
 @dataclass(frozen=True)
 class CornerReading:
@@ -186,6 +199,33 @@ def score_people(frame, people, region: str | None) -> None:
         person.corner_red, person.corner_blue = red, blue
 
 
+def assign_corners(frame, box_a, keypoints_a, box_b, keypoints_b, region: str):
+    """Which of these two is the red corner, in a region already decided.
+
+    The region comes from the whole fight; which fighter wears which colour
+    comes from the frame they were selected on, because that is the only
+    frame where "which of these is fighter A" is not itself in question.
+
+    Returns (None, None) unless both read clearly, in opposite colours, with
+    a margin between them - the same bar the refusal itself uses.
+    """
+    from core.identity import CORNER_MARGIN
+
+    red_a, blue_a = score_detection(frame, box_a, keypoints_a, region)
+    red_b, blue_b = score_detection(frame, box_b, keypoints_b, region)
+    best, strength = (None, None), 0.0
+    for a_corner, a_score, a_other, b_corner, b_score, b_other in (
+            ("red", red_a, blue_a, "blue", blue_b, red_b),
+            ("blue", blue_a, red_a, "red", red_b, blue_b)):
+        if a_score < CLEAR_COLOUR or b_score < CLEAR_COLOUR:
+            continue
+        if a_score - a_other < CORNER_MARGIN or b_score - b_other < CORNER_MARGIN:
+            continue
+        if min(a_score, b_score) > strength:
+            best, strength = (a_corner, b_corner), min(a_score, b_score)
+    return best
+
+
 def _frame_separation(frame, people, region: str) -> float:
     """Best red/blue split among the two largest fighters in one frame.
 
@@ -206,6 +246,34 @@ def _frame_separation(frame, people, region: str) -> float:
     return max(min(red_a, blue_b), min(red_b, blue_a))
 
 
+class CornerReader:
+    """Accumulates the evidence for a corner decision, one frame at a time.
+
+    Separate from read_corners() so the analyser can feed it frames it is
+    already decoding - the identity warm-up pass - instead of making a second
+    pass over the video purely to look at colour. Only the per-frame numbers
+    are kept; the frames themselves are not held, which matters because the
+    warm-up can run to hundreds of them.
+    """
+
+    def __init__(self) -> None:
+        self._totals: dict[str, list[float]] = {region: [] for region in REGIONS}
+
+    def observe(self, frame, people) -> None:
+        """Measure one frame. Frames with fewer than two fighters are ignored."""
+        if frame is None or people is None or len(people) < 2:
+            return
+        for region in REGIONS:
+            self._totals[region].append(_frame_separation(frame, people, region))
+
+    @property
+    def frames_scored(self) -> int:
+        return len(self._totals[REGIONS[0]])
+
+    def decide(self) -> CornerReading:
+        return _decide(self._totals)
+
+
 def read_corners(samples) -> CornerReading:
     """Decide, for one fight, whether corner colour is usable and where.
 
@@ -214,13 +282,13 @@ def read_corners(samples) -> CornerReading:
     whole sample and the better one wins, because which region carries the
     colour depends on the ruleset and cannot be known in advance.
     """
-    totals = {region: [] for region in REGIONS}
+    reader = CornerReader()
     for frame, people in samples:
-        if frame is None or people is None or len(people) < 2:
-            continue
-        for region in REGIONS:
-            totals[region].append(_frame_separation(frame, people, region))
+        reader.observe(frame, people)
+    return reader.decide()
 
+
+def _decide(totals: dict[str, list[float]]) -> CornerReading:
     scored = len(totals[REGIONS[0]])
     if not scored:
         return CornerReading(reason="no frame had two fighters to compare")

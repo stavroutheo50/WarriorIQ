@@ -6,8 +6,8 @@ import unittest
 import numpy as np
 
 from core.corner import (
-    CLEAR_COLOUR, DECIDED_FRACTION, CornerReading, colour_scores,
-    read_corners, score_detection,
+    CLEAR_COLOUR, DECIDE_AFTER_FRAMES, DECIDED_FRACTION, CornerReader,
+    CornerReading, assign_corners, colour_scores, read_corners, score_detection,
 )
 
 RED_BGR = (40, 40, 210)
@@ -181,6 +181,106 @@ class ReadCornersTests(unittest.TestCase):
         self.assertEqual(payload["region"], "torso")
         self.assertTrue(payload["decided"])
         self.assertIn("torso", payload["per_region"])
+
+
+class AssignCornersTests(unittest.TestCase):
+    """Which of these two is the red corner, in a region already decided.
+
+    Split from the region decision on purpose. The region is a question about
+    the whole fight and is answered from many frames; which fighter wears which
+    colour is a question about two particular boxes and can only be answered
+    from the frame they are in.
+    """
+
+    def pair(self, region, colours, size=(240, 420)):
+        frame, people = frame_with(
+            [(120, 120, 150, colours[0]), (300, 120, 150, colours[1])],
+            region, size=size)
+        return frame, people[0], people[1]
+
+    def test_red_on_the_left_is_named_red(self):
+        frame, a, b = self.pair("torso", (RED_BGR, BLUE_BGR))
+        self.assertEqual(
+            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
+            ("red", "blue"))
+
+    def test_the_answer_follows_the_fighters_and_not_their_order(self):
+        frame, a, b = self.pair("torso", (BLUE_BGR, RED_BGR))
+        self.assertEqual(
+            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
+            ("blue", "red"))
+
+    def test_gear_colours_are_found_in_the_gear_region(self):
+        frame, a, b = self.pair("gear", (RED_BGR, BLUE_BGR))
+        self.assertEqual(
+            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "gear"),
+            ("red", "blue"))
+
+    def test_two_fighters_in_one_colour_name_neither(self):
+        frame, a, b = self.pair("torso", (BLUE_BGR, BLUE_BGR))
+        self.assertEqual(
+            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
+            (None, None))
+
+    def test_one_uncoloured_fighter_names_neither(self):
+        """Half an answer is not an answer: both have to read clearly."""
+        frame, a, b = self.pair("torso", (RED_BGR, None))
+        self.assertEqual(
+            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
+            (None, None))
+
+    def test_looking_in_the_wrong_region_names_neither(self):
+        """Gear-coloured fighters, asked about the torso."""
+        frame, a, b = self.pair("gear", (RED_BGR, BLUE_BGR))
+        self.assertEqual(
+            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
+            (None, None))
+
+
+class CornerReaderTests(unittest.TestCase):
+    """The accumulating form, which is what an analysis actually uses.
+
+    read_corners() takes a finished list of samples. An analysis does not have
+    one: it has frames arriving one at a time, and holding hundreds of them to
+    ask a colour question afterwards is not affordable.
+    """
+
+    def frame(self, colours, region="torso"):
+        return frame_with([(120, 120, 150, colours[0]), (300, 120, 150, colours[1])],
+                          region)
+
+    def test_it_agrees_with_read_corners_on_the_same_frames(self):
+        samples = [self.frame((RED_BGR, BLUE_BGR)) for _ in range(5)]
+        reader = CornerReader()
+        for frame, people in samples:
+            reader.observe(frame, people)
+        self.assertEqual(reader.decide().region,
+                         read_corners(samples).region)
+
+    def test_frames_without_two_fighters_are_not_counted(self):
+        frame, people = self.frame((RED_BGR, BLUE_BGR))
+        reader = CornerReader()
+        reader.observe(frame, people[:1])
+        reader.observe(frame, [])
+        reader.observe(None, people)
+        self.assertEqual(reader.frames_scored, 0)
+        reader.observe(frame, people)
+        self.assertEqual(reader.frames_scored, 1)
+
+    def test_nothing_observed_decides_nothing(self):
+        reading = CornerReader().decide()
+        self.assertFalse(reading.decided)
+        self.assertIsNone(reading.region)
+
+    def test_the_round_is_watched_for_long_enough_to_outvote_one_frame(self):
+        """The whole point of DECIDE_AFTER_FRAMES.
+
+        Measured on this project's footage, a single frame picks torso or gear
+        depending only on which fighter is considered first, so the threshold
+        has to be well above one - and below what a short clip can supply.
+        """
+        self.assertGreater(DECIDE_AFTER_FRAMES, 10)
+        self.assertLess(DECIDE_AFTER_FRAMES, 200)
 
 
 if __name__ == "__main__":
