@@ -2100,10 +2100,10 @@ def request_password_reset(request: Request, email: str = Form(...)):
 
 
 @app.get("/reset-password/{token}", response_class=HTMLResponse)
-def reset_password_page(request: Request, token: str):
+def reset_password_page(request: Request, token: str, error: str = ""):
     return templates.TemplateResponse(
         request=request, name="password_reset.html",
-        context={"request": request, "token": token, "message": ""},
+        context={"request": request, "token": token, "message": "", "error": error[:200]},
     )
 
 
@@ -2115,7 +2115,14 @@ def reset_password(request: Request, token: str, password: str = Form(...)):
     # loose rather than a reason to have none.
     _enforce_rate_limit(request, "password-reset-complete", 15, 900)
     if not valid_password(password):
-        raise HTTPException(400, "Password must contain between 10 and 1,024 characters.")
+        # Back to the form with the reason, rather than a 400 page over it.
+        # The token stays in the path, so the link is still usable - which a
+        # 400 page made look untrue at the moment it mattered most.
+        return RedirectResponse(
+            "/reset-password/%s?%s" % (
+                quote(token, safe=""),
+                urlencode({"error": "Password must contain between 10 and 1,024 characters."})),
+            status_code=303)
     account_id = consume_password_reset_token(token_digest(token))
     if account_id is None or not update_password_hash(account_id, hash_password(password)):
         raise HTTPException(410, "This password-reset link is invalid or expired.")
@@ -4493,7 +4500,8 @@ def legal_document(request: Request):
 def copyright_report_page(request: Request):
     return templates.TemplateResponse(
         request=request, name="copyright_report.html",
-        context={"request": request, "submitted": False, "reference": None},
+        context={"request": request, "submitted": False, "reference": None,
+                 "error": "", "form": {}},
     )
 
 
@@ -4507,7 +4515,22 @@ def submit_copyright_report(
 ):
     _enforce_rate_limit(request, "copyright-report", 6, 3600)
     if not valid_email(email) or len(details.strip()) < 40 or not good_faith:
-        raise HTTPException(400, "Provide a valid email, a detailed good-faith report and the required confirmation.")
+        # Raising here replaced the page with a 400 and threw the report away.
+        # The browser's own minlength counts raw characters while this counts
+        # stripped ones, so a padded report passes the form and fails here -
+        # reachable by ordinary typing, and it cost the visitor everything
+        # they had written.
+        return templates.TemplateResponse(
+            request=request, name="copyright_report.html",
+            context={
+                "request": request, "submitted": False, "reference": None,
+                "error": "Provide a valid email, a detailed good-faith report "
+                         "and the required confirmation.",
+                "form": {"email": email, "details": details, "resource_id": resource_id,
+                         "good_faith": good_faith},
+            },
+            status_code=400,
+        )
     report_id = create_moderation_report("copyright", email.strip().lower(), details.strip(), resource_id.strip())
     record_security_event("copyright_report_received", resource_type="moderation_report", resource_id=str(report_id))
     return templates.TemplateResponse(
