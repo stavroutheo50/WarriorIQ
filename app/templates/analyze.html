@@ -136,7 +136,7 @@
   const holdPage=event=>{if(!uploadInFlight)return;event.preventDefault();event.returnValue=''};
   window.addEventListener('beforeunload',holdPage);
   const releasePage=()=>{uploadInFlight=false};
-  const fmtMB=b=>b>=1073741824?`${(b/1073741824).toFixed(2)} GB`:`${Math.round(b/1048576)} MB`;
+  const fmtMB=b=>b>=1073741824?`${(b/1073741824).toFixed(2)} GB`:b>=1048576?`${Math.round(b/1048576)} MB`:b>=1024?`${Math.round(b/1024)} KB`:`${b} B`;
   // "at this speed", not "left". The estimate genuinely rises when a
   // connection slows, and calling it a countdown made that read as the timer
   // running backwards. Rounded coarsely for the same reason: the exact second
@@ -389,7 +389,10 @@
                 :(overall>1?upload.loaded/overall:0);
       const left=rate>0?(upload.total-upload.loaded)/rate:0;
       progressBar.style.width=`${percent}%`;
-      progressText.textContent=rate>0?`${fmtMB(upload.loaded)} of ${fmtMB(upload.total)} · ${(rate/1048576).toFixed(1)} MB/s · ${fmtLeft(left)}`:`Uploading ${fmtMB(upload.total)}…`;
+      const sent=upload.total>0&&upload.loaded>=upload.total;
+      progressText.textContent=sent?`${fmtMB(upload.total)} sent · finishing…`
+        :rate>0?`${fmtMB(upload.loaded)} of ${fmtMB(upload.total)} · ${(rate/1048576).toFixed(1)} MB/s · ${fmtLeft(left)}`
+        :`Uploading ${fmtMB(upload.total)}…`;
       uploadSubmit.textContent=`Uploading ${percent}%`});
     request.addEventListener('loadend',()=>{clearInterval(stallTimer);releasePage()});
     // Released here, not in loadend: 'load' fires first, and every branch
