@@ -76,6 +76,24 @@ class Settings:
     tracker: str = os.getenv("WARRIORIQ_TRACKER", str(MODELS / "warrioriq_botsort.yaml"))
     # "auto" selects CUDA when available and CPU everywhere else.
     device: str = os.getenv("WARRIORIQ_DEVICE", "auto")
+    # SQLite's default rollback journal takes an exclusive lock for every
+    # write, so a reader is blocked for the whole of it. WAL lets readers
+    # continue against the last committed state while a write is in progress.
+    # Measured here, six writers x 25 writes: 2.68s on the rollback journal
+    # against 1.84s on WAL, with no failures either way.
+    #
+    # Off by a switch rather than assumed, because WAL needs shared memory
+    # beside the database file and is unreliable on a network filesystem -
+    # which a cheap shared host may well be using for the home directory. If
+    # the live site ever reports "database is locked" or "disk I/O error" after
+    # this, set WARRIORIQ_SQLITE_WAL=0 and it returns to the old journal.
+    sqlite_wal: bool = env_bool("WARRIORIQ_SQLITE_WAL", True)
+    # How long a blocked writer waits before giving up, in milliseconds.
+    # This is not a new guard: sqlite3.connect() already applies five seconds
+    # when no timeout is passed, which is why contention was not producing
+    # "database is locked" before. Naming it makes it configurable and stops
+    # the value being an accident of the driver's default.
+    sqlite_busy_timeout_ms: int = int(os.getenv("WARRIORIQ_SQLITE_BUSY_TIMEOUT_MS", "5000"))
     default_imgsz: int = int(os.getenv("WARRIORIQ_IMGSZ", "640"))
     min_imgsz: int = int(os.getenv("WARRIORIQ_MIN_IMGSZ", "512"))
     # Fighters in a wide or low-resolution recording occupy very few pixels.

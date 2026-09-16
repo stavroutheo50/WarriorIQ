@@ -74,7 +74,7 @@ from app.state import (
     update_job, update_job_for_worker,
 )
 from core.config import OUTPUTS, SETTINGS
-from core.db import release_analysis
+from core.db import record_analysis_failure, release_analysis
 from core.types import AnalysisRequest
 from core.worker_client import RemoteWorkerClient, RemoteWorkerError, retry_heartbeat
 
@@ -132,6 +132,14 @@ def run_claimed_job(worker_id: str, job_id: str, job: dict) -> None:
             release_analysis(int(current["account_id"]), job_id)
             update_job(job_id, {"usage_reserved": False})
         LOGGER.exception("Analysis job %s failed", job_id, exc_info=exc)
+        # The log is not a queue: it rotates, and it needs shell access to
+        # read. Keep the reason where it can be listed and reviewed.
+        try:
+            record_analysis_failure(
+                job_id, type(exc).__name__, detail=str(exc)[:500],
+                account_id=int(current["account_id"]) if current.get("account_id") else None)
+        except Exception:                       # noqa: BLE001
+            LOGGER.warning("Could not record the failure of job %s", job_id)
         if still_owns_run:
             update_job(job_id, {
                 "status": "error",

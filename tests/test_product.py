@@ -1964,7 +1964,16 @@ class AccountDeletionCoverageTests(unittest.TestCase):
 
         source = (Path(__file__).resolve().parents[1] / "core" / "db.py").read_text(encoding="utf-8")
         tables = {m.group(1) for m in re.finditer(r"CREATE TABLE IF NOT EXISTS (\w+)", source)}
-        body = source[source.index("def delete_account"):][:3000]
+        # The whole function, not a fixed slice of it. This read source[:3000]
+        # and silently stopped covering whatever fell past that - adding two
+        # tables to delete_account pushed its own DELETE FROM accounts and
+        # profiles out of the window, so the test reported the two statements
+        # it could no longer see rather than a real gap.
+        start = source.index("def delete_account")
+        rest = source[start:]
+        after = [i for i, line in enumerate(rest.splitlines())
+                 if i and (line.startswith("def ") or line.startswith("@"))]
+        body = "\n".join(rest.splitlines()[:after[0]]) if after else rest
         cleared = {m.group(1) for m in re.finditer(r"(?:DELETE FROM|UPDATE) (\w+)", body)}
         missed = tables - cleared - self.RETAINED
         self.assertEqual(

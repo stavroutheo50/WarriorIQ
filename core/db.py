@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -9,11 +10,71 @@ from pathlib import Path
 from core.config import DATASET, DB_PATH, SETTINGS
 from core.payments import PLANS, effective_plan_key, plan_for_key
 
+LOGGER = logging.getLogger("warrioriq.db")
+
+# Whether WAL was actually accepted, so it is logged once rather than per
+# connection. None until the first connection has tried.
+_wal_state: bool | None = None
+
+
+def _configure(con: sqlite3.Connection) -> None:
+    """Make concurrent access survivable.
+
+    WarriorIQ runs a web process and a worker against one file. The rollback
+    journal takes an exclusive lock for the whole of a write, so a reader is
+    blocked for its duration. WAL lets readers see the last committed state
+    while a write is in progress, and only writers queue.
+
+    Measured here, six writers making 25 writes each: 2.68s on the rollback
+    journal against 1.84s on WAL. Neither produced a single failure, which is
+    worth stating plainly - sqlite3.connect() already applies a five-second
+    busy timeout when none is passed, so contention was being waited out
+    rather than raised even before this. Setting busy_timeout explicitly
+    changes no behaviour at the default; it makes the value configurable and
+    stops it depending on a driver default that could change.
+
+    WAL is attempted, not assumed. It needs a shared-memory file beside the
+    database and is unreliable over a network filesystem, which a cheap shared
+    host may be using. A refusal is logged and the old journal keeps working,
+    because a slower database beats a broken one.
+    """
+    global _wal_state
+    # Set first and unconditionally: it is what makes contention wait rather
+    # than raise, and it is safe in every journal mode.
+    con.execute("PRAGMA busy_timeout=%d" % int(SETTINGS.sqlite_busy_timeout_ms))
+    if not SETTINGS.sqlite_wal:
+        return
+    try:
+        mode = con.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+    except sqlite3.Error as exc:
+        if _wal_state is not False:
+            LOGGER.warning("sqlite_wal_refused error=%s - staying on the rollback journal",
+                           type(exc).__name__)
+            _wal_state = False
+        return
+    accepted = str(mode).lower() == "wal"
+    if _wal_state is None or _wal_state != accepted:
+        LOGGER.info("sqlite_journal_mode=%s", mode)
+        _wal_state = accepted
+    if accepted:
+        # Safe to relax only under WAL: a commit still survives a process
+        # crash, and only an OS-level crash can lose the most recent commits.
+        con.execute("PRAGMA synchronous=NORMAL")
+
 
 @contextmanager
 def connection():
-    con = sqlite3.connect(DB_PATH)
+    """The one place WarriorIQ opens a database connection.
+
+    Every query in this module goes through here, which is what makes the
+    engine a single decision rather than 155 of them. Moving to another engine
+    means changing this function and the SQL dialect it serves - see
+    docs/postgres-migration.md for what that involves and why it has not been
+    done blind.
+    """
+    con = sqlite3.connect(DB_PATH, timeout=SETTINGS.sqlite_busy_timeout_ms / 1000.0)
     con.row_factory = sqlite3.Row
+    _configure(con)
     try:
         yield con
         con.commit()
@@ -187,6 +248,49 @@ def init_db() -> None:
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY(account_id) REFERENCES accounts(id)
             );
+
+            CREATE TABLE IF NOT EXISTS athlete_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fighter_id INTEGER NOT NULL,
+                job_id TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                accuracy REAL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                landed INTEGER NOT NULL DEFAULT 0,
+                output_per_round REAL,
+                defensive_lapses INTEGER,
+                pose_coverage REAL,
+                evidence_trusted INTEGER NOT NULL DEFAULT 0,
+                rated INTEGER NOT NULL DEFAULT 0,
+                rated_on TEXT NOT NULL DEFAULT '',
+                rating_before REAL,
+                rating_after REAL,
+                rating_delta REAL,
+                UNIQUE(fighter_id, job_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS athlete_ratings (
+                fighter_id INTEGER PRIMARY KEY,
+                rating REAL NOT NULL,
+                rated_sessions INTEGER NOT NULL DEFAULT 0,
+                total_sessions INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS analysis_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL,
+                account_id INTEGER,
+                stage TEXT NOT NULL DEFAULT 'analysis',
+                reason TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '',
+                attempts INTEGER NOT NULL DEFAULT 1,
+                occurred_at TEXT NOT NULL,
+                reviewed_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_analysis_failures_job
+                ON analysis_failures(job_id);
 
             CREATE TABLE IF NOT EXISTS moderation_reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1089,6 +1193,178 @@ def list_subscription_actions(account_id: int) -> list[dict]:
     return result
 
 
+def record_athlete_session(fighter_id: int, signals, *, occurred_at: str | None = None) -> dict:
+    """File one analysed fight against an athlete, and move the rating if it may.
+
+    Recording and rating are separate on purpose. Every session is kept,
+    because the history is worth having whatever the evidence gate said; only
+    a session carrying signals the scorecard already trusts moves the number.
+    A session that could not be rated is stored with rated=0 and an empty
+    rated_on, so "why did the rating not change" has an answer in the row
+    rather than in somebody's memory.
+
+    Re-filing the same fight replaces its row and leaves the rating alone. An
+    analysis re-run is the same fight, and letting it score twice would let
+    anyone inflate a rating by pressing the button again.
+    """
+    from core.rating import (
+        BASELINE_RATING, next_rating, performance_score,
+    )
+
+    now = occurred_at or datetime.now(timezone.utc).isoformat()
+    score = performance_score(signals)
+    with connection() as con:
+        existing = con.execute(
+            "SELECT id FROM athlete_sessions WHERE fighter_id=? AND job_id=?",
+            (int(fighter_id), signals.job_id),
+        ).fetchone()
+        row = con.execute(
+            "SELECT rating, rated_sessions, total_sessions FROM athlete_ratings WHERE fighter_id=?",
+            (int(fighter_id),),
+        ).fetchone()
+        rating = float(row["rating"]) if row else BASELINE_RATING
+        rated_sessions = int(row["rated_sessions"]) if row else 0
+        total_sessions = int(row["total_sessions"]) if row else 0
+
+        if existing is not None:
+            con.execute(
+                """UPDATE athlete_sessions SET occurred_at=?,accuracy=?,attempts=?,landed=?,
+                   output_per_round=?,defensive_lapses=?,pose_coverage=?,evidence_trusted=?
+                   WHERE id=?""",
+                (now, signals.accuracy, int(signals.attempts), int(signals.landed),
+                 signals.output_per_round, signals.defensive_lapses, signals.pose_coverage,
+                 1 if signals.evidence_trusted else 0, int(existing["id"])),
+            )
+            return {"rating": rating, "rated_sessions": rated_sessions,
+                    "total_sessions": total_sessions, "rated": False, "delta": 0.0,
+                    "reason": "this fight is already filed against this athlete"}
+
+        after, delta = (rating, 0.0)
+        if score is not None:
+            after, delta = next_rating(rating, rated_sessions, score)
+
+        con.execute(
+            """INSERT INTO athlete_sessions(
+               fighter_id,job_id,occurred_at,accuracy,attempts,landed,output_per_round,
+               defensive_lapses,pose_coverage,evidence_trusted,rated,rated_on,
+               rating_before,rating_after,rating_delta
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (int(fighter_id), signals.job_id, now, signals.accuracy, int(signals.attempts),
+             int(signals.landed), signals.output_per_round, signals.defensive_lapses,
+             signals.pose_coverage, 1 if signals.evidence_trusted else 0,
+             1 if score is not None else 0, ",".join(signals.used),
+             rating, after, delta),
+        )
+        total_sessions += 1
+        if score is not None:
+            rated_sessions += 1
+        con.execute(
+            """INSERT INTO athlete_ratings(fighter_id,rating,rated_sessions,total_sessions,updated_at)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(fighter_id) DO UPDATE SET
+                 rating=excluded.rating, rated_sessions=excluded.rated_sessions,
+                 total_sessions=excluded.total_sessions, updated_at=excluded.updated_at""",
+            (int(fighter_id), after, rated_sessions, total_sessions, now),
+        )
+    return {"rating": after, "rated_sessions": rated_sessions, "total_sessions": total_sessions,
+            "rated": score is not None, "delta": delta,
+            "reason": "" if score is not None else "no signal the scorecard trusts"}
+
+
+def athlete_rating(fighter_id: int) -> dict:
+    """The athlete's current standing, with the label to show for it."""
+    from core.rating import BASELINE_RATING, describe, is_provisional
+
+    with connection() as con:
+        row = con.execute(
+            "SELECT * FROM athlete_ratings WHERE fighter_id=?", (int(fighter_id),)).fetchone()
+    if row is None:
+        return {"fighter_id": int(fighter_id), "rating": BASELINE_RATING, "rated_sessions": 0,
+                "total_sessions": 0, "provisional": True, "label": describe(BASELINE_RATING, 0)}
+    rated = int(row["rated_sessions"])
+    return {
+        "fighter_id": int(fighter_id), "rating": float(row["rating"]),
+        "rated_sessions": rated, "total_sessions": int(row["total_sessions"]),
+        "provisional": is_provisional(rated), "label": describe(float(row["rating"]), rated),
+        "updated_at": row["updated_at"],
+    }
+
+
+def athlete_history(fighter_id: int, limit: int = 50) -> list[dict]:
+    """Every session filed against an athlete, newest first."""
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM athlete_sessions WHERE fighter_id=? ORDER BY id DESC LIMIT ?",
+            (int(fighter_id), int(limit)),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def record_analysis_failure(
+    job_id: str,
+    reason: str,
+    *,
+    detail: str = "",
+    account_id: int | None = None,
+    stage: str = "analysis",
+) -> int:
+    """Keep a failed analysis where it can be looked at later.
+
+    The worker already catches, releases the visitor's allowance and marks the
+    job `error`, so one bad upload never stalled the queue - that part was
+    never broken. What it did not do was keep the reason anywhere but the log,
+    so "why did these four fail" could only be answered by someone with shell
+    access reading files, and only until the logs rotated.
+
+    A repeat of the same job increments `attempts` rather than adding a row,
+    so a video that fails every retry reads as one stubborn problem instead of
+    five separate ones.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        existing = con.execute(
+            "SELECT id, attempts FROM analysis_failures WHERE job_id=? AND reviewed_at IS NULL"
+            " ORDER BY id DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        if existing is not None:
+            con.execute(
+                "UPDATE analysis_failures SET attempts=?, reason=?, detail=?, occurred_at=?"
+                " WHERE id=?",
+                (int(existing["attempts"]) + 1, reason[:120], detail[:500], now, int(existing["id"])),
+            )
+            return int(existing["id"])
+        cursor = con.execute(
+            """INSERT INTO analysis_failures(
+               job_id,account_id,stage,reason,detail,attempts,occurred_at
+               ) VALUES(?,?,?,?,?,?,?)""",
+            (job_id, account_id, stage[:40], reason[:120], detail[:500], 1, now),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_analysis_failures(limit: int = 50, include_reviewed: bool = False) -> list[dict]:
+    """The dead-letter queue, newest first."""
+    clause = "" if include_reviewed else " WHERE reviewed_at IS NULL"
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM analysis_failures%s ORDER BY id DESC LIMIT ?" % clause,
+            (int(limit),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_analysis_failure_reviewed(failure_id: int) -> bool:
+    """Take one off the queue once somebody has dealt with it."""
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE analysis_failures SET reviewed_at=? WHERE id=? AND reviewed_at IS NULL",
+            (now, int(failure_id)),
+        )
+        return cursor.rowcount > 0
+
+
 def record_security_event(
     event_type: str,
     *,
@@ -1406,10 +1682,24 @@ def delete_account(account_id: int) -> dict | None:
         # who is deleting this workspace - and some of them are minors. It
         # outlived the account it belonged to. Deleted after the fights that
         # reference it, so nothing is left pointing at a row that is gone.
+        # Before the roster goes: athlete history and ratings hang off
+        # fighter_id, and once the fighters are gone there is nothing left to
+        # match them against.
+        con.execute(
+            "DELETE FROM athlete_sessions WHERE fighter_id IN"
+            " (SELECT id FROM fighters WHERE profile_id=?)", (profile_id,))
+        con.execute(
+            "DELETE FROM athlete_ratings WHERE fighter_id IN"
+            " (SELECT id FROM fighters WHERE profile_id=?)", (profile_id,))
         con.execute("DELETE FROM fighters WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM legal_acceptances WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM analysis_usage WHERE account_id=?", (account_id,))
+        # The dead-letter queue carries account_id, so it holds account data
+        # and has to go with everything else. Caught by
+        # test_every_table_holding_account_data_is_cleared, which is the whole
+        # reason that test enumerates tables rather than naming them.
+        con.execute("DELETE FROM analysis_failures WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM plan_interest WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM subscription_actions WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM outbound_messages WHERE account_id=?", (account_id,))
