@@ -3,6 +3,7 @@
 {% block description %}WarriorIQ legal notices: privacy, terms, AI transparency, accessibility and security.{% endblock %}
 {% block content %}
 <header class="legal-hero"><div class="eyebrow">Legal center</div><h1>Clear rules. Honest readiness.</h1><p>Everything users should be able to read before uploading footage, creating an account or paying for WarriorIQ.</p></header>
+{% if request.state.legal_is_draft %}<div class="notice"><strong>Draft &mdash; not yet reviewed by a lawyer.</strong> Wording, jurisdiction and effective dates can still change. Read this as how WarriorIQ intends to operate rather than as a final agreement.</div>{% endif %}
 {% if launch_checklist_visible %}
 <section class="card launch-readiness {% if launch.ready %}ready{% else %}blocked{% endif %}"><div class="section-title"><div><div class="eyebrow">Public-launch gate</div><h2>{% if launch.ready %}Operator identity configured{% else %}Launch is blocked until real details are supplied{% endif %}</h2></div><span class="pill">{% if launch.ready %}CONFIGURED{% else %}{{launch.missing|length}} ITEMS MISSING{% endif %}</span></div>{% if launch.ready %}<p>Code-level identity fields are configured. Legal, security and accessibility review still remain operational launch tasks.</p>{% else %}<p>No company details were invented. Add these environment values before public launch or paid checkout:</p><ul class="launch-list">{% for item in launch.missing %}<li>{{item}}</li>{% endfor %}</ul>{% endif %}</section>
 {% endif %}

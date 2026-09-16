@@ -690,6 +690,15 @@ class Settings:
     # WarriorIQ up, and to a visitor it reads as "this company does not exist
     # yet". Off unless the operator deliberately turns it on.
     show_launch_checklist: bool = env_bool("WARRIORIQ_SHOW_LAUNCH_CHECKLIST", False)
+    # Whether the legal text still carries "not yet reviewed by a lawyer".
+    #
+    # This was written into legal_document.html, so it appeared on the twelve
+    # documents that template renders and on neither /privacy nor /legal, and
+    # clearing it once counsel had read the text meant editing markup on a live
+    # site. It is a claim about the documents, not about the deployment, which
+    # is why it is separate from launch_readiness(): text can be reviewed while
+    # the operator fields are still empty, and the reverse.
+    legal_is_draft: bool = env_bool("WARRIORIQ_LEGAL_DRAFT", True)
 
     # Social sign-in is opt-in per provider. A provider is exposed only when
     # both credentials and a stable state-signing secret are configured.

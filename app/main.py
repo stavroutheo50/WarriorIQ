@@ -977,6 +977,7 @@ async def viewer_context(request: Request, call_next):
     # of to show them a page of five sports.
     request.state.sports = [sport_identity(key) for key in SPORTS]
     request.state.launch = launch_readiness()
+    request.state.legal_is_draft = SETTINGS.legal_is_draft
     request.state.minimum_account_age = SETTINGS.minimum_account_age
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
     request.state.cookie_preferences = _cookie_preferences(request)
