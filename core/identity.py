@@ -17,6 +17,23 @@ from core.types import FighterState, PersonObservation
 # would turn noise into a rejection of the right fighter.
 CORNER_MARGIN = 0.20
 
+# How much of a track's colour history has to disagree before the corner is
+# allowed to refuse it.
+#
+# Measured, the per-frame version of this gate cost fighter B two thirds of its
+# coverage on a fight where its corner was assigned correctly: 0.728 -> 0.260,
+# with wrong_corner firing 2256 times. The colour of one detection in one frame
+# is simply not reliable - gear leaves frame, a fighter turns, the mat itself is
+# red and blue - and a hard categorical refusal on that reading sends a
+# correctly tracked fighter to recovery over and over.
+#
+# What does not flicker is a whole track's history. The case this gate exists
+# for - tracking having slid onto the other fighter - produces a track that
+# reads the opposing colour consistently, not once.
+CORNER_WINDOW = 30
+CORNER_MIN_OBSERVATIONS = 8
+CORNER_CONFLICT_FRACTION = 0.75
+
 
 def box_area(box) -> float:
     if box is None:
@@ -208,6 +225,13 @@ class IdentityManager:
         # state: every score below is then exactly what it was before corners
         # existed. See set_corners().
         self.corner_region: str | None = None
+        # What each track has read as, over its recent history: +1 for a clear
+        # red look, -1 for a clear blue one. Unclear looks are not recorded at
+        # all rather than recorded as neutral, so a fighter whose gear is often
+        # ambiguous simply takes longer to accumulate evidence instead of
+        # having its evidence diluted. Same rolling-window shape as
+        # _track_reid, and filled in the same place.
+        self._track_corner: dict[int, deque] = {}
         # Frames where A and B were equally plausible either way round.
         self.confusions = 0
         self.last_confusion_frame: int | None = None
@@ -223,6 +247,10 @@ class IdentityManager:
                 seen = self._track_reid.setdefault(int(person.track_id), deque(
                     maxlen=max(1, SETTINGS.reid_pool_size)))
                 seen.append(np.asarray(person.reid, dtype=np.float32).ravel())
+            look = self._corner_look(person)
+            if look is not None:
+                self._track_corner.setdefault(
+                    int(person.track_id), deque(maxlen=CORNER_WINDOW)).append(look)
             history = self._track_history.setdefault(int(person.track_id), deque(maxlen=450))
             box = person.box
             history.append((
@@ -326,24 +354,51 @@ class IdentityManager:
         short = self._recent_spread_short(track_id, fps)
         return short is not None and short < SETTINGS.max_stationary_spread_short
 
+    @staticmethod
+    def _corner_look(person: PersonObservation) -> int | None:
+        """What one detection read as: +1 clearly red, -1 clearly blue, None unclear.
+
+        The same bar the fight-level reader uses - clearly one colour, and
+        clearly not the other - so that an ambiguous look contributes nothing
+        instead of contributing noise.
+        """
+        red, blue = person.corner_red, person.corner_blue
+        if red is None or blue is None:
+            return None
+        from core.corner import CLEAR_COLOUR
+
+        if red >= CLEAR_COLOUR and red - blue >= CORNER_MARGIN:
+            return 1
+        if blue >= CLEAR_COLOUR and blue - red >= CORNER_MARGIN:
+            return -1
+        return None
+
     def _wears_the_other_corner(self, state: FighterState, candidate: PersonObservation) -> bool:
-        """Whether this candidate is clearly in the opposing corner's colour.
+        """Whether this track has repeatedly read as the opposing corner.
+
+        Sustained, never per-frame. One frame's colour is not evidence: the
+        earlier per-frame version of this gate refused a correctly assigned
+        fighter 2256 times in one fight and cost it two thirds of its
+        coverage. A track has to have been looked at CORNER_MIN_OBSERVATIONS
+        times clearly, and CORNER_CONFLICT_FRACTION of those looks have to
+        agree on the opposing colour, before it may be refused.
 
         False for everything uncertain: a fight with no readable corner, a
-        fighter with no corner assigned, a detection the sampler could not
-        colour, and any reading where the two colours are close. Only an
-        unambiguous conflict counts, because the cost of being wrong here is
-        refusing the right fighter.
+        fighter with no corner assigned, a detection with no track to
+        accumulate against, and any track not yet looked at enough. A track
+        seen briefly is never refused - which is deliberate, because that is
+        exactly the fighter coming back from a loss.
         """
         if not self.corner_region or state.corner is None:
             return False
-        red, blue = candidate.corner_red, candidate.corner_blue
-        if red is None or blue is None:
+        if candidate.track_id is None:
             return False
-        mine, theirs = (red, blue) if state.corner == "red" else (blue, red)
-        from core.corner import CLEAR_COLOUR
-
-        return bool(theirs >= CLEAR_COLOUR and theirs - mine >= CORNER_MARGIN)
+        looks = self._track_corner.get(int(candidate.track_id))
+        if not looks or len(looks) < CORNER_MIN_OBSERVATIONS:
+            return False
+        theirs = -1 if state.corner == "red" else 1
+        conflicting = sum(1 for look in looks if look == theirs)
+        return conflicting >= CORNER_CONFLICT_FRACTION * len(looks)
 
     def set_corners(self, region: str | None, a_corner: str | None, b_corner: str | None) -> None:
         """Tell the manager which corner each fighter is in, once per fight.
