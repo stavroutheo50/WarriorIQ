@@ -4177,6 +4177,15 @@ def delete_fight_route(request: Request, job_id: str):
 def compare_page(request: Request, a: str = "", b: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
+    # Only offer fights that can actually be compared. The row outlives its
+    # report - retention removes the outputs, and a failed or cleaned-up job
+    # leaves the row behind - and both halves of this page need a readable
+    # report for each side. Offering the rest meant a reader could pick two
+    # fights, submit, and get a page with no comparison and no movement
+    # table, still captioned "Choose two different saved fights" as though
+    # they had not chosen. It also makes the "two fights required" gate above
+    # count what it is actually gating on.
+    fights = [f for f in fights if (OUTPUTS / str(f["job_id"]) / "report.json").exists()]
     for fight in fights:
         # Every option read "Fight analysis · <date>", so a reader with six
         # fights on one day was choosing between six identical lines.
