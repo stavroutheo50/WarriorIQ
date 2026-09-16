@@ -827,9 +827,17 @@ class Settings:
     # Google Tag Manager container. GTM loads whatever tags the container holds,
     # so if a GA4 tag inside it uses the same measurement ID as
     # WARRIORIQ_ANALYTICS_ID, every page view is counted twice. Run one or the
-    # other: empty this to use the direct tag, or empty the measurement ID to
-    # let the container own analytics.
-    gtm_container_id: str = os.getenv("WARRIORIQ_GTM_ID", "GTM-PFCW27J2").strip()
+    # other: set this to let the container own analytics, or leave it empty and
+    # let the direct gtag.js tag own it.
+    #
+    # Empty by default, because the direct tag owns analytics here. Checked
+    # 2026-09-16: the container that used to be the default, GTM-PFCW27J2,
+    # holds **no tags at all** - 332 KB of Tag Manager runtime fetched on every
+    # page view with not one G-, UA-, AW- or DC- ID inside it, so it fired
+    # nothing while costing every visitor the download. Setting this again also
+    # re-widens frame-src, which is why that is only widened when a container
+    # is actually loaded.
+    gtm_container_id: str = os.getenv("WARRIORIQ_GTM_ID", "").strip()
     email_provider: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER", "").strip()
     require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 
