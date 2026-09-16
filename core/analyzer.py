@@ -57,6 +57,20 @@ LOGGER = logging.getLogger("warrioriq.analysis")
 # silent, and is what turned a 45-second SAM2 pass into 28 minutes.
 GPU_HEADROOM_WANTED_GB = 5.5
 
+# What an analysis holds in host memory *besides* the SAM2 frame buffer:
+# the pose model and its TensorRT context, SAM2's weights, torch, and the
+# decode working set. Measured by sampling RSS through a real pass on an
+# RTX 5060 - 0.51 GB bare, 1.16 GB with the pose model, 1.48 GB with SAM2
+# loaded, peaking at 5.33 GB against a 4.22 GB buffer, so 1.11 GB beside it.
+# Rounded up for slack.
+#
+# This replaces a threshold of twice the buffer, which wanted 8.44 GB for a
+# run that peaks at 5.33 GB. It fired on an analysis that then completed a
+# 94-second clip in 103 seconds at full speed - a warning that cries wolf on
+# a healthy run is worse than none, because it teaches the reader to ignore
+# the one that matters.
+ANALYSIS_WORKING_SET_GB = 1.5
+
 
 def _sam_clip_buffer_bytes() -> int:
     """What SAM2 is about to allocate in system RAM for one chunk.
@@ -84,13 +98,13 @@ def _log_host_memory() -> None:
 
         memory = psutil.virtual_memory()
         available = memory.available / 1024 ** 3
-        wanted = _sam_clip_buffer_bytes() / 1024 ** 3
+        buffer_gb = _sam_clip_buffer_bytes() / 1024 ** 3
+        wanted = buffer_gb + ANALYSIS_WORKING_SET_GB
         LOGGER.info(
-            "analysis_host_memory available_gb=%.2f total_gb=%.2f sam_clip_buffer_gb=%.2f",
-            available, memory.total / 1024 ** 3, wanted)
-        # Twice the buffer: the clip itself, plus the models, torch and the
-        # decode working set that have to live beside it.
-        if available < wanted * 2:
+            "analysis_host_memory available_gb=%.2f total_gb=%.2f sam_clip_buffer_gb=%.2f "
+            "wanted_gb=%.2f",
+            available, memory.total / 1024 ** 3, buffer_gb, wanted)
+        if available < wanted:
             LOGGER.warning(
                 "analysis_host_memory_tight available_gb=%.2f sam_clip_buffer_gb=%.2f "
                 "- this analysis may push the machine into swapping, which looks "
