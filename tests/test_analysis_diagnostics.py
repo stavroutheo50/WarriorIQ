@@ -60,6 +60,31 @@ class HostMemoryLoggingTests(unittest.TestCase):
         self.assertIn("analysis_host_memory", joined)
         self.assertNotIn("analysis_host_memory_tight", joined)
 
+    def test_a_healthy_run_is_not_warned_about(self):
+        """The exact false positive this threshold was rebuilt to remove.
+
+        A real analysis started with 7.08 GB available against a 4.22 GB
+        buffer, warned, and then finished a 94-second clip in 103 seconds at
+        full speed. A warning that cries wolf on a healthy run teaches the
+        reader to ignore the one that matters.
+        """
+        healthy = mock.Mock(available=7.08 * 1024 ** 3, total=15.87 * 1024 ** 3)
+        with mock.patch.dict("sys.modules", {"psutil": mock.Mock(
+                virtual_memory=mock.Mock(return_value=healthy))}):
+            with self.assertLogs("warrioriq.analysis", level="INFO") as logs:
+                analyzer._log_host_memory()
+        self.assertNotIn("analysis_host_memory_tight", " ".join(logs.output))
+
+    def test_the_threshold_is_the_buffer_plus_a_measured_working_set(self):
+        """Not a multiple of the buffer.
+
+        Sampling RSS through a real pass: 5.33 GB peak against a 4.22 GB
+        buffer, so 1.11 GB beside it - the pose model and its TensorRT
+        context, SAM2's weights, torch and the decode working set.
+        """
+        self.assertGreaterEqual(analyzer.ANALYSIS_WORKING_SET_GB, 1.1)
+        self.assertLess(analyzer.ANALYSIS_WORKING_SET_GB, 3.0)
+
     def test_a_tight_machine_is_warned_about(self):
         tight = mock.Mock(available=1 * 1024 ** 3, total=16 * 1024 ** 3)
         with mock.patch.dict("sys.modules", {"psutil": mock.Mock(
