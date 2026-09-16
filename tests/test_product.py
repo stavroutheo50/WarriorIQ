@@ -453,8 +453,15 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
                 "accept_terms": "true", "age_confirmed": "true",
             },
         )
-        denied = self.client.post("/account/export", data={"password": "wrong-password"})
-        self.assertEqual(denied.status_code, 400)
+        denied = self.client.post(
+            "/account/export", data={"password": "wrong-password", "next_path": "/profile"},
+            follow_redirects=False)
+        self.assertEqual(denied.status_code, 303)
+        self.assertIn("error=", denied.headers["location"])
+        self.assertNotIn("password_hash", denied.text)
+        landed = self.client.get(denied.headers["location"])
+        self.assertEqual(landed.status_code, 200)
+        self.assertIn("Enter the current account password", landed.text)
         exported = self.client.post("/account/export", data={"password": "Strong-Local-Password"})
         self.assertEqual(exported.status_code, 200)
         self.assertIn("attachment", exported.headers["content-disposition"])
@@ -1014,10 +1021,15 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         try:
             response = self.client.post(
                 "/account/delete",
-                data={"password": "Strong-Local-Password", "confirmation": "DELETE"},
+                data={"password": "Strong-Local-Password", "confirmation": "DELETE",
+                      "next_path": "/profile"},
+                follow_redirects=False,
             )
-            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.status_code, 303)
+            self.assertIn("error=", response.headers["location"])
             self.assertIsNotNone(database.get_account(account["id"]))
+            landed = self.client.get(response.headers["location"])
+            self.assertIn("Wait for the running analysis", landed.text)
         finally:
             delete_job("running123")
 
