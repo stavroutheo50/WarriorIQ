@@ -35,5 +35,34 @@ const jobId={{job_id|tojson}},video=document.getElementById('sourceVideo'),butto
 function setFrameStatus(label,value){const caption=document.createElement('span'),reading=document.createElement('strong');caption.textContent=label;reading.textContent=value;statusBox.replaceChildren(caption,reading)}
 function showFrameTime(){setFrameStatus('Selected moment',`${video.currentTime.toFixed(1)}s`)}
 video.addEventListener('loadedmetadata',()=>{if({{job.start_seconds|tojson}}>0)video.currentTime={{job.start_seconds|tojson}};showFrameTime()});video.addEventListener('timeupdate',showFrameTime);video.addEventListener('seeked',showFrameTime);
+// A format this browser cannot decode leaves the player black with duration 0
+// and fires none of the three listeners above, so the readout sat at
+// "Selected moment 0.0s" and the button stayed live over a video that was
+// never going to show a frame. MediaError 3 and 4 are decode and
+// source-not-supported: the bytes arrived and will not play. Measured in
+// Chrome against a ProRes .mov - code 4, DEMUXER_ERROR_NO_SUPPORTED_STREAMS,
+// readyState 0, duration NaN.
+//
+// The button stays enabled on purpose. Frame extraction and the analysis both
+// run through ffmpeg on the server, which decodes what the browser will not,
+// so the upload is fine and only the preview is broken. Disabling the only
+// way forward would turn a preview problem into a dead end. It is relabelled
+// instead, because "Use this frame" is a promise about a frame nobody can see.
+let frameFailed=false;
+video.addEventListener('error',()=>{
+  if(frameFailed)return;frameFailed=true;
+  const code=video.error&&video.error.code;
+  statusBox.replaceChildren();
+  const said=document.createElement('span');
+  said.textContent=(code===4||code===3
+    ? 'This browser cannot play this video in the format it was uploaded in. WarriorIQ can still read it, so the analysis is unaffected \u2014 continue, and it starts from the beginning. To check the file yourself, '
+    : 'The video could not be loaded. Continue to analyse it from the beginning, or ');
+  const link=document.createElement('a');link.className='text-link';
+  link.href=`/media/${jobId}`;link.setAttribute('download','');
+  link.textContent='download the original video';
+  statusBox.append(said,link);
+  statusBox.dataset.tone='bad';
+  button.textContent='Continue without choosing';
+});
 button.onclick=async()=>{button.disabled=true;button.setAttribute('aria-busy','true');setFrameStatus('Selected moment','Preparing…');try{const r=await fetch(`/api/selection-frame/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({seconds:video.currentTime})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Could not use this frame');location.href=`/select/${jobId}`}catch(e){setFrameStatus('Could not continue',e.message);button.disabled=false;button.removeAttribute('aria-busy')}};
 </script>{% endblock %}
