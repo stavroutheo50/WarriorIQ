@@ -42,7 +42,12 @@
       <div class="auth-divider"><span>or continue with email</span></div>
       {% endif %}
       <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" name="email" autocomplete="email" required></div>
-      <div class="field"><label for="authPassword">Password</label><input id="authPassword" type="password" name="password" autocomplete="{% if mode == 'signup' %}new-password{% else %}current-password{% endif %}" minlength="10" required></div>
+      {#- minlength is a signup rule. On sign-in it constrains a password that
+          already exists, so an account created under an older policy cannot
+          submit the form at all and is given no reason why, and the attribute
+          publishes the current policy to anyone reading the source. The note
+          below is already signup-only for the same reason. -#}
+      <div class="field"><label for="authPassword">Password</label><input id="authPassword" type="password" name="password" autocomplete="{% if mode == 'signup' %}new-password{% else %}current-password{% endif %}"{% if mode == 'signup' %} minlength="10"{% endif %} required></div>
       {% if mode == 'signup' %}<p class="auth-password-note">At least 10 characters.</p>{% endif %}
       <button class="btn auth-submit" type="submit">{% if mode == 'signup' %}Create private workspace{% else %}Sign in{% endif %}</button>
     </form>
