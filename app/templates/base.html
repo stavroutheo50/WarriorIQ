@@ -109,12 +109,33 @@
   <script>
   (()=>{
     const path=location.pathname,menuButton=document.getElementById('mobileMenuButton'),mobileMenu=document.getElementById('mobileMenu'),navMore=document.getElementById('navMore'),toast=document.getElementById('appToast');
-    menuButton.addEventListener('click',()=>{const open=mobileMenu.hidden;mobileMenu.hidden=!open;menuButton.setAttribute('aria-expanded',String(open));menuButton.setAttribute('aria-label',open?'Close navigation':'Open navigation');document.body.classList.toggle('menu-open',open)});
+    // One place that knows how the panel opens and closes, so the toggle,
+    // Escape and a click on the page behind it cannot drift apart.
+    const setMobileMenu=open=>{mobileMenu.hidden=!open;menuButton.setAttribute('aria-expanded',String(open));menuButton.setAttribute('aria-label',open?'Close navigation':'Open navigation');document.body.classList.toggle('menu-open',open)};
+    menuButton.addEventListener('click',()=>setMobileMenu(mobileMenu.hidden));
     const navMenus=()=>[...document.querySelectorAll('.nav details[open]')];
-    document.addEventListener('click',event=>{navMenus().forEach(menu=>{if(!menu.contains(event.target))menu.open=false})});
-    document.addEventListener('keydown',event=>{if(event.key==='Escape'){navMenus().forEach(menu=>menu.open=false);if(!mobileMenu.hidden){mobileMenu.hidden=true;menuButton.setAttribute('aria-expanded','false');menuButton.setAttribute('aria-label','Open navigation');document.body.classList.remove('menu-open')}}});
-    const active=path==='/'||/^\/(frame|select|progress)\//.test(path)?'analyze':/^\/(history|result|replay|review)\b/.test(path)?'library':/^\/(dashboard|compare)\b/.test(path)?'progress':path.startsWith('/coach')?'coach':path.startsWith('/pricing')?'plans':'';
-    const activeLink=document.querySelector(`[data-nav="${active}"]`);if(activeLink)activeLink.setAttribute('aria-current','page');
+    document.addEventListener('click',event=>{
+      navMenus().forEach(menu=>{if(!menu.contains(event.target))menu.open=false});
+      // The panel closed on Escape and on its own button but sat there through
+      // a click on the page behind it, which is the ordinary way to dismiss an
+      // open menu. The toggle is excluded or its click would close the panel it
+      // has just opened. Focus is left where the visitor put it: they chose to
+      // click elsewhere, and dragging focus back to the toggle would undo that.
+      if(!mobileMenu.hidden&&!mobileMenu.contains(event.target)&&!menuButton.contains(event.target))setMobileMenu(false);
+    });
+    // Escape returns focus to the toggle explicitly. It already landed there,
+    // but only because nothing had moved focus off the button in the first
+    // place - true by accident is not the same as true, and it stops being
+    // true the moment anyone tabs into the panel before pressing Escape.
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'){navMenus().forEach(menu=>menu.open=false);if(!mobileMenu.hidden){setMobileMenu(false);menuButton.focus()}}});
+    // Which nav item is the page we are on. "/" deliberately matches nothing:
+    // the home page is not the Analyze page, and marking Analyze there told a
+    // screen reader the visitor was somewhere they were not. /analyze is what
+    // Analyze means, together with the steps of its flow, which have no nav
+    // item of their own. An empty result marks nothing rather than searching
+    // for [data-nav=""], which no element carries.
+    const active=/^\/analyze\b/.test(path)||/^\/(frame|select|progress)\//.test(path)?'analyze':/^\/(history|result|replay|review)\b/.test(path)?'library':/^\/(dashboard|compare)\b/.test(path)?'progress':path.startsWith('/coach')?'coach':path.startsWith('/pricing')?'plans':'';
+    const activeLink=active?document.querySelector(`[data-nav="${active}"]`):null;if(activeLink)activeLink.setAttribute('aria-current','page');
     // Timestamps render in UTC on the server and are relabelled here to the
     // reader's own zone. The browser already knows it, so nothing has to be
     // stored or asked for; with JavaScript off the UTC text stands, which is

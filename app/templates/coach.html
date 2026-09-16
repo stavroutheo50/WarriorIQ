@@ -16,12 +16,38 @@
   <form class="add-fighter" method="post" action="/coach/fighters"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
     <input type="hidden" name="next_path" value="/coach#squad">
     <label class="small muted" for="newFighter">Add a fighter to the roster</label>
+    <p class="notice bad-notice add-fighter-error" id="fighterError" role="alert"
+       {% if not roster_error %}hidden{% endif %}>{{ roster_error }}</p>
     <div class="add-fighter-row">
       <input id="newFighter" name="name" type="text" maxlength="80" required
-             placeholder="Fighter's name" autocomplete="off">
+             placeholder="Fighter's name" autocomplete="off"
+             value="{{ roster_name }}" aria-describedby="fighterError"
+             {% if roster_error %}aria-invalid="true"{% endif %}>
       <button class="btn secondary" type="submit">Add</button>
     </div>
   </form>
+  <script>
+  // A name of nothing but spaces passes required= and then fails server-side,
+  // which used to cost the visitor this page. Stop the request instead, and
+  // say so where they are looking. The server check stays: this is the
+  // courtesy, not the rule.
+  (()=>{
+    const form=document.querySelector('.add-fighter');if(!form)return;
+    const input=form.querySelector('#newFighter'),error=form.querySelector('#fighterError');
+    const clear=()=>{error.hidden=true;error.textContent='';input.removeAttribute('aria-invalid')};
+    input.addEventListener('input',()=>{if(!error.hidden)clear()});
+    form.addEventListener('submit',event=>{
+      const trimmed=input.value.trim();
+      if(!trimmed){
+        event.preventDefault();
+        error.textContent='A fighter needs a name.';error.hidden=false;
+        input.setAttribute('aria-invalid','true');input.focus();
+        return;
+      }
+      input.value=trimmed;   // never post the padding
+    });
+  })();
+  </script>
 
   {% if roster %}<p class="small muted">On the roster: {{roster|map(attribute="name")|join(", ")}}</p>{% endif %}
 </section>

@@ -20,7 +20,7 @@ from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import cv2
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -977,6 +977,7 @@ async def viewer_context(request: Request, call_next):
     # of to show them a page of five sports.
     request.state.sports = [sport_identity(key) for key in SPORTS]
     request.state.launch = launch_readiness()
+    request.state.legal_is_draft = SETTINGS.legal_is_draft
     request.state.minimum_account_age = SETTINGS.minimum_account_age
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
     request.state.cookie_preferences = _cookie_preferences(request)
@@ -4177,6 +4178,15 @@ def delete_fight_route(request: Request, job_id: str):
 def compare_page(request: Request, a: str = "", b: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
+    # Only offer fights that can actually be compared. The row outlives its
+    # report - retention removes the outputs, and a failed or cleaned-up job
+    # leaves the row behind - and both halves of this page need a readable
+    # report for each side. Offering the rest meant a reader could pick two
+    # fights, submit, and get a page with no comparison and no movement
+    # table, still captioned "Choose two different saved fights" as though
+    # they had not chosen. It also makes the "two fights required" gate above
+    # count what it is actually gating on.
+    fights = [f for f in fights if (OUTPUTS / str(f["job_id"]) / "report.json").exists()]
     for fight in fights:
         # Every option read "Fight analysis · <date>", so a reader with six
         # fights on one day was choosing between six identical lines.
@@ -4205,7 +4215,7 @@ def compare_page(request: Request, a: str = "", b: str = ""):
 
 
 @app.get("/coach", response_class=HTMLResponse)
-def coach_page(request: Request):
+def coach_page(request: Request, error: str = "", name: str = ""):
     profile_id = _profile_id(request)
     profile = get_profile(profile_id) if profile_id is not None else None
     fights = list_fights(profile_id) if profile_id is not None else []
@@ -4242,8 +4252,20 @@ def coach_page(request: Request):
             "squad": build_squad_view(fights),
             # The roster is what the per-row assign control offers.
             "roster": list_fighters(profile_id) if profile_id is not None else [],
+            # A rejected roster addition comes back here rather than as a 400
+            # page, so the coach keeps the squad they were looking at. The
+            # typed name comes back with it - being told the name was wrong
+            # and then having to retype it is two punishments for one slip.
+            "roster_error": error[:200],
+            "roster_name": name[:80],
         },
     )
+
+
+def _roster_refusal(message: str, typed: str) -> RedirectResponse:
+    """Send a rejected roster addition back to /coach, message and name intact."""
+    query = urlencode({"error": message, "name": " ".join(typed.split())[:80]})
+    return RedirectResponse(f"/coach?{query}#squad", status_code=303)
 
 
 @app.post("/coach/fighters", dependencies=[Depends(require_csrf)])
@@ -4259,16 +4281,20 @@ def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = 
         return RedirectResponse("/login?next=/coach", status_code=303)
     roster = list_fighters(profile_id)
     cleaned = " ".join(name.split())
+    # Both refusals return to /coach with the message instead of raising, which
+    # rendered a full-page 400 and threw away the squad view. required= on the
+    # input catches an empty box but not a box holding only spaces, so this is
+    # reachable by typing one space, and it was the whole page for that.
     if not cleaned:
-        raise HTTPException(400, "A fighter needs a name.")
+        return _roster_refusal("A fighter needs a name.", name)
     if not any(f["name"].lower() == cleaned.lower() for f in roster):
         capacity = roster_capacity(_request_plan(request), len(roster))
         if not capacity["can_add"]:
-            raise HTTPException(
-                402,
+            return _roster_refusal(
                 f"This plan holds {capacity['limit']} "
                 f"fighter{'s' if capacity['limit'] != 1 else ''} and they are all in use. "
                 "Archive one you no longer coach, or move to a plan with more room.",
+                name,
             )
     create_fighter(profile_id, cleaned)
     return RedirectResponse(_safe_next(next_path, "/coach#squad"), status_code=303)
