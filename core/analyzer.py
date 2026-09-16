@@ -58,6 +58,49 @@ LOGGER = logging.getLogger("warrioriq.analysis")
 GPU_HEADROOM_WANTED_GB = 5.5
 
 
+def _sam_clip_buffer_bytes() -> int:
+    """What SAM2 is about to allocate in system RAM for one chunk.
+
+    _DecodedClip holds `capacity x 3 x image_size x image_size` float32, and
+    offload_video_to_cpu keeps it on the host rather than the card. SAM2's
+    image_size is 1024, so this is the number that decides whether the machine
+    swaps.
+    """
+    frames = max(1, int(SETTINGS.sam_continuous_chunk_frames))
+    return frames * 3 * 1024 * 1024 * 4
+
+
+def _log_host_memory() -> None:
+    """Say how much system memory was free before this analysis started.
+
+    The GPU line below could not explain a run that was thirty times slower
+    than the same code on the same card with the card almost idle. The host is
+    the other half: SAM2's frame buffer is gigabytes of ordinary RAM, and a
+    machine that starts swapping to find it behaves exactly like a slow GPU,
+    reports nothing, and cannot be told apart afterwards.
+    """
+    try:
+        import psutil
+
+        memory = psutil.virtual_memory()
+        available = memory.available / 1024 ** 3
+        wanted = _sam_clip_buffer_bytes() / 1024 ** 3
+        LOGGER.info(
+            "analysis_host_memory available_gb=%.2f total_gb=%.2f sam_clip_buffer_gb=%.2f",
+            available, memory.total / 1024 ** 3, wanted)
+        # Twice the buffer: the clip itself, plus the models, torch and the
+        # decode working set that have to live beside it.
+        if available < wanted * 2:
+            LOGGER.warning(
+                "analysis_host_memory_tight available_gb=%.2f sam_clip_buffer_gb=%.2f "
+                "- this analysis may push the machine into swapping, which looks "
+                "like a slow GPU and is not one. Close other applications, or "
+                "lower WARRIORIQ_SAM_CHUNK_FRAMES.",
+                available, wanted)
+    except Exception as exc:                 # noqa: BLE001 - diagnostics only
+        LOGGER.info("analysis_host_memory_unavailable error=%s", type(exc).__name__)
+
+
 def _log_gpu_state() -> None:
     """Say what the card looked like before this analysis touched it.
 
@@ -535,6 +578,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     # Honest wall timer: model load/warmup is part of the user's wait.
     wall_start = time.perf_counter()
     _log_gpu_state()
+    _log_host_memory()
     progress("Loading GPU models", 0.0, 0.0, 0.0)
 
     pose_tracker = get_pose_tracker()

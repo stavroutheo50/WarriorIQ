@@ -449,7 +449,17 @@ class Settings:
     sam_continuous_max_frames: int = int(os.getenv("WARRIORIQ_SAM_MAX_FRAMES", "360"))
     # Keep the bounded two-minute guidance pass in one memory state. Short
     # chunk resets were faster but could drift when reseeded during a crossing.
-    sam_continuous_chunk_frames: int = int(os.getenv("WARRIORIQ_SAM_CHUNK_FRAMES", "360"))
+    # How many sampled frames SAM2 holds at once. This is a host-memory
+    # decision, not a quality one: _DecodedClip allocates
+    # chunk x 3 x 1024 x 1024 float32 in system RAM, so 360 frames is 4.5 GB
+    # and a 70-second clip's 263 frames is 3.3 GB - on a 16 GB machine also
+    # running a browser, that is enough to start swapping, which looks exactly
+    # like a slow GPU and reports no error.
+    #
+    # 120 caps it at 1.5 GB. Measured on an RTX 5060, chunk 96 and chunk 360
+    # both run at ~0.17 s/frame, so the smaller chunk costs nothing: SAM2
+    # re-seeds each chunk from the previous chunk's last good boxes either way.
+    sam_continuous_chunk_frames: int = int(os.getenv("WARRIORIQ_SAM_CHUNK_FRAMES", "120"))
     sam_model_id: str = os.getenv("WARRIORIQ_SAM_MODEL", "facebook/sam2.1-hiera-small")
     sam_buffer_frames: int = int(os.getenv("WARRIORIQ_SAM_BUFFER", "18"))
     sam_cooldown_analyzed_frames: int = 24
