@@ -37,16 +37,29 @@ class AnalyticsPolicyTests(unittest.TestCase):
 
         self.client = TestClient(app)
 
+    # Both ids are empty by default now, so a test that needs a tag on the page
+    # has to put one there. The deployment supplies the real one; the default
+    # is empty because a fallback that cannot load is worse than none.
+    @contextlib.contextmanager
+    def tag_enabled(self, measurement="G-TESTONLY00"):
+        previous = SETTINGS.analytics_measurement_id
+        object.__setattr__(SETTINGS, "analytics_measurement_id", measurement)
+        try:
+            yield measurement
+        finally:
+            object.__setattr__(SETTINGS, "analytics_measurement_id", previous)
+
     def test_declining_analytics_denies_storage_but_keeps_the_tag_detectable(self):
         """Consent Mode: the tag is present, storage is denied.
 
         Withholding the tag entirely also hides it from Google's tag detection,
         which then reports a correctly installed site as having no tag.
         """
-        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "essential"})
-        self.assertIn("googletagmanager", response.text)
-        self.assertIn("'analytics_storage': 'denied'", response.text)
-        self.assertNotIn("'analytics_storage': 'granted'", response.text)
+        with self.tag_enabled():
+            response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "essential"})
+            self.assertIn("googletagmanager", response.text)
+            self.assertIn("'analytics_storage': 'denied'", response.text)
+            self.assertNotIn("'analytics_storage': 'granted'", response.text)
 
     def test_a_choice_made_against_an_older_policy_version_is_asked_again(self):
         """The cookie recorded the choice but not the version it answered.
@@ -57,15 +70,18 @@ class AnalyticsPolicyTests(unittest.TestCase):
         """
         from core.config import SETTINGS
 
-        current = self.client.get("/", cookies={
-            "warrioriq_cookie_preferences": f"all:{SETTINGS.policy_version}"})
-        self.assertIn("'analytics_storage': 'granted'", current.text)
-        self.assertNotIn('id="cookieNotice"', current.text)
+        # The consent lines only render when a tag is configured, and this test
+        # is about the version stamp rather than about analytics being on.
+        with self.tag_enabled():
+            current = self.client.get("/", cookies={
+                "warrioriq_cookie_preferences": f"all:{SETTINGS.policy_version}"})
+            self.assertIn("'analytics_storage': 'granted'", current.text)
+            self.assertNotIn('id="cookieNotice"', current.text)
 
-        stale = self.client.get("/", cookies={
-            "warrioriq_cookie_preferences": "all:1999-01-01"})
-        self.assertIn('id="cookieNotice"', stale.text)
-        self.assertNotIn("'analytics_storage': 'granted'", stale.text)
+            stale = self.client.get("/", cookies={
+                "warrioriq_cookie_preferences": "all:1999-01-01"})
+            self.assertIn('id="cookieNotice"', stale.text)
+            self.assertNotIn("'analytics_storage': 'granted'", stale.text)
 
     def test_a_choice_made_before_versions_were_recorded_is_not_asked_again(self):
         """Cookies written by the previous format carry no version.
@@ -74,9 +90,10 @@ class AnalyticsPolicyTests(unittest.TestCase):
         undecided would re-open the banner for every existing visitor at once,
         which is not what "re-prompt when the policy changes" asks for.
         """
-        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
-        self.assertIn("'analytics_storage': 'granted'", response.text)
-        self.assertNotIn('id="cookieNotice"', response.text)
+        with self.tag_enabled():
+            response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
+            self.assertIn("'analytics_storage': 'granted'", response.text)
+            self.assertNotIn('id="cookieNotice"', response.text)
 
     def test_saving_a_choice_stamps_it_with_the_policy_version(self):
         from core.config import SETTINGS
@@ -93,14 +110,15 @@ class AnalyticsPolicyTests(unittest.TestCase):
             response.headers["set-cookie"])
 
     def test_accepting_analytics_grants_storage(self):
-        response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
-        policy = response.headers["content-security-policy"]
-        self.assertIn("https://www.googletagmanager.com", policy)
-        # The tag is useless if the script loads but its beacons are blocked.
-        connect = [part for part in policy.split(";") if part.strip().startswith("connect-src")][0]
-        self.assertIn("google-analytics.com", connect)
-        self.assertIn("googletagmanager.com/gtag/js", response.text)
-        self.assertIn("'analytics_storage': 'granted'", response.text)
+        with self.tag_enabled():
+            response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"})
+            policy = response.headers["content-security-policy"]
+            self.assertIn("https://www.googletagmanager.com", policy)
+            # The tag is useless if the script loads but its beacons are blocked.
+            connect = [part for part in policy.split(";") if part.strip().startswith("connect-src")][0]
+            self.assertIn("google-analytics.com", connect)
+            self.assertIn("googletagmanager.com/gtag/js", response.text)
+            self.assertIn("'analytics_storage': 'granted'", response.text)
 
     # The Tag Manager container is off by default - the direct gtag.js tag owns
     # analytics here - so the tests covering the container have to switch it on.
@@ -118,8 +136,9 @@ class AnalyticsPolicyTests(unittest.TestCase):
 
     def test_consent_default_is_declared_before_any_tag_loads(self):
         """A default pushed after the loader would let a tag store first."""
-        page = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"}).text
-        self.assertLess(page.index("gtag('consent', 'default'"), page.index("gtag/js?id="))
+        with self.tag_enabled():
+            page = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"}).text
+            self.assertLess(page.index("gtag('consent', 'default'"), page.index("gtag/js?id="))
         with self.container_enabled():
             page = self.client.get("/", cookies={"warrioriq_cookie_preferences": "all"}).text
             self.assertLess(page.index("gtag('consent', 'default'"), page.index("gtm.js?id="))
@@ -160,6 +179,7 @@ class AnalyticsPolicyTests(unittest.TestCase):
         """Emptying one id must not silently leave the other measuring."""
         previous_ga = SETTINGS.analytics_measurement_id
         previous_gtm = SETTINGS.gtm_container_id
+        object.__setattr__(SETTINGS, "analytics_measurement_id", "G-TESTONLY00")
         try:
             # The container alone still measures, so the policy must stay open.
             # It is off by default now, so this half has to switch it on before

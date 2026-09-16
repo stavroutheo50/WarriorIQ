@@ -799,25 +799,54 @@ class Settings:
         for email in os.getenv("WARRIORIQ_ADMIN_EMAILS", "").split(",")
         if email.strip()
     )
-    # Google Analytics measurement ID (G-XXXXXXXXXX). The tag is rendered only
-    # for visitors who accept analytics cookies; leaving this empty disables
-    # analytics entirely and keeps the strict Content-Security-Policy.
+    # Google Analytics. The tag is rendered only for visitors who accept
+    # analytics cookies; leaving this empty disables analytics entirely and
+    # keeps the strict Content-Security-Policy.
     #
-    # **The default below does not exist in Google's system.** Checked
-    # 2026-09-09 against the live site: `googletagmanager.com/gtag/js?id=` for
-    # this ID returns **HTTP 404**, six times, with and without a Referer. A
-    # completely made-up ID (G-ZZZZZZZZZZ) returns 200 and a working 428 KB
-    # script, so a 404 is not what an unknown ID looks like - this string is
-    # rejected outright. The consequence, confirmed in the browser: gtag is
-    # defined, the config command reaches the dataLayer, consent is granted,
-    # and **no /g/collect request is ever sent**, which is why every report is
-    # empty however many devices are tested.
+    # **This wants the Google tag id (GT-...), not the GA4 measurement id.**
+    # Deployed value: GT-MQJ4F2RF, working since 2026-09-16.
     #
-    # Replace it with the Measurement ID from the GA4 property itself:
-    # Admin -> Data streams -> the web stream -> Measurement ID, top right.
-    # Set WARRIORIQ_ANALYTICS_ID rather than editing this line, so the value
-    # lives with the deployment and not in the repository.
-    analytics_measurement_id: str = os.getenv("WARRIORIQ_ANALYTICS_ID", "G-5V5Q4H30LD").strip()
+    # Empty by default, like WARRIORIQ_SITE_VERIFICATION and for the same
+    # reason. The previous default, G-5V5Q4H30LD, is known not to load, so
+    # falling back to it rendered a tag that 404s - installed to the eye,
+    # measuring nothing, and indistinguishable from a working one without
+    # opening the network panel. Empty disables analytics cleanly and keeps
+    # the strict Content-Security-Policy.
+    #
+    # The obvious advice - GA4 Admin -> Data streams -> Measurement ID, top
+    # right - gives G-5V5Q4H30LD, and **that id cannot be loaded**:
+    # `googletagmanager.com/gtag/js?id=G-5V5Q4H30LD` returns **404**, checked
+    # 2026-09-09 and again 2026-09-16. It is not a typo and not a dead
+    # property: the id appears 18 times inside the live tag scripts. This
+    # property's tag is owned by a Google tag created through Google Ads,
+    # which makes the measurement id a *destination* rather than something
+    # independently servable. Installing the GT- id routes to it - verified in
+    # the browser, the site sends `/g/collect` with
+    # `tid=G-5V5Q4H30LD&en=page_view&gcs=G101` (ads denied, analytics granted).
+    #
+    # **Two baselines before concluding anything from a status code here**,
+    # because both endpoints answer misleadingly:
+    #   - `gtag/js?id=` returns **200 and a working ~429 KB script for ids
+    #     invented on the spot**, so a 404 means actively rejected, not
+    #     unknown. That is a strong, specific signal - do not read it as a
+    #     wrong id and go hunting for a different one.
+    #   - `/g/collect?tid=` returns **204 for every tid**, real or invented,
+    #     so a 204 proves nothing whatsoever.
+    # The only real check is the browser:
+    # `performance.getEntriesByType('resource')` and look for the /g/collect
+    # entry carrying the tid. A week was lost to trusting the status codes.
+    #
+    # This Google tag also carries the Ads destination AW-18419565750, which
+    # fires `pagead2.googlesyndication.com/ccm/collect` on page view with
+    # `npa=1` and ad storage denied. No ad cookies, but Google Ads does
+    # receive a signal. A standalone GA4 web stream, not tied to the Ads tag,
+    # is the alternative if Ads must not fire at all.
+    #
+    # Set WARRIORIQ_ANALYTICS_ID on the deployment rather than editing this
+    # line. **cPanel's Python App panel wins over .env**, because
+    # `load_dotenv()` defaults to `override=False` and skips any key already
+    # in the environment - an edit to .env alone can silently do nothing.
+    analytics_measurement_id: str = os.getenv("WARRIORIQ_ANALYTICS_ID", "").strip()
     # Search Console ownership token: the `content` value of the
     # <meta name="google-site-verification"> tag Google offers under
     # "HTML tag" verification. Empty renders no tag, which is the honest
