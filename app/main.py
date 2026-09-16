@@ -773,16 +773,21 @@ def _cookie_preferences(request: Request) -> dict:
     raw = request.cookies.get(COOKIE_PREFERENCES_COOKIE, "")
     raw, _, version = raw.partition(":")
     if version and version != SETTINGS.policy_version:
-        return {"decided": False, "analytics": False, "marketing": False}
+        return {"decided": False, "analytics": False}
     if raw == "all":
-        return {"decided": True, "analytics": True, "marketing": True}
+        return {"decided": True, "analytics": True}
     if raw == "custom-analytics":
-        return {"decided": True, "analytics": True, "marketing": False}
+        return {"decided": True, "analytics": True}
+    # "custom-marketing" is a value this no longer writes: marketing storage was
+    # offered as a choice while nothing acted on it, so the control is gone.
+    # Cookies already carrying it are still read rather than treated as
+    # undecided, because those visitors did answer - they declined analytics,
+    # and re-asking them would be re-asking a question they settled.
     if raw == "custom-marketing":
-        return {"decided": True, "analytics": False, "marketing": True}
+        return {"decided": True, "analytics": False}
     if raw == "essential":
-        return {"decided": True, "analytics": False, "marketing": False}
-    return {"decided": False, "analytics": False, "marketing": False}
+        return {"decided": True, "analytics": False}
+    return {"decided": False, "analytics": False}
 
 
 def _queue_transactional_notice(
@@ -4339,25 +4344,24 @@ def save_cookie_preferences(
     choice: str = Form(...),
     next_path: str = Form("/"),
     analytics: bool = Form(False),
-    marketing: bool = Form(False),
 ):
     if choice == "all":
-        analytics = marketing = True
+        analytics = True
         value = "all"
     elif choice == "essential":
-        analytics = marketing = False
+        analytics = False
         value = "essential"
     elif choice == "custom":
-        value = "custom-analytics" if analytics and not marketing else "custom-marketing" if marketing and not analytics else "all" if analytics else "essential"
+        value = "custom-analytics" if analytics else "essential"
     else:
         raise HTTPException(400, "Choose a valid cookie preference.")
     account = _account(request)
     owner = {"profile_id": int(account["profile_id"])} if account else {"guest_id": request.state.guest_id}
     if account:
-        update_cookie_preferences(int(account["id"]), analytics=analytics, marketing=marketing)
+        update_cookie_preferences(int(account["id"]), analytics=analytics, marketing=False)
     record_legal_acceptance(
-        "cookie_preferences", SETTINGS.policy_version, metadata={"analytics": analytics, "marketing": marketing},
-        current_status="accepted" if analytics or marketing else "declined", **owner,
+        "cookie_preferences", SETTINGS.policy_version, metadata={"analytics": analytics},
+        current_status="accepted" if analytics else "declined", **owner,
     )
     response = RedirectResponse(_safe_next(next_path, "/"), status_code=303)
     response.set_cookie(
