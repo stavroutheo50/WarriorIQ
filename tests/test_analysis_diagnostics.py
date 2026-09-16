@@ -30,14 +30,18 @@ class ClipBufferTests(unittest.TestCase):
             object.__setattr__(SETTINGS, "sam_continuous_chunk_frames", previous)
         self.assertEqual(large, small * 3)
 
-    def test_the_default_chunk_stays_inside_a_gigabyte_and_a_half(self):
-        """The reason the default moved from 360 to 120.
+    def test_the_default_chunk_keeps_the_pass_in_one_piece(self):
+        """The chunk must still cover a whole SAM2 pass.
 
-        360 frames is 4.22 GB of system RAM in one tensor. On a 16 GB machine
-        also running a browser that is enough to start swapping, which is
-        indistinguishable from a slow GPU and reports nothing.
+        Lowering it would cut the buffer - 120 frames is 1.41 GB against
+        4.22 GB - but SAM2 re-seeds at every chunk boundary, and measured over
+        263 frames that moved the median box by 4px. One chunk is the
+        reproducible path, so the memory problem is reported rather than
+        traded away silently. See core/config.py.
         """
-        self.assertLessEqual(analyzer._sam_clip_buffer_bytes(), 1.6 * 1024 ** 3)
+        from core.config import SETTINGS
+        self.assertGreaterEqual(SETTINGS.sam_continuous_chunk_frames,
+                                SETTINGS.sam_continuous_max_frames)
 
     def test_the_arithmetic_matches_what_sam2_allocates(self):
         """capacity x 3 x 1024 x 1024 float32, as _DecodedClip declares it."""

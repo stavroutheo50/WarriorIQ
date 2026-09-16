@@ -456,10 +456,23 @@ class Settings:
     # running a browser, that is enough to start swapping, which looks exactly
     # like a slow GPU and reports no error.
     #
-    # 120 caps it at 1.5 GB. Measured on an RTX 5060, chunk 96 and chunk 360
-    # both run at ~0.17 s/frame, so the smaller chunk costs nothing: SAM2
-    # re-seeds each chunk from the previous chunk's last good boxes either way.
-    sam_continuous_chunk_frames: int = int(os.getenv("WARRIORIQ_SAM_CHUNK_FRAMES", "120"))
+    # Left at 360 deliberately, which keeps the whole SAM2 pass inside one
+    # chunk - the invariant test_sam_sampling_obeys_absolute_work_budget
+    # asserts, chunk_frames >= sam_continuous_max_frames.
+    #
+    # Lowering it is not free, and the cost was measured rather than assumed.
+    # At 120 the pass runs at the same speed (50.4s against 51.8s over 263
+    # frames) and the buffer drops to 1.41 GB, but SAM2 re-seeds each chunk
+    # from the previous chunk's last good boxes, so more chunks means more
+    # re-seeds: 244 of 600 boxes landed within 2px of the single-chunk path
+    # and the median difference was 4.00 px. These boxes are identity guidance
+    # only and downstream still needs a detection overlapping at IoU 0.12, so
+    # 4px changes no answer - but it is a different path, and one chunk is
+    # the reproducible one.
+    #
+    # Lower this if a machine is short of memory and the warning in
+    # core/analyzer.py says so. It is a memory decision, not a quality one.
+    sam_continuous_chunk_frames: int = int(os.getenv("WARRIORIQ_SAM_CHUNK_FRAMES", "360"))
     sam_model_id: str = os.getenv("WARRIORIQ_SAM_MODEL", "facebook/sam2.1-hiera-small")
     sam_buffer_frames: int = int(os.getenv("WARRIORIQ_SAM_BUFFER", "18"))
     sam_cooldown_analyzed_frames: int = 24
