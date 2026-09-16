@@ -199,20 +199,32 @@ def score_people(frame, people, region: str | None) -> None:
         person.corner_red, person.corner_blue = red, blue
 
 
-def assign_corners(frame, box_a, keypoints_a, box_b, keypoints_b, region: str):
-    """Which of these two is the red corner, in a region already decided.
+@dataclass
+class CornerAssignment:
+    """Which fighter is the red corner, and what that verdict was read from."""
 
-    The region comes from the whole fight; which fighter wears which colour
-    comes from the frame they were selected on, because that is the only
-    frame where "which of these is fighter A" is not itself in question.
+    corner_a: str | None = None
+    corner_b: str | None = None
+    frames: int = 0
+    red_a: float = 0.0
+    blue_a: float = 0.0
+    red_b: float = 0.0
+    blue_b: float = 0.0
 
-    Returns (None, None) unless both read clearly, in opposite colours, with
-    a margin between them - the same bar the refusal itself uses.
+    @property
+    def decided(self) -> bool:
+        return self.corner_a is not None and self.corner_b is not None
+
+
+def _decide_pair(red_a, blue_a, red_b, blue_b) -> tuple[str | None, str | None]:
+    """Opposite corners, or nothing.
+
+    Both have to read clearly, in opposite colours, with a margin between
+    them - the same bar the refusal itself uses, because a pairing this is
+    not sure of would put the refusal on the wrong fighter.
     """
     from core.identity import CORNER_MARGIN
 
-    red_a, blue_a = score_detection(frame, box_a, keypoints_a, region)
-    red_b, blue_b = score_detection(frame, box_b, keypoints_b, region)
     best, strength = (None, None), 0.0
     for a_corner, a_score, a_other, b_corner, b_score, b_other in (
             ("red", red_a, blue_a, "blue", blue_b, red_b),
@@ -224,6 +236,24 @@ def assign_corners(frame, box_a, keypoints_a, box_b, keypoints_b, region: str):
         if min(a_score, b_score) > strength:
             best, strength = (a_corner, b_corner), min(a_score, b_score)
     return best
+
+
+def assign_corners(frame, box_a, keypoints_a, box_b, keypoints_b,
+                   region: str) -> CornerAssignment:
+    """Which of these two is the red corner, from this one frame.
+
+    One frame, so one frame's worth of confidence. Measured on real footage
+    mid-exchange, a fighter read red 0.41 against blue 0.44 in the gear
+    region - both colours present, neither decisive - and no assignment was
+    possible at all. CornerReader.assign() is the form that averages over a
+    window and is what an analysis should use; this one is for the case where
+    there is only a frame to look at.
+    """
+    red_a, blue_a = score_detection(frame, box_a, keypoints_a, region)
+    red_b, blue_b = score_detection(frame, box_b, keypoints_b, region)
+    corner_a, corner_b = _decide_pair(red_a, blue_a, red_b, blue_b)
+    return CornerAssignment(corner_a=corner_a, corner_b=corner_b, frames=1,
+                            red_a=red_a, blue_a=blue_a, red_b=red_b, blue_b=blue_b)
 
 
 def _frame_separation(frame, people, region: str) -> float:
@@ -258,6 +288,12 @@ class CornerReader:
 
     def __init__(self) -> None:
         self._totals: dict[str, list[float]] = {region: [] for region in REGIONS}
+        # How the two *identified* fighters read, as opposed to the two largest
+        # people in the frame. Kept separately because they answer different
+        # questions - which region carries the colour, and which fighter wears
+        # which - and because only identity knows which detection is fighter A.
+        self._fighters: dict[str, list[tuple[float, float, float, float]]] = {
+            region: [] for region in REGIONS}
 
     def observe(self, frame, people) -> None:
         """Measure one frame. Frames with fewer than two fighters are ignored."""
@@ -266,12 +302,55 @@ class CornerReader:
         for region in REGIONS:
             self._totals[region].append(_frame_separation(frame, people, region))
 
+    def observe_fighters(self, frame, observation_a, observation_b) -> None:
+        """Record how each identified fighter reads, for the assignment.
+
+        Frames where identity is not holding both fighters are skipped rather
+        than half-recorded: a colour read off one fighter alone cannot say
+        which corner either of them is in.
+        """
+        if frame is None or observation_a is None or observation_b is None:
+            return
+        for region in REGIONS:
+            try:
+                red_a, blue_a = score_detection(
+                    frame, observation_a.box,
+                    getattr(observation_a, "keypoints", None), region)
+                red_b, blue_b = score_detection(
+                    frame, observation_b.box,
+                    getattr(observation_b, "keypoints", None), region)
+            except Exception:               # noqa: BLE001 - never fail a frame
+                continue
+            self._fighters[region].append((red_a, blue_a, red_b, blue_b))
+
     @property
     def frames_scored(self) -> int:
         return len(self._totals[REGIONS[0]])
 
     def decide(self) -> CornerReading:
         return _decide(self._totals)
+
+    def assign(self, region: str | None) -> CornerAssignment:
+        """Which fighter is the red corner, averaged over everything seen.
+
+        The region is a question about the whole fight and is answered from
+        the whole window; this is the other half of the same answer and has to
+        be read the same way. Deciding it from a single frame was measured
+        failing on footage where the fight-level region was unambiguous: mid
+        exchange one fighter read red 0.41 against blue 0.44 in the gear
+        region, so nothing could be assigned and the whole signal switched
+        off. Averaged over the window, a moment like that is outvoted.
+        """
+        looks = self._fighters.get(region) if region else None
+        if not looks:
+            return CornerAssignment()
+        count = float(len(looks))
+        red_a, blue_a, red_b, blue_b = (
+            sum(look[index] for look in looks) / count for index in range(4))
+        corner_a, corner_b = _decide_pair(red_a, blue_a, red_b, blue_b)
+        return CornerAssignment(
+            corner_a=corner_a, corner_b=corner_b, frames=len(looks),
+            red_a=red_a, blue_a=blue_a, red_b=red_b, blue_b=blue_b)
 
 
 def read_corners(samples) -> CornerReading:

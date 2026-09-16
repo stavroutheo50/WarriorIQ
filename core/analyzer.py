@@ -115,61 +115,46 @@ def _log_host_memory() -> None:
         LOGGER.info("analysis_host_memory_unavailable error=%s", type(exc).__name__)
 
 
-def _apply_corner_reading(reading, frame, observation_a, observation_b,
-                          manager, pose_tracker, decided_from: str) -> None:
-    """Turn a fight's corner reading into the identity manager's state.
+def _apply_corner_reading(reading, assignment, manager, pose_tracker,
+                          decided_from: str) -> None:
+    """Turn a fight's corner reading and assignment into the manager's state.
 
-    The region is the fight's answer, over every frame the reader saw. Which
-    fighter wears which colour is read off this one frame, because that is a
-    question about these two boxes rather than about the fight.
-
-    Anything short of two clearly opposite colours leaves the region None,
-    which is the state that makes every identity score exactly what it was
-    before corners existed.
+    Both halves are the fight's answer rather than one frame's: the region
+    from every frame the reader scored, and the pairing from every frame it
+    held both fighters in. Anything short of two clearly opposite colours
+    leaves the region None, which is the state that makes every identity
+    score exactly what it was before corners existed.
     """
     region = reading.region
     corner_a = corner_b = None
-    if region and observation_a is not None and observation_b is not None:
-        corner_a, corner_b = assign_corners(
-            frame, observation_a.box, getattr(observation_a, "keypoints", None),
-            observation_b.box, getattr(observation_b, "keypoints", None), region)
+    if region and assignment is not None:
+        corner_a, corner_b = assignment.corner_a, assignment.corner_b
     if region and corner_a is None:
         # The fight found a region and then nobody could be assigned in it.
         # Worth its own line: the two failures look identical in the result -
         # corners off either way - and want opposite fixes. Either identity
-        # was not holding both fighters on this frame, or it was and they did
-        # not read as opposite colours on it.
-        if observation_a is None or observation_b is None:
+        # never held both fighters together, or it did and they never read as
+        # opposite colours.
+        if assignment is None or not assignment.frames:
             LOGGER.info(
-                "analysis_corner_unassigned region=%s reason=fighter_missing "
-                "fighter_a=%s fighter_b=%s", region,
-                observation_a is not None, observation_b is not None)
+                "analysis_corner_unassigned region=%s reason=never_both_held", region)
         else:
-            from core.corner import score_detection
-
-            try:
-                red_a, blue_a = score_detection(
-                    frame, observation_a.box,
-                    getattr(observation_a, "keypoints", None), region)
-                red_b, blue_b = score_detection(
-                    frame, observation_b.box,
-                    getattr(observation_b, "keypoints", None), region)
-                LOGGER.info(
-                    "analysis_corner_unassigned region=%s reason=not_opposite "
-                    "a_red=%.2f a_blue=%.2f b_red=%.2f b_blue=%.2f",
-                    region, red_a, blue_a, red_b, blue_b)
-            except Exception as exc:            # noqa: BLE001 - diagnostics only
-                LOGGER.info("analysis_corner_unassigned region=%s reason=%s",
-                            region, type(exc).__name__)
+            LOGGER.info(
+                "analysis_corner_unassigned region=%s reason=not_opposite frames=%d "
+                "a_red=%.2f a_blue=%.2f b_red=%.2f b_blue=%.2f",
+                region, assignment.frames, assignment.red_a, assignment.blue_a,
+                assignment.red_b, assignment.blue_b)
     if corner_a is None:
         region = None
     manager.set_corners(region, corner_a, corner_b)
     pose_tracker.set_corner_region(manager.corner_region)
     LOGGER.info(
         "analysis_corner region=%s fighter_a=%s fighter_b=%s decided_from=%s "
-        "frames=%d separation=%.2f reason=%s",
+        "frames=%d assigned_from=%d separation=%.2f reason=%s",
         manager.corner_region or "none", corner_a or "none", corner_b or "none",
-        decided_from, reading.frames_scored, reading.separation, reading.reason)
+        decided_from, reading.frames_scored,
+        0 if assignment is None else assignment.frames,
+        reading.separation, reading.reason)
 
 
 def _log_gpu_state() -> None:
@@ -765,8 +750,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         manager.set_corners(None, None, None)
         pose_tracker.set_corner_region(None)
     else:
-        _apply_corner_reading(corner_reading, first_frame, initial_a, initial_b,
-                              manager, pose_tracker, "warmup")
+        # The warm-up decided it, and the warm-up ran before this manager
+        # existed, so there is no per-fighter history to average - the frame
+        # the fighters were selected on is genuinely all there is here.
+        _apply_corner_reading(
+            corner_reading,
+            assign_corners(first_frame, initial_a.box, initial_a.keypoints,
+                           initial_b.box, initial_b.keypoints,
+                           corner_reading.region),
+            manager, pose_tracker, "warmup")
     # Can these two be told apart in this video at all? Asked once, at the
     # start, because no amount of work downstream recovers from "no".
     pair_similarity = fighter_pair_similarity(initial_a, initial_b)
@@ -920,19 +912,24 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                         guided_pose_recoveries["B"] += 1
                 people.extend(focused)
                 fighter_a, fighter_b = manager.update(people, source_frame, sam_guidance=guidance)
-                if corner_pending and corner_reader.frames_scored >= DECIDE_AFTER_FRAMES:
-                    # Asked once, and answered whatever the answer is. A fight
-                    # that has not separated over this many frames of its own
-                    # footage does not have a readable corner, and asking again
-                    # later would only be waiting for a frame that agrees.
-                    #
-                    # Which fighter is which comes from the two the manager is
-                    # holding right now, not from the seed frame: identity has
-                    # been following them all the way here.
-                    corner_pending = False
-                    _apply_corner_reading(
-                        corner_reader.decide(), frame, fighter_a, fighter_b,
-                        manager, pose_tracker, "round")
+                if corner_pending:
+                    # Which fighter wears which colour, accumulated over the
+                    # same window as the region rather than read off whichever
+                    # frame the count happens to land on. Only identity knows
+                    # which detection is fighter A, which is why this is fed
+                    # here and not beside the region sampling above.
+                    corner_reader.observe_fighters(frame, fighter_a, fighter_b)
+                    if corner_reader.frames_scored >= DECIDE_AFTER_FRAMES:
+                        # Asked once, and answered whatever the answer is. A
+                        # fight that has not separated over this many frames of
+                        # its own footage does not have a readable corner, and
+                        # asking again later would only be waiting for a frame
+                        # that agrees.
+                        corner_pending = False
+                        reading = corner_reader.decide()
+                        _apply_corner_reading(
+                            reading, corner_reader.assign(reading.region),
+                            manager, pose_tracker, "round")
                 # Joints only, and only for the two fighters, only after
                 # identity has already chosen them. See core/rtm_pose.py.
                 refine_fighter_pose(frame, [fighter_a, fighter_b])

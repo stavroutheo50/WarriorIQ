@@ -21,6 +21,13 @@ MAT_BGR = (150, 80, 60)
 # unsaturated, so it casts no vote either way - which is the correct answer for
 # a competitor whose corner cannot be read.
 NEUTRAL_BGR = (118, 120, 122)
+# What fighters actually wear, most of the time. Corner colours are a feature
+# of organised competition; club footage is whatever people own. None of these
+# is a corner, and the module's job on them is to say so rather than to pick
+# the nearest of two answers it was built to give.
+BLACK_BGR = (22, 20, 24)
+GREEN_BGR = (60, 170, 65)
+WHITE_BGR = (232, 234, 233)
 
 
 class Person:
@@ -151,6 +158,34 @@ class ReadCornersTests(unittest.TestCase):
         # The region that carries nothing must not be the one that wins.
         self.assertGreater(reading.per_region["gear"], reading.per_region["torso"])
 
+    def test_kit_that_is_neither_colour_reads_as_no_corner(self):
+        """The common case, and the one this module must not damage.
+
+        Most footage is not a red-versus-blue competition: fighters wear
+        black, green, whatever they own. None of that is a corner, and the
+        only correct answer is to say so and switch the signal off - which
+        leaves every identity score exactly what it was before corners
+        existed. A module that guessed here would refuse real fighters on the
+        strength of their shorts.
+        """
+        for kit in ((BLACK_BGR, GREEN_BGR), (GREEN_BGR, GREEN_BGR),
+                    (BLACK_BGR, BLACK_BGR), (GREEN_BGR, WHITE_BGR)):
+            for region in ("torso", "gear"):
+                reading = read_corners(self.samples(region, kit))
+                self.assertFalse(reading.decided, "%s in %s" % (str(kit), region))
+                self.assertIsNone(reading.region)
+
+    def test_one_fighter_in_red_against_a_green_opponent_is_not_a_corner(self):
+        """Half a corner is not a corner.
+
+        A red fighter against a green one has no blue to be told apart from,
+        and calling the green fighter "blue corner" would put the refusal on
+        whichever of them the colour drifted towards.
+        """
+        for opponent in (GREEN_BGR, BLACK_BGR, WHITE_BGR):
+            reading = read_corners(self.samples("torso", (RED_BGR, opponent)))
+            self.assertFalse(reading.decided)
+
     def test_two_fighters_in_the_same_colour_is_refused(self):
         """Measured on real footage: both competitors in blue, and no method
         can separate them. Saying so beats asserting a corner."""
@@ -198,43 +233,45 @@ class AssignCornersTests(unittest.TestCase):
             region, size=size)
         return frame, people[0], people[1]
 
+    def corners(self, painted, asked, colours):
+        frame, a, b = self.pair(painted, colours)
+        found = assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, asked)
+        return found.corner_a, found.corner_b
+
     def test_red_on_the_left_is_named_red(self):
-        frame, a, b = self.pair("torso", (RED_BGR, BLUE_BGR))
-        self.assertEqual(
-            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
-            ("red", "blue"))
+        self.assertEqual(self.corners("torso", "torso", (RED_BGR, BLUE_BGR)),
+                         ("red", "blue"))
 
     def test_the_answer_follows_the_fighters_and_not_their_order(self):
-        frame, a, b = self.pair("torso", (BLUE_BGR, RED_BGR))
-        self.assertEqual(
-            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
-            ("blue", "red"))
+        self.assertEqual(self.corners("torso", "torso", (BLUE_BGR, RED_BGR)),
+                         ("blue", "red"))
 
     def test_gear_colours_are_found_in_the_gear_region(self):
-        frame, a, b = self.pair("gear", (RED_BGR, BLUE_BGR))
-        self.assertEqual(
-            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "gear"),
-            ("red", "blue"))
+        self.assertEqual(self.corners("gear", "gear", (RED_BGR, BLUE_BGR)),
+                         ("red", "blue"))
 
     def test_two_fighters_in_one_colour_name_neither(self):
-        frame, a, b = self.pair("torso", (BLUE_BGR, BLUE_BGR))
-        self.assertEqual(
-            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
-            (None, None))
+        self.assertEqual(self.corners("torso", "torso", (BLUE_BGR, BLUE_BGR)),
+                         (None, None))
 
     def test_one_uncoloured_fighter_names_neither(self):
         """Half an answer is not an answer: both have to read clearly."""
-        frame, a, b = self.pair("torso", (RED_BGR, None))
-        self.assertEqual(
-            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
-            (None, None))
+        self.assertEqual(self.corners("torso", "torso", (RED_BGR, None)),
+                         (None, None))
 
     def test_looking_in_the_wrong_region_names_neither(self):
         """Gear-coloured fighters, asked about the torso."""
-        frame, a, b = self.pair("gear", (RED_BGR, BLUE_BGR))
-        self.assertEqual(
-            assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso"),
-            (None, None))
+        self.assertEqual(self.corners("gear", "torso", (RED_BGR, BLUE_BGR)),
+                         (None, None))
+
+    def test_what_it_read_is_reported_alongside_the_verdict(self):
+        """A refusal to assign has to be explainable without a second run."""
+        frame, a, b = self.pair("torso", (RED_BGR, BLUE_BGR))
+        found = assign_corners(frame, a.box, a.keypoints, b.box, b.keypoints, "torso")
+        self.assertEqual(found.frames, 1)
+        self.assertTrue(found.decided)
+        self.assertGreater(found.red_a, found.blue_a)
+        self.assertGreater(found.blue_b, found.red_b)
 
 
 class CornerReaderTests(unittest.TestCase):
@@ -271,6 +308,61 @@ class CornerReaderTests(unittest.TestCase):
         reading = CornerReader().decide()
         self.assertFalse(reading.decided)
         self.assertIsNone(reading.region)
+
+    def test_the_assignment_averages_instead_of_trusting_one_frame(self):
+        """The failure this exists for, reproduced from the measured numbers.
+
+        On real footage the fight-level region was unambiguous - gear,
+        separation 0.93 over 40 frames - and the assignment still failed,
+        because the single frame the count landed on had fighter A reading red
+        0.41 against blue 0.44. Averaged over the window that frame is
+        outvoted; read alone it switches the whole signal off.
+        """
+        clear, muddled = (RED_BGR, BLUE_BGR), (None, BLUE_BGR)
+        reader = CornerReader()
+        for colours in [clear] * 9 + [muddled]:
+            frame, people = self.frame(colours, region="gear")
+            reader.observe_fighters(frame, people[0], people[1])
+        self.assertEqual(reader.assign("gear").decided, True)
+        self.assertEqual((reader.assign("gear").corner_a, reader.assign("gear").corner_b),
+                         ("red", "blue"))
+
+        alone = CornerReader()
+        frame, people = self.frame(muddled, region="gear")
+        alone.observe_fighters(frame, people[0], people[1])
+        self.assertFalse(alone.assign("gear").decided)
+
+    def test_frames_without_both_fighters_are_not_half_recorded(self):
+        """A colour off one fighter cannot say which corner either is in."""
+        frame, people = self.frame((RED_BGR, BLUE_BGR), region="gear")
+        reader = CornerReader()
+        reader.observe_fighters(frame, people[0], None)
+        reader.observe_fighters(frame, None, people[1])
+        reader.observe_fighters(None, people[0], people[1])
+        self.assertEqual(reader.assign("gear").frames, 0)
+        reader.observe_fighters(frame, people[0], people[1])
+        self.assertEqual(reader.assign("gear").frames, 1)
+
+    def test_an_unasked_region_assigns_nobody(self):
+        frame, people = self.frame((RED_BGR, BLUE_BGR), region="gear")
+        reader = CornerReader()
+        reader.observe_fighters(frame, people[0], people[1])
+        self.assertFalse(reader.assign(None).decided)
+        self.assertEqual(reader.assign(None).frames, 0)
+
+    def test_the_region_and_the_assignment_are_counted_separately(self):
+        """They answer different questions off different sets of people.
+
+        The region compares the two largest people in the frame; the
+        assignment compares the two identity is actually holding. Sharing a
+        counter would let a fight decide a region from frames where it never
+        saw both fighters.
+        """
+        frame, people = self.frame((RED_BGR, BLUE_BGR), region="gear")
+        reader = CornerReader()
+        reader.observe(frame, people)
+        self.assertEqual(reader.frames_scored, 1)
+        self.assertEqual(reader.assign("gear").frames, 0)
 
     def test_the_round_is_watched_for_long_enough_to_outvote_one_frame(self):
         """The whole point of DECIDE_AFTER_FRAMES.
