@@ -167,6 +167,25 @@ def score_detection(frame, box, keypoints, region: str) -> tuple[float, float]:
     return colour_scores(_region_pixels(frame, box, keypoints, region))
 
 
+def score_people(frame, people, region: str | None) -> None:
+    """Attach corner colours to every detection in a frame, in place.
+
+    Mirrors how core/reid.py and core/referee.py are applied: one pass over
+    the frame's people, writing onto each observation, so the identity manager
+    never has to hold a frame. A region of None leaves every reading None,
+    which is what turns the whole signal off for a fight that has no corner.
+    """
+    if not region or frame is None or not people:
+        return
+    for person in people:
+        try:
+            red, blue = score_detection(
+                frame, person.box, getattr(person, "keypoints", None), region)
+        except Exception:                       # noqa: BLE001 - never fail a frame
+            red = blue = None
+        person.corner_red, person.corner_blue = red, blue
+
+
 def _frame_separation(frame, people, region: str) -> float:
     """Best red/blue split among the two largest fighters in one frame.
 

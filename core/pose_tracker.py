@@ -8,6 +8,7 @@ import torch
 from core.config import SETTINGS
 from ultralytics import YOLO
 from core.identity import appearance_hist, pose_signature
+from core.corner import score_people as score_corner_people
 from core.referee import referee_probabilities
 from core.reid import embed
 from core.types import PersonObservation
@@ -213,6 +214,10 @@ class PoseTracker:
         engine_path = Path(SETTINGS.pose_model_engine)
         model_path = str(engine_path) if self.uses_cuda and engine_path.exists() else SETTINGS.pose_model_pt
         self.model_path = model_path
+        # Where this fight carries its corner colour. None until something
+        # measures it, and None is what keeps identity behaving exactly as it
+        # did before corners existed. See set_corner_region().
+        self.corner_region: str | None = None
         # Whether TensorRT is carrying this run is the difference between a
         # fight finishing inside its own length and not, and every way of
         # losing it was silent: a path that does not exist, a CPU device, an
@@ -300,6 +305,15 @@ class PoseTracker:
             except Exception:
                 pass
 
+    def set_corner_region(self, region: str | None) -> None:
+        """Where this fight carries its corner colour, or None for no corner.
+
+        Decided once per fight by core/corner.py and set before analysis
+        starts. Left None, every detection's colour stays None and identity
+        behaves exactly as it did before corners existed.
+        """
+        self.corner_region = region
+
     def track(self, frame, imgsz: int | None = None) -> list[PersonObservation]:
         size = int(imgsz or SETTINGS.default_imgsz)
         results = self.model.track(
@@ -327,6 +341,10 @@ class PoseTracker:
             for person, vector, verdict in zip(people, vectors, verdicts, strict=True):
                 person.reid = vector
                 person.referee_prob = verdict
+            # And which corner each is wearing, once the fight has told us
+            # where to look. No region means no reading, which is how a fight
+            # without a usable corner keeps its old behaviour exactly.
+            score_corner_people(frame, people, self.corner_region)
         return people
 
     def recover_from_guidance(
@@ -407,6 +425,11 @@ class PoseTracker:
                 best.appearance = appearance_hist(frame, best.box)
                 best.pose_signature = pose_signature(best.keypoints, best.box)
                 recovered.append(best)
+        # The guidance path builds observations by hand rather than through
+        # track(), so the corner has to be attached here too - and a fighter
+        # recovered by SAM2 guidance is exactly when identity most needs the
+        # one signal that has not drifted.
+        score_corner_people(frame, recovered, self.corner_region)
         return recovered
 
     @staticmethod
