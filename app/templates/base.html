@@ -113,8 +113,14 @@
     const navMenus=()=>[...document.querySelectorAll('.nav details[open]')];
     document.addEventListener('click',event=>{navMenus().forEach(menu=>{if(!menu.contains(event.target))menu.open=false})});
     document.addEventListener('keydown',event=>{if(event.key==='Escape'){navMenus().forEach(menu=>menu.open=false);if(!mobileMenu.hidden){mobileMenu.hidden=true;menuButton.setAttribute('aria-expanded','false');menuButton.setAttribute('aria-label','Open navigation');document.body.classList.remove('menu-open')}}});
-    const active=path==='/'||/^\/(frame|select|progress)\//.test(path)?'analyze':/^\/(history|result|replay|review)\b/.test(path)?'library':/^\/(dashboard|compare)\b/.test(path)?'progress':path.startsWith('/coach')?'coach':path.startsWith('/pricing')?'plans':'';
-    const activeLink=document.querySelector(`[data-nav="${active}"]`);if(activeLink)activeLink.setAttribute('aria-current','page');
+    // Which nav item is the page we are on. "/" deliberately matches nothing:
+    // the home page is not the Analyze page, and marking Analyze there told a
+    // screen reader the visitor was somewhere they were not. /analyze is what
+    // Analyze means, together with the steps of its flow, which have no nav
+    // item of their own. An empty result marks nothing rather than searching
+    // for [data-nav=""], which no element carries.
+    const active=/^\/analyze\b/.test(path)||/^\/(frame|select|progress)\//.test(path)?'analyze':/^\/(history|result|replay|review)\b/.test(path)?'library':/^\/(dashboard|compare)\b/.test(path)?'progress':path.startsWith('/coach')?'coach':path.startsWith('/pricing')?'plans':'';
+    const activeLink=active?document.querySelector(`[data-nav="${active}"]`):null;if(activeLink)activeLink.setAttribute('aria-current','page');
     // Timestamps render in UTC on the server and are relabelled here to the
     // reader's own zone. The browser already knows it, so nothing has to be
     // stored or asked for; with JavaScript off the UTC text stands, which is
