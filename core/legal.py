@@ -185,7 +185,15 @@ LEGAL_DOCUMENTS = {
     "contact": {
         "title": "Contact and Complaints",
         "description": "How to reach WarriorIQ support, privacy, accessibility and copyright contacts.",
-        "intro": "Use the configured address for the purpose below. Public launch remains blocked until the real operator and contact details are supplied in the launch configuration.",
+        # The second sentence used to assert that launch was blocked "until the
+        # real operator and contact details are supplied". It was a fixed
+        # string, so it said that whatever the configuration held - and it was
+        # printed directly above a working mailto: address, telling the reader
+        # no contact details existed while showing them one. Readiness is
+        # already answered per request: the template renders a launch-aware
+        # line below when launch_readiness() reports fields still missing, and
+        # drops it once they are set. One place, and it tracks reality.
+        "intro": "Use the configured address for the purpose below.",
         "sections": [
             ("Product and account support", "Use the configured support email for account access, billing, cancellation, accessibility help, analysis problems and general complaints. Include the analysis identifier when relevant, but do not send fight footage unless support specifically provides a secure channel."),
             ("Privacy rights", "Use the configured privacy email for access, correction, deletion, restriction, objection, portability or consent-withdrawal requests. The operator may need proportionate information to verify the requester before disclosing personal data."),
