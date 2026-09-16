@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
 import math
 import time
 from collections import deque
@@ -45,6 +46,46 @@ from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
 # constant here was calibrated against an older formula, survived a rescale of
 # it, and left six real fights showing 5 attempts out of 309 detections.
 ATTEMPT_CONFIDENCE = CONFIDENCE_FLOOR + 0.25 * (CONFIDENCE_CEILING - CONFIDENCE_FLOOR)
+
+LOGGER = logging.getLogger("warrioriq.analysis")
+
+# What this pipeline needs resident, measured on 2026-09-16 on an 8 GB RTX 5060:
+# the TensorRT pose engine takes 3.85 GB (3.5 GB of it the execution context),
+# SAM2's weights 0.30 GB, and SAM2 propagation peaks at 1.56 GB reserved. Below
+# roughly that total the card is already spoken for, and on Windows the driver
+# answers by spilling to system RAM over PCIe rather than failing - which is
+# silent, and is what turned a 45-second SAM2 pass into 28 minutes.
+GPU_HEADROOM_WANTED_GB = 5.5
+
+
+def _log_gpu_state() -> None:
+    """Say what the card looked like before this analysis touched it.
+
+    A run that is thirty times slower than the same code on the same hardware
+    looks identical, from the outside, to a run that is simply heavy. Nothing
+    recorded the difference, so an hour went into ruling out the code. Two
+    numbers at the start settle it next time.
+    """
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            LOGGER.warning("analysis_gpu_absent cuda_available=false")
+            return
+        index = torch.cuda.current_device()
+        free, total = torch.cuda.mem_get_info(index)
+        free_gb, total_gb = free / 1024 ** 3, total / 1024 ** 3
+        LOGGER.info(
+            "analysis_gpu_state device=%r free_gb=%.2f total_gb=%.2f in_use_gb=%.2f",
+            torch.cuda.get_device_name(index), free_gb, total_gb, total_gb - free_gb)
+        if free_gb < GPU_HEADROOM_WANTED_GB:
+            LOGGER.warning(
+                "analysis_gpu_contended free_gb=%.2f wanted_gb=%.2f in_use_gb=%.2f "
+                "- another process is holding this card; expect the analysis to "
+                "run far slower than normal",
+                free_gb, GPU_HEADROOM_WANTED_GB, total_gb - free_gb)
+    except Exception as exc:                 # never let diagnostics stop a run
+        LOGGER.info("analysis_gpu_state_unavailable error=%s", type(exc).__name__)
+
 
 # Where the progress bar stops describing setup and starts describing the
 # per-frame pass. Below this is model loading and the SAM2 identity pass;
@@ -493,6 +534,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
 
     # Honest wall timer: model load/warmup is part of the user's wait.
     wall_start = time.perf_counter()
+    _log_gpu_state()
     progress("Loading GPU models", 0.0, 0.0, 0.0)
 
     pose_tracker = get_pose_tracker()
