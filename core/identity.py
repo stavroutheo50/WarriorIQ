@@ -11,6 +11,13 @@ from core.reid import similarity as reid_similarity
 from core.types import FighterState, PersonObservation
 
 
+# How much clearer the opposing colour has to read before a candidate is
+# refused for wearing it. A bare "more blue than red" is not enough: the
+# sampler reads 0.30 against 0.31 on ordinary frames, and refusing on that
+# would turn noise into a rejection of the right fighter.
+CORNER_MARGIN = 0.20
+
+
 def box_area(box) -> float:
     if box is None:
         return 0.0
@@ -196,6 +203,11 @@ class IdentityManager:
         # The same question asked per *lost fighter* rather than per candidate.
         # See _recover for why the two differ and why this one is the useful one.
         self.blocked_recovery: dict[str, int] = {}
+        # Which body region this fight carries its corner colour in, or None
+        # when nothing has measured it. None is the default and the safe
+        # state: every score below is then exactly what it was before corners
+        # existed. See set_corners().
+        self.corner_region: str | None = None
         # Frames where A and B were equally plausible either way round.
         self.confusions = 0
         self.last_confusion_frame: int | None = None
@@ -314,6 +326,40 @@ class IdentityManager:
         short = self._recent_spread_short(track_id, fps)
         return short is not None and short < SETTINGS.max_stationary_spread_short
 
+    def _wears_the_other_corner(self, state: FighterState, candidate: PersonObservation) -> bool:
+        """Whether this candidate is clearly in the opposing corner's colour.
+
+        False for everything uncertain: a fight with no readable corner, a
+        fighter with no corner assigned, a detection the sampler could not
+        colour, and any reading where the two colours are close. Only an
+        unambiguous conflict counts, because the cost of being wrong here is
+        refusing the right fighter.
+        """
+        if not self.corner_region or state.corner is None:
+            return False
+        red, blue = candidate.corner_red, candidate.corner_blue
+        if red is None or blue is None:
+            return False
+        mine, theirs = (red, blue) if state.corner == "red" else (blue, red)
+        from core.corner import CLEAR_COLOUR
+
+        return bool(theirs >= CLEAR_COLOUR and theirs - mine >= CORNER_MARGIN)
+
+    def set_corners(self, region: str | None, a_corner: str | None, b_corner: str | None) -> None:
+        """Tell the manager which corner each fighter is in, once per fight.
+
+        Called after the seed boxes are known and never again. Passing None
+        for the region turns the signal off, which is the state every fight is
+        in until something measures it - and the state every fight stays in
+        when its footage carries no usable corner.
+        """
+        if region is None or a_corner is None or b_corner is None or a_corner == b_corner:
+            self.corner_region = None
+            self.a.corner = self.b.corner = None
+            return
+        self.corner_region = region
+        self.a.corner, self.b.corner = a_corner, b_corner
+
     def _blocked(self, reason: str) -> None:
         """Record why one fighter is unassigned in one frame. Diagnostics only."""
         self.blocked_recovery[reason] = self.blocked_recovery.get(reason, 0) + 1
@@ -383,6 +429,21 @@ class IdentityManager:
             # that never appeared in the diagnostics, so it was never looked at
             # while every other guard was tuned around it.
             return self._refuse(state, "too_far_to_be_them")
+        # Categorical, like the referee filter below, and refused in the same
+        # way: before any similarity is consulted. Every other signal here
+        # compares this candidate to a remembered template, so when tracking
+        # has slid onto the other fighter the template *is* the other fighter
+        # and all of them agree. Corner colour is fixed by the competition
+        # rules rather than by what was seen last, so it can still disagree -
+        # but only if it is allowed to answer "what is this person" instead of
+        # "how similar are they".
+        #
+        # A weighted penalty was tried first and does not work. Measured, a
+        # conflicting candidate that was otherwise a perfect match still
+        # scored 0.864 against a keep threshold of 0.46, which is exactly the
+        # shape of the swap this is meant to stop.
+        if self._wears_the_other_corner(state, candidate):
+            return self._refuse(state, "wrong_corner")
         iou = box_iou(reference, candidate.box)
         if state.last_box is None:
             # No positional anchor, because one was just discarded as wrong.
@@ -415,6 +476,7 @@ class IdentityManager:
             + 0.14 * anchor
             + 0.06 * anchor_pose_match
         )
+
         # A candidate that matches where the fighter should be but looks nothing
         # like the fighter the user picked is the exact shape of a referee walking
         # through. Refusing is correct here: this manager's rule is that missing

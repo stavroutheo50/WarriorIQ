@@ -65,6 +65,11 @@ class PersonObservation:
     # See core/referee.py.
     referee_prob: float | None = None
     pose_signature: np.ndarray | None = None
+    # How red and how blue this detection reads, in whichever body region this
+    # fight carries its corner colour. Both None unless a corner region was
+    # decided for the fight. See core/corner.py.
+    corner_red: float | None = None
+    corner_blue: float | None = None
 
 
 @dataclass
@@ -94,6 +99,10 @@ class FighterState:
     # anchor_appearance never updates - it is the only thing that still
     # remembers the real fighter after a gradual slide.
     anchor_reid: np.ndarray | None = None
+    # "red", "blue", or None when this fight has no readable corner. Decided
+    # once from the seed frame and never updated - that is the whole point:
+    # every other appearance signal here drifts, and this one cannot.
+    corner: str | None = None
     # The first few looks at the person originally selected, averaged. One crop
     # of somebody sixty pixels tall does not describe them well enough to
     # recognise them again; see core/reid.py.
