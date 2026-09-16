@@ -1178,6 +1178,10 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         # going below min_tracking_fps, and the stride stopped at that floor.
         "realtime_budget_enforced": SETTINGS.hard_realtime_budget,
         "budget_plan": quality.budget_reason,
+        # Where the frame cost behind the plan came from. Two runs of one video
+        # that planned different strides are explained by this field and by
+        # nothing else in the report.
+        "budget_cost_source": quality.budget_cost_source,
         "budget_met_expected": quality.budget_expected_met,
         "planned_stride": quality.planned_stride,
         "final_analysis_fps": quality.effective_fps,

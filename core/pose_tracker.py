@@ -56,6 +56,18 @@ def inference_size(source_width: int, source_height: int) -> int:
     return SETTINGS.default_imgsz
 
 
+def _device_name() -> str:
+    """The card this is running on, or "cpu". Never raises: it only keys a file."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return str(torch.cuda.get_device_name(torch.cuda.current_device()))
+    except Exception:                       # noqa: BLE001 - naming, not running
+        pass
+    return "cpu"
+
+
 class QualityController:
     """Adaptive analysis quality while respecting the <= video-length target."""
 
@@ -92,10 +104,43 @@ class QualityController:
         self.planned_stride: int | None = None
         self.budget_reason = "not_planned"
         self.budget_expected_met: bool | None = None
+        # Where the frame cost came from, so a run that planned differently
+        # from another on the same machine can be explained rather than
+        # argued about. See _frame_cost.
+        self.budget_cost_source = "not_planned"
+        # Which card this is, for the stored profile's key: the same footage
+        # costs a different amount on different hardware, and a profile shared
+        # between them would plan from somebody else's machine.
+        self.device_name = _device_name()
 
     @property
     def effective_fps(self) -> float:
         return self.source_fps / self.stride
+
+    def _frame_cost(self, measured_seconds: float) -> float:
+        """What to plan with: a configured cost, a stored one, or this run's.
+
+        Preference order matters. An explicitly configured cost is somebody
+        stating a fact about their hardware and wins outright. A stored cost is
+        this machine's own earlier measurement and is what makes two runs of
+        one video plan identically. Measuring here is the last resort, and the
+        measurement is written down so it is the last resort only once.
+        """
+        if SETTINGS.frame_cost_seconds > 0:
+            self.budget_cost_source = "configured"
+            return float(SETTINGS.frame_cost_seconds)
+        from core import machine_profile
+
+        stored = machine_profile.frame_cost(self.device_name, self.imgsz)
+        if stored:
+            self.budget_cost_source = "profile"
+            return stored
+        self.budget_cost_source = "measured"
+        # Snapped before use, not merely before storing, so this first run
+        # plans from the same number every later run will read back.
+        snapped = machine_profile.record_frame_cost(
+            self.device_name, self.imgsz, measured_seconds)
+        return snapped or measured_seconds
 
     def plan_for_budget(self, analyzed_frames: int, processed_seconds: float,
                         elapsed_seconds: float, segment_duration: float) -> None:
@@ -122,14 +167,22 @@ class QualityController:
         costs 0.194s per analysed frame, and cannot finish in real time at 10
         fps whatever this method does. Saying so is the honest outcome.
 
-        **Reproducibility, which is why the continuous controller stays off.**
-        Planning reads a clock, and a clock moves with machine load. Measured on
-        fight 1, twice: wall time differed by 23 s (208.4 s against 231.6 s) and
-        the plan did not - stride 3 both times, and coverage identical to four
-        decimals (A 0.6188, B 0.6450). It is stable here because the required
-        stride exceeds the floor and clamps to it, which is not stability in
-        general. For A/B work, pin it with WARRIORIQ_FORCE_STRIDE rather than
-        trusting that.
+        **Reproducibility, and why the cost no longer comes from this run.**
+        Planning reads a clock, and a clock moves with machine load. The
+        earlier version measured the cost of a frame inside the run, and the
+        warning here used to say that was stable only by luck. It was: on
+        fight 1, the same file and commit planned stride 3 on some runs and
+        stride 4 on others, and that flip moved fighter B's coverage from
+        0.260 to 0.728. Measured across all three fights the flip is worth
+        +0.468, -0.138 and 0.009 - opposite directions, so there is no safer
+        stride to prefer, only a requirement that the same input plans the
+        same way.
+
+        So the frame cost now comes from core/machine_profile.py: measured on
+        the first analysis that needs it, rounded to a bucket, written down,
+        and read back by every later run on that machine. The clock is read
+        once in the life of a machine rather than once per analysis, and
+        `budget_cost_source` in the report says which happened.
         """
         if self.planned or analyzed_frames < 40 or elapsed_seconds <= 0:
             return
@@ -138,10 +191,11 @@ class QualityController:
             self.stride = int(SETTINGS.force_tracking_stride)
             self.planned_stride = self.stride
             self.budget_reason = "stride_pinned"
+            self.budget_cost_source = "pinned"
             self.budget_expected_met = None
             return
 
-        per_frame = elapsed_seconds / max(1, analyzed_frames)
+        per_frame = self._frame_cost(elapsed_seconds / max(1, analyzed_frames))
         remaining_video = max(0.0, segment_duration - processed_seconds)
         remaining_budget = segment_duration - elapsed_seconds
         if remaining_video <= 0:
