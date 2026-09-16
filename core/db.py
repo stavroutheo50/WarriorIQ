@@ -249,6 +249,21 @@ def init_db() -> None:
                 FOREIGN KEY(account_id) REFERENCES accounts(id)
             );
 
+            CREATE TABLE IF NOT EXISTS analysis_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL,
+                account_id INTEGER,
+                stage TEXT NOT NULL DEFAULT 'analysis',
+                reason TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '',
+                attempts INTEGER NOT NULL DEFAULT 1,
+                occurred_at TEXT NOT NULL,
+                reviewed_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_analysis_failures_job
+                ON analysis_failures(job_id);
+
             CREATE TABLE IF NOT EXISTS moderation_reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 report_type TEXT NOT NULL,
@@ -1150,6 +1165,71 @@ def list_subscription_actions(account_id: int) -> list[dict]:
     return result
 
 
+def record_analysis_failure(
+    job_id: str,
+    reason: str,
+    *,
+    detail: str = "",
+    account_id: int | None = None,
+    stage: str = "analysis",
+) -> int:
+    """Keep a failed analysis where it can be looked at later.
+
+    The worker already catches, releases the visitor's allowance and marks the
+    job `error`, so one bad upload never stalled the queue - that part was
+    never broken. What it did not do was keep the reason anywhere but the log,
+    so "why did these four fail" could only be answered by someone with shell
+    access reading files, and only until the logs rotated.
+
+    A repeat of the same job increments `attempts` rather than adding a row,
+    so a video that fails every retry reads as one stubborn problem instead of
+    five separate ones.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        existing = con.execute(
+            "SELECT id, attempts FROM analysis_failures WHERE job_id=? AND reviewed_at IS NULL"
+            " ORDER BY id DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        if existing is not None:
+            con.execute(
+                "UPDATE analysis_failures SET attempts=?, reason=?, detail=?, occurred_at=?"
+                " WHERE id=?",
+                (int(existing["attempts"]) + 1, reason[:120], detail[:500], now, int(existing["id"])),
+            )
+            return int(existing["id"])
+        cursor = con.execute(
+            """INSERT INTO analysis_failures(
+               job_id,account_id,stage,reason,detail,attempts,occurred_at
+               ) VALUES(?,?,?,?,?,?,?)""",
+            (job_id, account_id, stage[:40], reason[:120], detail[:500], 1, now),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_analysis_failures(limit: int = 50, include_reviewed: bool = False) -> list[dict]:
+    """The dead-letter queue, newest first."""
+    clause = "" if include_reviewed else " WHERE reviewed_at IS NULL"
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM analysis_failures%s ORDER BY id DESC LIMIT ?" % clause,
+            (int(limit),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_analysis_failure_reviewed(failure_id: int) -> bool:
+    """Take one off the queue once somebody has dealt with it."""
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE analysis_failures SET reviewed_at=? WHERE id=? AND reviewed_at IS NULL",
+            (now, int(failure_id)),
+        )
+        return cursor.rowcount > 0
+
+
 def record_security_event(
     event_type: str,
     *,
@@ -1471,6 +1551,11 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM legal_acceptances WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM analysis_usage WHERE account_id=?", (account_id,))
+        # The dead-letter queue carries account_id, so it holds account data
+        # and has to go with everything else. Caught by
+        # test_every_table_holding_account_data_is_cleared, which is the whole
+        # reason that test enumerates tables rather than naming them.
+        con.execute("DELETE FROM analysis_failures WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM plan_interest WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM subscription_actions WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM outbound_messages WHERE account_id=?", (account_id,))
