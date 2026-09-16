@@ -449,6 +449,29 @@ class Settings:
     sam_continuous_max_frames: int = int(os.getenv("WARRIORIQ_SAM_MAX_FRAMES", "360"))
     # Keep the bounded two-minute guidance pass in one memory state. Short
     # chunk resets were faster but could drift when reseeded during a crossing.
+    # How many sampled frames SAM2 holds at once. This is a host-memory
+    # decision, not a quality one: _DecodedClip allocates
+    # chunk x 3 x 1024 x 1024 float32 in system RAM, so 360 frames is 4.5 GB
+    # and a 70-second clip's 263 frames is 3.3 GB - on a 16 GB machine also
+    # running a browser, that is enough to start swapping, which looks exactly
+    # like a slow GPU and reports no error.
+    #
+    # Left at 360 deliberately, which keeps the whole SAM2 pass inside one
+    # chunk - the invariant test_sam_sampling_obeys_absolute_work_budget
+    # asserts, chunk_frames >= sam_continuous_max_frames.
+    #
+    # Lowering it is not free, and the cost was measured rather than assumed.
+    # At 120 the pass runs at the same speed (50.4s against 51.8s over 263
+    # frames) and the buffer drops to 1.41 GB, but SAM2 re-seeds each chunk
+    # from the previous chunk's last good boxes, so more chunks means more
+    # re-seeds: 244 of 600 boxes landed within 2px of the single-chunk path
+    # and the median difference was 4.00 px. These boxes are identity guidance
+    # only and downstream still needs a detection overlapping at IoU 0.12, so
+    # 4px changes no answer - but it is a different path, and one chunk is
+    # the reproducible one.
+    #
+    # Lower this if a machine is short of memory and the warning in
+    # core/analyzer.py says so. It is a memory decision, not a quality one.
     sam_continuous_chunk_frames: int = int(os.getenv("WARRIORIQ_SAM_CHUNK_FRAMES", "360"))
     sam_model_id: str = os.getenv("WARRIORIQ_SAM_MODEL", "facebook/sam2.1-hiera-small")
     sam_buffer_frames: int = int(os.getenv("WARRIORIQ_SAM_BUFFER", "18"))
