@@ -46,6 +46,13 @@ from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
 # it, and left six real fights showing 5 attempts out of 309 detections.
 ATTEMPT_CONFIDENCE = CONFIDENCE_FLOOR + 0.25 * (CONFIDENCE_CEILING - CONFIDENCE_FLOOR)
 
+# Where the progress bar stops describing setup and starts describing the
+# per-frame pass. Below this is model loading and the SAM2 identity pass;
+# from here to 98 is the action and pose pass, which is the only part whose
+# rate says anything about how long the rest will take.
+ANALYSIS_PHASE_START = 35.0
+ANALYSIS_PHASE_SPAN = 63.0
+
 from core.identity import IdentityManager, fighter_pair_similarity
 from core.metrics import MetricsAccumulator
 from core.preflight import Preflight
@@ -401,7 +408,22 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     # ETA follows the same weighted phase progress as the visible progress bar.
     # The old calculation used "processed video seconds", which reaches the end
     # during SAM and then starts again during pose analysis, causing huge jumps.
+    #
+    # Weighting by percent removed the jumps and left a subtler error: percent
+    # covers two unrelated workloads. Everything below ANALYSIS_PHASE_START is
+    # model loading and the SAM2 identity pass; everything above it is the
+    # per-frame action and pose pass. Dividing elapsed by overall percent
+    # therefore predicted the second from the rate of the first. Observed on a
+    # 1:10 clip: 28m17s at 30.3%, still inside the SAM2 pass, reported as
+    # "ETA 62m44s" - a number extrapolated from a workload that was about to
+    # end. The EWMA below cannot rescue that; its comment calls the warmup
+    # short, and a full SAM2 pass over the clip is not short.
+    #
+    # So: no estimate at all until the frame pass has started and measured
+    # itself, then extrapolate from that phase alone. "Calculating..." for the
+    # warmup is worth more than a confident wrong number.
     estimated_total_seconds: float | None = None
+    analysis_phase_started_at: float | None = None
     live_action_trusted = False
 
     def progress(
@@ -418,24 +440,32 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         stats: dict | None = None,
         observation: dict | None = None,
     ):
-        nonlocal estimated_total_seconds
+        nonlocal estimated_total_seconds, analysis_phase_started_at
         if progress_callback is None:
             return
         speed = processed / elapsed if elapsed > 0.0 else 0.0
         bounded_percent = float(max(0.0, min(100.0, percent)))
+        if analysis_phase_started_at is None and bounded_percent >= ANALYSIS_PHASE_START:
+            analysis_phase_started_at = elapsed
+        phase_elapsed = (
+            elapsed - analysis_phase_started_at if analysis_phase_started_at is not None else 0.0)
+        phase_done = bounded_percent - ANALYSIS_PHASE_START
         if bounded_percent >= 100.0:
             eta = 0.0
-        elif bounded_percent >= 2.0 and elapsed > 0.0:
-            projected_total = elapsed / (bounded_percent / 100.0)
+        # Both guards matter on the first emit after the boundary, where a
+        # fraction of a percent over a fraction of a second projects hours.
+        elif phase_done >= 1.0 and phase_elapsed >= 2.0:
+            projected_total = elapsed + (100.0 - bounded_percent) / phase_done * phase_elapsed
             if estimated_total_seconds is None:
                 estimated_total_seconds = projected_total
             else:
-                # A conservative EWMA absorbs short model warmups and frame
-                # complexity changes without presenting impossible minute jumps.
+                # A conservative EWMA absorbs frame complexity changes without
+                # presenting impossible minute jumps.
                 estimated_total_seconds = 0.82 * estimated_total_seconds + 0.18 * projected_total
             estimated_total_seconds = max(elapsed, estimated_total_seconds)
             eta = max(0.0, estimated_total_seconds - elapsed)
         else:
+            # Warmup and the SAM2 pass. Nothing here measures the frame pass.
             eta = None
         payload = AnalysisProgress(
             percent=bounded_percent,
@@ -858,7 +888,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
 
             if analyzed_frames - last_progress_emit >= SETTINGS.progress_interval_frames:
                 last_progress_emit = analyzed_frames
-                percent = 35.0 + 63.0 * processed_seconds / segment_duration
+                percent = ANALYSIS_PHASE_START + ANALYSIS_PHASE_SPAN * processed_seconds / segment_duration
                 all_live_event_data = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
                 live_event_data = all_live_event_data[-160:]
                 live_stats = _provisional_stats(
