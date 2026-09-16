@@ -20,7 +20,7 @@ from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 
 import cv2
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -2100,10 +2100,10 @@ def request_password_reset(request: Request, email: str = Form(...)):
 
 
 @app.get("/reset-password/{token}", response_class=HTMLResponse)
-def reset_password_page(request: Request, token: str):
+def reset_password_page(request: Request, token: str, error: str = ""):
     return templates.TemplateResponse(
         request=request, name="password_reset.html",
-        context={"request": request, "token": token, "message": ""},
+        context={"request": request, "token": token, "message": "", "error": error[:200]},
     )
 
 
@@ -2115,7 +2115,14 @@ def reset_password(request: Request, token: str, password: str = Form(...)):
     # loose rather than a reason to have none.
     _enforce_rate_limit(request, "password-reset-complete", 15, 900)
     if not valid_password(password):
-        raise HTTPException(400, "Password must contain between 10 and 1,024 characters.")
+        # Back to the form with the reason, rather than a 400 page over it.
+        # The token stays in the path, so the link is still usable - which a
+        # 400 page made look untrue at the moment it mattered most.
+        return RedirectResponse(
+            "/reset-password/%s?%s" % (
+                quote(token, safe=""),
+                urlencode({"error": "Password must contain between 10 and 1,024 characters."})),
+            status_code=303)
     account_id = consume_password_reset_token(token_digest(token))
     if account_id is None or not update_password_hash(account_id, hash_password(password)):
         raise HTTPException(410, "This password-reset link is invalid or expired.")
@@ -3909,13 +3916,13 @@ def media(request: Request, job_id: str):
 
 
 @app.get("/profile", response_class=HTMLResponse)
-def profile_page(request: Request):
+def profile_page(request: Request, error: str = ""):
     profile_id = _profile_id(request)
     return templates.TemplateResponse(
         request=request,
         name="profile.html",
         context={
-            "request": request,
+            "request": request, "error": error[:200],
             "profile": get_profile(profile_id) if profile_id is not None else None,
             "fights": list_fights(profile_id) if profile_id is not None else [],
         },
@@ -3928,7 +3935,7 @@ def settings_root(request: Request):
 
 
 @app.get("/settings/{section}", response_class=HTMLResponse)
-def settings_page(request: Request, section: str, notice: str = ""):
+def settings_page(request: Request, section: str, notice: str = "", error: str = ""):
     account = _account(request)
     if not account:
         return RedirectResponse(f"/login?next=/settings/{section}", status_code=303)
@@ -3942,6 +3949,7 @@ def settings_page(request: Request, section: str, notice: str = ""):
             "request": request,
             "section": section,
             "notice": notice,
+            "error": error[:200],
             "account": account,
             "profile": get_profile(int(account["profile_id"])) or {},
             "fights": list_fights(int(account["profile_id"])),
@@ -4026,10 +4034,12 @@ def cancel_subscription(request: Request):
 def request_contract_withdrawal(request: Request, confirm: bool = Form(False)):
     account = _account(request)
     if not account or not confirm:
-        raise HTTPException(400, "Confirm the withdrawal request.")
+        return _form_refusal("Confirm the withdrawal request.",
+                             "/settings/billing", "/settings/billing")
     full_account = get_account(int(account["id"])) or account
     if not full_account.get("stripe_subscription_id"):
-        raise HTTPException(400, "No connected purchase is available for withdrawal review.")
+        return _form_refusal("No connected purchase is available for withdrawal review.",
+                             "/settings/billing", "/settings/billing")
     action = record_subscription_action(
         int(account["id"]), "eu_withdrawal", "pending_review",
         provider_reference=full_account.get("stripe_subscription_id"),
@@ -4061,7 +4071,7 @@ async def save_profile(
     current_profile = get_profile(profile_id) or {}
     default_fighter = default_fighter.upper()
     if default_fighter not in {"A", "B"}:
-        raise HTTPException(400, "Default fighter must be A or B.")
+        return _form_refusal("Default fighter must be A or B.", "/profile", "/profile")
     # Anything unexpected settles on athlete, which is the narrower of the two:
     # it never grants roster room nobody paid for.
     set_account_type(profile_id, account_type)
@@ -4072,12 +4082,13 @@ async def save_profile(
         folder.mkdir(parents=True, exist_ok=True)
         suffix = Path(photo.filename).suffix.lower()
         if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
-            raise HTTPException(400, "Profile photo must be JPG, PNG or WEBP.")
+            return _form_refusal("Profile photo must be JPG, PNG or WEBP.", "/profile", "/profile")
         file_path = folder / f"profile_{profile_id}{suffix}"
         await run_in_threadpool(_save_upload_limited, photo, file_path, MAX_PROFILE_PHOTO_BYTES)
         if await run_in_threadpool(cv2.imread, str(file_path)) is None:
             file_path.unlink(missing_ok=True)
-            raise HTTPException(400, "The profile photo could not be decoded as a safe image.")
+            return _form_refusal("The profile photo could not be decoded as a safe image.",
+                                 "/profile", "/profile")
         photo_path = f"/static/profile/{file_path.name}"
         if current_profile.get("photo_path") != photo_path:
             _remove_profile_file(current_profile.get("photo_path"))
@@ -4260,6 +4271,27 @@ def coach_page(request: Request, error: str = "", name: str = ""):
             "roster_name": name[:80],
         },
     )
+
+
+def _form_refusal(message: str, next_path: str, fallback: str) -> RedirectResponse:
+    """Send a refused submission back to the page it came from, with the reason.
+
+    Raising HTTPException renders the error page over whatever the visitor was
+    doing. For a genuinely broken request that is right; for a mistyped
+    password or an unticked box it throws away the page, every other field on
+    it, and any idea of where they were. These refusals belong beside the
+    field.
+
+    The message rides in ?error= rather than in a session, because there is no
+    session store to put it in and the page reading it is the page they were
+    already on. _safe_next keeps the destination on this site; anything else
+    falls back.
+    """
+    split = urlsplit(_safe_next(next_path, fallback))
+    query = parse_qs(split.query)
+    query["error"] = [message]
+    return RedirectResponse(
+        urlunsplit(split._replace(query=urlencode(query, doseq=True))), status_code=303)
 
 
 def _roster_refusal(message: str, typed: str) -> RedirectResponse:
@@ -4493,7 +4525,8 @@ def legal_document(request: Request):
 def copyright_report_page(request: Request):
     return templates.TemplateResponse(
         request=request, name="copyright_report.html",
-        context={"request": request, "submitted": False, "reference": None},
+        context={"request": request, "submitted": False, "reference": None,
+                 "error": "", "form": {}},
     )
 
 
@@ -4507,7 +4540,22 @@ def submit_copyright_report(
 ):
     _enforce_rate_limit(request, "copyright-report", 6, 3600)
     if not valid_email(email) or len(details.strip()) < 40 or not good_faith:
-        raise HTTPException(400, "Provide a valid email, a detailed good-faith report and the required confirmation.")
+        # Raising here replaced the page with a 400 and threw the report away.
+        # The browser's own minlength counts raw characters while this counts
+        # stripped ones, so a padded report passes the form and fails here -
+        # reachable by ordinary typing, and it cost the visitor everything
+        # they had written.
+        return templates.TemplateResponse(
+            request=request, name="copyright_report.html",
+            context={
+                "request": request, "submitted": False, "reference": None,
+                "error": "Provide a valid email, a detailed good-faith report "
+                         "and the required confirmation.",
+                "form": {"email": email, "details": details, "resource_id": resource_id,
+                         "good_faith": good_faith},
+            },
+            status_code=400,
+        )
     report_id = create_moderation_report("copyright", email.strip().lower(), details.strip(), resource_id.strip())
     record_security_event("copyright_report_received", resource_type="moderation_report", resource_id=str(report_id))
     return templates.TemplateResponse(
@@ -4833,11 +4881,15 @@ def revoke_shares(request: Request, job_id: str):
 
 
 @app.post("/account/export", dependencies=[Depends(require_csrf)])
-def export_account_data(request: Request, password: str = Form(...)):
+def export_account_data(request: Request, password: str = Form(...),
+                        next_path: str = Form("/profile")):
     _enforce_rate_limit(request, "account-export", 5, 3600)
     account = _account(request)
     if not account or not authenticate(account["email"], password):
-        raise HTTPException(400, "Enter the current account password to export your data.")
+        # The password is not carried back, for the obvious reason.
+        return _form_refusal(
+            "Enter the current account password to export your data.",
+            next_path, "/profile")
     profile_id = int(account["profile_id"])
     profile = dict(get_profile(profile_id) or {})
     profile["has_photo"] = bool(profile.pop("photo_path", None))
@@ -4888,7 +4940,8 @@ def export_account_data(request: Request, password: str = Form(...)):
 
 
 @app.post("/account/delete", dependencies=[Depends(require_csrf)])
-def delete_account_route(request: Request, password: str = Form(...), confirmation: str = Form(...)):
+def delete_account_route(request: Request, password: str = Form(...), confirmation: str = Form(...),
+                         next_path: str = Form("/profile")):
     # Takes a password, so it is a place to guess one. Nobody deletes their
     # account five times an hour.
     _enforce_rate_limit(request, "account-delete", 5, 3600)
@@ -4896,12 +4949,16 @@ def delete_account_route(request: Request, password: str = Form(...), confirmati
     if not account:
         raise HTTPException(403)
     if confirmation.strip().upper() != "DELETE" or not authenticate(account["email"], password):
-        raise HTTPException(400, "Enter DELETE and your current password to remove the account.")
+        return _form_refusal(
+            "Enter DELETE and your current password to remove the account.",
+            next_path, "/profile")
     if any(
         job.get("owner_key") == f"account:{account['id']}" and job.get("status") in {"queued", "running"}
         for _, job in list_jobs()
     ):
-        raise HTTPException(409, "Wait for the running analysis to finish before deleting the account.")
+        return _form_refusal(
+            "Wait for the running analysis to finish before deleting the account.",
+            next_path, "/profile")
     if account.get("stripe_subscription_id"):
         try:
             cancellation = cancel_subscription_at_period_end(str(account["stripe_subscription_id"]))
