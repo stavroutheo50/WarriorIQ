@@ -167,7 +167,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertNotIn("Accept All", self.client.get("/").text)
         guest_id = self.client.cookies.get(GUEST_COOKIE)
         records = database.list_legal_acceptances(guest_id=guest_id)
-        self.assertEqual(records[0]["metadata"], {"analytics": True, "marketing": False})
+        self.assertEqual(records[0]["metadata"], {"analytics": True})
 
     def test_health_reports_the_running_code_not_the_file_on_disk(self):
         """A deploy that copies files without restarting must not look healthy.
@@ -1588,12 +1588,27 @@ class AddFighterFromCoachPageTests(unittest.TestCase):
         """Otherwise this route is a way around the plan."""
         self.client.post("/coach/fighters", data={"name": "Theodoulos"}, follow_redirects=False)
         second = self.client.post("/coach/fighters", data={"name": "Maria"}, follow_redirects=False)
-        self.assertEqual(second.status_code, 402)
+        # Refused back to the page rather than as a 402 page, so the coach
+        # keeps the squad they were looking at and can read why.
+        self.assertEqual(second.status_code, 303)
+        self.assertIn("/coach?", second.headers["location"])
+        self.assertIn("all+in+use", second.headers["location"])
         self.assertEqual(len(database.list_fighters(self.profile)), 1)
+        self.assertIn("all in use", self.client.get(
+            second.headers["location"].split("#")[0]).text)
 
     def test_a_blank_name_is_refused(self):
+        """required= stops an empty box; only the server stops a box of spaces."""
         r = self.client.post("/coach/fighters", data={"name": "   "}, follow_redirects=False)
-        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.status_code, 303)
+        self.assertIn("A+fighter+needs+a+name", r.headers["location"])
+        self.assertEqual(database.list_fighters(self.profile), [])
+        # The refusal has to arrive where the visitor is looking, not as a
+        # page that replaces theirs.
+        landed = self.client.get(r.headers["location"].split("#")[0])
+        self.assertEqual(landed.status_code, 200)
+        self.assertIn("A fighter needs a name.", landed.text)
+        self.assertIn('action="/coach/fighters"', landed.text)
 
 
 class SocialSignInCspTests(unittest.TestCase):
