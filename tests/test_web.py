@@ -850,6 +850,37 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('id="start"', selection)
         self.assertNotIn('name="focusFighter" value="BOTH"', selection)
 
+    def test_identity_canvas_reads_the_pixel_ratio_in_exactly_one_place(self):
+        # The canvas backing store is sized in device pixels and everything else
+        # on the page - pointer events, the image viewport, the boxes - is in CSS
+        # pixels. fit() reconciles the two with a single setTransform.
+        #
+        # The bug this guards against: the draw functions used to read
+        # window.devicePixelRatio themselves and multiply every coordinate by it.
+        # The backing store was sized with the ratio at fit time, the drawing used
+        # the ratio at draw time, and nothing re-fitted when the ratio changed -
+        # ResizeObserver only fires on a size change, while moving a window to a
+        # second monitor changes the ratio and nothing else. Measured with the real
+        # geometry functions, fit at ratio 1 then draw at ratio 2 put a box dragged
+        # at (100,80) 160x250 CSS px on screen at (200,160) 319x235.
+        #
+        # So: the ratio may be read in fit() and in the watcher that re-fits, and
+        # nowhere else. If a new draw function needs it, that is the bug coming
+        # back - scale in fit() instead.
+        root = Path(__file__).resolve().parents[1]
+        selection = (root / "app" / "templates" / "select.html").read_text(encoding="utf-8")
+        script = selection.split("{% block scripts %}", 1)[1]
+        code = "\n".join(
+            line for line in script.splitlines() if not line.lstrip().startswith("//"))
+
+        self.assertIn("ctx.setTransform(ratio,0,0,ratio,0,0)", code)
+        self.assertEqual(2, code.count("devicePixelRatio"), code)
+        self.assertIn("matchMedia", code)
+        self.assertIn("dppx", code)
+        # clearRect has to use the CSS size; canvas.width is in device pixels and
+        # would leave a stale band on screen at any ratio above 1.
+        self.assertIn("ctx.clearRect(0,0,cssWidth,cssHeight)", code)
+
     def test_home_hero_copy_starts_at_the_top_of_the_upload_card(self):
         css = self.client.get("/static/fixes.css").text
         self.assertRegex(css, r"\.hero\{[^}]*align-items:start")
