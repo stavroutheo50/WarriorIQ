@@ -106,10 +106,19 @@ def main() -> int:
             "frame": int(frame_no),
             "seconds": round(frame_no / max(1.0, fps), 2),
             "candidates": [[round(float(v), 1) for v in b] for b in boxes],
-            # Fill these in: the candidate index for each fighter, or null when
-            # that fighter is not visible in this frame. "null" is a real
-            # answer and an important one - it is how the pipeline is credited
-            # for correctly holding nothing.
+            # Three kinds of answer, and the third one matters most:
+            #   a number  - this candidate box is that fighter
+            #   "absent"  - that fighter is not in the frame at all
+            #   "unboxed" - that fighter IS visible but no candidate covers them
+            #
+            # "unboxed" exists because the detector and the pipeline do not see
+            # the same thing. SAM2 guidance and guided pose recovery produce a
+            # box where the detector made none, and that is the pipeline
+            # working, not failing. An earlier version of this file offered
+            # only a number or null, with null meaning "not visible or not
+            # detected" - one answer for two opposite situations - and it
+            # scored the pipeline down for correctly rescuing a fighter the
+            # detector had missed. See labels_5736.json.
             "fighter_a": "FILL",
             "fighter_b": "FILL",
         })
@@ -141,9 +150,10 @@ def main() -> int:
         "_how": [
             "For each frame below, replace FILL with the candidate number that is",
             "fighter A and the one that is fighter B, reading them off the matching",
-            "sheet in outputs/label_%s/. Use null when that fighter is not visible" % args.fight,
-            "or is not detected - that is a real answer, and it is how the pipeline",
-            "gets credit for correctly holding nothing.",
+            "sheet in outputs/label_%s/. If that fighter is visible but no candidate" % args.fight,
+            "box covers them, write \"unboxed\" - the pipeline can still track them",
+            "through SAM2 and should be credited for it. Write \"absent\" only when",
+            "the fighter is genuinely not in the frame.",
             "",
             "A and B are whoever the seed boxes in verified_seeds.json are:",
             fight.get("note", ""),

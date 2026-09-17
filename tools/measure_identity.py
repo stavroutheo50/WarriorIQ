@@ -180,7 +180,8 @@ def score_against_labels(trace: list, labels_path: Path) -> None:
     by_frame = {t["frame"]: t for t in trace}
     unfilled = 0
     tally = {"right person": 0, "wrong person": 0, "missed a visible fighter": 0,
-             "held a non-fighter": 0, "correctly held nothing": 0}
+             "held a non-fighter": 0, "correctly held nothing": 0,
+             "tracked past a missed detection": 0, "missed an undetected fighter": 0}
     for entry in payload.get("frames", []):
         tracked = by_frame.get(entry["frame"])
         if tracked is None:
@@ -191,7 +192,16 @@ def score_against_labels(trace: list, labels_path: Path) -> None:
                 unfilled += 1
                 continue
             box = tracked["%s_box" % side]
-            if answer is None:
+            if answer == "unboxed":
+                # Visible, but the detector missed them. Holding a box here is
+                # the pipeline doing its job - SAM2 guidance and guided pose
+                # recovery exist for exactly this - so it cannot be scored as
+                # holding a non-fighter. It cannot be scored as right either,
+                # because there is no box to compare against.
+                tally["tracked past a missed detection" if box is not None
+                      else "missed an undetected fighter"] += 1
+                continue
+            if answer in (None, "absent"):
                 tally["correctly held nothing" if box is None else "held a non-fighter"] += 1
                 continue
             try:
@@ -215,7 +225,8 @@ def score_against_labels(trace: list, labels_path: Path) -> None:
         judged, " (%d still unfilled)" % unfilled if unfilled else ""))
     for name, count in tally.items():
         print("     %-26s %4d  (%.1f%%)" % (name, count, 100.0 * count / judged))
-    correct = tally["right person"] + tally["correctly held nothing"]
+    correct = (tally["right person"] + tally["correctly held nothing"]
+               + tally["tracked past a missed detection"])
     print("     %-26s %4d  (%.1f%%)" % ("CORRECT", correct, 100.0 * correct / judged))
     print("  This is the number coverage was never able to give.")
 
