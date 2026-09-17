@@ -139,6 +139,58 @@ def _crop_window(tracking, peak_frame, fighter, shape):
     return x1, y1, x2, y2
 
 
+# What the model gets, as opposed to what the labeller gets. The filmstrip is
+# six tiles at 230px because a person has to read it; this is sixteen frames at
+# 64x96 grayscale because a model does not.
+#
+# Measured on fight 5736, where the fighters are sixty pixels tall in
+# messenger-compressed 480x220 footage: upper-body motion across a ~0.3s window
+# separates flagged strike moments from the rest by 1.04 standard deviations
+# for fighter A and 0.78 for B, on a 2000-permutation test, p < 0.001. That is
+# a floor rather than a result - the flagged moments come from a rule-based
+# detector measured at 29% precision, so most of them are not strikes and are
+# dragging the separation down.
+#
+# It matters that this is not keypoints. core/action.py reads wrist positions
+# and elbow angles, and on a sixty-pixel fighter the error on a wrist is about
+# the size of the punch extension being measured, which is why thresholds were
+# tested and rejected. Crop motion needs no landmark precision, so it survives
+# exactly the footage this product exists to serve.
+SEQ_FRAMES = 16
+SEQ_SIZE = (64, 96)                     # w, h
+
+
+def _crop_sequence(cap, tracking, fighter, peak_frame, span_frames):
+    """The crop over time, as an array, for a model to learn motion from.
+
+    Deliberately the same window the filmstrip uses, so the clip a person
+    labels and the tensor a model trains on describe the same moment. A label
+    attached to a different framing than the model sees is a label about
+    something else.
+    """
+    first = max(0, peak_frame - span_frames // 2)
+    wanted = [first + round(i * span_frames / (SEQ_FRAMES - 1)) for i in range(SEQ_FRAMES)]
+    window, frames = None, []
+    for index in wanted:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, index)
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            return None
+        if window is None:
+            window = _crop_window(tracking, peak_frame, fighter, frame.shape)
+            if window is None:
+                return None
+        x1, y1, x2, y2 = window
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return None
+        grey = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        frames.append(cv2.resize(grey, SEQ_SIZE, interpolation=cv2.INTER_AREA))
+    if len(frames) < SEQ_FRAMES:
+        return None
+    return np.stack(frames).astype(np.uint8)
+
+
 def _filmstrip(cap, tracking, fighter, peak_frame, span_frames):
     first = max(0, peak_frame - span_frames // 2)
     wanted = [first + round(i * span_frames / (STRIP_FRAMES - 1)) for i in range(STRIP_FRAMES)]
@@ -309,6 +361,11 @@ def main() -> int:
     parser.add_argument("--negatives", type=int, default=40,
                         help="quiet windows per job, so the set has true negatives")
     parser.add_argument("--out", default="labelpack")
+    parser.add_argument("--no-sequences", dest="sequences", action="store_false",
+                        help="skip the per-clip crop tensors. They are what a "
+                             "motion model trains on, and they are the reason "
+                             "labelling this pack is worth doing on cheap "
+                             "footage - see _crop_sequence.")
     parser.add_argument("--name", default=None,
                         help="folder name for a multi-job pack (default: mixed)")
     parser.add_argument("--limit", type=int, default=0,
@@ -339,6 +396,10 @@ def main() -> int:
     root = Path(args.out) / (jobs[0][0] if single else (args.name or "mixed"))
     clips = root / "clips"
     clips.mkdir(parents=True, exist_ok=True)
+    sequences = None
+    if args.sequences:
+        sequences = root / "sequences"
+        sequences.mkdir(parents=True, exist_ok=True)
 
     rng = random.Random(0)
     # A budget per job rather than first-come, so a pack spread over a hundred
@@ -370,6 +431,20 @@ def main() -> int:
             cv2.imwrite(str(clips / name), strip, [cv2.IMWRITE_JPEG_QUALITY, 72])
             candidate["id"] = number
             candidate["clip"] = "clips/%s" % name
+            if sequences is not None:
+                # Saved under the same id as the filmstrip, so ingesting a
+                # label joins them without a second lookup table. Compressed:
+                # 16 x 96 x 64 uint8 is 98 KB raw and about 20 KB stored, so a
+                # 320-clip pack costs single-digit megabytes.
+                seq = _crop_sequence(cap, tracking, candidate["fighter"],
+                                     candidate["peak_frame"], span)
+                if seq is not None:
+                    np.savez_compressed(
+                        str(sequences / ("%05d.npz" % number)), frames=seq,
+                        fighter=candidate["fighter"],
+                        peak_frame=int(candidate["peak_frame"]),
+                        span_frames=int(span), job=job)
+                    candidate["sequence"] = "sequences/%05d.npz" % number
             index.append(candidate)
             number += 1
         cap.release()
@@ -415,6 +490,9 @@ def main() -> int:
     (root / "label.html").write_text(page, encoding="utf-8")
 
     proposed = sum(1 for c in index if c["source"] == "event")
+    if sequences is not None:
+        print("%d crop sequences in %s" % (
+            len(list(sequences.glob("*.npz"))), sequences))
     print("%d clips in %s  (%d proposed actions, %d quiet windows, %d fights)"
           % (len(index), root, proposed, len(index) - proposed, len(jobs)))
     print("open: %s" % (root / "label.html"))
