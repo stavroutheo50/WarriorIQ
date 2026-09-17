@@ -4285,7 +4285,12 @@ class StandaloneReportHonestyTests(unittest.TestCase):
 
         from core.report import write_report
 
-        report = json.loads(Path("outputs/fam3/report.json").read_text(encoding="utf-8"))
+        # A committed fixture, not outputs/fam3/report.json. outputs/ is
+        # gitignored, so these four tests could not run on a fresh clone at all
+        # - they were a standing four-failure baseline, and a standing red mask
+        # is how a fifth, real failure slips past unnoticed.
+        fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
+        report = json.loads(fixture.read_text(encoding="utf-8"))
         report.setdefault("integrity", {})["action_metrics_trusted"] = trusted
         out = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, out, True)
