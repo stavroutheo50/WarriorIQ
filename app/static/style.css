@@ -26,12 +26,25 @@
    all 58 uses and changes behaviour at every one of them. This set leaves 27 of
    the 58 exactly where they are.
 
-   MIGRATION IS NOT DONE. Nothing below has been moved onto these values yet;
-   the plan is in the audit reply. The one rule that already holds: every
-   display rule for .navlinks, .nav-more, .account-nav and .mobile-menu-button
-   lives at 1180px and nowhere else, because splitting those across three
-   breakpoints is what left a signed-in visitor between 901px and 1180px with no
-   navigation at all.
+   MIGRATION IS NOT DONE, and is deliberately not being forced through in one
+   pass. The shipped bundle switches on 22 widths across 71 media queries.
+   Measured before deciding: /, /pricing and /analyze/kickboxing swept at 360,
+   430, 520, 620, 700, 850, 1000 and 1180 - 25 measurements - showed zero
+   horizontal overflow and navigation present at every width on every page.
+   Moving all 71 queries onto the four values above would change behaviour at
+   each of them to fix a defect that measurement cannot find, which is a poor
+   trade on a live site. So the set is RATCHETED instead: the 22 are listed in
+   NavigationReachabilityTests.KNOWN_BREAKPOINTS and a 23rd fails the suite.
+   The list may shrink whenever a rule is moved onto the scale for a reason.
+
+   Note when shrinking it: 981 is not ad-hoc. max-width:980 paired with
+   min-width:981 is how a two-sided boundary is written without a one-pixel
+   overlap, so those two belong together.
+
+   The one rule that already holds: every display rule for .navlinks,
+   .nav-more, .account-nav and .mobile-menu-button lives at one breakpoint and
+   nowhere else, because splitting those across three breakpoints is what left
+   a signed-in visitor between 901px and 1180px with no navigation at all.
    ========================================================================= */
 :root{
   --wiq-bp-compact:480px;

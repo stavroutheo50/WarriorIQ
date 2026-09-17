@@ -3177,6 +3177,48 @@ class NavigationReachabilityTests(unittest.TestCase):
             len(set(found.values())), 1,
             f"the nav collapses at more than one width: {found}")
 
+    # Every width the shipped CSS currently switches on. The list can SHRINK
+    # freely - that is the migration onto the four documented values in
+    # style.css - but a new entry has to be added here deliberately, which is
+    # the point: this got to twenty-two because each one looked like a single
+    # harmless number at the time.
+    #
+    # 981 is not one of the ad-hoc ones. It is the min-width partner of 980, and
+    # max-width:980 / min-width:981 is how a two-sided boundary is written
+    # without a one-pixel overlap. Do not "consolidate" it into 980.
+    KNOWN_BREAKPOINTS = {
+        430, 440, 480, 560, 620, 650, 680, 700, 720, 760, 780,
+        850, 860, 900, 950, 980, 981, 1000, 1024, 1100, 1120, 1180,
+    }
+
+    def test_no_new_breakpoint_is_introduced(self):
+        """A ratchet, not a migration.
+
+        Twenty-two widths across seventy-one media queries is a real
+        maintainability problem and the audit is right to name it. It is not
+        currently a user-visible one: sweeping /, /pricing and
+        /analyze/kickboxing at 360, 430, 520, 620, 700, 850, 1000 and 1180
+        found zero horizontal overflow and navigation present at every width on
+        every page. Moving all seventy-one onto four values would change
+        behaviour at each of them to fix a defect measurement cannot find, so
+        the count is frozen rather than forced down in one pass.
+        """
+        from app.main import CSS_BUNDLE_TEXT
+
+        css = "\n".join(CSS_BUNDLE_TEXT.values())
+        conditions = [css[m.start():css.index("{", m.start())]
+                      for m in re.finditer(r"@media", css)]
+        widths = {int(w) for condition in conditions
+                  for w in re.findall(r"(?:max|min)-width:\s*(\d+)px", condition)}
+
+        added = widths - self.KNOWN_BREAKPOINTS
+        self.assertEqual(
+            set(), added,
+            f"new breakpoint(s) {sorted(added)}; use one of the four in "
+            f"style.css, or add it here on purpose")
+        # The four documented values must survive whatever else moves.
+        self.assertLessEqual({480, 620, 900, 1180}, widths)
+
     def test_the_mobile_menu_carries_everything_the_collapsed_bars_held(self):
         base = (Path(__file__).resolve().parents[1] / "app" / "templates"
                 / "base.html").read_text(encoding="utf-8")
