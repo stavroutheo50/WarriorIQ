@@ -1029,6 +1029,59 @@ class PublicPageTests(unittest.TestCase):
             kick_minimum=kick_minimum,
         )
 
+    def _render_identity(self, trusted):
+        from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
+        from app.main import _analysis_quality_summary, sport_identity
+
+        class Stub:
+            def __init__(self, **kw): self.__dict__.update(kw)
+            def __getattr__(self, key): return Stub()
+            def __getitem__(self, key): return Stub()
+            def __str__(self): return ""
+            def __bool__(self): return False
+            def __iter__(self): return iter(())
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        env = Environment(loader=FileSystemLoader(str(templates)), undefined=ChainableUndefined)
+        fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
+        report = json.loads(fixture.read_text(encoding="utf-8"))
+        report.setdefault("integrity", {})["identity_evidence_trusted"] = trusted
+        request = Stub(url=Stub(path="/report/abc"), state=Stub(account=None), cookies={}, headers={})
+        return env.get_template("result.html").render(
+            request=request, job_id="abc", report=report,
+            identity=sport_identity("kickboxing"),
+            report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
+            analysis_quality=_analysis_quality_summary(report), can_share=False,
+            sharing=None, score_withheld=None, unavailable=[], kick_minimum=None,
+        )
+
+    def test_the_identity_fix_is_the_first_thing_on_a_failed_report(self):
+        """It was roughly 2177px down, under everything the failure invalidated.
+
+        When identity fails there is no score, no per-fighter number and no
+        scorecard - the page has nothing to say until it is fixed. Putting the
+        one action that fixes it below all of that, while the header read
+        "Analysis complete", told the reader the opposite of the truth.
+        """
+        page = self._render_identity(trusted=False)
+        self.assertIn("Needs one quick step", page)
+        self.assertNotIn("Analysis complete", page)
+
+        # Above the fold means above the body, not merely present.
+        action = page.index('href="/select/abc"')
+        self.assertLess(action, page.index("Fighter identity check failed"),
+                        "the fix must come before the notice explaining it")
+        self.assertLess(action, 6000,
+                        "the fix belongs in the header block, not partway down the report")
+
+    def test_a_healthy_report_is_not_told_it_needs_a_step(self):
+        page = self._render_identity(trusted=True)
+        self.assertIn("Analysis complete", page)
+        self.assertNotIn("Needs one quick step", page)
+        self.assertNotIn("Fighter identity check failed", page)
+        self.assertNotIn('href="/select/abc"', page)
+
     def test_evidence_timestamps_are_links_a_reader_can_actually_follow(self):
         """They were a raw Python list, and before that a button with no handler.
 
