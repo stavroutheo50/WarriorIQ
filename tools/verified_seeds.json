@@ -17,31 +17,82 @@
     "rule. See tools/measure_identity.py, which reads this file and renders a",
     "sheet of what it actually tracked so the next person can check too."
   ],
-  "_convention": "fighter_a is the blue-kit fighter in all three, so numbers can be read across fights.",
+  "_convention": "fighter_a is the blue-kit fighter on the three library fights; on muaythai_hd, which has no blue, it is the left fighter at the seed frame.",
   "fights": {
     "5736": {
       "video": "fights/0-02-05-5736bb3acb024e3772ad5fd6341d0b6768ccece93b7c329dcfa26f3ec1478f00_d242ef68be9b3ffe.mp4",
       "seed_frame": 700,
-      "fighter_a": [194, 25, 226, 96],
-      "fighter_b": [241, 17, 293, 97],
+      "fighter_a": [
+        194,
+        25,
+        226,
+        96
+      ],
+      "fighter_b": [
+        241,
+        17,
+        293,
+        97
+      ],
       "note": "Broadcast single mat. A is the blue fighter, B the red one. Verified at frame 700, where the detector separates both fighters and the seated coaches at x 357-397. On frame 0 the second-largest detection is one of those coaches, which is what the old rule picked.",
       "kit": "blue vs red - the only fight in the library that carries a real corner colour"
     },
     "b883": {
       "video": "fights/0-02-05-b883d4f42b067f4eff1f3c2a7dfdef96c3c93531a4251b6700ab7485ab74e1e7_3b4468a3b4823ded.mp4",
       "seed_frame": 4400,
-      "fighter_a": [199, 134, 228, 210],
-      "fighter_b": [240, 154, 285, 229],
+      "fighter_a": [
+        199,
+        134,
+        228,
+        210
+      ],
+      "fighter_b": [
+        240,
+        154,
+        285,
+        229
+      ],
       "note": "Multi-mat hall, 13-18 people in shot, several bouts at once - so 'which two' is a real question and the answer is the pair on the near mat. Verified at frame 4400 mid-exchange, A kicking, B punching. Earlier frames merge B with the white-shirted referee.",
       "kit": "blue vs black - no corner colour at all, which is the normal case"
     },
     "1mp4": {
       "video": "fights/1.mp4",
       "seed_frame": 1500,
-      "fighter_a": [223, 55, 261, 131],
-      "fighter_b": [174, 51, 204, 113],
+      "fighter_a": [
+        223,
+        55,
+        261,
+        131
+      ],
+      "fighter_b": [
+        174,
+        51,
+        204,
+        113
+      ],
       "note": "A is the blue fighter centre-frame, B the dark-kit opponent to their left. Frame 0 shows only one person, so this fight cannot be seeded at the start at all. The seated coach at x 368-411 is what the old rule picked as B.",
       "kit": "blue vs black"
+    },
+    "muaythai_hd": {
+      "video": "fights/free/muaythai_lamai.webm",
+      "seed_frame": 90,
+      "fighter_a": [
+        533,
+        230,
+        703,
+        688
+      ],
+      "fighter_b": [
+        802,
+        202,
+        1005,
+        682
+      ],
+      "note": "1920x1080 at 60fps, one continuous bout, one fixed camera. Verified at frame 90: A is the left fighter in cream shorts with red gloves, B the right fighter in a dark shirt and red shorts. Everything else detected is foreground crowd between the camera and the ring. Public domain-ish: CC BY-SA 4.0, see fights/free/ATTRIBUTION.md.",
+      "kit": "cream vs dark shirt - no corner colour, and the ring ropes cut across both fighters all bout",
+      "why_here": "The three library fights are all messenger-compressed 480x220 or 568x320 copies where more than half of what identity loses is a fighter the detector cannot see at any confidence. This one is native HD, so it separates 'the detector cannot see him' from 'identity lost him'. It is only 10.5s, so read the detected-vs-lost split rather than comparing its coverage against the others.",
+      "measured": "A 0.933, B 0.994 at stride 3 - and the contact sheet shows both numbers are partly coverage of the wrong people. At f222 B is on a cornerman standing outside the ropes in a dark shirt like fighter B's; at f327 A is on that same cornerman; at f369 B has dropped onto a spectator's head in the foreground. Read the sheet, never the number.",
+      "what_it_settles": "Native HD removes the detector-blindness that dominates the compressed library: fighter B is missing on 1 of 164 frames here and on 276 of 713 on 1.mp4, where 228 of those had nobody detected at his position at all. It does NOT remove identity error - it changes its shape, because a sharp 1080p frame also resolves every cornerman and spectator well enough for identity to latch onto one."
     }
   },
   "_duplicates": {
