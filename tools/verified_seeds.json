@@ -1,0 +1,50 @@
+{
+  "_why": [
+    "Seed boxes for the library fights, each one confirmed by looking at the",
+    "frame rather than picked by a rule. Every automatic rule tried here has",
+    "chosen at least one non-fighter: 'the two largest non-referee detections",
+    "on frame 0' picks a seated coach as fighter B on two of the three fights,",
+    "and the analysis then spends the bout holding a chair. That is not a",
+    "hypothetical - it produced a whole afternoon of fighter-B measurements",
+    "that were really measurements of furniture, and coverage went UP when the",
+    "tracking got worse, because a man in a chair is easy to keep covered.",
+    "",
+    "The product itself never does this: the coach draws both boxes by hand.",
+    "The rule only exists in measurement harnesses, which is exactly where it",
+    "does the most damage, because nobody is looking at the frames.",
+    "",
+    "So: measure from these, or from boxes you have looked at. Never from a",
+    "rule. See tools/measure_identity.py, which reads this file and renders a",
+    "sheet of what it actually tracked so the next person can check too."
+  ],
+  "_convention": "fighter_a is the blue-kit fighter in all three, so numbers can be read across fights.",
+  "fights": {
+    "5736": {
+      "video": "fights/0-02-05-5736bb3acb024e3772ad5fd6341d0b6768ccece93b7c329dcfa26f3ec1478f00_d242ef68be9b3ffe.mp4",
+      "seed_frame": 700,
+      "fighter_a": [194, 25, 226, 96],
+      "fighter_b": [241, 17, 293, 97],
+      "note": "Broadcast single mat. A is the blue fighter, B the red one. Verified at frame 700, where the detector separates both fighters and the seated coaches at x 357-397. On frame 0 the second-largest detection is one of those coaches, which is what the old rule picked.",
+      "kit": "blue vs red - the only fight in the library that carries a real corner colour"
+    },
+    "b883": {
+      "video": "fights/0-02-05-b883d4f42b067f4eff1f3c2a7dfdef96c3c93531a4251b6700ab7485ab74e1e7_3b4468a3b4823ded.mp4",
+      "seed_frame": 4400,
+      "fighter_a": [199, 134, 228, 210],
+      "fighter_b": [240, 154, 285, 229],
+      "note": "Multi-mat hall, 13-18 people in shot, several bouts at once - so 'which two' is a real question and the answer is the pair on the near mat. Verified at frame 4400 mid-exchange, A kicking, B punching. Earlier frames merge B with the white-shirted referee.",
+      "kit": "blue vs black - no corner colour at all, which is the normal case"
+    },
+    "1mp4": {
+      "video": "fights/1.mp4",
+      "seed_frame": 1500,
+      "fighter_a": [223, 55, 261, 131],
+      "fighter_b": [174, 51, 204, 113],
+      "note": "A is the blue fighter centre-frame, B the dark-kit opponent to their left. Frame 0 shows only one person, so this fight cannot be seeded at the start at all. The seated coach at x 368-411 is what the old rule picked as B.",
+      "kit": "blue vs black"
+    }
+  },
+  "_duplicates": {
+    "f84e": "fights/0-02-05-f84ec82f3271783fcb884ca43f15f94aae2ec3086be1ca26774d5784b373e3b9_336b8df8343b952b.mp4 is the same bout as b883 - sampled frames at 0, 500, 2000 and 3000 decode to identical md5s. Four files, three fights. Do not count it as a fourth."
+  }
+}
