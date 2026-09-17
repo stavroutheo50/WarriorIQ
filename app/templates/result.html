@@ -37,7 +37,11 @@
 {% endif %}
 <section class="result-overview" aria-label="Fight summary" data-motion-sequence="result-summary">
   <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="Fighter A portrait" onerror="this.hidden=true"><span><small>Red corner</small><strong>Fighter A</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="Fighter B portrait" onerror="this.hidden=true"><span><small>Blue corner</small><strong>Fighter B</strong></span></div></div>
-  <div class="result-context"><div><span>Ruleset</span><strong>{{report.scorecard.ruleset_label}}</strong></div><div><span>Format</span><strong>{{report.setup.round_count}} × {{report.setup.round_duration_seconds|int}}s</strong></div><div><span>Report focus</span><strong>Fighter {{report.video.focus_fighter|default(report.video.analysis_target, true)}}</strong></div></div>
+  <div class="result-context"><div><span>Ruleset</span><strong>{{report.scorecard.ruleset_label}}</strong></div>{# Read back in the same words the upload form used. This said "1 × 71s" on
+   every fight, because the format was posted hidden as one round spanning the
+   video; now that it is asked for, a 3x3min bout has to read like one. #}
+{% set fmt_secs = report.setup.round_duration_seconds|int %}
+<div><span>Format</span><strong>{{report.setup.round_count}} × {% if fmt_secs >= 60 and fmt_secs % 60 == 0 %}{{ (fmt_secs / 60)|int }} min{% else %}{{ fmt_secs }}s{% endif %}</strong></div><div><span>Report focus</span><strong>Fighter {{report.video.focus_fighter|default(report.video.analysis_target, true)}}</strong></div></div>
   <div class="result-scoreline">{% if report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}Fighter {{report.scorecard.winner_estimate}} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
   {# When the score is withheld the page used to stop here. It knows more than
      nothing: what each fighter was seen doing, and over how much of the round.
@@ -138,7 +142,12 @@
     footage rarely reaches that - all three reference bouts produced 19%
     to 40% - so promoting it opened the report with a refusal, sitting on
     top of the pose numbers that are always available and always true. -#}
-{% set movement = report.movement_scorecard|default({}, true) %}
+{# Hidden outright when identity failed. A scorecard reading "10 - 9, Fighter A
+   ahead" is an attribution, and the same page has already said it could not
+   tell the two fighters apart - so the number is about two names the report
+   does not stand behind. Withholding the score and then printing who won it
+   is the contradiction, not the score itself. #}
+{% set movement = {} if identity_failed else report.movement_scorecard|default({}, true) %}
 {% if movement %}
 <section class="card" id="report-movement-score">
   <div class="section-title" style="margin-top:0">
@@ -309,7 +318,16 @@
      eleven in two of the three bouts checked against video, so the total was
      the one number here that was not defensible. -#}
   {% macro legs(who) %}{% set st = fighter_stats.get(who, {}) %}{{ (st.kick_attempts|default(0)) + (st.knee_attempts|default(0)) }}{% endmacro %}
+  {# Per-fighter totals are attributions. When identity failed the report has
+     already said it lost track of which fighter was which, so "Fighter A: 19,
+     Fighter B: 22" is a split it cannot support - the strikes were seen, but
+     not whose they were. The count is given unattributed instead, which is
+     the part that survives. #}
+  {% if identity_failed %}
+  <div class="numbers-unavailable"><div><span>Leg strikes seen, both fighters</span><strong>{{ (legs('A')|int) + (legs('B')|int) }}</strong></div><p>Not split between the two fighters: the identity check failed, so WarriorIQ cannot say whose these were. Choose the fighters again at the top of this page and the split comes back. Punches are not counted at all &mdash; checked against video, the kick count came out right and the punch count did not.</p></div>
+  {% else %}
   <div class="numbers-unavailable"><div><span>Fighter A leg strikes</span><strong>{{legs('A')}}</strong></div><div><span>Fighter B leg strikes</span><strong>{{legs('B')}}</strong></div><p>Punches are not counted &mdash; checked against video, the kick count came out right and the punch count did not. Landed, missed and blocked are hidden until WarriorIQ can count them accurately. Nothing here is guessed.</p></div>
+  {% endif %}
   {% endif %}
   <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'Keep the measured baseline'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Build the next clean sample'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% endif %}</article></div>
   {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary"><div class="eyebrow">Final coaching summary · Fighter {{primary}}</div><h2>What this fight says to work on next</h2><div class="performance-insights">{% set worked = keep[1] if keep|length > 1 else (keep[0] if keep else None) %}<article><span>What worked</span><strong>{{worked.title if worked else 'No supported strength yet'}}</strong><p>{{worked.detail if worked else 'The report needs more evidence before naming a strength.'}}</p></article><article><span>What hurt performance</span><strong>{{fix[0].title if fix else 'No supported weakness yet'}}</strong><p>{{fix[0].detail if fix else 'The report does not invent a weakness without evidence.'}}</p></article>{% set plan=report.training_plan[primary]|default([]) %}<article><span>Next training priority</span><strong>{{plan[0].focus if plan else 'Collect a cleaner sample'}}</strong><p>{{plan[0].work if plan else 'Use a clear full-body camera angle and keep both fighters visible.'}}</p></article><article><span>Success target</span><strong>{{plan[0].goal if plan else 'Improve usable evidence'}}</strong><p>This target comes from Fighter {{primary}}’s measured report, not a generic template.</p></article></div></section>{% endif %}

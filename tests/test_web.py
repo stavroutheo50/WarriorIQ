@@ -1075,6 +1075,27 @@ class PublicPageTests(unittest.TestCase):
         self.assertLess(action, 6000,
                         "the fix belongs in the header block, not partway down the report")
 
+    def test_a_failed_report_attributes_nothing_to_either_fighter(self):
+        """It said both things on one page.
+
+        SCORE "Not scored" and "we have not credited strikes to either name",
+        then "Fighter A: 19 leg strikes", "Fighter B: 22", and a movement
+        scorecard reading 10-9 "Fighter A ahead". The strikes were seen; whose
+        they were is exactly what the failed check could not establish, so the
+        split is the part that has to go - not the count.
+        """
+        page = self._render_identity(trusted=False)
+        self.assertNotIn("Movement scorecard", page)
+        self.assertNotIn("Fighter A leg strikes", page)
+        self.assertNotIn("Fighter B leg strikes", page)
+        # The unattributed total survives, because it is still true.
+        self.assertIn("Leg strikes seen, both fighters", page)
+
+    def test_a_healthy_report_keeps_the_numbers_it_can_stand_behind(self):
+        page = self._render_identity(trusted=True)
+        self.assertIn("Fighter A leg strikes", page)
+        self.assertNotIn("Leg strikes seen, both fighters", page)
+
     def test_a_healthy_report_is_not_told_it_needs_a_step(self):
         page = self._render_identity(trusted=True)
         self.assertIn("Analysis complete", page)
