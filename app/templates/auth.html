@@ -25,6 +25,11 @@
       <div class="social-auth" aria-label="Social account options">
         <p>Use an account you already trust</p>
         <div class="social-auth-grid">
+          {# One button per CONFIGURED provider, so nothing renders that cannot
+             work. The GitHub icon below is kept although GitHub has no button
+             any more: PROVIDER_LABELS in core/social_auth.py is what removed it,
+             and leaving the icon means putting it back is one line there rather
+             than two edits. #}
           {% for provider in request.state.oauth_providers %}
           <button class="social-auth-button social-{{provider.key}}" type="submit" formaction="/auth/{{provider.key}}/start" formmethod="post" formnovalidate data-keep-label="true">
             <span class="social-auth-icon" aria-hidden="true">
