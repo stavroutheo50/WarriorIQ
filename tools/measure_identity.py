@@ -167,6 +167,59 @@ def contact_sheet(fight: dict, trace: list, out: Path, count: int) -> None:
     cv2.imwrite(str(out), np.vstack(rows))
 
 
+def score_against_labels(trace: list, labels_path: Path) -> None:
+    """How often the box was on the right person, which coverage cannot say.
+
+    Five outcomes, not two, because "held nothing" is right or wrong depending
+    on whether the fighter was there to hold. Lumping those together is how a
+    tracker that quietly follows a spectator scores well.
+    """
+    from core.identity import box_iou
+
+    payload = json.loads(labels_path.read_text(encoding="utf-8"))
+    by_frame = {t["frame"]: t for t in trace}
+    unfilled = 0
+    tally = {"right person": 0, "wrong person": 0, "missed a visible fighter": 0,
+             "held a non-fighter": 0, "correctly held nothing": 0}
+    for entry in payload.get("frames", []):
+        tracked = by_frame.get(entry["frame"])
+        if tracked is None:
+            continue
+        for side in ("a", "b"):
+            answer = entry.get("fighter_%s" % side)
+            if answer == "FILL":
+                unfilled += 1
+                continue
+            box = tracked["%s_box" % side]
+            if answer is None:
+                tally["correctly held nothing" if box is None else "held a non-fighter"] += 1
+                continue
+            try:
+                truth = entry["candidates"][int(answer)]
+            except (TypeError, ValueError, IndexError):
+                unfilled += 1
+                continue
+            if box is None:
+                tally["missed a visible fighter"] += 1
+            elif box_iou(np.asarray(truth, dtype=np.float32),
+                         np.asarray(box, dtype=np.float32)) >= 0.5:
+                tally["right person"] += 1
+            else:
+                tally["wrong person"] += 1
+
+    judged = sum(tally.values())
+    if not judged:
+        print("\n  no labels filled in yet - %s still has FILL in it" % labels_path.name)
+        return
+    print("\n  scored against %d labelled answers%s:" % (
+        judged, " (%d still unfilled)" % unfilled if unfilled else ""))
+    for name, count in tally.items():
+        print("     %-26s %4d  (%.1f%%)" % (name, count, 100.0 * count / judged))
+    correct = tally["right person"] + tally["correctly held nothing"]
+    print("     %-26s %4d  (%.1f%%)" % ("CORRECT", correct, 100.0 * correct / judged))
+    print("  This is the number coverage was never able to give.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--fight", required=True, help="key in tools/verified_seeds.json")
@@ -174,6 +227,8 @@ def main() -> int:
                         help="pinned, because an unpinned stride is chosen off a clock")
     parser.add_argument("--frames", type=int, default=8, help="tiles on the contact sheet")
     parser.add_argument("--out", default=None, help="where to write the sheet")
+    parser.add_argument("--labels", default=None,
+                        help="a filled-in file from tools/label_identity.py, to score against")
     args = parser.parse_args()
 
     fight = load_fight(args.fight)
@@ -262,6 +317,9 @@ def main() -> int:
     # requires knowing which is which, and that is ground truth, not a proxy.
     # Until a labelled sample exists the contact sheet below is the instrument -
     # it is what caught all three cases above. Look at it.
+
+    if args.labels:
+        score_against_labels(trace, Path(args.labels))
 
     out = Path(args.out) if args.out else PROJECT_ROOT / "outputs" / (
         "identity_%s_stride%d.png" % (args.fight, args.stride))
