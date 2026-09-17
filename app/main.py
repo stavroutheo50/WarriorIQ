@@ -244,7 +244,10 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 # requests instead of eight keeps the order identical.
 CSS_BUNDLES: dict[str, tuple[str, ...]] = {
     "base": ("style.css", "navigation.css", "fixes.css", "product.css", "system.css"),
-    "shell": ("premium.css", "motion.css", "redesign.css"),
+    # a11y.css is last, and has to stay last: it sets floor values for tap
+    # targets and control font size that must win over whatever a component
+    # asked for, and load order is how they do that without !important.
+    "shell": ("premium.css", "motion.css", "redesign.css", "a11y.css"),
 }
 
 
