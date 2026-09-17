@@ -88,6 +88,15 @@ def trace_run(fight: dict, stride: int) -> tuple[list, dict]:
                 box_iou(predicted, p.box) >= 0.3 for p in people)
         a, b = original(self, people, source_frame, sam_guidance=sam_guidance)
         after = dict(self.blocked_recovery)
+        # How much the track each fighter is being held on has actually moved
+        # lately. A fighter crosses the ring; a cornerman outside the ropes and
+        # a spectator in the foreground do not. This is the same measurement
+        # _release_if_furniture makes before letting an identity go, read here
+        # every frame instead of only at the six-second mark - so a bystander
+        # held for a second and a half is visible rather than forgiven.
+        spread = {}
+        for side, state in (("a", self.a), ("b", self.b)):
+            spread[side] = self._recent_spread(state.current_track_id, self.source_fps)
         trace.append({
             "frame": int(source_frame),
             "a_box": None if a is None else [float(v) for v in a.box],
@@ -96,6 +105,8 @@ def trace_run(fight: dict, stride: int) -> tuple[list, dict]:
             "a_refusal": self.a.last_refusal,
             "seen_a": seen_where_expected["a"],
             "seen_b": seen_where_expected["b"],
+            "spread_a": spread["a"],
+            "spread_b": spread["b"],
             "blocked": [k for k, v in after.items() if v > before.get(k, 0)],
         })
         return a, b
@@ -172,6 +183,9 @@ def main() -> int:
     print("  %s" % fight["note"], flush=True)
 
     trace, tracking = trace_run(fight, args.stride)
+    probe = cv2.VideoCapture(str(PROJECT_ROOT / fight["video"]))
+    fps_hint = probe.get(cv2.CAP_PROP_FPS) or 30.0
+    probe.release()
     held_a = sum(1 for t in trace if t["a_box"])
     held_b = sum(1 for t in trace if t["b_box"])
     print("\nanalysed %d frames" % len(trace))
@@ -222,6 +236,32 @@ def main() -> int:
         print("  fighter %s missing on %d frames: %d had nobody detected where "
               "they were expected (not an identity failure), %d had somebody "
               "there and lost them anyway" % (side, len(missing), unseen, seen))
+
+    # Held, but held on what? Coverage counts a frame the same whether the box
+    # is on a fighter or on a cornerman outside the ropes, and this project has
+    # been fooled by that three times: 98% on a seated spectator, 0.728 on a
+    # seated coach, 0.994 on HD footage where the sheet showed a cornerman and
+    # then a spectator's head.
+    #
+    # **There is no number here, and that is the finding.** Two automatic
+    # measures were tried and both failed, in opposite directions:
+    #
+    #   * the manager's own _recent_spread, the reading the furniture guard
+    #     uses. It will not answer about a track without history, and a freshly
+    #     latched bystander is exactly that track - it judged 74 of 164 frames
+    #     on the HD bout and reported 0% on a clip with two bystanders visible
+    #     by eye. Blind precisely where it was needed.
+    #
+    #   * displacement of the tracked box over a second, which needs no
+    #     history. It flagged 43% of fighter A's windows on the same clip,
+    #     including frames where the sheet shows A correctly on the fighter.
+    #     Muay Thai fighters circle and clinch; standing still for a second is
+    #     ordinary fighting, not a bystander.
+    #
+    # Distinguishing "held a fighter" from "held someone who looks like one"
+    # requires knowing which is which, and that is ground truth, not a proxy.
+    # Until a labelled sample exists the contact sheet below is the instrument -
+    # it is what caught all three cases above. Look at it.
 
     out = Path(args.out) if args.out else PROJECT_ROOT / "outputs" / (
         "identity_%s_stride%d.png" % (args.fight, args.stride))
