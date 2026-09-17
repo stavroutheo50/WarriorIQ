@@ -4490,6 +4490,23 @@ class FightLabelTests(unittest.TestCase):
         self.assertEqual(len(set(same_day)), 3, same_day)
         self.assertEqual(same_day[0], "Kick Light · 2 Sep, 18:54 · competition")
 
+        # The fighter's name leads when the row has one. A coach with several
+        # athletes cannot tell two of their fights apart by ruleset and clock
+        # time, which is all the label had; the name is what they are actually
+        # looking for. Two fights that are otherwise identical separate on it.
+        named = [
+            fight_choice_label("KICK_LIGHT", "2026-09-02T18:54:00+00:00", "competition", "Theodoulos"),
+            fight_choice_label("KICK_LIGHT", "2026-09-02T18:54:00+00:00", "competition", "Maria"),
+        ]
+        self.assertEqual(named[0], "Theodoulos · Kick Light · 2 Sep, 18:54 · competition")
+        self.assertEqual(len(set(named)), 2, named)
+        # A fight with no fighter attached keeps the old label rather than
+        # gaining a leading separator, and a name of only spaces counts as none.
+        self.assertEqual(
+            fight_choice_label("KICK_LIGHT", "2026-09-02T18:54:00+00:00", "competition", "   "),
+            same_day[0])
+        self.assertEqual(fight_choice_label(None, None, None, None), "Fight analysis")
+
 
 class WebVideoDerivativeTests(unittest.TestCase):
     """Phone footage arrives in a QuickTime container.

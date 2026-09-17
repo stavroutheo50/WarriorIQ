@@ -4228,7 +4228,8 @@ def compare_page(request: Request, a: str = "", b: str = ""):
         # Every option read "Fight analysis · <date>", so a reader with six
         # fights on one day was choosing between six identical lines.
         fight["choice_label"] = fight_choice_label(
-            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"))
+            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
+            fight.get("fighter_name"))
     allowed = {fight["job_id"] for fight in fights}
     reports = []
     for job_id in (a, b):
@@ -4260,7 +4261,8 @@ def coach_page(request: Request, error: str = "", name: str = ""):
         # The saved-evidence list printed the raw ruleset enum beside every
         # entry: "Fight analysis · KICK_LIGHT".
         fight["choice_label"] = fight_choice_label(
-            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"))
+            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
+            fight.get("fighter_name"))
     latest = None
     focus = (profile or {}).get("default_fighter", "A")
     suggested_assignments: list[dict] = []
