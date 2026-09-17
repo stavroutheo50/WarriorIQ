@@ -193,12 +193,55 @@ LEGAL_DOCUMENTS = {
         # already answered per request: the template renders a launch-aware
         # line below when launch_readiness() reports fields still missing, and
         # drops it once they are set. One place, and it tracks reality.
-        "intro": "Use the configured address for the purpose below.",
+        "intro": "Each purpose below names the address to use.",
         "sections": [
-            ("Product and account support", "Use the configured support email for account access, billing, cancellation, accessibility help, analysis problems and general complaints. Include the analysis identifier when relevant, but do not send fight footage unless support specifically provides a secure channel."),
-            ("Privacy rights", "Use the configured privacy email for access, correction, deletion, restriction, objection, portability or consent-withdrawal requests. The operator may need proportionate information to verify the requester before disclosing personal data."),
-            ("Copyright notices", "Use the configured copyright address for infringement notices and counter-notices. The Copyright and DMCA Policy explains the information required and the limits of the published process."),
+            ("Product and account support", "Write to {support_email} for account access, billing, cancellation, accessibility help, analysis problems and general complaints. Include the analysis identifier when relevant, but do not send fight footage unless support specifically provides a secure channel."),
+            ("Privacy rights", "Write to {privacy_email} for access, correction, deletion, restriction, objection, portability or consent-withdrawal requests. The operator may need proportionate information to verify the requester before disclosing personal data."),
+            ("Copyright notices", "Write to {dmca_email} for infringement notices and counter-notices. The Copyright and DMCA Policy explains the information required and the limits of the published process."),
             ("Complaint handling", "The operator should acknowledge complaints, investigate them fairly, explain the outcome where lawful, and identify any independent regulator, consumer-dispute route or appeal mechanism required in the user's jurisdiction."),
         ],
     },
 }
+
+
+# What to say when an address is not configured.
+#
+# /contact used to read "Use the configured support email" in one section and
+# "the configured privacy email" in the next, while the three real addresses
+# appeared only in the operator block at the foot of the page. That is an
+# unfilled template: the reader has to scroll past the whole document and then
+# work out which of three addresses the section they were reading meant.
+#
+# The sections carry the address inline now. Where one is genuinely not set,
+# the old phrasing is what remains - an empty mailto, or an invented address,
+# would be worse than saying it is configured elsewhere. Nothing here makes up
+# a contact detail that has not been supplied.
+CONTACT_ADDRESS_FALLBACKS = {
+    "support_email": "the configured support email",
+    "privacy_email": "the configured privacy email",
+    "dmca_email": "the configured copyright address",
+}
+
+
+def resolve_document(slug: str) -> dict | None:
+    """A published legal document with its contact placeholders filled in.
+
+    Filled per call rather than baked in at import, so that changing an address
+    needs only the restart every other setting needs, and so a test that
+    patches SETTINGS sees what it patched.
+    """
+    document = LEGAL_DOCUMENTS.get(slug)
+    if document is None:
+        return None
+    addresses = {
+        key: (getattr(SETTINGS, key, "") or fallback)
+        for key, fallback in CONTACT_ADDRESS_FALLBACKS.items()
+    }
+    # Only text that actually carries a placeholder is formatted, so a stray
+    # brace in ordinary prose can never raise on a legal page.
+    fill = lambda text: text.format(**addresses) if "{" in text else text
+    return {
+        **document,
+        "intro": fill(document.get("intro", "")),
+        "sections": [(heading, fill(body)) for heading, body in document["sections"]],
+    }

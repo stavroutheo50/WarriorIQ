@@ -233,6 +233,50 @@ class PublicPageTests(unittest.TestCase):
                 self.assertNotIn("globalBack", response.text)
                 self.assertNotIn("global-back", response.text)
 
+    def test_contact_names_the_address_for_each_purpose_in_the_section(self):
+        """/contact read like a template nobody had filled in.
+
+        "Use the configured support email" in one section, "the configured
+        privacy email" in the next, and the three real addresses only in the
+        operator block at the foot of the page - so a reader had to scroll past
+        the whole document and then work out which of three addresses the
+        section they were reading had meant.
+
+        Where an address genuinely is not set the generic phrase stays. An
+        empty mailto, or an address invented to make the page look finished,
+        would be worse than saying it is configured elsewhere.
+        """
+        import dataclasses
+
+        import core.legal as legal
+
+        configured = dataclasses.replace(
+            legal.SETTINGS,
+            support_email="support@example.test",
+            privacy_email="privacy@example.test",
+            dmca_email="copyright@example.test",
+        )
+        with mock.patch.object(legal, "SETTINGS", configured):
+            page = self.client.get("/contact").text
+        self.assertIn("Write to support@example.test for account access", page)
+        self.assertIn("Write to privacy@example.test for access, correction", page)
+        self.assertIn("Write to copyright@example.test for infringement", page)
+        self.assertNotIn("the configured support email", page)
+
+        blank = dataclasses.replace(
+            legal.SETTINGS, support_email="", privacy_email="", dmca_email="")
+        with mock.patch.object(legal, "SETTINGS", blank):
+            page = self.client.get("/contact").text
+        self.assertIn("the configured support email", page)
+        self.assertNotIn("Write to  ", page, "an unset address must not leave a hole")
+        self.assertNotIn("mailto:\"", page)
+
+        # Every other legal page still renders; resolve_document touches them
+        # all and only text carrying a placeholder is formatted.
+        for path in ("/terms", "/privacy", "/cookies", "/refunds"):
+            with self.subTest(path=path):
+                self.assertEqual(200, self.client.get(path).status_code)
+
     def test_legal_center_and_every_policy_render(self):
         paths = (
             "/legal", "/terms", "/cookies", "/acceptable-use", "/refunds", "/eula",

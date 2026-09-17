@@ -79,7 +79,7 @@ from core.db import (
 from core.evidence_trust import report_evidence_trust
 from core.coaching import build_coaching, build_training_plan
 from core.payments import roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
-from core.legal import LEGAL_DOCUMENTS, launch_readiness
+from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
@@ -4543,7 +4543,10 @@ def legal_center(request: Request):
 @app.get("/contact", response_class=HTMLResponse)
 def legal_document(request: Request):
     slug = request.url.path.strip("/")
-    document = LEGAL_DOCUMENTS.get(slug)
+    # resolve_document, not a raw LEGAL_DOCUMENTS lookup: /contact names the
+    # address for each purpose inline, and the placeholders are filled per
+    # request so a changed setting needs only a restart.
+    document = resolve_document(slug)
     if document is None:
         raise HTTPException(404)
     return templates.TemplateResponse(
