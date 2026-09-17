@@ -45,7 +45,14 @@ def main() -> int:
                         help="how many frames to label; 40 is about an hour's honest work")
     parser.add_argument("--stride", type=int, default=3,
                         help="must match the stride the measurement will use")
-    parser.add_argument("--per-sheet", type=int, default=4)
+    # One frame per image, not four. Labelling a 4-up sheet was measured
+    # producing wrong labels: on fight 5736 at least four frames were marked
+    # "this fighter is not detected" when the pipeline was holding the fighter
+    # correctly and a thin candidate box was simply too small to see. Those
+    # errors then scored against the pipeline as "held a non-fighter", which is
+    # the exact accusation the labelling exists to test. A label that is harder
+    # to read than the thing it judges is worse than no label.
+    parser.add_argument("--per-sheet", type=int, default=1)
     args = parser.parse_args()
 
     from core import preflight
@@ -106,7 +113,7 @@ def main() -> int:
             "fighter_a": "FILL",
             "fighter_b": "FILL",
         })
-        scale = max(1, int(round(1100.0 / max(1, frame.shape[1]))))
+        scale = max(2, int(round(1900.0 / max(1, frame.shape[1]))))
         big = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_LANCZOS4)
         for index, box in enumerate(boxes):
             x1, y1, x2, y2 = [int(v * scale) for v in box]

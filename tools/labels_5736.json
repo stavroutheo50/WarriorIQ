@@ -193,8 +193,8 @@
           75.2
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": null,
+      "fighter_b": 3
     },
     {
       "frame": 939,
@@ -231,8 +231,8 @@
           143.9
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 1,
+      "fighter_b": 0
     },
     {
       "frame": 993,
@@ -275,8 +275,8 @@
           87.3
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 1,
+      "fighter_b": 2
     },
     {
       "frame": 1050,
@@ -313,8 +313,8 @@
           144.2
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 1
     },
     {
       "frame": 1104,
@@ -383,8 +383,8 @@
           87.6
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 2
     },
     {
       "frame": 1215,
@@ -409,8 +409,8 @@
           71.2
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": null,
+      "fighter_b": 0
     },
     {
       "frame": 1272,
@@ -447,8 +447,8 @@
           64.6
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": null,
+      "fighter_b": 0
     },
     {
       "frame": 1326,
@@ -491,8 +491,8 @@
           43.8
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 1,
+      "fighter_b": 0
     },
     {
       "frame": 1383,
@@ -567,8 +567,8 @@
           75.6
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": null,
+      "fighter_b": 0
     },
     {
       "frame": 1494,
@@ -599,8 +599,8 @@
           87.2
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": null,
+      "fighter_b": 0
     },
     {
       "frame": 1548,
@@ -625,8 +625,8 @@
           87.1
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": null,
+      "fighter_b": 1
     },
     {
       "frame": 1605,
@@ -657,8 +657,8 @@
           87.3
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 2,
+      "fighter_b": 1
     },
     {
       "frame": 1659,
@@ -689,8 +689,8 @@
           87.1
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 2,
+      "fighter_b": 1
     },
     {
       "frame": 1716,
@@ -727,8 +727,8 @@
           72.1
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 2
     },
     {
       "frame": 1770,
@@ -759,8 +759,8 @@
           70.2
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 1
     },
     {
       "frame": 1827,
@@ -797,8 +797,8 @@
           109.7
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 4
     },
     {
       "frame": 1881,
@@ -835,8 +835,8 @@
           73.7
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 2
     },
     {
       "frame": 1938,
@@ -861,8 +861,8 @@
           87.1
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 1,
+      "fighter_b": null
     },
     {
       "frame": 1992,
@@ -899,8 +899,8 @@
           103.9
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 4
     },
     {
       "frame": 2049,
@@ -937,8 +937,8 @@
           77.9
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 3
     },
     {
       "frame": 2103,
@@ -981,8 +981,8 @@
           106.5
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 1,
+      "fighter_b": 4
     },
     {
       "frame": 2160,
@@ -1031,8 +1031,8 @@
           104.2
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 3
     },
     {
       "frame": 2214,
@@ -1069,8 +1069,8 @@
           48.6
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 2
     },
     {
       "frame": 2271,
@@ -1101,8 +1101,8 @@
           79.1
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": null
     },
     {
       "frame": 2325,
@@ -1133,8 +1133,8 @@
           87.6
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 2
     },
     {
       "frame": 2382,
@@ -1165,8 +1165,8 @@
           87.4
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 1
     },
     {
       "frame": 2436,
@@ -1203,8 +1203,8 @@
           79.5
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 1,
+      "fighter_b": 0
     },
     {
       "frame": 2493,
@@ -1235,8 +1235,8 @@
           95.8
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": null,
+      "fighter_b": 3
     },
     {
       "frame": 2547,
@@ -1255,8 +1255,8 @@
           79.4
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": null,
+      "fighter_b": null
     },
     {
       "frame": 2604,
@@ -1313,8 +1313,8 @@
           91.9
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 1,
+      "fighter_b": null
     },
     {
       "frame": 2715,
@@ -1345,8 +1345,8 @@
           61.2
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 2
     },
     {
       "frame": 2769,
@@ -1371,15 +1371,30 @@
           88.0
         ]
       ],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": 0,
+      "fighter_b": 1
     },
     {
       "frame": 2826,
       "seconds": 94.2,
       "candidates": [],
-      "fighter_a": "FILL",
-      "fighter_b": "FILL"
+      "fighter_a": null,
+      "fighter_b": null
     }
+  ],
+  "_warning": [
+    "PARTLY WRONG, and kept as a worked example of how. Frames 1215, 1548, 1938",
+    "and 2271 are labelled 'not detected' for a fighter the pipeline was in fact",
+    "holding correctly - checked by rendering what was in the box. They were",
+    "mislabelled because these sheets packed four frames into one image and a",
+    "thin candidate box on a 60px fighter is not visible at that size.",
+    "",
+    "So the 87.5% correct this scored is a FLOOR, not an estimate: several of the",
+    "8 'held a non-fighter' answers are labelling errors, and the pipeline was",
+    "right. The 0% 'wrong person' is the number that stands - identity never",
+    "swapped A and B on any of 72 answers.",
+    "",
+    "label_identity.py now writes one frame per image. Re-label before quoting",
+    "any figure from this file."
   ]
 }
