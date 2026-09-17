@@ -208,10 +208,9 @@ class PublicPageTests(unittest.TestCase):
     def signed_in(self):
         """Reach pages that now require an account.
 
-        Choosing a sport sends signed-out visitors to sign in, because an
-        analysis started without an account becomes a guest report that is
-        deleted after two hours. These tests are about what those pages say,
-        not about the gate, so they borrow an account rather than build one.
+        Choosing a sport sends signed-out visitors to sign in, because /upload
+        answers 401 without an account. These tests are about what those pages
+        say, not about the gate, so they borrow an account rather than build one.
         """
         import app.main as webapp
 
@@ -260,7 +259,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("does not register", self.client.get("/dmca").text)
 
     def test_choosing_a_sport_signed_out_says_why_before_spending_an_upload(self):
-        """A guest analysis is deleted after two hours and never saved.
+        """Analysis needs an account, and the page says so before the upload.
 
         Letting someone pick a sport, upload a fight and wait for the analysis
         before mentioning that spends the one thing they cannot get back - so
@@ -268,10 +267,16 @@ class PublicPageTests(unittest.TestCase):
         the five other workspace routes answered 200 with a signed-out shell.
         Someone who bookmarked /history got a sales page and someone who
         bookmarked /analyze got a login form, for the same signed-out state.
+
+        What it must NOT say is that a signed-out analysis is "deleted after
+        two hours". /upload answers 401 to a guest and is the only place a job
+        is created, so no guest analysis can exist to be deleted - that
+        sentence promised a guest mode this product does not have.
         """
         response = self.client.get("/analyze", follow_redirects=False)
         self.assertEqual(response.status_code, 200)
-        self.assertIn("deleted after two hours", response.text)
+        self.assertIn("does not analyse a fight without an account", response.text)
+        self.assertNotIn("two hours", response.text)
         # The destination survives whichever way they go.
         self.assertIn("/signup?next=/analyze", response.text)
         self.assertIn("/login?next=/analyze", response.text)

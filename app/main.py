@@ -2252,10 +2252,16 @@ def choose_sport(request: Request):
     sport, so it is asked first and asked on its own rather than as one field
     among ten on a form the reader has already started filling in.
 
-    An analysis started without an account produces a guest report that is
-    deleted after two hours and never joins the fight library, so a signed-out
-    visitor is told that before spending an upload on it - but told here,
-    rather than bounced to /login.
+    An analysis needs an account: /upload answers 401 to a signed-out visitor,
+    and that is the only place a job is ever created. So a signed-out visitor
+    is told here, before choosing a sport and picking a file, rather than being
+    bounced to /login or finding out after the upload.
+
+    This page used to say the analysis would be "deleted after two hours"
+    instead. GUEST_RETENTION_HOURS and cleanup_expired_guest_jobs are both
+    still real, but nothing can reach them - a guest job cannot be created at
+    all - so the sentence described a path that does not exist and implied a
+    guest mode this product does not have.
 
     This route used to redirect while /dashboard, /history, /coach, /profile
     and /compare all answered 200 with the same signed-out shell, so someone
