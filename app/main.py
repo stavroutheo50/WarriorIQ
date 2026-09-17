@@ -2159,14 +2159,34 @@ def _prose_list(items) -> str:
     return f"{', '.join(items[:-1])} and {items[-1]}"
 
 
+# The format each sport is usually fought at, as (rounds, seconds per round).
+#
+# A default, not an assertion: the upload form preselects it and the athlete
+# changes it, and anyone who does not know picks "use the whole video". These
+# are the amateur/most-common formats rather than the championship ones - a
+# five-round title fight is rarer than a three-round club bout, and the person
+# with the title fight is the one who will notice the field and change it.
+SPORT_ROUND_DEFAULTS: dict[str, tuple[int, int]] = {
+    "kickboxing": (3, 180),     # K-1 3x3
+    "boxing": (3, 180),
+    "muay_thai": (5, 180),      # the full-rules bout is five threes
+    "taekwondo": (3, 120),
+    "mma": (3, 300),
+}
+
+
 def _sport_context(request: Request, sport: str) -> dict:
     """Everything a single sport's setup page needs to describe itself."""
     account = _account(request)
     keys = SPORTS[sport]
+    default_rounds, default_seconds = SPORT_ROUND_DEFAULTS.get(sport, (3, 180))
     return {
         "request": request,
         "sport": sport,
         "sport_label": RULESET_SPORTS[sport],
+        # Preselected on the round pickers. See SPORT_ROUND_DEFAULTS.
+        "default_round_count": default_rounds,
+        "default_round_seconds": default_seconds,
         # The smaller of what WarriorIQ allows and what the host will carry, so
         # a file that cannot possibly arrive is refused here instead of after a
         # minute of uploading.
