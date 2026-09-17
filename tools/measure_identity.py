@@ -59,7 +59,7 @@ def trace_run(fight: dict, stride: int) -> tuple[list, dict]:
     os.environ["WARRIORIQ_FORCE_STRIDE"] = str(int(stride))
 
     from core import analyzer
-    from core.identity import IdentityManager
+    from core.identity import IdentityManager, box_iou
     from core.types import AnalysisRequest
 
     video = str(PROJECT_ROOT / fight["video"])
@@ -75,6 +75,17 @@ def trace_run(fight: dict, stride: int) -> tuple[list, dict]:
 
     def traced(self, people, source_frame, sam_guidance=None):
         before = dict(self.blocked_recovery)
+        # Was anybody detected where this fighter was expected to be? That is
+        # the question that splits the two failures, and counting heads does
+        # not answer it: on 1.mp4 a seated coach is detected all bout with a
+        # referee probability of 0.05, so "two people were available" reads as
+        # an identity failure when the second fighter was never detected at
+        # all. Measured, that mislabelled 207 of 276 frames.
+        seen_where_expected = {}
+        for side, state in (("a", self.a), ("b", self.b)):
+            predicted = self._predicted_box(state)
+            seen_where_expected[side] = None if predicted is None else any(
+                box_iou(predicted, p.box) >= 0.3 for p in people)
         a, b = original(self, people, source_frame, sam_guidance=sam_guidance)
         after = dict(self.blocked_recovery)
         trace.append({
@@ -83,6 +94,8 @@ def trace_run(fight: dict, stride: int) -> tuple[list, dict]:
             "b_box": None if b is None else [float(v) for v in b.box],
             "b_refusal": self.b.last_refusal,
             "a_refusal": self.a.last_refusal,
+            "seen_a": seen_where_expected["a"],
+            "seen_b": seen_where_expected["b"],
             "blocked": [k for k, v in after.items() if v > before.get(k, 0)],
         })
         return a, b
@@ -187,6 +200,28 @@ def main() -> int:
     if blocked:
         print("  recovery blocked by: %s" % ", ".join(
             "%s=%d" % kv for kv in sorted(blocked.items(), key=lambda kv: -kv[1])[:5]))
+
+    # The split that decides who owns the problem, and the only one that has
+    # ever held up here. A fighter missing while somebody was detected where
+    # they were expected is identity losing a fighter it could see. A fighter
+    # missing while nothing was detected there is not an identity failure at
+    # all - there was nothing to assign, and no threshold in core/identity.py
+    # can invent a detection.
+    #
+    # Measured on 1.mp4: of 241 frames where B was lost, nothing was detectable
+    # at his position at any confidence down to 0.03 on 130 of them. Lowering
+    # new_track_thresh from 0.30 to 0.20 would have recovered 8. This is a
+    # detector-and-footage problem wearing an identity problem's clothes.
+    for side in ("A", "B"):
+        key = "%s_box" % side.lower()
+        missing = [t for t in trace if not t[key]]
+        if not missing:
+            continue
+        unseen = sum(1 for t in missing if t["seen_%s" % side.lower()] is False)
+        seen = sum(1 for t in missing if t["seen_%s" % side.lower()] is True)
+        print("  fighter %s missing on %d frames: %d had nobody detected where "
+              "they were expected (not an identity failure), %d had somebody "
+              "there and lost them anyway" % (side, len(missing), unseen, seen))
 
     out = Path(args.out) if args.out else PROJECT_ROOT / "outputs" / (
         "identity_%s_stride%d.png" % (args.fight, args.stride))
