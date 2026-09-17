@@ -3222,6 +3222,67 @@ class PlanBadgeTests(unittest.TestCase):
         page = self._render("free")
         self.assertNotIn("Preview this plan", page)
 
+    def test_a_closed_checkout_does_not_price_a_plan_nobody_can_buy(self):
+        """The page used to argue with itself.
+
+        It printed €9.99 to €89.99 as each card's headline price next to a
+        banner claiming every plan was free during early access, and neither
+        was true. Nothing makes a paid plan free: accounts.plan defaults to
+        'free', the only way off it is a per-account grant the operator makes
+        by hand, and checkout is shut, so nobody can be on a paid plan at all.
+
+        With payments disabled a paid card must not headline a price, because
+        that price cannot be charged today - it says what the plan will cost
+        instead. Starter is genuinely €0 forever and keeps its number.
+        """
+        import re
+
+        page = self._render("free")
+        self.assertIn("Paid plans are not open yet", page)
+        self.assertNotIn("Every plan below is free to use", page)
+
+        for card in re.split(r'(?=<section class="card pricing-card)', page):
+            key = re.search(r'data-plan="([^"]+)"', card)
+            if not key:
+                continue
+            card = card.split("</section>", 1)[0]
+            headline = re.search(r'class="plan-price">(.*?)</div>', card, re.S)
+            self.assertIsNotNone(headline, key.group(1))
+            headline = headline.group(1).strip()
+            if key.group(1) == "free":
+                self.assertEqual("€0", headline)
+            else:
+                self.assertEqual("Not open yet", headline, key.group(1))
+                # The real price still has to be visible, just not as the
+                # headline - hiding it would be the opposite mistake.
+                self.assertIn("when billing opens", card, key.group(1))
+
+    def test_a_paid_card_offers_one_action_and_it_is_about_that_plan(self):
+        """Pressing "Coach 30" used to look like it had selected Coach 30.
+
+        Each paid card carried "Open your workspace" first - a link to
+        /dashboard that does nothing about the plan - and the interest form
+        second, both styled as secondary. So the card had two actions, the more
+        prominent one was unrelated to it, and neither said which plan it meant.
+        Registering interest is the only thing the card can do while checkout is
+        closed, so it is the only button on it and it names its own plan.
+        """
+        import re
+
+        page = self._render("free")
+        for card in re.split(r'(?=<section class="card pricing-card)', page):
+            key = re.search(r'data-plan="([^"]+)"', card)
+            if not key or key.group(1) == "free":
+                continue
+            # Stop at the card's own closing tag; the last split otherwise
+            # carries the rest of the page, cookie banner included.
+            card = card.split("</section>", 1)[0]
+            buttons = re.findall(
+                r'<(?:a|button)[^>]*class="btn[^"]*"[^>]*>(.*?)</(?:a|button)>', card, re.S)
+            self.assertEqual(1, len(buttons), f"{key.group(1)}: {buttons}")
+            self.assertNotIn("Open your workspace", card, key.group(1))
+            self.assertIn("Tell us you want", buttons[0])
+
 
 class CoachFilenameTests(unittest.TestCase):
     """/pricing carries the check-marked promise "No video filename shown"."""

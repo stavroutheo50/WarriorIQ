@@ -13,7 +13,13 @@
 {#- What a visitor needs to know is that they cannot be charged, not which
     internal fields are still blank. The launch-readiness checklist it used to
     link to lists the operator's own missing company details. -#}
-{% if not payments_enabled %}<div class="notice"><strong>Paid subscriptions are not available during early access yet.</strong> Every plan below is free to use while WarriorIQ is in early access, and no card is ever asked for.</div>{% endif %}
+{# Early access: checkout is closed, so nobody can be ON a paid plan. A new
+   account is created with plan 'free' and the only way off it is a per-account
+   grant the operator makes by hand. The banner used to say every plan below
+   was free to use, which is not something any code here does - it named the
+   prices in the same breath, so the page contradicted itself and a reader had
+   no way to tell which half was true. #}
+{% if not payments_enabled %}<div class="notice"><strong>Paid plans are not open yet.</strong> Everyone is on Starter, free, while WarriorIQ is in early access — no card is ever asked for. The prices below are what each plan will cost when billing opens, so you can tell us now which one you want.</div>{% endif %}
 
 {% if allowance %}
 <section class="allowance-strip">
@@ -44,8 +50,16 @@
       <div class="eyebrow">{{plan.label}}</div>
       {% if key == current_plan_key %}<span class="current-plan">Current plan</span>{% endif %}
     </div>
-    <div class="plan-price">{{plan.price}}</div>
-    <div class="small muted">{{plan.period}}</div>
+    {# While checkout is closed a paid price is a future price, and printing it
+       as though it were chargeable today is what made this page argue with its
+       own banner. Starter is genuinely €0 forever, so it is not rewritten. #}
+    {% if not payments_enabled and key != 'free' %}
+      <div class="plan-price">Not open yet</div>
+      <div class="small muted">{{plan.price}} {{plan.period}} when billing opens</div>
+    {% else %}
+      <div class="plan-price">{{plan.price}}</div>
+      <div class="small muted">{{plan.period}}</div>
+    {% endif %}
     <details class="billing-details">
       <summary><span>Billing details<small>Terms, tax and cancellation</small></span><b aria-hidden="true">+</b></summary>
       <div class="billing-facts small"><span><strong>Billing:</strong> {% if key == 'free' %}No payment{% else %}Charged when checkout is confirmed; renews automatically each month until cancelled{% endif %}</span><span><strong>Trial:</strong> No trial is currently offered</span><span><strong>Tax/VAT:</strong> Shown by the payment provider where applicable before confirmation</span><span><strong>Cancellation:</strong> Cancel in Settings; access continues through the confirmed paid period</span><span><strong>Refunds:</strong> <a class="text-link" href="/refunds">Read refund and EU withdrawal information</a></span></div>
@@ -64,11 +78,14 @@
     {% elif payments_enabled and plan.stripe_price_id %}
       <form method="post" action="/checkout/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="check billing-check"><input type="checkbox" name="billing_acceptance" value="true" required> I understand {{plan.price}} {{plan.period}}, recurring until cancelled, with {{plan.limit_label|lower}}. I accept the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms</a> and <a class="text-link" href="/refunds" target="_blank" rel="noopener">cancellation policy</a>.</label><button class="btn" type="submit" data-loading-label="Opening secure checkout…">Continue to secure payment</button></form>
     {% elif account %}
-      <a class="btn secondary" href="{% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Open your workspace</a>
-      {#- The only way to say "this is the plan I want" while checkout is
-          closed. Recorded against the account so it can be answered later. -#}
-      {% if key in plans_wanted %}<p class="small muted plan-wanted">✓ Noted — you are on the list for {{plan.label}}.</p>
-      {% else %}<form method="post" action="/plan-interest/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="/pricing"><button class="btn secondary" type="submit">Notify me when this opens</button></form>{% endif %}
+      {#- The card's one action while checkout is closed. It used to lead with
+          "Open your workspace", which goes to /dashboard and does nothing about
+          the plan the reader just pressed - so choosing Coach 30 looked like it
+          had selected Coach 30 and had not. Registering interest is the only
+          thing this card can actually do, so it is the only button on it, and
+          it says which plan it is for rather than "this". -#}
+      {% if key in plans_wanted %}<p class="small muted plan-wanted">✓ Noted — you are on the list for {{plan.label}}. We will email you when billing opens.</p>
+      {% else %}<form method="post" action="/plan-interest/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="/pricing"><button class="btn" type="submit">Tell us you want {{plan.label}}</button></form>{% endif %}
     {% else %}
       <a class="btn secondary" href="/signup?next={% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Create account first</a>
     {% endif %}
