@@ -2777,6 +2777,60 @@ class RateLimitClientTests(unittest.TestCase):
                 self.assertIn(scope, inspect.getsource(getattr(main, name)))
 
 
+class FocusFighterDefaultTests(unittest.TestCase):
+    """Which fighter gets the detailed report starts from the account's answer.
+
+    It was already a per-fight choice - the radio on /select posts
+    focus_fighter with the boxes and the job stores it - but the page hardcoded
+    Fighter A. "My identity in reports" on /profile drove only the progress
+    dashboard, so an athlete who had said they were Fighter B had to say it
+    again on every upload and silently got a report about their opponent
+    whenever they forgot.
+
+    The profile value is the default and nothing more. Which corner somebody is
+    in changes from fight to fight, so the per-fight radio still wins and
+    choosing on one fight never writes back to the profile.
+    """
+
+    def _checked(self, default_fighter, has_profile=True):
+        import app.main as webapp
+
+        job = {"id": "j1", "status": "selection",
+               "video_width": 1920, "video_height": 1080}
+        client = TestClient(webapp.app)
+        patches = [
+            mock.patch.object(webapp, "_authorized_job", return_value=job),
+            mock.patch.object(webapp, "_profile_id",
+                              return_value=1 if has_profile else None),
+        ]
+        if has_profile:
+            patches.append(mock.patch.object(
+                webapp, "get_profile",
+                return_value={"default_fighter": default_fighter}))
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            page = client.get("/select/j1").text
+        return [value for value, checked in re.findall(
+            r'name="focusFighter" value="([AB])"\s*(checked)?', page) if checked]
+
+    def test_the_profile_choice_is_the_one_already_selected(self):
+        self.assertEqual(["A"], self._checked("A"))
+        self.assertEqual(["B"], self._checked("B"))
+
+    def test_a_missing_or_nonsense_setting_falls_back_to_fighter_a(self):
+        for value in (None, "", "banana", "C"):
+            with self.subTest(value=value):
+                self.assertEqual(["A"], self._checked(value))
+        self.assertEqual(["A"], self._checked(None, has_profile=False))
+
+    def test_exactly_one_radio_is_ever_preselected(self):
+        # Two checked radios in one group is a silent browser-dependent choice.
+        for value in ("A", "B", None, "banana"):
+            with self.subTest(value=value):
+                self.assertEqual(1, len(self._checked(value)))
+
+
 class KeyboardFighterSelectionTests(unittest.TestCase):
     """Fighter selection has to be possible without a pointer.
 

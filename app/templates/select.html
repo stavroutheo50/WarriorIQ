@@ -48,7 +48,7 @@
   </div>
   <section class="analysis-choice">
     <div class="analysis-choice-copy"><div class="eyebrow">Detailed report</div><h2>Who are you training?</h2><p>Both fighters are tracked for context and scoring. Your chosen athlete receives the full report, coach insights, replay, and personal training plan.</p></div>
-    <div class="analysis-choice-actions"><div class="target-options" role="radiogroup" aria-label="Choose the athlete for the detailed report"><label><input type="radio" name="focusFighter" value="A" checked><span><i>A</i> Fighter A</span></label><label><input type="radio" name="focusFighter" value="B"><span><i>B</i> Fighter B</span></label></div><button class="btn" id="start" type="button" data-motion-primary disabled>Start WarriorIQ analysis <span aria-hidden="true">→</span></button></div>
+    <div class="analysis-choice-actions"><div class="target-options" role="radiogroup" aria-label="Choose the athlete for the detailed report"><label><input type="radio" name="focusFighter" value="A" {% if default_focus != 'B' %}checked{% endif %}><span><i>A</i> Fighter A</span></label><label><input type="radio" name="focusFighter" value="B" {% if default_focus == 'B' %}checked{% endif %}><span><i>B</i> Fighter B</span></label></div><button class="btn" id="start" type="button" data-motion-primary disabled>Start WarriorIQ analysis <span aria-hidden="true">→</span></button></div>
     <p class="start-feedback" id="startFeedback" role="alert" hidden></p>
   </section>
 </section>

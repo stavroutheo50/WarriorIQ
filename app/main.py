@@ -2629,7 +2629,26 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
             _seek_selection_frame(job_id, job, float(seconds))
         except Exception:                                           # noqa: BLE001
             LOGGER.warning("recheck_seek_failed job=%s seconds=%s", job_id, seconds)
-    return templates.TemplateResponse(request=request, name="select.html", context={"request": request, "job_id": job_id, "job": job})
+    # Which fighter gets the detailed report is a per-fight choice, made on this
+    # page, and it already is one - the radio posts focus_fighter with the boxes
+    # and the job stores it. What it was not doing is starting from the answer
+    # the account already gave: "My identity in reports" on /profile drove the
+    # progress dashboard while this page hardcoded Fighter A, so an athlete who
+    # had said they were Fighter B had to say it again on every single upload
+    # and silently got the wrong report whenever they forgot.
+    #
+    # The profile value is the DEFAULT only. Which corner somebody is in changes
+    # from fight to fight, so the per-fight radio still wins and nothing here
+    # writes back to the profile.
+    profile_id = _profile_id(request)
+    profile = get_profile(profile_id) if profile_id is not None else None
+    default_focus = str((profile or {}).get("default_fighter") or "A").upper()
+    if default_focus not in {"A", "B"}:
+        default_focus = "A"
+    return templates.TemplateResponse(
+        request=request, name="select.html",
+        context={"request": request, "job_id": job_id, "job": job,
+                 "default_focus": default_focus})
 
 
 @app.get("/selection-image/{job_id}")
