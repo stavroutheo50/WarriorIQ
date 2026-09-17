@@ -2566,8 +2566,11 @@ async def upload(
         "fight_video_upload_permission", SETTINGS.policy_version,
         resource_id=job_id,
         metadata={
-            "rights_confirmed": True,
-            "people_permissions_confirmed": True,
+            # What was actually submitted, not a literal. The guard above means
+            # these are both true by the time we get here, but a consent record
+            # that hardcodes the answer stops being evidence of consent.
+            "rights_confirmed": bool(rights_confirmed),
+            "people_permissions_confirmed": bool(people_permissions_confirmed),
             "minor_permission_status": minor_permission_status,
             "ruleset": normalize_ruleset(ruleset),
             "external_ai_enabled": bool(openai_identity_recovery),

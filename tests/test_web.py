@@ -756,7 +756,16 @@ class PublicPageTests(unittest.TestCase):
         # all five, which render from one template.
         home = self.client.get("/analyze/kickboxing").text
         self.assertIn('name="rights_confirmed"', home)
-        self.assertIn('type="hidden" name="people_permissions_confirmed" value="true"', home)
+        # Owning the footage and having permission from the people in it are two
+        # different claims - you can hold the rights to a clip of somebody who
+        # never agreed to appear in it. The server has always required both, but
+        # the page used to post the second as a hidden field set to true, so the
+        # user asserted a permission nobody asked them for. Both are checkboxes
+        # now, both required, and no hidden consent field ships at all.
+        self.assertIn('type="checkbox" name="people_permissions_confirmed" value="true" required', home)
+        self.assertNotIn('type="hidden" name="people_permissions_confirmed"', home)
+        self.assertEqual(2, home.count('type="checkbox" name="rights_confirmed" value="true" required')
+                         + home.count('type="checkbox" name="people_permissions_confirmed" value="true" required'))
         self.assertIn('name="minor_permission_status"', home)
         self.assertEqual(home.count('type="radio" name="minor_permission_status"'), 2)
         self.assertNotIn(">Choose one<", home)
