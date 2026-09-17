@@ -900,6 +900,25 @@ class Settings:
     # receive a signal. A standalone GA4 web stream, not tied to the Ads tag,
     # is the alternative if Ads must not fire at all.
     #
+    # An audit reported that ccm/collect answers 503 on every page load and
+    # asked for the tag to be fixed or removed. Neither is a code change, and
+    # the reason is worth being precise about: **AW-18419565750 does not appear
+    # anywhere in this repository**. Confirmed in the browser against the live
+    # site - the only id in the markup is GT-MQJ4F2RF, and the AW- id shows up
+    # solely inside the outgoing request, because it is a destination attached
+    # to that tag in the Google Tag account. There is no line here to delete.
+    #
+    # The status code could not be confirmed either way, and the earlier
+    # warning in this comment applies twice over: these are cross-origin
+    # requests with no Timing-Allow-Origin, so PerformanceResourceTiming
+    # reports responseStatus 0 for all of them - including gtag/js, which
+    # demonstrably works. A 503 on ccm/collect is in any case a refused
+    # fire-and-forget beacon: nothing renders differently and no user sees it.
+    #
+    # To actually stop it, remove the Ads destination from tag GT-MQJ4F2RF in
+    # the Google Tag interface. GA4 keeps working - the /g/collect hit carrying
+    # tid=G-5V5Q4H30LD is sent by the same tag and is independent of Ads.
+    #
     # Set WARRIORIQ_ANALYTICS_ID on the deployment rather than editing this
     # line. **cPanel's Python App panel wins over .env**, because
     # `load_dotenv()` defaults to `override=False` and skips any key already
