@@ -460,7 +460,35 @@ class PoseTracker:
             # A separate predictor is essential: predict() on the persistent
             # tracking model changes its internal source geometry and breaks
             # BoT-SORT camera-motion state on the next full frame.
-            self._focus_model = YOLO(self.model_path)
+            #
+            # It must NOT be the TensorRT engine, though, and that was costing
+            # far more than the recovery it buys. Loading the .engine a second
+            # time creates a second IExecutionContext, and the context - not the
+            # 86 MiB of weights - is 3.5 GB. Measured in the logs of every run
+            # today: the card goes 3582 MiB after the tracking model and 7164
+            # MiB once this one loads, on an 8151 MiB card.
+            #
+            # What that starves is SAM2. An earlier session measured SAM2 at
+            # 0.176 s/frame with ONE engine resident and 2.71 GB free, and noted
+            # it cost nothing. With two there is under 1 GB left, so SAM2 spills
+            # to system RAM over PCIe - which Windows does silently instead of
+            # erroring - and a twenty second clip did not finish in forty-five
+            # minutes with the GPU pinned at 100%. Runs with SAM2 disabled
+            # completed; runs with it enabled did not. That is the whole
+            # difference.
+            #
+            # This path runs on a handful of frames in a round, on crops, at
+            # imgsz 384. PyTorch weights are far quicker than that needs and
+            # cost a few hundred MB instead of 3.5 GB. The engine stays the
+            # fallback for a checkout that has no .pt.
+            focus_path = self.model_path
+            pt_path = Path(SETTINGS.pose_model_pt)
+            if self.model_path.endswith(".engine") and pt_path.exists():
+                focus_path = str(pt_path)
+            LOGGER.info("focus_backend=%s model=%s",
+                        "tensorrt" if focus_path.endswith(".engine") else "pytorch",
+                        focus_path)
+            self._focus_model = YOLO(focus_path)
         # One crop per call rather than one batched call over the list.
         #
         # The batch was not "guaranteed one result per request" as the comment
