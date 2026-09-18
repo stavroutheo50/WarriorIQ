@@ -524,6 +524,53 @@ class IdentityTests(unittest.TestCase):
         self.assertLessEqual(sampled, SETTINGS.sam_continuous_max_frames)
         self.assertGreaterEqual(SETTINGS.sam_continuous_chunk_frames, SETTINGS.sam_continuous_max_frames)
 
+    def test_the_sweep_cannot_eat_the_realtime_budget_of_a_short_fight(self):
+        """Four samples per second of footage does not scale with anything.
+
+        The product promises an analysis finishes inside the video's own
+        length. sam_continuous_fps is absolute, so at 0.173 s per SAM frame the
+        continuous pass took a FIXED 0.69 s for every second of video - 65% of
+        the entire budget on a short fight, leaving a seventy second round with
+        twenty-five seconds for the pose pass, the tracker and everything else.
+        The identical settings cost 5% of a twenty minute fight, which is why
+        this went unnoticed: it is invisible on long footage and ruinous on a
+        single round, and a single round is what people upload.
+
+        The cap is relative to the footage, so its share stays bounded at every
+        length.
+        """
+        cost = SETTINGS.sam_frame_cost_seconds
+        for seconds in (30, 70, 120, 302, 1200):
+            with self.subTest(seconds=seconds):
+                total = int(seconds * 30)
+                stride = sam_sampling_stride(30.0, total)
+                share = (total // stride) * cost / seconds
+                self.assertLessEqual(
+                    share, SETTINGS.sam_budget_fraction + 0.01,
+                    f"the sweep takes {share:.0%} of a {seconds}s budget")
+
+    def test_the_cap_never_makes_a_long_fight_sample_less(self):
+        """It may only raise the stride.
+
+        On footage where the cap does not bind, the existing frequency and
+        absolute-frame bounds must decide exactly as before - otherwise this
+        silently degrades the long fights it was never about.
+        """
+        import dataclasses as _dataclasses
+        import unittest.mock as _mock
+
+        from core import sam_recovery
+
+        for seconds in (302, 600, 1200):
+            with self.subTest(seconds=seconds):
+                total = int(seconds * 30)
+                capped = sam_sampling_stride(30.0, total)
+                relaxed = _dataclasses.replace(SETTINGS, sam_budget_fraction=0.0)
+                with _mock.patch.object(sam_recovery, "SETTINGS", relaxed):
+                    uncapped = sam_recovery.sam_sampling_stride(30.0, total)
+                self.assertEqual(uncapped, capped,
+                                 f"{seconds}s footage changed; the cap should not bind here")
+
     def test_ai_assignment_cannot_use_one_person_twice(self):
         manager = IdentityManager(_person(1, 100, 200, 1), _person(2, 400, 500, 2), 0)
         a, b = manager.apply_ai_assignment([_person(3, 110, 210, 1), _person(4, 390, 490, 2)], 0, 0, 1, 0.9)
@@ -4718,9 +4765,31 @@ class ShotChangeTests(unittest.TestCase):
 
     def test_the_upload_route_reports_rather_than_refuses(self):
         """The thresholds are fitted against five files of which exactly one is
-        edited. That is not a basis for rejecting somebody's fight."""
+        edited. That is not a basis for rejecting somebody's fight.
+
+        This used to look for the call on the request path. It is off that path
+        now - scanning the whole file was 2.44s of the 2.80s a user spent on a
+        finished progress bar, and all it produces is a log line and a security
+        event - so the check follows it into _record_shot_profile rather than
+        pinning where the work happens.
+
+        The guarantee is unchanged and slightly stronger: the old code sat
+        inside a try that unlinked the video and re-raised, so a crash while
+        counting cuts destroyed the upload. Now nothing escapes at all.
+        """
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
-        marker = source.index("shots = await run_in_threadpool(detect_shot_changes")
-        following = source[marker:marker + 1200]
-        self.assertIn("upload_looks_edited", following)
-        self.assertNotIn("raise HTTPException", following)
+
+        start = source.index("def _record_shot_profile")
+        body = source[start:source.index('@app.post("/upload"', start)]
+        self.assertIn("detect_shot_changes", body)
+        self.assertIn("upload_looks_edited", body)
+        # Reports. Never refuses, and never takes the upload down with it.
+        self.assertNotIn("raise", body)
+
+        # And it must not be back on the request path: exactly one call site,
+        # and it is the one above.
+        calls = [line for line in source.splitlines()
+                 if "detect_shot_changes" in line and not line.strip().startswith("#")]
+        self.assertEqual(
+            2, len(calls),                      # the import, and the call above
+            f"detect_shot_changes is called somewhere new: {calls}")

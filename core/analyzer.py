@@ -72,19 +72,42 @@ GPU_HEADROOM_WANTED_GB = 5.5
 ANALYSIS_WORKING_SET_GB = 1.5
 
 
-def _sam_clip_buffer_bytes() -> int:
+def _sam_clip_buffer_bytes(segment_frames: int = 0, source_fps: float = 0.0) -> int:
     """What SAM2 is about to allocate in system RAM for one chunk.
 
     _DecodedClip holds `capacity x 3 x image_size x image_size` float32, and
     offload_video_to_cpu keeps it on the host rather than the card. SAM2's
     image_size is 1024, so this is the number that decides whether the machine
     swaps.
+
+    The capacity is `min(chunk_frames, expected - saved)`, not chunk_frames -
+    a short segment never fills a chunk. Estimating from chunk_frames alone
+    overstated the buffer badly on exactly the footage where it matters:
+
+         30s segment   needs  60 frames   0.70 GiB   estimate said 4.22
+         70s segment   needs 140 frames   1.64 GiB   estimate said 4.22
+        302s segment   needs 349 frames   4.09 GiB   estimate said 4.22
+
+    A 70-second round was told to close other applications while 2.92 GB was
+    free and it needed 1.64. The comment on ANALYSIS_WORKING_SET_GB already
+    says why that is the worst kind of bug here - "a warning that cries wolf on
+    a healthy run is worse than none, because it teaches the reader to ignore
+    the one that matters" - and this was doing it again from the other side.
+
+    Falls back to the old chunk-sized estimate when the segment is not known,
+    which is the conservative direction.
     """
     frames = max(1, int(SETTINGS.sam_continuous_chunk_frames))
+    if segment_frames > 0 and source_fps > 0:
+        from core.sam_recovery import sam_sampling_stride
+
+        stride = sam_sampling_stride(source_fps, int(segment_frames))
+        expected = (int(segment_frames) + stride - 1) // max(1, stride)
+        frames = max(1, min(frames, expected))
     return frames * 3 * 1024 * 1024 * 4
 
 
-def _log_host_memory() -> None:
+def _log_host_memory(segment_frames: int = 0, source_fps: float = 0.0) -> None:
     """Say how much system memory was free before this analysis started.
 
     The GPU line below could not explain a run that was thirty times slower
@@ -98,19 +121,23 @@ def _log_host_memory() -> None:
 
         memory = psutil.virtual_memory()
         available = memory.available / 1024 ** 3
-        buffer_gb = _sam_clip_buffer_bytes() / 1024 ** 3
+        buffer_gb = _sam_clip_buffer_bytes(segment_frames, source_fps) / 1024 ** 3
         wanted = buffer_gb + ANALYSIS_WORKING_SET_GB
         LOGGER.info(
             "analysis_host_memory available_gb=%.2f total_gb=%.2f sam_clip_buffer_gb=%.2f "
             "wanted_gb=%.2f",
             available, memory.total / 1024 ** 3, buffer_gb, wanted)
         if available < wanted:
+            # Label the numbers as what they are. This printed `wanted` - the
+            # buffer PLUS the working set - into a slot named
+            # sam_clip_buffer_gb, so the log overstated the buffer by the
+            # working set on every run that tripped it.
             LOGGER.warning(
                 "analysis_host_memory_tight available_gb=%.2f sam_clip_buffer_gb=%.2f "
-                "- this analysis may push the machine into swapping, which looks "
-                "like a slow GPU and is not one. Close other applications, or "
-                "lower WARRIORIQ_SAM_CHUNK_FRAMES.",
-                available, wanted)
+                "wanted_gb=%.2f - this analysis may push the machine into "
+                "swapping, which looks like a slow GPU and is not one. Close "
+                "other applications, or lower WARRIORIQ_SAM_CHUNK_FRAMES.",
+                available, buffer_gb, wanted)
     except Exception as exc:                 # noqa: BLE001 - diagnostics only
         LOGGER.info("analysis_host_memory_unavailable error=%s", type(exc).__name__)
 
@@ -498,6 +525,32 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(0)
 
+    # How much of the card was already taken before this run allocated anything.
+    #
+    # Windows falls back to system RAM over PCIe rather than erroring when a
+    # CUDA allocation will not fit, which produces a large silent slowdown with
+    # no message anywhere. An analysis that took 28 minutes to reach 30% was
+    # eventually traced to exactly this, after five other causes had been ruled
+    # out by measurement, and the note written at the time said the one thing
+    # that would have answered it immediately was a free-VRAM reading at the
+    # start of the run. Nothing recorded one. This does.
+    #
+    # It is a diagnostic, not a gate: a busy card is the user's business and
+    # refusing to run would be worse than running slowly. But when a report
+    # shows a missed budget, this says in one number whether the code was slow
+    # or the machine was busy.
+    vram_free_at_start = None
+    if torch.cuda.is_available():
+        try:
+            free_bytes, total_bytes = torch.cuda.mem_get_info()
+            vram_free_at_start = {
+                "free_gb": round(free_bytes / 2 ** 30, 2),
+                "total_gb": round(total_bytes / 2 ** 30, 2),
+                "in_use_fraction": round(1.0 - free_bytes / max(1, total_bytes), 3),
+            }
+        except Exception:                                        # noqa: BLE001
+            vram_free_at_start = None
+
     job_dir = OUTPUTS / req.job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     tracking_path = job_dir / "tracking.jsonl"
@@ -592,7 +645,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     # Honest wall timer: model load/warmup is part of the user's wait.
     wall_start = time.perf_counter()
     _log_gpu_state()
-    _log_host_memory()
+    _log_host_memory(max(0, end_frame - start_frame), float(info.fps))
     progress("Loading GPU models", 0.0, 0.0, 0.0)
 
     pose_tracker = get_pose_tracker()
@@ -1182,6 +1235,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         # that planned different strides are explained by this field and by
         # nothing else in the report.
         "budget_cost_source": quality.budget_cost_source,
+        # What the plan assumed a frame costs, and what one actually cost during
+        # calibration. Equal on a machine behaving as its profile describes.
+        # When observed is far above planned, the stored profile is stale for
+        # this run - something else is using the card, or the workload is not
+        # what the profile was measured on - and budget_plan says
+        # "machine_slower_than_profile" rather than claiming a budget was met.
+        # Without these two numbers that conclusion is unfalsifiable.
+        "budget_cost_planned_seconds": quality.budget_cost_planned,
+        "budget_cost_observed_seconds": quality.budget_cost_observed,
         "budget_met_expected": quality.budget_expected_met,
         "planned_stride": quality.planned_stride,
         "final_analysis_fps": quality.effective_fps,
@@ -1189,6 +1251,10 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "quality_mode": quality.mode,
         "pose_model": pose_tracker.model_path,
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
+        # What else was on the card before this run started. See the comment at
+        # the top of analyze(): a slow run and a busy card are indistinguishable
+        # in every other field here.
+        "vram_free_at_start": vram_free_at_start,
         "unused_frame_copy_avoidance": not fallback_buffer_enabled,
         "external_identity_history_enabled": identity_referee.enabled,
     }

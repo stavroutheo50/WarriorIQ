@@ -108,6 +108,12 @@ class QualityController:
         # from another on the same machine can be explained rather than
         # argued about. See _frame_cost.
         self.budget_cost_source = "not_planned"
+        # What a frame ACTUALLY cost during calibration, next to what the plan
+        # was made with. These are usually the same number. When they are not,
+        # the machine is not the machine its stored profile describes, and the
+        # gap is the only warning anything gets - see plan_for_budget.
+        self.budget_cost_planned: float | None = None
+        self.budget_cost_observed: float | None = None
         # Which card this is, for the stored profile's key: the same footage
         # costs a different amount on different hardware, and a profile shared
         # between them would plan from somebody else's machine.
@@ -195,7 +201,32 @@ class QualityController:
             self.budget_expected_met = None
             return
 
-        per_frame = self._frame_cost(elapsed_seconds / max(1, analyzed_frames))
+        observed = elapsed_seconds / max(1, analyzed_frames)
+        per_frame = self._frame_cost(observed)
+        self.budget_cost_planned = float(per_frame)
+        self.budget_cost_observed = float(observed)
+        # Plan from the stored cost, predict from the observed one.
+        #
+        # These are the same number on a machine behaving as its profile says,
+        # and the stride below must keep coming from the stored value or two
+        # runs of one video stop planning identically - which is the whole
+        # reason the profile exists. But when the machine is slower than its
+        # profile RIGHT NOW, planning from the profile and then reporting that
+        # the budget will be met publishes something false: measured on this
+        # machine, a profile of 0.083 s/frame against an actual 2.4 s/frame
+        # still produced budget_expected_met = True while the run missed its
+        # deadline roughly thirty-fold, and the report said it had met it.
+        #
+        # So the stride stays deterministic and the PREDICTION becomes honest.
+        # A run that cannot meet the budget now says so, whatever the stored
+        # number believes, and carries both costs so the gap is visible instead
+        # of being argued about later.
+        #
+        # 1.5x is deliberately loose. Frame cost varies run to run with what
+        # else the machine is doing, and a prediction that flickers to False on
+        # ordinary noise is a worse lie than the one it replaces.
+        divergence = observed / max(1e-9, per_frame)
+        cost_is_stale = self.budget_cost_source in {"configured", "profile"} and divergence > 1.5
         remaining_video = max(0.0, segment_duration - processed_seconds)
         remaining_budget = segment_duration - elapsed_seconds
         if remaining_video <= 0:
@@ -209,9 +240,15 @@ class QualityController:
 
         wanted = remaining_video * self.source_fps / max(1, self.stride)
         if wanted <= affordable:
+            self.planned_stride = self.stride
+            if cost_is_stale and wanted * observed > max(0.0, remaining_budget):
+                # Affordable by the stored cost, not affordable by this run's.
+                # Keep the stride; drop the promise.
+                self.budget_reason = "machine_slower_than_profile"
+                self.budget_expected_met = False
+                return
             self.budget_reason = "on_track"
             self.budget_expected_met = True
-            self.planned_stride = self.stride
             return
 
         needed = remaining_video * self.source_fps / max(1e-6, affordable)
@@ -225,6 +262,13 @@ class QualityController:
         self.budget_reason = (
             "sampling_reduced" if self.budget_expected_met
             else "cannot_meet_budget_above_quality_floor")
+        # Same check on the reduced-sampling path: a stride chosen against a
+        # stored cost that this run is not achieving does not meet the budget
+        # either, and saying it does is the failure this guards against.
+        if self.budget_expected_met and cost_is_stale:
+            if affordable_at_chosen * observed > max(0.0, remaining_budget):
+                self.budget_expected_met = False
+                self.budget_reason = "machine_slower_than_profile"
 
     def maybe_adjust(self, analyzed_index: int, processed_seconds: float, elapsed_seconds: float) -> tuple[int, int, str]:
         if not SETTINGS.adaptive_quality or elapsed_seconds < 2.0 or analyzed_index - self.last_adjust < 60:
@@ -416,7 +460,35 @@ class PoseTracker:
             # A separate predictor is essential: predict() on the persistent
             # tracking model changes its internal source geometry and breaks
             # BoT-SORT camera-motion state on the next full frame.
-            self._focus_model = YOLO(self.model_path)
+            #
+            # It must NOT be the TensorRT engine, though, and that was costing
+            # far more than the recovery it buys. Loading the .engine a second
+            # time creates a second IExecutionContext, and the context - not the
+            # 86 MiB of weights - is 3.5 GB. Measured in the logs of every run
+            # today: the card goes 3582 MiB after the tracking model and 7164
+            # MiB once this one loads, on an 8151 MiB card.
+            #
+            # What that starves is SAM2. An earlier session measured SAM2 at
+            # 0.176 s/frame with ONE engine resident and 2.71 GB free, and noted
+            # it cost nothing. With two there is under 1 GB left, so SAM2 spills
+            # to system RAM over PCIe - which Windows does silently instead of
+            # erroring - and a twenty second clip did not finish in forty-five
+            # minutes with the GPU pinned at 100%. Runs with SAM2 disabled
+            # completed; runs with it enabled did not. That is the whole
+            # difference.
+            #
+            # This path runs on a handful of frames in a round, on crops, at
+            # imgsz 384. PyTorch weights are far quicker than that needs and
+            # cost a few hundred MB instead of 3.5 GB. The engine stays the
+            # fallback for a checkout that has no .pt.
+            focus_path = self.model_path
+            pt_path = Path(SETTINGS.pose_model_pt)
+            if self.model_path.endswith(".engine") and pt_path.exists():
+                focus_path = str(pt_path)
+            LOGGER.info("focus_backend=%s model=%s",
+                        "tensorrt" if focus_path.endswith(".engine") else "pytorch",
+                        focus_path)
+            self._focus_model = YOLO(focus_path)
         # One crop per call rather than one batched call over the list.
         #
         # The batch was not "guaranteed one result per request" as the comment

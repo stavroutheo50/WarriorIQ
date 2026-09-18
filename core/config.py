@@ -455,6 +455,36 @@ class Settings:
     sam_continuous_enabled: bool = env_bool("WARRIORIQ_SAM_CONTINUOUS", True)
     sam_continuous_fps: float = float(os.getenv("WARRIORIQ_SAM_FPS", "4"))
     sam_continuous_max_frames: int = int(os.getenv("WARRIORIQ_SAM_MAX_FRAMES", "360"))
+    # The most of the realtime budget SAM2's continuous pass may spend.
+    #
+    # sam_continuous_fps is four samples per second of FOOTAGE, which does not
+    # scale with anything. The product's budget is the video's own length, so a
+    # fixed sampling rate takes a fixed fraction of it - and at 0.173 s per SAM
+    # frame that fraction is enormous on exactly the short fights where the
+    # budget is tightest. Computed across lengths:
+    #
+    #      30s video   112 SAM frames    19s    65% of the whole budget
+    #      70s video   262 SAM frames    45s    65%
+    #     302s video   348 SAM frames    60s    20%
+    #    1200s video   360 SAM frames    62s     5%
+    #
+    # A seventy second round spent forty-five seconds in SAM2 and had
+    # twenty-five left for the pose pass, the tracker and everything else. That
+    # is most of the reason an analysis of a short clip cannot finish inside
+    # its own length.
+    #
+    # This caps the continuous pass at a share of the budget instead, so it
+    # scales with the footage. It only ever RAISES the stride, so a long fight
+    # is untouched - the cap does not bind there - and recovery is not affected
+    # at all: sam_recovery_enabled and the on-demand rescue of a fighter the
+    # detector lost are separate and stay exactly as they were. This is the
+    # sweep, not the safety net.
+    sam_budget_fraction: float = float(os.getenv("WARRIORIQ_SAM_BUDGET_FRACTION", "0.35"))
+    # What one SAM2 propagation frame costs on this machine. Measured under
+    # production settings on the RTX 5060: 263 frames in 45.4 s wall, peak VRAM
+    # 1.56 GB. Used only to turn the fraction above into a frame count; a wrong
+    # value makes the cap loose or tight, never incorrect.
+    sam_frame_cost_seconds: float = float(os.getenv("WARRIORIQ_SAM_FRAME_COST", "0.173"))
     # Keep the bounded two-minute guidance pass in one memory state. Short
     # chunk resets were faster but could drift when reseeded during a crossing.
     # How many sampled frames SAM2 holds at once. This is a host-memory

@@ -12,10 +12,35 @@ from core.config import SETTINGS
 
 
 def sam_sampling_stride(source_fps: float, total_source_frames: int) -> int:
-    """Bound SAM work by both target frequency and an absolute frame budget."""
+    """Bound SAM work by frequency, an absolute frame budget, and the clock.
+
+    The first two bounds are both absolute, and neither knows how long the
+    video is. That is what made the continuous pass unaffordable on short
+    fights: four samples per second of footage at 0.173 s each is 0.69 s of SAM
+    for every second of video, so a seventy second round spent forty-five
+    seconds here and had twenty-five left for everything else. The same
+    settings cost 5% of a twenty minute fight.
+
+    The third bound fixes that by being relative. The product's budget is the
+    video's own length, so the continuous pass gets a share of it -
+    sam_budget_fraction - and the stride follows from that. It can only raise
+    the stride, never lower it, so a long fight where the cap does not bind is
+    unchanged and no configuration gets quietly overridden.
+
+    This bounds the SWEEP, not the safety net. Recovering a fighter the
+    detector lost runs off sam_recovery_enabled and is untouched.
+    """
     fps_stride = max(1, round(float(source_fps) / max(1.0, SETTINGS.sam_continuous_fps)))
     budget_stride = max(1, int(np.ceil(max(0, total_source_frames) / max(1, SETTINGS.sam_continuous_max_frames))))
-    return max(fps_stride, budget_stride)
+
+    fraction = float(SETTINGS.sam_budget_fraction)
+    cost = float(SETTINGS.sam_frame_cost_seconds)
+    clock_stride = 1
+    if fraction > 0 and cost > 0 and source_fps > 0 and total_source_frames > 0:
+        segment_seconds = float(total_source_frames) / float(source_fps)
+        affordable_frames = max(1.0, segment_seconds * fraction / cost)
+        clock_stride = max(1, int(np.ceil(total_source_frames / affordable_frames)))
+    return max(fps_stride, budget_stride, clock_stride)
 
 
 class _DecodedClip:

@@ -23,7 +23,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 
 import cv2
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
+                     Request, UploadFile)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -2310,9 +2311,44 @@ def sport_setup(request: Request, sport: str):
     return response
 
 
+def _record_shot_profile(job_id: str, video_path: Path) -> None:
+    """Note whether an upload looks like an edited reel. Runs after the response.
+
+    A sixty-second file in this project's own library is an event reel -
+    announcer, crowd, a table of medals, a fight-card poster - and it went
+    through the pipeline without complaint, producing a confident report of a
+    tracker that spent part of the run following a photograph of a man on a
+    poster. Worth knowing about, which is why this exists.
+
+    Not worth making somebody wait for, which is why it is here. It never
+    influenced the selection frame or anything else the next page reads, and
+    scanning the whole file for cuts is the single most expensive thing in the
+    upload handler.
+
+    Everything is swallowed on purpose. This is telemetry about a file that has
+    already been accepted, and there is no caller left to return an error to.
+    """
+    try:
+        shots = detect_shot_changes(video_path)
+        if not shots.get("looks_edited"):
+            return
+        LOGGER.info(
+            "upload_looks_edited job_id=%s cuts=%s longest_shot=%.1fs of %.1fs",
+            job_id, shots["cut_count"], shots["longest_shot_seconds"],
+            shots["duration_seconds"])
+        record_security_event(
+            "upload_looks_edited", severity="info",
+            resource_type="fight", resource_id=job_id,
+            metadata={"cuts": shots["cut_count"],
+                      "longest_shot_seconds": shots["longest_shot_seconds"]})
+    except Exception:                                            # noqa: BLE001
+        LOGGER.warning("shot_profile_failed job_id=%s", job_id, exc_info=True)
+
+
 @app.post("/upload", dependencies=[Depends(require_csrf)])
 async def upload(
     request: Request,
+    background: BackgroundTasks,
     video: UploadFile = File(...),
     fight_type: str = Form("competition"),
     analysis_target: str = Form("BOTH"),
@@ -2461,7 +2497,6 @@ async def upload(
         # Reported, not refused. The thresholds are fitted against five files
         # of which exactly one is edited, which is not a basis for rejecting
         # somebody's fight; see core/video.py.
-        shots = await run_in_threadpool(detect_shot_changes, video_path)
     except Exception:
         video_path.unlink(missing_ok=True)
         raise
@@ -2474,16 +2509,22 @@ async def upload(
     # which is exactly the "it analysed the referee" failure people report. So
     # when no explicit start was asked for, open the picker on a moment where
     # the two are actually working. The uploader can still scrub anywhere.
-    if shots.get("looks_edited"):
-        LOGGER.info(
-            "upload_looks_edited job_id=%s cuts=%s longest_shot=%.1fs of %.1fs",
-            job_id, shots["cut_count"], shots["longest_shot_seconds"],
-            shots["duration_seconds"])
-        record_security_event(
-            "upload_looks_edited", severity="info",
-            resource_type="fight", resource_id=job_id,
-            metadata={"cuts": shots["cut_count"],
-                      "longest_shot_seconds": shots["longest_shot_seconds"]})
+    # Shot detection runs AFTER the response, not before it.
+    #
+    # It scans the whole file, and measured on a 5 minute 640x480 upload it is
+    # 2.44s of the 2.80s a user spends staring at a finished progress bar -
+    # every other post-upload step together is 0.36s. What it buys is a log
+    # line and a security event. It does not choose the selection frame; that
+    # comes from probe_upload, which costs 0.32s and stays on the critical
+    # path. So the uploader was waiting two and a half seconds for telemetry
+    # about their own file.
+    #
+    # Deferring it changes nothing a user sees and nothing a later step reads.
+    # It does change one thing worth stating: a failure in here no longer
+    # deletes the upload. It never should have - the comment above says this is
+    # "reported, not refused", and a crash while counting cuts is not a reason
+    # to throw away somebody's fight.
+    background.add_task(_record_shot_profile, job_id, video_path)
     selection_frame = int(round(start * info.fps))
     if start <= 0.0:
         selection_frame = probed_frame
