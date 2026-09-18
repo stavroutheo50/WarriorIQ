@@ -134,3 +134,49 @@ class GpuLoggingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HostMemoryEstimateTests(unittest.TestCase):
+    """The swap warning has to be about the memory this run will actually take.
+
+    _DecodedClip's capacity is min(chunk_frames, expected - saved), so a short
+    segment never fills a chunk. Estimating from chunk_frames alone overstated
+    the buffer on exactly the footage where the realtime budget is tightest: a
+    70-second round was told to close other applications while 2.92 GB was free
+    and it needed 1.64.
+
+    The comment on ANALYSIS_WORKING_SET_GB already records why that is the worst
+    kind of bug here - a threshold that cried wolf on a healthy run was replaced
+    for the same reason - and this was doing it again from the other side.
+    """
+
+    def test_a_short_segment_is_not_charged_for_a_full_chunk(self):
+        from core.analyzer import _sam_clip_buffer_bytes
+        from core.config import SETTINGS
+
+        full_chunk = SETTINGS.sam_continuous_chunk_frames * 3 * 1024 * 1024 * 4
+        short = _sam_clip_buffer_bytes(int(70 * 29.97), 29.97)
+        self.assertLess(short, full_chunk / 2,
+                        "a 70s segment is still being charged for a full chunk")
+
+    def test_a_long_segment_still_reaches_the_chunk_size(self):
+        from core.analyzer import _sam_clip_buffer_bytes
+        from core.config import SETTINGS
+
+        full_chunk = SETTINGS.sam_continuous_chunk_frames * 3 * 1024 * 1024 * 4
+        self.assertEqual(full_chunk, _sam_clip_buffer_bytes(int(1200 * 29.97), 29.97))
+
+    def test_an_unknown_segment_falls_back_to_the_conservative_number(self):
+        """Not knowing must not quietly become an optimistic estimate."""
+        from core.analyzer import _sam_clip_buffer_bytes
+        from core.config import SETTINGS
+
+        full_chunk = SETTINGS.sam_continuous_chunk_frames * 3 * 1024 * 1024 * 4
+        self.assertEqual(full_chunk, _sam_clip_buffer_bytes())
+        self.assertEqual(full_chunk, _sam_clip_buffer_bytes(0, 0.0))
+
+    def test_the_estimate_grows_with_the_segment(self):
+        from core.analyzer import _sam_clip_buffer_bytes
+
+        sizes = [_sam_clip_buffer_bytes(int(s * 29.97), 29.97) for s in (30, 70, 302, 1200)]
+        self.assertEqual(sizes, sorted(sizes), sizes)

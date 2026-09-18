@@ -72,19 +72,42 @@ GPU_HEADROOM_WANTED_GB = 5.5
 ANALYSIS_WORKING_SET_GB = 1.5
 
 
-def _sam_clip_buffer_bytes() -> int:
+def _sam_clip_buffer_bytes(segment_frames: int = 0, source_fps: float = 0.0) -> int:
     """What SAM2 is about to allocate in system RAM for one chunk.
 
     _DecodedClip holds `capacity x 3 x image_size x image_size` float32, and
     offload_video_to_cpu keeps it on the host rather than the card. SAM2's
     image_size is 1024, so this is the number that decides whether the machine
     swaps.
+
+    The capacity is `min(chunk_frames, expected - saved)`, not chunk_frames -
+    a short segment never fills a chunk. Estimating from chunk_frames alone
+    overstated the buffer badly on exactly the footage where it matters:
+
+         30s segment   needs  60 frames   0.70 GiB   estimate said 4.22
+         70s segment   needs 140 frames   1.64 GiB   estimate said 4.22
+        302s segment   needs 349 frames   4.09 GiB   estimate said 4.22
+
+    A 70-second round was told to close other applications while 2.92 GB was
+    free and it needed 1.64. The comment on ANALYSIS_WORKING_SET_GB already
+    says why that is the worst kind of bug here - "a warning that cries wolf on
+    a healthy run is worse than none, because it teaches the reader to ignore
+    the one that matters" - and this was doing it again from the other side.
+
+    Falls back to the old chunk-sized estimate when the segment is not known,
+    which is the conservative direction.
     """
     frames = max(1, int(SETTINGS.sam_continuous_chunk_frames))
+    if segment_frames > 0 and source_fps > 0:
+        from core.sam_recovery import sam_sampling_stride
+
+        stride = sam_sampling_stride(source_fps, int(segment_frames))
+        expected = (int(segment_frames) + stride - 1) // max(1, stride)
+        frames = max(1, min(frames, expected))
     return frames * 3 * 1024 * 1024 * 4
 
 
-def _log_host_memory() -> None:
+def _log_host_memory(segment_frames: int = 0, source_fps: float = 0.0) -> None:
     """Say how much system memory was free before this analysis started.
 
     The GPU line below could not explain a run that was thirty times slower
@@ -98,19 +121,23 @@ def _log_host_memory() -> None:
 
         memory = psutil.virtual_memory()
         available = memory.available / 1024 ** 3
-        buffer_gb = _sam_clip_buffer_bytes() / 1024 ** 3
+        buffer_gb = _sam_clip_buffer_bytes(segment_frames, source_fps) / 1024 ** 3
         wanted = buffer_gb + ANALYSIS_WORKING_SET_GB
         LOGGER.info(
             "analysis_host_memory available_gb=%.2f total_gb=%.2f sam_clip_buffer_gb=%.2f "
             "wanted_gb=%.2f",
             available, memory.total / 1024 ** 3, buffer_gb, wanted)
         if available < wanted:
+            # Label the numbers as what they are. This printed `wanted` - the
+            # buffer PLUS the working set - into a slot named
+            # sam_clip_buffer_gb, so the log overstated the buffer by the
+            # working set on every run that tripped it.
             LOGGER.warning(
                 "analysis_host_memory_tight available_gb=%.2f sam_clip_buffer_gb=%.2f "
-                "- this analysis may push the machine into swapping, which looks "
-                "like a slow GPU and is not one. Close other applications, or "
-                "lower WARRIORIQ_SAM_CHUNK_FRAMES.",
-                available, wanted)
+                "wanted_gb=%.2f - this analysis may push the machine into "
+                "swapping, which looks like a slow GPU and is not one. Close "
+                "other applications, or lower WARRIORIQ_SAM_CHUNK_FRAMES.",
+                available, buffer_gb, wanted)
     except Exception as exc:                 # noqa: BLE001 - diagnostics only
         LOGGER.info("analysis_host_memory_unavailable error=%s", type(exc).__name__)
 
@@ -618,7 +645,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     # Honest wall timer: model load/warmup is part of the user's wait.
     wall_start = time.perf_counter()
     _log_gpu_state()
-    _log_host_memory()
+    _log_host_memory(max(0, end_frame - start_frame), float(info.fps))
     progress("Loading GPU models", 0.0, 0.0, 0.0)
 
     pose_tracker = get_pose_tracker()

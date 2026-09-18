@@ -7,6 +7,10 @@ what actually happened, because the interesting failure is the two disagreeing.
 
     python tools/measure_realtime.py <video> <seconds> [--sam-off]
 
+<seconds> is passed as end_seconds, so it genuinely bounds the analysed span.
+The ratio is still computed from what the run reports it covered, never from
+what was asked for.
+
 It reports:
 
     realtime ratio   wall seconds per video second. <= 1.0 keeps the promise.
@@ -99,6 +103,17 @@ def main() -> int:
         fighter_b_box=[float(v) for v in b],
         ruleset="WT", fight_type="competition", round_count=1,
         start_seconds=0.0, round_duration_seconds=seconds,
+        # end_seconds is what actually bounds the work.
+        #
+        # round_duration_seconds does NOT, and that is deliberate rather than a
+        # bug: build_round_schedule extends the last round to the end of the
+        # file whenever every round is selected, because a nine minute bout
+        # entered as 3x2min once had three of its nine minutes silently thrown
+        # away. Rounds decide where the round lines fall, not how much footage
+        # is worth looking at. So a request for 70 seconds of a five minute file
+        # analysed all 302.6 of it, correctly, and this tool reported 5.59x for
+        # a run that was 1.29x.
+        end_seconds=seconds,
         job_id="measure_realtime", profile_id=1, persist_result=False))
     wall = time.perf_counter() - start
 
