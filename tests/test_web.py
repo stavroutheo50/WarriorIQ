@@ -863,12 +863,46 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("at least 18", signup.lower())
         self.assertIn('name="marketing_consent"', signup)
 
+    @staticmethod
+    def _without_random_tokens(html: str) -> str:
+        """The page with its generated values blanked out.
+
+        The check below is that the internal version marker never reaches a
+        visitor - the build directory is WarriorIQ_V4_Professional and that
+        must not leak. Run against the raw HTML it also searched the CSRF
+        tokens, which are random base64url: with a 64-character alphabet and
+        roughly 120 adjacent positions across the tokens on a page, two of them
+        spell the marker every few hundred runs by pure chance. Observed:
+        content="uXV451oWOqdn_u6h7BQdbeaetb-n2wSjScHuWjGhi2k", which fails on
+        the "V4" at index 2 and passed on the very next run.
+
+        A flake that rare is worse than no test - it fires long after the
+        change that would explain it, and teaches everyone to re-run. So the
+        generated values go before the assertion, and nothing else does.
+        """
+        html = re.sub(r'(content|value)="[A-Za-z0-9_\-]{20,}"',
+                      r'\1="<generated>"', html)
+        return re.sub(r'\?v=[0-9a-f]+', "?v=<generated>", html)
+
     def test_professional_home_has_product_and_trust_sections(self):
         response = self.client.get("/")
         self.assertIn("Four steps. No technical homework.", response.text)
         self.assertIn("Your next round starts here.", response.text)
         self.assertIn("Evidence before claims.", response.text)
-        self.assertNotIn("V" + "4", response.text)
+        self.assertNotIn("V" + "4", self._without_random_tokens(response.text))
+
+    def test_the_version_marker_check_is_not_defeated_by_the_masking(self):
+        """The masking must not be able to hide a real leak.
+
+        Blanking the random values is only safe if a genuine marker still
+        fails. If this ever passes, the substitution has grown wide enough to
+        swallow the thing it was protecting.
+        """
+        leaked = '<p>Built with WarriorIQ_V4_Professional</p>'
+        self.assertIn("V" + "4", self._without_random_tokens(leaked))
+        # And a token that happens to contain the marker still does not fail.
+        innocent = '<meta name="csrf-token" content="uXV451oWOqdn_u6h7BQdbeaetb">'
+        self.assertNotIn("V" + "4", self._without_random_tokens(innocent))
 
     def test_professional_polish_uses_shared_product_surfaces(self):
         home = self.client.get("/").text
@@ -2943,17 +2977,48 @@ class WorkerAuthOrderingTests(unittest.TestCase):
     def setUp(self):
         import importlib
 
-        self._env = mock.patch.dict(os.environ, {
-            "WARRIORIQ_WORKER_MODE": "remote",
-            "WARRIORIQ_WORKER_TOKEN": "unit-test-worker-token",
-        })
-        self._env.start()
-        self.addCleanup(self._env.stop)
-        import core.config
         import app.main
-        importlib.reload(core.config)
+        import core.config
+
+        # app.main is reloaded because the worker routes get their auth
+        # dependency at import time, and that is the whole point of these
+        # tests. core.config is NOT reloaded, and must not be.
+        #
+        # Reloading it builds a brand new SETTINGS object, while every module
+        # that did `from core.config import SETTINGS` - payments, referee,
+        # legal, social_auth and a dozen more - keeps holding the old one. The
+        # cleanup reload then made a THIRD object and still fixed none of them.
+        # From that point on core.config.SETTINGS and everyone else's SETTINGS
+        # were different objects, so any later test that edits the settings in
+        # place and expects another module to see it quietly failed:
+        #
+        #   ProductFoundationTests.test_complimentary_grant_outranks_the_stored_plan
+        #     put a grant in core.config.SETTINGS.complimentary_plans; payments
+        #     read its stale copy and returned "free" instead of "gym".
+        #   RefereeProbeLocationTests.test_a_genuinely_missing_probe_still_disables_cleanly
+        #     pointed core.config.SETTINGS at a missing probe; referee read its
+        #     stale copy, found the real file and loaded it.
+        #
+        # Both passed when test_core ran alone and failed when test_web ran
+        # first, which reads like an unrelated flake and is not one.
+        #
+        # So the two fields are set on the settings object that already exists,
+        # and restored afterwards. One SETTINGS for the whole process.
+        settings = core.config.SETTINGS
+        previous = {
+            "analysis_worker_mode": settings.analysis_worker_mode,
+            "worker_token": settings.worker_token,
+        }
+        object.__setattr__(settings, "analysis_worker_mode", "remote")
+        object.__setattr__(settings, "worker_token", "unit-test-worker-token")
+
+        def restore():
+            for field, value in previous.items():
+                object.__setattr__(settings, field, value)
+            importlib.reload(app.main)
+
+        self.addCleanup(restore)
         self.main = importlib.reload(app.main)
-        self.addCleanup(lambda: (importlib.reload(core.config), importlib.reload(app.main)))
         from fastapi.testclient import TestClient
         self.client = TestClient(self.main.app)
 
