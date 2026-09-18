@@ -41,6 +41,12 @@ _RUNTIME = pathlib.Path(tempfile.mkdtemp(prefix="warrioriq-tests-"))
 os.environ["WARRIORIQ_DB_PATH"] = str(_RUNTIME / "warrioriq.sqlite3")
 os.environ["WARRIORIQ_UPLOADS_DIR"] = str(_RUNTIME / "uploads")
 os.environ["WARRIORIQ_OUTPUTS_DIR"] = str(_RUNTIME / "outputs")
+# The machine profile is written too, and by a path nobody expects: planning a
+# budget calls _frame_cost, which RECORDS the cost it measured when nothing is
+# stored yet. So merely running the budget tests wrote a frame cost into the
+# developer's own machine_profile.json - the file every real analysis then plans
+# from, and which is write-once and never corrects itself.
+os.environ["WARRIORIQ_MACHINE_PROFILE"] = str(_RUNTIME / "machine_profile.json")
 
 
 def pytest_report_header(config) -> str:
