@@ -36,6 +36,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
+def _analysed_span(path: Path) -> float:
+    """Seconds of video the run actually covered, read from its own trace."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        first = json.loads(lines[0])["time_seconds"]
+        last = json.loads(lines[-1])["time_seconds"]
+        return max(0.0, float(last) - float(first))
+    except Exception:                                            # noqa: BLE001
+        return 0.0
+
+
 def vram() -> str:
     try:
         import torch
@@ -92,6 +103,23 @@ def main() -> int:
     wall = time.perf_counter() - start
 
     tracking = report.get("tracking") or {}
+    performance = report.get("performance") or {}
+
+    # Measure against what was ACTUALLY analysed, not what was asked for.
+    #
+    # round_duration_seconds does not bound the analysed segment the way it
+    # looks like it should: a request for 70 seconds of a 5 minute file
+    # analysed the whole 302.6 seconds. Dividing the wall time by the REQUESTED
+    # duration reported 5.59x for a run that was really 1.29x - a tool that
+    # overstates by 4x is worse than no tool, and it was my own arithmetic, not
+    # the product's.
+    analysed = float(tracking.get("recording", {}).get("analysed_seconds") or 0.0)
+    if not analysed:
+        analysed = _analysed_span(ROOT / "outputs" / "measure_realtime" / "tracking.jsonl")
+    if not analysed:
+        analysed = seconds
+        print("  (could not read the analysed span; falling back to the request)")
+    seconds = analysed
     ratio = wall / max(1e-6, seconds)
     print()
     print("=" * 58)
@@ -100,20 +128,27 @@ def main() -> int:
     print(f"  REALTIME RATIO      {ratio:.2f}x   "
           f"({'KEEPS' if ratio <= 1.0 else 'MISSES'} the <= 1.0 promise)")
     print()
-    for key in ("budget_reason", "budget_expected_met", "budget_cost_source",
-                "planned_stride", "stride", "imgsz", "analyzed_frames", "speed"):
+    # The budget fields live under report["performance"], not ["tracking"].
+    for key in ("budget_plan", "budget_met_expected", "budget_cost_source",
+                "budget_cost_planned_seconds", "budget_cost_observed_seconds",
+                "planned_stride", "final_analysis_fps", "final_imgsz",
+                "vram_free_at_start"):
+        if key in performance:
+            print(f"  {key:30} {performance[key]}")
+    for key in ("analyzed_frames", "sam_continuous_frames"):
         if key in tracking:
-            print(f"  {key:20} {tracking[key]}")
+            print(f"  {key:30} {tracking[key]}")
     print(f"  VRAM after          {vram()}")
     print("=" * 58)
-    if tracking.get("budget_expected_met") and ratio > 1.0:
+    if performance.get("budget_met_expected") and ratio > 1.0:
         print("  !! The planner predicted it would meet the budget and it did")
         print("     not. Its cost model is wrong, and the report published that")
         print("     prediction to the user as though it were true.")
     Path(ROOT / "outputs").mkdir(exist_ok=True)
     out = ROOT / "outputs" / "realtime_probe.json"
     out.write_text(json.dumps({"wall_seconds": wall, "video_seconds": seconds,
-                               "realtime_ratio": ratio, "tracking": tracking},
+                               "realtime_ratio": ratio, "tracking": tracking,
+                               "performance": performance},
                               indent=1, default=str), encoding="utf-8")
     print(f"  written to {out}")
     return 0
