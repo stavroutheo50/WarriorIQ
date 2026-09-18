@@ -108,6 +108,12 @@ class QualityController:
         # from another on the same machine can be explained rather than
         # argued about. See _frame_cost.
         self.budget_cost_source = "not_planned"
+        # What a frame ACTUALLY cost during calibration, next to what the plan
+        # was made with. These are usually the same number. When they are not,
+        # the machine is not the machine its stored profile describes, and the
+        # gap is the only warning anything gets - see plan_for_budget.
+        self.budget_cost_planned: float | None = None
+        self.budget_cost_observed: float | None = None
         # Which card this is, for the stored profile's key: the same footage
         # costs a different amount on different hardware, and a profile shared
         # between them would plan from somebody else's machine.
@@ -195,7 +201,32 @@ class QualityController:
             self.budget_expected_met = None
             return
 
-        per_frame = self._frame_cost(elapsed_seconds / max(1, analyzed_frames))
+        observed = elapsed_seconds / max(1, analyzed_frames)
+        per_frame = self._frame_cost(observed)
+        self.budget_cost_planned = float(per_frame)
+        self.budget_cost_observed = float(observed)
+        # Plan from the stored cost, predict from the observed one.
+        #
+        # These are the same number on a machine behaving as its profile says,
+        # and the stride below must keep coming from the stored value or two
+        # runs of one video stop planning identically - which is the whole
+        # reason the profile exists. But when the machine is slower than its
+        # profile RIGHT NOW, planning from the profile and then reporting that
+        # the budget will be met publishes something false: measured on this
+        # machine, a profile of 0.083 s/frame against an actual 2.4 s/frame
+        # still produced budget_expected_met = True while the run missed its
+        # deadline roughly thirty-fold, and the report said it had met it.
+        #
+        # So the stride stays deterministic and the PREDICTION becomes honest.
+        # A run that cannot meet the budget now says so, whatever the stored
+        # number believes, and carries both costs so the gap is visible instead
+        # of being argued about later.
+        #
+        # 1.5x is deliberately loose. Frame cost varies run to run with what
+        # else the machine is doing, and a prediction that flickers to False on
+        # ordinary noise is a worse lie than the one it replaces.
+        divergence = observed / max(1e-9, per_frame)
+        cost_is_stale = self.budget_cost_source in {"configured", "profile"} and divergence > 1.5
         remaining_video = max(0.0, segment_duration - processed_seconds)
         remaining_budget = segment_duration - elapsed_seconds
         if remaining_video <= 0:
@@ -209,9 +240,15 @@ class QualityController:
 
         wanted = remaining_video * self.source_fps / max(1, self.stride)
         if wanted <= affordable:
+            self.planned_stride = self.stride
+            if cost_is_stale and wanted * observed > max(0.0, remaining_budget):
+                # Affordable by the stored cost, not affordable by this run's.
+                # Keep the stride; drop the promise.
+                self.budget_reason = "machine_slower_than_profile"
+                self.budget_expected_met = False
+                return
             self.budget_reason = "on_track"
             self.budget_expected_met = True
-            self.planned_stride = self.stride
             return
 
         needed = remaining_video * self.source_fps / max(1e-6, affordable)
@@ -225,6 +262,13 @@ class QualityController:
         self.budget_reason = (
             "sampling_reduced" if self.budget_expected_met
             else "cannot_meet_budget_above_quality_floor")
+        # Same check on the reduced-sampling path: a stride chosen against a
+        # stored cost that this run is not achieving does not meet the budget
+        # either, and saying it does is the failure this guards against.
+        if self.budget_expected_met and cost_is_stale:
+            if affordable_at_chosen * observed > max(0.0, remaining_budget):
+                self.budget_expected_met = False
+                self.budget_reason = "machine_slower_than_profile"
 
     def maybe_adjust(self, analyzed_index: int, processed_seconds: float, elapsed_seconds: float) -> tuple[int, int, str]:
         if not SETTINGS.adaptive_quality or elapsed_seconds < 2.0 or analyzed_index - self.last_adjust < 60:
