@@ -63,3 +63,72 @@ class BudgetPlanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BudgetHonestyTests(unittest.TestCase):
+    """A plan made from a stale cost must not claim it will meet the budget.
+
+    plan_for_budget takes the frame cost from machine_profile.json so that two
+    runs of one video plan the same stride - without that, the planner reads a
+    clock and identical input plans differently, which moved fighter B's
+    coverage from 0.260 to 0.728 on one fight.
+
+    The cost of that determinism is that the stored number can be wrong for the
+    run happening now: something else is using the card, or the workload is not
+    what the profile was measured on. Measured here on 2026-09-18, a stored
+    0.083 s/frame against an actual ~2.4 s/frame still produced
+    budget_expected_met = True while the run missed its deadline about
+    thirtyfold - and the report published that prediction to the user.
+
+    So the stride keeps coming from the stored cost, and the PREDICTION now
+    comes from what this run is actually achieving.
+    """
+
+    def _controller(self, stored_cost, source_fps=30.0):
+        from unittest import mock
+
+        from core import machine_profile
+        q = QualityController(source_fps, 640, 480)
+        self._patch = mock.patch.object(
+            machine_profile, "frame_cost", return_value=stored_cost)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+        return q
+
+    def test_a_machine_slower_than_its_profile_stops_promising(self):
+        q = self._controller(stored_cost=0.02)
+        # 60 frames took 60s: one second per frame, fifty times the stored cost.
+        q.plan_for_budget(analyzed_frames=60, processed_seconds=2.0,
+                          elapsed_seconds=60.0, segment_duration=120.0)
+        self.assertFalse(q.budget_expected_met)
+        self.assertEqual(q.budget_reason, "machine_slower_than_profile")
+        # Both numbers travel with the verdict, or it cannot be checked.
+        self.assertAlmostEqual(q.budget_cost_planned, 0.02)
+        self.assertAlmostEqual(q.budget_cost_observed, 1.0)
+
+    def test_a_machine_matching_its_profile_still_promises(self):
+        q = self._controller(stored_cost=0.02)
+        # 60 frames in 1.2s is exactly the stored cost, and far inside budget.
+        q.plan_for_budget(analyzed_frames=60, processed_seconds=30.0,
+                          elapsed_seconds=1.2, segment_duration=120.0)
+        self.assertTrue(q.budget_expected_met)
+        self.assertEqual(q.budget_reason, "on_track")
+
+    def test_ordinary_noise_does_not_flip_the_promise(self):
+        """A prediction that flickers on normal variation is its own lie."""
+        q = self._controller(stored_cost=0.02)
+        # 40% slower than stored - real, but under the 1.5x guard - and still
+        # comfortably inside the budget.
+        q.plan_for_budget(analyzed_frames=60, processed_seconds=30.0,
+                          elapsed_seconds=1.68, segment_duration=120.0)
+        self.assertTrue(q.budget_expected_met)
+        self.assertEqual(q.budget_reason, "on_track")
+
+    def test_the_stride_is_unchanged_by_the_honesty_check(self):
+        """Determinism is the reason the stored cost exists. Keep it."""
+        slow = self._controller(stored_cost=0.02)
+        slow.plan_for_budget(analyzed_frames=60, processed_seconds=2.0,
+                             elapsed_seconds=60.0, segment_duration=120.0)
+        self.assertEqual(slow.stride, slow.planned_stride)
+        # The verdict changed; the frame path did not.
+        self.assertFalse(slow.budget_expected_met)

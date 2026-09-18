@@ -498,6 +498,32 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(0)
 
+    # How much of the card was already taken before this run allocated anything.
+    #
+    # Windows falls back to system RAM over PCIe rather than erroring when a
+    # CUDA allocation will not fit, which produces a large silent slowdown with
+    # no message anywhere. An analysis that took 28 minutes to reach 30% was
+    # eventually traced to exactly this, after five other causes had been ruled
+    # out by measurement, and the note written at the time said the one thing
+    # that would have answered it immediately was a free-VRAM reading at the
+    # start of the run. Nothing recorded one. This does.
+    #
+    # It is a diagnostic, not a gate: a busy card is the user's business and
+    # refusing to run would be worse than running slowly. But when a report
+    # shows a missed budget, this says in one number whether the code was slow
+    # or the machine was busy.
+    vram_free_at_start = None
+    if torch.cuda.is_available():
+        try:
+            free_bytes, total_bytes = torch.cuda.mem_get_info()
+            vram_free_at_start = {
+                "free_gb": round(free_bytes / 2 ** 30, 2),
+                "total_gb": round(total_bytes / 2 ** 30, 2),
+                "in_use_fraction": round(1.0 - free_bytes / max(1, total_bytes), 3),
+            }
+        except Exception:                                        # noqa: BLE001
+            vram_free_at_start = None
+
     job_dir = OUTPUTS / req.job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     tracking_path = job_dir / "tracking.jsonl"
@@ -1182,6 +1208,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         # that planned different strides are explained by this field and by
         # nothing else in the report.
         "budget_cost_source": quality.budget_cost_source,
+        # What the plan assumed a frame costs, and what one actually cost during
+        # calibration. Equal on a machine behaving as its profile describes.
+        # When observed is far above planned, the stored profile is stale for
+        # this run - something else is using the card, or the workload is not
+        # what the profile was measured on - and budget_plan says
+        # "machine_slower_than_profile" rather than claiming a budget was met.
+        # Without these two numbers that conclusion is unfalsifiable.
+        "budget_cost_planned_seconds": quality.budget_cost_planned,
+        "budget_cost_observed_seconds": quality.budget_cost_observed,
         "budget_met_expected": quality.budget_expected_met,
         "planned_stride": quality.planned_stride,
         "final_analysis_fps": quality.effective_fps,
@@ -1189,6 +1224,10 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "quality_mode": quality.mode,
         "pose_model": pose_tracker.model_path,
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
+        # What else was on the card before this run started. See the comment at
+        # the top of analyze(): a slow run and a busy card are indistinguishable
+        # in every other field here.
+        "vram_free_at_start": vram_free_at_start,
         "unused_frame_copy_avoidance": not fallback_buffer_enabled,
         "external_identity_history_enabled": identity_referee.enabled,
     }

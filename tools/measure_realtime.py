@@ -1,0 +1,123 @@
+"""Does the analysis finish inside the video's own length, and does it know?
+
+The product's stated promise - written into plan_for_budget's first line - is
+that an analysis never takes longer than the video it is analysing. This times
+a real run against that promise and prints what the planner BELIEVED alongside
+what actually happened, because the interesting failure is the two disagreeing.
+
+    python tools/measure_realtime.py <video> <seconds> [--sam-off]
+
+It reports:
+
+    realtime ratio   wall seconds per video second. <= 1.0 keeps the promise.
+    budget_reason    what the planner decided: on_track, sampling_reduced,
+                     cannot_meet_budget_above_quality_floor, stride_pinned.
+    budget_expected  what the planner PREDICTED. If this is True and the ratio
+                     is above 1.0, the planner's cost model is wrong and the
+                     report is telling the user something false.
+    cost_source      configured / profile / measured - which number it planned
+                     from. "profile" means a value stored from an earlier run
+                     on this machine, which is what makes runs reproducible and
+                     is also what goes stale when something else is using the
+                     GPU.
+
+Free VRAM is printed first, because a card that is already occupied is the
+single largest cause of a run missing this budget, and nothing in the product
+logs it today.
+"""
+from __future__ import annotations
+
+import json
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+
+def vram() -> str:
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return "no CUDA"
+        free, total = torch.cuda.mem_get_info()
+        return (f"{free/2**30:.2f} GB free of {total/2**30:.2f} GB "
+                f"({(total-free)/total*100:.0f}% already in use)")
+    except Exception as exc:                                     # noqa: BLE001
+        return f"unavailable ({type(exc).__name__})"
+
+
+def main() -> int:
+    if len(sys.argv) < 3:
+        print(__doc__)
+        return 2
+    video = sys.argv[1]
+    seconds = float(sys.argv[2])
+    sam_off = "--sam-off" in sys.argv
+
+    if sam_off:
+        import os
+        os.environ["WARRIORIQ_SAM_RECOVERY"] = "0"
+        os.environ["WARRIORIQ_SAM_CONTINUOUS"] = "0"
+
+    print(f"VRAM before: {vram()}", flush=True)
+
+    import cv2
+
+    from core import analyzer
+    from core.types import AnalysisRequest
+
+    cap = cv2.VideoCapture(video)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+
+    # Boxes matter for identity, not for speed. This measures speed, so they are
+    # two plausible halves of the frame rather than a verified seed - do not
+    # read any accuracy number off this run.
+    a = [w * 0.22, h * 0.28, w * 0.46, h * 0.92]
+    b = [w * 0.70, h * 0.28, w * 0.92, h * 0.92]
+
+    start = time.perf_counter()
+    report = analyzer.analyze(AnalysisRequest(
+        video_path=video,
+        fighter_a_box=[float(v) for v in a],
+        fighter_b_box=[float(v) for v in b],
+        ruleset="WT", fight_type="competition", round_count=1,
+        start_seconds=0.0, round_duration_seconds=seconds,
+        job_id="measure_realtime", profile_id=1, persist_result=False))
+    wall = time.perf_counter() - start
+
+    tracking = report.get("tracking") or {}
+    ratio = wall / max(1e-6, seconds)
+    print()
+    print("=" * 58)
+    print(f"  video analysed      {seconds:.0f}s at {fps:.2f}fps ({w}x{h})")
+    print(f"  wall time           {wall:.0f}s")
+    print(f"  REALTIME RATIO      {ratio:.2f}x   "
+          f"({'KEEPS' if ratio <= 1.0 else 'MISSES'} the <= 1.0 promise)")
+    print()
+    for key in ("budget_reason", "budget_expected_met", "budget_cost_source",
+                "planned_stride", "stride", "imgsz", "analyzed_frames", "speed"):
+        if key in tracking:
+            print(f"  {key:20} {tracking[key]}")
+    print(f"  VRAM after          {vram()}")
+    print("=" * 58)
+    if tracking.get("budget_expected_met") and ratio > 1.0:
+        print("  !! The planner predicted it would meet the budget and it did")
+        print("     not. Its cost model is wrong, and the report published that")
+        print("     prediction to the user as though it were true.")
+    Path(ROOT / "outputs").mkdir(exist_ok=True)
+    out = ROOT / "outputs" / "realtime_probe.json"
+    out.write_text(json.dumps({"wall_seconds": wall, "video_seconds": seconds,
+                               "realtime_ratio": ratio, "tracking": tracking},
+                              indent=1, default=str), encoding="utf-8")
+    print(f"  written to {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
