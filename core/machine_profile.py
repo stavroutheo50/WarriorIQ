@@ -17,6 +17,24 @@ stride derived from it would go on flipping at the boundaries.
 Keyed by device and inference size because those are what actually move the
 number - the same card is twice as slow at twice the pixels, and a machine
 without a GPU is not comparable to one with it.
+
+And keyed by PIPELINE_VERSION, because write-once has a failure mode that took
+a day to find. On 2026-09-18 a fix stopped the recovery predictor loading a
+second TensorRT execution context, which had been taking the card from 3582 to
+7164 MiB of 8151 and starving SAM2. Frames got far cheaper. The stored cost did
+not move, because it never moves - and the planner went on believing a frame
+cost 0.083081 s when it now cost about a quarter of that.
+
+That direction is the quiet one. A machine slower than its profile misses its
+deadline and plan_for_budget now says so. A machine FASTER than its profile
+looks fine and silently *reduces sampling*, because the stale number says it
+cannot afford the frames: measured here, stride 2 cut to 3 while sitting on
+three times the headroom it needed. Frames are identity and strike evidence, so
+that is a real cost with nothing anywhere reporting it.
+
+So: bump PIPELINE_VERSION whenever a change alters what a frame costs. Old
+entries stop matching, the next run measures once and writes a fresh one, and
+determinism is preserved within a version - which is all it was ever protecting.
 """
 from __future__ import annotations
 
@@ -42,8 +60,25 @@ def profile_path() -> Path:
         str(DATA_ROOT / "machine_profile.json"))).expanduser()
 
 
+# Bump this when a change alters what a frame costs, so stored numbers from the
+# old pipeline stop being read. See the module docstring for why write-once
+# needs an escape hatch.
+#
+#   1  original
+#   2  2026-09-18: the recovery predictor stopped loading a second TensorRT
+#      execution context, which had been starving SAM2 and had every cost on
+#      this machine measured against a card with under 1 GB free.
+PIPELINE_VERSION = 2
+
+
 def _key(device: str, imgsz: int) -> str:
-    return "%s@%d" % ((device or "unknown").strip() or "unknown", max(1, int(imgsz)))
+    # The version leads, so an entry from an older pipeline simply does not
+    # match and is re-measured once rather than needing a migration. Old entries
+    # are left in the file: they are a few bytes, and they are a record of what
+    # this machine used to cost.
+    return "v%d|%s@%d" % (PIPELINE_VERSION,
+                          (device or "unknown").strip() or "unknown",
+                          max(1, int(imgsz)))
 
 
 def snap(seconds: float) -> float:
