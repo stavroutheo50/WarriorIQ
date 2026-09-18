@@ -93,6 +93,44 @@
       "why_here": "The three library fights are all messenger-compressed 480x220 or 568x320 copies where more than half of what identity loses is a fighter the detector cannot see at any confidence. This one is native HD, so it separates 'the detector cannot see him' from 'identity lost him'. It is only 10.5s, so read the detected-vs-lost split rather than comparing its coverage against the others.",
       "measured": "A 0.933, B 0.994 at stride 3 - and the contact sheet shows both numbers are partly coverage of the wrong people. At f222 B is on a cornerman standing outside the ropes in a dark shirt like fighter B's; at f327 A is on that same cornerman; at f369 B has dropped onto a spectator's head in the foreground. Read the sheet, never the number.",
       "what_it_settles": "Native HD removes the detector-blindness that dominates the compressed library: fighter B is missing on 1 of 164 frames here and on 276 of 713 on 1.mp4, where 228 of those had nobody detected at his position at all. It does NOT remove identity error - it changes its shape, because a sharp 1080p frame also resolves every cornerman and spectator well enough for identity to latch onto one."
+    },
+    "tunney1927": {
+      "_note": [
+        "Tunney v Dempsey, 1927 - the hardest footage in the set and the reason",
+        "it is here. Black and white, no corner colour of any kind, a canvas",
+        "blown to pure white, and wide shots that put both fighters at about",
+        "88px tall with the referee between them. If identity survives this it",
+        "will survive a phone in a gym.",
+        "",
+        "Source is a 255 MB FMP4 .avi, which the product REFUSES: the upload",
+        "cap is 136.3 MB. Re-encoded to H.264 with the audio stripped it is",
+        "135.6 MB and fits by 0.7 MB. Keep that in mind before treating this",
+        "file as representative - a user would never get this far.",
+        "",
+        "Seeded at frame 15017 (50%, 10:00) and NOT at the start, because the",
+        "early wide shots are the referee trap: frame 9010 holds three small",
+        "figures and no rule picks the right two. 15017 has both fighters near",
+        "full height, well separated, and no referee between them. Verified by",
+        "drawing the boxes on the frame and looking at them.",
+        "",
+        "So an analysis from this seed covers 10:00-20:00, half the bout."
+      ],
+      "video": "fights/tunney_dempsey_1927.mp4",
+      "seed_frame": 15017,
+      "start_seconds": 600.7,
+      "ruleset": "BOXING",
+      "fighter_a": [
+        52,
+        122,
+        196,
+        527
+      ],
+      "fighter_b": [
+        432,
+        16,
+        581,
+        527
+      ]
     }
   },
   "_duplicates": {

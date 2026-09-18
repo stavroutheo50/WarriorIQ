@@ -27,6 +27,36 @@ circular.
     python tools/measure_family_flip.py               # every verified fight
     python tools/measure_family_flip.py 5736 1mp4     # named fights only
 
+FIRST RESULT, fight 5736, 2026-09-18, SAM2 disabled, 22 events:
+
+    flips                punch->kick 2,  kick->punch 0
+    flip rate            9.1%
+    published kicks      11 as shipped
+                         11 without the kick->punch flip   (identical: never fired)
+                          9 without the punch->kick flip
+    travel ratio median  kick 0.33 (n=6), knee 0.92 (n=3), punch 0.974 (n=13)
+
+This is the opposite of what the reported bug suggested, and worth reading
+carefully before anyone "fixes" this rule.
+
+  * The demotion - a kick becoming a punch, the thing that would delete a leg
+    strike from the published count - did NOT fire once. Kick events sit at a
+    median ratio of 0.33, meaning the feet travel three times as far as the
+    hands. They are nowhere near the 1.6 threshold.
+  * What fired was the promotion, twice, so 2 of the 11 kicks the report
+    publishes are events the detector first proposed as punches.
+
+So on this fight the rule is not destroying kicks, it is RESCUING them from a
+seed classification that had already called them punches. The mislabelling
+happens upstream of this rule, and this rule partially corrects it. Weakening
+the flip - the obvious reading of "my kick was counted as a punch" - would
+have made the reported bug worse, not better.
+
+Caveats that matter: one fight, 22 events, and SAM2 off changes which events
+exist at all, so the absolute counts are not production counts. This is a
+direction, not a verdict. Run it on b883, 1mp4 and muaythai_hd, with SAM2 on,
+before drawing any conclusion about the rule itself.
+
 Pin WARRIORIQ_FORCE_STRIDE first if you want to compare two runs; the planner
 reads a wall clock otherwise and the frame set changes between runs.
 """
