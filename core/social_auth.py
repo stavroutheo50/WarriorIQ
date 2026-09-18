@@ -17,15 +17,52 @@ class SocialIdentity:
     email_verified: bool = False
 
 
+# Which providers get a button. Order is the order they appear in.
+#
 # Apple is deliberately absent. Sign in with Apple needs the Apple Developer
 # Program ($99/year, and enrolment requires the legal age of majority), and its
 # "client secret" is a JWT that expires within six months, so it would fail
 # silently twice a year unless minted on every request. Re-adding it means
 # restoring this label, the registration block, and the icon in auth.html.
+#
+# GitHub is absent for a different reason: this is a product for fighters and
+# coaches, and a developer account is not a credential that audience has. It is
+# missing from HERE only - the registration below, the callback and the identity
+# branch are all still live, on purpose. Anyone who already signed up through
+# GitHub has an oauth_identities row and, because GitHub publishes a profile
+# email only if the account chose to, possibly no address to send a password
+# reset to. Deleting the provider outright would lock those people out with no
+# way back. Keeping it registered means putting the button back is one line
+# here, not a rebuild.
+#
+# To finish the removal, confirm nobody is relying on it first:
+#     SELECT COUNT(*) FROM oauth_identities WHERE provider='github';
+# If that is 0, delete the registration block, the AUTHORIZE_ORIGINS entry, the
+# identity_from_token branch, the two config settings and the icon in auth.html,
+# and unset WARRIORIQ_GITHUB_CLIENT_ID/SECRET on the host.
 PROVIDER_LABELS = {
     "google": "Google",
     "facebook": "Facebook",
     "microsoft": "Microsoft",
+}
+
+# Providers nobody may sign UP with any more, but that existing accounts still
+# need to sign IN with.
+#
+# Taking GitHub out of PROVIDER_LABELS removes the button from both pages, and
+# that is one step too far on a live site where GitHub was configured and could
+# have been used: those accounts have no password, and GitHub publishes a
+# profile email only when the account chose to, so some of them have no address
+# to send a password reset to either. Removing the only door they have is not
+# a tidy-up, it is a lockout.
+#
+# So the button is gone from /signup, where it was the wrong offer, and /login
+# keeps a quiet recovery line for people who already used it. New accounts
+# cannot be created this way; old ones are not stranded.
+#
+# This can be emptied once the owner confirms nothing depends on it:
+#     SELECT COUNT(*) FROM oauth_identities WHERE provider='github';
+LEGACY_PROVIDER_LABELS = {
     "github": "GitHub",
 }
 
@@ -81,6 +118,11 @@ class SocialAuthRegistry:
         # discovery document, so the identity is read from its own user API.
         # Its endpoints are fixed, which means pressing this button needs no
         # network call before the redirect at all.
+        #
+        # This registration is deliberately kept although GitHub no longer has a
+        # button - see the note on PROVIDER_LABELS. It exists so an account
+        # created through GitHub is not orphaned, and so restoring the button is
+        # one line. Do not delete it without checking oauth_identities first.
         if SETTINGS.github_client_id and SETTINGS.github_client_secret:
             self.oauth.register(
                 name="github",
@@ -123,6 +165,19 @@ class SocialAuthRegistry:
         return [
             {"key": key, "label": PROVIDER_LABELS[key]}
             for key in PROVIDER_LABELS
+            if key in self._enabled
+        ]
+
+    @property
+    def legacy_provider_buttons(self) -> list[dict[str, str]]:
+        """Sign-in-only providers, for accounts that already use them.
+
+        Empty unless the provider is still configured, so removing the
+        credentials from the host removes the recovery line too.
+        """
+        return [
+            {"key": key, "label": LEGACY_PROVIDER_LABELS[key]}
+            for key in LEGACY_PROVIDER_LABELS
             if key in self._enabled
         ]
 

@@ -79,7 +79,7 @@ from core.db import (
 from core.evidence_trust import report_evidence_trust
 from core.coaching import build_coaching, build_training_plan
 from core.payments import roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
-from core.legal import LEGAL_DOCUMENTS, launch_readiness
+from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
@@ -244,7 +244,10 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 # requests instead of eight keeps the order identical.
 CSS_BUNDLES: dict[str, tuple[str, ...]] = {
     "base": ("style.css", "navigation.css", "fixes.css", "product.css", "system.css"),
-    "shell": ("premium.css", "motion.css", "redesign.css"),
+    # a11y.css is last, and has to stay last: it sets floor values for tap
+    # targets and control font size that must win over whatever a component
+    # asked for, and load order is how they do that without !important.
+    "shell": ("premium.css", "motion.css", "redesign.css", "a11y.css"),
 }
 
 
@@ -980,6 +983,9 @@ async def viewer_context(request: Request, call_next):
     request.state.legal_is_draft = SETTINGS.legal_is_draft
     request.state.minimum_account_age = SETTINGS.minimum_account_age
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
+    # Sign-in-only providers. /signup never offers these; /login shows a quiet
+    # recovery line so an account created through one is not stranded.
+    request.state.legacy_oauth_providers = SOCIAL_AUTH.legacy_provider_buttons
     request.state.cookie_preferences = _cookie_preferences(request)
     request.state.analytics_measurement_id = SETTINGS.analytics_measurement_id
     request.state.site_verification_token = SETTINGS.site_verification_token
@@ -2159,14 +2165,34 @@ def _prose_list(items) -> str:
     return f"{', '.join(items[:-1])} and {items[-1]}"
 
 
+# The format each sport is usually fought at, as (rounds, seconds per round).
+#
+# A default, not an assertion: the upload form preselects it and the athlete
+# changes it, and anyone who does not know picks "use the whole video". These
+# are the amateur/most-common formats rather than the championship ones - a
+# five-round title fight is rarer than a three-round club bout, and the person
+# with the title fight is the one who will notice the field and change it.
+SPORT_ROUND_DEFAULTS: dict[str, tuple[int, int]] = {
+    "kickboxing": (3, 180),     # K-1 3x3
+    "boxing": (3, 180),
+    "muay_thai": (5, 180),      # the full-rules bout is five threes
+    "taekwondo": (3, 120),
+    "mma": (3, 300),
+}
+
+
 def _sport_context(request: Request, sport: str) -> dict:
     """Everything a single sport's setup page needs to describe itself."""
     account = _account(request)
     keys = SPORTS[sport]
+    default_rounds, default_seconds = SPORT_ROUND_DEFAULTS.get(sport, (3, 180))
     return {
         "request": request,
         "sport": sport,
         "sport_label": RULESET_SPORTS[sport],
+        # Preselected on the round pickers. See SPORT_ROUND_DEFAULTS.
+        "default_round_count": default_rounds,
+        "default_round_seconds": default_seconds,
         # The smaller of what WarriorIQ allows and what the host will carry, so
         # a file that cannot possibly arrive is refused here instead of after a
         # minute of uploading.
@@ -2229,10 +2255,16 @@ def choose_sport(request: Request):
     sport, so it is asked first and asked on its own rather than as one field
     among ten on a form the reader has already started filling in.
 
-    An analysis started without an account produces a guest report that is
-    deleted after two hours and never joins the fight library, so a signed-out
-    visitor is told that before spending an upload on it - but told here,
-    rather than bounced to /login.
+    An analysis needs an account: /upload answers 401 to a signed-out visitor,
+    and that is the only place a job is ever created. So a signed-out visitor
+    is told here, before choosing a sport and picking a file, rather than being
+    bounced to /login or finding out after the upload.
+
+    This page used to say the analysis would be "deleted after two hours"
+    instead. GUEST_RETENTION_HOURS and cleanup_expired_guest_jobs are both
+    still real, but nothing can reach them - a guest job cannot be created at
+    all - so the sentence described a path that does not exist and implied a
+    guest mode this product does not have.
 
     This route used to redirect while /dashboard, /history, /coach, /profile
     and /compare all answered 200 with the same signed-out shell, so someone
@@ -2543,8 +2575,11 @@ async def upload(
         "fight_video_upload_permission", SETTINGS.policy_version,
         resource_id=job_id,
         metadata={
-            "rights_confirmed": True,
-            "people_permissions_confirmed": True,
+            # What was actually submitted, not a literal. The guard above means
+            # these are both true by the time we get here, but a consent record
+            # that hardcodes the answer stops being evidence of consent.
+            "rights_confirmed": bool(rights_confirmed),
+            "people_permissions_confirmed": bool(people_permissions_confirmed),
             "minor_permission_status": minor_permission_status,
             "ruleset": normalize_ruleset(ruleset),
             "external_ai_enabled": bool(openai_identity_recovery),
@@ -2597,7 +2632,26 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
             _seek_selection_frame(job_id, job, float(seconds))
         except Exception:                                           # noqa: BLE001
             LOGGER.warning("recheck_seek_failed job=%s seconds=%s", job_id, seconds)
-    return templates.TemplateResponse(request=request, name="select.html", context={"request": request, "job_id": job_id, "job": job})
+    # Which fighter gets the detailed report is a per-fight choice, made on this
+    # page, and it already is one - the radio posts focus_fighter with the boxes
+    # and the job stores it. What it was not doing is starting from the answer
+    # the account already gave: "My identity in reports" on /profile drove the
+    # progress dashboard while this page hardcoded Fighter A, so an athlete who
+    # had said they were Fighter B had to say it again on every single upload
+    # and silently got the wrong report whenever they forgot.
+    #
+    # The profile value is the DEFAULT only. Which corner somebody is in changes
+    # from fight to fight, so the per-fight radio still wins and nothing here
+    # writes back to the profile.
+    profile_id = _profile_id(request)
+    profile = get_profile(profile_id) if profile_id is not None else None
+    default_focus = str((profile or {}).get("default_fighter") or "A").upper()
+    if default_focus not in {"A", "B"}:
+        default_focus = "A"
+    return templates.TemplateResponse(
+        request=request, name="select.html",
+        context={"request": request, "job_id": job_id, "job": job,
+                 "default_focus": default_focus})
 
 
 @app.get("/selection-image/{job_id}")
@@ -4202,7 +4256,8 @@ def compare_page(request: Request, a: str = "", b: str = ""):
         # Every option read "Fight analysis · <date>", so a reader with six
         # fights on one day was choosing between six identical lines.
         fight["choice_label"] = fight_choice_label(
-            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"))
+            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
+            fight.get("fighter_name"))
     allowed = {fight["job_id"] for fight in fights}
     reports = []
     for job_id in (a, b):
@@ -4234,7 +4289,8 @@ def coach_page(request: Request, error: str = "", name: str = ""):
         # The saved-evidence list printed the raw ruleset enum beside every
         # entry: "Fight analysis · KICK_LIGHT".
         fight["choice_label"] = fight_choice_label(
-            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"))
+            fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
+            fight.get("fighter_name"))
     latest = None
     focus = (profile or {}).get("default_fighter", "A")
     suggested_assignments: list[dict] = []
@@ -4509,7 +4565,10 @@ def legal_center(request: Request):
 @app.get("/contact", response_class=HTMLResponse)
 def legal_document(request: Request):
     slug = request.url.path.strip("/")
-    document = LEGAL_DOCUMENTS.get(slug)
+    # resolve_document, not a raw LEGAL_DOCUMENTS lookup: /contact names the
+    # address for each purpose inline, and the placeholders are filled per
+    # request so a changed setting needs only a restart.
+    document = resolve_document(slug)
     if document is None:
         raise HTTPException(404)
     return templates.TemplateResponse(

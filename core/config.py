@@ -747,6 +747,32 @@ class Settings:
     # site. It is a claim about the documents, not about the deployment, which
     # is why it is separate from launch_readiness(): text can be reviewed while
     # the operator fields are still empty, and the reverse.
+    #
+    # TO CLEAR IT, once counsel has actually read the text:
+    #   set WARRIORIQ_LEGAL_DRAFT=0 in the host environment and restart.
+    #   cPanel's Python App panel wins over .env - load_dotenv() defaults to
+    #   override=False and skips any key already in the environment - so set it
+    #   in the panel, not only in the file.
+    #
+    # It is read in exactly one place, app/main.py setting
+    # request.state.legal_is_draft, and rendered by three templates:
+    # legal.html, privacy.html and legal_document.html, the last of which
+    # covers all twelve documents it renders. So one flag clears every page.
+    #
+    # **Do not flip it for a partial review.** One flag covering every document
+    # is the right shape for "counsel has read the set" and the wrong shape for
+    # "counsel has read Terms and Privacy". If the review comes back covering
+    # some documents and not others, the honest change is to make this
+    # per-document before clearing anything - clearing it globally would put
+    # "reviewed by a lawyer" on pages no lawyer has seen, which is a worse
+    # claim than the banner it removes.
+    #
+    # An audit asked for the banner to come off outright. Declined on
+    # 2026-09-18: the review had not happened yet, and removing a disclaimer
+    # you cannot back is a false implied claim, not a fix. The audit also
+    # looked for the exact string "DRAFT FOR COUNSEL REVIEW" - that string does
+    # not exist; the eyebrow reads "draft for counsel review" in lower case and
+    # the banner text is the sentence in the three templates above.
     legal_is_draft: bool = env_bool("WARRIORIQ_LEGAL_DRAFT", True)
 
     # Social sign-in is opt-in per provider. A provider is exposed only when
@@ -899,6 +925,25 @@ class Settings:
     # `npa=1` and ad storage denied. No ad cookies, but Google Ads does
     # receive a signal. A standalone GA4 web stream, not tied to the Ads tag,
     # is the alternative if Ads must not fire at all.
+    #
+    # An audit reported that ccm/collect answers 503 on every page load and
+    # asked for the tag to be fixed or removed. Neither is a code change, and
+    # the reason is worth being precise about: **AW-18419565750 does not appear
+    # anywhere in this repository**. Confirmed in the browser against the live
+    # site - the only id in the markup is GT-MQJ4F2RF, and the AW- id shows up
+    # solely inside the outgoing request, because it is a destination attached
+    # to that tag in the Google Tag account. There is no line here to delete.
+    #
+    # The status code could not be confirmed either way, and the earlier
+    # warning in this comment applies twice over: these are cross-origin
+    # requests with no Timing-Allow-Origin, so PerformanceResourceTiming
+    # reports responseStatus 0 for all of them - including gtag/js, which
+    # demonstrably works. A 503 on ccm/collect is in any case a refused
+    # fire-and-forget beacon: nothing renders differently and no user sees it.
+    #
+    # To actually stop it, remove the Ads destination from tag GT-MQJ4F2RF in
+    # the Google Tag interface. GA4 keeps working - the /g/collect hit carrying
+    # tid=G-5V5Q4H30LD is sent by the same tag and is independent of Ads.
     #
     # Set WARRIORIQ_ANALYTICS_ID on the deployment rather than editing this
     # line. **cPanel's Python App panel wins over .env**, because

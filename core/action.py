@@ -570,6 +570,19 @@ class ActionEngine:
                     # reads a knee as though the leg never moved.
                     foot_travel = max(_travel(L_ANKLE), _travel(R_ANKLE),
                                       _travel(L_KNEE), _travel(R_KNEE))
+                    # What the detector proposed, before the travel ratio gets a
+                    # vote. Recorded on the event because this rule is the one
+                    # place a leg action can become a hand action and vice
+                    # versa, and it is the only family decision nothing else in
+                    # the pipeline can audit after the fact. The reported kick
+                    # count is kick_attempts + knee_attempts, so every flip here
+                    # moves a number the report shows into one it withholds, or
+                    # the other way round, with no trace.
+                    seed_family = family
+                    family_ratio = (
+                        float(hand_travel) / max(0.01, float(foot_travel))
+                        if foot_travel or hand_travel else None
+                    )
                     if family == "punch" and foot_travel > FAMILY_MARGIN * max(0.01, hand_travel):
                         family = "kick"
                         side = "left" if _travel(L_ANKLE) >= _travel(R_ANKLE) else "right"
@@ -679,6 +692,14 @@ class ActionEngine:
                                 1 for item in contact_samples if item.get("opponent_box")),
                             "max_speed_body_lengths_per_s": float(active.max_speed),
                             "extension_gain": float(extension_gain),
+                            # The family before and after the travel-ratio rule,
+                            # and the ratio that decided it. Diagnostic only -
+                            # nothing reads these to classify anything - so that
+                            # "this kick was counted as a punch" can be checked
+                            # against a number instead of argued about.
+                            "family_seed": seed_family,
+                            "family_flipped": seed_family != family,
+                            "family_travel_ratio": family_ratio,
                             # Turning and jumping are separately scored actions
                             # in several rulesets - a turning kick to the head
                             # is worth 5 in WT taekwondo against 3 for the same

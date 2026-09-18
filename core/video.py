@@ -259,13 +259,26 @@ def build_round_schedule(req: AnalysisRequest, info: VideoInfo) -> list[RoundSpe
     identity survives into the next round.
     """
     start = max(0.0, float(req.start_seconds))
-    selected = set(req.selected_rounds or range(1, int(req.round_count) + 1))
+
+    # A round length of zero means "the whole video as one span", which is what
+    # the upload form offers anyone who does not know the format. It has to be
+    # resolved here rather than in the browser: `max(1.0, ...)` below turns a
+    # posted 0 into a ONE SECOND round, and the only reason that never happened
+    # was that the page's JavaScript always overwrote the field with the file's
+    # duration first. On a video whose duration the browser could not read it
+    # posted 0 and analysed one second of footage.
+    length = float(req.round_duration_seconds)
+    count = max(1, int(req.round_count))
+    if length <= 0:
+        length, count = float(info.duration), 1
+
+    selected = set(req.selected_rounds or range(1, count + 1))
     rounds: list[RoundSpec] = []
 
     cursor = start
-    for number in range(1, max(1, int(req.round_count)) + 1):
+    for number in range(1, count + 1):
         round_start = cursor
-        round_end = min(info.duration, round_start + max(1.0, float(req.round_duration_seconds)))
+        round_end = min(info.duration, round_start + max(1.0, length))
         if req.end_seconds is not None:
             round_end = min(round_end, float(req.end_seconds))
         rounds.append(RoundSpec(number, round_start, round_end, number in selected))

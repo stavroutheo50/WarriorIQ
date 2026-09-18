@@ -1650,9 +1650,82 @@ class SocialSignInCspTests(unittest.TestCase):
 
         # Every provider that can be registered needs somewhere to redirect to,
         # or its button is shown and then blocked by the browser.
+        #
+        # This is a subset rather than an equality now. GitHub keeps its origin
+        # after losing its button, so that an account created through it can
+        # still complete a sign-in - see the next test. The direction that
+        # matters is unchanged: nothing may have a button without an origin.
         from core.social_auth import PROVIDER_LABELS
 
-        self.assertEqual(set(PROVIDER_LABELS), set(AUTHORIZE_ORIGINS))
+        self.assertLessEqual(set(PROVIDER_LABELS), set(AUTHORIZE_ORIGINS))
+        self.assertIn("github", set(AUTHORIZE_ORIGINS) - set(PROVIDER_LABELS))
+
+    def test_github_has_no_button_but_an_existing_account_is_not_orphaned(self):
+        """GitHub is off the sign-in page without being deleted.
+
+        This is a product for fighters and coaches, so a developer account is
+        not a credential that audience has and the button goes. Deleting the
+        provider outright is a different matter: an account created through
+        GitHub has an oauth_identities row, and GitHub only publishes a profile
+        email if the account chose to, so some of those accounts have no address
+        to send a password reset to. Removing the registration would lock them
+        out with nothing to fall back on.
+
+        So: no button, but still registered and still startable. Restoring it is
+        one line in PROVIDER_LABELS.
+        """
+        from core.social_auth import PROVIDER_LABELS, SocialAuthRegistry
+
+        self.assertNotIn("github", PROVIDER_LABELS)
+        self.assertIn("google", PROVIDER_LABELS)
+
+        registry = SocialAuthRegistry()
+        registry._enabled = {"google", "github"}
+        self.assertEqual([b["key"] for b in registry.provider_buttons], ["google"])
+        self.assertTrue(registry.is_enabled("github"))
+        self.assertIn("https://github.com", registry.form_action_origins)
+        # Sign-in only, and only while the provider is still configured.
+        self.assertEqual([b["key"] for b in registry.legacy_provider_buttons], ["github"])
+        registry._enabled = {"google"}
+        self.assertEqual([], registry.legacy_provider_buttons)
+
+    def test_signup_cannot_use_github_but_an_existing_account_can_sign_in(self):
+        """The lockout this would otherwise cause, checked on the real pages.
+
+        GitHub is configured on the live site, so an account may exist that was
+        created through it. Those accounts have no password, and GitHub
+        publishes a profile email only when the account chose to, so some have
+        no address to send a reset to. Removing the button from BOTH pages
+        would take away the only door they have.
+
+        So: /signup offers no GitHub at all - not the button and not the
+        endpoint, because a form action is as good as a button to anyone who
+        reads the markup - and /login keeps a quiet recovery line.
+        """
+        import re
+        from unittest import mock
+
+        from fastapi.testclient import TestClient
+
+        import app.main as webapp
+        from core.social_auth import SocialAuthRegistry
+
+        registry = SocialAuthRegistry()
+        registry._enabled = {"google", "github"}
+        with mock.patch.object(webapp, "SOCIAL_AUTH", registry):
+            client = TestClient(webapp.app)
+            signup = client.get("/signup").text
+            login = client.get("/login").text
+
+        starts = lambda page: set(re.findall(r'formaction="/auth/(\w+)/start"', page))
+        self.assertEqual({"google"}, starts(signup))
+        self.assertNotIn("GitHub", signup)
+        self.assertNotIn("Signed up with", signup)
+
+        self.assertEqual({"google", "github"}, starts(login))
+        self.assertIn("Signed up with", login)
+        self.assertNotIn("Continue with GitHub", login,
+                         "recovery is a quiet line, not a headline button")
 
     def test_the_response_header_carries_those_origins(self):
         from fastapi.testclient import TestClient

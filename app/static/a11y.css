@@ -1,0 +1,75 @@
+/* ============================================================================
+   Tap targets and control sizing
+   ----------------------------------------------------------------------------
+   Last in the shell bundle on purpose. These are floor values that have to win
+   over whatever a component set, and being loaded last is how they do that
+   without a single !important - see CSS_BUNDLES in app/main.py.
+
+   Three measured problems, all on the upload form, which is the one form a
+   first-time user has to complete:
+
+     * selects rendered at 15px. iOS Safari zooms the whole page when a control
+       under 16px is focused, and it does not zoom back out. 16px is the
+       documented threshold, not a rounded-up guess.
+     * the consent checkbox was 13x13 with a label row 17-20px tall, and it is
+       REQUIRED to proceed. 44px is the WCAG 2.5.5 / Apple HIG target.
+     * footer links were 19px tall.
+
+   Nothing here changes a colour, a font family or a layout - only the size of
+   the things a finger has to hit and the text inside controls.
+   ========================================================================= */
+
+/* --- 16px floor on anything typed into or picked from ------------------- */
+input,
+select,
+textarea {
+  font-size: max(16px, 1em);
+}
+
+/* A file input's own font-size drives the height of its rendered button on
+   some engines, so it is included rather than assumed harmless. */
+input[type="file"] {
+  font-size: 16px;
+}
+
+/* --- 44px tap targets on checkboxes, radios and their labels ------------ */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 22px;
+  height: 22px;
+  /* The box itself is 22px; the remaining 22px of target comes from the label
+     row's min-height below, which is the surface a thumb actually lands on. */
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+label.check,
+.minor-permission label,
+.upload-consent label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  /* Without this the row is only as tall as its text and the 44px does
+     nothing - the label has to be the target, not just contain one. */
+  cursor: pointer;
+}
+
+/* The consent text itself stays at its designed size; only the row grows. */
+label.check > span,
+.minor-permission label > span {
+  line-height: 1.4;
+}
+
+/* --- Footer links ------------------------------------------------------- */
+/* Desktop keeps its density: a mouse does not need 44px, and forcing it there
+   would double the height of the footer on every page. Phones get the target,
+   which is where the 19px rows were actually being missed. 620px is
+   --wiq-bp-phone from style.css, not a new breakpoint. */
+@media (max-width: 620px) {
+  footer a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}

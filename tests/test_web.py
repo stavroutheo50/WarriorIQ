@@ -208,10 +208,9 @@ class PublicPageTests(unittest.TestCase):
     def signed_in(self):
         """Reach pages that now require an account.
 
-        Choosing a sport sends signed-out visitors to sign in, because an
-        analysis started without an account becomes a guest report that is
-        deleted after two hours. These tests are about what those pages say,
-        not about the gate, so they borrow an account rather than build one.
+        Choosing a sport sends signed-out visitors to sign in, because /upload
+        answers 401 without an account. These tests are about what those pages
+        say, not about the gate, so they borrow an account rather than build one.
         """
         import app.main as webapp
 
@@ -233,6 +232,50 @@ class PublicPageTests(unittest.TestCase):
                 # of six pages. Nothing should bring it back.
                 self.assertNotIn("globalBack", response.text)
                 self.assertNotIn("global-back", response.text)
+
+    def test_contact_names_the_address_for_each_purpose_in_the_section(self):
+        """/contact read like a template nobody had filled in.
+
+        "Use the configured support email" in one section, "the configured
+        privacy email" in the next, and the three real addresses only in the
+        operator block at the foot of the page - so a reader had to scroll past
+        the whole document and then work out which of three addresses the
+        section they were reading had meant.
+
+        Where an address genuinely is not set the generic phrase stays. An
+        empty mailto, or an address invented to make the page look finished,
+        would be worse than saying it is configured elsewhere.
+        """
+        import dataclasses
+
+        import core.legal as legal
+
+        configured = dataclasses.replace(
+            legal.SETTINGS,
+            support_email="support@example.test",
+            privacy_email="privacy@example.test",
+            dmca_email="copyright@example.test",
+        )
+        with mock.patch.object(legal, "SETTINGS", configured):
+            page = self.client.get("/contact").text
+        self.assertIn("Write to support@example.test for account access", page)
+        self.assertIn("Write to privacy@example.test for access, correction", page)
+        self.assertIn("Write to copyright@example.test for infringement", page)
+        self.assertNotIn("the configured support email", page)
+
+        blank = dataclasses.replace(
+            legal.SETTINGS, support_email="", privacy_email="", dmca_email="")
+        with mock.patch.object(legal, "SETTINGS", blank):
+            page = self.client.get("/contact").text
+        self.assertIn("the configured support email", page)
+        self.assertNotIn("Write to  ", page, "an unset address must not leave a hole")
+        self.assertNotIn("mailto:\"", page)
+
+        # Every other legal page still renders; resolve_document touches them
+        # all and only text carrying a placeholder is formatted.
+        for path in ("/terms", "/privacy", "/cookies", "/refunds"):
+            with self.subTest(path=path):
+                self.assertEqual(200, self.client.get(path).status_code)
 
     def test_legal_center_and_every_policy_render(self):
         paths = (
@@ -260,7 +303,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("does not register", self.client.get("/dmca").text)
 
     def test_choosing_a_sport_signed_out_says_why_before_spending_an_upload(self):
-        """A guest analysis is deleted after two hours and never saved.
+        """Analysis needs an account, and the page says so before the upload.
 
         Letting someone pick a sport, upload a fight and wait for the analysis
         before mentioning that spends the one thing they cannot get back - so
@@ -268,10 +311,16 @@ class PublicPageTests(unittest.TestCase):
         the five other workspace routes answered 200 with a signed-out shell.
         Someone who bookmarked /history got a sales page and someone who
         bookmarked /analyze got a login form, for the same signed-out state.
+
+        What it must NOT say is that a signed-out analysis is "deleted after
+        two hours". /upload answers 401 to a guest and is the only place a job
+        is created, so no guest analysis can exist to be deleted - that
+        sentence promised a guest mode this product does not have.
         """
         response = self.client.get("/analyze", follow_redirects=False)
         self.assertEqual(response.status_code, 200)
-        self.assertIn("deleted after two hours", response.text)
+        self.assertIn("does not analyse a fight without an account", response.text)
+        self.assertNotIn("two hours", response.text)
         # The destination survives whichever way they go.
         self.assertIn("/signup?next=/analyze", response.text)
         self.assertIn("/login?next=/analyze", response.text)
@@ -756,17 +805,35 @@ class PublicPageTests(unittest.TestCase):
         # all five, which render from one template.
         home = self.client.get("/analyze/kickboxing").text
         self.assertIn('name="rights_confirmed"', home)
-        self.assertIn('type="hidden" name="people_permissions_confirmed" value="true"', home)
+        # Owning the footage and having permission from the people in it are two
+        # different claims - you can hold the rights to a clip of somebody who
+        # never agreed to appear in it. The server has always required both, but
+        # the page used to post the second as a hidden field set to true, so the
+        # user asserted a permission nobody asked them for. Both are checkboxes
+        # now, both required, and no hidden consent field ships at all.
+        self.assertIn('type="checkbox" name="people_permissions_confirmed" value="true" required', home)
+        self.assertNotIn('type="hidden" name="people_permissions_confirmed"', home)
+        self.assertEqual(2, home.count('type="checkbox" name="rights_confirmed" value="true" required')
+                         + home.count('type="checkbox" name="people_permissions_confirmed" value="true" required'))
         self.assertIn('name="minor_permission_status"', home)
         self.assertEqual(home.count('type="radio" name="minor_permission_status"'), 2)
         self.assertNotIn(">Choose one<", home)
-        # Rounds are no longer asked for. They still post, derived from the
-        # video's real duration, so per-round scoring keeps working without
-        # putting two more questions in front of a first-time user.
+        # Rounds ARE asked for again, and as visible controls. Deriving them
+        # from the file's duration made every bout "1 x 71s" in the report: a
+        # 3x2min fight with breaks and a walk-off is eight minutes of footage,
+        # and no amount of reading the container tells you it was three twos.
+        # The sport's usual format is preselected so the common case is still
+        # one glance, and "use the whole video" stays for anyone unsure.
         self.assertIn('id="roundCount"', home)
         self.assertIn('id="roundSeconds"', home)
         self.assertIn("readDuration", home)
-        self.assertIn('name="fight_type" value="competition"', home)
+        for name in ("round_count", "round_duration_seconds", "fight_type"):
+            with self.subTest(field=name):
+                self.assertNotIn('type="hidden" name="%s"' % name, home)
+        # Sparring is a real choice, or the library's Sparring filter can never
+        # match anything - every upload was posted as a competition.
+        self.assertIn('<option value="sparring">', home)
+        self.assertIn('<option value="competition" selected>', home)
         # The ruleset is the one thing WarriorIQ cannot infer, so it stays.
         self.assertIn('name="ruleset"', home)
         self.assertNotIn('id="fightSettings"', home)
@@ -840,6 +907,37 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('name="focusFighter" value="B"', selection)
         self.assertIn('id="start"', selection)
         self.assertNotIn('name="focusFighter" value="BOTH"', selection)
+
+    def test_identity_canvas_reads_the_pixel_ratio_in_exactly_one_place(self):
+        # The canvas backing store is sized in device pixels and everything else
+        # on the page - pointer events, the image viewport, the boxes - is in CSS
+        # pixels. fit() reconciles the two with a single setTransform.
+        #
+        # The bug this guards against: the draw functions used to read
+        # window.devicePixelRatio themselves and multiply every coordinate by it.
+        # The backing store was sized with the ratio at fit time, the drawing used
+        # the ratio at draw time, and nothing re-fitted when the ratio changed -
+        # ResizeObserver only fires on a size change, while moving a window to a
+        # second monitor changes the ratio and nothing else. Measured with the real
+        # geometry functions, fit at ratio 1 then draw at ratio 2 put a box dragged
+        # at (100,80) 160x250 CSS px on screen at (200,160) 319x235.
+        #
+        # So: the ratio may be read in fit() and in the watcher that re-fits, and
+        # nowhere else. If a new draw function needs it, that is the bug coming
+        # back - scale in fit() instead.
+        root = Path(__file__).resolve().parents[1]
+        selection = (root / "app" / "templates" / "select.html").read_text(encoding="utf-8")
+        script = selection.split("{% block scripts %}", 1)[1]
+        code = "\n".join(
+            line for line in script.splitlines() if not line.lstrip().startswith("//"))
+
+        self.assertIn("ctx.setTransform(ratio,0,0,ratio,0,0)", code)
+        self.assertEqual(2, code.count("devicePixelRatio"), code)
+        self.assertIn("matchMedia", code)
+        self.assertIn("dppx", code)
+        # clearRect has to use the CSS size; canvas.width is in device pixels and
+        # would leave a stale band on screen at any ratio above 1.
+        self.assertIn("ctx.clearRect(0,0,cssWidth,cssHeight)", code)
 
     def test_home_hero_copy_starts_at_the_top_of_the_upload_card(self):
         css = self.client.get("/static/fixes.css").text
@@ -1019,6 +1117,80 @@ class PublicPageTests(unittest.TestCase):
             sharing=sharing, score_withheld=score_withheld, unavailable=[],
             kick_minimum=kick_minimum,
         )
+
+    def _render_identity(self, trusted):
+        from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
+        from app.main import _analysis_quality_summary, sport_identity
+
+        class Stub:
+            def __init__(self, **kw): self.__dict__.update(kw)
+            def __getattr__(self, key): return Stub()
+            def __getitem__(self, key): return Stub()
+            def __str__(self): return ""
+            def __bool__(self): return False
+            def __iter__(self): return iter(())
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        env = Environment(loader=FileSystemLoader(str(templates)), undefined=ChainableUndefined)
+        fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
+        report = json.loads(fixture.read_text(encoding="utf-8"))
+        report.setdefault("integrity", {})["identity_evidence_trusted"] = trusted
+        request = Stub(url=Stub(path="/report/abc"), state=Stub(account=None), cookies={}, headers={})
+        return env.get_template("result.html").render(
+            request=request, job_id="abc", report=report,
+            identity=sport_identity("kickboxing"),
+            report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
+            analysis_quality=_analysis_quality_summary(report), can_share=False,
+            sharing=None, score_withheld=None, unavailable=[], kick_minimum=None,
+        )
+
+    def test_the_identity_fix_is_the_first_thing_on_a_failed_report(self):
+        """It was roughly 2177px down, under everything the failure invalidated.
+
+        When identity fails there is no score, no per-fighter number and no
+        scorecard - the page has nothing to say until it is fixed. Putting the
+        one action that fixes it below all of that, while the header read
+        "Analysis complete", told the reader the opposite of the truth.
+        """
+        page = self._render_identity(trusted=False)
+        self.assertIn("Needs one quick step", page)
+        self.assertNotIn("Analysis complete", page)
+
+        # Above the fold means above the body, not merely present.
+        action = page.index('href="/select/abc"')
+        self.assertLess(action, page.index("Fighter identity check failed"),
+                        "the fix must come before the notice explaining it")
+        self.assertLess(action, 6000,
+                        "the fix belongs in the header block, not partway down the report")
+
+    def test_a_failed_report_attributes_nothing_to_either_fighter(self):
+        """It said both things on one page.
+
+        SCORE "Not scored" and "we have not credited strikes to either name",
+        then "Fighter A: 19 leg strikes", "Fighter B: 22", and a movement
+        scorecard reading 10-9 "Fighter A ahead". The strikes were seen; whose
+        they were is exactly what the failed check could not establish, so the
+        split is the part that has to go - not the count.
+        """
+        page = self._render_identity(trusted=False)
+        self.assertNotIn("Movement scorecard", page)
+        self.assertNotIn("Fighter A leg strikes", page)
+        self.assertNotIn("Fighter B leg strikes", page)
+        # The unattributed total survives, because it is still true.
+        self.assertIn("Leg strikes seen, both fighters", page)
+
+    def test_a_healthy_report_keeps_the_numbers_it_can_stand_behind(self):
+        page = self._render_identity(trusted=True)
+        self.assertIn("Fighter A leg strikes", page)
+        self.assertNotIn("Leg strikes seen, both fighters", page)
+
+    def test_a_healthy_report_is_not_told_it_needs_a_step(self):
+        page = self._render_identity(trusted=True)
+        self.assertIn("Analysis complete", page)
+        self.assertNotIn("Needs one quick step", page)
+        self.assertNotIn("Fighter identity check failed", page)
+        self.assertNotIn('href="/select/abc"', page)
 
     def test_evidence_timestamps_are_links_a_reader_can_actually_follow(self):
         """They were a raw Python list, and before that a button with no handler.
@@ -2214,12 +2386,43 @@ class UploadHandoffTests(unittest.TestCase):
         # Rate comes from a trailing window, not the average since the start.
         self.assertIn("samples.shift()", self.page)
 
-    def test_no_two_minute_round_default_can_truncate_a_fight(self):
+    def test_no_round_default_can_truncate_a_fight(self):
+        """Zero means the whole video, and it has to mean that in the code.
+
+        It used to mean it only by accident. build_round_schedule clamps the
+        round length with `max(1.0, ...)`, so a posted 0 became a ONE SECOND
+        round; nobody saw that because the page's JavaScript always overwrote
+        the field with the file's duration first. On a video whose duration the
+        browser could not read - the case the fallback exists for - it posted 0
+        and analysed one second.
+
+        Now that the length is a visible control a reader can genuinely leave
+        at "use the whole video", this is asserted against the scheduler rather
+        than against markup.
+        """
+        import types
         from pathlib import Path
 
-        self.assertIn('name="round_duration_seconds" value="0"', self.page)
+        from core.video import build_round_schedule
+
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
         self.assertIn("round_duration_seconds: float = Form(0.0)", source)
+
+        info = types.SimpleNamespace(duration=187.0, fps=30.0)
+        req = types.SimpleNamespace(
+            start_seconds=0.0, end_seconds=None, round_count=3,
+            round_duration_seconds=0.0, break_duration_seconds=60.0,
+            selected_rounds=None)
+        rounds = build_round_schedule(req, info)
+        self.assertEqual(len(rounds), 1, "zero length must collapse to one span")
+        self.assertAlmostEqual(rounds[0].end_seconds, 187.0, places=3)
+        self.assertTrue(rounds[0].selected)
+
+        # And a real format is still honoured rather than flattened.
+        req.round_duration_seconds, req.break_duration_seconds = 120.0, 0.0
+        three_twos = build_round_schedule(req, info)
+        self.assertEqual(len(three_twos), 2, "187s of footage holds two full two-minute rounds")
+        self.assertAlmostEqual(three_twos[0].end_seconds, 120.0, places=3)
 
 
 class HomepagePromiseTests(unittest.TestCase):
@@ -2572,6 +2775,60 @@ class RateLimitClientTests(unittest.TestCase):
         ):
             with self.subTest(route=name):
                 self.assertIn(scope, inspect.getsource(getattr(main, name)))
+
+
+class FocusFighterDefaultTests(unittest.TestCase):
+    """Which fighter gets the detailed report starts from the account's answer.
+
+    It was already a per-fight choice - the radio on /select posts
+    focus_fighter with the boxes and the job stores it - but the page hardcoded
+    Fighter A. "My identity in reports" on /profile drove only the progress
+    dashboard, so an athlete who had said they were Fighter B had to say it
+    again on every upload and silently got a report about their opponent
+    whenever they forgot.
+
+    The profile value is the default and nothing more. Which corner somebody is
+    in changes from fight to fight, so the per-fight radio still wins and
+    choosing on one fight never writes back to the profile.
+    """
+
+    def _checked(self, default_fighter, has_profile=True):
+        import app.main as webapp
+
+        job = {"id": "j1", "status": "selection",
+               "video_width": 1920, "video_height": 1080}
+        client = TestClient(webapp.app)
+        patches = [
+            mock.patch.object(webapp, "_authorized_job", return_value=job),
+            mock.patch.object(webapp, "_profile_id",
+                              return_value=1 if has_profile else None),
+        ]
+        if has_profile:
+            patches.append(mock.patch.object(
+                webapp, "get_profile",
+                return_value={"default_fighter": default_fighter}))
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            page = client.get("/select/j1").text
+        return [value for value, checked in re.findall(
+            r'name="focusFighter" value="([AB])"\s*(checked)?', page) if checked]
+
+    def test_the_profile_choice_is_the_one_already_selected(self):
+        self.assertEqual(["A"], self._checked("A"))
+        self.assertEqual(["B"], self._checked("B"))
+
+    def test_a_missing_or_nonsense_setting_falls_back_to_fighter_a(self):
+        for value in (None, "", "banana", "C"):
+            with self.subTest(value=value):
+                self.assertEqual(["A"], self._checked(value))
+        self.assertEqual(["A"], self._checked(None, has_profile=False))
+
+    def test_exactly_one_radio_is_ever_preselected(self):
+        # Two checked radios in one group is a silent browser-dependent choice.
+        for value in ("A", "B", None, "banana"):
+            with self.subTest(value=value):
+                self.assertEqual(1, len(self._checked(value)))
 
 
 class KeyboardFighterSelectionTests(unittest.TestCase):
@@ -2974,6 +3231,48 @@ class NavigationReachabilityTests(unittest.TestCase):
             len(set(found.values())), 1,
             f"the nav collapses at more than one width: {found}")
 
+    # Every width the shipped CSS currently switches on. The list can SHRINK
+    # freely - that is the migration onto the four documented values in
+    # style.css - but a new entry has to be added here deliberately, which is
+    # the point: this got to twenty-two because each one looked like a single
+    # harmless number at the time.
+    #
+    # 981 is not one of the ad-hoc ones. It is the min-width partner of 980, and
+    # max-width:980 / min-width:981 is how a two-sided boundary is written
+    # without a one-pixel overlap. Do not "consolidate" it into 980.
+    KNOWN_BREAKPOINTS = {
+        430, 440, 480, 560, 620, 650, 680, 700, 720, 760, 780,
+        850, 860, 900, 950, 980, 981, 1000, 1024, 1100, 1120, 1180,
+    }
+
+    def test_no_new_breakpoint_is_introduced(self):
+        """A ratchet, not a migration.
+
+        Twenty-two widths across seventy-one media queries is a real
+        maintainability problem and the audit is right to name it. It is not
+        currently a user-visible one: sweeping /, /pricing and
+        /analyze/kickboxing at 360, 430, 520, 620, 700, 850, 1000 and 1180
+        found zero horizontal overflow and navigation present at every width on
+        every page. Moving all seventy-one onto four values would change
+        behaviour at each of them to fix a defect measurement cannot find, so
+        the count is frozen rather than forced down in one pass.
+        """
+        from app.main import CSS_BUNDLE_TEXT
+
+        css = "\n".join(CSS_BUNDLE_TEXT.values())
+        conditions = [css[m.start():css.index("{", m.start())]
+                      for m in re.finditer(r"@media", css)]
+        widths = {int(w) for condition in conditions
+                  for w in re.findall(r"(?:max|min)-width:\s*(\d+)px", condition)}
+
+        added = widths - self.KNOWN_BREAKPOINTS
+        self.assertEqual(
+            set(), added,
+            f"new breakpoint(s) {sorted(added)}; use one of the four in "
+            f"style.css, or add it here on purpose")
+        # The four documented values must survive whatever else moves.
+        self.assertLessEqual({480, 620, 900, 1180}, widths)
+
     def test_the_mobile_menu_carries_everything_the_collapsed_bars_held(self):
         base = (Path(__file__).resolve().parents[1] / "app" / "templates"
                 / "base.html").read_text(encoding="utf-8")
@@ -3062,6 +3361,67 @@ class PlanBadgeTests(unittest.TestCase):
     def test_no_button_claims_to_preview_a_plan_it_cannot_show(self):
         page = self._render("free")
         self.assertNotIn("Preview this plan", page)
+
+    def test_a_closed_checkout_does_not_price_a_plan_nobody_can_buy(self):
+        """The page used to argue with itself.
+
+        It printed €9.99 to €89.99 as each card's headline price next to a
+        banner claiming every plan was free during early access, and neither
+        was true. Nothing makes a paid plan free: accounts.plan defaults to
+        'free', the only way off it is a per-account grant the operator makes
+        by hand, and checkout is shut, so nobody can be on a paid plan at all.
+
+        With payments disabled a paid card must not headline a price, because
+        that price cannot be charged today - it says what the plan will cost
+        instead. Starter is genuinely €0 forever and keeps its number.
+        """
+        import re
+
+        page = self._render("free")
+        self.assertIn("Paid plans are not open yet", page)
+        self.assertNotIn("Every plan below is free to use", page)
+
+        for card in re.split(r'(?=<section class="card pricing-card)', page):
+            key = re.search(r'data-plan="([^"]+)"', card)
+            if not key:
+                continue
+            card = card.split("</section>", 1)[0]
+            headline = re.search(r'class="plan-price">(.*?)</div>', card, re.S)
+            self.assertIsNotNone(headline, key.group(1))
+            headline = headline.group(1).strip()
+            if key.group(1) == "free":
+                self.assertEqual("€0", headline)
+            else:
+                self.assertEqual("Not open yet", headline, key.group(1))
+                # The real price still has to be visible, just not as the
+                # headline - hiding it would be the opposite mistake.
+                self.assertIn("when billing opens", card, key.group(1))
+
+    def test_a_paid_card_offers_one_action_and_it_is_about_that_plan(self):
+        """Pressing "Coach 30" used to look like it had selected Coach 30.
+
+        Each paid card carried "Open your workspace" first - a link to
+        /dashboard that does nothing about the plan - and the interest form
+        second, both styled as secondary. So the card had two actions, the more
+        prominent one was unrelated to it, and neither said which plan it meant.
+        Registering interest is the only thing the card can do while checkout is
+        closed, so it is the only button on it and it names its own plan.
+        """
+        import re
+
+        page = self._render("free")
+        for card in re.split(r'(?=<section class="card pricing-card)', page):
+            key = re.search(r'data-plan="([^"]+)"', card)
+            if not key or key.group(1) == "free":
+                continue
+            # Stop at the card's own closing tag; the last split otherwise
+            # carries the rest of the page, cookie banner included.
+            card = card.split("</section>", 1)[0]
+            buttons = re.findall(
+                r'<(?:a|button)[^>]*class="btn[^"]*"[^>]*>(.*?)</(?:a|button)>', card, re.S)
+            self.assertEqual(1, len(buttons), f"{key.group(1)}: {buttons}")
+            self.assertNotIn("Open your workspace", card, key.group(1))
+            self.assertIn("Tell us you want", buttons[0])
 
 
 class CoachFilenameTests(unittest.TestCase):

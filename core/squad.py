@@ -65,13 +65,26 @@ def fight_label(sport_label: str | None, ruleset: str | None, created_at: str | 
 
 
 def fight_choice_label(ruleset: str | None, created_at: str | None,
-                       fight_type: str | None) -> str:
+                       fight_type: str | None, fighter_name: str | None = None) -> str:
     """What to call a fight in a dropdown, built from what differs between them.
 
     The /compare selects listed "Fight analysis · 2026-09-02" six times and
     "· 2026-09-01" three times, which is not a choice but nine identical rows.
     Ruleset, time of day and fight type are all stored on the row already and
     are exactly what tells one from another.
+
+    The fighter's name leads when there is one. Somebody comparing seventeen
+    fights is almost always looking for a particular athlete first and the date
+    second, and a coach with several fighters cannot tell them apart by ruleset
+    and clock time at all. It stays optional because a fight can genuinely have
+    no fighter attached, and an empty lead would just push a stray separator in
+    front of every label.
+
+    Not done here: the audit also asks for a thumbnail per option. An <option>
+    element cannot contain an image in any browser - that needs a custom listbox
+    replacing a working <select>, which is a larger change than this item, and
+    it would have to keep the keyboard behaviour and the required-field gate
+    that the plain control gives for free.
     """
     stamp = ""
     if created_at:
@@ -81,6 +94,7 @@ def fight_choice_label(ruleset: str | None, created_at: str | None,
         except (TypeError, ValueError):
             stamp = str(created_at)[:10]
     parts = [
+        (fighter_name or "").strip(),
         RULESET_LABELS.get(ruleset or "", (ruleset or "").replace("_", " ").title()).strip(),
         stamp,
         (fight_type or "").replace("_", " ").strip(),
