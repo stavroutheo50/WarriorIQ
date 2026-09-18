@@ -4718,9 +4718,31 @@ class ShotChangeTests(unittest.TestCase):
 
     def test_the_upload_route_reports_rather_than_refuses(self):
         """The thresholds are fitted against five files of which exactly one is
-        edited. That is not a basis for rejecting somebody's fight."""
+        edited. That is not a basis for rejecting somebody's fight.
+
+        This used to look for the call on the request path. It is off that path
+        now - scanning the whole file was 2.44s of the 2.80s a user spent on a
+        finished progress bar, and all it produces is a log line and a security
+        event - so the check follows it into _record_shot_profile rather than
+        pinning where the work happens.
+
+        The guarantee is unchanged and slightly stronger: the old code sat
+        inside a try that unlinked the video and re-raised, so a crash while
+        counting cuts destroyed the upload. Now nothing escapes at all.
+        """
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
-        marker = source.index("shots = await run_in_threadpool(detect_shot_changes")
-        following = source[marker:marker + 1200]
-        self.assertIn("upload_looks_edited", following)
-        self.assertNotIn("raise HTTPException", following)
+
+        start = source.index("def _record_shot_profile")
+        body = source[start:source.index('@app.post("/upload"', start)]
+        self.assertIn("detect_shot_changes", body)
+        self.assertIn("upload_looks_edited", body)
+        # Reports. Never refuses, and never takes the upload down with it.
+        self.assertNotIn("raise", body)
+
+        # And it must not be back on the request path: exactly one call site,
+        # and it is the one above.
+        calls = [line for line in source.splitlines()
+                 if "detect_shot_changes" in line and not line.strip().startswith("#")]
+        self.assertEqual(
+            2, len(calls),                      # the import, and the call above
+            f"detect_shot_changes is called somewhere new: {calls}")
