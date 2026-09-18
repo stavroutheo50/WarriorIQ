@@ -43,6 +43,17 @@
           {% endfor %}
         </div>
         {% if mode == 'signup' %}<p class="social-auth-gate" id="socialGate">Accept the policies above to use these.</p>{% endif %}
+        {#- Sign-in only, and only for someone who already has one of these.
+            GitHub is no longer offered as a way to create an account, but an
+            account created through it has no password and may have no address
+            to reset one to, so removing its only door would lock that person
+            out. Not shown on /signup. -#}
+        {% if mode != 'signup' and request.state.legacy_oauth_providers %}
+        <p class="social-auth-legacy small muted">Signed up with
+          {%- for provider in request.state.legacy_oauth_providers %} {% if not loop.first %}or {% endif %}
+          <button class="text-link" type="submit" formaction="/auth/{{provider.key}}/start" formmethod="post" formnovalidate data-keep-label="true">{{provider.label}}</button>
+          {%- endfor %}? Use that to sign in.</p>
+        {% endif %}
       </div>
       <div class="auth-divider"><span>or continue with email</span></div>
       {% endif %}

@@ -46,6 +46,26 @@ PROVIDER_LABELS = {
     "microsoft": "Microsoft",
 }
 
+# Providers nobody may sign UP with any more, but that existing accounts still
+# need to sign IN with.
+#
+# Taking GitHub out of PROVIDER_LABELS removes the button from both pages, and
+# that is one step too far on a live site where GitHub was configured and could
+# have been used: those accounts have no password, and GitHub publishes a
+# profile email only when the account chose to, so some of them have no address
+# to send a password reset to either. Removing the only door they have is not
+# a tidy-up, it is a lockout.
+#
+# So the button is gone from /signup, where it was the wrong offer, and /login
+# keeps a quiet recovery line for people who already used it. New accounts
+# cannot be created this way; old ones are not stranded.
+#
+# This can be emptied once the owner confirms nothing depends on it:
+#     SELECT COUNT(*) FROM oauth_identities WHERE provider='github';
+LEGACY_PROVIDER_LABELS = {
+    "github": "GitHub",
+}
+
 # Where each provider's consent page lives.
 #
 # Pressing a social button submits a form, and the reply is a redirect to the
@@ -145,6 +165,19 @@ class SocialAuthRegistry:
         return [
             {"key": key, "label": PROVIDER_LABELS[key]}
             for key in PROVIDER_LABELS
+            if key in self._enabled
+        ]
+
+    @property
+    def legacy_provider_buttons(self) -> list[dict[str, str]]:
+        """Sign-in-only providers, for accounts that already use them.
+
+        Empty unless the provider is still configured, so removing the
+        credentials from the host removes the recovery line too.
+        """
+        return [
+            {"key": key, "label": LEGACY_PROVIDER_LABELS[key]}
+            for key in LEGACY_PROVIDER_LABELS
             if key in self._enabled
         ]
 

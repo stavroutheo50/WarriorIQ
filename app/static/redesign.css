@@ -732,6 +732,31 @@ fieldset.needs-attention {
   font-size: var(--wiq-text-xs);
 }
 
+/* Recovery line for a provider that no longer has a button: "Signed up with
+   GitHub? Use that to sign in."
+   It has to be a <button>, because starting a social sign-in is a form POST
+   carrying a CSRF token - an <a> cannot do it. So the button is reset back to
+   looking like the sentence it sits in. Without this it renders as a native
+   control: measured grey 240,240,240 with a 2px border in the middle of a line
+   of prose. The existing reset is scoped to .assign-note and does not reach
+   here. */
+.social-auth-legacy {
+  margin: 10px 0 0;
+  color: var(--wiq-text-tertiary);
+  font-size: var(--wiq-text-xs);
+}
+
+.social-auth-legacy .text-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: #7fb1ff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
 /* The score line is not the headline while strike scoring is untrained. It
    said "Withheld" in the largest type on the page, so the most prominent thing
    in a fighter's report was a refusal. */

@@ -983,6 +983,9 @@ async def viewer_context(request: Request, call_next):
     request.state.legal_is_draft = SETTINGS.legal_is_draft
     request.state.minimum_account_age = SETTINGS.minimum_account_age
     request.state.oauth_providers = SOCIAL_AUTH.provider_buttons
+    # Sign-in-only providers. /signup never offers these; /login shows a quiet
+    # recovery line so an account created through one is not stranded.
+    request.state.legacy_oauth_providers = SOCIAL_AUTH.legacy_provider_buttons
     request.state.cookie_preferences = _cookie_preferences(request)
     request.state.analytics_measurement_id = SETTINGS.analytics_measurement_id
     request.state.site_verification_token = SETTINGS.site_verification_token
