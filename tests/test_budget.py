@@ -7,6 +7,39 @@ from core.pose_tracker import QualityController
 
 
 class BudgetPlanTests(unittest.TestCase):
+    def setUp(self):
+        """One machine profile per test, because planning WRITES one.
+
+        _frame_cost prefers a stored cost and, when there is none, measures and
+        records it. So the first test in this class planned from its own 1.0s /
+        40 frames, wrote 0.023884 to machine_profile.json, and every later test
+        in the file planned from that instead of from its own numbers.
+
+        test_a_slow_run_samples_less describes 40 frames taking 30s - badly
+        behind - and expects the stride to rise. It read the fast cost the
+        previous test had just written, concluded it was comfortably inside
+        budget, and left the stride alone. Run on its own it passed. Run after
+        its neighbour it did not, and the assertion said "2 not greater than 2"
+        with nothing to suggest the cause was a file.
+
+        The failure alternated depending on which cost was in the file, which is
+        why chasing it looked like two unrelated bugs: with the developer's real
+        profile present (0.083081, stale - recorded before the TensorRT context
+        fix made frames far cheaper) it was test_a_run_already_inside_the_budget
+        that failed instead.
+        """
+        import os
+        import tempfile
+        from unittest import mock
+
+        handle, path = tempfile.mkstemp(prefix="warrioriq-profile-", suffix=".json")
+        os.close(handle)
+        os.unlink(path)                       # a path that does not exist yet
+        patcher = mock.patch.dict(os.environ, {"WARRIORIQ_MACHINE_PROFILE": path})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+
     def _controller(self, source_fps=31.22):
         return QualityController(source_fps, 480, 220)
 
