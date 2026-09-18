@@ -216,3 +216,53 @@ class PlanningIsReproducibleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PipelineVersionTests(unittest.TestCase):
+    """A stored cost must not outlive the pipeline that measured it.
+
+    Write-once is what makes two runs of one video plan the same stride. Its
+    failure mode is that a change making frames cheaper leaves the old number in
+    place for ever. That happened: fixing a second TensorRT execution context on
+    2026-09-18 made frames far cheaper on this machine, and the profile went on
+    saying 0.083081 s.
+
+    A machine slower than its profile misses its deadline and plan_for_budget
+    reports it. A machine FASTER than its profile silently reduces sampling,
+    because the stale number says it cannot afford the frames - measured here,
+    stride 2 cut to 3 with three times the needed headroom. Frames are identity
+    and strike evidence, and nothing reports that loss.
+    """
+
+    def setUp(self):
+        import tempfile
+        from unittest import mock
+
+        handle, path = tempfile.mkstemp(prefix="warrioriq-ver-", suffix=".json")
+        os.close(handle)
+        os.unlink(path)
+        self.path = path
+        patcher = mock.patch.dict(os.environ, {"WARRIORIQ_MACHINE_PROFILE": path})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+
+    def test_a_cost_from_an_older_pipeline_is_not_read(self):
+        import json
+
+        old_key = "%s@%d" % ("NVIDIA GeForce RTX 5060", 1600)   # the pre-version shape
+        with open(self.path, "w", encoding="utf-8") as handle:
+            json.dump({old_key: 0.083081}, handle)
+        self.assertIsNone(
+            machine_profile.frame_cost("NVIDIA GeForce RTX 5060", 1600),
+            "a cost measured by an older pipeline is still being planned from")
+
+    def test_a_cost_from_this_pipeline_is_read(self):
+        machine_profile.record_frame_cost("NVIDIA GeForce RTX 5060", 1600, 0.02)
+        self.assertIsNotNone(machine_profile.frame_cost("NVIDIA GeForce RTX 5060", 1600))
+
+    def test_the_version_is_part_of_the_key(self):
+        key = machine_profile._key("NVIDIA GeForce RTX 5060", 1600)
+        self.assertTrue(key.startswith(f"v{machine_profile.PIPELINE_VERSION}|"), key)
+        # Determinism within a version is the thing being protected.
+        self.assertEqual(key, machine_profile._key("NVIDIA GeForce RTX 5060", 1600))
