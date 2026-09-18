@@ -747,6 +747,32 @@ class Settings:
     # site. It is a claim about the documents, not about the deployment, which
     # is why it is separate from launch_readiness(): text can be reviewed while
     # the operator fields are still empty, and the reverse.
+    #
+    # TO CLEAR IT, once counsel has actually read the text:
+    #   set WARRIORIQ_LEGAL_DRAFT=0 in the host environment and restart.
+    #   cPanel's Python App panel wins over .env - load_dotenv() defaults to
+    #   override=False and skips any key already in the environment - so set it
+    #   in the panel, not only in the file.
+    #
+    # It is read in exactly one place, app/main.py setting
+    # request.state.legal_is_draft, and rendered by three templates:
+    # legal.html, privacy.html and legal_document.html, the last of which
+    # covers all twelve documents it renders. So one flag clears every page.
+    #
+    # **Do not flip it for a partial review.** One flag covering every document
+    # is the right shape for "counsel has read the set" and the wrong shape for
+    # "counsel has read Terms and Privacy". If the review comes back covering
+    # some documents and not others, the honest change is to make this
+    # per-document before clearing anything - clearing it globally would put
+    # "reviewed by a lawyer" on pages no lawyer has seen, which is a worse
+    # claim than the banner it removes.
+    #
+    # An audit asked for the banner to come off outright. Declined on
+    # 2026-09-18: the review had not happened yet, and removing a disclaimer
+    # you cannot back is a false implied claim, not a fix. The audit also
+    # looked for the exact string "DRAFT FOR COUNSEL REVIEW" - that string does
+    # not exist; the eyebrow reads "draft for counsel review" in lower case and
+    # the banner text is the sentence in the three templates above.
     legal_is_draft: bool = env_bool("WARRIORIQ_LEGAL_DRAFT", True)
 
     # Social sign-in is opt-in per provider. A provider is exposed only when
