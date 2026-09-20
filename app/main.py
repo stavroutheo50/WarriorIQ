@@ -17,6 +17,7 @@ import hashlib
 import secrets
 import zipfile
 from copy import deepcopy
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -25,7 +26,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 import cv2
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
                      Request, UploadFile)
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -37,6 +38,7 @@ from authlib.integrations.base_client.errors import OAuthError
 
 from app.state import (
     AnalysisRunLost, AnalysisStateNotPersisted, claim_next_job, create_job, delete_job,
+    analysis_run_directory, completed_artifact_directory, persist_completed_job,
     finalize_job_from_worker, get_job, list_jobs, prepare_job_run, record_worker_heartbeat,
     start_job_run, update_job, update_job_for_worker, wake_status, worker_status,
 )
@@ -84,7 +86,10 @@ from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
-from core.upload_security import looks_like_video, scan_upload
+from core.upload_security import (
+    UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, looks_like_video, scan_upload,
+    reserve_upload_storage, release_upload_storage,
+)
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
     refresh_identity_integrity,
@@ -106,6 +111,7 @@ from core.video import (
 
 app = FastAPI(title="WarriorIQ")
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
+app.add_middleware(UploadBodyLimitMiddleware)
 _oauth_cookie_secure = SETTINGS.public_base_url.lower().startswith("https://")
 def _session_secret() -> str:
     """A signing key that survives a restart and is shared across processes.
@@ -486,6 +492,48 @@ def _external_origin(request: Request) -> str:
     scheme = _external_scheme(request)
     host = _forwarded_header(request, "x-forwarded-host", request.headers.get("host", request.url.netloc))
     return f"{scheme}://{host}".lower()
+
+
+def _trusted_request_host(value: str) -> bool:
+    if not value or any(char in value for char in "/\\@?#, \t\r\n"):
+        return False
+    try:
+        parsed = urlsplit(f"//{value}")
+        _ = parsed.port
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return False
+    public_host = urlsplit(SETTINGS.public_base_url).hostname
+    allowed = {"localhost", "127.0.0.1", "::1", *SETTINGS.allowed_hosts}
+    if public_host:
+        allowed.update({public_host.lower(), f"www.{public_host.lower()}"})
+    if host in allowed:
+        return True
+    # Infrastructure reaches the application by address, not by name: a shared
+    # host's health check, a local probe, a container gateway. Rejecting those
+    # takes the whole site down for a header nobody chose, and an address
+    # cannot do the damage this check exists to prevent - every URL WarriorIQ
+    # emits is pinned by _public_base, so a Host header can never decide where
+    # a password-reset or OAuth token is sent.
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def _public_base(request: Request) -> str:
+    """Never let an incoming Host header choose where account tokens are sent."""
+    configured = SETTINGS.public_base_url
+    if configured:
+        parsed = urlsplit(configured)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise HTTPException(503, "The site's public address needs configuration.")
+        return configured
+    # Local development has no public origin. Host validation runs before routes.
+    if request.url.hostname in {"localhost", "127.0.0.1", "::1"}:
+        return str(request.base_url).rstrip("/")
+    return "https://warrioriq.eu"
 
 
 def _request_is_secure(request: Request) -> bool:
@@ -913,29 +961,95 @@ def _analysis_quality_summary(report: dict) -> dict:
     }
 
 
-def _save_upload_limited(upload: UploadFile, destination: Path, limit: int) -> None:
+def _save_upload_limited(upload: UploadFile, destination: Path, limit: int) -> str:
     free_before = shutil.disk_usage(destination.parent).free
     reserve = int(SETTINGS.minimum_free_storage_gb * 1024**3)
     if free_before <= reserve:
         raise HTTPException(507, "Fight uploads are temporarily paused while storage capacity is restored.")
     total = 0
+    digest = hashlib.sha256()
     try:
         with destination.open("wb") as handle:
             while chunk := upload.file.read(1024 * 1024):
                 total += len(chunk)
                 if total > limit:
                     raise HTTPException(413, "The uploaded file exceeds the maximum allowed size.")
-                if free_before - total <= reserve:
+                if free_before - total <= reserve or shutil.disk_usage(destination.parent).free - len(chunk) <= reserve:
                     raise HTTPException(507, "This upload would exceed WarriorIQ's private storage safety reserve.")
                 handle.write(chunk)
+                digest.update(chunk)
+        return digest.hexdigest()
     except Exception:
         destination.unlink(missing_ok=True)
         raise
 
 
+async def _admit_fight_upload(request: Request, call_next):
+    account = _account(request)
+    if not account:
+        return JSONResponse({"detail": "Create a free account or sign in to analyse a fight."}, status_code=401)
+    job_id = uuid.uuid4().hex[:12]
+    account_id = int(account["id"])
+    accepted = False
+    reserved = False
+    try:
+        _enforce_rate_limit(request, "fight-upload", 12, 600)
+        await run_in_threadpool(reserve_upload_storage, account_id, job_id, min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes))
+        reserved = await run_in_threadpool(reserve_analysis, account_id, job_id)
+        if not reserved:
+            return JSONResponse({"detail": "Your analysis allowance is used for this period. It will reset automatically."}, status_code=429)
+        request.state.upload_job_id = job_id
+        response = await call_next(request)
+        accepted = response.status_code in {201, 303}
+        return response
+    except UploadCapacityError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+    except HTTPException as exc:
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    finally:
+        # Nothing in here is awaited, deliberately. This is the finally of an
+        # async function, so every await is a point where a cancelled request -
+        # a phone that hung up mid-transfer, a shutdown - can skip the rest of
+        # the cleanup. A storage lease that outlives its request is not a leaked
+        # row: with max_pending_uploads at 2, two abandoned uploads lock the
+        # account out of uploading until the lease expires half an hour later.
+        # Both releases are single indexed deletes, so they cost less than the
+        # await they replace. Orphaned files are the one thing left best-effort,
+        # and cleanup_abandoned_processing_files already sweeps those.
+        if reserved and not accepted:
+            release_analysis(account_id, job_id)
+            # This ID was generated for this request; never touch a prior fight.
+            for path in UPLOADS.glob(f"{job_id}*"):
+                if path.is_file() and path.resolve().parent == UPLOADS.resolve():
+                    path.unlink(missing_ok=True)
+            job_dir = OUTPUTS / job_id
+            if job_dir.exists() and job_dir.resolve().parent == OUTPUTS.resolve():
+                shutil.rmtree(job_dir)
+            delete_job(job_id)
+            delete_legal_acceptances_for_resource(job_id)
+        release_upload_storage(job_id)
+
+
 @app.middleware("http")
 async def viewer_context(request: Request, call_next):
     global _last_guest_cleanup, _last_saved_video_cleanup
+    rejected_host = next(
+        (
+            candidate for candidate in (
+                request.headers.get("host", ""),
+                _forwarded_header(request, "x-forwarded-host", "") if request.headers.get("x-forwarded-host") else None,
+            )
+            if candidate is not None and not _trusted_request_host(candidate)
+        ),
+        None,
+    )
+    if rejected_host is not None:
+        # Name the host that was refused. Without this a deployment reached
+        # under a hostname nobody listed in WARRIORIQ_ALLOWED_HOSTS is a blank
+        # 400 with nothing to act on. Logged rather than recorded as a security
+        # event, so an unauthenticated request cannot drive a database write.
+        LOGGER.warning("untrusted_request_host host=%r path=%s", rejected_host[:120], request.url.path)
+        return JSONResponse({"detail": "Unrecognized website address."}, status_code=400)
     request_started = time.perf_counter()
     request_id = request.headers.get("x-request-id", "").strip()[:64] or uuid.uuid4().hex[:16]
     request.state.request_id = request_id
@@ -991,6 +1105,7 @@ async def viewer_context(request: Request, call_next):
     request.state.analytics_measurement_id = SETTINGS.analytics_measurement_id
     request.state.site_verification_token = SETTINGS.site_verification_token
     request.state.gtm_container_id = SETTINGS.gtm_container_id
+    request.state.external_ai_available = bool(os.getenv("OPENAI_API_KEY", "").strip())
     request.state.is_admin = _is_admin(request)
     request.state.noindex = (
         not SETTINGS.public_base_url
@@ -1022,9 +1137,13 @@ async def viewer_context(request: Request, call_next):
             return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
     now = time.monotonic()
     if now - _last_guest_cleanup > 600:
+        jobs_before_cleanup = dict(list_jobs())
+        cutoff = time.time() - SETTINGS.failed_upload_retention_hours * 3600
         protected = {
-            job_id for job_id, job in list_jobs()
-            if job.get("status") in {"selecting", "queued", "running"}
+            job_id for job_id, job in jobs_before_cleanup.items()
+            if job.get("status") in {"queued", "running"}
+            or (job.get("status") == "complete" and job.get("history_saved") is False and job.get("persist_result"))
+            or (job.get("status") == "selecting" and float(job.get("updated_at_epoch", 0)) > cutoff)
         }
         for job_id in cleanup_expired_guest_jobs(protected):
             delete_legal_acceptances_for_resource(job_id)
@@ -1040,21 +1159,31 @@ async def viewer_context(request: Request, call_next):
                     "video_retention_deleted", account_id=None, resource_type="fight",
                     resource_id=fight["job_id"], metadata={"scheduled": True},
                 )
+        jobs_before_cleanup = dict(list_jobs())
+        cutoff = time.time() - SETTINGS.failed_upload_retention_hours * 3600
         protected = {
-            job_id for job_id, job in list_jobs()
-            if job.get("status") in {"selecting", "queued", "running"}
+            job_id for job_id, job in jobs_before_cleanup.items()
+            if job.get("status") in {"queued", "running"}
+            or (job.get("status") == "complete" and job.get("history_saved") is False and job.get("persist_result"))
+            or (job.get("status") == "selecting" and float(job.get("updated_at_epoch", 0)) > cutoff)
         }
         saved = {item["job_id"] for item in list_all_fight_storage()}
         for abandoned_job_id in cleanup_abandoned_processing_files(
             protected, saved, older_than_hours=SETTINGS.failed_upload_retention_hours,
         ):
+            abandoned = jobs_before_cleanup.get(abandoned_job_id, {})
+            if abandoned.get("usage_reserved") and abandoned.get("account_id"):
+                release_analysis(int(abandoned["account_id"]), abandoned_job_id)
             delete_legal_acceptances_for_resource(abandoned_job_id)
             delete_job(abandoned_job_id)
             record_security_event(
                 "abandoned_processing_files_deleted", resource_type="fight", resource_id=abandoned_job_id,
             )
         _last_saved_video_cleanup = now
-    response = await call_next(request)
+    if is_fight_upload(request.scope):
+        response = await _admit_fight_upload(request, call_next)
+    else:
+        response = await call_next(request)
     duration_ms = (time.perf_counter() - request_started) * 1000.0
     response.headers.setdefault("X-Request-ID", request_id)
     response.headers.setdefault("Server-Timing", f"app;dur={duration_ms:.1f}")
@@ -1511,7 +1640,7 @@ def _analysis_request(job_id: str, job: dict, fighter_a_box: list[float], fighte
         job_id=job_id,
         profile_id=job.get("profile_id", 1),
         persist_result=bool(job.get("persist_result", False)),
-        openai_identity_recovery=bool(job.get("openai_identity_recovery", False)),
+        openai_identity_recovery=bool(job.get("openai_identity_recovery") and job.get("external_ai_opted_in")),
         fighter_id=job.get("fighter_id"),
     )
 
@@ -1526,12 +1655,13 @@ def _run_job(job_id: str, req: AnalysisRequest, analysis_run_id: str):
         if not start_job_run(job_id, worker_id, analysis_run_id):
             LOGGER.warning("analysis_run_not_started job_id=%s run_id=%s", job_id, analysis_run_id)
             return
-        report = _analyze(req, cb)
-        if not update_job_for_worker(job_id, worker_id, analysis_run_id, {
-            "status": "complete", "report": report, "percent": 100.0,
-            "message": "Complete", "worker_lease_expires_epoch": None,
-        }, renew_lease=False):
+        output_dir = analysis_run_directory(job_id, analysis_run_id)
+        report = _analyze(replace(req, output_dir=str(output_dir), persist_result=False), cb)
+        artifacts = {name: output_dir / name for name in ("tracking.jsonl", "events.json", "report.html") if (output_dir / name).is_file()}
+        if not finalize_job_from_worker(job_id, worker_id, analysis_run_id, report, artifacts):
             LOGGER.warning("analysis_completion_discarded job_id=%s run_id=%s", job_id, analysis_run_id)
+            return
+        _save_remote_fight(job_id, get_job(job_id), report)
     except AnalysisRunLost:
         # A newer run or recovery now owns this job. Never overwrite its state
         # or refund its already-reserved account allowance.
@@ -1674,7 +1804,7 @@ def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/
 
 
 def _oauth_redirect_uri(request: Request, provider: str) -> str:
-    base = SETTINGS.public_base_url or _external_origin(request)
+    base = _public_base(request)
     return f"{base}/auth/{provider}/callback"
 
 
@@ -1911,7 +2041,7 @@ def _send_verification_email(request: Request, account: dict) -> bool:
     token = session_token()
     expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
     save_email_verification_token(int(account["id"]), token_digest(token), expires)
-    base = SETTINGS.public_base_url or str(request.base_url).rstrip("/")
+    base = _public_base(request)
     verify_url = f"{base}/verify-email/{token}"
     try:
         return send_transactional_email(
@@ -2085,7 +2215,7 @@ def request_password_reset(request: Request, email: str = Form(...)):
         token = session_token()
         expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
         save_password_reset_token(int(account["id"]), token_digest(token), expires)
-        reset_url = f"{str(request.base_url).rstrip('/')}/reset-password/{token}"
+        reset_url = f"{_public_base(request)}/reset-password/{token}"
         try:
             delivered = send_transactional_email(
                 account["email"], "Reset your WarriorIQ password",
@@ -2363,12 +2493,8 @@ async def upload(
     round_duration_seconds: float = Form(0.0),
     break_duration_seconds: float = Form(60.0),
     selected_rounds: str = Form("ALL"),
-    # Always on. This used to be a checkbox on the setup page, which asked
-    # someone uploading their first fight to make a call about an external
-    # service before they had seen a single result. It is a no-op unless
-    # OPENAI_API_KEY is configured, so the choice that actually matters is the
-    # operator's, and it is made once in the environment rather than per fight.
-    openai_identity_recovery: bool = Form(True),
+    openai_identity_recovery: bool = Form(False),
+    external_ai_guardian_permission: bool = Form(False),
     # Which fighter this bout is about. Either an existing roster id, or a new
     # name typed on the setup page - a coach adding a fighter should not have
     # to go somewhere else first.
@@ -2378,7 +2504,6 @@ async def upload(
     people_permissions_confirmed: bool = Form(False),
     minor_permission_status: str = Form(""),
 ):
-    _enforce_rate_limit(request, "fight-upload", 12, 600)
     minor_permission_status = minor_permission_status.strip().lower()
     if (
         not rights_confirmed
@@ -2396,12 +2521,21 @@ async def upload(
         # anonymous browser session; the 401 lets the upload form send the
         # visitor to sign-in without losing what they filled in.
         raise HTTPException(401, "Create a free account or sign in to analyse a fight.")
-    allowance = analysis_allowance(int(account["id"]))
-    if allowance["remaining"] == 0:
-        raise HTTPException(429, f"Your {allowance['plan']['label']} allowance is used for this period. It will reset automatically.")
+    if openai_identity_recovery and not request.state.external_ai_available:
+        raise HTTPException(400, "Optional external identity recovery is unavailable.")
+    if openai_identity_recovery and minor_permission_status == "guardian_authorized" and not external_ai_guardian_permission:
+        raise HTTPException(400, "Parent or guardian permission is also needed before selected frames of minors can be sent to OpenAI.")
     if not video.filename:
         raise HTTPException(400, "Choose a fight video.")
-    job_id = uuid.uuid4().hex[:12]
+    job_id = getattr(request.state, "upload_job_id", None)
+    if not job_id:
+        # Admission control assigns this id after reserving the account's
+        # allowance and its storage lease. Reaching the handler without one
+        # means the two never ran, so accepting the video here would take
+        # footage nobody has capacity for. Refuse rather than proceed.
+        LOGGER.error("fight_upload_admission_skipped path=%s root_path=%r",
+                     request.url.path, request.scope.get("root_path", ""))
+        raise HTTPException(500, "WarriorIQ could not start this upload. Please try again.")
     suffix = Path(video.filename).suffix.lower() or ".mp4"
     if suffix not in {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}:
         raise HTTPException(400, "Unsupported video format.")
@@ -2409,7 +2543,7 @@ async def upload(
     video_path = UPLOADS / f"{job_id}{suffix}"
     # UploadFile uses a spooled file. Keep the blocking disk copy outside the
     # event loop so one large phone upload cannot freeze every other request.
-    await run_in_threadpool(_save_upload_limited, video, video_path, MAX_FIGHT_BYTES)
+    video_digest = await run_in_threadpool(_save_upload_limited, video, video_path, min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes))
 
     # Before the scanner and before the decoder: the suffix is chosen by
     # whoever names the file, so it says nothing about what is inside it.
@@ -2585,6 +2719,7 @@ async def upload(
         job_id,
         {
             "video_path": str(video_path),
+            "source_video_sha256": video_digest,
             "original_name": video.filename,
             "fight_type": fight_type.lower(),
             "analysis_target": analysis_target.upper(),
@@ -2603,11 +2738,13 @@ async def upload(
             "selection_frame": selection_frame,
             "profile_id": profile_id,
             "account_id": int(account["id"]) if account else None,
+            "usage_reserved": True,
             "persist_result": bool(account),
             "owner_key": _owner_key(request),
             "quality": quality,
             "upload_scan_status": scan["status"],
             "openai_identity_recovery": bool(openai_identity_recovery),
+            "external_ai_opted_in": bool(openai_identity_recovery),
             "fighter_id": chosen_fighter["id"] if chosen_fighter else None,
         },
     )
@@ -2637,7 +2774,9 @@ async def upload(
         record_legal_acceptance(
             "external_ai_frame_processing", SETTINGS.policy_version,
             resource_id=job_id,
-            metadata={"provider": "OpenAI", "purpose": "fighter_identity_recovery"},
+            metadata={"provider": "OpenAI", "purpose": "fighter_identity_recovery",
+                      "explicit_opt_in": True, "guardian_permission": bool(external_ai_guardian_permission),
+                      "minor_permission_status": minor_permission_status},
             **acceptance_owner,
         )
     next_url = f"/frame/{job_id}"
@@ -2747,15 +2886,7 @@ def detect_people(request: Request, job_id: str):
         raise HTTPException(500, "Could not read selection image")
     try:
         tracker = _get_pose_tracker()
-        tracker.warmup(frame)
-        results = tracker.model.predict(
-            frame,
-            device=tracker.device,
-            imgsz=SETTINGS.default_imgsz,
-            conf=SETTINGS.detection_conf,
-            classes=[0],
-            verbose=False,
-        )
+        results = tracker.predict_selection(frame)
     except Exception as exc:
         LOGGER.warning("Selection candidate detection unavailable: %s", type(exc).__name__)
         return {
@@ -2863,7 +2994,8 @@ def _remote_job_payload(job_id: str, job: dict) -> dict:
         "round_duration_seconds": float(job.get("round_duration_seconds", 120.0)),
         "break_duration_seconds": float(job.get("break_duration_seconds", 60.0)),
         "selected_rounds": job.get("selected_rounds"),
-        "openai_identity_recovery": bool(job.get("openai_identity_recovery", False)),
+        "openai_identity_recovery": bool(job.get("openai_identity_recovery") and job.get("external_ai_opted_in")),
+        "external_ai_opted_in": bool(job.get("external_ai_opted_in")),
     }
 
 
@@ -2897,39 +3029,7 @@ def _prepare_worker_archive(archive_path: Path, job_dir: Path, analysis_run_id: 
 
 
 def _save_remote_fight(job_id: str, job: dict, report: dict) -> None:
-    if not job.get("persist_result"):
-        return
-    performance = report.get("performance", {})
-    tracking = report.get("tracking", {})
-    scorecard = report.get("scorecard", {})
-    summary = {
-        "winner_estimate": scorecard.get("winner_estimate"),
-        "score_totals": scorecard.get("totals", {"A": None, "B": None}),
-        "analysis_seconds": performance.get("analysis_seconds"),
-        "video_seconds": performance.get("segment_duration_seconds"),
-        "within_budget": performance.get("within_video_length_budget"),
-        "fighter_A_coverage": tracking.get("fighter_A_coverage", 0.0),
-        "fighter_B_coverage": tracking.get("fighter_B_coverage", 0.0),
-        "progress_report": {
-            key: report.get(key, {})
-            for key in ("video", "setup", "integrity", "metrics", "statistics", "coaching", "training_plan")
-        },
-    }
-    save_fight(
-        job_id=job_id,
-        profile_id=int(job.get("profile_id", 0)),
-        original_name=str(job.get("original_name") or "Fight video"),
-        video_path=str(job["video_path"]),
-        report_path=str(OUTPUTS / job_id / "report.json"),
-        fight_type=str(job["fight_type"]),
-        ruleset=str(job["ruleset"]),
-        analysis_target=str(job.get("focus_fighter") or "A"),
-        summary=summary,
-        fighter_id=job.get("fighter_id"),
-        video_delete_after=(
-            datetime.now(timezone.utc) + timedelta(days=SETTINGS.saved_video_retention_days)
-        ).isoformat(),
-    )
+    persist_completed_job(job_id, str(job.get("analysis_run_id") or ""))
 
 
 @app.post("/api/worker/heartbeat", dependencies=[Depends(_require_remote_worker)])
@@ -2994,8 +3094,14 @@ def remote_worker_dataset_backfill(request: Request):
             skipped_no_consent += 1
             continue
         corrected = annotation.get("corrected") or {}
+        directory = completed_artifact_directory(job_id)
+        if directory is None:
+            skipped_no_tracking += 1
+            continue
         path = export_sequence(
             job_id, int(annotation["id"]), corrected, float(annotation["event_time"]),
+            tracking_path=directory / "tracking.jsonl",
+            source_fight_id=(get_job(job_id) or {}).get("source_video_sha256"),
         )
         if path:
             set_annotation_sequence(int(annotation["id"]), path)
@@ -3077,7 +3183,8 @@ async def remote_worker_complete(
         and existing.get("status") == "complete"
         and existing.get("worker_id") == worker_id
         and existing.get("analysis_run_id") == analysis_run_id
-        and (OUTPUTS / job_id / "report.json").is_file()
+        and completed_artifact_directory(job_id, existing) is not None
+        and (completed_artifact_directory(job_id, existing) / "report.json").is_file()
     ):
         # A worker may retry after the web server committed the result but the
         # success response was lost. Treat that exact generation as complete;
@@ -3281,7 +3388,7 @@ def _public_job_status(job_id: str, job: dict) -> dict:
         "job_id", "status", "percent", "message", "stage", "elapsed_seconds", "eta_seconds",
         "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
         "fighter_b_confidence", "current_round", "quality_mode", "live_event_mode",
-        "live_events", "provisional_stats", "latest_observation", "focus_fighter",
+        "live_events", "provisional_stats", "latest_observation", "focus_fighter", "analysis_run_id",
     }
     payload = {key: value for key, value in job.items() if key in public_fields}
     payload.setdefault("job_id", job_id)
@@ -3537,7 +3644,7 @@ def _sharing_state(request: Request, job_id: str, profile_id: int | None) -> dic
     for link in links:
         link["expires_label"] = _friendly_date(link.get("expires_at"))
     token = (request.query_params.get("share") or "").strip()
-    new_link = f"{str(request.base_url).rstrip('/')}/s/{token}" if token else None
+    new_link = f"{_public_base(request)}/s/{token}" if token else None
     revoked_raw = request.query_params.get("revoked")
     try:
         revoked = int(revoked_raw) if revoked_raw is not None else None
@@ -3561,11 +3668,21 @@ def _friendly_date(value: str | None) -> str:
         return ""
 
 
+def _require_completed_artifact(job_id: str, name: str) -> Path:
+    directory = completed_artifact_directory(job_id)
+    if directory is None or not (directory / name).is_file():
+        raise HTTPException(404, "This analysis has no completed result yet.")
+    return directory / name
+
+
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result_page(request: Request, job_id: str):
-    if not _authorized_job(request, job_id):
+    job = _authorized_job(request, job_id)
+    if not job:
         raise HTTPException(404)
-    path = OUTPUTS / job_id / "report.json"
+    if job.get("history_saved") is False:
+        persist_completed_job(job_id, str(job.get("analysis_run_id") or ""))
+    path = _require_completed_artifact(job_id, "report.json")
     if not path.exists():
         raise HTTPException(404)
     report = json.loads(path.read_text(encoding="utf-8"))
@@ -3627,7 +3744,7 @@ def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
     _enforce_rate_limit(request, "annotations", 300, 300)
     if not _account(request) or not _authorized_job(request, job_id) or not _request_plan(request).get("can_correct"):
         raise HTTPException(403, "Evidence corrections are available with a complete-report plan.")
-    report_path = OUTPUTS / job_id / "report.json"
+    report_path = _require_completed_artifact(job_id, "report.json")
     if not report_path.exists():
         raise HTTPException(404, "Fight report not found")
     fighter = payload.fighter.upper()
@@ -3673,7 +3790,11 @@ def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
     annotation_id = save_annotation(job_id, payload.event_time, report.get("setup", {}).get("ruleset", "K1"), predicted, corrected)
     profile = get_profile(_profile_id(request))
     training_consent = bool(profile and profile.get("allow_model_training"))
-    sequence_path = export_sequence(job_id, annotation_id, corrected, contact_time) if training_consent else None
+    sequence_path = export_sequence(
+        job_id, annotation_id, corrected, contact_time,
+        tracking_path=report_path.parent / "tracking.jsonl",
+        source_fight_id=(get_job(job_id) or {}).get("source_video_sha256"),
+    ) if training_consent else None
     set_annotation_sequence(annotation_id, sequence_path)
     return {
         "ok": True, "annotation_id": annotation_id,
@@ -3742,7 +3863,7 @@ def _review_candidates(report: dict, mode: str = "dataset") -> list[dict]:
 def review_evidence_page(request: Request, job_id: str, page: int = 1, mode: str = "scorecard"):
     if not _account(request) or not _authorized_job(request, job_id) or not _request_plan(request).get("can_correct"):
         raise HTTPException(403, "Evidence review is available with a complete-report plan.")
-    report_path = OUTPUTS / job_id / "report.json"
+    report_path = _require_completed_artifact(job_id, "report.json")
     if not report_path.exists():
         raise HTTPException(404)
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -3788,7 +3909,7 @@ def complete_evidence_review(
         raise HTTPException(403)
     if complete:
         mode = "dataset" if mode == "dataset" else "scorecard"
-        report_path = OUTPUTS / job_id / "report.json"
+        report_path = _require_completed_artifact(job_id, "report.json")
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
         refresh_identity_integrity(report)
         if not report.get("integrity", {}).get("identity_evidence_trusted", True):
@@ -3919,7 +4040,7 @@ def replay_page(
 ):
     if not _authorized_job(request, job_id):
         raise HTTPException(404)
-    path = OUTPUTS / job_id / "report.json"
+    path = _require_completed_artifact(job_id, "report.json")
     if not path.exists():
         raise HTTPException(404)
     report = json.loads(path.read_text(encoding="utf-8"))
@@ -3951,21 +4072,39 @@ def replay_page(
     )
 
 
-@app.get("/api/tracking/{job_id}")
-def tracking_data(request: Request, job_id: str):
-    if not _authorized_job(request, job_id):
-        raise HTTPException(404)
-    path = OUTPUTS / job_id / "tracking.jsonl"
-    if not path.exists():
-        raise HTTPException(404)
-    frames = []
-    with path.open("r", encoding="utf-8") as handle:
+def _tracking_response_chunks(path: Path):
+    """Keep server memory bounded instead of rebuilding an entire replay array."""
+    yield b'{"frames":['
+    chunks = []
+    size = 0
+    first = True
+    with path.open("rb") as handle:
         for line in handle:
             try:
-                frames.append(json.loads(line))
-            except json.JSONDecodeError:
+                json.loads(line)
+            except (ValueError, UnicodeError):
                 continue
-    return JSONResponse({"frames": frames})
+            chunk = (b"" if first else b",") + line.strip()
+            first = False
+            chunks.append(chunk)
+            size += len(chunk)
+            if size >= 64 * 1024:
+                yield b"".join(chunks)
+                chunks.clear()
+                size = 0
+    if chunks:
+        yield b"".join(chunks)
+    yield b"]}"
+
+
+@app.get("/api/tracking/{job_id}")
+def tracking_data(request: Request, job_id: str, run: str | None = None):
+    if not _authorized_job(request, job_id):
+        raise HTTPException(404)
+    path = _require_completed_artifact(job_id, "tracking.jsonl")
+    if run and path.parent.name != run:
+        raise HTTPException(409, "This fight has a newer analysis. Open its current report to replay it.")
+    return StreamingResponse(_tracking_response_chunks(path), media_type="application/json")
 
 
 @app.get("/fighter-portrait/{job_id}/{fighter}")
@@ -4292,7 +4431,8 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     # table, still captioned "Choose two different saved fights" as though
     # they had not chosen. It also makes the "two fights required" gate above
     # count what it is actually gating on.
-    fights = [f for f in fights if (OUTPUTS / str(f["job_id"]) / "report.json").exists()]
+    fights = [f for f in fights if completed_artifact_directory(f["job_id"]) is not None
+              and (completed_artifact_directory(f["job_id"]) / "report.json").is_file()]
     for fight in fights:
         # Every option read "Fight analysis · <date>", so a reader with six
         # fights on one day was choosing between six identical lines.
@@ -4302,8 +4442,10 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     allowed = {fight["job_id"] for fight in fights}
     reports = []
     for job_id in (a, b):
-        path = OUTPUTS / job_id / "report.json"
-        report = json.loads(path.read_text(encoding="utf-8")) if job_id in allowed and path.exists() else None
+        report = None
+        if job_id in allowed:
+            path = _require_completed_artifact(job_id, "report.json")
+            report = json.loads(path.read_text(encoding="utf-8"))
         if report is not None:
             _apply_report_annotations(report, [])
             refresh_identity_integrity(report)
@@ -4958,7 +5100,7 @@ def shared_report(request: Request, token: str):
     share = get_report_share(token_digest(token))
     if not share:
         raise HTTPException(404)
-    path = OUTPUTS / share["job_id"] / "report.json"
+    path = _require_completed_artifact(share["job_id"], "report.json")
     if not path.exists():
         raise HTTPException(404)
     report = json.loads(path.read_text(encoding="utf-8"))
@@ -5117,7 +5259,7 @@ def checkout(request: Request, plan_key: str, billing_acceptance: bool = Form(Fa
         profile_id=int(account["profile_id"]), resource_id=plan_key,
         metadata={"price": PLANS[plan_key]["price"], "period": PLANS[plan_key]["period"]},
     )
-    base = str(request.base_url).rstrip("/")
+    base = _public_base(request)
     try:
         url = create_checkout(
             plan_key, f"{base}/purchase/confirmation?session_id={{CHECKOUT_SESSION_ID}}", f"{base}/pricing?cancelled=1",

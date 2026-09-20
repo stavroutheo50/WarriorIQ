@@ -18,6 +18,8 @@ from starlette.responses import RedirectResponse
 import app.main as webapp
 import core.db as database
 import core.retention as retention
+import core.upload_security as upload_security
+from app import state
 from app.main import GUEST_COOKIE, SESSION_COOKIE, app
 from app.state import create_job, delete_job
 from core.auth import register
@@ -55,6 +57,13 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         webapp.UPLOADS = Path(self.temp.name) / "uploads"
         retention.OUTPUTS = webapp.OUTPUTS
         retention.UPLOADS = webapp.UPLOADS
+        for module, name, value in (
+            (state, "OUTPUTS", webapp.OUTPUTS), (state, "_jobs", {}),
+            (upload_security, "OUTPUTS", webapp.OUTPUTS), (upload_security, "UPLOADS", webapp.UPLOADS),
+        ):
+            patcher = patch.object(module, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         webapp.OUTPUTS.mkdir()
         webapp.UPLOADS.mkdir()
         database.init_db()
@@ -1356,6 +1365,13 @@ class PlanRosterLimitTests(unittest.TestCase):
         database.DB_PATH = Path(self.temp.name) / "plans.sqlite3"
         webapp.UPLOADS = Path(self.temp.name) / "uploads"
         webapp.OUTPUTS = Path(self.temp.name) / "outputs"
+        for module, name, value in (
+            (state, "OUTPUTS", webapp.OUTPUTS), (state, "_jobs", {}),
+            (upload_security, "OUTPUTS", webapp.OUTPUTS), (upload_security, "UPLOADS", webapp.UPLOADS),
+        ):
+            patcher = patch.object(module, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         webapp.UPLOADS.mkdir()
         webapp.OUTPUTS.mkdir()
         database.init_db()
@@ -1372,7 +1388,8 @@ class PlanRosterLimitTests(unittest.TestCase):
     def _upload_named(self, name):
         from core.types import VideoInfo
         info = VideoInfo("f.mp4", 30.0, 900, 640, 360, 30.0)
-        with patch.object(webapp, "get_video_info", return_value=info), \
+        with patch.object(webapp, "reserve_analysis", return_value=True), \
+             patch.object(webapp, "get_video_info", return_value=info), \
              patch.object(webapp, "scan_upload", return_value={"clean": True, "status": "clean"}), \
              patch.object(webapp, "inspect_video_quality", return_value={"status": "good", "score": 90}), \
              patch.object(webapp, "probe_upload", return_value=(0, [])), \

@@ -40,6 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.config import DB_PATH, OUTPUTS
+from app.state import completed_artifact_directory
 from core.temporal_model import ACTION_CLASSES
 
 STRIP_FRAMES = 6
@@ -47,7 +48,10 @@ THUMB_HEIGHT = 230
 
 
 def _read_tracking(job: str) -> dict[int, dict]:
-    path = OUTPUTS / job / "tracking.jsonl"
+    directory = completed_artifact_directory(job)
+    if directory is None:
+        raise SystemExit("This analysis has no completed generation yet")
+    path = directory / "tracking.jsonl"
     if not path.exists():
         raise SystemExit("no tracking at %s - run the analysis for this job first" % path)
     out: dict[int, dict] = {}
@@ -62,7 +66,10 @@ def _read_tracking(job: str) -> dict[int, dict]:
 
 
 def _read_events(job: str) -> list[dict]:
-    path = OUTPUTS / job / "events.json"
+    directory = completed_artifact_directory(job)
+    if directory is None:
+        raise SystemExit("This analysis has no completed generation yet")
+    path = directory / "events.json"
     if not path.exists():
         raise SystemExit("no events at %s" % path)
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -302,10 +309,15 @@ def _video_for(job):
 def _packable_jobs():
     """Every analysed job whose video is still on disk, newest first."""
     found = []
-    reports = sorted(Path("outputs").glob("*/report.json"),
-                     key=lambda q: q.stat().st_mtime, reverse=True)
-    for report in reports:
-        job = report.parent.name
+    reports = []
+    for job_dir in OUTPUTS.iterdir():
+        if not job_dir.is_dir():
+            continue
+        directory = completed_artifact_directory(job_dir.name)
+        if directory is not None and (directory / "report.json").is_file():
+            reports.append((job_dir.name, directory / "report.json"))
+    reports.sort(key=lambda item: item[1].stat().st_mtime, reverse=True)
+    for job, report in reports:
         video = _video_for(job)
         if video:
             found.append((job, video))

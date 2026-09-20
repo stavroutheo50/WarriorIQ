@@ -38,14 +38,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-OUTPUTS = PROJECT_ROOT / "outputs"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.state import completed_artifact_directory
 MARKS_DIR = PROJECT_ROOT / "labelpack"
 MAX_BODY_BYTES = 4 * 1024 * 1024
 
 
 def load_tracking(job: str) -> list[dict]:
     """The analysed frames, reduced to what the overlay needs."""
-    path = OUTPUTS / job / "tracking.jsonl"
+    directory = completed_artifact_directory(job)
+    if directory is None:
+        raise SystemExit("This analysis has no completed generation yet")
+    path = directory / "tracking.jsonl"
     if not path.exists():
         raise SystemExit(f"no tracking record at {path}")
     frames = []

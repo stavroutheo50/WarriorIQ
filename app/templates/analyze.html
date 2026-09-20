@@ -112,6 +112,12 @@
       {% endif %}
 
       <fieldset class="upload-consent card-inset"><legend>Three quick questions</legend><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>This is my video, or I have the right to upload it.</span></label><label class="check"><input type="checkbox" name="people_permissions_confirmed" value="true" required> <span>Everyone in the video is OK with me uploading it.</span></label><fieldset class="minor-permission"><legend id="minorPermissionLabel">Is anyone in the video under 18?</legend><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No, all 18 or over</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes, and a parent or guardian said OK</span></label></fieldset><p class="small muted">TV footage still needs permission. <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
+      {% if request.state.external_ai_available %}
+      <fieldset class="upload-consent card-inset"><legend>Optional tracking recovery</legend>
+        <label class="check"><input type="checkbox" name="openai_identity_recovery" value="true"> <span>Allow selected frames to be sent to OpenAI if WarriorIQ loses track of a fighter. Leaving this off keeps identity recovery local. <a class="text-link" href="/subprocessors" target="_blank" rel="noopener">Processing details</a>.</span></label>
+        <label class="check" id="externalGuardianChoice" hidden><input type="checkbox" name="external_ai_guardian_permission" value="true"> <span>I have parent or guardian permission for selected frames showing minors to be sent to OpenAI for this purpose.</span></label>
+      </fieldset>
+      {% endif %}
       <p class="upload-validation" id="uploadValidation" role="status" aria-live="polite" hidden></p>
       <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Starting upload…" data-motion-primary disabled>Choose a video to continue</button>
       <div class="upload-progress" id="uploadProgress" role="status" aria-live="polite" hidden><span><i id="uploadProgressBar"></i></span><b id="uploadProgressText">Uploading fight video…</b><small id="uploadProgressHint">Keep this tab open — you can keep reading the page. WarriorIQ moves you on by itself.</small></div>
@@ -227,6 +233,9 @@
   // being asked. It is a real checkbox now.
   const peopleBox=form.querySelector('[name="people_permissions_confirmed"]');
   const minorRadios=[...form.querySelectorAll('[name="minor_permission_status"]')];
+  const externalRecovery=form.querySelector('[name="openai_identity_recovery"]');
+  const externalGuardian=form.querySelector('[name="external_ai_guardian_permission"]');
+  const needsExternalGuardian=()=>Boolean(externalRecovery?.checked&&minorRadios.some(r=>r.checked&&r.value==='guardian_authorized'));
   const outstanding=()=>{
     const missing=[];
     if(!videoInput.files[0])missing.push({text:'choose a fight video',field:videoInput});
@@ -234,8 +243,11 @@
     if(peopleBox&&!peopleBox.checked)missing.push({text:'confirm the people in it agreed',field:peopleBox});
     if(minorRadios.length&&!minorRadios.some(r=>r.checked))
       missing.push({text:'answer the under-18 question',field:minorRadios[0]});
+    if(needsExternalGuardian()&&!externalGuardian.checked)
+      missing.push({text:'confirm permission for external processing of minors’ frames',field:externalGuardian});
     return missing};
   const syncSubmit=()=>{
+    if(externalGuardian){const needed=needsExternalGuardian();externalGuardian.closest('label').hidden=!needed;externalGuardian.required=needed;if(!needed)externalGuardian.checked=false}
     const missing=outstanding();
     uploadSubmit.disabled=missing.length>0;
     if(!validation)return;
@@ -249,7 +261,7 @@
       if(holder)holder.classList.add('needs-attention')});
   };
   form.addEventListener('change',event=>{
-    if(event.target.name==='rights_confirmed'||event.target.name==='people_permissions_confirmed'||event.target.name==='minor_permission_status')syncSubmit()});
+    if(['rights_confirmed','people_permissions_confirmed','minor_permission_status','openai_identity_recovery','external_ai_guardian_permission'].includes(event.target.name))syncSubmit()});
   const setReady=()=>{const file=videoInput.files[0];
     if(file){const problem=fileProblem(file);if(problem){rejectFile(problem);return}}
     const ready=Boolean(file);

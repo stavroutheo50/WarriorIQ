@@ -27,6 +27,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.state import completed_artifact_directory
+
 VIDEOS = {
     "fam3": "fights/1.mp4",
     "f2_gateh": "fights/0-02-05-5736bb3acb024e3772ad5fd6341d0b6768ccece93b7c329dcfa26f3ec1478f00_d242ef68be9b3ffe.mp4",
@@ -36,7 +38,10 @@ VIDEOS = {
 
 def _tracking(job: str) -> dict[int, dict]:
     records = {}
-    for line in (PROJECT_ROOT / "outputs" / job / "tracking.jsonl").read_text(encoding="utf-8").splitlines():
+    directory = completed_artifact_directory(job)
+    if directory is None:
+        raise ValueError("This analysis has no completed generation yet")
+    for line in (directory / "tracking.jsonl").read_text(encoding="utf-8").splitlines():
         try:
             record = json.loads(line)
         except ValueError:

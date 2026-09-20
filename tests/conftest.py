@@ -41,6 +41,7 @@ _RUNTIME = pathlib.Path(tempfile.mkdtemp(prefix="warrioriq-tests-"))
 os.environ["WARRIORIQ_DB_PATH"] = str(_RUNTIME / "warrioriq.sqlite3")
 os.environ["WARRIORIQ_UPLOADS_DIR"] = str(_RUNTIME / "uploads")
 os.environ["WARRIORIQ_OUTPUTS_DIR"] = str(_RUNTIME / "outputs")
+os.environ["WARRIORIQ_ALLOWED_HOSTS"] = "testserver,warrioriq.eu,warrioriq.onrender.com"
 # The machine profile is written too, and by a path nobody expects: planning a
 # budget calls _frame_cost, which RECORDS the cost it measured when nothing is
 # stored yet. So merely running the budget tests wrote a frame cost into the

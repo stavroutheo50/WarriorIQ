@@ -1,0 +1,6 @@
+# Optional runtime dependencies only; see README before installing RTMLib.
+# Tested CUDA 12 runtime; do not install together with onnxruntime (CPU).
+numpy>=1.26,<3
+opencv-python>=4.10
+tqdm>=4.66
+onnxruntime-gpu==1.26.0

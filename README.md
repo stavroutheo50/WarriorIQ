@@ -50,6 +50,86 @@ withholds any claim the footage cannot support.
 
 
 
+## Dependency installation
+
+Use separate Python 3.10+ virtual environments for the web server and analysis
+worker. Do not install both requirement files into one environment: the web
+server uses `opencv-python-headless`, while Ultralytics requires `opencv-python`;
+both own the same `cv2` package.
+
+For a fresh web environment:
+
+```text
+python -m pip install -r requirements-web.txt
+python -m pip check
+```
+
+For a fresh analysis worker (the core PyTorch/YOLO/SAM pipeline):
+
+```text
+python -m pip install -r requirements.txt
+python -m pip check
+```
+
+The Torch, Torchvision and Ultralytics versions match the tested worker. Torch
+2.11 requires `setuptools<82`, which the manifest enforces. On NVIDIA CUDA 12.8
+workers, install the matching Torch builds into the fresh environment first:
+
+```text
+python -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128
+python -m pip install -r requirements.txt
+```
+
+The main requirements deliberately do not select an ONNX Runtime or RTMLib
+backend. The optional RTMPose refinement improves difficult small-fighter poses;
+a core-only installation does not provide that refinement and is not equivalent
+to the existing fully configured analysis worker.
+
+### Optional RTMPose refinement
+
+RTMLib 0.0.16 is the current upstream release. Its metadata requires both OpenCV
+distributions and the CPU ONNX Runtime even for a GPU installation. A normal
+`pip install rtmlib` therefore installs overlapping packages. Until upstream
+corrects that metadata, this optional integration needs an explicit exception.
+In a fresh worker environment, choose **one** of these runtime profiles:
+
+```text
+python -m pip install -r requirements-rtm-cpu.txt
+```
+
+Or, for the CUDA 12.8 worker:
+
+```text
+python -m pip install -r requirements-rtm-cuda12.txt
+```
+
+Then install the exact optional library without letting its conflicting metadata
+replace the chosen runtime. Every runtime dependency it uses is declared in the
+chosen profile:
+
+```text
+python -m pip install --no-deps rtmlib==0.0.16
+python -c "import torch, cv2, onnxruntime; from rtmlib import RTMPose; print(onnxruntime.get_available_providers())"
+```
+
+Set `WARRIORIQ_RTM_POSE_DEVICE=cpu` for the CPU profile, or `cuda` for the CUDA
+profile, and retain `WARRIORIQ_RTM_POSE=true`. A CUDA worker must expose
+`CUDAExecutionProvider`; also inspect the actual RTMPose session provider during
+a real analysis because an advertised provider alone does not prove CUDA loaded.
+Keep the existing CUDA 12 runtime pin until a different version is benchmarked.
+
+This optional workaround is **not** a clean `pip check`: RTMLib still declares
+`opencv-contrib-python`, and the GPU profile also lacks the declared CPU
+`onnxruntime`. Those precise metadata warnings are expected; unrelated warnings
+are not. Do not install the conflicting packages to silence them. Keep an
+environment snapshot and validate a real pose inference before using a newly
+built worker in production. Do not uninstall packages from an existing working
+worker to switch profiles; provision and validate a separate environment first.
+
+The requirement files are compatibility manifests, not complete transitive lock
+files. Save the resolved environment after deployment validation for exact
+reproduction; do not claim a fresh resolver run is identical to an existing one.
+
 ## First professional-workspace setup
 
 Open **Create account** in the local website. The first local account safely claims the existing athlete profile and its saved fight library, so previous analyses are not lost. Later local accounts receive separate profiles and cannot access another profile's library, comparisons, assignments, media or reports.
@@ -90,7 +170,7 @@ Read `PRODUCTION_LAUNCH_CHECKLIST.md` before any public deployment. Passing the 
 
 ## Render deployment
 
-The repository includes `render.yaml`. Render should build with `pip install -r requirements.txt`, start with `python run.py`, and probe `/health`. `run.py` reads Render's `PORT`, binds to `0.0.0.0`, trusts proxy headers through Uvicorn, and does not open a desktop browser in production.
+The repository includes `render.yaml`. Render should build with `pip install -r requirements-web.txt`, start with `python run.py`, and probe `/health`. `run.py` reads Render's `PORT`, binds to `0.0.0.0`, trusts proxy headers through Uvicorn, and does not open a desktop browser in production.
 
 Set `WARRIORIQ_PUBLIC_BASE_URL` to the final public HTTPS origin, for example `https://warrioriq.onrender.com`. Add the verified operator and legal-contact values listed in `.env.example` before paid public launch. Render supplies `RENDER` and `PORT`; do not create replacements for them. The web interface now starts without importing Torch, Ultralytics, or SAM2. Fighter selection remains available through manual box drawing when optional candidate detection is disabled or unavailable.
 

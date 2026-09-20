@@ -228,10 +228,11 @@ class DurableAnalysisStateTests(TestCase):
                         with self.assertRaises(state.AnalysisStateNotPersisted):
                             state.prepare_job_run("strand-job", {})
 
-                        # In-process runs keep the job in memory, so a failed
-                        # write must not block a local PyCharm analysis.
+                        # Local runs now publish through the same durable
+                        # generation boundary; memory alone is not sufficient.
                         object.__setattr__(SETTINGS, "analysis_worker_mode", "inprocess")
-                        self.assertTrue(state.prepare_job_run("strand-job", {}))
+                        with self.assertRaises(state.AnalysisStateNotPersisted):
+                            state.prepare_job_run("strand-job", {})
                     state.delete_job("strand-job")
             finally:
                 object.__setattr__(SETTINGS, "analysis_worker_mode", previous_mode)
@@ -314,8 +315,10 @@ class DurableAnalysisStateTests(TestCase):
                     )
                     self.assertEqual(completed.status_code, 201)
                     self.assertEqual(state.get_job("remote-job")["status"], "complete")
-                    self.assertTrue((outputs / "remote-job" / "report.json").is_file())
-                    self.assertTrue((outputs / "remote-job" / "tracking.jsonl").is_file())
+                    published = state.completed_artifact_directory("remote-job")
+                    self.assertEqual(published, state.analysis_run_directory("remote-job", run_id))
+                    self.assertTrue((published / "report.json").is_file())
+                    self.assertTrue((published / "tracking.jsonl").is_file())
                     repeated = client.post(
                         "/api/worker/jobs/remote-job/complete", headers=headers,
                         data={"worker_id": "gpu-test", "analysis_run_id": run_id},

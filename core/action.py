@@ -402,6 +402,13 @@ class ActionEngine:
         self.states = {"A": FighterActionState(), "B": FighterActionState()}
         self.temporal = TemporalModel()
 
+    def interrupt(self, fighter_name: str) -> None:
+        """Discard unfinished actions when observation or active fighting stops."""
+        state = self.states[fighter_name]
+        state.samples.clear()
+        state.features.clear()
+        state.active.clear()
+
     def _make_sample(
         self,
         frame: int,
@@ -438,8 +445,14 @@ class ActionEngine:
         opponent_identity_confidence: float = 1.0,
     ) -> list[StrikeEvent]:
         if fighter is None or fighter.keypoints is None or len(fighter.keypoints) < 17:
+            self.interrupt(fighter_name)
             return []
         state = self.states[fighter_name]
+        previous = state.samples[-1] if state.samples else None
+        if previous is not None and (
+            round_number != previous.round_number or seconds <= previous.time
+        ):
+            self.interrupt(fighter_name)
         sample = self._make_sample(
             frame,
             seconds,

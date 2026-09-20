@@ -70,7 +70,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.state import (
-    AnalysisRunLost, claim_next_job, get_job, record_worker_heartbeat,
+    AnalysisRunLost, analysis_run_directory, persist_completed_job,
+    finalize_job_from_worker, claim_next_job, get_job, record_worker_heartbeat,
     update_job, update_job_for_worker,
 )
 from core.config import OUTPUTS, SETTINGS
@@ -100,8 +101,9 @@ def _request_from_job(job_id: str, job: dict) -> AnalysisRequest:
         end_seconds=job.get("end_seconds"),
         job_id=job_id,
         profile_id=int(job.get("profile_id", 0)),
-        persist_result=bool(job.get("persist_result", False)),
-        openai_identity_recovery=bool(job.get("openai_identity_recovery", False)),
+        persist_result=False,
+        output_dir=str(analysis_run_directory(job_id, str(job["analysis_run_id"]))) if job.get("analysis_run_id") else None,
+        openai_identity_recovery=bool(job.get("openai_identity_recovery") and job.get("external_ai_opted_in")),
         fighter_id=job.get("fighter_id"),
     )
 
@@ -118,11 +120,12 @@ def run_claimed_job(worker_id: str, job_id: str, job: dict) -> None:
 
     try:
         report = analyze(_request_from_job(job_id, job), progress)
-        if not update_job_for_worker(job_id, worker_id, analysis_run_id, {
-            "status": "complete", "report": report, "percent": 100.0,
-            "message": "Complete", "worker_lease_expires_epoch": None,
-        }, renew_lease=False):
+        output_dir = analysis_run_directory(job_id, analysis_run_id)
+        artifacts = {name: output_dir / name for name in ("tracking.jsonl", "events.json", "report.html") if (output_dir / name).is_file()}
+        if not finalize_job_from_worker(job_id, worker_id, analysis_run_id, report, artifacts):
             LOGGER.warning("Analysis completion discarded for superseded job %s", job_id)
+            return
+        persist_completed_job(job_id, analysis_run_id)
     except AnalysisRunLost:
         LOGGER.warning("Analysis worker lost ownership of job %s; stale output was discarded", job_id)
     except Exception as exc:
@@ -217,8 +220,8 @@ def _remote_request(job: dict, video_path: Path) -> AnalysisRequest:
     return _request_from_job(str(job["job_id"]), payload)
 
 
-def _worker_result_archive(job_id: str, destination: Path) -> None:
-    job_dir = OUTPUTS / job_id
+def _worker_result_archive(job_id: str, destination: Path, analysis_run_id: str | None = None) -> None:
+    job_dir = analysis_run_directory(job_id, analysis_run_id) if analysis_run_id else OUTPUTS / job_id
     required = (job_dir / "report.json", job_dir / "tracking.jsonl")
     if any(not path.is_file() for path in required):
         raise RuntimeError("Analysis completed without the report or skeleton tracking artifact")
@@ -255,7 +258,7 @@ def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
 
     job_id = str(job["job_id"])
     analysis_run_id = str(job["analysis_run_id"])
-    output_dir = OUTPUTS / job_id
+    output_dir = analysis_run_directory(job_id, analysis_run_id)
     stop_keepalive = threading.Event()
     ownership_lost = threading.Event()
     keepalive = threading.Thread(
@@ -272,9 +275,8 @@ def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
             client.download_video(job, video_path)
             if ownership_lost.is_set():
                 raise AnalysisRunLost(f"Analysis run {analysis_run_id} no longer owns {job_id}")
-            if output_dir.parent.resolve() != OUTPUTS.resolve():
+            if not output_dir.resolve().is_relative_to(OUTPUTS.resolve()):
                 raise RuntimeError("Unsafe worker output path")
-            shutil.rmtree(output_dir, ignore_errors=True)
 
             def progress(patch: dict) -> None:
                 if ownership_lost.is_set():
@@ -284,7 +286,7 @@ def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
             analyze(_remote_request(job, video_path), progress)
             if ownership_lost.is_set():
                 raise AnalysisRunLost(f"Analysis run {analysis_run_id} no longer owns {job_id}")
-            _worker_result_archive(job_id, archive_path)
+            _worker_result_archive(job_id, archive_path, analysis_run_id)
             client.complete(job_id, analysis_run_id, archive_path)
     except AnalysisRunLost:
         LOGGER.warning("Remote worker lost ownership of job %s; output was discarded", job_id)
@@ -297,7 +299,7 @@ def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
     finally:
         stop_keepalive.set()
         keepalive.join(timeout=2.0)
-        if output_dir.parent.resolve() == OUTPUTS.resolve():
+        if output_dir.resolve().is_relative_to(OUTPUTS.resolve()):
             shutil.rmtree(output_dir, ignore_errors=True)
 
 

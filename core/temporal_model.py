@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
 
 from core.config import SETTINGS
 
+LOGGER = logging.getLogger("warrioriq.temporal")
 
 ACTION_CLASSES = [
     "none",
@@ -127,15 +129,22 @@ class TemporalModel:
         self.device = None
         self.architecture = None
         self.validation = {}
+        self.status = "checkpoint_missing"
+        self.error_type = None
+        self.inference_failures = 0
+        self.input_dim = 102
         checkpoint = Path(SETTINGS.temporal_checkpoint)
         if not checkpoint.exists():
+            LOGGER.warning("temporal_model_unavailable reason=checkpoint_missing")
             return
         try:
             import torch
 
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            payload = torch.load(checkpoint, map_location=self.device)
+            payload = torch.load(checkpoint, map_location=self.device, weights_only=True)
             input_dim = int(payload.get("input_dim", 102)) if isinstance(payload, dict) else 102
+            if input_dim != 102:
+                raise ValueError("Checkpoint input dimensions do not match the pose feature contract")
             state = payload.get("state_dict", payload) if isinstance(payload, dict) else payload
             architecture = payload.get("architecture", "gru_v1") if isinstance(payload, dict) else "gru_v1"
             classes = payload.get("classes", ACTION_CLASSES) if isinstance(payload, dict) else ACTION_CLASSES
@@ -161,24 +170,51 @@ class TemporalModel:
                     "end_to_end_validation": payload.get("end_to_end_validation"),
                 }
             self.available = True
-        except Exception:
+            self.input_dim = input_dim
+            self.status = "ready"
+            LOGGER.info("temporal_model_loaded architecture=%s", architecture)
+        except Exception as exc:
             self.available = False
             self.model = None
+            self.status = "checkpoint_load_failed"
+            self.error_type = type(exc).__name__
+            LOGGER.error("temporal_model_unavailable reason=checkpoint_load_failed error_type=%s", self.error_type)
+
+    def diagnostics(self) -> dict:
+        return {
+            "status": self.status,
+            "error_type": self.error_type,
+            "inference_failures": self.inference_failures,
+        }
 
     def predict(self, sequence: np.ndarray) -> tuple[str, float] | None:
-        if not self.available or self.model is None or sequence.ndim != 2:
+        if not self.available or self.model is None:
             return None
         try:
             import torch
 
-            tensor = torch.from_numpy(sequence.astype(np.float32))[None].to(self.device)
+            if sequence.ndim != 2 or sequence.shape[0] == 0 or sequence.shape[1] != self.input_dim:
+                raise ValueError("Temporal input does not match the pose feature contract")
+            if not np.isfinite(sequence).all():
+                raise ValueError("Temporal input contains non-finite pose features")
+            tensor = torch.from_numpy(sequence.astype(np.float32, copy=False))[None].to(self.device)
             with torch.inference_mode():
-                probs = torch.softmax(self.model(tensor), dim=-1)[0]
+                logits = self.model(tensor)
+                if logits.shape != (1, len(ACTION_CLASSES)) or not torch.isfinite(logits).all():
+                    raise ValueError("Temporal output does not match the action class contract")
+                probs = torch.softmax(logits, dim=-1)[0]
             confidence, index = torch.max(probs, dim=0)
             label = ACTION_CLASSES[int(index)]
             value = float(confidence)
             if label == "none" or value < SETTINGS.temporal_probability_threshold:
                 return None
             return label, value
-        except Exception:
+        except Exception as exc:
+            # Stop retrying a broken checkpoint for every strike and revoke its
+            # release status for this run. The report retains the reason.
+            self.available = False
+            self.status = "inference_failed"
+            self.error_type = type(exc).__name__
+            self.inference_failures += 1
+            LOGGER.error("temporal_inference_failed error_type=%s", self.error_type)
             return None

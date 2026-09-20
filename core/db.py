@@ -4,7 +4,7 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.config import DATASET, DB_PATH, SETTINGS
@@ -337,6 +337,15 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_analysis_usage_account_period
             ON analysis_usage(account_id, period_key);
+
+            -- Admission leases exist before multipart parsing starts. Existing
+            -- accounts/fights are unchanged; expired transfer leases are reaped.
+            CREATE TABLE IF NOT EXISTS upload_leases (
+                job_id TEXT PRIMARY KEY,
+                account_id INTEGER NOT NULL,
+                reserved_bytes INTEGER NOT NULL,
+                expires_epoch REAL NOT NULL
+            );
 
             CREATE INDEX IF NOT EXISTS idx_legal_acceptances_profile
             ON legal_acceptances(profile_id, accepted_at);
@@ -1471,6 +1480,36 @@ def list_outbound_messages(account_id: int | None = None) -> list[dict]:
     return result
 
 
+def save_completed_analysis(job_id: str, job: dict, report: dict, report_path: str) -> None:
+    """Persist the report only after its analysis generation has been committed."""
+    if not job.get("persist_result"):
+        return
+    performance = report.get("performance", {})
+    tracking = report.get("tracking", {})
+    scorecard = report.get("scorecard", {})
+    summary = {
+        "winner_estimate": scorecard.get("winner_estimate"),
+        "score_totals": scorecard.get("totals", {"A": None, "B": None}),
+        "analysis_seconds": performance.get("analysis_seconds"),
+        "video_seconds": performance.get("segment_duration_seconds"),
+        "within_budget": performance.get("within_video_length_budget"),
+        "fighter_A_coverage": tracking.get("fighter_A_coverage", 0.0),
+        "fighter_B_coverage": tracking.get("fighter_B_coverage", 0.0),
+        "progress_report": {key: report.get(key, {}) for key in (
+            "video", "setup", "integrity", "metrics", "statistics", "coaching", "training_plan",
+        )},
+    }
+    save_fight(
+        job_id=job_id, profile_id=int(job.get("profile_id", 0)),
+        original_name=str(job.get("original_name") or "Fight video"),
+        video_path=str(job["video_path"]), report_path=report_path,
+        fight_type=str(job["fight_type"]), ruleset=str(job["ruleset"]),
+        analysis_target=str(job.get("focus_fighter") or "A"), summary=summary,
+        fighter_id=job.get("fighter_id"),
+        video_delete_after=(datetime.now(timezone.utc) + timedelta(days=SETTINGS.saved_video_retention_days)).isoformat(),
+    )
+
+
 def consume_credit(account_id: int) -> bool:
     init_db()
     with connection() as con:
@@ -1695,6 +1734,7 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM legal_acceptances WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM analysis_usage WHERE account_id=?", (account_id,))
+        con.execute("DELETE FROM upload_leases WHERE account_id=?", (account_id,))
         # The dead-letter queue carries account_id, so it holds account data
         # and has to go with everything else. Caught by
         # test_every_table_holding_account_data_is_cleared, which is the whole

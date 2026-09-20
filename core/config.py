@@ -856,6 +856,9 @@ class Settings:
         int(os.getenv("WARRIORIQ_WORKER_ARTIFACT_MAX_BYTES", str(256 * 1024 * 1024))),
     )
     minimum_free_storage_gb: float = max(0.25, float(os.getenv("WARRIORIQ_MIN_FREE_STORAGE_GB", "2")))
+    account_storage_bytes: int = max(1, int(os.getenv("WARRIORIQ_ACCOUNT_STORAGE_BYTES", str(8 * 1024**3))))
+    max_pending_uploads: int = max(1, int(os.getenv("WARRIORIQ_MAX_PENDING_UPLOADS", "2")))
+    upload_timeout_seconds: int = max(60, int(os.getenv("WARRIORIQ_UPLOAD_TIMEOUT_SECONDS", "900")))
     max_fight_bytes: int = max(
         50 * 1024 * 1024,
         int(os.getenv("WARRIORIQ_MAX_FIGHT_BYTES", str(2 * 1024 * 1024 * 1024))),
@@ -883,6 +886,10 @@ class Settings:
     # blocked until the real operator has supplied every launch-critical item.
     policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-08-24")
     public_base_url: str = os.getenv("WARRIORIQ_PUBLIC_BASE_URL", "").rstrip("/")
+    allowed_hosts: tuple[str, ...] = tuple(
+        value.strip().lower() for value in os.getenv("WARRIORIQ_ALLOWED_HOSTS", "").split(",")
+        if value.strip()
+    )
     operator_name: str = os.getenv("WARRIORIQ_OPERATOR_NAME", "").strip()
     operator_address: str = os.getenv("WARRIORIQ_OPERATOR_ADDRESS", "").strip()
     operator_registration: str = os.getenv("WARRIORIQ_OPERATOR_REGISTRATION", "").strip()
@@ -894,7 +901,7 @@ class Settings:
     dmca_agent_name: str = os.getenv("WARRIORIQ_DMCA_AGENT_NAME", "").strip()
     minimum_account_age: int = int(os.getenv("WARRIORIQ_MINIMUM_AGE", "18"))
     saved_video_retention_days: int = max(1, int(os.getenv("WARRIORIQ_VIDEO_RETENTION_DAYS", "30")))
-    failed_upload_retention_hours: int = max(1, int(os.getenv("WARRIORIQ_FAILED_UPLOAD_RETENTION_HOURS", "24")))
+    failed_upload_retention_hours: int = max(1, int(os.getenv("WARRIORIQ_FAILED_UPLOAD_RETENTION_HOURS", "2")))
     # Complimentary plan grants as "email:plan_key" pairs, comma separated.
     # Kept in configuration rather than as a row edit on the live database so a
     # grant is visible, reviewable and survives a restore.
