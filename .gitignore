@@ -59,6 +59,13 @@ dataset/boxingvi/
 dataset/sequences_boxingvi/
 dataset/sequences_own_negatives/
 dataset/sequences_combined/
+# TKD-Kick3 (Zenodo 10.5281/zenodo.20390892, CC BY 4.0). The licence would
+# allow redistribution with attribution, unlike BoxingVI - but it is still a
+# 58 MB download that this project does not own, and tools/import_tkd_kick3.py
+# re-fetches it. Pose sequences of identifiable athletes stay out of a public
+# repository on the same reasoning as everything above.
+dataset/tkd_kick3/
+dataset/sequences_tkd_kick3/
 
 # Fight footage stays on the machine that filmed it.
 #
