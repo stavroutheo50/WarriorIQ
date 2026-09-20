@@ -450,7 +450,14 @@ class ActionEngine:
         state = self.states[fighter_name]
         previous = state.samples[-1] if state.samples else None
         if previous is not None and (
-            round_number != previous.round_number or seconds <= previous.time
+            round_number != previous.round_number
+            or seconds <= previous.time
+            # Time ran forward further than the sampler can legitimately skip,
+            # so whatever the limb did in between was never looked at. The
+            # existing checks only caught the round changing and time going
+            # backwards; a forward gap read as one continuous action, and a
+            # wind-up seen before it was completed by a retraction seen after.
+            or seconds - previous.time > SETTINGS.max_observation_gap_seconds
         ):
             self.interrupt(fighter_name)
         sample = self._make_sample(

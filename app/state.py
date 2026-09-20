@@ -496,6 +496,7 @@ def finalize_job_from_worker(
                 "updated_at_epoch": now,
                 "artifacts_run_id": analysis_run_id,
                 "artifact_isolation_version": 1,
+                "history_saved": False if job.get("persist_result") else None,
             })
             if not _write_session(job_id, job):
                 return False
