@@ -765,3 +765,179 @@ fieldset.needs-attention {
   color: var(--wiq-text-tertiary);
   font-weight: 600;
 }
+
+/* ---------------------------------------------------------------------------
+   Data face, and the one eyebrow that earns its place.
+
+   Every text node on this site rendered in Inter, and there was not a single
+   monospace element anywhere. Numbers a reader compares - a round clock, a
+   coverage percentage, a score - are readings, not prose, and they were
+   sitting in the same face as the paragraphs around them. IBM Plex Mono with
+   tabular figures gives them a column to sit in and stops a digit changing
+   width as it counts.
+   --------------------------------------------------------------------------- */
+.metric .value, .metric .label,
+.stat, .stat-value, .stat-label,
+.analysis-progress-value, .big-progress, .score, .time,
+.capture-readout, .fight-state,
+th, .field label,
+.step-indicator {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+/* The step indicator is wayfinding: it tells someone mid-upload where they are
+   in a sequence they cannot see the end of. It used to share .eyebrow with the
+   decorative section labels, which is why removing those would have taken it
+   with them. It is its own thing now, and it is the one place on the site
+   where an all-caps micro-label is load-bearing. */
+.step-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: rgb(var(--wiq-accent));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+.step-indicator::before {
+  content: "";
+  width: 22px;
+  height: 2px;
+  background: currentColor;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Hero: pose overlay instead of two empty boxes.
+   --------------------------------------------------------------------------- */
+.preview-fight-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 14px 12px;
+}
+.preview-pose { display: block; width: 100%; height: auto; }
+.preview-pose .pose polyline {
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.preview-pose .pose-head { fill: none; stroke-width: 2.2; }
+.preview-pose .pose-joint circle { stroke: none; }
+/* Corner colour is the whole point: it is the convention the sport already
+   uses, so a coach reads which fighter is which without a legend. */
+.preview-pose .pose-blue polyline, .preview-pose .pose-blue .pose-head { stroke: var(--wiq-corner-blue); }
+.preview-pose .pose-blue .pose-joint circle { fill: var(--wiq-corner-blue); }
+.preview-pose .pose-red polyline, .preview-pose .pose-red .pose-head { stroke: var(--wiq-corner-red); }
+.preview-pose .pose-red .pose-joint circle { fill: var(--wiq-corner-red); }
+
+.preview-corners {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+}
+.corner-tag { display: inline-flex; align-items: center; gap: 6px; }
+.corner-tag::before { content: ""; width: 8px; height: 8px; border-radius: 2px; }
+.corner-tag-blue { color: var(--wiq-corner-blue); }
+.corner-tag-blue::before { background: var(--wiq-corner-blue); }
+.corner-tag-red { color: var(--wiq-corner-red-text); }
+.corner-tag-red::before { background: var(--wiq-corner-red); }
+
+/* The connector rules that used to run between the two boxes. There are no
+   boxes now, and they drew a line straight through both skeletons. */
+.preview-fight-stage::before, .preview-fight-stage::after { content: none; }
+
+/* ---------------------------------------------------------------------------
+   Pricing: one default, visible from across the room.
+
+   Seven cards rendered with the same border and the same background, and the
+   only mark of a recommendation was .featured changing a border from #1a2a45
+   to #526ca9 - a difference nobody scanning the page would register. The
+   markup already knew which plan was recommended; the stylesheet did not act
+   on it. This does not move the recommendation to a different plan: which
+   tier to push is a pricing decision, not a visual one.
+   --------------------------------------------------------------------------- */
+.pricing-card.featured {
+  border-color: rgb(var(--wiq-accent));
+  background: linear-gradient(180deg, rgba(214, 176, 96, .07), transparent 190px), var(--wiq-canvas-raised);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .38);
+}
+.pricing-card.featured .plan-price { color: rgb(var(--wiq-accent)); }
+/* The banner was inline text in the card flow. On the recommended card it
+   becomes a badge on the top edge, which is what makes the card read as
+   chosen rather than merely described. */
+.pricing-card.featured .plan-banner {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 5px 13px;
+  border-radius: 999px;
+  background: rgb(var(--wiq-accent));
+  color: var(--wiq-canvas);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.pricing-card.featured {
+  position: relative;
+  overflow: visible;
+  margin-top: 10px;
+  transform: translateY(-8px);
+}
+/* The team card is a different audience, not a competing default: it keeps a
+   marked border and drops the badge so there is one recommendation per group. */
+.pricing-card.gym-featured { border-color: var(--wiq-line); background: var(--wiq-canvas-raised); }
+@media (max-width: 1100px) {
+  /* Stacked, the cards are read one after another and a raised one is just
+     misaligned, so the lift comes off rather than a new breakpoint going in. */
+  .pricing-card.featured { transform: none; }
+}
+
+/* --- Section labels -------------------------------------------------------
+   Fifteen purely atmospheric eyebrows came off the marketing pages, where a
+   label like "Questions" above a heading reading "Before you upload" only
+   repeated it. The ones that carried information stayed: the coach workspace
+   names each panel it stacks, and that text is how someone finds the roster
+   rather than the assignment list. They keep the words and lose the treatment
+   - the gradient dash, the .16em tracking and the shout - so a label that
+   means something no longer looks like the decoration that did not. */
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--wiq-text-tertiary);
+  margin-bottom: 7px;
+}
+.section-label::before { content: none; }
+
+/* The plan name is the only thing that tells seven tiers apart, and it shipped
+   as an 11px tracked-out eyebrow sitting above a 38px price: the card
+   announced the number and whispered what the number bought. It reads as a
+   title now - display face, full contrast, sentence case - so the name and the
+   price are the two things found first. The featured card keeps the accent on
+   the name, which is where the recommendation belongs, rather than spending it
+   on decoration. Copy is untouched; only the treatment moves. */
+.plan-card-head .eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--wiq-text-md);
+  font-weight: 600;
+  letter-spacing: -.01em;
+  text-transform: none;
+  color: var(--wiq-text);
+}
+.plan-card-head .eyebrow::before { content: none; }
+.pricing-card.featured .plan-card-head .eyebrow { color: rgb(var(--wiq-accent)); }

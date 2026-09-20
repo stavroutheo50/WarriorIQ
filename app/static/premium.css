@@ -160,9 +160,39 @@ body { background: transparent; }
   font-display: swap;
 }
 
+/* Display and data faces, self-hosted for the same reason Inter is: a
+   fonts.gstatic.com request would put every visitor's IP in front of a US ad
+   company before the consent banner has been answered, and would need adding
+   to the subprocessor list. Latin subsets only - 22 KB and 15 KB. */
+@font-face {
+  font-family: "SpaceGrotesk";
+  src: url("/static/fonts/space-grotesk-var.woff2") format("woff2-variations");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBMPlexMono";
+  src: url("/static/fonts/ibm-plex-mono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBMPlexMono";
+  src: url("/static/fonts/ibm-plex-mono-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  --font-display: "InterVar", Inter, "Segoe UI", system-ui, sans-serif;
+  --font-display: "SpaceGrotesk", "InterVar", Inter, "Segoe UI", system-ui, sans-serif;
   --font-body: "InterVar", Inter, "Segoe UI", system-ui, sans-serif;
+  /* Anything the reader treats as a reading rather than a sentence: round
+     clocks, scores, coverage percentages, step indicators. Tabular figures so
+     a number does not change width as it counts. */
+  --font-mono: "IBMPlexMono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   /* Optical sizing and a slightly tighter tracking are what make Inter look
      drawn rather than defaulted. */
   --wiq-radius-lg: 22px;

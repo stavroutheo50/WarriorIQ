@@ -5,7 +5,7 @@
 {% if not signed_in %}<section class="empty-workspace card"><h2>Fight analysis belongs to your private athlete workspace</h2><p class="muted">WarriorIQ does not analyse a fight without an account. Your footage, the athletes in it and your upload allowance all belong to a workspace, so there is nowhere to put an analysis until you have one. It is free to create, and your fights stay private to you.</p><div class="hero-actions"><a class="btn" href="/signup?next=/analyze">Create account</a><a class="btn secondary" href="/login?next=/analyze">Sign in</a></div></section>{% else %}
 <section class="chooser">
   <header class="chooser-head" data-reveal>
-    <div class="eyebrow">Step 1 of 3 · Your sport</div>
+    <div class="step-indicator">Step 1 of 3 · Your sport</div>
     <h1>Which sport are we watching?</h1>
     <p>Legal targets, what a strike is worth and what the analysis can honestly claim all follow from this. Everything after it adapts.</p>
     {% if allowance and allowance.remaining == 0 %}

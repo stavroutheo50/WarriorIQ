@@ -1,11 +1,24 @@
 /* WarriorIQ product polish — shared editorial sports interface */
 :root{
-  --wiq-canvas:#09090b;
-  --wiq-canvas-raised:#151518;
-  --wiq-panel:#1c1c21;
-  --wiq-panel-strong:#232329;
-  --wiq-line:#33333a;
-  --wiq-line-soft:#242429;
+  /* Navy, not near-black. The whole neutral ramp moves together: a navy
+     canvas under grey panels reads as a colour mistake rather than a theme,
+     so every surface and line carries the same blue cast. Contrast measured
+     against the canvas rather than assumed - body text 17.1:1, secondary
+     7.3:1, tertiary 4.9:1, all past 4.5:1. */
+  --wiq-canvas:#081226;
+  --wiq-canvas-raised:#0f1d34;
+  --wiq-panel:#142440;
+  --wiq-panel-strong:#1b2d4d;
+  --wiq-line:#2a3d5e;
+  --wiq-line-soft:#1a2a45;
+  /* Corner colours, from the sport rather than from a UI kit. Used only where
+     a fighter is actually being identified - never as decoration - so red and
+     blue keep meaning "that fighter" wherever they appear. Both clear 3:1
+     against the canvas as UI colours; the lighter red is the one to use if
+     either is ever set as text. */
+  --wiq-corner-red:#e5484d;
+  --wiq-corner-red-text:#ff6b6b;
+  --wiq-corner-blue:#5c82ef;
   --wiq-text:#f5f5f6;
   --wiq-text-secondary:#a1a1a8;
   --wiq-text-tertiary:#82828b;
