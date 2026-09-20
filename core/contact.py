@@ -20,14 +20,37 @@ L_EAR, R_EAR = 3, 4
 L_SHOULDER, R_SHOULDER = 5, 6
 L_HIP, R_HIP = 11, 12
 
+# Match the live-overlay visibility floor: a hidden joint cannot prove contact.
+_MIN_CONTACT_KEYPOINT_CONF = 0.30
+
 
 def _valid(kp: np.ndarray | None, idx: int):
     if kp is None or len(kp) <= idx:
         return None
     p = np.asarray(kp[idx], dtype=np.float32)[:2]
-    if p[0] <= 0 or p[1] <= 0:
+    if p.size < 2 or not np.isfinite(p).all() or p[0] <= 0 or p[1] <= 0:
         return None
     return p
+
+
+def _observed_keypoints(raw, confidence):
+    if raw is None:
+        return None
+    points = np.asarray(raw, dtype=np.float32)
+    if points.ndim != 2 or points.shape[1] < 2:
+        return None
+    points = points[:, :2].copy()
+    valid = np.isfinite(points).all(axis=1) & (points > 0).all(axis=1)
+    if confidence is not None:
+        scores = np.asarray(confidence, dtype=np.float32).reshape(-1)
+        reliable = np.zeros(len(points), dtype=bool)
+        size = min(len(scores), len(points))
+        reliable[:size] = np.isfinite(scores[:size]) & (scores[:size] >= _MIN_CONTACT_KEYPOINT_CONF)
+        valid &= reliable
+    # Missing confidence is supported for legacy reports, not a way to override
+    # an explicitly unreliable score or an invalid coordinate.
+    points[~valid] = 0
+    return points
 
 
 def _mean_points(kp, indices):
@@ -122,16 +145,21 @@ def _is_leg_check(defender_kp: np.ndarray | None, body: float) -> bool:
     return bool(left_raised or right_raised)
 
 
-def _evaluate_snapshot(event: StrikeEvent, attacker_raw, defender_raw, defender_box):
+def _evaluate_snapshot(
+    event: StrikeEvent, attacker_raw, defender_raw, defender_box,
+    attacker_conf=None, defender_conf=None,
+):
     if attacker_raw is None or defender_raw is None:
         return None
-    attacker_kp = np.asarray(attacker_raw, dtype=np.float32)
-    defender_kp = np.asarray(defender_raw, dtype=np.float32)
+    attacker_kp = _observed_keypoints(attacker_raw, attacker_conf)
+    defender_kp = _observed_keypoints(defender_raw, defender_conf)
     endpoint = _valid(attacker_kp, _endpoint_index(event))
     if endpoint is None:
         return None
     body = _body_length(defender_kp, defender_box)
     groups = _target_points(defender_kp)
+    if not any(groups.values()) or not np.isfinite(body) or body <= 0:
+        return None
     distances = {name: _distance_to_group(endpoint, points) / body for name, points in groups.items()}
     target = min(distances, key=distances.get)
     return {
@@ -142,6 +170,9 @@ def _evaluate_snapshot(event: StrikeEvent, attacker_raw, defender_raw, defender_
         "body": body,
         "defender_box": defender_box,
         "block_distance": _block_distance(endpoint, defender_kp, body),
+        "observed_targets": {name for name, points in groups.items() if points},
+        "guard_observed": all(_valid(defender_kp, index) is not None for index in (L_WRIST, R_WRIST)),
+        "check_observed": all(_valid(defender_kp, index) is not None for index in (L_KNEE, R_KNEE, L_ANKLE, R_ANKLE)),
     }
 
 
@@ -348,6 +379,8 @@ def classify_contact(event: StrikeEvent) -> StrikeEvent:
             sample.get("attacker_keypoints"),
             sample.get("opponent_keypoints"),
             sample.get("opponent_box"),
+            sample.get("attacker_conf"),
+            sample.get("opponent_conf"),
         )
         if item is not None:
             item["frame"] = sample.get("frame")
@@ -359,12 +392,14 @@ def classify_contact(event: StrikeEvent) -> StrikeEvent:
 
     # Backward-compatible fallback for reports/events created without the
     # trajectory field.
-    if not evaluations:
+    if "contact_samples" not in evidence:
         item = _evaluate_snapshot(
             event,
             evidence.get("peak_attacker_keypoints"),
             evidence.get("peak_opponent_keypoints"),
             evidence.get("peak_opponent_box"),
+            evidence.get("peak_attacker_conf"),
+            evidence.get("peak_opponent_conf"),
         )
         if item is not None:
             item["frame"] = event.peak_frame
@@ -444,9 +479,17 @@ def classify_contact(event: StrikeEvent) -> StrikeEvent:
     # closest to that same zone. Previously the target could be changed after
     # selecting a frame, leaving the timestamp, distance and block decision
     # sourced from different instants.
-    best_eval = min(evaluations, key=lambda item: float(item["distances"].get(best_target, 9999.0)))
+    target_evaluations = [item for item in evaluations if best_target in item["observed_targets"]]
+    if not target_evaluations:
+        event.target = best_target
+        event.outcome = "uncertain"
+        event.landed = False
+        event.contact_confidence = 0.0
+        event.evidence["rejected_contact_reason"] = "target_not_observed"
+        return event
+    best_eval = min(target_evaluations, key=lambda item: float(item["distances"].get(best_target, 9999.0)))
     best_distance = float(best_eval["distances"].get(best_target, 9999.0))
-    target_distances = [float(item["distances"].get(best_target, 9999.0)) for item in evaluations]
+    target_distances = [float(item["distances"].get(best_target, 9999.0)) for item in target_evaluations]
     exact_hits = sum(d <= SETTINGS.contact_threshold_body_lengths for d in target_distances)
     support_hits = sum(d <= SETTINGS.likely_contact_threshold_body_lengths for d in target_distances)
     required = max(1, int(SETTINGS.contact_confirmation_frames))
@@ -476,7 +519,21 @@ def classify_contact(event: StrikeEvent) -> StrikeEvent:
         event.evidence["rejected_contact_reason"] = "punch_endpoint_in_leg_zone"
         return event
 
-    if best_distance <= SETTINGS.contact_threshold_body_lengths and temporal_confirmed:
+    observed_block = (
+        best_target in {"head", "body"}
+        and best_distance <= SETTINGS.contact_threshold_body_lengths
+        and temporal_confirmed
+        and block_dist <= SETTINGS.block_proximity_body_lengths
+    )
+    guard_unknown = (
+        best_target in {"head", "body"} and not best_eval["guard_observed"] and not observed_block
+    ) or (event.family == "kick" and best_target == "leg" and not best_eval["check_observed"])
+    if best_distance <= SETTINGS.likely_contact_threshold_body_lengths and guard_unknown:
+        event.outcome = "uncertain"
+        event.landed = False
+        event.contact_confidence = 0.0
+        event.evidence["rejected_contact_reason"] = "defender_guard_not_observed"
+    elif best_distance <= SETTINGS.contact_threshold_body_lengths and temporal_confirmed:
         if event.family == "kick" and best_target == "leg" and _is_leg_check(best_eval["defender_kp"], best_eval["body"]):
             event.outcome = "checked"
             event.landed = False

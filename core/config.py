@@ -528,6 +528,17 @@ class Settings:
     )
     action_window: int = 12
     min_event_gap_seconds: float = 0.22
+    # How long a fighter can go unseen before an action in flight is abandoned
+    # rather than joined across the gap.
+    #
+    # Derived, not chosen: the stride governor never samples slower than
+    # min_tracking_fps, which is 6, so consecutive observations of one fighter
+    # are at most about 0.167s apart in normal running. Anything past this is
+    # three times that floor - long enough that the whole of a strike could have
+    # happened inside it unseen, and the engine would otherwise pair a wind-up
+    # from before the gap with a retraction from after it and publish the two as
+    # one action.
+    max_observation_gap_seconds: float = 0.5
     min_strike_speed_body_lengths_per_s: float = 0.90
     # A limb cannot move this fast. Measured on one real fight, candidate peak
     # speeds ran to 47.6 body lengths a second - roughly 80 m/s - because the

@@ -50,14 +50,6 @@ def main():
     )
     check(compiled, "all WarriorIQ Python files compile")
 
-    from jinja2 import Environment, FileSystemLoader
-
-    templates_root = ROOT / "app" / "templates"
-    env = Environment(loader=FileSystemLoader(str(templates_root)))
-    for path in sorted(templates_root.glob("*.html")):
-        env.get_template(path.name)
-    check(True, "all Jinja templates parse")
-
     import cv2
     import fastapi
     import pydantic
@@ -102,11 +94,25 @@ def main():
     # Import complete application last, after dependency checks.
     import app.main  # noqa: F401
     check(True, "FastAPI application imports")
+    # Compile with the actual filters registered by the application.
+    for path in sorted((ROOT / "app" / "templates").glob("*.html")):
+        app.main.templates.env.get_template(path.name)
+    check(True, "all Jinja templates compile with application filters")
 
-    import unittest
-    suite = unittest.defaultTestLoader.discover(str(ROOT / "tests"))
-    result = unittest.TextTestRunner(verbosity=1).run(suite)
-    check(result.wasSuccessful(), "WarriorIQ core unit tests pass")
+    import importlib.util
+    import subprocess
+    from tempfile import TemporaryDirectory
+
+    check(importlib.util.find_spec("pytest") is not None,
+          "pytest is installed (install the test dependencies if missing)")
+    # A fresh process lets conftest redirect storage before core.config loads.
+    # unittest discovery bypassed that isolation and omitted pytest tests.
+    with TemporaryDirectory(prefix="warrioriq-verification-") as scratch:
+        result = subprocess.run([
+            sys.executable, "-m", "pytest", str(ROOT / "tests"), "-q",
+            "-p", "no:cacheprovider", "--basetemp", str(Path(scratch) / "pytest"),
+        ], cwd=ROOT, check=False)
+    check(result.returncode == 0, "WarriorIQ regression tests pass")
 
     print("\nWARRIORIQ PROJECT CHECK PASSED\n")
 

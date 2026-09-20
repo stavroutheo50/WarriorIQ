@@ -3189,6 +3189,7 @@ async def remote_worker_complete(
         # A worker may retry after the web server committed the result but the
         # success response was lost. Treat that exact generation as complete;
         # never re-run it or turn a successful analysis into an error.
+        persist_completed_job(job_id, analysis_run_id)
         record_worker_heartbeat(worker_id)
         return {"ok": True, "job_id": job_id, "already_complete": True}
     job = _owned_worker_job(job_id, worker_id, analysis_run_id)
