@@ -1,0 +1,22 @@
+# What continuous integration installs. Not a deployment profile: no runner has
+# a GPU, so this is the worker stack with CUDA taken out, which is enough to run
+# every test but the two that build a TensorRT engine.
+#
+# torch and torchvision are NOT pinned here. requirements.txt pins the +cu128
+# builds, which a runner cannot use and would spend 2.5 GB failing to; the
+# workflow installs the same versions from PyTorch's CPU index instead. Keeping
+# them out of this file stops the two pins drifting apart silently.
+#
+# opencv is deliberately absent too. ultralytics depends on opencv-python while
+# requirements-web.txt wants opencv-python-headless, and the two install into
+# the same cv2/ directory - so pip ends up with both, and uninstalling either
+# one deletes the shared files and leaves `import cv2` broken. Measured, not
+# guessed. The workflow installs everything, then clears both and puts back
+# headless alone, which is also the right one for a runner with no display.
+-r requirements-web.txt
+
+ultralytics==8.4.124
+sam2==1.1.0
+
+pytest>=8
+packaging>=23
