@@ -50,8 +50,11 @@ def classification_metrics(
         precision = None if predicted_count == 0 else true_positive / predicted_count
         recall = None if support == 0 else true_positive / support
         f1 = None
-        if precision is not None and recall is not None:
-            f1 = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+        denominator = 2 * true_positive + false_positive + false_negative
+        if denominator:
+            # A class missed every time must lower macro-F1, not disappear
+            # from it because no prediction made precision undefined.
+            f1 = 2 * true_positive / denominator
             f1_values.append(f1)
             if label != "none":
                 action_f1_values.append(f1)
@@ -138,6 +141,8 @@ def audit_sequence_directory(root: Path) -> dict:
                 if label_array.size != 1:
                     raise ValueError("y must be one scalar class index")
                 label_index = int(label_array.item())
+                if label_array.item() != label_index:
+                    raise ValueError("y must be an integer class index")
                 if label_index < 0 or label_index >= len(ACTION_CLASSES):
                     raise ValueError(f"y class index {label_index} is outside the supported range")
                 if "fight_id" in data:
@@ -149,7 +154,7 @@ def audit_sequence_directory(root: Path) -> dict:
 
                 digest = hashlib.sha256()
                 digest.update(sequence.tobytes(order="C"))
-                digest.update(str(label_index).encode("ascii"))
+                # Identical footage is leakage even if somebody changed its label.
                 fingerprint = digest.hexdigest()
         except Exception as exc:
             result["issues"].append({"file": path.name, "reason": str(exc)})
@@ -191,6 +196,7 @@ def audit_dataset_split(development_root: Path, untouched_test_root: Path) -> di
     )
     test_ready = bool(
         untouched["invalid_sequences"] == 0
+        and untouched["duplicate_sequences"] == 0
         and untouched["fights"] >= 3
         and untouched["all_classes_covered"]
         and not fight_overlap

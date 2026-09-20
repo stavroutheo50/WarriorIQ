@@ -48,8 +48,10 @@ class MarkIdentityTests(unittest.TestCase):
         self.assertIn('v.addEventListener("pause"', page)
 
     def test_tracking_is_reduced_to_the_boxes_and_sorted_by_time(self):
+        from core.config import OUTPUTS
+
         module = _module()
-        job = ROOT / "outputs" / "__marktest__"
+        job = OUTPUTS / "__marktest__"
         job.mkdir(parents=True, exist_ok=True)
         try:
             (job / "tracking.jsonl").write_text("\n".join([
@@ -61,6 +63,7 @@ class MarkIdentityTests(unittest.TestCase):
             frames = module.load_tracking("__marktest__")
         finally:
             (job / "tracking.jsonl").unlink(missing_ok=True)
+            (job / ".state.lock").unlink(missing_ok=True)
             job.rmdir()
         self.assertEqual([f["t"] for f in frames], [1.0, 2.0, 3.0], "unparseable lines are skipped, order is time")
         self.assertEqual(frames[0]["B"], [5.0, 6.0, 7.0, 8.0])

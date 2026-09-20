@@ -1,0 +1,6 @@
+# Optional runtime dependencies only; see README before installing RTMLib.
+# Use in the full worker environment, never alongside the CUDA profile.
+numpy>=1.26,<3
+opencv-python>=4.10
+tqdm>=4.66
+onnxruntime==1.26.0

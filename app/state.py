@@ -7,21 +7,27 @@ import os
 import shutil
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from threading import Lock
+from threading import RLock
 from typing import Any
 
 from core.config import OUTPUTS, SETTINGS
 
 
 _jobs: dict[str, dict] = {}
-_lock = Lock()
+# Guards the in-memory mirror and the per-job lock table only. It is never
+# held while waiting on a per-job lock or on disk, so one stalled job cannot
+# freeze state access for every other job in this process.
+_lock = RLock()
+_job_locks: dict[str, "_JobLock"] = {}
 _SESSION_FILE = "analysis-session.json"
 _WORKER_HEARTBEAT_FILE = "worker-heartbeat.json"
 _CLAIM_DIRECTORY = ".claim"
 _TRANSIENT_KEYS = {"report"}
 LOGGER = logging.getLogger("warrioriq.state")
+_ARTIFACT_NAMES = {"report.json", "report.html", "tracking.jsonl", "events.json"}
 
 
 class AnalysisRunLost(RuntimeError):
@@ -48,6 +54,111 @@ def _json_safe(value: Any) -> Any:
 
 def _session_path(job_id: str) -> Path:
     return OUTPUTS / job_id / _SESSION_FILE
+
+
+class _JobLock:
+    """One job's lock: reentrant in this process, exclusive across processes."""
+
+    __slots__ = ("guard", "depth")
+
+    def __init__(self) -> None:
+        self.guard = RLock()
+        self.depth = 0
+
+
+def _remember(job_id: str, job: dict) -> None:
+    with _lock:
+        _jobs[job_id] = job
+
+
+def _forget(job_id: str) -> None:
+    # The lock object itself is deliberately kept. Dropping it while another
+    # thread waits on it would hand the two of them different guards, and both
+    # would then try to take the same file lock on separate descriptors.
+    with _lock:
+        _jobs.pop(job_id, None)
+
+
+def _hold_file_lock(handle, acquire: bool) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK if acquire else msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX if acquire else fcntl.LOCK_UN)
+
+
+@contextmanager
+def _job_lock(job_id: str, *, create: bool = False):
+    """Serialize session commits across the web process and local workers.
+
+    The process-wide lock is taken only to find this job's lock, and released
+    before anything can block, so waiting on one job never stalls state access
+    for another. The file lock is taken once per outermost entry: the guard is
+    reentrant, and flock() on a second descriptor for the same file in one
+    process deadlocks rather than nesting.
+    """
+    with _lock:
+        job_lock = _job_locks.get(job_id)
+        if job_lock is None:
+            job_lock = _job_locks[job_id] = _JobLock()
+    with job_lock.guard:
+        directory = _session_path(job_id).parent
+        if create:
+            directory.mkdir(parents=True, exist_ok=True)
+        if not directory.is_dir() or job_lock.depth:
+            # Already inside this job's file lock, or there is no directory to
+            # put one in. The reentrant guard is the whole exclusion here.
+            job_lock.depth += 1
+            try:
+                yield
+            finally:
+                job_lock.depth -= 1
+            return
+        with (directory / ".state.lock").open("a+b") as handle:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            _hold_file_lock(handle, True)
+            job_lock.depth = 1
+            try:
+                yield
+            finally:
+                job_lock.depth = 0
+                _hold_file_lock(handle, False)
+
+
+def analysis_run_directory(job_id: str, analysis_run_id: str) -> Path:
+    """Keep each generation's files separate, including failed partial output."""
+    if not analysis_run_id or any(c not in "0123456789abcdef" for c in analysis_run_id):
+        raise ValueError("Invalid analysis generation")
+    return OUTPUTS / job_id / ".runs" / analysis_run_id
+
+
+def completed_artifact_directory(job_id: str, job: dict | None = None) -> Path | None:
+    """Return only the current committed result, with pre-upgrade compatibility."""
+    if _session_path(job_id).exists():
+        with _job_lock(job_id):
+            persisted = _read_session(job_id)
+        if persisted is None:
+            return None
+        job = persisted
+    if job is None:
+        job = get_job(job_id)
+    if job is None:
+        return OUTPUTS / job_id
+    if job.get("status") != "complete":
+        return None
+    if not job.get("artifact_isolation_version"):
+        return OUTPUTS / job_id
+    run_id = str(job.get("analysis_run_id") or "")
+    if not run_id or job.get("artifacts_run_id") != run_id:
+        return None
+    return analysis_run_directory(job_id, run_id)
 
 
 def _write_session(job_id: str, job: dict) -> bool:
@@ -100,7 +211,7 @@ def _read_session(job_id: str, *, recover_orphan: bool = False) -> dict | None:
 
 
 def create_job(job_id: str, data: dict) -> None:
-    with _lock:
+    with _job_lock(job_id, create=True):
         now = time.time()
         job = {
             "job_id": job_id,
@@ -111,12 +222,12 @@ def create_job(job_id: str, data: dict) -> None:
             "updated_at_epoch": now,
             **data,
         }
-        _jobs[job_id] = job
+        _remember(job_id, job)
         _write_session(job_id, job)
 
 
 def update_job(job_id: str, patch: dict) -> bool:
-    with _lock:
+    with _job_lock(job_id):
         # Always re-read persisted state. In external-worker mode the web and
         # GPU processes have separate memories and the file is their contract.
         job = _read_session(job_id) or _jobs.get(job_id)
@@ -124,29 +235,33 @@ def update_job(job_id: str, patch: dict) -> bool:
             return False
         job.update(patch)
         job["updated_at_epoch"] = time.time()
-        _jobs[job_id] = job
+        _remember(job_id, job)
         return _write_session(job_id, job)
 
 
 def get_job(job_id: str) -> dict | None:
-    with _lock:
+    with _job_lock(job_id):
         persisted = _read_session(job_id, recover_orphan=job_id not in _jobs)
         job = persisted or _jobs.get(job_id)
         if job is not None:
-            _jobs[job_id] = job
+            _remember(job_id, job)
         return dict(job) if job is not None else None
 
 
 def list_jobs() -> list[tuple[str, dict]]:
-    with _lock:
-        for path in OUTPUTS.glob(f"*/{_SESSION_FILE}"):
-            job_id = path.parent.name
-            # A web process and an external worker have separate memories.
-            # Refresh known jobs too, otherwise navigation and cleanup can act
-            # on an old queued/running status after the worker has advanced it.
+    # Never hold the process-wide lock across a per-job lock. Acquiring them in
+    # that order here, while every job-level write takes them in the opposite
+    # order, is what turns one busy worker into a stalled web process.
+    for path in OUTPUTS.glob(f"*/{_SESSION_FILE}"):
+        job_id = path.parent.name
+        # A web process and an external worker have separate memories.
+        # Refresh known jobs too, otherwise navigation and cleanup can act
+        # on an old queued/running status after the worker has advanced it.
+        with _job_lock(job_id):
             job = _read_session(job_id, recover_orphan=job_id not in _jobs)
-            if job is not None:
-                _jobs[job_id] = job
+        if job is not None:
+            _remember(job_id, job)
+    with _lock:
         return [(job_id, dict(job)) for job_id, job in _jobs.items()]
 
 
@@ -174,19 +289,22 @@ def prepare_job_run(job_id: str, patch: dict) -> str:
         "worker_heartbeat_epoch": None,
         "worker_lease_expires_epoch": None,
         "analysis_run_id": analysis_run_id,
+        "artifacts_run_id": None,
+        "history_saved": None,
+        "artifact_isolation_version": 1,
         **patch,
     }
     # A detached worker discovers queued work only through this file. If it
     # cannot be written the analysis would sit at "Queued" forever, so fail the
     # request instead of stranding the fight silently.
-    if not update_job(job_id, reset) and SETTINGS.analysis_worker_mode != "inprocess":
+    if not update_job(job_id, reset):
         raise AnalysisStateNotPersisted(f"Queued analysis {job_id} could not be persisted for a worker to claim")
     return analysis_run_id
 
 
 def start_job_run(job_id: str, worker_id: str, analysis_run_id: str) -> bool:
     """Move the exact queued generation to running."""
-    with _lock:
+    with _job_lock(job_id):
         job = _read_session(job_id) or _jobs.get(job_id)
         if (
             not job
@@ -204,14 +322,14 @@ def start_job_run(job_id: str, worker_id: str, analysis_run_id: str) -> bool:
             "worker_lease_expires_epoch": now + SETTINGS.worker_lease_seconds,
             "updated_at_epoch": now,
         })
-        _jobs[job_id] = job
+        _remember(job_id, job)
         return _write_session(job_id, job)
 
 
 def delete_job(job_id: str) -> None:
-    with _lock:
-        _jobs.pop(job_id, None)
+    with _job_lock(job_id):
         _session_path(job_id).unlink(missing_ok=True)
+    _forget(job_id)
 
 
 def _claim_path(job_id: str) -> Path:
@@ -233,29 +351,29 @@ def claim_next_job(worker_id: str) -> tuple[str, dict] | None:
         except FileExistsError:
             continue
         try:
-            job = _read_session(job_id)
-            if not job or job.get("status") != "queued":
-                continue
-            now = time.time()
-            requested = job.get("wake_requested_at_epoch")
-            wake_latency = round(now - float(requested), 2) if requested else None
-            analysis_run_id = str(job.get("analysis_run_id") or uuid.uuid4().hex)
-            job.update({
-                "status": "running",
-                "message": "GPU worker accepted the fight",
-                "worker_id": worker_id,
-                "analysis_run_id": analysis_run_id,
-                "worker_started_at_epoch": now,
-                "wake_latency_seconds": wake_latency,
-                "worker_heartbeat_epoch": now,
-                "worker_lease_expires_epoch": now + SETTINGS.worker_lease_seconds,
-                "updated_at_epoch": now,
-            })
-            if not _write_session(job_id, job):
-                continue
-            with _lock:
-                _jobs[job_id] = job
-            return job_id, dict(job)
+            with _job_lock(job_id):
+                job = _read_session(job_id)
+                if not job or job.get("status") != "queued":
+                    continue
+                now = time.time()
+                requested = job.get("wake_requested_at_epoch")
+                wake_latency = round(now - float(requested), 2) if requested else None
+                analysis_run_id = str(job.get("analysis_run_id") or uuid.uuid4().hex)
+                job.update({
+                    "status": "running",
+                    "message": "GPU worker accepted the fight",
+                    "worker_id": worker_id,
+                    "analysis_run_id": analysis_run_id,
+                    "worker_started_at_epoch": now,
+                    "wake_latency_seconds": wake_latency,
+                    "worker_heartbeat_epoch": now,
+                    "worker_lease_expires_epoch": now + SETTINGS.worker_lease_seconds,
+                    "updated_at_epoch": now,
+                })
+                if not _write_session(job_id, job):
+                    continue
+                _remember(job_id, job)
+                return job_id, dict(job)
         finally:
             shutil.rmtree(claim_path, ignore_errors=True)
     return None
@@ -270,7 +388,7 @@ def wake_observations(limit: int = 40) -> list[float]:
     seen: list[tuple[float, float]] = []
     for path in OUTPUTS.glob(f"*/{_SESSION_FILE}"):
         try:
-            job = _read_session(path.parent.name)
+            job = get_job(path.parent.name)
         except Exception:
             continue
         if not job:
@@ -312,7 +430,7 @@ def update_job_for_worker(
     renew_lease: bool = True,
 ) -> bool:
     """Update only while this worker owns the exact live analysis generation."""
-    with _lock:
+    with _job_lock(job_id):
         job = _read_session(job_id)
         if (
             not job
@@ -327,7 +445,7 @@ def update_job_for_worker(
         if renew_lease and job.get("status") == "running":
             job["worker_heartbeat_epoch"] = now
             job["worker_lease_expires_epoch"] = now + SETTINGS.worker_lease_seconds
-        _jobs[job_id] = job
+        _remember(job_id, job)
         return _write_session(job_id, job)
 
 
@@ -338,13 +456,14 @@ def finalize_job_from_worker(
     report: dict,
     artifacts: dict[str, Path],
 ) -> bool:
-    """Publish one remote worker generation atomically enough for readers.
+    """Commit one complete generation after all its files have been written.
 
-    Remote uploads are first written to run-specific staging files by the web
-    process. Only the worker that still owns the live generation may replace
-    the canonical report/tracking artifacts and mark the job complete.
+    Readers resolve the directory through the atomic session file. Failed or
+    superseded generations never become current, and older files are retained.
     """
-    with _lock:
+    if set(artifacts) - _ARTIFACT_NAMES:
+        raise ValueError("Unsupported analysis artifact")
+    with _job_lock(job_id):
         job = _read_session(job_id)
         if (
             not job
@@ -353,15 +472,17 @@ def finalize_job_from_worker(
             or job.get("analysis_run_id") != analysis_run_id
         ):
             return False
-        job_dir = _session_path(job_id).parent
-        temporary_report = job_dir / f"report.json.{analysis_run_id}.tmp"
+        job_dir = analysis_run_directory(job_id, analysis_run_id)
+        temporary_report = job_dir / "report.json.tmp"
         try:
+            job_dir.mkdir(parents=True, exist_ok=True)
             temporary_report.write_text(
-                json.dumps(_json_safe(report), separators=(",", ":")),
+                json.dumps(_json_safe({**report, "analysis_run_id": analysis_run_id}), separators=(",", ":")),
                 encoding="utf-8",
             )
             for name, source in artifacts.items():
-                os.replace(source, job_dir / name)
+                if name != "report.json" and source.resolve() != (job_dir / name).resolve():
+                    os.replace(source, job_dir / name)
             os.replace(temporary_report, job_dir / "report.json")
             now = time.time()
             job.update({
@@ -373,9 +494,13 @@ def finalize_job_from_worker(
                 "worker_heartbeat_epoch": now,
                 "worker_lease_expires_epoch": None,
                 "updated_at_epoch": now,
+                "artifacts_run_id": analysis_run_id,
+                "artifact_isolation_version": 1,
             })
-            _jobs[job_id] = job
-            return _write_session(job_id, job)
+            if not _write_session(job_id, job):
+                return False
+            _remember(job_id, job)
+            return True
         except OSError as exc:
             temporary_report.unlink(missing_ok=True)
             LOGGER.error(
@@ -385,8 +510,34 @@ def finalize_job_from_worker(
             return False
 
 
+def persist_completed_job(job_id: str, analysis_run_id: str) -> bool:
+    """Save history for the current generation without invalidating its report."""
+    from core.db import save_completed_analysis
+
+    with _job_lock(job_id):
+        job = _read_session(job_id)
+        if not job or job.get("status") != "complete" or job.get("artifacts_run_id") != analysis_run_id:
+            return False
+        if not job.get("persist_result") or job.get("history_saved"):
+            return True
+        report_path = analysis_run_directory(job_id, analysis_run_id) / "report.json"
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            save_completed_analysis(job_id, job, report, str(report_path))
+        except Exception as exc:
+            LOGGER.error("analysis_history_save_failed job_id=%s error_type=%s", job_id, type(exc).__name__)
+            job["history_saved"] = False
+            job["message"] = "Analysis complete. Saving to fight history failed; your report is still available. Open it to retry saving."
+        else:
+            job["history_saved"] = True
+            job["message"] = "Complete"
+        if _write_session(job_id, job):
+            _remember(job_id, job)
+        return job["history_saved"]
+
+
 def renew_job_lease(job_id: str, worker_id: str, analysis_run_id: str | None = None) -> bool:
-    job = _read_session(job_id)
+    job = get_job(job_id)
     if not job:
         return False
     expected_run_id = analysis_run_id or str(job.get("analysis_run_id") or "")

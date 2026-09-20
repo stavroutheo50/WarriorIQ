@@ -5,6 +5,7 @@ import hashlib
 import logging
 import math
 import time
+from threading import Lock, RLock
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -190,7 +191,7 @@ from core.sam_recovery import SamRecovery, nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
 from core.scoring import collapse_simultaneous_labels, is_legal_event, normalize_ruleset
 from core.types import AnalysisProgress, AnalysisRequest, PersonObservation, PoseFrame, RoundSpec
-from core.video import build_round_schedule, get_video_info, requested_segment_end, round_at_time
+from core.video import SourceTimestampClock, build_round_schedule, get_video_info, requested_segment_end, round_at_time
 
 ProgressCallback = Callable[[dict], None]
 
@@ -365,10 +366,19 @@ def _latest_observation(seconds: float, width: int, height: int, fighter_a, figh
     }
 
 
+_POSE_MODEL_LOCK = Lock()
+_ANALYSIS_LOCK = RLock()
+
+
 @lru_cache(maxsize=1)
-def get_pose_tracker() -> PoseTracker:
-    """One GPU model instance for the local WarriorIQ server."""
+def _cached_pose_tracker() -> PoseTracker:
     return PoseTracker()
+
+
+def get_pose_tracker() -> PoseTracker:
+    """Reuse model weights without racing first-time model initialization."""
+    with _POSE_MODEL_LOCK:
+        return _cached_pose_tracker()
 
 
 def _validate_request(req: AnalysisRequest, duration: float) -> None:
@@ -508,6 +518,13 @@ def _observed_fighter_mismatch(finder) -> dict | None:
 
 
 def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None) -> dict:
+    # BoT-SORT state belongs to one run for its entire lifetime. Per-frame
+    # locks would still let a second job reset identities between frames.
+    with _ANALYSIS_LOCK:
+        return _analyze(req, progress_callback)
+
+
+def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None) -> dict:
     info = get_video_info(req.video_path)
     _validate_request(req, info.duration)
     rounds = build_round_schedule(req, info)
@@ -551,7 +568,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         except Exception:                                        # noqa: BLE001
             vram_free_at_start = None
 
-    job_dir = OUTPUTS / req.job_id
+    job_dir = Path(req.output_dir) if req.output_dir else OUTPUTS / req.job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     tracking_path = job_dir / "tracking.jsonl"
     events_path = job_dir / "events.json"
@@ -673,6 +690,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "custom_temporal_checkpoint_loaded": bool(action_engine.temporal.available),
         "temporal_architecture": action_engine.temporal.architecture,
         "temporal_validation": action_engine.temporal.validation,
+        "temporal_runtime": action_engine.temporal.diagnostics(),
         "contact_classifier": "pose_geometry_temporal_contact",
         "max_engagement_body_lengths": SETTINGS.max_engagement_body_lengths,
         "uncertainty_policy": "No single-frame strike events, temporal support for contact, and no identity reassignment when recovery evidence is ambiguous.",
@@ -687,6 +705,8 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     if not ok or first_frame is None:
         cap.release()
         raise RuntimeError("Could not read the selected fight-start frame")
+    source_clock = SourceTimestampClock(info.fps)
+    first_seconds = source_clock.seconds(start_frame, float(cap.get(cv2.CAP_PROP_POS_MSEC)))
 
     # Warm model before tracker initialization. This also downloads the model on
     # first use if Ultralytics has not cached it yet.
@@ -794,7 +814,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     # next source frame again.
     next_inference_frame = start_frame + max(1, quality.stride)
     current_imgsz = quality.imgsz
-    decoded_seconds = req.start_seconds
+    decoded_seconds = first_seconds
 
     # Since the first frame has already been consumed, process it through the
     # same downstream path before entering the read loop.
@@ -835,7 +855,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                     break
                 current_frame = source_frame
                 pts_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC))
-                decoded_seconds = pts_ms / 1000.0 if pts_ms > 0.0 else source_frame / info.fps
+                decoded_seconds = source_clock.seconds(source_frame, pts_ms)
                 # Three things can want this frame, and the cheap check has to
                 # consider all of them or a feature silently stops being fed.
                 wants_history = bool(
@@ -919,7 +939,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                         fighter_a = recovered_a or fighter_a
                         fighter_b = recovered_b or fighter_b
 
-            seconds = req.start_seconds if source_frame == start_frame else decoded_seconds
+            seconds = first_seconds if source_frame == start_frame else decoded_seconds
             spec = round_at_time(rounds, seconds)
             round_number = spec.number if spec else None
             active_selected_round = bool(spec and spec.selected)
@@ -991,6 +1011,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                         event.metadata["defense"] = defense.defense
                         event.metadata["defense_confidence"] = float(defense.confidence)
                         defenses.append(defense)
+            else:
+                # Do not join a pre-break extension to post-break retraction.
+                action_engine.interrupt("A")
+                action_engine.interrupt("B")
+
+            if live_action_trusted and not action_engine.temporal.available:
+                live_action_trusted = False
+                classifier["custom_temporal_checkpoint_loaded"] = False
+            classifier["temporal_runtime"] = action_engine.temporal.diagnostics()
 
             # Fighters move. Someone at ringside does not, and that is the
             # difference a separation test cannot see when the wrong two
@@ -1257,11 +1286,13 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "vram_free_at_start": vram_free_at_start,
         "unused_frame_copy_avoidance": not fallback_buffer_enabled,
         "external_identity_history_enabled": identity_referee.enabled,
+        "timestamp_source": "decoded_presentation_timestamps",
+        "timestamp_fallback_frames": source_clock.fallback_frames,
     }
     progress(
         "Building performance report", 98.3, analysis_seconds, segment_duration, manager, None, quality,
         stage="report", live_events_snapshot=final_live_events, stats=final_live_stats,
-        observation=_latest_observation(segment_end_seconds, info.width, info.height, fighter_a, fighter_b, manager),
+        observation=_latest_observation(seconds, info.width, info.height, fighter_a, fighter_b, manager),
     )
     original_name = req.original_name or Path(req.video_path).name
     report = build_report(
@@ -1303,7 +1334,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "Finalizing coaching priorities", 99.2, time.perf_counter() - wall_start, segment_duration,
         manager, None, quality, stage="report", live_events_snapshot=final_live_events,
         stats=final_live_stats,
-        observation=_latest_observation(segment_end_seconds, info.width, info.height, fighter_a, fighter_b, manager),
+        observation=_latest_observation(seconds, info.width, info.height, fighter_a, fighter_b, manager),
     )
     # Freeze the exact customer-facing event stream once. Live completion,
     # saved report totals, round summaries, evidence buttons, and progress
@@ -1356,7 +1387,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         "Saving completed report", 99.7, time.perf_counter() - wall_start, segment_duration,
         manager, None, quality, stage="report", live_events_snapshot=final_live_events,
         stats=final_live_stats,
-        observation=_latest_observation(segment_end_seconds, info.width, info.height, fighter_a, fighter_b, manager),
+        observation=_latest_observation(seconds, info.width, info.height, fighter_a, fighter_b, manager),
     )
 
     summary = {
@@ -1398,10 +1429,12 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         )
 
     progress(
-        "Complete", 100.0, time.perf_counter() - wall_start, segment_duration, manager, None, quality,
-        stage="complete",
+        "Finalizing report" if req.output_dir else "Complete",
+        99.9 if req.output_dir else 100.0,
+        time.perf_counter() - wall_start, segment_duration, manager, None, quality,
+        stage="report" if req.output_dir else "complete",
         live_events_snapshot=final_live_events,
         stats=final_live_stats,
-        observation=_latest_observation(segment_end_seconds, info.width, info.height, fighter_a, fighter_b, manager),
+        observation=_latest_observation(seconds, info.width, info.height, fighter_a, fighter_b, manager),
     )
     return report

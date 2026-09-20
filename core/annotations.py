@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 
@@ -39,8 +40,11 @@ def _sample(record: dict, fighter: str) -> Sample | None:
     )
 
 
-def export_sequence(job_id: str, annotation_id: int, corrected: dict, event_time: float) -> str | None:
-    tracking = OUTPUTS / job_id / "tracking.jsonl"
+def export_sequence(
+    job_id: str, annotation_id: int, corrected: dict, event_time: float,
+    *, tracking_path: Path | None = None, source_fight_id: str | None = None,
+) -> str | None:
+    tracking = tracking_path if tracking_path is not None else OUTPUTS / job_id / "tracking.jsonl"
     if not tracking.exists():
         return None
     records = []
@@ -75,7 +79,7 @@ def export_sequence(job_id: str, annotation_id: int, corrected: dict, event_time
     path = folder / f"{job_id}__annotation_{annotation_id:06d}.npz"
     np.savez_compressed(
         path, x=np.asarray(features, dtype=np.float32), y=np.int64(ACTION_CLASSES.index(label)),
-        fight_id=np.asarray(job_id), fighter=np.asarray(fighter),
+        fight_id=np.asarray(source_fight_id or job_id), fighter=np.asarray(fighter),
         technique=np.asarray(corrected.get("technique", "none")),
         target=np.asarray(corrected.get("target") or "none"),
         outcome=np.asarray(corrected.get("outcome") or "uncertain"),

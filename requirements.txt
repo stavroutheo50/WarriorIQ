@@ -1,4 +1,7 @@
-ultralytics>=8.4.0
+ultralytics==8.4.124
+torch==2.11.0
+torchvision==0.26.0
+setuptools>=70,<82
 opencv-python>=4.10
 numpy>=1.26,<3
 scipy>=1.13
@@ -9,13 +12,13 @@ python-multipart>=0.0.12
 python-dotenv>=1.0
 pydantic>=2.8
 authlib>=1.6,<2
+httpx>=0.27,<1
 itsdangerous>=2.2,<3
 huggingface_hub>=0.27
 sam2==1.1.0
 stripe>=11.0
 openai>=2.0
 a2wsgi>=1.10,<2
-rtmlib>=0.0.16  # optional: top-down pose refinement, see core/rtm_pose.py
 # onnx arrives as an ultralytics dependency, which is happy with 1.17 - and
 # 1.17 carries eleven known CVEs, all fixed by 1.21/1.22. None is reachable
 # through WarriorIQ (onnx parses model files, and people upload video, not
@@ -28,28 +31,7 @@ rtmlib>=0.0.16  # optional: top-down pose refinement, see core/rtm_pose.py
 # test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask_causal_expanded,
 # which no amount of care in this repo can shorten.
 onnx>=1.22
-# onnxruntime-gpu, pinned to a CUDA 12 build, and NOT alongside `onnxruntime`.
-#
-# rtmlib depends on plain `onnxruntime`, which is the CPU wheel. Installing it
-# means RTMPose runs on the CPU no matter what `rtm_pose_device` says - which
-# is what happened here for months: the config read "cuda", the log carried one
-# warning line, and the model refined at 15.6 ms per person. Both packages
-# install into the same `onnxruntime` package directory, so having both is
-# unsupported and which one wins depends on install order.
-#
-# The version matters and is not "latest". Measured 2026-09-14:
-#
-#     1.27 - 1.29   built against CUDA 13.0   <- needs cublasLt64_13.dll
-#     1.21 - 1.26   built against CUDA 12.8   <- what torch cu128 already ships
-#
-# This project is CUDA 12 throughout (torch 2.11.0+cu128, tensorrt_cu12), so a
-# 1.27+ wheel silently falls back to the CPU. 1.26.0 is the newest that
-# matches. Do not "upgrade" this without checking that table.
-#
-# Install with:  pip install --no-deps onnxruntime-gpu==1.26.0
-# (--no-deps, or pip may pull the CPU wheel back in for rtmlib.)
-#
-# The DLL search path is the other half; see core/rtm_pose.py, which imports
-# torch before building the session because the CUDA libraries live in
-# torch/lib and are not otherwise findable.
-onnxruntime-gpu==1.26.0
+# Optional RTMPose has conflicting upstream dependency metadata. Choose one
+# runtime profile using the separate installation procedure in README.md.
+# Do not add rtmlib here: pip would install two OpenCV distributions and the
+# CPU ONNX runtime alongside the GPU runtime, overwriting shared packages.

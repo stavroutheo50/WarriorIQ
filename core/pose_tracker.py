@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from threading import RLock
 
 import numpy as np
 import torch
@@ -326,6 +327,7 @@ class PoseTracker:
             )
         self.model = YOLO(model_path)
         self._focus_model = None
+        self._focus_lock = RLock()
         self._warmed = False
 
     def warmup(self, frame) -> None:
@@ -367,7 +369,7 @@ class PoseTracker:
         self._warmed = True
 
     def reset_tracking(self) -> None:
-        """Best-effort reset of Ultralytics tracker state between fights.
+        """Reset identities between fights or fail before using stale tracks.
 
         The YOLO model is cached so we do not pay model-loading cost for every
         fight, but BoT-SORT state must never leak from one uploaded video into
@@ -382,11 +384,14 @@ class PoseTracker:
         if trackers is not None:
             for tracker in trackers:
                 reset = getattr(tracker, "reset", None)
-                if callable(reset):
-                    try:
-                        reset()
-                    except Exception:
-                        pass
+                if not callable(reset):
+                    LOGGER.error("pose_tracker_reset_failed reason=unsupported_tracker")
+                    raise RuntimeError("The pose tracker cannot safely reset for a new fight")
+                try:
+                    reset()
+                except Exception as exc:
+                    LOGGER.error("pose_tracker_reset_failed error_type=%s", type(exc).__name__)
+                    raise RuntimeError("The pose tracker could not reset for a new fight") from exc
 
         # Some Ultralytics tracker callbacks use vid_path to decide whether a
         # source changed. Clearing it prevents a cached ndarray source from
@@ -395,8 +400,30 @@ class PoseTracker:
             try:
                 current = predictor.vid_path
                 predictor.vid_path = [None] * len(current) if isinstance(current, (list, tuple)) else None
-            except Exception:
-                pass
+            except Exception as exc:
+                LOGGER.error("pose_tracker_reset_failed reason=video_state error_type=%s", type(exc).__name__)
+                raise RuntimeError("The pose tracker could not clear the previous video state") from exc
+
+    def _get_focus_model(self):
+        if self._focus_model is None:
+            # Keep selection/crop geometry away from BoT-SORT's predictor.
+            # A second TensorRT context can exhaust VRAM; use the PT weights.
+            focus_path = self.model_path
+            pt_path = Path(SETTINGS.pose_model_pt)
+            if self.model_path.endswith(".engine") and pt_path.exists():
+                focus_path = str(pt_path)
+            LOGGER.info("focus_backend=%s model=%s",
+                        "tensorrt" if focus_path.endswith(".engine") else "pytorch", focus_path)
+            self._focus_model = YOLO(focus_path)
+        return self._focus_model
+
+    def predict_selection(self, frame):
+        """Detect candidates without changing the current analysis predictor."""
+        with self._focus_lock:
+            return self._get_focus_model().predict(
+                frame, device=self.device, imgsz=SETTINGS.default_imgsz,
+                conf=SETTINGS.detection_conf, classes=[0], verbose=False,
+            )
 
     def track(self, frame, imgsz: int | None = None) -> list[PersonObservation]:
         size = int(imgsz or SETTINGS.default_imgsz)
@@ -456,39 +483,6 @@ class PoseTracker:
         if not requests:
             return []
 
-        if self._focus_model is None:
-            # A separate predictor is essential: predict() on the persistent
-            # tracking model changes its internal source geometry and breaks
-            # BoT-SORT camera-motion state on the next full frame.
-            #
-            # It must NOT be the TensorRT engine, though, and that was costing
-            # far more than the recovery it buys. Loading the .engine a second
-            # time creates a second IExecutionContext, and the context - not the
-            # 86 MiB of weights - is 3.5 GB. Measured in the logs of every run
-            # today: the card goes 3582 MiB after the tracking model and 7164
-            # MiB once this one loads, on an 8151 MiB card.
-            #
-            # What that starves is SAM2. An earlier session measured SAM2 at
-            # 0.176 s/frame with ONE engine resident and 2.71 GB free, and noted
-            # it cost nothing. With two there is under 1 GB left, so SAM2 spills
-            # to system RAM over PCIe - which Windows does silently instead of
-            # erroring - and a twenty second clip did not finish in forty-five
-            # minutes with the GPU pinned at 100%. Runs with SAM2 disabled
-            # completed; runs with it enabled did not. That is the whole
-            # difference.
-            #
-            # This path runs on a handful of frames in a round, on crops, at
-            # imgsz 384. PyTorch weights are far quicker than that needs and
-            # cost a few hundred MB instead of 3.5 GB. The engine stays the
-            # fallback for a checkout that has no .pt.
-            focus_path = self.model_path
-            pt_path = Path(SETTINGS.pose_model_pt)
-            if self.model_path.endswith(".engine") and pt_path.exists():
-                focus_path = str(pt_path)
-            LOGGER.info("focus_backend=%s model=%s",
-                        "tensorrt" if focus_path.endswith(".engine") else "pytorch",
-                        focus_path)
-            self._focus_model = YOLO(focus_path)
         # One crop per call rather than one batched call over the list.
         #
         # The batch was not "guaranteed one result per request" as the comment
@@ -502,17 +496,19 @@ class PoseTracker:
         #
         # This path only runs where SAM sees a fighter YOLO missed, a handful of
         # frames in a round, so looping costs nothing worth protecting.
-        results = [
-            self._focus_model.predict(
-                request[4],
-                device=self.device,
-                imgsz=384 if self.uses_cuda else 320,
-                conf=max(0.10, SETTINGS.detection_conf * 0.65),
-                classes=[0],
-                verbose=False,
-            )[0]
-            for request in requests
-        ]
+        with self._focus_lock:
+            model = self._get_focus_model()
+            results = [
+                model.predict(
+                    request[4],
+                    device=self.device,
+                    imgsz=384 if self.uses_cuda else 320,
+                    conf=max(0.10, SETTINGS.detection_conf * 0.65),
+                    classes=[0],
+                    verbose=False,
+                )[0]
+                for request in requests
+            ]
         recovered: list[PersonObservation] = []
         for (name, guide, offset_x, offset_y, crop), result in zip(requests, results, strict=True):
             candidates = self.parse(result, crop)

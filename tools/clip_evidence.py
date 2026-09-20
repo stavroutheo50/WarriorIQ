@@ -29,6 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.action import L_ANKLE, L_KNEE, L_WRIST, R_ANKLE, R_KNEE, R_WRIST
+from app.state import completed_artifact_directory
 
 # Just over half a second either side of the moment: long enough to contain a
 # strike from chamber to retraction, short enough not to swallow the next one.
@@ -38,7 +39,10 @@ MIN_CONFIDENCE = 0.30
 
 def _load_tracking(job: str) -> dict[int, dict]:
     records = {}
-    path = PROJECT_ROOT / "outputs" / job / "tracking.jsonl"
+    directory = completed_artifact_directory(job)
+    if directory is None:
+        raise ValueError("This analysis has no completed generation yet")
+    path = directory / "tracking.jsonl"
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
             record = json.loads(line)

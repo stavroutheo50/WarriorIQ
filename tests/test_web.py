@@ -1086,25 +1086,20 @@ class PublicPageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertGreater(len(response.content), 1000)
 
-    def test_identity_recovery_is_not_a_question_on_the_setup_page(self):
-        """The setup page must not ask about external identity recovery.
-
-        It is a no-op without OPENAI_API_KEY, so the decision belongs to
-        whoever configures the server, not to someone uploading their first
-        fight. The endpoint therefore defaults it on and the checkbox is gone.
-        """
+    def test_identity_recovery_requires_upload_time_opt_in(self):
+        """An operator's API key does not constitute an uploader's consent."""
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
-        self.assertNotIn("openai_identity_recovery", template)
+        self.assertIn('type="checkbox" name="openai_identity_recovery" value="true"', template)
         self.assertNotIn("setup-extra", template)
 
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
-        self.assertIn("openai_identity_recovery: bool = Form(True)", source)
+        self.assertIn("openai_identity_recovery: bool = Form(False)", source)
 
         # Sending frames to a third party on every analysis has to be what the
         # privacy policy actually says, or the policy is wrong.
         privacy = (Path(__file__).resolve().parents[1] / "app" / "templates" / "privacy.html").read_text(encoding="utf-8")
-        self.assertNotIn("only when external recovery is explicitly enabled", privacy)
-        self.assertIn("rather than being chosen per upload", privacy)
+        self.assertIn("only when external recovery is explicitly enabled", privacy)
+        self.assertNotIn("rather than being chosen per upload", privacy)
 
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
                        scorecard_available=None, measurement=None, kick_minimum=None,
@@ -1644,7 +1639,8 @@ class PublicPageTests(unittest.TestCase):
 
     def test_replay_applies_measured_sync_delay(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "replay.html").read_text(encoding="utf-8")
-        self.assertIn("skeletonDelay=.14", template)
+        self.assertNotIn("skeletonDelay=", template)
+        self.assertIn("t=Math.max(0,shown)", template)
 
     def test_failed_analysis_has_return_to_selection_action(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
