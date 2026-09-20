@@ -12,7 +12,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.annotations import accuracy_summary
-from core.config import OUTPUTS, UPLOADS
+from core.config import UPLOADS
+from app.state import completed_artifact_directory
 from core.db import get_fight, list_annotations
 from core.regression_manifest import build_regression_manifest, file_sha256
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
@@ -28,12 +29,10 @@ def _video_path(job_id: str) -> Path | None:
 
 
 def _report_path(job_id: str) -> Path | None:
-    fight = get_fight(job_id)
-    if fight and fight.get("report_path"):
-        candidate = Path(fight["report_path"])
-        if candidate.is_file():
-            return candidate
-    candidate = OUTPUTS / job_id / "report.json"
+    directory = completed_artifact_directory(job_id)
+    if directory is None:
+        return None
+    candidate = directory / "report.json"
     return candidate if candidate.is_file() else None
 
 

@@ -26,6 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.annotations import _temporal_label, export_sequence
 from core.config import DATASET
+from app.state import completed_artifact_directory, get_job
 
 ID_BASE = 500000
 
@@ -91,11 +92,18 @@ def main() -> int:
             disagreed += 1
         if args.dry_run:
             continue
+        job_id = entry.get("job") or args.job
+        directory = completed_artifact_directory(job_id)
+        if directory is None:
+            failed += 1
+            continue
         written = export_sequence(
-            entry.get("job") or args.job, ID_BASE + int(entry["id"]),
+            job_id, ID_BASE + int(entry["id"]),
             {"fighter": entry.get("fighter", "A"), "technique": technique,
              "target": entry.get("target"), "outcome": entry.get("outcome")},
             float(entry["peak_time"]),
+            tracking_path=directory / "tracking.jsonl",
+            source_fight_id=(get_job(job_id) or {}).get("source_video_sha256"),
         )
         if written is None:
             failed += 1

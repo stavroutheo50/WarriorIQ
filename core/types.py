@@ -47,6 +47,8 @@ class AnalysisRequest:
     # Which fighter on the workspace roster this bout is about. None for a
     # fight analysed before the roster existed, or by a guest.
     fighter_id: int | None = None
+    # Optional run staging directory; the orchestrator publishes it atomically.
+    output_dir: str | None = None
 
 
 @dataclass

@@ -40,21 +40,19 @@ class SequenceDataset(Dataset):
         self.fight_ids = []
         self.labels = []
         for path in self.items:
-            data = np.load(path, allow_pickle=False)
-            if "fight_id" in data:
-                fid = str(np.asarray(data["fight_id"]).item())
-            else:
-                fid = path.stem.split("__", 1)[0]
+            with np.load(path, allow_pickle=False) as data:
+                fid = str(np.asarray(data["fight_id"]).item()) if "fight_id" in data else path.stem.split("__", 1)[0]
+                label = int(data["y"])
             self.fight_ids.append(fid)
-            self.labels.append(int(data["y"]))
+            self.labels.append(label)
 
     def __len__(self):
         return len(self.items)
 
     def __getitem__(self, index):
-        data = np.load(self.items[index], allow_pickle=False)
-        x = np.asarray(data["x"], dtype=np.float32)
-        y = int(data["y"])
+        with np.load(self.items[index], allow_pickle=False) as data:
+            x = np.asarray(data["x"], dtype=np.float32)
+            y = int(data["y"])
         if x.ndim != 2:
             raise ValueError(f"{self.items[index]} x must be 2D (T, features), got {x.shape}")
         return torch.from_numpy(x), torch.tensor(y, dtype=torch.long)

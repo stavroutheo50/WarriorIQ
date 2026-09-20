@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import subprocess
 from pathlib import Path
 from typing import Iterable
@@ -11,6 +12,35 @@ import numpy as np
 from core.types import AnalysisRequest, RoundSpec, VideoInfo
 
 LOGGER = logging.getLogger("warrioriq")
+
+
+class SourceTimestampClock:
+    """Use decoded presentation times, anchoring missing timestamps locally."""
+
+    def __init__(self, fps: float):
+        if not math.isfinite(fps) or fps <= 0:
+            raise ValueError("Video frame rate must be finite and positive")
+        self.fps = fps
+        self.last_frame = None
+        self.last_seconds = None
+        self.fallback_frames = 0
+
+    def seconds(self, source_frame: int, pts_ms: float) -> float:
+        pts = pts_ms / 1000.0
+        valid = math.isfinite(pts) and pts >= 0.0 and (pts > 0.0 or source_frame == 0)
+        if self.last_seconds is not None:
+            valid = valid and pts > self.last_seconds
+        if valid:
+            value = pts
+        else:
+            value = source_frame / self.fps if self.last_seconds is None else (
+                self.last_seconds + max(1, source_frame - self.last_frame) / self.fps
+            )
+            self.fallback_frames += 1
+            if self.fallback_frames == 1:
+                LOGGER.warning("video_timestamp_fallback frame=%d reason=missing_or_non_monotonic_pts", source_frame)
+        self.last_frame, self.last_seconds = source_frame, value
+        return value
 
 
 def get_video_info(path: str | Path) -> VideoInfo:

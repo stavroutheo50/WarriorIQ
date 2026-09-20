@@ -75,6 +75,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.action import L_ANKLE, L_KNEE, L_WRIST, R_ANKLE, R_KNEE, R_WRIST
 from core.referee import referee_probability
+from app.state import completed_artifact_directory
 
 VIDEOS = {
     "fam3": "fights/1.mp4",
@@ -92,7 +93,10 @@ FEATURE_NAMES = (
 
 def _tracking(job: str) -> dict[int, dict]:
     records = {}
-    for line in (PROJECT_ROOT / "outputs" / job / "tracking.jsonl").read_text(encoding="utf-8").splitlines():
+    directory = completed_artifact_directory(job)
+    if directory is None:
+        raise ValueError("This analysis has no completed generation yet")
+    for line in (directory / "tracking.jsonl").read_text(encoding="utf-8").splitlines():
         try:
             record = json.loads(line)
         except ValueError:
