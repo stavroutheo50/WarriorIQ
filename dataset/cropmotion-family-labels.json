@@ -1,0 +1,145 @@
+[
+ {
+  "id": 33,
+  "job": "cropmotion",
+  "fighter": "B",
+  "peak_time": 58.7,
+  "proposed": "left_low_kick",
+  "technique": "kick",
+  "target": "leg",
+  "outcome": "checked",
+  "source": "event"
+ },
+ {
+  "id": 66,
+  "job": "cropmotion",
+  "fighter": "A",
+  "peak_time": 82.80000000000001,
+  "proposed": "left_body_kick",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "likely_landed",
+  "source": "event"
+ },
+ {
+  "id": 65,
+  "job": "cropmotion",
+  "fighter": "A",
+  "peak_time": 45.300000000000004,
+  "proposed": "left_body_kick",
+  "technique": "kick",
+  "target": "body",
+  "outcome": "clean",
+  "source": "event"
+ },
+ {
+  "id": 83,
+  "job": "cropmotion",
+  "fighter": "A",
+  "peak_time": 79.60000000000001,
+  "proposed": "right_push_kick",
+  "technique": "kick",
+  "target": "leg",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 31,
+  "job": "cropmotion",
+  "fighter": "A",
+  "peak_time": 87.2,
+  "proposed": "right_knee",
+  "technique": "knee",
+  "target": "body",
+  "outcome": "clean",
+  "source": "event"
+ },
+ {
+  "id": 91,
+  "job": "cropmotion",
+  "fighter": "B",
+  "peak_time": 87.4,
+  "proposed": "jab",
+  "technique": "punch",
+  "target": "body",
+  "outcome": "clean",
+  "source": "event"
+ },
+ {
+  "id": 38,
+  "job": "cropmotion",
+  "fighter": "B",
+  "peak_time": 90.60000000000001,
+  "proposed": "jab",
+  "technique": "punch",
+  "target": "body",
+  "outcome": "likely_landed",
+  "source": "event"
+ },
+ {
+  "id": 6,
+  "job": "cropmotion",
+  "fighter": "A",
+  "peak_time": 85.9,
+  "proposed": "jab",
+  "technique": "punch",
+  "target": "body",
+  "outcome": "likely_landed",
+  "source": "event"
+ },
+ {
+  "id": 26,
+  "job": "cropmotion",
+  "fighter": "A",
+  "peak_time": 87.10000000000001,
+  "proposed": "right_low_kick",
+  "technique": "kick",
+  "target": "leg",
+  "outcome": "likely_landed",
+  "source": "event"
+ },
+ {
+  "id": 14,
+  "job": "cropmotion",
+  "fighter": "A",
+  "peak_time": 87.5,
+  "proposed": "left_hook",
+  "technique": "punch",
+  "target": "body",
+  "outcome": "blocked",
+  "source": "event"
+ },
+ {
+  "id": 50,
+  "job": "cropmotion",
+  "fighter": "B",
+  "peak_time": 82.30000000000001,
+  "proposed": "right_low_kick",
+  "technique": "kick",
+  "target": "leg",
+  "outcome": "likely_landed",
+  "source": "event"
+ },
+ {
+  "id": 87,
+  "job": "cropmotion",
+  "fighter": "A",
+  "peak_time": 27.900000000000002,
+  "proposed": "left_low_kick",
+  "technique": "kick",
+  "target": "leg",
+  "outcome": "missed",
+  "source": "event"
+ },
+ {
+  "id": 12,
+  "job": "cropmotion",
+  "fighter": "A",
+  "peak_time": 81.30000000000001,
+  "proposed": "jab",
+  "technique": "punch",
+  "target": "body",
+  "outcome": "likely_landed",
+  "source": "event"
+ }
+]
