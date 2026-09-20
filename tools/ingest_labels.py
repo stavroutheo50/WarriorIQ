@@ -31,6 +31,25 @@ from app.state import completed_artifact_directory, get_job
 ID_BASE = 500000
 
 
+def _agrees(technique: str, proposed: str | None) -> bool:
+    """Did the labeller confirm the detector's guess?
+
+    Compared as the trainer will see them, not as raw strings. The detector
+    names a kick by where it landed - core/contact.py rewrites a round kick to
+    left_low_kick, left_body_kick or left_head_kick - while the page can only
+    offer the seventeen technique classes, so left_round_kick is the only way
+    to agree about that kick at all. A string compare therefore recorded a
+    disagreement every time the labeller agreed about one, and 104 of the
+    proposals across the packs on disk carry a height.
+
+    Neither side can collapse to "none" by accident here: families are
+    diverted before this is reached, and every proposal the builder writes
+    maps to a real class, so this cannot manufacture an agreement out of a
+    name that failed to map.
+    """
+    return _temporal_label(technique) == _temporal_label(proposed or "none")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Write .npz sequences from a label pack.")
     parser.add_argument("--job", default=None,
@@ -86,7 +105,7 @@ def main() -> int:
             continue
         # What the trainer will actually see, after kick heights collapse.
         kept[_temporal_label(technique)] += 1
-        if technique == entry.get("proposed"):
+        if _agrees(technique, entry.get("proposed")):
             agreed += 1
         else:
             disagreed += 1
