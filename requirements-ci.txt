@@ -15,6 +15,17 @@
 # headless alone, which is also the right one for a runner with no display.
 -r requirements-web.txt
 
+# run.py imports uvicorn and tests/test_web.py imports run, but main's
+# requirements-web.txt does not list it - so the suite has a dependency the
+# manifest never declared, and the very first CI run on this repository is what
+# noticed. It went unseen locally because every working checkout installs from
+# requirements.txt or has uvicorn already.
+#
+# Pinned here rather than added to requirements-web.txt because #23 already adds
+# exactly this line (with stripe); fixing it here too would only collide. Delete
+# this block once #23 lands.
+uvicorn[standard]>=0.32
+
 ultralytics==8.4.124
 sam2==1.1.0
 
