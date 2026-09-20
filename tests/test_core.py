@@ -3507,6 +3507,35 @@ class LabelGranularityTests(unittest.TestCase):
                         source.index("kept[_temporal_label(technique)]"),
                         "families must be diverted before reaching _temporal_label")
 
+    def test_agreeing_about_a_kick_is_not_recorded_as_a_disagreement(self):
+        """The detector names a kick by height, the page by technique.
+
+        core/contact.py rewrites a round kick to left_low_kick once it knows
+        where it landed, but the page can only offer the seventeen classes, so
+        left_round_kick is the only way to agree about that kick. Comparing the
+        raw strings counted that as a disagreement - on the packs currently on
+        disk, 104 proposals carry a height, 16 of them in the 58 events of
+        nointerrupt_5736.
+        """
+        from tools.ingest_labels import _agrees
+
+        for answer, proposal in (("left_round_kick", "left_low_kick"),
+                                 ("right_round_kick", "right_body_kick"),
+                                 ("left_round_kick", "left_head_kick")):
+            self.assertTrue(_agrees(answer, proposal),
+                            "%s is how a labeller agrees with %s" % (answer, proposal))
+
+        self.assertTrue(_agrees("jab", "jab"))
+        self.assertTrue(_agrees("none", "none"))
+        self.assertTrue(_agrees("none", None))
+
+        # Real disagreements have to survive the collapse.
+        self.assertFalse(_agrees("jab", "cross"))
+        self.assertFalse(_agrees("none", "left_low_kick"))
+        self.assertFalse(_agrees("left_low_kick", "none"))
+        self.assertFalse(_agrees("left_round_kick", "right_low_kick"))
+        self.assertFalse(_agrees("left_round_kick", "left_front_kick"))
+
 
 class RedirectSafetyTests(unittest.TestCase):
     """Where a login is allowed to send somebody afterwards."""
