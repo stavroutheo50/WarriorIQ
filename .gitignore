@@ -57,6 +57,8 @@ dataset/sequences/
 # it here - it is a download, not a thing this project owns.
 dataset/boxingvi/
 dataset/sequences_boxingvi/
+dataset/sequences_own_negatives/
+dataset/sequences_combined/
 
 # Fight footage stays on the machine that filmed it.
 #
