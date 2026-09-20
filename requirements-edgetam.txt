@@ -1,0 +1,18 @@
+# Optional runtime dependencies for the EdgeTAM sweep backend, selected with
+# WARRIORIQ_SAM_BACKEND=edgetam. SAM2 is the default and needs none of this.
+#
+# Installed alongside sam2==1.1.0 rather than instead of it. EdgeTAM's own
+# repository (facebookresearch/EdgeTAM) is a fork of SAM2 and installs over the
+# `sam2` package, which would replace a working path to add an experimental
+# one; the HuggingFace port shares nothing with sam2 at runtime, so both
+# backends can be present and either selected.
+#
+# Measured on the project venv 2026-09-20: installing these added four packages
+# (transformers, tokenizers, timm, plus typer/shellingham) and upgraded or
+# downgraded nothing already present, including huggingface_hub, which sam2
+# uses.
+transformers==5.17.0
+# transformers does not require timm, but EdgeTAM's vision config does - it is
+# a TimmWrapperConfig, and without timm from_pretrained raises ImportError at
+# load rather than at import.
+timm>=1.0.19
