@@ -6,10 +6,27 @@ a real run against that promise and prints what the planner BELIEVED alongside
 what actually happened, because the interesting failure is the two disagreeing.
 
     python tools/measure_realtime.py <video> <seconds> [--sam-off]
+                                    [--sam-model=<hf id>] [--stride=<n>]
 
 <seconds> is passed as end_seconds, so it genuinely bounds the analysed span.
 The ratio is still computed from what the run reports it covered, never from
 what was asked for.
+
+--sam-model swaps the SAM2 checkpoint for one run, which is the cheapest
+speed experiment available: `facebook/sam2.1-hiera-tiny` is 39M parameters
+against the small default, and SAM2 is over half of a short round's wall time.
+build_sam2_video_predictor_hf takes the repo id straight through, so nothing
+but this string changes.
+
+--stride pins WARRIORIQ_FORCE_STRIDE, and **two runs cannot be compared
+without it.** The planner otherwise picks the stride off a wall clock, so the
+same fight and the same code give fighter B 0.26 on one run and 0.73 on the
+next. An A/B without a pinned stride measures the clock, not the change.
+
+Both are read before core.config is imported, which is not a style choice:
+SETTINGS is a frozen dataclass whose defaults evaluate at that import, so an
+environment variable set afterwards is silently ignored. --sam-off has always
+done it this way; these follow it.
 
 It reports:
 
@@ -38,6 +55,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+
+def _flag(name: str) -> str | None:
+    """Read `--name=value` from argv, or None.
+
+    argparse would reject the positional-then-flags shape this tool has always
+    had, and rewriting the interface would break whatever is already calling it.
+    """
+    prefix = f"{name}="
+    for argument in sys.argv[1:]:
+        if argument.startswith(prefix):
+            return argument[len(prefix):].strip() or None
+    return None
 
 
 def _analysed_span(path: Path) -> float:
@@ -71,13 +101,26 @@ def main() -> int:
     video = sys.argv[1]
     seconds = float(sys.argv[2])
     sam_off = "--sam-off" in sys.argv
+    sam_model = _flag("--sam-model")
+    stride = _flag("--stride")
 
+    # Everything that changes SETTINGS has to happen here, above the core
+    # import below. See the note in the module docstring.
+    import os
     if sam_off:
-        import os
         os.environ["WARRIORIQ_SAM_RECOVERY"] = "0"
         os.environ["WARRIORIQ_SAM_CONTINUOUS"] = "0"
+    if sam_model:
+        os.environ["WARRIORIQ_SAM_MODEL"] = sam_model
+    if stride:
+        os.environ["WARRIORIQ_FORCE_STRIDE"] = str(int(stride))
 
     print(f"VRAM before: {vram()}", flush=True)
+    # Printed so a saved run says what produced it. Two ratios compared without
+    # these three lines beside them are not evidence of anything.
+    print(f"sam_model  : {sam_model or 'default (see WARRIORIQ_SAM_MODEL)'}")
+    print(f"stride     : {stride or 'ADAPTIVE - not comparable between runs'}")
+    print(f"sam        : {'off' if sam_off else 'on'}", flush=True)
 
     import cv2
 

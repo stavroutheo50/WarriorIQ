@@ -54,9 +54,20 @@ def load_fight(name: str) -> dict:
     return fights[name]
 
 
-def trace_run(fight: dict, stride: int) -> tuple[list, dict]:
-    """One analysis, recording where each fighter was on every analysed frame."""
+def trace_run(fight: dict, stride: int, sam_model: str | None = None) -> tuple[list, dict]:
+    """One analysis, recording where each fighter was on every analysed frame.
+
+    `sam_model` swaps the SAM2 checkpoint for this run. It is set here rather
+    than by the caller because SETTINGS is a frozen dataclass whose defaults
+    evaluate when core.config is first imported, three lines below - an
+    environment variable set after that import is silently ignored, and the
+    run would quietly measure the default while claiming to measure the swap.
+    That is the same shape as the two measurement bugs in this module's own
+    docstring: an A/B arm that was not actually switched on.
+    """
     os.environ["WARRIORIQ_FORCE_STRIDE"] = str(int(stride))
+    if sam_model:
+        os.environ["WARRIORIQ_SAM_MODEL"] = sam_model
 
     from core import analyzer
     from core.identity import IdentityManager, box_iou
@@ -240,15 +251,18 @@ def main() -> int:
     parser.add_argument("--out", default=None, help="where to write the sheet")
     parser.add_argument("--labels", default=None,
                         help="a filled-in file from tools/label_identity.py, to score against")
+    parser.add_argument("--sam-model", default=None,
+                        help="SAM2 checkpoint to use, e.g. facebook/sam2.1-hiera-tiny")
     args = parser.parse_args()
 
     fight = load_fight(args.fight)
     print("fight %s  seeds A=%s B=%s at frame %d  stride %d" % (
         args.fight, fight["fighter_a"], fight["fighter_b"],
         fight["seed_frame"], args.stride), flush=True)
+    print("  sam_model %s" % (args.sam_model or "default"), flush=True)
     print("  %s" % fight["note"], flush=True)
 
-    trace, tracking = trace_run(fight, args.stride)
+    trace, tracking = trace_run(fight, args.stride, args.sam_model)
     probe = cv2.VideoCapture(str(PROJECT_ROOT / fight["video"]))
     fps_hint = probe.get(cv2.CAP_PROP_FPS) or 30.0
     probe.release()
