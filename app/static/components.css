@@ -1,4 +1,4 @@
-.file-native{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none}.file-button{display:flex!important;align-items:center;justify-content:center;gap:10px;width:100%;min-height:52px;border:1px dashed #315ea8;border-radius:13px;background:#101a2f;color:var(--lime)!important;font-size:13px!important;letter-spacing:.2px!important;text-transform:none!important;cursor:pointer;transition:.2s}.file-button:hover{background:#14233e;border-color:var(--lime);transform:translateY(-1px)}.file-button span{font-size:20px}.file-status{min-height:18px;color:var(--muted);font-size:12px}.file-status.uploaded{color:var(--green);font-weight:750}.analysis-choice{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;margin-top:18px}.analysis-choice .btn{grid-column:1/-1}.analysis-choice h3{margin:7px 0 2px}.target-options{display:flex;gap:8px;flex-wrap:wrap}.target-options input{position:absolute;opacity:0;pointer-events:none}.target-options span{display:block;padding:11px 14px;border:1px solid var(--line);border-radius:11px;background:#0b0e0c;color:#aeb4af;font-size:12px;font-weight:850;cursor:pointer}.target-options input:checked+span{border-color:var(--lime);background:#2f6fed12;color:var(--lime);box-shadow:inset 0 0 0 1px #2f6fed33}@media(max-width:700px){.analysis-choice{grid-template-columns:1fr}.target-options label{flex:1}.target-options span{text-align:center}}
+.file-native{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none}.file-button{display:flex!important;align-items:center;justify-content:center;gap:10px;width:100%;min-height:52px;border:1px dashed #315ea8;border-radius:2px;background:#101a2f;color:var(--lime)!important;font-size:13px!important;letter-spacing:.2px!important;text-transform:none!important;cursor:pointer;transition:.2s}.file-button:hover{background:#14233e;border-color:var(--lime);transform:translateY(-1px)}.file-button span{font-size:20px}.file-status{min-height:18px;color:var(--muted);font-size:12px}.file-status.uploaded{color:var(--green);font-weight:750}.analysis-choice{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;margin-top:18px}.analysis-choice .btn{grid-column:1/-1}.analysis-choice h3{margin:7px 0 2px}.target-options{display:flex;gap:8px;flex-wrap:wrap}.target-options input{position:absolute;opacity:0;pointer-events:none}.target-options span{display:block;padding:11px 14px;border:1px solid var(--line);border-radius:2px;background:#0b0e0c;color:#aeb4af;font-size:12px;font-weight:850;cursor:pointer}.target-options input:checked+span{border-color:var(--lime);background:#2f6fed12;color:var(--lime);box-shadow:inset 0 0 0 1px #2f6fed33}@media(max-width:700px){.analysis-choice{grid-template-columns:1fr}.target-options label{flex:1}.target-options span{text-align:center}}
 
 
 /* ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@
 }
 .share-link-field:focus {
   outline: none;
-  border-color: var(--wiq-cyan, #59d2e8);
+  border-color: var(--wiq-accent-solid, #59d2e8);
 }
 .share-panel .share-once { margin-top: 12px; }
 
@@ -151,7 +151,7 @@
   box-shadow: none;
   transition: left .15s linear, top .15s linear;
 }
-.live-video-wrap .fighter-overlay b { top: 0; left: 0; border-radius: 6px; }
+.live-video-wrap .fighter-overlay b { top: 0; left: 0; border-radius: 2px; }
 
 /* The four-week block under the next-session plan.
    A single session and a target says what to fix but not how to arrive there,
@@ -172,7 +172,7 @@
   padding: 3px 9px;
   border-radius: 999px;
   background: rgba(85, 119, 216, .18);
-  color: var(--wiq-cyan, #8ea9f5);
+  color: var(--wiq-accent-solid, #8ea9f5);
   font-size: var(--wiq-text-micro, 11px);
   font-weight: 800;
   letter-spacing: .6px;
@@ -185,7 +185,7 @@
 .progression-targets span {
   padding: 5px 10px;
   border: 1px solid var(--wiq-line, #2a3a52);
-  border-radius: 8px;
+  border-radius: 2px;
   font-size: var(--wiq-text-micro, 12px);
 }
 .progression-targets b { color: var(--wiq-text, #e8eefb); font-weight: 750; }
@@ -234,12 +234,12 @@
    evidence rather than as a score, because it is deliberately neither a
    total nor a comparison. */
 .observed{margin-top:18px;padding:16px 18px;border:1px solid rgba(135,148,255,.28);
-  border-radius:12px;background:rgba(135,148,255,.05)}
+  border-radius:2px;background:rgba(135,148,255,.05)}
 .observed h3{margin:0 0 4px;font-size:15px;font-weight:700}
 .observed-note{margin:0 0 12px;font-size:13px;color:#98a2b3;max-width:62ch}
 .observed-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
 .observed-card{display:flex;flex-direction:column;gap:3px;padding:12px 14px;
-  border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(0,0,0,.18)}
+  border:1px solid rgba(255,255,255,.08);border-radius:2px;background:rgba(0,0,0,.18)}
 .observed-who{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:#8794ff;font-weight:800}
 .observed-card strong{font-size:26px;line-height:1.1;font-weight:800}
 .observed-basis{font-size:12.5px;color:#98a2b3}
@@ -252,7 +252,7 @@
    cell would read as a penalty against the fighter when it is a statement
    about our own coverage. */
 .kick-minimum{margin-top:18px;padding:16px 18px;border:1px solid rgba(255,255,255,.10);
-  border-radius:12px;background:rgba(0,0,0,.16)}
+  border-radius:2px;background:rgba(0,0,0,.16)}
 .kick-minimum h3{margin:0 0 4px;font-size:15px;font-weight:700}
 .kick-minimum-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
 .kick-minimum-table th{text-align:left;font-size:11px;letter-spacing:1.2px;

@@ -14,7 +14,7 @@
 
 :root {
   --wiq-aurora-a: 92 130 239;   /* --wiq-blue  */
-  --wiq-aurora-b: 85 198 223;   /* --wiq-cyan  */
+  --wiq-aurora-b: 85 198 223;   /* --wiq-accent-solid  */
   --wiq-aurora-c: 160 138 232;  /* --wiq-b     */
   --wiq-edge: rgba(255, 255, 255, .07);
   --wiq-edge-strong: rgba(255, 255, 255, .14);
@@ -165,15 +165,15 @@ body { background: transparent; }
    company before the consent banner has been answered, and would need adding
    to the subprocessor list. Latin subsets only - 22 KB and 15 KB. */
 @font-face {
-  font-family: "BarlowCondensed";
-  src: url("/static/fonts/barlow-condensed-600.woff2") format("woff2");
+  font-family: "Oswald";
+  src: url("/static/fonts/oswald-600.woff2") format("woff2");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: "BarlowCondensed";
-  src: url("/static/fonts/barlow-condensed-700.woff2") format("woff2");
+  font-family: "Oswald";
+  src: url("/static/fonts/oswald-700.woff2") format("woff2");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -222,7 +222,7 @@ body { background: transparent; }
 }
 
 :root {
-  --font-display: "BarlowCondensed", "Barlow", "InterVar", Inter, "Segoe UI", system-ui, sans-serif;
+  --font-display: "Oswald", "Barlow", "InterVar", Inter, "Segoe UI", system-ui, sans-serif;
   --font-body: "Barlow", "InterVar", Inter, "Segoe UI", system-ui, sans-serif;
   /* Anything the reader treats as a reading rather than a sentence: round
      clocks, scores, coverage percentages, step indicators. Tabular figures so
@@ -297,13 +297,13 @@ p { max-width: 68ch; }
    utilitarian; matching the curve to the control height is what makes a form
    feel considered. */
 .btn {
-  border-radius: 11px;
+  border-radius: 2px;
   padding-inline: 20px;
   letter-spacing: .004em;
 }
 
 .field input, .field select, .field textarea {
-  border-radius: 11px;
+  border-radius: 2px;
   min-height: 46px;
 }
 
@@ -427,7 +427,7 @@ p { max-width: 68ch; }
   padding: 11px 13px;
   border: 1px solid var(--wiq-edge);
   border-left: 2px solid var(--wiq-success);
-  border-radius: 0 10px 10px 0;
+  border-radius: 0 2px 2px 0;
   background: rgba(255, 255, 255, .022);
   color: var(--wiq-text-secondary);
   font-size: 12px;
@@ -572,7 +572,7 @@ p { max-width: 68ch; }
   min-height: 186px;
   padding: 24px 24px 22px;
   border: 1px solid var(--wiq-edge);
-  border-radius: 16px;
+  border-radius: 2px;
   background: linear-gradient(160deg, rgba(255,255,255,.045), rgba(255,255,255,.014));
   box-shadow: var(--wiq-lift);
   overflow: hidden;
@@ -649,7 +649,7 @@ p { max-width: 68ch; }
   padding: 13px 15px;
   border: 1px solid var(--wiq-edge);
   border-left: 2px solid var(--wiq-success);
-  border-radius: 0 11px 11px 0;
+  border-radius: 0 2px 2px 0;
   background: rgba(255, 255, 255, .022);
   color: var(--wiq-text-secondary);
   font-size: 12.5px;
@@ -662,7 +662,7 @@ p { max-width: 68ch; }
 .setup-card {
   padding: clamp(22px, 3vw, 30px);
   border: 1px solid var(--wiq-edge);
-  border-radius: 18px;
+  border-radius: 2px;
   background: linear-gradient(160deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
   box-shadow: var(--wiq-lift);
 }
@@ -684,7 +684,7 @@ p { max-width: 68ch; }
   padding: 12px 15px;
   border: 1px solid var(--wiq-edge);
   border-left: 2px solid var(--wiq-warning);
-  border-radius: 0 11px 11px 0;
+  border-radius: 0 2px 2px 0;
   background: rgba(255, 255, 255, .022);
   color: var(--wiq-text-secondary);
   font-size: 12.5px;
@@ -712,7 +712,7 @@ p { max-width: 68ch; }
   width: 44px;
   height: 44px;
   border: 1px solid rgb(var(--sport-accent) / .42);
-  border-radius: 13px;
+  border-radius: 2px;
   background: linear-gradient(150deg, rgb(var(--sport-accent) / .24), rgb(var(--sport-accent) / .07));
   color: rgb(var(--sport-accent-soft));
   font-size: 13px;
@@ -728,7 +728,7 @@ p { max-width: 68ch; }
 }
 
 .sport-card { gap: 9px; }
-.sport-card .sport-crest { width: 38px; height: 38px; border-radius: 11px; font-size: 12px; }
+.sport-card .sport-crest { width: 38px; height: 38px; border-radius: 2px; font-size: 12px; }
 .sport-card:hover { border-color: rgb(var(--sport-accent) / .5); }
 .sport-card:hover h2 { color: rgb(var(--sport-accent-soft)); }
 .sport-card h2 { transition: color var(--wiq-fast) var(--wiq-ease); }
@@ -884,7 +884,7 @@ p { max-width: 68ch; }
 
 @media (max-width: 620px) {
   .setup-title { gap: 11px; }
-  .sport-crest { width: 36px; height: 36px; border-radius: 10px; font-size: 11px; }
+  .sport-crest { width: 36px; height: 36px; border-radius: 2px; font-size: 11px; }
   .weapon-row { grid-template-columns: minmax(0, 1fr); gap: 9px; }
   .weapon-row > b { font-size: 12.5px; }
   .weapon-bar {

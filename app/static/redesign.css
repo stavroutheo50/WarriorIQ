@@ -241,34 +241,24 @@ tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   .sport-rail b { padding-right: 16px; font-size: 12px; }
 }
 
-/* --- Gradient text, restored on the two lines that are the brand ----------
-   An earlier pass removed this, reasoning that a headline earns attention by
-   size and weight. That holds on a light page; on a deep indigo one it left
-   the second display line a flat grey that read as disabled text rather than
-   as the other half of the sentence. It is back on the home and pricing
-   heroes and nowhere else - a gradient on every em is how the first version
-   got noisy, so the reset below still covers the rest.
+/* --- The display line carries the one hot colour --------------------------
+   An earlier pass removed a clipped gradient here, reasoning that a headline
+   earns attention by size and weight. On a light page that holds; on this one
+   it left the second line a flat grey that read as disabled text. A gradient
+   went back in briefly and was worse - cyan into violet into pink is a
+   software palette, not a fight one - so the line is solid crimson instead:
+   one colour, full weight, no glow.
 
-   Painting it needs all four properties: setting a colour does not undo a
-   clipped gradient, the fill has to be reset too, which is what the removal
-   note got right and is why this rule is heavier than it looks. */
+   It still takes all four properties. Setting a colour does not undo a
+   clipped gradient, the fill has to be reset too, which is what the original
+   removal note got right and is why this rule is heavier than it looks. */
 .hero h1 em,
 .pricing-hero h1 em {
-  background-image: var(--wiq-grad) !important;
-  -webkit-background-clip: text !important;
-  background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-  color: transparent !important;
-}
-/* Without clipping support the text would be transparent on transparent, so
-   the fill comes back and the line is simply cyan. */
-@supports not ((background-clip: text) or (-webkit-background-clip: text)) {
-  .hero h1 em,
-  .pricing-hero h1 em {
-    background-image: none !important;
-    -webkit-text-fill-color: currentColor !important;
-    color: var(--wiq-cyan) !important;
-  }
+  background-image: none !important;
+  -webkit-background-clip: border-box !important;
+  background-clip: border-box !important;
+  -webkit-text-fill-color: rgb(var(--wiq-accent)) !important;
+  color: rgb(var(--wiq-accent)) !important;
 }
 .workflow-heading h1 em,
 .archive-hero h1 em,
@@ -443,7 +433,7 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
   /* Championship gold. Warm against a cold canvas, distinct from all five
      sport accents (blue, red, orange, cyan, violet), and it reads as sport
      rather than software. Used on one thing per screen. */
-  --wiq-accent: 34 211 238;
+  --wiq-accent: 238 78 95;
 }
 
 /* Panels become objects: a lit top edge, a real fill, and a hairline that is
@@ -971,17 +961,17 @@ th, .field label,
    preview panel sitting at the old navy while everything around them moved.
    These are the surfaces large enough to see; they are retuned to the same
    indigo rather than left as a second, competing blue. */
-.nav { background: rgba(10, 14, 36, .92); }
+.nav { background: rgba(10, 12, 15, .93); }
 .card, .hero-card {
-  background: linear-gradient(150deg, rgba(27, 35, 80, .96), rgba(16, 21, 52, .99));
+  background: linear-gradient(150deg, rgba(16, 20, 25, .96), rgba(11, 13, 17, .99));
 }
-.nav-more-panel, .profile-menu-panel { background: #141a3e; }
-.preview-screen { border-color: #33407f; background: #131a3c; }
+.nav-more-panel, .profile-menu-panel { background: #0e1216; }
+.preview-screen { border-color: #2b333f; background: #0e1216; }
 .preview-fight-stage {
-  border-color: #2b3670;
-  background: linear-gradient(145deg, #182051, #0b1026);
+  border-color: #242b36;
+  background: linear-gradient(145deg, #12171d, #090b0e);
 }
-.preview-timeline::before { background: #2b3670; }
+.preview-timeline::before { background: #242b36; }
 
 /* The headline was one flat grey word after a white one. It carries the whole
    palette now - cyan into violet into the corner red - which is the fastest
@@ -995,8 +985,8 @@ th, .field label,
 .btn.nav-signup:not(.secondary),
 .btn[data-motion-primary]:not(.secondary) {
   border: 0;
-  background: var(--wiq-grad);
-  background-image: var(--wiq-grad);
+  background: rgb(var(--wiq-accent));
+  background-image: none;
   color: #0a0e24;
   font-weight: 700;
 }
@@ -1013,7 +1003,7 @@ th, .field label,
 /* The second voice. Violet separates the guide cards and the trust checks
    from the cyan that marks sequence and interface, so the page reads as more
    than one colour without either of them stopping meaning something. */
-.learn-grid a > span { color: var(--wiq-violet); }
-.learn-grid a:hover, .outcome-list a:hover { border-color: var(--wiq-violet); }
+.learn-grid a > span { color: var(--wiq-steel); }
+.learn-grid a:hover, .outcome-list a:hover { border-color: var(--wiq-steel); }
 .trust-checks span { border-color: var(--wiq-line); color: var(--wiq-text-secondary); }
 .trust-panel { border-color: var(--wiq-line); }
