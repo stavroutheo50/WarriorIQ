@@ -4127,13 +4127,52 @@ class LabelPackServerTests(unittest.TestCase):
             finally:
                 server.shutdown()
 
-    def test_it_listens_only_on_this_machine(self):
-        """Nothing here is authenticated, so nothing here is reachable."""
+    def test_nothing_unauthenticated_is_reachable_from_off_this_machine(self):
+        """The bind was loopback-only, so nothing needed a key. Now both hold.
+
+        This used to read main() for the literal ("127.0.0.1", args.port) and
+        call that proof. --host exists now, so a pack can be answered on a
+        phone, and the invariant moved rather than went away: loopback stays
+        keyless, anything else mints a key and refuses every request without
+        it. Exercised here rather than grepped, because a source match breaks
+        on reformatting and passes on a server that authenticates nothing.
+        """
         import inspect
+        import tempfile
+        import threading
+        import urllib.error
+        import urllib.request
+        from http.server import ThreadingHTTPServer
 
         import tools.serve_label_pack as serve
 
-        self.assertIn('("127.0.0.1", args.port)', inspect.getsource(serve.main))
+        source = inspect.getsource(serve.main)
+        # Off loopback is opt-in, and it cannot be taken without a key.
+        self.assertIn('"--host", default="127.0.0.1"', source)
+        self.assertIn("ACCESS_KEY = secrets.token_urlsafe", source)
+
+        root = Path(tempfile.mkdtemp())
+        pack = root / "demo"
+        pack.mkdir()
+        (pack / "label.html").write_text("<html>pack</html>", encoding="utf-8")
+        with mock.patch.object(serve, "PACKS", root),                 mock.patch.object(serve, "PROJECT_ROOT", root),                 mock.patch.object(serve, "ACCESS_KEY", "a-key-for-this-test"):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            base = "http://127.0.0.1:%d" % server.server_address[1]
+            try:
+                for path in ("/", "/demo/", "/demo/?k=wrong"):
+                    with self.assertRaises(urllib.error.HTTPError) as caught:
+                        urllib.request.urlopen(base + path, timeout=10)
+                    self.assertEqual(caught.exception.code, 403, path)
+                answered = urllib.request.urlopen(
+                    base + "/demo/?k=a-key-for-this-test", timeout=10)
+                self.assertEqual(answered.status, 200)
+                # The page POSTs each answer to an absolute path, so the key has
+                # to survive in the cookie or every save after the first is lost.
+                self.assertIn("labelpack_key=a-key-for-this-test",
+                              answered.headers.get("Set-Cookie", ""))
+            finally:
+                server.shutdown()
 
 
 class SimultaneousLabelTests(unittest.TestCase):
