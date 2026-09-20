@@ -45,6 +45,15 @@ from core.temporal_model import ACTION_CLASSES
 
 STRIP_FRAMES = 6
 THUMB_HEIGHT = 230
+# A second, smaller row of the SAME frames, uncropped. The crop below it is
+# taken from one window around the peak and is tight enough to fill itself with
+# the tracked box - which on this footage repeatedly turned "one fighter alone
+# on an empty mat" into "two figures close together", because the nearest
+# official or the referee was pulled into frame beside them. Six events across
+# t=41-42 of fight 5736 were labelled unsure from the crop and resolved to "no
+# opponent within reach" the moment the whole mat was visible. The crop answers
+# what the limb did; this answers whether there was anybody to do it to.
+CONTEXT_HEIGHT = 126
 
 
 def _read_tracking(job: str) -> dict[int, dict]:
@@ -208,6 +217,7 @@ def _filmstrip(cap, tracking, fighter, peak_frame, span_frames):
     wanted[nearest] = peak_frame
     window = None
     tiles = []
+    context = []
     for index in wanted:
         cap.set(cv2.CAP_PROP_POS_FRAMES, index)
         ok, frame = cap.read()
@@ -231,6 +241,13 @@ def _filmstrip(cap, tracking, fighter, peak_frame, span_frames):
         crop = shot[y1:y2, x1:x2]
         if crop.size == 0:
             continue
+        # The same drawn frame, whole. Built before the crop is scaled so the
+        # boxes it carries are the ones the labeller is judging.
+        whole = cv2.resize(
+            shot, (max(1, int(shot.shape[1] * CONTEXT_HEIGHT / shot.shape[0])), CONTEXT_HEIGHT),
+            interpolation=cv2.INTER_AREA)
+        context.append(cv2.copyMakeBorder(whole, 0, 3, 2, 2, cv2.BORDER_CONSTANT,
+                                          value=(0, 140, 200) if index == peak_frame else (24, 24, 24)))
         scale = THUMB_HEIGHT / crop.shape[0]
         tile = cv2.resize(crop, (max(1, int(crop.shape[1] * scale)), THUMB_HEIGHT),
                           interpolation=cv2.INTER_CUBIC)
@@ -244,7 +261,27 @@ def _filmstrip(cap, tracking, fighter, peak_frame, span_frames):
     if not tiles:
         return None
     width = min(t.shape[1] for t in tiles)
-    return cv2.hconcat([t[:, :width] for t in tiles])
+    strip = cv2.hconcat([t[:, :width] for t in tiles])
+    if not context:
+        return strip
+    # The two rows must share a width so they line up frame for frame, but the
+    # context row must never be the one that shrinks: a tall narrow crop (one
+    # fighter, close) makes the crop row narrow, and matching to it squeezed the
+    # whole mat into about a hundred pixels - which is the same blindness this
+    # row exists to remove, just in the other direction. Widen the narrower row.
+    natural = cv2.hconcat(context)
+    target = max(strip.shape[1], natural.shape[1])
+
+    def fit(row):
+        # Pad, never upscale. Stretching a narrow crop to the target invents
+        # pixels it does not have and cost 6 MB across a pack for nothing.
+        if row.shape[1] >= target:
+            return row[:, :target]
+        left = (target - row.shape[1]) // 2
+        return cv2.copyMakeBorder(row, 0, 0, left, target - row.shape[1] - left,
+                                  cv2.BORDER_CONSTANT, value=(24, 24, 24))
+
+    return cv2.vconcat([fit(natural), fit(strip)])
 
 
 # Below this, over three seconds, the subject is not a fighter having a quiet
