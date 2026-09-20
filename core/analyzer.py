@@ -187,7 +187,8 @@ from core.pose_smoothing import JointGate
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
 from core.report import build_report, write_report
 from core.rtm_pose import refine as refine_fighter_pose
-from core.sam_recovery import SamRecovery, nearest_guidance, sam_sampling_stride
+from core.edgetam_recovery import build_recovery
+from core.sam_recovery import nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
 from core.scoring import collapse_simultaneous_labels, is_legal_event, normalize_ruleset
 from core.types import AnalysisProgress, AnalysisRequest, PersonObservation, PoseFrame, RoundSpec
@@ -666,7 +667,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     progress("Loading GPU models", 0.0, 0.0, 0.0)
 
     pose_tracker = get_pose_tracker()
-    sam_recovery = SamRecovery()
+    # SAM2 unless WARRIORIQ_SAM_BACKEND says otherwise. Both backends return
+    # the same thing from track_segment and mean the same thing by it.
+    sam_recovery = build_recovery()
     action_engine = ActionEngine()
     defense_engine = DefenseEngine()
     joint_gate = JointGate() if SETTINGS.pose_gate_enabled else None

@@ -512,6 +512,24 @@ class Settings:
     # core/analyzer.py says so. It is a memory decision, not a quality one.
     sam_continuous_chunk_frames: int = int(os.getenv("WARRIORIQ_SAM_CHUNK_FRAMES", "360"))
     sam_model_id: str = os.getenv("WARRIORIQ_SAM_MODEL", "facebook/sam2.1-hiera-small")
+    # Which model runs the continuous sweep: "sam2" or "edgetam".
+    #
+    # EdgeTAM is 2.5x faster on this footage - 0.078 s/frame against 0.197,
+    # measured on fight 1 with the same seeds and the same sampled frames,
+    # holding both fighters on 60 of 60 frames. The sweep is over half of a
+    # short round, so that is the largest speed change available here.
+    #
+    # **Still not the default**, because speed is not the thing this project
+    # gets wrong. Coverage has gone UP while tracking got worse before now
+    # (a seated spectator is easy to hold), so a faster sweep has to be
+    # measured on identity, with rendered frames, before it decides anything.
+    # tools/measure_identity.py is that measurement.
+    sam_backend: str = os.getenv("WARRIORIQ_SAM_BACKEND", "sam2").strip().lower()
+    # The HuggingFace port, not facebookresearch/EdgeTAM - that repository is a
+    # fork of SAM2 and installs over the `sam2` package this project pins,
+    # which would replace a working path to add an experimental one. This one
+    # lives in `transformers` and shares nothing with sam2 at runtime.
+    edgetam_model_id: str = os.getenv("WARRIORIQ_EDGETAM_MODEL", "yonigozlan/EdgeTAM-hf")
     sam_buffer_frames: int = int(os.getenv("WARRIORIQ_SAM_BUFFER", "18"))
     sam_cooldown_analyzed_frames: int = 24
     openai_identity_model: str = os.getenv("WARRIORIQ_OPENAI_MODEL", "gpt-5.6-terra")
