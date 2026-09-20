@@ -1,0 +1,76 @@
+name: tests
+
+# Until now nothing checked a pull request. #23 carried 42 files and ~1900 added
+# lines with no automated verification at all, and its only evidence was a test
+# run on one laptop that no reviewer could see.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A second push to the same branch makes the first run's answer worthless.
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-ci.txt
+            requirements-web.txt
+
+      - name: Install the CPU stack
+        run: |
+          python -m pip install --upgrade pip
+          # The same versions requirements.txt pins, from the CPU index. The
+          # pinned +cu128 wheels are 2.5 GB and useless on a runner with no GPU.
+          pip install --index-url https://download.pytorch.org/whl/cpu \
+            "torch==2.11.0" "torchvision==0.26.0"
+          pip install -r requirements-ci.txt
+          # ultralytics pulls opencv-python; requirements-web.txt wants
+          # opencv-python-headless. Both unpack into the same cv2/ directory, so
+          # pip installs both and removing either deletes the shared files -
+          # `import cv2` then fails outright. Clear both, put back headless
+          # alone, which is what a runner with no display should have anyway.
+          pip uninstall -y opencv-python opencv-python-headless || true
+          pip install "opencv-python-headless>=4.10"
+
+      - name: Show what is actually installed
+        # The manifests are checked by tests/test_dependency_manifests.py, which
+        # reads the files rather than the environment - so a venv can satisfy
+        # every test while contradicting its own pins. Print the versions that
+        # actually ran, and fail loudly if two opencv distributions survived.
+        run: |
+          python -c "import torch, torchvision, cv2, sam2, ultralytics; \
+            print('torch', torch.__version__, 'cuda', torch.cuda.is_available()); \
+            print('torchvision', torchvision.__version__); \
+            print('cv2', cv2.__version__); print('ultralytics', ultralytics.__version__)"
+          test "$(pip list --format=freeze | grep -c '^opencv-')" -eq 1
+
+      - name: pytest
+        # The two deselected tests assert that a TensorRT engine gets built.
+        # core/trt_engine.ensure_pose_engine returns None when
+        # torch.cuda.is_available() is false, so they cannot pass without a GPU
+        # and are not failing here for any other reason. The no-CUDA path itself
+        # IS covered and does run: test_no_cuda_means_no_engine_and_no_exception.
+        #
+        # Deselected in this file rather than marked with skipIf in the test,
+        # because tests/ is touched by open pull requests and a marker would
+        # conflict with them. Worth converting to a marker once those land.
+        run: |
+          python -m pytest tests/ -q -p no:randomly \
+            --deselect tests/test_trt_engine.py::EnsureEngineTests::test_a_missing_engine_is_built_once \
+            --deselect tests/test_trt_engine.py::EnsureEngineTests::test_an_existing_engine_is_reused_not_rebuilt
