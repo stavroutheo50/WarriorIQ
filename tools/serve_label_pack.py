@@ -151,24 +151,57 @@ class Handler(BaseHTTPRequestHandler):
         print(f"  {parts[0]}: {done} answered -> {destination.relative_to(PROJECT_ROOT)}")
         return self._send(200, b'{"ok":true}', "application/json")
 
+    def _pack_progress(self, pack: Path) -> tuple[int, int]:
+        """How many of this pack's clips have an answer, and how many there are."""
+        answered = 0
+        saved = pack / f"{pack.name}-labels.json"
+        if saved.exists():
+            try:
+                data = json.loads(saved.read_text(encoding="utf-8"))
+                answered = len(data.get("labels") or []) + len(data.get("unsure") or [])
+            except ValueError:
+                answered = -1                    # unreadable; say so rather than guess
+        total = 0
+        try:
+            total = len(json.loads((pack / "index.json").read_text(encoding="utf-8"))
+                        .get("candidates") or [])
+        except (OSError, ValueError):
+            pass
+        return answered, total
+
     def _index(self) -> str:
+        # Unfinished packs first, least done first, so the pack that most needs
+        # answering is the one under the thumb. Alphabetical put whatever was
+        # named earliest at the top: a session meant for three fresh packs went
+        # into an old one 91 answers deep because it sorted above them, and
+        # nothing on the page suggested it was already finished.
+        packs = [p for p in PACKS.iterdir() if (p / "label.html").exists()]
+        measured = [(p, *self._pack_progress(p)) for p in packs]
+        measured.sort(key=lambda item: (
+            item[2] and item[1] >= item[2],      # finished packs sink
+            item[1] / item[2] if item[2] else 0,  # then least-answered first
+            item[0].name,
+        ))
         rows = []
-        for pack in sorted(p for p in PACKS.iterdir() if (p / "label.html").exists()):
-            saved = pack / f"{pack.name}-labels.json"
-            state = "not started"
-            if saved.exists():
-                try:
-                    data = json.loads(saved.read_text(encoding="utf-8"))
-                    state = f"{len(data.get('labels') or []) + len(data.get('unsure') or [])} answered"
-                except ValueError:
-                    state = "saved"
+        for pack, answered, total in measured:
+            if answered < 0:
+                state, css = "saved (unreadable)", "warn"
+            elif not answered:
+                state, css = f"not started - {total} clips" if total else "not started", "todo"
+            elif total and answered >= total:
+                state, css = f"done - {answered}", "done"
+            else:
+                state, css = f"{answered} of {total}" if total else f"{answered} answered", "part"
             rows.append(
-                f'<li><a href="/{pack.name}/">{pack.name}</a> <span>{state}</span></li>')
+                f'<li><a href="/{pack.name}/">{pack.name}</a> '
+                f'<span class="{css}">{state}</span></li>')
         return (
             "<!doctype html><meta charset=utf-8><title>WarriorIQ label packs</title>"
             "<style>body{background:#0f1115;color:#eef1f5;font:16px/1.6 system-ui;"
             "margin:0;padding:40px}h1{font-size:19px}li{margin:10px 0}"
-            "a{color:#ffb020}span{color:#98a2b3;font-size:13px;margin-left:10px}</style>"
+            "a{color:#ffb020}span{color:#98a2b3;font-size:13px;margin-left:10px}"
+            ".todo{color:#7ee787}.part{color:#e3b341}.done{color:#6e7681}"
+            ".warn{color:#f85149}</style>"
             "<h1>WarriorIQ label packs</h1><p style='color:#98a2b3;font-size:14px'>"
             "Answers save to disk as you give them. Closing the tab loses nothing.</p><ul>"
             + "".join(rows) + "</ul>")
