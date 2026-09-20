@@ -241,12 +241,35 @@ tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   .sport-rail b { padding-right: 16px; font-size: 12px; }
 }
 
-/* --- Gradient text, removed -----------------------------------------------
-   The display lines were painted with a clipped linear-gradient. Setting a
-   colour does not undo that: the fill has to be reset too, or the gradient
-   keeps showing through. A headline earns attention by size and weight. */
+/* --- Gradient text, restored on the two lines that are the brand ----------
+   An earlier pass removed this, reasoning that a headline earns attention by
+   size and weight. That holds on a light page; on a deep indigo one it left
+   the second display line a flat grey that read as disabled text rather than
+   as the other half of the sentence. It is back on the home and pricing
+   heroes and nowhere else - a gradient on every em is how the first version
+   got noisy, so the reset below still covers the rest.
+
+   Painting it needs all four properties: setting a colour does not undo a
+   clipped gradient, the fill has to be reset too, which is what the removal
+   note got right and is why this rule is heavier than it looks. */
 .hero h1 em,
-.pricing-hero h1 em,
+.pricing-hero h1 em {
+  background-image: var(--wiq-grad) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+}
+/* Without clipping support the text would be transparent on transparent, so
+   the fill comes back and the line is simply cyan. */
+@supports not ((background-clip: text) or (-webkit-background-clip: text)) {
+  .hero h1 em,
+  .pricing-hero h1 em {
+    background-image: none !important;
+    -webkit-text-fill-color: currentColor !important;
+    color: var(--wiq-cyan) !important;
+  }
+}
 .workflow-heading h1 em,
 .archive-hero h1 em,
 h1 em, h2 em {
@@ -420,7 +443,7 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
   /* Championship gold. Warm against a cold canvas, distinct from all five
      sport accents (blue, red, orange, cyan, violet), and it reads as sport
      rather than software. Used on one thing per screen. */
-  --wiq-accent: 214 176 96;
+  --wiq-accent: 34 211 238;
 }
 
 /* Panels become objects: a lit top edge, a real fill, and a hairline that is
@@ -941,3 +964,56 @@ th, .field label,
 }
 .plan-card-head .eyebrow::before { content: none; }
 .pricing-card.featured .plan-card-head .eyebrow { color: rgb(var(--wiq-accent)); }
+
+/* --- Electric corner, past the tokens ------------------------------------
+   Most of the dark surfaces on this site are hardcoded hexes older than the
+   token ramp, so moving --wiq-canvas alone left the nav, the cards and the
+   preview panel sitting at the old navy while everything around them moved.
+   These are the surfaces large enough to see; they are retuned to the same
+   indigo rather than left as a second, competing blue. */
+.nav { background: rgba(10, 14, 36, .92); }
+.card, .hero-card {
+  background: linear-gradient(150deg, rgba(27, 35, 80, .96), rgba(16, 21, 52, .99));
+}
+.nav-more-panel, .profile-menu-panel { background: #141a3e; }
+.preview-screen { border-color: #33407f; background: #131a3c; }
+.preview-fight-stage {
+  border-color: #2b3670;
+  background: linear-gradient(145deg, #182051, #0b1026);
+}
+.preview-timeline::before { background: #2b3670; }
+
+/* The headline was one flat grey word after a white one. It carries the whole
+   palette now - cyan into violet into the corner red - which is the fastest
+   way to say "this is a fight product" without a single extra element. The
+   flat cyan underneath is what shows if background-clip:text is unsupported;
+   without it the text would be transparent on transparent. */
+/* The primary call to action carries the same gradient, so the thing the page
+   wants you to do is the most saturated thing on it. Dark ink on top because
+   cyan and violet are both light - white would have failed against them. */
+.btn.btn-lead:not(.secondary),
+.btn.nav-signup:not(.secondary),
+.btn[data-motion-primary]:not(.secondary) {
+  border: 0;
+  background: var(--wiq-grad);
+  background-image: var(--wiq-grad);
+  color: #0a0e24;
+  font-weight: 700;
+}
+.btn.btn-lead:not(.secondary):hover,
+.btn.nav-signup:not(.secondary):hover,
+.btn[data-motion-primary]:not(.secondary):hover { filter: brightness(1.08); }
+
+/* Step numbers and list indices were a muted blue-grey doing nothing. They
+   are the accent now: they mark sequence, which is worth seeing. */
+.workflow-track article > span,
+.preview-proof li > span,
+.outcome-list a > span { color: rgb(var(--wiq-accent)); font-weight: 700; }
+
+/* The second voice. Violet separates the guide cards and the trust checks
+   from the cyan that marks sequence and interface, so the page reads as more
+   than one colour without either of them stopping meaning something. */
+.learn-grid a > span { color: var(--wiq-violet); }
+.learn-grid a:hover, .outcome-list a:hover { border-color: var(--wiq-violet); }
+.trust-checks span { border-color: var(--wiq-line); color: var(--wiq-text-secondary); }
+.trust-panel { border-color: var(--wiq-line); }

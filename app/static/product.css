@@ -1,34 +1,42 @@
 /* WarriorIQ product polish — shared editorial sports interface */
 :root{
-  /* Navy, not near-black. The whole neutral ramp moves together: a navy
-     canvas under grey panels reads as a colour mistake rather than a theme,
-     so every surface and line carries the same blue cast. Contrast measured
-     against the canvas rather than assumed - body text 17.1:1, secondary
-     7.3:1, tertiary 4.9:1, all past 4.5:1. */
-  --wiq-canvas:#081226;
-  --wiq-canvas-raised:#0f1d34;
-  --wiq-panel:#142440;
-  --wiq-panel-strong:#1b2d4d;
-  --wiq-line:#2a3d5e;
-  --wiq-line-soft:#1a2a45;
+  /* Electric corner. The navy that shipped first was one hue at one
+     saturation, and a page built from a single desaturated blue reads as
+     switched off however well the type is set. The base stays deep - this is
+     a product people open to look at dark video - but the ramp is indigo
+     rather than slate, and three saturated hues sit on top of it: cyan for
+     the interface, violet for the second voice, and the corner red that the
+     sport already owns. Contrast measured against both the canvas and the
+     panel, because labels sit on both: body 17.0:1, secondary 9.3:1,
+     tertiary 6.9:1 on canvas and 5.5:1 on panel, all past 4.5:1. */
+  --wiq-canvas:#0a0e24;
+  --wiq-canvas-raised:#141a3e;
+  --wiq-panel:#1b2350;
+  --wiq-panel-strong:#242e66;
+  --wiq-line:#33407f;
+  --wiq-line-soft:#1e2650;
   /* Corner colours, from the sport rather than from a UI kit. Used only where
      a fighter is actually being identified - never as decoration - so red and
      blue keep meaning "that fighter" wherever they appear. Both clear 3:1
-     against the canvas as UI colours; the lighter red is the one to use if
-     either is ever set as text. */
-  --wiq-corner-red:#e5484d;
-  --wiq-corner-red-text:#ff6b6b;
-  --wiq-corner-blue:#5c82ef;
-  --wiq-text:#f5f5f6;
-  --wiq-text-secondary:#a1a1a8;
-  --wiq-text-tertiary:#82828b;
-  --wiq-blue:#5c82ef;
-  --wiq-cyan:#55c6df;
-  --wiq-a:#55c6df;
-  --wiq-b:#a08ae8;
+     against the canvas as UI colours (5.9:1 and 9.9:1); the lighter red is
+     the one to use if either is ever set as text. */
+  --wiq-corner-red:#ff4d6d;
+  --wiq-corner-red-text:#ff8aa3;
+  --wiq-corner-blue:#4cc9f0;
+  --wiq-text:#edf2ff;
+  --wiq-text-secondary:#a8b4dc;
+  --wiq-text-tertiary:#8d9ace;
+  --wiq-blue:#4cc9f0;
+  --wiq-cyan:#22d3ee;
+  --wiq-violet:#a78bfa;
+  --wiq-a:#22d3ee;
+  --wiq-b:#a78bfa;
   --wiq-success:#5fd5a6;
   --wiq-warning:#edb966;
   --wiq-danger:#ef7891;
+  /* One gradient, declared once, so the headline, the primary button and the
+     progress rail cannot drift apart. */
+  --wiq-grad:linear-gradient(92deg,#22d3ee 0%,#a78bfa 45%,#ff4d6d 100%);
   --wiq-radius-sm:3px;
   --wiq-radius-md:4px;
   --wiq-radius-lg:6px;
