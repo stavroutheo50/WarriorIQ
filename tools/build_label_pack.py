@@ -312,14 +312,29 @@ def _packable_jobs():
     return found
 
 
-def _candidates_for(job, video, negatives, rng):
-    """The proposed actions and quiet windows for one job."""
+def _candidates_for(job, video, negatives, rng, max_seconds=0.0):
+    """The proposed actions and quiet windows for one job.
+
+    `max_seconds` exists because two of the library fights are phone screen
+    recordings of a livestream, and they do not end when the fight does. The
+    last second or two of each is an Instagram banner and then the iOS Control
+    Centre, filling the frame. The analysis produced no events there - but the
+    quiet-window sampler, which looks for frames far from any event, found them
+    ideal: four of fight 5736's forty negatives were phone UI. A negative like
+    that is worse than useless, because a missed-strike rate is computed
+    against it and there is no fight in it to miss.
+    """
     tracking = _read_tracking(job)
     events = _read_events(job)
     cap = cv2.VideoCapture(video)
     if not cap.isOpened():
         return None, None, None
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+
+    if max_seconds > 0:
+        tracking = {f: r for f, r in tracking.items()
+                    if float(r.get("time_seconds", f / (cap.get(cv2.CAP_PROP_FPS) or 30.0))) < max_seconds}
+        events = [e for e in events if float(e.get("peak_time", 0.0)) < max_seconds]
 
     candidates = []
     for event in events:
@@ -360,6 +375,11 @@ def main() -> int:
                              "(only meaningful with a single --job)")
     parser.add_argument("--negatives", type=int, default=40,
                         help="quiet windows per job, so the set has true negatives")
+    parser.add_argument("--max-seconds", type=float, default=0.0,
+                        help="ignore everything at or after this timestamp. Use it "
+                             "when a source video outlives its fight - a screen "
+                             "recording that ends on the phone's own UI will "
+                             "otherwise donate that UI to the negatives.")
     parser.add_argument("--out", default="labelpack")
     parser.add_argument("--no-sequences", dest="sequences", action="store_false",
                         help="skip the per-clip crop tensors. They are what a "
@@ -411,7 +431,7 @@ def main() -> int:
     index = []
     number = 0
     for job, video in jobs:
-        candidates, tracking, cap = _candidates_for(job, video, args.negatives, rng)
+        candidates, tracking, cap = _candidates_for(job, video, args.negatives, rng, args.max_seconds)
         if candidates is None:
             print("skipping %s: could not open %s" % (job, video))
             continue
