@@ -17,6 +17,24 @@ from unittest import mock
 from core import trt_engine
 
 
+def _cuda_available() -> bool:
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:                                  # noqa: BLE001 - absence is the answer
+        return False
+
+
+# ensure_pose_engine returns None before it looks at anything else when
+# torch.cuda.is_available() is false, so a test that asserts an engine was
+# built cannot pass on a machine without a GPU. These two lived as --deselect
+# lines in .github/workflows/tests.yml while tests/ had open pull requests that
+# a marker would have conflicted with; the requirement belongs in the test.
+needs_cuda = unittest.skipUnless(
+    _cuda_available(), "builds a TensorRT engine, which needs a CUDA device")
+
+
 class EngineNamingTests(unittest.TestCase):
     def test_the_filename_carries_the_gpu(self):
         """Two container types must never be handed each other's engine."""
@@ -52,6 +70,7 @@ class EngineNamingTests(unittest.TestCase):
 
 
 class EnsureEngineTests(unittest.TestCase):
+    @needs_cuda
     def test_an_existing_engine_is_reused_not_rebuilt(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = trt_engine.engine_path_for(tmp)
@@ -62,6 +81,7 @@ class EnsureEngineTests(unittest.TestCase):
             self.assertEqual(got, target)
             build.assert_not_called()
 
+    @needs_cuda
     def test_a_missing_engine_is_built_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             expected = trt_engine.engine_path_for(tmp)

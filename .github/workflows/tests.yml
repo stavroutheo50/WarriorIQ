@@ -61,16 +61,9 @@ jobs:
           test "$(pip list --format=freeze | grep -c '^opencv-')" -eq 1
 
       - name: pytest
-        # The two deselected tests assert that a TensorRT engine gets built.
-        # core/trt_engine.ensure_pose_engine returns None when
-        # torch.cuda.is_available() is false, so they cannot pass without a GPU
-        # and are not failing here for any other reason. The no-CUDA path itself
-        # IS covered and does run: test_no_cuda_means_no_engine_and_no_exception.
-        #
-        # Deselected in this file rather than marked with skipIf in the test,
-        # because tests/ is touched by open pull requests and a marker would
-        # conflict with them. Worth converting to a marker once those land.
-        run: |
-          python -m pytest tests/ -q -p no:randomly \
-            --deselect tests/test_trt_engine.py::EnsureEngineTests::test_a_missing_engine_is_built_once \
-            --deselect tests/test_trt_engine.py::EnsureEngineTests::test_an_existing_engine_is_reused_not_rebuilt
+        # Nothing is deselected here. The two tests that need a CUDA device to
+        # build an engine carry @needs_cuda in tests/test_trt_engine.py, so they
+        # skip themselves on a runner and still run on the GPU machine. A
+        # requirement stated in the test travels with it; one stated in this
+        # file is invisible to anyone running pytest by hand.
+        run: python -m pytest tests/ -q -p no:randomly
