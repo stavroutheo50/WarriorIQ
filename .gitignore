@@ -59,6 +59,11 @@ dataset/boxingvi/
 dataset/sequences_boxingvi/
 dataset/sequences_own_negatives/
 dataset/sequences_combined/
+dataset/sequences_athens_hd/
+dataset/sequences_indomain/
+dataset/sequences_mixed/
+dataset/sequences_tkd_kick3/
+dataset/tkd_kick3/
 
 # Fight footage stays on the machine that filmed it.
 #
