@@ -83,6 +83,45 @@ def _measured_baseline_drills(fighter: str, own: dict) -> list[dict]:
     ]
 
 
+# What each pose measurement looks like on real footage, as (typical, spread).
+#
+# These are the numbers coaching has always ranked against - "Guard sits near
+# 0.15 on real footage and balance near 0.70" is the note that set them. They
+# are lifted to module scope because the REPORT needs them too: a card that
+# says "Guard 0.110" and nothing else is a number a reader cannot place, and
+# the fix is not to invent a scale but to show the one already in use here.
+#
+# One source of truth on purpose. Two copies of a reference value drift, and
+# then the coaching text and the card disagree about what normal is.
+POSE_DIMENSIONS = [
+    (
+        "guard_index", "Guard", (0.17, 0.10),
+        "Guard-return audit",
+        "4 x 90 sec: after every exchange, freeze in stance and confirm both hands have returned before the partner counters.",
+    ),
+    (
+        "balance_index", "Balance", (0.72, 0.08),
+        "Balanced-finish rounds",
+        "4 x 90 sec: finish each legal technique in stance, hold for one count, then move without crossing the feet.",
+    ),
+    (
+        "ring_center_control", "Holding the middle", (0.50, 0.15),
+        "Center-line movement rounds",
+        "3 x 2 min: use a marked center lane; exit every exchange at an angle and recover the lane before restarting.",
+    ),
+    (
+        "pressure_index", "Walking them down", (0.03, 0.10),
+        "Forward-pressure rounds",
+        "4 x 2 min: every time your partner steps back, take the space. Reset if you circle away instead of closing.",
+    ),
+    (
+        "footwork_body_lengths_per_second", "Moving your feet", (1.00, 0.30),
+        "Step-count rounds",
+        "4 x 2 min: no more than two strikes without changing position. Feet before hands, every exchange.",
+    ),
+]
+
+
 def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -> dict:
     """Build useful coaching only from identity-safe pose measurements.
 
@@ -90,35 +129,7 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
     labels.  It keeps the report useful while the temporal action model is not
     release-validated without laundering its candidates into fight facts.
     """
-    # Pressure and footwork are the two that actually differ between fighters
-    # on real footage, and both were missing from coaching entirely.
-    dimensions = [
-        (
-            "guard_index", "Guard", (0.17, 0.10),
-            "Guard-return audit",
-            "4 x 90 sec: after every exchange, freeze in stance and confirm both hands have returned before the partner counters.",
-        ),
-        (
-            "balance_index", "Balance", (0.72, 0.08),
-            "Balanced-finish rounds",
-            "4 x 90 sec: finish each legal technique in stance, hold for one count, then move without crossing the feet.",
-        ),
-        (
-            "ring_center_control", "Holding the middle", (0.50, 0.15),
-            "Center-line movement rounds",
-            "3 x 2 min: use a marked center lane; exit every exchange at an angle and recover the lane before restarting.",
-        ),
-        (
-            "pressure_index", "Walking them down", (0.03, 0.10),
-            "Forward-pressure rounds",
-            "4 x 2 min: every time your partner steps back, take the space. Reset if you circle away instead of closing.",
-        ),
-        (
-            "footwork_body_lengths_per_second", "Moving your feet", (1.00, 0.30),
-            "Step-count rounds",
-            "4 x 2 min: no more than two strikes without changing position. Feet before hands, every exchange.",
-        ),
-    ]
+    dimensions = POSE_DIMENSIONS
 
     # Ranked by how each number compares with the opponent's same number, not
     # against the fighter's other numbers. Guard sits near 0.15 on real footage
