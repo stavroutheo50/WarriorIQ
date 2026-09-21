@@ -699,6 +699,28 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     # exactly how a wrong figure gets quoted back later.
     trusted = bool((report.get("integrity") or {}).get("action_metrics_trusted", False))
 
+    # One source for the headline and for the table under it. They disagreed
+    # once: the card counted every flagged kick while the timeline listed only
+    # the ones that arrived, so a reader saw "15" above a list of six and had
+    # to do arithmetic to find out nothing was broken. Worse, the largest
+    # number on the page was the least reliable one - flagged kicks are 63%
+    # real on the fight that was hand-checked, the arrived ones 100%.
+    kick_events = [e for e in (report.get("events") or [])
+                   if (e.get("family") or "") == "kick"]
+    arrived_kicks = [e for e in kick_events
+                     if (e.get("outcome") or "") in ARRIVED_OUTCOMES]
+
+    def _per_fighter(items: list) -> dict:
+        counts = {"A": 0, "B": 0}
+        for item in items:
+            side = str(item.get("fighter") or "")
+            if side in counts:
+                counts[side] += 1
+        return counts
+
+    flagged_kicks = _per_fighter(kick_events)
+    reached_kicks = _per_fighter(arrived_kicks)
+
     def fighter_card(name: str) -> str:
         m = report["metrics"][name]
         attacks = m["attacks"]
@@ -706,7 +728,13 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         # integrity gate. Checked against the video on three bouts: the kick
         # count was right in all three and the punch count overstated by eleven
         # in two, so punches are not shown here either.
-        kicks = int((attacks.get("families") or {}).get("kick") or 0)
+        # On an untrusted run every leg-strike number on the card comes from
+        # the same events the timeline is built from, so the headline, this row
+        # and the table cannot contradict each other however the metrics
+        # pipeline counts. A trusted run keeps the metrics figure, which is
+        # what its own timeline lists.
+        kicks = (int((attacks.get("families") or {}).get("kick") or 0) if trusted
+                 else flagged_kicks.get(name, 0))
         # Every index gets the figure it should be read against. "Guard 0.110"
         # alone is unreadable - a coach cannot tell whether it is good, and the
         # report was showing four such numbers per fighter. The reference is
@@ -738,11 +766,18 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
             "Punch counts, accuracy and named techniques are not shown for this fight - "
             "WarriorIQ can see that a punch was thrown but cannot yet tell you reliably "
             "which punch it was or whether it landed, so it does not guess.</div>")
+        # On a trusted run the timeline lists every key moment, so the flagged
+        # count is what the table shows and the two already agree.
+        if trusted:
+            headline, caption = kicks, "leg strikes flagged (kicks and knees)"
+        else:
+            headline = reached_kicks.get(name, 0)
+            caption = "kicks that reached, of %d flagged" % flagged_kicks.get(name, 0)
         return f"""
         <section class='card'>
           <h2>Fighter {name}</h2>
-          <div class='big'>{kicks}</div>
-          <div class='muted'>leg strikes flagged (kicks and knees)</div>
+          <div class='big'>{headline}</div>
+          <div class='muted'>{escape(caption)}</div>
           <table>{''.join(rows)}</table>
           {note}
         </section>
@@ -763,10 +798,8 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     moments = report.get("key_moments") or []
     withheld_candidates = 0
     if not trusted:
-        kicks = [e for e in (report.get("events") or [])
-                 if (e.get("family") or "") == "kick"]
-        moments = [e for e in kicks if (e.get("outcome") or "") in ARRIVED_OUTCOMES]
-        withheld_candidates = len(kicks) - len(moments)
+        moments = arrived_kicks
+        withheld_candidates = len(kick_events) - len(arrived_kicks)
     # Outcome and Target are only ever filled on a trusted run, so on every
     # other run they were two columns of "not classified" and "-" - two thirds
     # of the table saying nothing, which reads as broken rather than careful.
