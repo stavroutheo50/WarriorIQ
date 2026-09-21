@@ -4419,7 +4419,12 @@ class StandaloneReportHonestyTests(unittest.TestCase):
         for claim in ("Strongest weapon", "Accuracy", "jab", "uppercut"):
             with self.subTest(claim=claim):
                 self.assertNotIn(claim, html)
-        self.assertIn("leg strikes flagged", html)
+        # The caption moved from "leg strikes flagged" to "kicks that reached,
+        # of N flagged" when the headline started counting what the table
+        # lists. Either way the leg strikes are still reported - that is what
+        # this asserts, rather than one spelling of the label.
+        self.assertIn("flagged", html)
+        self.assertIn("Leg strikes flagged", html)
         # The customer-facing sentence gets reworded; what has to hold is that
         # the omission is stated rather than left silent. So this asserts the
         # substance - punches are named, and named as not counted - instead of
@@ -4499,6 +4504,34 @@ class StandaloneReportHonestyTests(unittest.TestCase):
             report.setdefault("tracking", {})["recording"] = {"measured": False}
 
         self.assertNotIn("Your recording", self._write(trusted=False, mutate=unmeasured))
+
+    def test_the_headline_counts_what_the_table_lists(self):
+        """They disagreed: the card counted every flagged kick while the table
+        listed only the ones that arrived, so a reader saw a big number above a
+        short list and had to do arithmetic to learn nothing was broken. Worse,
+        the largest number on the page was the least reliable one - flagged
+        kicks are 63% real on the hand-checked fight, arrived ones 100%."""
+        def kicks(report):
+            report["events"] = [
+                {"round_number": 1, "peak_time": 11.25, "fighter": "A", "family": "kick",
+                 "technique": "right_low_kick", "outcome": "clean", "target": "leg"},
+                {"round_number": 1, "peak_time": 22.50, "fighter": "A", "family": "kick",
+                 "technique": "left_low_kick", "outcome": "blocked", "target": "leg"},
+                {"round_number": 1, "peak_time": 33.75, "fighter": "A", "family": "kick",
+                 "technique": "left_high_kick", "outcome": "missed", "target": "head"},
+                {"round_number": 1, "peak_time": 44.00, "fighter": "B", "family": "kick",
+                 "technique": "right_low_kick", "outcome": "uncertain", "target": "leg"},
+            ]
+
+        html = self._write(trusted=False, mutate=kicks)
+        rows = html.split("Evidence timeline")[1].split("</section>")[0].count("<tr>") - 1
+        self.assertEqual(rows, 2, "the table should list the two that arrived")
+        self.assertIn("kicks that reached, of 3 flagged", html)
+        self.assertIn("kicks that reached, of 1 flagged", html)
+        # A threw two that arrived, B none: the headlines are 2 and 0, and they
+        # add up to the rows in the table.
+        self.assertIn("<div class='big'>2</div>", html)
+        self.assertIn("<div class='big'>0</div>", html)
 
     def test_the_scoring_note_is_not_printed_twice(self):
         """integrity.scoring_status is a copy of the scorecard disclaimer.
