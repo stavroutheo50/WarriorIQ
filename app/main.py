@@ -1081,6 +1081,33 @@ async def _admit_fight_upload(request: Request, call_next):
         release_upload_storage(job_id)
 
 
+# When this process began serving, for the uptime reported by /health.
+PROCESS_STARTED_AT = time.time()
+
+
+def _resident_megabytes() -> float | None:
+    """This process's resident memory, or None where it cannot be read.
+
+    Never raises and never becomes a dependency: psutil is not required by this
+    project, and a health probe that fails because a diagnostic is unavailable
+    would be worse than one that simply says less.
+    """
+    try:
+        import psutil
+
+        return round(psutil.Process().memory_info().rss / (1024 * 1024), 1)
+    except Exception:                                               # noqa: BLE001
+        pass
+    try:
+        # Linux, where the host actually runs. /proc is read directly so the
+        # answer does not depend on a package being installed there.
+        with open("/proc/self/statm", encoding="ascii") as handle:
+            pages = int(handle.read().split()[1])
+        return round(pages * os.sysconf("SC_PAGE_SIZE") / (1024 * 1024), 1)
+    except Exception:                                               # noqa: BLE001
+        return None
+
+
 @app.middleware("http")
 async def viewer_context(request: Request, call_next):
     global _last_guest_cleanup, _last_saved_video_cleanup
@@ -4997,7 +5024,7 @@ RUNNING_COMMIT = _deployed_commit()
 
 
 @app.get("/health", include_in_schema=False)
-def health_check():
+def health_check(request: Request):
     """Minimal deployment probe with no account, model or filesystem details.
 
     "commit" is the code actually running. "deployed" only appears when the
@@ -5005,6 +5032,31 @@ def health_check():
     copied its files without restarting the application.
     """
     payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT}
+    # How long THIS process has been alive, and how much memory it is holding.
+    #
+    # Added to answer a question nothing else could. Measured from outside, the
+    # site was taking 34 and 82 seconds to send a first byte while reporting 50
+    # to 90 ms of its own work on the very same requests - and fast requests
+    # were interleaved with the slow ones under continuous load. That shape is
+    # not a slow application; it is requests waiting on a process that is
+    # starting up, and `import app.main` alone costs 3.3s on a development
+    # machine against a host measured 8 to 12 times slower.
+    #
+    # If successive calls to this endpoint report an uptime that keeps resetting
+    # then the application is being recycled and every recycle is a stall for
+    # whoever is browsing. If it climbs steadily, the wait is somewhere in front
+    # of the application and no amount of work in here will shorten it. Two
+    # numbers, one answer, and no way to get it from outside without them.
+    # Shown only to a signed-in administrator. The probe is deliberately
+    # minimal for everybody else - no account, model, path or worker detail -
+    # and that decision has a test guarding it, so this adds nothing to what
+    # the public sees.
+    if _is_admin(request):
+        payload["uptime_seconds"] = round(time.time() - PROCESS_STARTED_AT, 1)
+        payload["pid"] = os.getpid()
+        resident = _resident_megabytes()
+        if resident is not None:
+            payload["rss_mb"] = resident
     on_disk = _deployed_commit()
     if on_disk != RUNNING_COMMIT:
         payload["deployed"] = on_disk
