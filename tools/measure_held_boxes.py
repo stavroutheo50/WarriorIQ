@@ -32,17 +32,36 @@ them, which made the first version of this tool report 60% of fighter B's
 boxes as empty when many plainly were not. The wider window agrees with the
 eye on four of five.
 
-**Known bias: this over-reports "on nobody".** f1661 is the fifth case - two
-fighters adjacent, merged by the detector into one box that overlaps the other
-fighter's slot. So treat the empty figure as an upper bound.
+**Known bias, and it is large. Measured, not guessed.** Six boxes this tool
+flagged as empty on fight 1 were then rendered and judged by eye:
+
+    f2033 A   genuinely offset onto mat        tool right
+    f3104 A   genuinely offset onto a banner   tool right
+    f2639 B   genuinely offset onto mat        tool right
+    f2675 A   squarely on the blue fighter     TOOL WRONG
+    f1697 B   on a fighter in a clinch         TOOL WRONG
+    f2243 B   overlapping a real fighter       TOOL WRONG
+
+**Three of six.** The failures are the case f1661 showed: fighters close
+together, merged by the detector into one box that overlaps the neighbouring
+slot more than the flagged one. So an "on nobody" figure from this tool is an
+upper bound with roughly half the flags wrong, and it must not be used to drop
+an observation, gate a frame, or correct a coverage number. It is a comparison
+instrument, not a classifier.
+
+What it does support: comparing the SAME fight before and after a change, where
+the bias is common to both arms, and the contrast between fights below, which
+is far larger than the bias.
 
 Measured 2026-09-21:
 
     athens_hd, 1920x1080   A 100% on a person, B 100%, median overlap 0.94
-    fight 1,   480x220     A  21% on NOBODY,   B  37%, median 0.50 / 0.44
+    fight 1,   480x220     A  21% flagged,     B  37%, median 0.50 / 0.44
 
-The tracker is not the problem on footage it can see. Read every coverage
-number against this one.
+Read the athens figure as exact - nothing was flagged there at all, so the bias
+below cannot be inflating it - and the fight 1 figures as an upper bound of
+which about half are wrong. The contrast survives either way: the tracker is
+not the problem on footage it can see.
 
     tools/measure_held_boxes.py --trace run.json --video fights/1.mp4
 """
