@@ -5,6 +5,7 @@ from html import escape
 from pathlib import Path
 
 from core.coaching import (
+    POSE_DIMENSIONS,
     build_coaching, build_pose_coaching, build_training_plan, build_training_progression,
 )
 from core.sport_profiles import build_sport_coaching
@@ -15,6 +16,29 @@ from core.scoring import (
     minimum_kicks_per_round, score_fight,
 )
 from core.types import AnalysisRequest, DefenseEvent, RoundSpec, StrikeEvent
+
+
+# What each index should be read against, keyed by metric name. Built from
+# coaching's POSE_DIMENSIONS so there is one source of truth: if the reference
+# for guard changes, the coaching sentence and the report card change together.
+_TYPICAL = {key: reference[0] for key, _label, reference, *_rest in POSE_DIMENSIONS}
+
+
+def _metric_row(label: str, value, key: str) -> str:
+    """One card row, with the figure this number should be compared against.
+
+    A bare "Guard 0.110" cannot be read by anybody. It is not a percentage of
+    anything a coach knows, and four of the six rows on each fighter card were
+    exactly that. The reference is not a target and is not presented as one -
+    it is what the measurement tends to sit at on real footage, which is enough
+    for a reader to tell whether 0.110 is unusual.
+    """
+    if value is None:
+        return f"<tr><td>{escape(label)}</td><td>Unavailable</td><td class='muted'></td></tr>"
+    typical = _TYPICAL.get(key)
+    context = "" if typical is None else f"typical ≈ {typical:.2f}"
+    return (f"<tr><td>{escape(label)}</td><td>{float(value):.3f}</td>"
+            f"<td class='muted'>{context}</td></tr>")
 
 
 def _timeline_event_reliable(event: StrikeEvent) -> bool:
@@ -663,13 +687,18 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         # count was right in all three and the punch count overstated by eleven
         # in two, so punches are not shown here either.
         kicks = int((attacks.get("families") or {}).get("kick") or 0)
+        # Every index gets the figure it should be read against. "Guard 0.110"
+        # alone is unreadable - a coach cannot tell whether it is good, and the
+        # report was showing four such numbers per fighter. The reference is
+        # coaching's own POSE_DIMENSIONS, not a scale invented here, so the
+        # card and the coaching text cannot disagree about what normal is.
         rows = [
-            f"<tr><td>Leg strikes flagged</td><td>{kicks}</td></tr>",
-            f"<tr><td>Pose coverage</td><td>{m['pose_coverage']*100:.1f}%</td></tr>",
-            f"<tr><td>Footwork (body lengths/s)</td><td>{fmt(m.get('footwork_body_lengths_per_second'))}</td></tr>",
-            f"<tr><td>Guard</td><td>{fmt(m.get('guard_index'))}</td></tr>",
-            f"<tr><td>Balance</td><td>{fmt(m.get('balance_index'))}</td></tr>",
-            f"<tr><td>Centre control</td><td>{fmt(m.get('ring_center_control'))}</td></tr>",
+            f"<tr><td>Leg strikes flagged</td><td>{kicks}</td><td class='muted'></td></tr>",
+            f"<tr><td>Pose coverage</td><td>{m['pose_coverage']*100:.1f}%</td><td class='muted'>of analysed frames</td></tr>",
+            _metric_row("Footwork (body lengths/s)", m.get("footwork_body_lengths_per_second"), "footwork_body_lengths_per_second"),
+            _metric_row("Guard", m.get("guard_index"), "guard_index"),
+            _metric_row("Balance", m.get("balance_index"), "balance_index"),
+            _metric_row("Centre control", m.get("ring_center_control"), "ring_center_control"),
         ]
         if trusted:
             accuracy = "Unavailable" if attacks["accuracy"] is None else f"{attacks['accuracy']*100:.1f}%"
@@ -680,10 +709,15 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
                 f"<tr><td>Combinations</td><td>{m['combinations']['count']}</td></tr>",
                 f"<tr><td>Counters</td><td>{m['counters']['count']}</td></tr>",
             ]
+        # Written for a coach, not for whoever built the gate. The previous
+        # wording named an "identity and action integrity gate", which tells a
+        # customer nothing except that something failed. What they need to know
+        # is which numbers they can rely on and which are missing, and why.
         note = "" if trusted else (
-            "<div class='muted'>Landed, accuracy, strongest weapon and technique names are "
-            "withheld: this analysis did not pass the identity and action integrity gate. "
-            "Punches are not counted at any confidence.</div>")
+            "<div class='muted'>Kicks, knees, movement and coverage above are measured. "
+            "Punch counts, accuracy and named techniques are not shown for this fight - "
+            "WarriorIQ can see that a punch was thrown but cannot yet tell you reliably "
+            "which punch it was or whether it landed, so it does not guess.</div>")
         return f"""
         <section class='card'>
           <h2>Fighter {name}</h2>
@@ -697,13 +731,41 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     # Named techniques and outcomes only where the analysis earned them. A
     # "jab" on footage that cannot resolve an arm is a guess with a confident
     # label on it.
-    event_rows = "".join(
-        f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
-        f"<td>{escape(e['technique'].replace('_',' ')) if trusted else escape(e.get('family') or 'action')}</td>"
-        f"<td>{escape(e['outcome']) if trusted else 'not classified'}</td>"
-        f"<td>{escape(str(e['target'])) if trusted else '-'}</td></tr>"
-        for e in report["key_moments"]
-    ) if report.get("key_moments") else ""
+    # `key_moments` is filtered on outcome, and outcomes are only classified
+    # when the analysis is trusted - so on an untrusted run the table rendered
+    # its headers over nothing at all. That is the worst of both: it withholds
+    # the punch counts it does not trust AND the leg strikes it does, leaving a
+    # reader with an empty table under a card that says 15.
+    #
+    # So when nothing is trusted, fall back to the leg strikes, which is
+    # exactly what the card counts and what the scorecard note says came out
+    # right when checked against video. Technique names stay withheld.
+    moments = report.get("key_moments") or []
+    if not trusted:
+        moments = [e for e in (report.get("events") or [])
+                   if (e.get("family") or "") == "kick"]
+    # Outcome and Target are only ever filled on a trusted run, so on every
+    # other run they were two columns of "not classified" and "-" - two thirds
+    # of the table saying nothing, which reads as broken rather than careful.
+    # The columns are dropped instead of filled with placeholders.
+    if trusted:
+        timeline_head = "<tr><th>Round</th><th>Time</th><th>Fighter</th><th>Technique</th><th>Outcome</th><th>Target</th></tr>"
+        event_rows = "".join(
+            f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
+            f"<td>{escape(e['technique'].replace('_',' '))}</td>"
+            f"<td>{escape(e['outcome'])}</td>"
+            f"<td>{escape(str(e['target']))}</td></tr>"
+            for e in moments)
+    else:
+        timeline_head = "<tr><th>Round</th><th>Time</th><th>Fighter</th><th>What</th></tr>"
+        event_rows = "".join(
+            f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
+            f"<td>{escape(e.get('family') or 'action')}</td></tr>"
+            for e in moments)
+    timeline_note = "" if trusted else (
+        "<div class='muted'>Every kick and knee WarriorIQ saw, with the second "
+        "it happened, so you can find it on the video. Punches are left out - "
+        "they are not counted accurately enough yet to put in front of you.</div>")
 
     coaching_html = ""
     for fighter in ("A", "B"):
@@ -722,6 +784,17 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         if score.get("available") else
         f"<p>{escape(score['disclaimer'])}</p>"
     )
+    # integrity.scoring_status is a copy of the scorecard disclaimer, so when
+    # there is no score to show the same paragraph was printed twice on one
+    # page - once as the scorecard section, once under Integrity. Repeating a
+    # caveat does not make it more believable, it makes the page look generated.
+    # It is kept under Integrity only where the scorecard section shows totals
+    # instead, or where the two texts have diverged and dropping one would
+    # withhold something.
+    scoring_status = str(report["integrity"].get("scoring_status") or "")
+    already_shown = (not score.get("available")) and scoring_status == score.get("disclaimer")
+    integrity_scoring = "" if (already_shown or not scoring_status) else (
+        f"<p>{escape(scoring_status)}</p>")
 
     html = f"""<!doctype html>
 <html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
@@ -732,11 +805,11 @@ header{{display:flex;justify-content:space-between;align-items:end;margin-bottom
 </style></head><body>
 <header><div><h1>WarriorIQ</h1><div class='muted'>Fight analysis</div></div><div class='pill'>{escape(report['scorecard']['ruleset_label'])}</div></header>
 <div class='grid'>{fighter_card('A')}{fighter_card('B')}</div>
-<section class='card'><h2>Performance</h2><p>Segment: {report['performance']['segment_duration_seconds']:.1f}s · Analysis: {report['performance']['analysis_seconds']:.1f}s · Speed: {report['performance']['realtime_speed']:.2f}× realtime · Within budget: {report['performance']['within_video_length_budget']}</p></section>
+<section class='card'><h2>Performance</h2><p>Segment analysed: {report['performance']['segment_duration_seconds']:.1f}s · Processing time: {report['performance']['analysis_seconds']:.1f}s</p></section>
 <section class='card'><h2>Estimated scorecard</h2>{scorecard_html}</section>
-<section class='card'><h2>Evidence timeline</h2><table><thead><tr><th>Round</th><th>Time</th><th>Fighter</th><th>Technique</th><th>Outcome</th><th>Target</th></tr></thead><tbody>{event_rows}</tbody></table></section>
+<section class='card'><h2>Evidence timeline</h2>{timeline_note}<table><thead>{timeline_head}</thead><tbody>{event_rows}</tbody></table></section>
 {coaching_html}
-<section class='card'><h2>Integrity</h2><p>{escape(report['integrity']['uncertainty_policy'])}</p><p>{escape(report['integrity']['scoring_status'])}</p></section>
+<section class='card'><h2>Integrity</h2><p>{escape(report['integrity']['uncertainty_policy'])}</p>{integrity_scoring}</section>
 </body></html>"""
     html_path.write_text(html, encoding="utf-8")
     return json_path, html_path

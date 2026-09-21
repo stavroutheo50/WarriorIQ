@@ -4392,7 +4392,7 @@ class StandaloneReportHonestyTests(unittest.TestCase):
     gets quoted back later.
     """
 
-    def _write(self, trusted):
+    def _write(self, trusted, mutate=None):
         import json
         import shutil
         import tempfile
@@ -4407,6 +4407,8 @@ class StandaloneReportHonestyTests(unittest.TestCase):
         fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
         report = json.loads(fixture.read_text(encoding="utf-8"))
         report.setdefault("integrity", {})["action_metrics_trusted"] = trusted
+        if mutate is not None:
+            mutate(report)
         out = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, out, True)
         _, html_path = write_report(out, report)
@@ -4418,7 +4420,51 @@ class StandaloneReportHonestyTests(unittest.TestCase):
             with self.subTest(claim=claim):
                 self.assertNotIn(claim, html)
         self.assertIn("leg strikes flagged", html)
-        self.assertIn("Punches are not counted", html)
+        # The customer-facing sentence gets reworded; what has to hold is that
+        # the omission is stated rather than left silent. So this asserts the
+        # substance - punches are named, and named as not counted - instead of
+        # pinning one phrasing of it and failing on the next rewrite.
+        lowered = html.lower()
+        self.assertIn("punch", lowered)
+        self.assertIn("not counted", lowered)
+
+    def test_an_untrusted_timeline_drops_the_columns_it_cannot_fill(self):
+        """Outcome and target are only ever known on a trusted run.
+
+        Printing them as "not classified" and "-" on every row filled two
+        thirds of the table with nothing, which reads as broken rather than
+        careful, so the columns are dropped on an untrusted run instead.
+        """
+        untrusted = self._write(trusted=False)
+        for absent in ("not classified", "<th>Outcome</th>", "<th>Target</th>"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, untrusted)
+        trusted = self._write(trusted=True)
+        for present in ("<th>Outcome</th>", "<th>Target</th>"):
+            with self.subTest(present=present):
+                self.assertIn(present, trusted)
+
+    def test_the_scoring_note_is_not_printed_twice(self):
+        """integrity.scoring_status is a copy of the scorecard disclaimer.
+
+        With no score to show, that disclaimer *is* the scorecard section, so
+        printing it again under Integrity put the same paragraph on the page
+        twice. It is kept under Integrity where the scorecard shows totals
+        instead and the caveat would otherwise go unsaid.
+        """
+        from html import escape
+
+        seen = {}
+
+        def unscored(report):
+            report["scorecard"]["available"] = False
+            seen["text"] = escape(report["scorecard"]["disclaimer"])
+
+        html = self._write(trusted=False, mutate=unscored)
+        self.assertEqual(html.count(seen["text"]), 1)
+
+        scored = self._write(trusted=True)
+        self.assertEqual(scored.count(seen["text"]), 1)
 
     def test_the_pose_numbers_are_shown_either_way(self):
         """These are measured and survive the gate, so they always appear."""
