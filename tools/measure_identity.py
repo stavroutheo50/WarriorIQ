@@ -112,10 +112,27 @@ def trace_run(fight: dict, stride: int, sam_model: str | None = None,
         spread = {}
         for side, state in (("a", self.a), ("b", self.b)):
             spread[side] = self._recent_spread(state.current_track_id, self.source_fps)
+        def quality(observation):
+            """What the detector itself said about this observation.
+
+            Recorded so a later question - does cheap evidence predict whether
+            the box holds a person? - can be asked without another run and
+            without the crop detector that tools/measure_held_boxes.py needs.
+            """
+            if observation is None:
+                return None, None
+            conf = float(getattr(observation, "confidence", 0.0) or 0.0)
+            kp = getattr(observation, "keypoint_conf", None)
+            return conf, (None if kp is None else float(np.mean(np.asarray(kp, dtype=np.float32))))
+
+        a_conf, a_kp = quality(a)
+        b_conf, b_kp = quality(b)
         trace.append({
             "frame": int(source_frame),
             "a_box": None if a is None else [float(v) for v in a.box],
             "b_box": None if b is None else [float(v) for v in b.box],
+            "a_conf": a_conf, "a_kp_conf": a_kp,
+            "b_conf": b_conf, "b_kp_conf": b_kp,
             "b_refusal": self.b.last_refusal,
             "a_refusal": self.a.last_refusal,
             "seen_a": seen_where_expected["a"],
@@ -284,9 +301,6 @@ def main() -> int:
              "tracking": {k: v for k, v in tracking.items() if not isinstance(v, (list, dict))},
              "frames": trace}, indent=1, default=str), encoding="utf-8")
         print("trace: %s" % destination)
-    probe = cv2.VideoCapture(str(PROJECT_ROOT / fight["video"]))
-    fps_hint = probe.get(cv2.CAP_PROP_FPS) or 30.0
-    probe.release()
     held_a = sum(1 for t in trace if t["a_box"])
     held_b = sum(1 for t in trace if t["b_box"])
     print("\nanalysed %d frames" % len(trace))
