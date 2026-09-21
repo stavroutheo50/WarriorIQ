@@ -131,6 +131,23 @@
         581,
         527
       ]
+    },
+    "athens_hd": {
+      "video": "fights/athens_iphone_1080p.mov",
+      "seed_frame": 300,
+      "fighter_a": [
+        658,
+        424,
+        843,
+        719
+      ],
+      "fighter_b": [
+        851,
+        446,
+        1075,
+        701
+      ],
+      "note": "The user's own iPhone 13 original of the Athens Challenge bout, 1920x1080 at 59.97 fps - NOT a messenger copy. A is the light-blue-kit fighter, B the dark-kit one with blue gloves. Picked off frame 300 with tools/pick_seeds.py and looked at: detections 4 and 5. The referee stands between them and was correctly scored 0.99 as the referee, so he is not a candidate here. Fighters are 295 px and 255 px tall, against ~56 px on the Viber copy of the same bout."
     }
   },
   "_duplicates": {

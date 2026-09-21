@@ -67,6 +67,12 @@ dataset/sequences_combined/
 dataset/tkd_kick3/
 dataset/sequences_tkd_kick3/
 
+# What tools/build_labelled_sequences.py and the training mixes build. Same
+# reasoning: pose measurements of identifiable athletes, public repository.
+dataset/sequences_athens_hd/
+dataset/sequences_indomain/
+dataset/sequences_mixed/
+
 # Fight footage stays on the machine that filmed it.
 #
 # fights/ is a local drop-box - its own placeholder says "these never leave
