@@ -3459,6 +3459,38 @@ class WorkerSingleInstanceTests(unittest.TestCase):
         self.worker._lock_path().write_text("not a lock", encoding="utf-8")
         self.assertTrue(self.worker._claim_sole_worker())
 
+    def test_declining_the_lock_is_not_reported_as_a_crash(self):
+        """The supervisor has to tell "someone else is doing it" from "it broke".
+
+        Both exited 1, so deploy/run-worker.ps1 applied its crash back-off - up
+        to five minutes - to a worker that was declining on purpose. It started
+        a process every five minutes that immediately quit, wrote an ERROR each
+        time, and left the queue up to five minutes from being picked up if the
+        other worker ever stopped.
+        """
+        from pathlib import Path
+
+        self.assertEqual(self.worker.EXIT_ANOTHER_WORKER_IS_RUNNING, 3)
+        source = Path("worker.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "raise SystemExit(EXIT_ANOTHER_WORKER_IS_RUNNING)", source,
+            "the decline must not exit with the same code as a failure")
+
+    def test_the_supervisor_and_the_worker_agree_on_that_code(self):
+        """The number is duplicated across a .py and a .ps1, so pin it here.
+
+        PowerShell cannot import the constant, and a silent disagreement would
+        put the loop back without anything failing.
+        """
+        from pathlib import Path
+
+        service = Path("deploy/run-worker.ps1").read_text(encoding="utf-8")
+        self.assertIn("$code -eq %d" % self.worker.EXIT_ANOTHER_WORKER_IS_RUNNING, service)
+        self.assertIn("$lockStaleSeconds = %d" % self.worker.LOCK_STALE_SECONDS, service)
+        # Standing by has to be checked far more often than the crash back-off,
+        # or taking over from a stopped worker is as slow as it was before.
+        self.assertIn("$standbyPoll = 30", service)
+
     def test_the_requirements_are_checked_before_the_imports_that_need_them(self):
         """Otherwise the wrong Python dies on a traceback instead of a reason."""
         from pathlib import Path
