@@ -54,10 +54,12 @@ def load_fight(name: str) -> dict:
     return fights[name]
 
 
-def trace_run(fight: dict, stride: int, sam_model: str | None = None) -> tuple[list, dict]:
+def trace_run(fight: dict, stride: int, sam_model: str | None = None,
+              sam_backend: str | None = None) -> tuple[list, dict]:
     """One analysis, recording where each fighter was on every analysed frame.
 
-    `sam_model` swaps the SAM2 checkpoint for this run. It is set here rather
+    `sam_model` swaps the SAM2 checkpoint and `sam_backend` swaps the model
+    that runs the sweep entirely ("sam2" or "edgetam"). Both are set here rather
     than by the caller because SETTINGS is a frozen dataclass whose defaults
     evaluate when core.config is first imported, three lines below - an
     environment variable set after that import is silently ignored, and the
@@ -68,6 +70,8 @@ def trace_run(fight: dict, stride: int, sam_model: str | None = None) -> tuple[l
     os.environ["WARRIORIQ_FORCE_STRIDE"] = str(int(stride))
     if sam_model:
         os.environ["WARRIORIQ_SAM_MODEL"] = sam_model
+    if sam_backend:
+        os.environ["WARRIORIQ_SAM_BACKEND"] = sam_backend
 
     from core import analyzer
     from core.identity import IdentityManager, box_iou
@@ -253,16 +257,19 @@ def main() -> int:
                         help="a filled-in file from tools/label_identity.py, to score against")
     parser.add_argument("--sam-model", default=None,
                         help="SAM2 checkpoint to use, e.g. facebook/sam2.1-hiera-tiny")
+    parser.add_argument("--sam-backend", default=None, choices=["sam2", "edgetam"],
+                        help="which model runs the continuous sweep")
     args = parser.parse_args()
 
     fight = load_fight(args.fight)
     print("fight %s  seeds A=%s B=%s at frame %d  stride %d" % (
         args.fight, fight["fighter_a"], fight["fighter_b"],
         fight["seed_frame"], args.stride), flush=True)
-    print("  sam_model %s" % (args.sam_model or "default"), flush=True)
+    print("  sam_model %s  backend %s" % (
+        args.sam_model or "default", args.sam_backend or "default"), flush=True)
     print("  %s" % fight["note"], flush=True)
 
-    trace, tracking = trace_run(fight, args.stride, args.sam_model)
+    trace, tracking = trace_run(fight, args.stride, args.sam_model, args.sam_backend)
     probe = cv2.VideoCapture(str(PROJECT_ROOT / fight["video"]))
     fps_hint = probe.get(cv2.CAP_PROP_FPS) or 30.0
     probe.release()

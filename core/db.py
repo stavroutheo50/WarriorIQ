@@ -1999,8 +1999,22 @@ def flush_page_views() -> int:
     return sum(count for _key, count in pending)
 
 
-# Whatever is still buffered when the process ends is worth one last write.
-atexit.register(lambda: flush_page_views())
+def _flush_page_views_at_exit() -> None:
+    """One last write on the way out, and never a traceback on the way out.
+
+    By interpreter shutdown the database can be gone - at the end of a test run
+    the temporary directory holding it has already been removed - and an atexit
+    handler that raises prints its traceback after everything else has
+    finished, where it reads as a crash in whatever ran last. Losing the last
+    few counts is the lesser of the two.
+    """
+    try:
+        flush_page_views()
+    except Exception:
+        LOGGER.debug("page_views_not_flushed_at_exit", exc_info=True)
+
+
+atexit.register(_flush_page_views_at_exit)
 
 
 def page_view_summary(days: int = 30) -> dict:

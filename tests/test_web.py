@@ -3916,3 +3916,16 @@ class CookielessTrafficCountTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 database.flush_page_views()
         self.assertEqual(database.flush_page_views(), 1)
+
+    def test_the_shutdown_flush_never_raises(self):
+        """An atexit handler that raises prints a traceback after everything
+        else has finished, where it reads as a crash in whatever ran last.
+        At shutdown the database may simply be gone."""
+        from unittest import mock
+
+        from core import db as database
+
+        database.record_page_view("/pricing", day="2026-01-02")
+        with mock.patch.object(database, "connection", side_effect=OSError("no database")):
+            database._flush_page_views_at_exit()   # must not raise
+        self.assertEqual(database.flush_page_views(), 1, "the counts were dropped")

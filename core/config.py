@@ -519,11 +519,24 @@ class Settings:
     # holding both fighters on 60 of 60 frames. The sweep is over half of a
     # short round, so that is the largest speed change available here.
     #
-    # **Still not the default**, because speed is not the thing this project
-    # gets wrong. Coverage has gone UP while tracking got worse before now
-    # (a seated spectator is easy to hold), so a faster sweep has to be
-    # measured on identity, with rendered frames, before it decides anything.
-    # tools/measure_identity.py is that measurement.
+    # **Measured 2026-09-21 with tools/measure_identity.py --sam-backend, and
+    # it does not ship.** The per-frame number is real and end-to-end it buys
+    # nothing, because the sweep is a small share of the frames analysed - 64
+    # of 620 on athens_hd:
+    #
+    #     fight        sam2              edgetam
+    #     athens_hd    86s  A 1.000      84s  A 1.000   byte-identical tracking
+    #     1mp4         76s  A .874 B .609   91s  A .860 B .638   20% SLOWER
+    #
+    # A repeat of the sam2 arm on 1mp4 was bit-identical to the first, so the
+    # difference is the backend and not run-to-run noise. Swapping a model for
+    # 2% on good footage and -20% on bad, while moving identity in both
+    # directions, is not an upgrade.
+    #
+    # What the same measurement DID establish is that the sweep itself earns
+    # its time. With it off, 1mp4 runs in 36s instead of 76s and fighter B
+    # collapses from 0.609 to 0.139. The sweep is not overhead to be tuned
+    # away; it is most of what holds the harder fighter.
     sam_backend: str = os.getenv("WARRIORIQ_SAM_BACKEND", "sam2").strip().lower()
     # The HuggingFace port, not facebookresearch/EdgeTAM - that repository is a
     # fork of SAM2 and installs over the `sam2` package this project pins,
