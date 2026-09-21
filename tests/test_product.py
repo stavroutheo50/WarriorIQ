@@ -197,6 +197,36 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(stale["deployed"], "deadbee")
         self.assertTrue(stale["restart_required"])
 
+    def test_health_reports_how_long_this_process_has_been_alive(self):
+        """Measured from outside, the site took 34 and 82 seconds to send a
+        first byte while reporting 50-90ms of its own work on those same
+        requests, with fast requests interleaved under continuous load. That
+        shape is requests waiting on a process that is starting up, and there
+        was no way to confirm it from outside. An uptime that keeps resetting
+        across calls says the application is being recycled; one that climbs
+        says the wait is in front of the application."""
+        # Nothing for the public: the probe stays minimal, which its own test
+        # in tests/test_web.py pins exactly.
+        self.assertNotIn("uptime_seconds", self.client.get("/health").json())
+
+        from core.config import SETTINGS
+
+        register("health-admin@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "health-admin@example.com",
+                                         "password": "Strong-Local-Password"})
+        previous = SETTINGS.admin_emails
+        object.__setattr__(SETTINGS, "admin_emails", ("health-admin@example.com",))
+        try:
+            health = self.client.get("/health").json()
+        finally:
+            object.__setattr__(SETTINGS, "admin_emails", previous)
+        self.assertIsInstance(health["uptime_seconds"], (int, float))
+        self.assertGreaterEqual(health["uptime_seconds"], 0)
+        self.assertEqual(health["pid"], os.getpid())
+        # rss_mb is best-effort: absent is fine, nonsense is not.
+        if "rss_mb" in health:
+            self.assertGreater(health["rss_mb"], 0)
+
     def test_the_deploy_restarts_the_application_last(self):
         """Copying files leaves Passenger serving the imported app from memory.
 
