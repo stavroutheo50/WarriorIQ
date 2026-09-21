@@ -4444,6 +4444,62 @@ class StandaloneReportHonestyTests(unittest.TestCase):
             with self.subTest(present=present):
                 self.assertIn(present, trusted)
 
+    def test_the_timeline_shows_only_the_strikes_that_arrived(self):
+        """Hand-checking every event of athens_hd against the video priced each
+        of the analyser's own outcomes: `likely_landed` and `blocked` are 100%
+        real, `clean` 80%, `missed` 42% and `uncertain` 12%. `missed` is also
+        exactly the set whose limb never entered the opponent's box, 0 of 19.
+        The evidence list was being filled with the two categories the analyser
+        is worst at; on that fight the kick timeline was 27 rows at 63% correct
+        and is now 10 rows at 100%.
+        """
+        def three_kicks(report):
+            report["events"] = [
+                {"round_number": 1, "peak_time": 11.25, "fighter": "A", "family": "kick",
+                 "technique": "right_low_kick", "outcome": "clean", "target": "leg"},
+                {"round_number": 1, "peak_time": 22.50, "fighter": "B", "family": "kick",
+                 "technique": "left_low_kick", "outcome": "missed", "target": "leg"},
+                {"round_number": 1, "peak_time": 33.75, "fighter": "B", "family": "kick",
+                 "technique": "left_high_kick", "outcome": "uncertain", "target": "head"},
+            ]
+
+        html = self._write(trusted=False, mutate=three_kicks)
+        self.assertIn("11.25", html)
+        for withheld in ("22.50", "33.75"):
+            with self.subTest(withheld=withheld):
+                self.assertNotIn(withheld, html)
+        # Withheld, not silently dropped: the reader is told how many.
+        self.assertIn("2 more were seen", html)
+
+    def test_the_recording_advice_reaches_the_reader(self):
+        """The preflight probe measures the recording on every analysis and
+        writes plain advice for whoever held the camera. None of it was
+        rendered, so the one thing a customer can change between this analysis
+        and a better one was computed and thrown away."""
+        def measured(report):
+            report.setdefault("tracking", {})["recording"] = {
+                "measured": True, "can_analyse": True,
+                "source": {"width": 1920, "height": 1080, "fps": 59.97},
+                "subject_share_of_height": 0.249, "people_in_frame": 28.0,
+                "camera_shift_percent": 0.63,
+                "blocking": [],
+                "warnings": ["About 28 people are in shot."],
+                "advice": ["Film from closer to the mat or zoom in."],
+            }
+
+        html = self._write(trusted=False, mutate=measured)
+        for shown in ("Your recording", "1920×1080", "25% of the picture",
+                      "about 28", "Film from closer to the mat"):
+            with self.subTest(shown=shown):
+                self.assertIn(shown, html)
+
+    def test_a_recording_that_could_not_be_measured_says_nothing(self):
+        """Better an absent section than a table of zeroes presented as facts."""
+        def unmeasured(report):
+            report.setdefault("tracking", {})["recording"] = {"measured": False}
+
+        self.assertNotIn("Your recording", self._write(trusted=False, mutate=unmeasured))
+
     def test_the_scoring_note_is_not_printed_twice(self):
         """integrity.scoring_status is a copy of the scorecard disclaimer.
 

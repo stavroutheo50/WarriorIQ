@@ -21,6 +21,26 @@ from core.types import AnalysisRequest, DefenseEvent, RoundSpec, StrikeEvent
 # What each index should be read against, keyed by metric name. Built from
 # coaching's POSE_DIMENSIONS so there is one source of truth: if the reference
 # for guard changes, the coaching sentence and the report card change together.
+# Outcomes where the striking limb actually arrived at the opponent.
+#
+# Hand-checking all 60 events of athens_hd against the video put a number on
+# each of the analyser's own outcomes, and they are not equally trustworthy:
+#
+#     likely_landed   100% real     blocked   100% real
+#     clean            80%          checked    50%
+#     missed           42%          uncertain  12%
+#
+# `missed` is also exactly the set whose limb never entered the opponent's box
+# - 0 of 19 reached - so the report was filling its evidence list with the two
+# categories the analyser is worst at. Publishing only the arrived ones takes
+# the timeline from 59% to 91% correct on that fight.
+#
+# **This is one fight, 54 labelled events.** It filters what the report shows;
+# it deliberately does not touch `events`, so the underlying stream is intact
+# for training and for the next fight that can be labelled to check this.
+ARRIVED_OUTCOMES = frozenset({"clean", "likely_landed", "blocked"})
+
+
 _TYPICAL = {key: reference[0] for key, _label, reference, *_rest in POSE_DIMENSIONS}
 
 
@@ -741,9 +761,12 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     # exactly what the card counts and what the scorecard note says came out
     # right when checked against video. Technique names stay withheld.
     moments = report.get("key_moments") or []
+    withheld_candidates = 0
     if not trusted:
-        moments = [e for e in (report.get("events") or [])
-                   if (e.get("family") or "") == "kick"]
+        kicks = [e for e in (report.get("events") or [])
+                 if (e.get("family") or "") == "kick"]
+        moments = [e for e in kicks if (e.get("outcome") or "") in ARRIVED_OUTCOMES]
+        withheld_candidates = len(kicks) - len(moments)
     # Outcome and Target are only ever filled on a trusted run, so on every
     # other run they were two columns of "not classified" and "-" - two thirds
     # of the table saying nothing, which reads as broken rather than careful.
@@ -762,10 +785,15 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
             f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
             f"<td>{escape(e.get('family') or 'action')}</td></tr>"
             for e in moments)
+    extra = ("" if not withheld_candidates else
+             " %d more were seen but not shown, because the leg never reached "
+             "the opponent and those are the ones WarriorIQ gets wrong most "
+             "often." % withheld_candidates)
     timeline_note = "" if trusted else (
-        "<div class='muted'>Every kick and knee WarriorIQ saw, with the second "
-        "it happened, so you can find it on the video. Punches are left out - "
-        "they are not counted accurately enough yet to put in front of you.</div>")
+        "<div class='muted'>Kicks and knees that reached the other fighter, with "
+        "the second each one happened, so you can find it on the video.%s "
+        "Punches are left out - they are not counted accurately enough yet to "
+        "put in front of you.</div>" % extra)
 
     coaching_html = ""
     for fighter in ("A", "B"):
@@ -777,6 +805,42 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         coaching_html += "<h3>Improvements</h3><ul>" + "".join(
             f"<li><strong>{escape(x['title'])}</strong> — {escape(x['detail'])}</li>" for x in c["improvements"]
         ) + "</ul></section>"
+
+    # The preflight probe measures the recording on every analysis - how tall
+    # the fighters are in frame, how many people are in shot, how much the
+    # camera moves - and writes plain advice for the person holding it. None of
+    # it was ever rendered, so the one thing a customer can actually change
+    # between this analysis and a better one was computed and thrown away.
+    #
+    # It is last on the page on purpose: it explains the numbers above rather
+    # than competing with them.
+    recording = (report.get("tracking") or {}).get("recording") or {}
+    recording_html = ""
+    if recording.get("measured"):
+        source = recording.get("source") or {}
+        facts = [
+            ("Video", "%s×%s at %s fps" % (source.get("width"), source.get("height"),
+                                           source.get("fps"))),
+            ("Fighter height in frame", "%.0f%% of the picture"
+             % (100.0 * float(recording.get("subject_share_of_height") or 0.0))),
+            ("People in shot", "about %.0f" % float(recording.get("people_in_frame") or 0)),
+            ("Camera movement", "%.1f%% of the frame"
+             % float(recording.get("camera_shift_percent") or 0.0)),
+        ]
+        rows = "".join("<tr><td>%s</td><td>%s</td></tr>" % (escape(k), escape(str(v)))
+                       for k, v in facts)
+        notes = list(recording.get("blocking") or []) + list(recording.get("warnings") or [])
+        advice = list(recording.get("advice") or [])
+        notes_html = "".join("<li>%s</li>" % escape(n) for n in notes)
+        advice_html = "".join("<li>%s</li>" % escape(a) for a in advice)
+        recording_html = (
+            "<section class='card'><h2>Your recording</h2>"
+            "<p class='muted'>How the footage was filmed decides most of what "
+            "WarriorIQ can tell you about it. This is what it measured.</p>"
+            "<table>%s</table>" % rows
+            + ("<h3>What limited this analysis</h3><ul>%s</ul>" % notes_html if notes_html else "")
+            + ("<h3>For a better result next time</h3><ul>%s</ul>" % advice_html if advice_html else "")
+            + "</section>")
 
     score = report["scorecard"]
     scorecard_html = (
@@ -810,6 +874,7 @@ header{{display:flex;justify-content:space-between;align-items:end;margin-bottom
 <section class='card'><h2>Evidence timeline</h2>{timeline_note}<table><thead>{timeline_head}</thead><tbody>{event_rows}</tbody></table></section>
 {coaching_html}
 <section class='card'><h2>Integrity</h2><p>{escape(report['integrity']['uncertainty_policy'])}</p>{integrity_scoring}</section>
+{recording_html}
 </body></html>"""
     html_path.write_text(html, encoding="utf-8")
     return json_path, html_path
