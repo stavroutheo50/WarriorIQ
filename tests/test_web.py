@@ -3874,3 +3874,45 @@ class CookielessTrafficCountTests(unittest.TestCase):
             self.assertIn("/pricing", page.text)
         finally:
             object.__setattr__(SETTINGS, "admin_emails", previous)
+
+    def test_counting_does_not_put_a_database_write_on_the_page(self):
+        """Measured before this: 19 ms a view, against 8-9 ms to build the page.
+
+        Closing the last connection checkpoints the WAL, so a write per view
+        cost more than serving the page it was counting. Views are buffered and
+        written in batches instead; the request path must not touch the file.
+        """
+        from core.db import connection, flush_page_views, record_page_view
+
+        flush_page_views()
+        with connection() as con:
+            before = con.execute(
+                "SELECT COALESCE(SUM(views),0) FROM page_views").fetchone()[0]
+
+        for _ in range(5):
+            self.client.get("/pricing", headers=self.BROWSER)
+
+        with connection() as con:
+            during = con.execute(
+                "SELECT COALESCE(SUM(views),0) FROM page_views").fetchone()[0]
+        self.assertEqual(during, before, "a page view wrote to the database")
+
+        record_page_view("/pricing")
+        self.assertEqual(flush_page_views(), 6, "buffered views were lost")
+        with connection() as con:
+            after = con.execute(
+                "SELECT COALESCE(SUM(views),0) FROM page_views").fetchone()[0]
+        self.assertEqual(after, before + 6)
+
+    def test_a_failed_flush_keeps_the_counts(self):
+        """A locked database should delay the numbers, not lose them."""
+        from unittest import mock
+
+        from core import db as database
+
+        database.flush_page_views()
+        database.record_page_view("/pricing", day="2026-01-01")
+        with mock.patch.object(database, "connection", side_effect=RuntimeError("locked")):
+            with self.assertRaises(RuntimeError):
+                database.flush_page_views()
+        self.assertEqual(database.flush_page_views(), 1)

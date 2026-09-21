@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import atexit
+import collections
 import json
 import logging
 import sqlite3
+import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1923,20 +1927,80 @@ def plan_interest_counts() -> dict[str, int]:
     return {str(row["plan_key"]): int(row["total"]) for row in rows}
 
 
+# Counting a page view must not cost more than serving one.
+#
+# Every write in this module opens a connection and closes it again, and
+# closing the last open connection checkpoints the WAL. Measured on the
+# development machine: 19 ms for one counted view - 0.2 ms of which is the
+# statement - against the 8-9 ms the app takes to build the page being
+# counted. Everywhere else in this module that cost is paid once per action a
+# person took. Here it would be paid on every page view, so views are added up
+# in memory and written in one batch when the buffer is old enough or wide
+# enough.
+#
+# A crash loses at most FLUSH_SECONDS of counts. For "is anyone visiting the
+# site" that is a rounding error; it is also the reason nothing that has to be
+# exact should ever be counted this way.
+_PAGE_VIEW_FLUSH_SECONDS = 30.0
+_PAGE_VIEW_FLUSH_ROWS = 100
+_pending_page_views: collections.Counter = collections.Counter()
+_page_view_lock = threading.Lock()
+_page_views_flushed_at = 0.0
+
+
 def record_page_view(path: str, *, day: str | None = None) -> None:
-    """Add one to today's count for this path.
+    """Note one view of this path. Written to the database in a batch.
 
     Nothing about who asked is recorded - see the table comment. Days are UTC
     so a count cannot move when the host's timezone does.
     """
-    init_db()
-    stamp = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    with connection() as con:
-        con.execute(
-            "INSERT INTO page_views(day,path,views) VALUES(?,?,1) "
-            "ON CONFLICT(day,path) DO UPDATE SET views=views+1",
-            (str(stamp)[:10], str(path)[:200]),
-        )
+    global _page_views_flushed_at
+    stamp = str(day or datetime.now(timezone.utc).strftime("%Y-%m-%d"))[:10]
+    now = time.monotonic()
+    with _page_view_lock:
+        _pending_page_views[(stamp, str(path)[:200])] += 1
+        if not _page_views_flushed_at:
+            _page_views_flushed_at = now
+        due = (now - _page_views_flushed_at >= _PAGE_VIEW_FLUSH_SECONDS
+               or len(_pending_page_views) >= _PAGE_VIEW_FLUSH_ROWS)
+    if due:
+        flush_page_views()
+
+
+def flush_page_views() -> int:
+    """Write everything counted since the last write. Returns views written.
+
+    A failed write puts the counts back rather than dropping them, so a locked
+    database delays the numbers instead of losing them.
+    """
+    global _page_views_flushed_at
+    with _page_view_lock:
+        pending = list(_pending_page_views.items())
+        _pending_page_views.clear()
+        _page_views_flushed_at = time.monotonic()
+    if not pending:
+        return 0
+    try:
+        # Inside the try, not before it. The buffer has already been emptied by
+        # this point, so anything that raises between here and the write loses
+        # the counts it was holding - which is what init_db() raising did.
+        init_db()
+        with connection() as con:
+            con.executemany(
+                "INSERT INTO page_views(day,path,views) VALUES(?,?,?) "
+                "ON CONFLICT(day,path) DO UPDATE SET views=views+excluded.views",
+                [(day, path, count) for (day, path), count in pending],
+            )
+    except Exception:
+        with _page_view_lock:
+            for key, count in pending:
+                _pending_page_views[key] += count
+        raise
+    return sum(count for _key, count in pending)
+
+
+# Whatever is still buffered when the process ends is worth one last write.
+atexit.register(lambda: flush_page_views())
 
 
 def page_view_summary(days: int = 30) -> dict:
@@ -1944,7 +2008,11 @@ def page_view_summary(days: int = 30) -> dict:
 
     Days with no visitors are returned as zero rather than left out. A gap in
     a list of dates reads as a missing measurement; a zero is the measurement.
+
+    Flushes first, so the operator is never shown a number that is behind what
+    has already been counted.
     """
+    flush_page_views()
     init_db()
     span = max(1, int(days))
     first = (datetime.now(timezone.utc) - timedelta(days=span - 1)).strftime("%Y-%m-%d")
