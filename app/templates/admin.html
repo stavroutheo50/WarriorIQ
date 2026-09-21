@@ -6,6 +6,17 @@
   <form method="get" action="/admin"><div class="field"><label for="adminSearch">Search users by email</label><input id="adminSearch" type="search" name="q" value="{{query}}"></div><button class="btn secondary" type="submit">Search users</button></form>
   <div class="privacy-fight-list">{% for user in users %}<article><div><strong>{{user.email}}</strong><span>{{user.account_status}} · {{user.plan_override or user.plan}} · joined {{user.created_at[:10]}}</span></div><form action="/admin/accounts/{{user.id}}/status" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="status" value="{% if user.account_status == 'active' %}suspended{% else %}active{% endif %}"><button class="btn {% if user.account_status == 'active' %}danger{% else %}secondary{% endif %}" type="submit">{% if user.account_status == 'active' %}Suspend{% else %}Restore{% endif %}</button></form></article>{% else %}<p class="muted">No matching users.</p>{% endfor %}</div>
 </section>
+<section class="card">
+  <div class="eyebrow">Traffic · counted here, not by Google</div><h2>Last 30 days</h2>
+  {#- Google is told nothing until a visitor accepts cookies, and below its
+     modelling threshold a denied visitor is absent from the reports rather
+     than estimated. These numbers include them. They are page views, not
+     people: nothing here identifies anybody, by design. -#}
+  <p class="big">{{traffic.total}} page view{{ '' if traffic.total == 1 else 's' }}</p>
+  <div class="privacy-fight-list">{% for page in traffic.pages[:15] %}<article><div><strong>{{page.path}}</strong></div><span>{{page.views}}</span></article>{% else %}<p class="muted">No page views counted yet.</p>{% endfor %}</div>
+  <h3>By day</h3>
+  <ul class="list-clean">{% for day in traffic.days[-14:] %}<li><span class="small muted">{{day.day}}</span> · {{day.views}}</li>{% endfor %}</ul>
+</section>
 <div class="grid">
   <section class="card"><div class="eyebrow">Copyright and abuse</div><h2>Reports</h2><ul class="list-clean">{% for report in reports %}<li><strong>{{report.report_type|title}} · #{{report.id}}</strong><br><span class="small muted">{{report.reporter_email}} · {{report.created_at}}</span><p>{{report.details}}</p>{% if report.status == 'open' %}<form action="/admin/reports/{{report.id}}/resolve" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Mark resolved</button></form>{% endif %}</li>{% else %}<li class="muted">No reports.</li>{% endfor %}</ul></section>
   <section class="card"><div class="eyebrow">Security audit</div><h2>Recent events</h2><ul class="list-clean">{% for event in security_events %}<li><strong>{{event.event_type|replace('_',' ')|title}}</strong><br><span class="small muted">{{event.occurred_at}} · {{event.severity}} · {{event.resource_type or ''}} {{event.resource_id or ''}}</span></li>{% else %}<li class="muted">No events.</li>{% endfor %}</ul></section>

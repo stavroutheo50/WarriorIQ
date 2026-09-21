@@ -2023,7 +2023,14 @@ class AccountDeletionCoverageTests(unittest.TestCase):
 
     # Deliberately retained: abuse reports and payment records are kept for
     # reasons that outlive the account, and both are reviewed separately.
-    RETAINED = {"moderation_reports", "payment_events"}
+    #
+    # page_views is a different case. It is not retained account data, it is
+    # not account data: a day, a path and a number, with no column that could
+    # identify whose view it was. There is nothing in it to delete with an
+    # account, which is the same property that lets it be collected without
+    # asking. If a visitor column is ever added, this exemption stops being
+    # true and the row belongs in delete_account.
+    RETAINED = {"moderation_reports", "payment_events", "page_views"}
 
     def test_deleting_an_account_takes_the_roster_with_it(self):
         """The names in a roster belong to people, and some of them are minors."""
