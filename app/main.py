@@ -6,6 +6,7 @@ import json
 import html
 import hmac
 import logging
+import re
 from logging.handlers import RotatingFileHandler
 import math
 import shutil
@@ -74,8 +75,8 @@ from core.db import (
     revoke_report_shares, save_annotation,
     save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
     set_account_status, set_annotation_sequence,
-    plan_interest_counts, plans_wanted_by, policies_outdated,
-    record_plan_interest, record_policy_reacceptance,
+    page_view_summary, plan_interest_counts, plans_wanted_by, policies_outdated,
+    record_page_view, record_plan_interest, record_policy_reacceptance,
     set_fight_review_status, toggle_assignment, update_cookie_preferences,
     update_marketing_consent, update_password_hash, update_profile,
 )
@@ -809,6 +810,56 @@ def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds
         _prune_rate_windows(now)
 
 
+# Segments that are an identifier rather than a page: all digits, or hex long
+# enough to be a job id. Written to match those and nothing else, because a
+# guide slug like /how-to-record-a-fight-for-analysis is long too, and folding
+# it into ":id" would throw away the one number worth having - which page.
+_IDENTIFIER_SEGMENT = re.compile(r"^(?:[0-9]+|[0-9a-f]{8,}|[0-9a-f-]{32,})$", re.IGNORECASE)
+
+# Read from the user agent, never stored. Keeping the string would make this a
+# record about a visitor instead of a count of pages, which is the whole
+# distinction that lets it run without a consent banner.
+_ROBOT_MARKERS = (
+    "bot", "crawler", "spider", "slurp", "facebookexternalhit", "embedly",
+    "headlesschrome", "python-requests", "curl/", "wget", "httpx", "axios",
+    "lighthouse", "pagespeed", "pingdom", "uptimerobot", "monitoring", "preview",
+)
+
+
+def _counted_path(path: str) -> str:
+    """The page a request is for, with identifiers folded away.
+
+    Without this, one report per visitor is one row per visitor, and a table
+    of a thousand paths seen once each answers nothing.
+    """
+    parts = [segment for segment in path.split("/") if segment]
+    if not parts:
+        return "/"
+    return "/" + "/".join(
+        ":id" if _IDENTIFIER_SEGMENT.match(segment) else segment[:40]
+        for segment in parts[:4])
+
+
+def _is_counted_page_view(request: Request, response) -> bool:
+    """Whether this request was a person opening a public page.
+
+    HTML only, which is what excludes assets, JSON polling and redirects
+    without having to list them. Private routes are left out on purpose: the
+    question this answers is whether anyone is finding the site, and counting
+    the workspace would mostly count the owner using their own product.
+    """
+    if request.method != "GET" or response.status_code != 200:
+        return False
+    if not response.headers.get("content-type", "").lower().startswith("text/html"):
+        return False
+    if request.url.path.startswith(PRIVATE_ROUTE_PREFIXES):
+        return False
+    agent = request.headers.get("user-agent", "").lower()
+    if not agent or any(marker in agent for marker in _ROBOT_MARKERS):
+        return False
+    return True
+
+
 def _cookie_preferences(request: Request) -> dict:
     """Read the stored cookie choice, and whether it still applies.
 
@@ -1191,6 +1242,14 @@ async def viewer_context(request: Request, call_next):
         "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
         request_id, request.method, request.url.path, response.status_code, duration_ms,
     )
+    if _is_counted_page_view(request, response):
+        try:
+            record_page_view(_counted_path(request.url.path))
+        except Exception:  # pragma: no cover - counting must never cost a page
+            # A visitor came for the page, not for the statistic. If the write
+            # fails the page still has to be served, so this swallows rather
+            # than raises, and says so in the log instead.
+            LOGGER.warning("page_view_not_counted path=%s", request.url.path)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
@@ -4818,6 +4877,7 @@ def admin_page(request: Request, q: str = ""):
         context={
             "request": request, "query": q[:200], "users": list_accounts(q),
             "reports": list_moderation_reports(), "security_events": list_security_events(),
+            "traffic": page_view_summary(30),
         },
     )
 

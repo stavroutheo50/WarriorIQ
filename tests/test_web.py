@@ -3768,3 +3768,109 @@ class AssetVersionTests(unittest.TestCase):
         start = time.perf_counter()
         _asset_version()
         self.assertLess(time.perf_counter() - start, 0.25)
+
+
+class CookielessTrafficCountTests(unittest.TestCase):
+    """Counting the visitors Google is not told about.
+
+    Consent Mode leaves analytics_storage denied until someone accepts the
+    banner, and a property this size is far below Google's modelling
+    threshold, so a visitor who ignores the banner is absent from the reports
+    rather than estimated. Verified on the live site: the tag fires with
+    `gcs=G100` and sets no `_ga` cookie until consent is given.
+
+    These counts include those visitors. They are page views and nothing else
+    - no visitor column, no IP, no user agent - which is what keeps them
+    outside the thing the banner exists to ask about.
+    """
+
+    BROWSER = {"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"}
+
+    def setUp(self):
+        from app.main import app
+
+        self.client = TestClient(app)
+
+    def _views(self, path):
+        from core.db import page_view_summary
+
+        return next(
+            (page["views"] for page in page_view_summary(2)["pages"] if page["path"] == path), 0)
+
+    def test_a_public_page_view_is_counted(self):
+        before = self._views("/pricing")
+        self.assertEqual(self.client.get("/pricing", headers=self.BROWSER).status_code, 200)
+        self.assertEqual(self._views("/pricing"), before + 1)
+
+    def test_a_crawler_is_not_counted(self):
+        before = self._views("/pricing")
+        self.client.get("/pricing", headers={"user-agent": "Googlebot/2.1 (+http://www.google.com/bot.html)"})
+        self.client.get("/pricing", headers={"user-agent": "python-requests/2.31"})
+        self.assertEqual(self._views("/pricing"), before)
+
+    def test_only_pages_count_not_the_files_they_load(self):
+        """HTML only. That excludes assets, JSON polling and redirects at once,
+        without a list of exclusions that has to be kept current."""
+        from core.db import page_view_summary
+
+        before = page_view_summary(2)["total"]
+        self.client.get("/assets/base.css", headers=self.BROWSER)
+        self.client.get("/health", headers=self.BROWSER)
+        self.assertEqual(page_view_summary(2)["total"], before)
+
+    def test_the_workspace_is_not_counted(self):
+        """The question is whether anyone is finding the site. Counting the
+        private routes would mostly count the owner using their own product."""
+        before = self._views("/dashboard")
+        self.client.get("/dashboard", headers=self.BROWSER)
+        self.assertEqual(self._views("/dashboard"), 0)
+        self.assertEqual(before, 0)
+
+    def test_identifiers_are_folded_so_the_table_stays_readable(self):
+        from app.main import _counted_path
+
+        for path, expected in (
+            ("/", "/"),
+            ("/pricing", "/pricing"),
+            ("/analyze/kickboxing", "/analyze/kickboxing"),
+            # A slug is long too. Folding it would throw away the one thing
+            # worth knowing - which page - so only identifiers fold.
+            ("/how-to-record-a-fight-for-analysis", "/how-to-record-a-fight-for-analysis"),
+            ("/report/9f2c81aa7d34", "/report/:id"),
+            ("/fights/12", "/fights/:id"),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(_counted_path(path), expected)
+
+    def test_a_failed_count_still_serves_the_page(self):
+        """A visitor came for the page, not for the statistic."""
+        import app.main as main
+
+        def explode(*_args, **_kwargs):
+            raise RuntimeError("database is locked")
+
+        original = main.record_page_view
+        main.record_page_view = explode
+        try:
+            self.assertEqual(self.client.get("/pricing", headers=self.BROWSER).status_code, 200)
+        finally:
+            main.record_page_view = original
+
+    def test_the_count_is_where_the_owner_will_see_it(self):
+        """A number nobody opens is not a measurement."""
+        from core.auth import register
+
+        register("traffic-owner@example.com", "Strong-Local-Password")
+        self.client.post(
+            "/login",
+            data={"email": "traffic-owner@example.com", "password": "Strong-Local-Password"})
+        previous = SETTINGS.admin_emails
+        object.__setattr__(SETTINGS, "admin_emails", ("traffic-owner@example.com",))
+        try:
+            self.client.get("/pricing", headers=self.BROWSER)
+            page = self.client.get("/admin")
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("Traffic", page.text)
+            self.assertIn("/pricing", page.text)
+        finally:
+            object.__setattr__(SETTINGS, "admin_emails", previous)

@@ -395,6 +395,28 @@ def init_db() -> None:
                 FOREIGN KEY(account_id) REFERENCES accounts(id)
             );
             CREATE INDEX IF NOT EXISTS idx_plan_interest_plan ON plan_interest(plan_key);
+
+            -- Traffic the analytics tag cannot see.
+            --
+            -- Consent Mode leaves analytics_storage denied until a visitor
+            -- accepts cookies, and Google only turns denied-consent pings into
+            -- reportable numbers once a property clears its modelling
+            -- threshold - on the order of a thousand events a day. Below that,
+            -- everyone who ignores the banner is simply absent from the
+            -- reports, which on this site is nearly everyone.
+            --
+            -- This counts them: one row per day per path, a number that only
+            -- goes up. There is deliberately no visitor column, no IP and no
+            -- user agent, so a row cannot be tied to a person and needs no
+            -- consent to keep. Adding any of those three would change that,
+            -- and would make this the thing the banner exists to ask about.
+            CREATE TABLE IF NOT EXISTS page_views (
+                day TEXT NOT NULL,
+                path TEXT NOT NULL,
+                views INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(day, path)
+            );
+            CREATE INDEX IF NOT EXISTS idx_page_views_day ON page_views(day);
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -1899,3 +1921,48 @@ def plan_interest_counts() -> dict[str, int]:
             "SELECT plan_key, COUNT(*) AS total FROM plan_interest GROUP BY plan_key"
         ).fetchall()
     return {str(row["plan_key"]): int(row["total"]) for row in rows}
+
+
+def record_page_view(path: str, *, day: str | None = None) -> None:
+    """Add one to today's count for this path.
+
+    Nothing about who asked is recorded - see the table comment. Days are UTC
+    so a count cannot move when the host's timezone does.
+    """
+    init_db()
+    stamp = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with connection() as con:
+        con.execute(
+            "INSERT INTO page_views(day,path,views) VALUES(?,?,1) "
+            "ON CONFLICT(day,path) DO UPDATE SET views=views+1",
+            (str(stamp)[:10], str(path)[:200]),
+        )
+
+
+def page_view_summary(days: int = 30) -> dict:
+    """Recent traffic, for the operator: per day, per page, and the total.
+
+    Days with no visitors are returned as zero rather than left out. A gap in
+    a list of dates reads as a missing measurement; a zero is the measurement.
+    """
+    init_db()
+    span = max(1, int(days))
+    first = (datetime.now(timezone.utc) - timedelta(days=span - 1)).strftime("%Y-%m-%d")
+    with connection() as con:
+        per_day = {
+            str(row["day"]): int(row["views"]) for row in con.execute(
+                "SELECT day, SUM(views) AS views FROM page_views "
+                "WHERE day >= ? GROUP BY day", (first,)).fetchall()
+        }
+        pages = [
+            {"path": str(row["path"]), "views": int(row["views"])}
+            for row in con.execute(
+                "SELECT path, SUM(views) AS views FROM page_views "
+                "WHERE day >= ? GROUP BY path ORDER BY views DESC, path", (first,)).fetchall()
+        ]
+    today = datetime.now(timezone.utc)
+    timeline = []
+    for offset in range(span - 1, -1, -1):
+        stamp = (today - timedelta(days=offset)).strftime("%Y-%m-%d")
+        timeline.append({"day": stamp, "views": per_day.get(stamp, 0)})
+    return {"days": timeline, "pages": pages, "total": sum(per_day.values())}
