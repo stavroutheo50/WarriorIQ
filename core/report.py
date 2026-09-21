@@ -784,6 +784,17 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         if score.get("available") else
         f"<p>{escape(score['disclaimer'])}</p>"
     )
+    # integrity.scoring_status is a copy of the scorecard disclaimer, so when
+    # there is no score to show the same paragraph was printed twice on one
+    # page - once as the scorecard section, once under Integrity. Repeating a
+    # caveat does not make it more believable, it makes the page look generated.
+    # It is kept under Integrity only where the scorecard section shows totals
+    # instead, or where the two texts have diverged and dropping one would
+    # withhold something.
+    scoring_status = str(report["integrity"].get("scoring_status") or "")
+    already_shown = (not score.get("available")) and scoring_status == score.get("disclaimer")
+    integrity_scoring = "" if (already_shown or not scoring_status) else (
+        f"<p>{escape(scoring_status)}</p>")
 
     html = f"""<!doctype html>
 <html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
@@ -798,7 +809,7 @@ header{{display:flex;justify-content:space-between;align-items:end;margin-bottom
 <section class='card'><h2>Estimated scorecard</h2>{scorecard_html}</section>
 <section class='card'><h2>Evidence timeline</h2>{timeline_note}<table><thead>{timeline_head}</thead><tbody>{event_rows}</tbody></table></section>
 {coaching_html}
-<section class='card'><h2>Integrity</h2><p>{escape(report['integrity']['uncertainty_policy'])}</p><p>{escape(report['integrity']['scoring_status'])}</p></section>
+<section class='card'><h2>Integrity</h2><p>{escape(report['integrity']['uncertainty_policy'])}</p>{integrity_scoring}</section>
 </body></html>"""
     html_path.write_text(html, encoding="utf-8")
     return json_path, html_path
