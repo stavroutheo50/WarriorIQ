@@ -362,6 +362,27 @@ class IdentityManager:
                 return person
         return None
 
+    def expected_boxes(self) -> dict:
+        """Where each fighter should be on this frame, for a closer look.
+
+        The detector works on the whole picture squashed into one square, so a
+        fighter 76 px tall in a 480-wide phone copy arrives at the network
+        about 100 px tall - the row of core/preflight.py's table where it finds
+        almost nobody. Measured on fight 1: fighter B was missing on 279 of 713
+        frames and 238 of those had nobody detected where B was expected. Not
+        an identity failure. The detector simply never saw them.
+
+        A crop around this box, inferred at its own size, puts the same fighter
+        in the hundreds of pixels instead. That machinery already exists in
+        PoseTracker.recover_from_guidance; it was only ever pointed at what the
+        SAM sweep found, which is a fraction of frames. This points it at the
+        tracker's own prediction for the rest.
+
+        Returns None for a fighter with no position yet - the first frames,
+        before anybody has been locked on - because there is nowhere to look.
+        """
+        return {"A": self._predicted_box(self.a), "B": self._predicted_box(self.b)}
+
     @staticmethod
     def _predicted_box(state: FighterState) -> np.ndarray | None:
         if state.last_box is None:
