@@ -337,6 +337,13 @@ def _code_changed_since(fingerprint: str) -> bool:
 
 LOCK_STALE_SECONDS = 90
 
+# Declining because a healthy worker is already running is not a failure, and
+# the supervisor has to be able to tell the difference. deploy/run-worker.ps1
+# treats a crash with an escalating back-off, up to five minutes; applied to
+# this case it retried forever, logged an ERROR every time, and left the queue
+# up to five minutes from being picked up if the other worker ever stopped.
+EXIT_ANOTHER_WORKER_IS_RUNNING = 3
+
 
 def _lock_path() -> Path:
     return Path(__file__).resolve().parent / "worker.lock"
@@ -525,7 +532,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     if not _claim_sole_worker() and not args.once:
-        raise SystemExit(1)
+        raise SystemExit(EXIT_ANOTHER_WORKER_IS_RUNNING)
     try:
         raise SystemExit(run_worker(once=args.once))
     finally:

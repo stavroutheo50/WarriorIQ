@@ -54,8 +54,58 @@ Set-Location $root
 $delay = 5
 $max   = 300
 
+# Someone else already doing the job is not a crash.
+#
+# start-worker.bat exists as well, so both supervisors can be up at once - and
+# then this one started a worker every five minutes that immediately declined
+# the lock, wrote an ERROR, and exited. Two bad outcomes: a log that reads like
+# a fault when nothing is wrong, and a queue left up to five minutes from being
+# picked up if the other worker ever stopped.
+#
+# So while another live worker holds the lock, stand by instead: no process is
+# started, one line is logged on the way in and one on the way out, and the
+# check runs often enough to take over quickly.
+$standbyPoll = 30
+$standingBy  = $false
+
+# worker.py's own guard is what actually decides - this only avoids starting a
+# process that would immediately decline. It mirrors LOCK_STALE_SECONDS there.
+# If the two ever drift apart the worst case is the old behaviour: a worker
+# starts, declines, and exits with EXIT_ANOTHER_WORKER_IS_RUNNING below.
+$lockStaleSeconds = 90
+$lockFile = Join-Path $root 'worker.lock'
+
+function Get-LiveLockHolder {
+    if (-not (Test-Path $lockFile)) { return $null }
+    try { $parts = (Get-Content $lockFile -ErrorAction Stop) -split '\s+' } catch { return $null }
+    if ($parts.Count -lt 2) { return $null }
+    $holderPid = 0; $beat = 0.0
+    if (-not [int]::TryParse($parts[0], [ref]$holderPid)) { return $null }
+    if (-not [double]::TryParse($parts[1], [ref]$beat)) { return $null }
+    $age = ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) - $beat
+    if ($age -ge $lockStaleSeconds) { return $null }
+    if (-not (Get-Process -Id $holderPid -ErrorAction SilentlyContinue)) { return $null }
+    return $holderPid
+}
+
 while ($true) {
     Limit-Log
+
+    $holder = Get-LiveLockHolder
+    if ($null -ne $holder) {
+        if (-not $standingBy) {
+            Write-Log "another worker (process $holder) holds the lock; standing by"
+            $standingBy = $true
+        }
+        Start-Sleep -Seconds $standbyPoll
+        continue
+    }
+    if ($standingBy) {
+        Write-Log 'the lock is free again; starting the worker'
+        $standingBy = $false
+        $delay = 5
+    }
+
     $started = Get-Date
     try {
         & $python $worker 2>&1 | ForEach-Object { Write-Log $_ }
@@ -67,6 +117,17 @@ while ($true) {
 
     $ran = [int]((Get-Date) - $started).TotalSeconds
     Write-Log "worker exited with code $code after ${ran}s"
+
+    # It raced someone to the lock between the check above and starting. Same
+    # situation, so say so once and stand by rather than counting it a crash.
+    if ($code -eq 3) {
+        if (-not $standingBy) {
+            Write-Log 'another worker claimed the lock first; standing by'
+            $standingBy = $true
+        }
+        Start-Sleep -Seconds $standbyPoll
+        continue
+    }
 
     if ($ran -gt 120) { $delay = 5 }
 
