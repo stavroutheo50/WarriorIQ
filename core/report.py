@@ -806,6 +806,42 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
             f"<li><strong>{escape(x['title'])}</strong> — {escape(x['detail'])}</li>" for x in c["improvements"]
         ) + "</ul></section>"
 
+    # The preflight probe measures the recording on every analysis - how tall
+    # the fighters are in frame, how many people are in shot, how much the
+    # camera moves - and writes plain advice for the person holding it. None of
+    # it was ever rendered, so the one thing a customer can actually change
+    # between this analysis and a better one was computed and thrown away.
+    #
+    # It is last on the page on purpose: it explains the numbers above rather
+    # than competing with them.
+    recording = (report.get("tracking") or {}).get("recording") or {}
+    recording_html = ""
+    if recording.get("measured"):
+        source = recording.get("source") or {}
+        facts = [
+            ("Video", "%s×%s at %s fps" % (source.get("width"), source.get("height"),
+                                           source.get("fps"))),
+            ("Fighter height in frame", "%.0f%% of the picture"
+             % (100.0 * float(recording.get("subject_share_of_height") or 0.0))),
+            ("People in shot", "about %.0f" % float(recording.get("people_in_frame") or 0)),
+            ("Camera movement", "%.1f%% of the frame"
+             % float(recording.get("camera_shift_percent") or 0.0)),
+        ]
+        rows = "".join("<tr><td>%s</td><td>%s</td></tr>" % (escape(k), escape(str(v)))
+                       for k, v in facts)
+        notes = list(recording.get("blocking") or []) + list(recording.get("warnings") or [])
+        advice = list(recording.get("advice") or [])
+        notes_html = "".join("<li>%s</li>" % escape(n) for n in notes)
+        advice_html = "".join("<li>%s</li>" % escape(a) for a in advice)
+        recording_html = (
+            "<section class='card'><h2>Your recording</h2>"
+            "<p class='muted'>How the footage was filmed decides most of what "
+            "WarriorIQ can tell you about it. This is what it measured.</p>"
+            "<table>%s</table>" % rows
+            + ("<h3>What limited this analysis</h3><ul>%s</ul>" % notes_html if notes_html else "")
+            + ("<h3>For a better result next time</h3><ul>%s</ul>" % advice_html if advice_html else "")
+            + "</section>")
+
     score = report["scorecard"]
     scorecard_html = (
         f"<p class='big'>Fighter A {score['totals']['A']} · Fighter B {score['totals']['B']}</p>"
@@ -838,6 +874,7 @@ header{{display:flex;justify-content:space-between;align-items:end;margin-bottom
 <section class='card'><h2>Evidence timeline</h2>{timeline_note}<table><thead>{timeline_head}</thead><tbody>{event_rows}</tbody></table></section>
 {coaching_html}
 <section class='card'><h2>Integrity</h2><p>{escape(report['integrity']['uncertainty_policy'])}</p>{integrity_scoring}</section>
+{recording_html}
 </body></html>"""
     html_path.write_text(html, encoding="utf-8")
     return json_path, html_path
