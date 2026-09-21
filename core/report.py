@@ -709,10 +709,15 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
                 f"<tr><td>Combinations</td><td>{m['combinations']['count']}</td></tr>",
                 f"<tr><td>Counters</td><td>{m['counters']['count']}</td></tr>",
             ]
+        # Written for a coach, not for whoever built the gate. The previous
+        # wording named an "identity and action integrity gate", which tells a
+        # customer nothing except that something failed. What they need to know
+        # is which numbers they can rely on and which are missing, and why.
         note = "" if trusted else (
-            "<div class='muted'>Landed, accuracy, strongest weapon and technique names are "
-            "withheld: this analysis did not pass the identity and action integrity gate. "
-            "Punches are not counted at any confidence.</div>")
+            "<div class='muted'>Kicks, knees, movement and coverage above are measured. "
+            "Punch counts, accuracy and named techniques are not shown for this fight - "
+            "WarriorIQ can see that a punch was thrown but cannot yet tell you reliably "
+            "which punch it was or whether it landed, so it does not guess.</div>")
         return f"""
         <section class='card'>
           <h2>Fighter {name}</h2>
@@ -739,17 +744,28 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     if not trusted:
         moments = [e for e in (report.get("events") or [])
                    if (e.get("family") or "") == "kick"]
-    event_rows = "".join(
-        f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
-        f"<td>{escape(e['technique'].replace('_',' ')) if trusted else escape(e.get('family') or 'action')}</td>"
-        f"<td>{escape(e['outcome']) if trusted else 'not classified'}</td>"
-        f"<td>{escape(str(e['target'])) if trusted else '-'}</td></tr>"
-        for e in moments
-    )
+    # Outcome and Target are only ever filled on a trusted run, so on every
+    # other run they were two columns of "not classified" and "-" - two thirds
+    # of the table saying nothing, which reads as broken rather than careful.
+    # The columns are dropped instead of filled with placeholders.
+    if trusted:
+        timeline_head = "<tr><th>Round</th><th>Time</th><th>Fighter</th><th>Technique</th><th>Outcome</th><th>Target</th></tr>"
+        event_rows = "".join(
+            f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
+            f"<td>{escape(e['technique'].replace('_',' '))}</td>"
+            f"<td>{escape(e['outcome'])}</td>"
+            f"<td>{escape(str(e['target']))}</td></tr>"
+            for e in moments)
+    else:
+        timeline_head = "<tr><th>Round</th><th>Time</th><th>Fighter</th><th>What</th></tr>"
+        event_rows = "".join(
+            f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
+            f"<td>{escape(e.get('family') or 'action')}</td></tr>"
+            for e in moments)
     timeline_note = "" if trusted else (
-        "<div class='muted'>Leg strikes only, with technique names and outcomes "
-        "withheld. Punches are not listed because they are not counted "
-        "reliably yet.</div>")
+        "<div class='muted'>Every kick and knee WarriorIQ saw, with the second "
+        "it happened, so you can find it on the video. Punches are left out - "
+        "they are not counted accurately enough yet to put in front of you.</div>")
 
     coaching_html = ""
     for fighter in ("A", "B"):
@@ -780,7 +796,7 @@ header{{display:flex;justify-content:space-between;align-items:end;margin-bottom
 <div class='grid'>{fighter_card('A')}{fighter_card('B')}</div>
 <section class='card'><h2>Performance</h2><p>Segment analysed: {report['performance']['segment_duration_seconds']:.1f}s · Processing time: {report['performance']['analysis_seconds']:.1f}s</p></section>
 <section class='card'><h2>Estimated scorecard</h2>{scorecard_html}</section>
-<section class='card'><h2>Evidence timeline</h2>{timeline_note}<table><thead><tr><th>Round</th><th>Time</th><th>Fighter</th><th>Technique</th><th>Outcome</th><th>Target</th></tr></thead><tbody>{event_rows}</tbody></table></section>
+<section class='card'><h2>Evidence timeline</h2>{timeline_note}<table><thead>{timeline_head}</thead><tbody>{event_rows}</tbody></table></section>
 {coaching_html}
 <section class='card'><h2>Integrity</h2><p>{escape(report['integrity']['uncertainty_policy'])}</p><p>{escape(report['integrity']['scoring_status'])}</p></section>
 </body></html>"""
