@@ -808,6 +808,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     missing = {"A": 0, "B": 0}
     sam_guided = {"A": 0, "B": 0}
     guided_pose_recoveries = {"A": 0, "B": 0}
+    # Recoveries from the tracker's own prediction rather than the sweep's,
+    # counted apart so the two can be told from each other in the report.
+    expected_pose_recoveries = {"A": 0, "B": 0}
     coverage_windows: dict[int, dict[str, int]] = {}
     sam_stride = sam_sampling_stride(info.fps, end_frame - start_frame)
     current_frame = start_frame
@@ -896,6 +899,27 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                     elif observation.track_id == -1002:
                         guided_pose_recoveries["B"] += 1
                 people.extend(focused)
+                # And where the sweep said nothing, look where the tracker
+                # expects them anyway.
+                #
+                # The sweep only covers a fraction of the frames - 64 of 620 on
+                # one fight - so for most of a bout the crop was never taken.
+                # Meanwhile the detector was missing fighter B on 279 of 713
+                # frames of fight 1, and 238 of those had nobody detected where
+                # B was expected: a fighter too small in the network input to
+                # find, with a perfectly good prediction of where to look.
+                #
+                # recover_from_guidance already refuses any fighter an existing
+                # detection overlaps, so this costs a crop only on the frames
+                # where somebody is actually missing.
+                expected = pose_tracker.recover_from_guidance(
+                    frame, manager.expected_boxes(), people)
+                for observation in expected:
+                    if observation.track_id == -1001:
+                        expected_pose_recoveries["A"] += 1
+                    elif observation.track_id == -1002:
+                        expected_pose_recoveries["B"] += 1
+                people.extend(expected)
                 fighter_a, fighter_b = manager.update(people, source_frame, sam_guidance=guidance)
                 # Joints only, and only for the two fighters, only after
                 # identity has already chosen them. See core/rtm_pose.py.
@@ -1217,6 +1241,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "fighter_B_sam_guided_frames": sam_guided["B"],
         "fighter_A_guided_pose_recoveries": guided_pose_recoveries["A"],
         "fighter_B_guided_pose_recoveries": guided_pose_recoveries["B"],
+        # Found by cropping to where the tracker expected them, on frames the
+        # whole-picture pass missed them and the sweep had nothing to say.
+        "fighter_A_expected_pose_recoveries": expected_pose_recoveries["A"],
+        "fighter_B_expected_pose_recoveries": expected_pose_recoveries["B"],
         "sam_continuous_failure_reason": sam_recovery.continuous_failure_reason,
         "fighter_A_rejected_switches": manager.a.switches_rejected,
         "fighter_B_rejected_switches": manager.b.switches_rejected,

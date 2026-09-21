@@ -259,6 +259,9 @@ def main() -> int:
                         help="SAM2 checkpoint to use, e.g. facebook/sam2.1-hiera-tiny")
     parser.add_argument("--sam-backend", default=None, choices=["sam2", "edgetam"],
                         help="which model runs the continuous sweep")
+    parser.add_argument("--trace-out", default=None,
+                        help="write the per-frame trace as JSON, so a later "
+                             "question about the gaps needs no second run")
     args = parser.parse_args()
 
     fight = load_fight(args.fight)
@@ -270,6 +273,17 @@ def main() -> int:
     print("  %s" % fight["note"], flush=True)
 
     trace, tracking = trace_run(fight, args.stride, args.sam_model, args.sam_backend)
+    if args.trace_out:
+        # A run costs about eighty seconds. Every "why was it missing there?"
+        # asked afterwards used to cost another one, so the trace is worth
+        # keeping whenever somebody asks for it.
+        destination = Path(args.trace_out)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(
+            {"fight": args.fight, "stride": args.stride,
+             "tracking": {k: v for k, v in tracking.items() if not isinstance(v, (list, dict))},
+             "frames": trace}, indent=1, default=str), encoding="utf-8")
+        print("trace: %s" % destination)
     probe = cv2.VideoCapture(str(PROJECT_ROOT / fight["video"]))
     fps_hint = probe.get(cv2.CAP_PROP_FPS) or 30.0
     probe.release()
