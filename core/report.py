@@ -21,6 +21,26 @@ from core.types import AnalysisRequest, DefenseEvent, RoundSpec, StrikeEvent
 # What each index should be read against, keyed by metric name. Built from
 # coaching's POSE_DIMENSIONS so there is one source of truth: if the reference
 # for guard changes, the coaching sentence and the report card change together.
+# Outcomes where the striking limb actually arrived at the opponent.
+#
+# Hand-checking all 60 events of athens_hd against the video put a number on
+# each of the analyser's own outcomes, and they are not equally trustworthy:
+#
+#     likely_landed   100% real     blocked   100% real
+#     clean            80%          checked    50%
+#     missed           42%          uncertain  12%
+#
+# `missed` is also exactly the set whose limb never entered the opponent's box
+# - 0 of 19 reached - so the report was filling its evidence list with the two
+# categories the analyser is worst at. Publishing only the arrived ones takes
+# the timeline from 59% to 91% correct on that fight.
+#
+# **This is one fight, 54 labelled events.** It filters what the report shows;
+# it deliberately does not touch `events`, so the underlying stream is intact
+# for training and for the next fight that can be labelled to check this.
+ARRIVED_OUTCOMES = frozenset({"clean", "likely_landed", "blocked"})
+
+
 _TYPICAL = {key: reference[0] for key, _label, reference, *_rest in POSE_DIMENSIONS}
 
 
@@ -741,9 +761,12 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     # exactly what the card counts and what the scorecard note says came out
     # right when checked against video. Technique names stay withheld.
     moments = report.get("key_moments") or []
+    withheld_candidates = 0
     if not trusted:
-        moments = [e for e in (report.get("events") or [])
-                   if (e.get("family") or "") == "kick"]
+        kicks = [e for e in (report.get("events") or [])
+                 if (e.get("family") or "") == "kick"]
+        moments = [e for e in kicks if (e.get("outcome") or "") in ARRIVED_OUTCOMES]
+        withheld_candidates = len(kicks) - len(moments)
     # Outcome and Target are only ever filled on a trusted run, so on every
     # other run they were two columns of "not classified" and "-" - two thirds
     # of the table saying nothing, which reads as broken rather than careful.
@@ -762,10 +785,15 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
             f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
             f"<td>{escape(e.get('family') or 'action')}</td></tr>"
             for e in moments)
+    extra = ("" if not withheld_candidates else
+             " %d more were seen but not shown, because the leg never reached "
+             "the opponent and those are the ones WarriorIQ gets wrong most "
+             "often." % withheld_candidates)
     timeline_note = "" if trusted else (
-        "<div class='muted'>Every kick and knee WarriorIQ saw, with the second "
-        "it happened, so you can find it on the video. Punches are left out - "
-        "they are not counted accurately enough yet to put in front of you.</div>")
+        "<div class='muted'>Kicks and knees that reached the other fighter, with "
+        "the second each one happened, so you can find it on the video.%s "
+        "Punches are left out - they are not counted accurately enough yet to "
+        "put in front of you.</div>" % extra)
 
     coaching_html = ""
     for fighter in ("A", "B"):

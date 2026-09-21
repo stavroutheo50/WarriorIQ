@@ -4444,6 +4444,33 @@ class StandaloneReportHonestyTests(unittest.TestCase):
             with self.subTest(present=present):
                 self.assertIn(present, trusted)
 
+    def test_the_timeline_shows_only_the_strikes_that_arrived(self):
+        """Hand-checking every event of athens_hd against the video priced each
+        of the analyser's own outcomes: `likely_landed` and `blocked` are 100%
+        real, `clean` 80%, `missed` 42% and `uncertain` 12%. `missed` is also
+        exactly the set whose limb never entered the opponent's box, 0 of 19.
+        The evidence list was being filled with the two categories the analyser
+        is worst at; on that fight the kick timeline was 27 rows at 63% correct
+        and is now 10 rows at 100%.
+        """
+        def three_kicks(report):
+            report["events"] = [
+                {"round_number": 1, "peak_time": 11.25, "fighter": "A", "family": "kick",
+                 "technique": "right_low_kick", "outcome": "clean", "target": "leg"},
+                {"round_number": 1, "peak_time": 22.50, "fighter": "B", "family": "kick",
+                 "technique": "left_low_kick", "outcome": "missed", "target": "leg"},
+                {"round_number": 1, "peak_time": 33.75, "fighter": "B", "family": "kick",
+                 "technique": "left_high_kick", "outcome": "uncertain", "target": "head"},
+            ]
+
+        html = self._write(trusted=False, mutate=three_kicks)
+        self.assertIn("11.25", html)
+        for withheld in ("22.50", "33.75"):
+            with self.subTest(withheld=withheld):
+                self.assertNotIn(withheld, html)
+        # Withheld, not silently dropped: the reader is told how many.
+        self.assertIn("2 more were seen", html)
+
     def test_the_scoring_note_is_not_printed_twice(self):
         """integrity.scoring_status is a copy of the scorecard disclaimer.
 
