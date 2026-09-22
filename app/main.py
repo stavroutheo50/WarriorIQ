@@ -2515,6 +2515,13 @@ def sport_setup(request: Request, sport: str):
     key = (sport or "").strip().lower()
     if key not in SPORTS:
         raise HTTPException(status_code=404, detail="Unknown sport")
+    # The nav chip is rendered from request.state, which the middleware filled
+    # in from the *incoming* cookie - the sport of the previous visit. The
+    # cookie for this request is only set on the response below, so without
+    # this line the page reads "Set up your Boxing fight." under a nav chip
+    # that still says Taekwondo. The URL is what the visitor asked for, so it
+    # wins over the cookie for this render.
+    request.state.active_sport = sport_identity(key)
     response = templates.TemplateResponse(
         request=request, name="analyze.html", context=_sport_context(request, key),
     )

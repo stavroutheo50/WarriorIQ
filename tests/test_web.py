@@ -461,6 +461,40 @@ class PublicPageTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_the_chip_shows_the_sport_this_page_is_for(self):
+        """Visiting /analyze/boxing after /analyze/taekwondo said "Taekwondo".
+
+        The middleware fills request.state.active_sport from the *incoming*
+        cookie, and /analyze/<sport> only writes the new cookie onto the
+        response - after the template has already been rendered from the old
+        one. So the H1 read "Set up your Boxing fight." under a nav chip that
+        still named the sport before it, on the page where getting the sport
+        wrong matters most.
+
+        Every ordered pair, because the bug is invisible when the sport does
+        not change and one pair passing says nothing about the rest.
+        """
+        sports = {
+            "kickboxing": "Kickboxing", "boxing": "Boxing", "muay_thai": "Muay Thai",
+            "taekwondo": "Taekwondo", "mma": "MMA",
+        }
+        for previous, previous_label in sports.items():
+            for current, current_label in sports.items():
+                if previous == current:
+                    continue
+                with self.subTest(previous=previous, current=current):
+                    client = TestClient(app)
+                    try:
+                        client.get(f"/analyze/{previous}")
+                        self.assertEqual(client.cookies.get("warrioriq_sport"), previous)
+                        page = client.get(f"/analyze/{current}").text
+                        self.assertIn(
+                            f'<span class="sport-switch-name">{current_label}</span>', page)
+                        self.assertNotIn(
+                            f'<span class="sport-switch-name">{previous_label}</span>', page)
+                    finally:
+                        client.close()
+
     def test_no_text_is_left_below_the_readability_floor(self):
         """The audit found 85 rules setting body and label text at 9-10px.
 
