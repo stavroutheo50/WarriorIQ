@@ -2410,6 +2410,43 @@ class ComponentStylesReachTheirPagesTests(unittest.TestCase):
         self.assertFalse(undefined, f"button variants with no CSS: {sorted(undefined)}")
 
 
+class AssetCacheBustingTests(unittest.TestCase):
+    """Every stylesheet must carry the content hash, not a typed-in date.
+
+    /static/ is served with max-age=604800, so a stylesheet whose token never
+    moves reaches returning visitors up to a week late - new markup against an
+    old stylesheet, which looks like the site broke rather than like a cache.
+    Three of them carried "?v=20260831-ui4", the exact hand-typed token that
+    _asset_version() was written to get rid of.
+    """
+
+    def test_no_template_carries_a_hand_typed_asset_token(self):
+        templates_dir = Path(__file__).resolve().parents[1] / "app" / "templates"
+        for path in sorted(templates_dir.glob("*.html")):
+            for token in re.findall(r'\?v=([^"\']+)', path.read_text(encoding="utf-8")):
+                with self.subTest(template=path.name, token=token):
+                    self.assertEqual(
+                        token, "{{asset_version}}",
+                        f"{path.name} pins an asset to a token that never moves")
+
+    def test_the_token_follows_the_stylesheet_contents(self):
+        """It hashes contents, not mtimes: the deploy copies with `cp -R`, so
+        an mtime-based token threw away every visitor's cache on every deploy
+        whether or not anything had changed."""
+        from app.main import _asset_version
+
+        static = Path(__file__).resolve().parents[1] / "app" / "static"
+        target = static / "frame-picker.css"
+        before = _asset_version()
+        original = target.read_bytes()
+        try:
+            target.write_bytes(original + b"\n/* cache probe */\n")
+            self.assertNotEqual(before, _asset_version())
+        finally:
+            target.write_bytes(original)
+        self.assertEqual(before, _asset_version())
+
+
 class FightVideoFormatTests(unittest.TestCase):
     """The picker, the copy and the server must name the same formats.
 
