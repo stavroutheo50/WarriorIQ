@@ -4463,7 +4463,12 @@ class StandaloneReportHonestyTests(unittest.TestCase):
         # pinning one phrasing of it and failing on the next rewrite.
         lowered = html.lower()
         self.assertIn("punch", lowered)
-        self.assertIn("not counted", lowered)
+        # Any wording will do, as long as the omission is stated. It has been
+        # "not counted", then "not shown", and is now a reason as well - the
+        # fighters being too small to read a hand.
+        self.assertTrue(
+            any(phrase in lowered for phrase in ("not counted", "not shown", "left out")),
+            "the report must say punches are missing, however it words it")
 
     def test_an_untrusted_timeline_drops_the_columns_it_cannot_fill(self):
         """Outcome and target are only ever known on a trusted run.
@@ -4564,6 +4569,65 @@ class StandaloneReportHonestyTests(unittest.TestCase):
         # add up to the rows in the table.
         self.assertIn("<div class='big'>2</div>", html)
         self.assertIn("<div class='big'>0</div>", html)
+
+    def _fight_with(self, subject_px, events):
+        def setup(report):
+            report.setdefault("tracking", {})["recording"] = {
+                "measured": True, "can_analyse": True,
+                "source": {"width": 1920, "height": 1080, "fps": 59.97},
+                "subject_share_of_height": 0.25, "people_in_frame": 4.0,
+                "camera_shift_percent": 0.5, "subject_px_in_network": subject_px,
+                "blocking": [], "warnings": [], "advice": [],
+            }
+            report["events"] = events
+        return setup
+
+    @staticmethod
+    def _event(time, fighter, family, outcome):
+        return {"round_number": 1, "peak_time": time, "fighter": fighter,
+                "family": family, "technique": "jab" if family == "punch" else "right_low_kick",
+                "outcome": outcome, "target": "head"}
+
+    def test_punches_are_counted_when_the_fighters_are_big_enough(self):
+        """Punches were withheld outright on evidence from three messenger
+        copies where a fighter reaches the network about 86-101px tall. On the
+        iPhone original at 201px, hand-checking says punches that arrived are
+        85% real. Withholding them there threw away eleven real punches to
+        avoid two false ones."""
+        events = [self._event(11.25, "A", "kick", "clean"),
+                  self._event(22.50, "A", "punch", "blocked"),
+                  self._event(33.75, "B", "punch", "likely_landed")]
+        html = self._write(trusted=False, mutate=self._fight_with(201.0, events))
+        rows = html.split("Evidence timeline")[1].split("</section>")[0].count("<tr>") - 1
+        self.assertEqual(rows, 3, "the kick and both punches should be listed")
+        self.assertIn("strikes that reached", html)
+        self.assertNotIn("Punches are left out", html)
+
+    def test_punches_are_withheld_when_the_fighters_are_too_small(self):
+        """The same three bouts that produced 'punches reported 11, actually
+        thrown 0' are exactly the ones below this line."""
+        events = [self._event(11.25, "A", "kick", "clean"),
+                  self._event(22.50, "A", "punch", "blocked")]
+        html = self._write(trusted=False, mutate=self._fight_with(95.0, events))
+        rows = html.split("Evidence timeline")[1].split("</section>")[0].count("<tr>") - 1
+        self.assertEqual(rows, 1, "only the kick")
+        self.assertIn("Punches are left out", html)
+        self.assertIn("too small in the picture", html)
+
+    def test_a_clean_punch_is_not_good_enough_to_publish(self):
+        """Hand-checked on the fight with labels: blocked and likely_landed
+        punches are 100% real, clean ones 60%. Published with clean included,
+        BOTH wrong rows in the evidence list were clean punches - one on a
+        fighter standing apart, one crediting B for a kick A threw."""
+        events = [self._event(11.25, "A", "punch", "blocked"),
+                  self._event(22.50, "A", "punch", "clean"),
+                  self._event(33.75, "B", "kick", "clean")]
+        html = self._write(trusted=False, mutate=self._fight_with(201.0, events))
+        self.assertIn("11.25", html)
+        self.assertNotIn("22.50", html)
+        # A clean KICK is still published: all three of its outcomes measured
+        # 100% real, which is what makes punches the exception and not the rule.
+        self.assertIn("33.75", html)
 
     def test_the_scoring_note_is_not_printed_twice(self):
         """integrity.scoring_status is a copy of the scorecard disclaimer.

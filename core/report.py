@@ -40,6 +40,55 @@ from core.types import AnalysisRequest, DefenseEvent, RoundSpec, StrikeEvent
 # for training and for the next fight that can be labelled to check this.
 ARRIVED_OUTCOMES = frozenset({"clean", "likely_landed", "blocked"})
 
+# How tall a fighter must be in the network's input before punches are counted.
+#
+# Punches were withheld outright, on this evidence from hand-checking three
+# bouts against the video:
+#
+#     fight 1   punches reported 11, actually thrown 0
+#     fight 2   punches reported  3, actually thrown 2
+#     fight 3   punches reported 14, actually thrown 3
+#
+# All three are messenger copies where a fighter is 56-76 px in the source and
+# reaches the network about 86-101 px tall. On the iPhone original, where a
+# fighter is 268 px and reaches the network at 201 px, the same detector and
+# the same hand-checking give a different answer:
+#
+#     everything called a punch               27 events   56% real
+#       of those, only the ones that arrived  13 events   85% real
+#          outcome blocked                     5 events  100% real
+#          outcome likely_landed               3 events  100% real
+#          outcome uncertain                   8 events   12% real
+#
+# and not one punch proposal turned out to be a kick misnamed. So a punch is
+# not untrustworthy in itself - it is untrustworthy when the hand throwing it
+# is a dozen pixels wide. Withholding every one of them threw away eleven real
+# punches on that fight to avoid two false ones.
+#
+# The threshold sits between the two groups rather than at the edge of either,
+# because this is one fight's evidence on the permissive side against three
+# fights' on the strict side. core/preflight.py measures the number on every
+# analysis, so no new measurement is needed to apply it.
+PUNCHES_NEED_THIS_MANY_PIXELS = 150.0
+
+# A punch has to have been stopped or seen to land; "clean" is not enough.
+#
+# Kicks may use the full ARRIVED set - hand-checked, all three of its outcomes
+# are 100% real on the fight with labels. Punches are not the same. Broken out
+# by outcome on that fight:
+#
+#     blocked         5 real,  0 wrong   100%
+#     likely_landed   3 real,  0 wrong   100%
+#     clean           3 real,  2 wrong    60%
+#
+# Published with `clean` included, the evidence list ran 17 of 21 correct and
+# BOTH of the wrong rows were clean punches - one on a fighter standing apart
+# doing nothing, one crediting B for a kick A threw. Dropping that one outcome
+# costs three real punches and removes both errors. A coach who reads "clean
+# punch" about a moment where nothing happened stops believing the rest of the
+# page, so the cheaper mistake is to list fewer.
+PUNCH_OUTCOMES = frozenset({"likely_landed", "blocked"})
+
 
 _TYPICAL = {key: reference[0] for key, _label, reference, *_rest in POSE_DIMENSIONS}
 
@@ -705,10 +754,23 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     # to do arithmetic to find out nothing was broken. Worse, the largest
     # number on the page was the least reliable one - flagged kicks are 63%
     # real on the fight that was hand-checked, the arrived ones 100%.
+    # Which families can be counted on THIS video. Kicks always; punches only
+    # where the fighters are big enough in the network's input for a hand to be
+    # readable - see PUNCHES_NEED_THIS_MANY_PIXELS.
+    recording = (report.get("tracking") or {}).get("recording") or {}
+    subject_pixels = float(recording.get("subject_px_in_network") or 0.0)
+    punches_are_readable = subject_pixels >= PUNCHES_NEED_THIS_MANY_PIXELS
+    countable_families = {"kick"} | ({"punch"} if punches_are_readable else set())
+
     kick_events = [e for e in (report.get("events") or [])
-                   if (e.get("family") or "") == "kick"]
-    arrived_kicks = [e for e in kick_events
-                     if (e.get("outcome") or "") in ARRIVED_OUTCOMES]
+                   if (e.get("family") or "") in countable_families]
+    def _arrived(event: dict) -> bool:
+        outcome = event.get("outcome") or ""
+        if (event.get("family") or "") == "punch":
+            return outcome in PUNCH_OUTCOMES
+        return outcome in ARRIVED_OUTCOMES
+
+    arrived_kicks = [e for e in kick_events if _arrived(e)]
 
     def _per_fighter(items: list) -> dict:
         counts = {"A": 0, "B": 0}
@@ -761,18 +823,27 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         # wording named an "identity and action integrity gate", which tells a
         # customer nothing except that something failed. What they need to know
         # is which numbers they can rely on and which are missing, and why.
+        measured = ("Strikes that reached, movement and coverage above are measured."
+                    if punches_are_readable else
+                    "Kicks, knees, movement and coverage above are measured.")
+        withheld = ("Named techniques and accuracy are not shown - WarriorIQ can see "
+                    "that a strike arrived but cannot yet tell you reliably which "
+                    "punch or kick it was, so it does not guess."
+                    if punches_are_readable else
+                    "Punch counts, accuracy and named techniques are not shown for this "
+                    "fight - the fighters are too small in the picture for WarriorIQ to "
+                    "count hands reliably.")
         note = "" if trusted else (
-            "<div class='muted'>Kicks, knees, movement and coverage above are measured. "
-            "Punch counts, accuracy and named techniques are not shown for this fight - "
-            "WarriorIQ can see that a punch was thrown but cannot yet tell you reliably "
-            "which punch it was or whether it landed, so it does not guess.</div>")
+            "<div class='muted'>%s %s</div>" % (measured, withheld))
         # On a trusted run the timeline lists every key moment, so the flagged
         # count is what the table shows and the two already agree.
         if trusted:
             headline, caption = kicks, "leg strikes flagged (kicks and knees)"
         else:
             headline = reached_kicks.get(name, 0)
-            caption = "kicks that reached, of %d flagged" % flagged_kicks.get(name, 0)
+            caption = "%s that reached, of %d flagged" % (
+                "strikes" if punches_are_readable else "kicks",
+                flagged_kicks.get(name, 0))
         return f"""
         <section class='card'>
           <h2>Fighter {name}</h2>
@@ -819,14 +890,17 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
             f"<td>{escape(e.get('family') or 'action')}</td></tr>"
             for e in moments)
     extra = ("" if not withheld_candidates else
-             " %d more were seen but not shown, because the leg never reached "
-             "the opponent and those are the ones WarriorIQ gets wrong most "
-             "often." % withheld_candidates)
+             " %d more were seen but not shown, because the strike never "
+             "reached the opponent and those are the ones WarriorIQ gets wrong "
+             "most often." % withheld_candidates)
+    punch_note = ("" if punches_are_readable else
+                  " Punches are left out of this video - the fighters are too "
+                  "small in the picture for WarriorIQ to count hands reliably. "
+                  "The advice at the bottom of this page is how to change that.")
     timeline_note = "" if trusted else (
-        "<div class='muted'>Kicks and knees that reached the other fighter, with "
-        "the second each one happened, so you can find it on the video.%s "
-        "Punches are left out - they are not counted accurately enough yet to "
-        "put in front of you.</div>" % extra)
+        "<div class='muted'>%s that reached the other fighter, with the second "
+        "each one happened, so you can find it on the video.%s%s</div>"
+        % ("Strikes" if punches_are_readable else "Kicks and knees", extra, punch_note))
 
     coaching_html = ""
     for fighter in ("A", "B"):
