@@ -103,9 +103,13 @@
             {% for f in roster %}<option value="{{f.id}}">{{f.name}}</option>{% endfor %}
             <option value="" {% if not roster %}selected{% endif %}>+ Add a new fighter</option>
           </select>
-          <input class="field-input" id="fighterName" name="fighter_name" type="text"
-                 placeholder="Fighter's name" maxlength="80" autocomplete="off"
-                 {% if roster %}hidden{% endif %}>
+          {#- Label and input are wrapped so they hide together. A visible
+              label that outlived its input would be worse than none. #}
+          <div id="newFighterField" {% if roster %}hidden{% endif %}>
+            <label for="fighterName">New fighter's name</label>
+            <input class="field-input" id="fighterName" name="fighter_name" type="text"
+                   placeholder="Fighter's name" maxlength="80" autocomplete="off">
+          </div>
           <p class="small muted">Filing each fight against a fighter is what lets WarriorIQ show whether they are improving.</p>
         </div>
         {% endif %}
@@ -327,7 +331,11 @@
   describeFormat();
   const fighterPick=document.getElementById('fighterPick'),fighterName=document.getElementById('fighterName');
   if(fighterPick&&fighterName){
-    const syncFighter=()=>{const adding=fighterPick.value==='';fighterName.hidden=!adding;fighterName.required=adding;if(!adding)fighterName.value=''};
+    const newFighterField=document.getElementById('newFighterField');
+    // The wrapper hides, so the label goes with it. `required` still
+    // toggles on the input itself: a required control inside a hidden
+    // wrapper blocks submit with an error pointing at nothing.
+    const syncFighter=()=>{const adding=fighterPick.value==='';if(newFighterField)newFighterField.hidden=!adding;fighterName.required=adding;if(!adding)fighterName.value=''};
     fighterPick.addEventListener('change',syncFighter);syncFighter();
   }
   videoInput.addEventListener('change',()=>{setReady();const file=videoInput.files[0];if(file)applyDuration(file)});

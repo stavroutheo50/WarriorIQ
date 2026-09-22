@@ -2410,6 +2410,78 @@ class ComponentStylesReachTheirPagesTests(unittest.TestCase):
         self.assertFalse(undefined, f"button variants with no CSS: {sorted(undefined)}")
 
 
+class FormLabellingTests(unittest.TestCase):
+    """Every control on the upload form must have an accessible name.
+
+    fighter_name had none: in the branch where an account already has a roster
+    it is the "+ Add a new fighter" text box, and the only <label> nearby
+    points at the select above it. A screen reader reached an unnamed edit
+    field on the form that starts every analysis.
+    """
+
+    def setUp(self):
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        self.client.close()
+
+    # Hidden and CSRF fields carry no user-visible question, and submits are
+    # named by their own text.
+    _EXEMPT_TYPES = {"hidden", "submit", "button", "image", "reset"}
+
+    def _unlabelled(self, page: str) -> list[str]:
+        labelled = set(re.findall(r'<label[^>]*\bfor="([^"]+)"', page))
+        # <label><input> text</label> names the control by containing it, and
+        # the consent checkboxes are written that way. Record those spans so
+        # wrapping counts as a name alongside for=/aria-label.
+        wrapped = [(m.start(), m.end())
+                   for m in re.finditer(r"<label\b[^>]*>.*?</label>", page, re.S)]
+        missing = []
+        for match in re.finditer(r"<(?:input|select|textarea)\b[^>]*>", page):
+            tag = match.group(0)
+            kind = (re.search(r'\btype="([^"]+)"', tag) or [None, ""])[1]
+            if kind in self._EXEMPT_TYPES:
+                continue
+            if "aria-label" in tag or "aria-labelledby" in tag:
+                continue
+            identifier = re.search(r'\bid="([^"]+)"', tag)
+            if identifier and identifier.group(1) in labelled:
+                continue
+            if any(start < match.start() < end for start, end in wrapped):
+                continue
+            missing.append(tag)
+        return missing
+
+    def test_every_control_on_the_analyze_form_is_named(self):
+        for sport in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
+            with self.subTest(sport=sport):
+                missing = self._unlabelled(self.client.get(f"/analyze/{sport}").text)
+                self.assertEqual(missing, [], f"unlabelled control(s): {missing}")
+
+    def test_the_new_fighter_name_field_is_labelled(self):
+        """Read from the template, not a rendered page: this branch only
+        exists for a signed-in account that already has a roster, and the
+        anonymous page never reaches it."""
+        source = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                  / "analyze.html").read_text(encoding="utf-8")
+        self.assertIn('<label for="fighterName">', source)
+        # The label lives inside the wrapper the script hides, so it cannot be
+        # left on screen pointing at a field that is no longer there.
+        self.assertIn('id="newFighterField"', source)
+        self.assertIn("newFighterField.hidden=!adding", source)
+        # required stays on the input: a required control inside a hidden
+        # wrapper blocks submit with an error pointing at nothing visible.
+        self.assertIn("fighterName.required=adding", source)
+
+    def test_no_control_in_the_analyze_template_is_left_unnamed(self):
+        """The rendered check above only sees the signed-out form. The
+        template source reaches the account and roster branches too."""
+        source = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                  / "analyze.html").read_text(encoding="utf-8")
+        missing = self._unlabelled(source)
+        self.assertEqual(missing, [], f"unlabelled control(s): {missing}")
+
+
 class AssetCacheBustingTests(unittest.TestCase):
     """Every stylesheet must carry the content hash, not a typed-in date.
 
