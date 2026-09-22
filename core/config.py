@@ -936,9 +936,15 @@ class Settings:
     # minutes of 1080p produces 140-260 MB, which 130 MiB refused outright.
     #
     # What is proven is 134 MiB through the live host. 512 MB in a single
-    # request is not, and this path has no resume if it fails - which is an
-    # argument for the chunked path being the default, not for stating a
-    # smaller number than WarriorIQ will accept.
+    # request is not, and while chunked_upload_enabled is off this is the only
+    # path there is - so that unproven size is what a user actually gets, with
+    # no resume if it fails.
+    #
+    # Kept at 512 MB anyway, because the alternative is worse: 130 MiB refused
+    # a two-minute 1080p round outright, which is the complaint that started
+    # all of this. A large upload that might fail beats one that cannot be
+    # attempted. The real fix is turning the chunked path on, and until that
+    # happens this number is carrying more weight than it was chosen to.
     #
     # max_fight_bytes above says 2 GB and cannot be honoured while this is
     # smaller. The chunked upload path does not go through this limit at all -
@@ -976,7 +982,20 @@ class Settings:
     # A design that only works at the fast end fails the people at the slow
     # end, and splitting the transfer removes the question - a dropped
     # connection costs one chunk rather than the fight.
-    chunked_upload_enabled: bool = env_bool("WARRIORIQ_CHUNKED_UPLOAD", True)
+    # Off by default, so the first deploy carrying this ships it inert.
+    #
+    # Nothing about the chunked path has run against the real host: not
+    # Passenger's behaviour with a PUT body, not a2wsgi's delivery of one, not
+    # a phone on a venue's connection. It is well covered by tests and
+    # verified locally end to end, and neither of those is the thing it has to
+    # survive. Turning it on is one env var and a restart, and turning it off
+    # again is the same - which is worth more on the day it misbehaves than
+    # shipping it hot is worth today.
+    #
+    # The page falls back to the single-request /upload whenever begin answers
+    # 404, which is exactly what this default produces, so a deploy with this
+    # off behaves as the site does now.
+    chunked_upload_enabled: bool = env_bool("WARRIORIQ_CHUNKED_UPLOAD", False)
     # 8 MiB. Far below any plausible request-body ceiling, so the host's limit
     # stops being the thing that decides whether a fight can be uploaded; large
     # enough that a 260 MB round is about 33 requests rather than hundreds;
