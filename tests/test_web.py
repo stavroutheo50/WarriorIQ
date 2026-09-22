@@ -25,6 +25,29 @@ from core.evidence_trust import automated_evidence_trust
 from core.temporal_model import ACTION_CLASSES
 
 
+
+def _real_template_env(directory=None):
+    """A Jinja environment that renders templates the way the app does.
+
+    Several tests render a real template directly to prove something never
+    reaches the page. A bare Environment is not what the app uses: it carries
+    none of the app's filters or globals, and an unknown filter raises instead
+    of resolving to ChainableUndefined. So the first custom filter any page
+    picked up broke five of these tests while working perfectly in production
+    - the tests were failing on their own scaffolding rather than on the page.
+    """
+    from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
+    from app.main import templates as app_templates
+
+    root = Path(__file__).resolve().parents[1] / "app" / "templates"
+    env = Environment(loader=FileSystemLoader(str(directory or root)),
+                      undefined=ChainableUndefined)
+    env.filters.update(app_templates.env.filters)
+    env.globals.update(app_templates.env.globals)
+    return env
+
+
 class AnalyticsPolicyTests(unittest.TestCase):
     """The analytics tag and the policy that permits it must stay in step.
 
@@ -1157,7 +1180,7 @@ class PublicPageTests(unittest.TestCase):
             def __iter__(self): return iter(())
 
         templates = Path(__file__).resolve().parents[1] / "app" / "templates"
-        env = Environment(loader=FileSystemLoader(str(templates)), undefined=ChainableUndefined)
+        env = _real_template_env(templates)
         # A real report, trimmed of its bulk arrays. Hand-built dicts kept
         # failing on fields the page reaches for, which is the point: only a
         # genuine report shape proves the template renders.
@@ -1195,7 +1218,7 @@ class PublicPageTests(unittest.TestCase):
             def __iter__(self): return iter(())
 
         templates = Path(__file__).resolve().parents[1] / "app" / "templates"
-        env = Environment(loader=FileSystemLoader(str(templates)), undefined=ChainableUndefined)
+        env = _real_template_env(templates)
         fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
         report = json.loads(fixture.read_text(encoding="utf-8"))
         report.setdefault("integrity", {})["identity_evidence_trusted"] = trusted
@@ -1295,7 +1318,7 @@ class PublicPageTests(unittest.TestCase):
             def __iter__(self): return iter(())
 
         templates = Path(__file__).resolve().parents[1] / "app" / "templates"
-        env = Environment(loader=FileSystemLoader(str(templates)), undefined=ChainableUndefined)
+        env = _real_template_env(templates)
         fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
         base = json.loads(fixture.read_text(encoding="utf-8"))
 
@@ -3433,7 +3456,7 @@ class NoPunchClaimLeaksTests(unittest.TestCase):
             def __bool__(self): return False
             def __iter__(self): return iter(())
 
-        env = Environment(loader=FileSystemLoader("app/templates"), undefined=ChainableUndefined)
+        env = _real_template_env()
         env.policies["json.dumps_function"] = _json.dumps
         return env.get_template("result.html").render(
             request=Stub(url=Stub(path="/result/x"), state=Stub(csrf_token="t" * 43, account=None)),
@@ -3690,8 +3713,7 @@ class PlanBadgeTests(unittest.TestCase):
             def __bool__(self): return False
 
         templates = Path(__file__).resolve().parents[1] / "app" / "templates"
-        env = Environment(loader=FileSystemLoader(str(templates)),
-                          undefined=ChainableUndefined)
+        env = _real_template_env(templates)
         return env.get_template("pricing.html").render(
             request=Stub(url=Stub(path="/pricing"), state=Stub(account=None), cookies={}),
             plans=PLANS, roster_held=0, payments_enabled=False,

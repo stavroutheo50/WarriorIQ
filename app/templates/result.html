@@ -371,10 +371,10 @@
     <div><div class="eyebrow">Fighter {{fighter}}</div><h2 style="margin:4px 0">Performance</h2></div>
   </div>
   <div class="performance-rail" tabindex="0" aria-label="Fighter {{fighter}} performance measurements; scroll horizontally for more">
-    <article class="performance-stat"><span>Pose evidence</span><strong>{{'%.0f'|format(m.pose_coverage*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} pose evidence" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.pose_coverage*100)}}"><i style="--meter-value:{{'%.1f'|format(m.pose_coverage*100)}}%"></i></div><small>Usable fighter observations</small></article>
-    {% if m.guard_index is not none %}<article class="performance-stat"><span>Guard baseline</span><strong>{{'%.0f'|format(m.guard_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} guard-position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.guard_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.guard_index*100)}}%"></i></div><small>Hands near defensive position</small></article>{% endif %}
-    {% if m.balance_index is not none %}<article class="performance-stat"><span>Balance baseline</span><strong>{{'%.0f'|format(m.balance_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} post-action balance baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.balance_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.balance_index*100)}}%"></i></div><small>Stable movement frames</small></article>{% endif %}
-    {% if m.ring_center_control is not none %}<article class="performance-stat"><span>Center position</span><strong>{{'%.0f'|format(m.ring_center_control*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} ring-center position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.ring_center_control*100)}}"><i style="--meter-value:{{'%.1f'|format(m.ring_center_control*100)}}%"></i></div><small>Time near the ring center</small></article>{% endif %}
+    <article class="performance-stat"><span>Seen</span><strong>{{'%.0f'|format(m.pose_coverage*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} pose evidence" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.pose_coverage*100)}}"><i style="--meter-value:{{'%.1f'|format(m.pose_coverage*100)}}%"></i></div><small>Usable fighter observations</small></article>
+    {% if m.guard_index is not none %}<article class="performance-stat"><span>Guard</span><strong>{{'%.0f'|format(m.guard_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} guard-position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.guard_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.guard_index*100)}}%"></i></div><small>Hands near defensive position</small></article>{% endif %}
+    {% if m.balance_index is not none %}<article class="performance-stat"><span>Balance</span><strong>{{'%.0f'|format(m.balance_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} post-action balance baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.balance_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.balance_index*100)}}%"></i></div><small>Stable movement frames</small></article>{% endif %}
+    {% if m.ring_center_control is not none %}<article class="performance-stat"><span>Centre</span><strong>{{'%.0f'|format(m.ring_center_control*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} ring-center position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.ring_center_control*100)}}"><i style="--meter-value:{{'%.1f'|format(m.ring_center_control*100)}}%"></i></div><small>Time near the ring center</small></article>{% endif %}
     {% if action_ready and m.attacks.accuracy is not none %}<article class="performance-stat"><span>Action conversion</span><strong>{{'%.0f'|format(m.attacks.accuracy*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} verified action conversion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.attacks.accuracy*100)}}"><i style="--meter-value:{{'%.1f'|format(m.attacks.accuracy*100)}}%"></i></div><small>Evidence-supported actions</small></article>{% endif %}
   </div>
   {% if action_ready %}<div class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:16px">
@@ -387,14 +387,25 @@
   <details class="report-details">
   <summary>More performance details <span>Open the deeper numbers only when you need them</span></summary>
   <div class="report-details-body">
-  <div class="performance-insights">
-    <article><span>Guard</span><strong>{% if m.guard_index is not none %}{{'%.0f'|format(m.guard_index*100)}}%{% else %}Not measured{% endif %}</strong><p>How often the hands stayed near a defensive position in usable pose frames.</p></article>
-    <article><span>Balance</span><strong>{% if m.balance_index is not none %}{{'%.0f'|format(m.balance_index*100)}}%{% else %}Not measured{% endif %}</strong><p>How often the athlete maintained a stable base during measured movement.</p></article>
-    <article><span>Ring position</span><strong>{% if m.ring_center_control is not none %}{{'%.0f'|format(m.ring_center_control*100)}}%{% else %}Not measured{% endif %}</strong><p>The share of observed movement spent near the central fighting space.</p></article>
-    <article><span>Footwork pace</span><strong>{% if m.footwork_body_lengths_per_second is not none %}{{'%.2f'|format(m.footwork_body_lengths_per_second)}}{% else %}Not measured{% endif %}</strong><p>Body-lengths travelled per second, normalized to the selected athlete.</p></article>
+  {#- This block used to restate Guard, Balance, Centre and Movement - the
+      same four numbers shown above it, under four different names. A reader
+      comparing the two sections could not tell whether they were looking at
+      one measurement twice or two that agreed.
+
+      It now carries the thing the rail above cannot: where each number sits
+      against a reference, and - for the ones nobody has a reference for - the
+      fact that there is not one. Names and bands both come from
+      core/metric_catalog.py, so they cannot drift apart again. #}
+  <div class="metric-standing">
+    {% for reading in m|metric_readings %}
+    <article data-standing="{{reading.standing}}">
+      <span>{{reading.metric.name}}</span>
+      <p class="metric-definition">{{reading.metric.definition}}</p>
+      <p class="metric-reference">{{reading.reference}}</p>
+    </article>
+    {% endfor %}
   </div>
   <div class="table-wrap"><table>
-    <tr><td>Pose coverage</td><td>{{'%.1f'|format(m.pose_coverage*100)}}%</td></tr>
     {% if action_ready %}<tr><td>Strongest weapon</td><td>{{m.strongest_weapon|default('No confirmed weapon', true)}}</td></tr>{% endif %}
     {% if action_ready and report_access.report_tier in ['expanded','full'] %}
     <tr><td>Missed / blocked / checked</td><td>{{m.attacks.missed}} / {{m.attacks.blocked}} / {{m.attacks.checked}}</td></tr>

@@ -322,3 +322,27 @@
 .preflight-points li:last-child { margin-bottom: 0; }
 .preflight p:empty { display: none; }
 .preflight p { margin: 8px 0 0; }
+
+/* Where a measurement stands against its reference.
+ *
+ * Replaces the block that restated four numbers the section above already
+ * showed. The number lives once, in the rail; this says what it means. The
+ * standing colours the left edge only - a percentage is not a verdict, and
+ * a red panel would make it read as one.
+ */
+.metric-standing { display: grid; gap: 10px; margin-top: 4px; }
+.metric-standing article {
+  padding: 12px 14px;
+  border: 1px solid var(--wiq-edge);
+  border-left: 2px solid var(--wiq-text-tertiary, #7f8da3);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .02);
+}
+.metric-standing span { color: var(--wiq-text); font-size: 13px; font-weight: 800; }
+.metric-standing p { margin: 5px 0 0; font-size: 12px; line-height: 1.6; }
+.metric-definition { color: var(--wiq-text-secondary); }
+.metric-reference { color: var(--wiq-text-tertiary, #8291aa); }
+.metric-standing article[data-standing="doing_well"] { border-left-color: var(--wiq-success); }
+.metric-standing article[data-standing="needs_work"] { border-left-color: var(--wiq-warning); }
+/* No reference and not measured both read as "we are not telling you this is
+ * good or bad", so they share the neutral edge they inherit. */
