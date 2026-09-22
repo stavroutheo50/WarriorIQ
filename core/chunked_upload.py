@@ -2,18 +2,27 @@
 
 The problem
 -----------
-A phone films 1080p at 8-17 Mbps, so two minutes of fight is 140-260 MB. Sent
-as one request body that is two walls at once:
+A phone films 1080p at 8-17 Mbps, so two minutes of fight is 140-260 MB, and
+a single POST of that has nothing to resume from. Whatever goes wrong at any
+point in the transfer costs the whole fight.
 
-  * a body ceiling, which WarriorIQ sets at 130 MiB;
-  * a single request that has to live for the whole transfer. Measured against
-    the live host from a home connection the transfer runs at about
-    187 KiB/s, which makes 260 MB roughly twenty-three minutes - against an
-    `upload_timeout_seconds` of 900.
+**How long that transfer takes is not knowable in advance.** Two measurements
+of the same path to the live host, within an hour of each other: 183 KiB/s and
+3.5 MiB/s. At the first, 260 MB is twenty-three minutes and exceeds
+`upload_timeout_seconds`; at the second it is seventy seconds and comfortable.
+Neither was taken from a phone on mobile data in a sports hall, which is the
+connection this actually has to serve.
 
-The second wall is the one nobody was looking at, and it does not move when
-the ceiling does. One dropped connection at minute twenty costs the whole
-fight, because a single POST has nothing to resume from.
+That spread is the argument. A design that only works at the fast end fails
+for the people most likely to be at the slow end, and no threshold picked from
+one sample would have told us which end a given upload is on. Splitting the
+transfer removes the question: a dropped connection costs one chunk, and the
+bytes already accepted stay accepted.
+
+A body ceiling was the original reason for this work. It turned out to be
+WarriorIQ's own `max_upload_bytes` rather than the host's - 134 MiB of request
+body reaches the live application, which then answers on its own terms - so
+the ceiling is liftable. Resumability is not, and that is what this is for.
 
 The shape
 ---------

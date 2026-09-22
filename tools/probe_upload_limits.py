@@ -17,8 +17,15 @@ nobody checked - that WarriorIQ refused its own upload:
   * `a2wsgi` passes Content-Length through correctly and streams the body, so
     it is not losing the header on the way in.
 
-That is not proof the host has no limit. It is a good enough reason not to
-design an upload architecture around a number that may be self-inflicted.
+**Since settled, and the answer is that the host has no such limit.** A
+136 MiB body was pushed at the live /upload: 134 MiB of it crossed the wire
+and the application answered 401 on its own terms. Nothing in front of
+WarriorIQ refused it. The 130 MiB ceiling is WarriorIQ's own
+`max_upload_bytes` and can be raised with WARRIORIQ_MAX_UPLOAD_BYTES.
+
+What this tool is still for is the other two walls, which that test did not
+touch: whether a body arrives streamed or buffered, and how long one request
+is allowed to take.
 
 What this measures
 ------------------
@@ -138,10 +145,12 @@ def verdict(results: list[dict]) -> list[str]:
                      "WARRIORIQ_MAX_UPLOAD_BYTES rather than designing around "
                      "a host limit that is not there.")
     lines.append("")
-    lines.append("Size is not the only wall. A 260 MB round at the rate above "
-                 "takes longer than SETTINGS.upload_timeout_seconds allows for "
-                 "one request, so resumable chunks are worth having even if the "
-                 "byte ceiling turns out to be liftable.")
+    lines.append("One rate is not a rate. The same path to the live host "
+                 "measured 183 KiB/s and 3.5 MiB/s within an hour - the same "
+                 "260 MB file is twenty-three minutes or seventy seconds "
+                 "depending which one you sampled. Read the number above as "
+                 "one draw from that spread, not as this connection's speed, "
+                 "and do not size a timeout from it.")
     return lines
 
 

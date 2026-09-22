@@ -921,11 +921,16 @@ class Settings:
     #     so Apache is not refusing on size before the body arrives.
     #   * a2wsgi passes Content-Length through and streams the body.
     #
-    # What has NOT been done is pushing a real body over 130 MiB at the live
-    # site, which is the one test that settles it; see
-    # tools/probe_upload_limits.py. Until somebody runs it this stays where it
-    # is, because lowering a ceiling is cheap and discovering the hard way that
-    # the host does refuse is not.
+    # **Settled 2026-09-22: the host has no such limit.** A 136 MiB body was
+    # pushed at the live /upload; 134 MiB crossed the wire and the application
+    # answered 401 on its own terms, with nothing in front of it refusing.
+    #
+    # This value is therefore WarriorIQ's own choice and not a constraint. It
+    # stays at 130 MiB anyway, because the chunked path now carries anything
+    # large and each of its requests is one 8 MiB chunk - so raising this only
+    # affects the legacy single-request /upload, where a bigger body buys a
+    # longer transfer with no resume. Raise it if that path has to carry a
+    # full round again; otherwise leave it.
     #
     # max_fight_bytes above says 2 GB and cannot be honoured while this is
     # smaller. The chunked upload path does not go through this limit at all -
@@ -953,16 +958,16 @@ class Settings:
     # ------------------------------------------------------------
     # Chunked upload
     # ------------------------------------------------------------
-    # A phone films 1080p at 8-17 Mbps, so two minutes is 140-260 MB. Sent as
-    # one request body that is refused outright above the ceiling; and even
-    # where it is not refused, it is one request that has to survive the whole
-    # transfer. Measured against the live host from a home connection, that
-    # transfer runs at about 187 KiB/s - so 260 MB is roughly twenty-three
-    # minutes in a single request, against an upload_timeout_seconds of 900.
+    # A phone films 1080p at 8-17 Mbps, so two minutes is 140-260 MB, and a
+    # single POST of that has nothing to resume from.
     #
-    # So the ceiling is not the only wall and possibly not even the first one.
-    # Splitting the transfer fixes both: every request is one small chunk, and
-    # a dropped connection costs one chunk rather than the fight.
+    # How long it takes is not knowable in advance. The same path to the live
+    # host measured 183 KiB/s and 3.5 MiB/s within an hour: twenty-three
+    # minutes and seventy seconds for the same file. Neither sample came from
+    # a phone on mobile data at a venue, which is the connection this serves.
+    # A design that only works at the fast end fails the people at the slow
+    # end, and splitting the transfer removes the question - a dropped
+    # connection costs one chunk rather than the fight.
     chunked_upload_enabled: bool = env_bool("WARRIORIQ_CHUNKED_UPLOAD", True)
     # 8 MiB. Far below any plausible request-body ceiling, so the host's limit
     # stops being the thing that decides whether a fight can be uploaded; large

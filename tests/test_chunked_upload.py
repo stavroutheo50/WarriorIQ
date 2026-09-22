@@ -1,12 +1,10 @@
 """Uploading a fight in pieces, so a phone connection can lose one.
 
-A phone films 1080p at 8-17 Mbps, so two minutes of fight is 140-260 MB. Sent
-as one request body that is two walls at once: a body ceiling, and a single
-request that has to survive the whole transfer. Measured against the live host
-the transfer runs at about 187 KiB/s, so 260 MB is roughly twenty-three
-minutes against an upload_timeout_seconds of 900 - and one dropped connection
-at minute twenty costs the whole fight, because a single POST has nothing to
-resume from.
+A phone films 1080p at 8-17 Mbps, so two minutes of fight is 140-260 MB, and a
+single POST of that has nothing to resume from. The same path to the live host
+measured 183 KiB/s and 3.5 MiB/s within an hour of each other, so how long a
+transfer takes is not knowable in advance - and neither sample came from a
+phone on mobile data at a venue. Splitting it removes the question.
 """
 
 from __future__ import annotations

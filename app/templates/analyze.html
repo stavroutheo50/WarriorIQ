@@ -597,10 +597,10 @@
   /* Send the fight in pieces, so one dropped connection costs one piece.
    *
    * A phone films 1080p at 8-17 Mbps, so two minutes is 140-260 MB, and the
-   * single POST below has to survive the whole transfer. Measured against the
-   * live host that runs at about 187 KiB/s - roughly twenty-three minutes in
-   * one request - and a connection that drops at minute twenty has nothing to
-   * resume from.
+   * single POST below has nothing to resume from. The same path to the live
+   * host measured 183 KiB/s and 3.5 MiB/s within an hour, so how long a
+   * transfer takes cannot be known in advance - and neither sample came from
+   * a phone on mobile data at a venue, which is the connection this serves.
    *
    * Sequential, never parallel: the server is a small number of Passenger
    * workers, and firing chunks at once would occupy all of them for the
