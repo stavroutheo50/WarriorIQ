@@ -196,6 +196,19 @@ class IdentityManager:
         # The same question asked per *lost fighter* rather than per candidate.
         # See _recover for why the two differ and why this one is the useful one.
         self.blocked_recovery: dict[str, int] = {}
+        # The same counts, kept apart by fighter.
+        #
+        # blocked_recovery above pools A and B, which cannot answer the
+        # question that matters most about coverage: the red corner is tracked
+        # worse than the blue one on every fight sampled - 64-74% against
+        # 82-88% - and a pooled total of "why somebody was lost" says nothing
+        # about which of them it was. A reason that is 60% of A's losses and
+        # 5% of B's looks identical, pooled, to one evenly split between them,
+        # and those two need opposite fixes.
+        self.blocked_recovery_by_fighter: dict[str, dict[str, int]] = {"A": {}, "B": {}}
+        # Frames each fighter was unassigned, so the reasons above have a
+        # denominator and the two fighters' shares can be compared directly.
+        self.missing_frames_by_fighter: dict[str, int] = {"A": 0, "B": 0}
         # Frames where A and B were equally plausible either way round.
         self.confusions = 0
         self.last_confusion_frame: int | None = None
@@ -314,9 +327,17 @@ class IdentityManager:
         short = self._recent_spread_short(track_id, fps)
         return short is not None and short < SETTINGS.max_stationary_spread_short
 
-    def _blocked(self, reason: str) -> None:
-        """Record why one fighter is unassigned in one frame. Diagnostics only."""
+    def _blocked(self, reason: str, fighter: str | None = None) -> None:
+        """Record why one fighter is unassigned in one frame. Diagnostics only.
+
+        `fighter` is which of them it was. It is optional only so that a call
+        site without a state in scope cannot crash a paid run over a counter;
+        every current caller passes it.
+        """
         self.blocked_recovery[reason] = self.blocked_recovery.get(reason, 0) + 1
+        if fighter in self.blocked_recovery_by_fighter:
+            side = self.blocked_recovery_by_fighter[fighter]
+            side[reason] = side.get(reason, 0) + 1
 
     def _refuse(self, state: FighterState, reason: str) -> float:
         """Record a refused identity takeover and why."""
@@ -588,7 +609,7 @@ class IdentityManager:
                 scored.append((score, candidate))
 
         if not scored:
-            self._blocked(nearest_refusal or "no_candidates")
+            self._blocked(nearest_refusal or "no_candidates", state.name)
             return None, 0.0
         scored.sort(key=lambda item: item[0], reverse=True)
         best_score, best = scored[0]
@@ -598,16 +619,16 @@ class IdentityManager:
         # `too_far_to_be_them` went unexamined while every other guard was
         # adjusted.
         if best_score < SETTINGS.min_reid_score:
-            self._blocked(nearest_refusal or "below_min_reid_score")
+            self._blocked(nearest_refusal or "below_min_reid_score", state.name)
             return None, best_score
         if len(scored) > 1 and best_score - second < SETTINGS.min_reid_margin:
-            self._blocked(nearest_refusal or "two_candidates_too_alike")
+            self._blocked(nearest_refusal or "two_candidates_too_alike", state.name)
             return None, best_score
         if nearest is not None and best is not nearest:
             # Recovered, but onto somebody other than the person standing where
             # the fighter was. Worth seeing separately: it is the shape of a
             # lock sliding onto a bystander.
-            self._blocked("recovered_onto_someone_else")
+            self._blocked("recovered_onto_someone_else", state.name)
         return best, best_score
 
     def _update_one(self, state: FighterState, people: list[PersonObservation], source_frame: int, forbidden_id: int | None) -> PersonObservation | None:
@@ -752,27 +773,29 @@ class IdentityManager:
                 (self.b, b_obs, scores_b, reasons_b, furniture_b)):
             if obs is not None:
                 continue
+            if state.name in self.missing_frames_by_fighter:
+                self.missing_frames_by_fighter[state.name] += 1
             if furniture:
-                self._blocked("released_as_furniture")
+                self._blocked("released_as_furniture", state.name)
                 continue
             if ambiguous:
-                self._blocked("cannot_tell_a_from_b")
+                self._blocked("cannot_tell_a_from_b", state.name)
                 continue
             reference = self._predicted_box(state)
             if reference is None:
-                self._blocked("no_anchor_to_search_from")
+                self._blocked("no_anchor_to_search_from", state.name)
                 continue
             k = min(range(len(people)),
                     key=lambda i: normalized_distance(reference, people[i].box))
             if scores[k] < -100:
-                self._blocked(reasons[k] or "refused_by_a_gate")
+                self._blocked(reasons[k] or "refused_by_a_gate", state.name)
             elif scores[k] < SETTINGS.min_reid_score:
                 # Nothing refused them outright; they simply did not look enough
                 # like the fighter to beat an empty slot. This one is invisible
                 # in every existing counter.
-                self._blocked("scored_below_empty_slot")
+                self._blocked("scored_below_empty_slot", state.name)
             else:
-                self._blocked("lost_to_the_other_fighter")
+                self._blocked("lost_to_the_other_fighter", state.name)
         return a_obs, b_obs
 
     def _release_if_furniture(self, state: FighterState) -> bool:

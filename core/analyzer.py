@@ -1255,6 +1255,19 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # Counted per lost fighter rather than per candidate, so it says which
         # gate is actually costing coverage. Read this one, not the line above.
         "blocked_recovery_reasons": dict(manager.blocked_recovery),
+        # The same reasons, split by fighter, with the number of frames each
+        # of them was missing as the denominator.
+        #
+        # The pooled dict above cannot answer why one corner is tracked worse
+        # than the other, and it is: red measured 64-74% against blue's 82-88%
+        # on every fight sampled, never once close. A cause that is most of
+        # A's losses and none of B's is indistinguishable, pooled, from one
+        # shared evenly - and the two call for opposite fixes.
+        "blocked_recovery_by_fighter": {
+            side: dict(reasons)
+            for side, reasons in manager.blocked_recovery_by_fighter.items()
+        },
+        "missing_frames_by_fighter": dict(manager.missing_frames_by_fighter),
         # What the recording itself looks like, and what the person holding the
         # camera could do differently. Kept beside the tracking numbers because
         # it is usually the explanation for them.
