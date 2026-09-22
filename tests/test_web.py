@@ -2410,6 +2410,59 @@ class ComponentStylesReachTheirPagesTests(unittest.TestCase):
         self.assertFalse(undefined, f"button variants with no CSS: {sorted(undefined)}")
 
 
+class SmallUiConsistencyTests(unittest.TestCase):
+    """Four places the product stopped looking like itself."""
+
+    def setUp(self):
+        self.client = TestClient(app)
+        self.root = Path(__file__).resolve().parents[1]
+
+    def tearDown(self):
+        self.client.close()
+
+    def test_the_faq_draws_its_own_disclosure_marker(self):
+        """It was the one <details> still showing the browser's grey triangle,
+        against three others that draw a +/- of their own."""
+        css = (self.root / "app" / "static" / "fixes.css").read_text(encoding="utf-8")
+        self.assertIn(".faq summary::-webkit-details-marker{display:none}", css)
+        self.assertIn('.faq summary:after{content:"＋"', css)
+        self.assertIn('.faq details[open] summary:after{content:"−"}', css)
+
+    def test_the_sport_chip_is_absent_where_sport_means_nothing(self):
+        self.client.get("/analyze/muay_thai")
+        for path in ("/pricing", "/dashboard", "/coach"):
+            with self.subTest(path=path):
+                self.assertNotIn('class="sport-switch-name"', self.client.get(path).text)
+        # And still present where it is the switcher for the page.
+        self.assertIn('class="sport-switch-name"', self.client.get("/analyze/boxing").text)
+
+    def test_the_library_search_covers_what_people_search_by(self):
+        page = (self.root / "app" / "templates" / "history.html").read_text(encoding="utf-8")
+        # The fighter's name and the date of the fight, not just the ruleset.
+        self.assertIn("f.fighter_name|lower", page)
+        self.assertIn("f.created_at|fight_moment(false)|lower", page)
+        self.assertIn("f.ruleset|ruleset_label|lower", page)
+        # And the placeholder says so rather than understating it.
+        self.assertIn('placeholder="Search by name, date, ruleset or type"', page)
+        self.assertNotIn('placeholder="Search ruleset or fight type"', page)
+
+    def test_deleting_a_fight_asks_in_the_products_own_dialog(self):
+        page = (self.root / "app" / "templates" / "history.html").read_text(encoding="utf-8")
+        self.assertNotIn("return confirm(", page)
+        self.assertIn("dialog.showModal()", page)
+        # The existing guarantee about what the question says is unchanged.
+        self.assertIn("{{f.ruleset|ruleset_label}} fight from", page)
+        self.assertIn("video, report and corrections", page)
+
+    def test_the_delete_control_keeps_its_measured_contrast(self):
+        """product.css already fixed this colour at 4.5:1. Separating delete
+        from the navigation beside it must not restate the colour and quietly
+        undo that."""
+        fixes = (self.root / "app" / "static" / "fixes.css").read_text(encoding="utf-8")
+        self.assertNotIn(".record-delete{", fixes)
+        self.assertIn("form[data-confirm-delete]{margin-left:auto", fixes)
+
+
 class SitemapTests(unittest.TestCase):
     """What the sitemap offers and what a page permits must be one decision.
 

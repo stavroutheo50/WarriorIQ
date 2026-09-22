@@ -366,6 +366,10 @@ PUBLIC_INDEX_ROUTES = (
     "/analyze", "/analyze/kickboxing", "/analyze/boxing", "/analyze/muay_thai",
     "/analyze/taekwondo", "/analyze/mma",
 )
+# Pages where the sport chip is noise rather than navigation. Kept next to the
+# other route groupings so it is obvious there are three of them.
+SPORT_IRRELEVANT_PREFIXES = ("/pricing", "/dashboard", "/coach", "/profile",
+                             "/settings", "/legal", "/privacy", "/terms")
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/dashboard", "/history",
@@ -1186,6 +1190,12 @@ async def viewer_context(request: Request, call_next):
     request.state.active_analysis = request.state.analysis_navigation["display"]
     chosen_sport = (request.cookies.get(ACTIVE_SPORT_COOKIE) or "").strip().lower()
     request.state.active_sport = sport_identity(chosen_sport) if chosen_sport in SPORTS else None
+    # Where naming a sport means nothing. The chip is a switcher for the
+    # analysis flow; on the price list, the workspace overview and a coach's
+    # squad it is a control that changes nothing on the page it sits on, which
+    # invites a click that navigates away from what the reader came for.
+    request.state.sport_switch_hidden = request.url.path.startswith(
+        SPORT_IRRELEVANT_PREFIXES)
     # The switcher is a real menu now, so it needs something to list. It
     # looked like a dropdown - bordered pill, chevron - and was a plain link
     # to /analyze, so pressing it left whatever the reader was in the middle

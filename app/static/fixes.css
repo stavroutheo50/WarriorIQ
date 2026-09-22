@@ -147,3 +147,35 @@ body:has(#cookieNotice) main{padding-bottom:210px}.error-page{margin:45px 0;padd
 @media(max-width:900px){.accuracy-dataset-grid{grid-template-columns:1fr}.class-support-grid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:900px){.end-to-end-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:650px){.accuracy-title,.accuracy-next-step,.accuracy-card-head{align-items:flex-start;flex-direction:column}.accuracy-bars,.accuracy-error-strip{grid-template-columns:1fr 1fr}.class-support-grid,.end-to-end-grid{grid-template-columns:1fr 1fr}.accuracy-state{align-self:flex-start}}
+
+/* The FAQ kept the browser's default ▶ disclosure triangle.
+ *
+ * Every other <details> in the product hides it and draws its own marker -
+ * .nav-more>summary, .profile-menu>summary and .report-details summary all
+ * do - so the FAQ was the one place a raw platform control showed through.
+ * Same +/- marker as the report's accordion, for the same reason: one
+ * disclosure idiom across the site.
+ */
+.faq summary{display:flex;align-items:center;justify-content:space-between;gap:16px;list-style:none}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary:after{content:"＋";flex:none;color:#8494ff;font-size:18px;font-weight:400;line-height:1}
+.faq details[open] summary:after{content:"−"}
+
+/* Delete already has its own colour and contrast in product.css, measured at
+ * 4.5:1 and pinned by a test - not restated here. What it lacked was
+ * separation from "View analysis" and "Replay": a destructive action reading
+ * as the third item in a row of navigation. A divider before it, and only
+ * that, so the responsive variants in product.css keep deciding the layout. */
+.fight-record-actions form[data-confirm-delete]{margin-left:auto;padding-left:14px;border-left:1px solid var(--wiq-line-soft,#263756)}
+
+/* The delete confirmation, replacing window.confirm(). */
+.wiq-confirm{max-width:460px;width:calc(100% - 32px);padding:0;border:1px solid var(--wiq-edge,#2b3d60);border-radius:16px;background:var(--wiq-surface,#0c172a);color:var(--wiq-text,#e8effb)}
+.wiq-confirm::backdrop{background:rgba(3,7,15,.72)}
+.wiq-confirm-body{padding:22px}
+.wiq-confirm h2{margin:0 0 10px;font-size:18px}
+.wiq-confirm p{margin:0;color:var(--wiq-text-secondary,#9fb0cb);font-size:13px;line-height:1.6}
+.wiq-confirm-actions{display:flex;justify-content:flex-end;gap:10px;padding:0 22px 22px}
+.wiq-confirm-actions button{padding:10px 16px;border-radius:10px;font-size:13px;font-weight:750;cursor:pointer}
+.wiq-confirm-cancel{border:1px solid var(--wiq-edge,#2b3d60);background:transparent;color:var(--wiq-text,#e8effb)}
+.wiq-confirm-delete{border:1px solid #7d3446;background:#5d2231;color:#ffd9e0}
+.wiq-confirm-delete:hover{background:#742b3d}
