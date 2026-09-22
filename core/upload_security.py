@@ -177,6 +177,46 @@ def scan_upload(path: str | Path) -> dict:
     return {"status": "unavailable", "clean": False}
 
 
+# The fight-video formats WarriorIQ accepts, in one place.
+#
+# This existed three times and they did not agree: the server refused anything
+# outside this set, the file picker was `accept="video/*"`, and the line under
+# it was a hand-typed sentence. video/* let the picker offer .wmv, .flv, .3gp
+# and .mpg - happily selected, uploaded over a phone connection, and only then
+# refused. The drift is the bug, so the extensions, the picker filter and the
+# sentence are all derived from this tuple and cannot disagree again.
+#
+# The MIME types are what a browser reports for these containers; the picker
+# gets both them and the extensions, because a browser that does not recognise
+# a container reports an empty type and would otherwise filter the file out.
+#
+# This is the *fight* video list. The profile video in /profile is deliberately
+# a narrower set - it is played back in a <video> element, where MKV and AVI
+# would not play - and is not derived from here.
+FIGHT_VIDEO_FORMATS: tuple[tuple[str, str], ...] = (
+    (".mp4", "video/mp4"),
+    (".mov", "video/quicktime"),
+    (".mkv", "video/x-matroska"),
+    (".avi", "video/x-msvideo"),
+    (".m4v", "video/x-m4v"),
+    (".webm", "video/webm"),
+)
+
+# What the upload route refuses on.
+FIGHT_VIDEO_EXTENSIONS: frozenset[str] = frozenset(
+    suffix for suffix, _ in FIGHT_VIDEO_FORMATS)
+
+# What the file picker offers. Extensions first: Safari and Firefox match on
+# those when the MIME type is unknown to them.
+FIGHT_VIDEO_ACCEPT: str = ",".join(
+    [suffix for suffix, _ in FIGHT_VIDEO_FORMATS]
+    + [mime for _, mime in FIGHT_VIDEO_FORMATS])
+
+# What the reader is told, built from the same tuple: "MP4, MOV, ... or WEBM".
+_NAMES = [suffix.lstrip(".").upper() for suffix, _ in FIGHT_VIDEO_FORMATS]
+FIGHT_VIDEO_LABEL: str = ", ".join(_NAMES[:-1]) + f" or {_NAMES[-1]}"
+
+
 # The container signatures WarriorIQ accepts, as (offset, bytes) pairs. A file
 # matching none of them is not a video whatever it is called.
 #

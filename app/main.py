@@ -88,6 +88,7 @@ from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
 from core.upload_security import (
+    FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS, FIGHT_VIDEO_LABEL,
     UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, looks_like_video, scan_upload,
     reserve_upload_storage, release_upload_storage,
 )
@@ -241,6 +242,10 @@ def _asset_version() -> str:
 
 ASSET_VERSION = _asset_version()
 templates.env.globals["asset_version"] = ASSET_VERSION
+# The picker filter and the sentence under it both come from the one tuple in
+# core.upload_security, so neither can drift from what the server accepts.
+templates.env.globals["fight_video_accept"] = FIGHT_VIDEO_ACCEPT
+templates.env.globals["fight_video_label"] = FIGHT_VIDEO_LABEL
 
 # Every page pulled eight separate stylesheets, so a phone opening WarriorIQ
 # made eight blocking round trips to a shared host before it could paint
@@ -2630,8 +2635,8 @@ async def upload(
                      request.url.path, request.scope.get("root_path", ""))
         raise HTTPException(500, "WarriorIQ could not start this upload. Please try again.")
     suffix = Path(video.filename).suffix.lower() or ".mp4"
-    if suffix not in {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}:
-        raise HTTPException(400, "Unsupported video format.")
+    if suffix not in FIGHT_VIDEO_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported video format. WarriorIQ reads {FIGHT_VIDEO_LABEL}.")
 
     video_path = UPLOADS / f"{job_id}{suffix}"
     # UploadFile uses a spooled file. Keep the blocking disk copy outside the

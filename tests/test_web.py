@@ -2410,6 +2410,68 @@ class ComponentStylesReachTheirPagesTests(unittest.TestCase):
         self.assertFalse(undefined, f"button variants with no CSS: {sorted(undefined)}")
 
 
+class FightVideoFormatTests(unittest.TestCase):
+    """The picker, the copy and the server must name the same formats.
+
+    accept="video/*" let the picker offer .wmv, .flv, .3gp and .mpg. They were
+    accepted at pick time and refused after the upload had already been sent -
+    the worst possible place to find out, on a phone connection.
+    """
+
+    def setUp(self):
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        self.client.close()
+
+    def test_the_picker_offers_exactly_what_the_server_accepts(self):
+        from core.upload_security import FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS
+
+        page = self.client.get("/analyze/kickboxing").text
+        self.assertIn(f'accept="{FIGHT_VIDEO_ACCEPT}"', page)
+        self.assertNotIn('accept="video/*"', page)
+        # Every extension the server would take is offered by the picker.
+        for suffix in FIGHT_VIDEO_EXTENSIONS:
+            self.assertIn(suffix, FIGHT_VIDEO_ACCEPT)
+        # And nothing the server refuses is.
+        for refused in (".wmv", ".flv", ".3gp", ".mpg", ".mpeg"):
+            self.assertNotIn(refused, FIGHT_VIDEO_ACCEPT)
+
+    def test_the_displayed_copy_is_built_from_the_same_list(self):
+        from core.upload_security import FIGHT_VIDEO_FORMATS, FIGHT_VIDEO_LABEL
+
+        self.assertEqual(FIGHT_VIDEO_LABEL, "MP4, MOV, MKV, AVI, M4V or WEBM")
+        self.assertIn(FIGHT_VIDEO_LABEL, self.client.get("/analyze/kickboxing").text)
+        # Naming a format in the sentence that the server does not take is the
+        # drift this whole arrangement exists to prevent.
+        for suffix, _ in FIGHT_VIDEO_FORMATS:
+            self.assertIn(suffix.lstrip(".").upper(), FIGHT_VIDEO_LABEL)
+
+    def test_the_signature_check_covers_every_accepted_format(self):
+        """A format we accept but cannot recognise on disk would be refused
+        after upload by looks_like_video, which is the same late refusal in a
+        different coat."""
+        from core.upload_security import FIGHT_VIDEO_EXTENSIONS, looks_like_video
+        import tempfile
+
+        headers = {
+            ".mp4": b"\x00\x00\x00\x20ftypisom", ".mov": b"\x00\x00\x00\x14ftypqt  ",
+            ".m4v": b"\x00\x00\x00\x20ftypM4V ", ".mkv": b"\x1a\x45\xdf\xa3\x01\x00\x00\x00",
+            ".webm": b"\x1a\x45\xdf\xa3\x01\x00\x00\x00",
+            ".avi": b"RIFF\x00\x00\x00\x00AVI LIST",
+        }
+        self.assertEqual(set(headers), set(FIGHT_VIDEO_EXTENSIONS))
+        for suffix, header in headers.items():
+            with self.subTest(suffix=suffix):
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+                    handle.write(header + b"\x00" * 32)
+                    path = handle.name
+                try:
+                    self.assertTrue(looks_like_video(path))
+                finally:
+                    Path(path).unlink(missing_ok=True)
+
+
 class UploadHandoffTests(unittest.TestCase):
     """The upload must hand off to the frame picker without a prompt."""
 
