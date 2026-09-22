@@ -1131,7 +1131,25 @@ class PublicPageTests(unittest.TestCase):
         # "uploaded" at selection described a transfer that had not started.
         self.assertIn("Fight video selected", template)
         self.assertNotIn("Fight video uploaded", template)
-        self.assertNotIn("file.name", template)
+
+        # The rule is that the reader never sees their own filename on the
+        # page. This used to be spelled "file.name appears nowhere", which was
+        # the same thing while the only possible use was to show it. The
+        # chunked upload has another: the server reads the extension from the
+        # name to decide whether it can open the file at all, and the
+        # single-request path has always sent it too, inside the multipart
+        # part header. So the ban is on reaching the page, not on existing.
+        sinks = ("textContent", "innerHTML", "innerText", "placeholder", ".value =",
+                 ".value=", "append(", "insertAdjacent")
+        for number, line in enumerate(template.splitlines(), start=1):
+            if "file.name" not in line:
+                continue
+            with self.subTest(line=number):
+                self.assertIn(
+                    "filename:", line,
+                    "file.name may only be sent to the server, never displayed")
+                for sink in sinks:
+                    self.assertNotIn(sink, line, f"line {number} puts the filename on the page")
 
     def test_replay_overlay_does_not_block_video_controls(self):
         css = self.client.get("/static/fixes.css")

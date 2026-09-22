@@ -949,6 +949,45 @@ class Settings:
     # ceiling gets measured. Off by default, admin-only, writes nothing to
     # disk; turn it on, measure, turn it off.
     upload_probe_enabled: bool = env_bool("WARRIORIQ_UPLOAD_PROBE", False)
+
+    # ------------------------------------------------------------
+    # Chunked upload
+    # ------------------------------------------------------------
+    # A phone films 1080p at 8-17 Mbps, so two minutes is 140-260 MB. Sent as
+    # one request body that is refused outright above the ceiling; and even
+    # where it is not refused, it is one request that has to survive the whole
+    # transfer. Measured against the live host from a home connection, that
+    # transfer runs at about 187 KiB/s - so 260 MB is roughly twenty-three
+    # minutes in a single request, against an upload_timeout_seconds of 900.
+    #
+    # So the ceiling is not the only wall and possibly not even the first one.
+    # Splitting the transfer fixes both: every request is one small chunk, and
+    # a dropped connection costs one chunk rather than the fight.
+    chunked_upload_enabled: bool = env_bool("WARRIORIQ_CHUNKED_UPLOAD", True)
+    # 8 MiB. Far below any plausible request-body ceiling, so the host's limit
+    # stops being the thing that decides whether a fight can be uploaded; large
+    # enough that a 260 MB round is about 33 requests rather than hundreds;
+    # small enough that a failed chunk costs seconds of a phone's uplink
+    # instead of minutes.
+    #
+    # tools/probe_upload_limits.py reports whether this host streams a body or
+    # buffers it whole. If it buffers, this is also what it holds in memory per
+    # request, and that is the number to lower.
+    upload_chunk_bytes: int = max(
+        256 * 1024,
+        min(32 * 1024 * 1024,
+            int(os.getenv("WARRIORIQ_UPLOAD_CHUNK_BYTES", str(8 * 1024 * 1024)))),
+    )
+    # The largest fight a chunked upload may assemble. Deliberately far below
+    # max_fight_bytes' 2 GB: every byte accepted is disk on a shared host with
+    # an 8 GB per-account budget and a 2 GB free-space reserve, and then GPU
+    # minutes on the analysis that follows. 512 MB covers a two-minute 1080p
+    # round several times over. Raise it when something has been measured
+    # against it, not before.
+    max_chunked_upload_bytes: int = max(
+        8 * 1024 * 1024,
+        int(os.getenv("WARRIORIQ_MAX_CHUNKED_UPLOAD_BYTES", str(512 * 1024 * 1024))),
+    )
     max_video_duration_seconds: int = max(60, int(os.getenv("WARRIORIQ_MAX_VIDEO_SECONDS", "10800")))
     max_video_pixels: int = max(640 * 360, int(os.getenv("WARRIORIQ_MAX_VIDEO_PIXELS", str(3840 * 2160))))
     malware_scan_command: str = os.getenv("WARRIORIQ_MALWARE_SCAN_COMMAND", "").strip()

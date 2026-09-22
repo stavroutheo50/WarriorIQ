@@ -88,6 +88,11 @@ from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
 from core.metric_catalog import BY_KEY as METRIC_CATALOG, readings as metric_readings
+from core.chunked_upload import (
+    ChunkedUploadError, StoredUpload, append as append_chunk, begin as begin_chunked,
+    discard as discard_chunked, extend_lease, finalise as finalise_chunked,
+    load as load_chunked,
+)
 from core.preflight_client import client_thresholds
 from core.upload_security import (
     FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS, FIGHT_VIDEO_LABEL,
@@ -2667,10 +2672,20 @@ async def upload(
     if suffix not in FIGHT_VIDEO_EXTENSIONS:
         raise HTTPException(400, f"Unsupported video format. WarriorIQ reads {FIGHT_VIDEO_LABEL}.")
 
-    video_path = UPLOADS / f"{job_id}{suffix}"
-    # UploadFile uses a spooled file. Keep the blocking disk copy outside the
-    # event loop so one large phone upload cannot freeze every other request.
-    video_digest = await run_in_threadpool(_save_upload_limited, video, video_path, min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes))
+    if isinstance(video, StoredUpload):
+        # A chunked upload assembled this file already. Everything below -
+        # the container check, the scanner, the normaliser, the decoder, the
+        # limits, the job row - is identical for both paths and runs here
+        # rather than being duplicated into a second route where the two could
+        # drift. Only the copy is skipped, because copying would mean writing
+        # a second half-gigabyte file on a shared host to move it a few inches.
+        video_path = video.path
+        video_digest = await run_in_threadpool(video.digest)
+    else:
+        video_path = UPLOADS / f"{job_id}{suffix}"
+        # UploadFile uses a spooled file. Keep the blocking disk copy outside the
+        # event loop so one large phone upload cannot freeze every other request.
+        video_digest = await run_in_threadpool(_save_upload_limited, video, video_path, min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes))
 
     # Before the scanner and before the decoder: the suffix is chosen by
     # whoever names the file, so it says nothing about what is inside it.
@@ -5062,6 +5077,287 @@ def _deployed_commit() -> str:
 # the process therefore looked perfectly healthy. This constant can only move
 # when the process itself is replaced, which is the whole point of it.
 RUNNING_COMMIT = _deployed_commit()
+
+
+# --------------------------------------------------------------------------
+# Chunked upload
+#
+# A phone films 1080p at 8-17 Mbps, so two minutes of fight is 140-260 MB.
+# As one request body that is two walls at once: a body ceiling, and a single
+# request that has to survive the whole transfer. Measured against the live
+# host, that transfer runs at about 187 KiB/s - so 260 MB is roughly
+# twenty-three minutes against an upload_timeout_seconds of 900. The second
+# wall does not move when the ceiling does, and one dropped connection at
+# minute twenty costs the whole fight.
+#
+# /upload is untouched and stays the fallback. See core/chunked_upload.py.
+# --------------------------------------------------------------------------
+
+
+def _chunked_failure(error: ChunkedUploadError) -> JSONResponse:
+    payload = {"detail": error.detail}
+    if error.offset is not None:
+        payload["offset"] = error.offset
+    return JSONResponse(payload, status_code=error.status)
+
+
+def _release_chunked(account_id: int, job_id: str) -> None:
+    """Give back everything begin took."""
+    discard_chunked(job_id)
+    release_analysis(account_id, job_id)
+    release_upload_storage(job_id)
+
+
+@app.post("/api/upload/begin", dependencies=[Depends(require_csrf)])
+async def chunked_upload_begin(request: Request):
+    """Reserve capacity and open a session, before any bytes are sent.
+
+    Admission is the part that changes shape. _admit_fight_upload reserves and
+    then releases in a `finally` unless the response was a 201 - which is right
+    for one request that carries the whole fight, and wrong here, where the
+    reservation has to outlive this response and cover every chunk that
+    follows. So this reserves, and the release moves to finish, abort, and the
+    lease sweep as the backstop.
+
+    The consent answers arrive here too, which is stricter than the single
+    request path rather than looser: not one byte of somebody's footage is
+    accepted before they have said they have the right to upload it.
+    """
+    if not SETTINGS.chunked_upload_enabled:
+        raise HTTPException(404)
+    account = _account(request)
+    if not account:
+        return JSONResponse(
+            {"detail": "Create a free account or sign in to analyse a fight."},
+            status_code=401)
+    account_id = int(account["id"])
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001 - a malformed body is a 400, not a 500
+        raise HTTPException(400, "Malformed request.") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Malformed request.")
+
+    form = {key: value for key, value in payload.items()
+            if key not in {"filename", "size"}}
+    if not (form.get("rights_confirmed") and form.get("people_permissions_confirmed")):
+        raise HTTPException(400, "Confirm you have the right to upload this video.")
+    if str(form.get("minor_permission_status") or "") not in {"no_minors", "guardian_authorized"}:
+        raise HTTPException(400, "Answer whether anyone in the video is under 18.")
+
+    job_id = uuid.uuid4().hex[:12]
+    reserved = False
+    try:
+        _enforce_rate_limit(request, "fight-upload", 12, 600)
+        await run_in_threadpool(
+            reserve_upload_storage, account_id, job_id,
+            min(MAX_FIGHT_BYTES, SETTINGS.max_chunked_upload_bytes))
+        reserved = await run_in_threadpool(reserve_analysis, account_id, job_id)
+        if not reserved:
+            release_upload_storage(job_id)
+            return JSONResponse(
+                {"detail": "Your analysis allowance is used for this period. "
+                           "It will reset automatically."}, status_code=429)
+        session = await run_in_threadpool(
+            begin_chunked, job_id, account_id,
+            filename=str(payload.get("filename") or "fight.mp4"),
+            declared_bytes=int(payload.get("size") or 0), form=form)
+    except UploadCapacityError as exc:
+        _unwind_chunked(account_id, job_id, reserved)
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+    except ChunkedUploadError as exc:
+        _unwind_chunked(account_id, job_id, reserved)
+        return _chunked_failure(exc)
+    except Exception:
+        _unwind_chunked(account_id, job_id, reserved)
+        raise
+    return JSONResponse({
+        "job_id": session.job_id,
+        "chunk_size": SETTINGS.upload_chunk_bytes,
+        "offset": 0,
+        "expires_in": SETTINGS.upload_timeout_seconds,
+    }, status_code=201)
+
+
+def _unwind_chunked(account_id: int, job_id: str, reserved: bool) -> None:
+    """Undo exactly as much of begin as actually happened."""
+    if reserved:
+        _release_chunked(account_id, job_id)
+    else:
+        discard_chunked(job_id)
+        release_upload_storage(job_id)
+
+
+@app.put("/api/upload/{job_id}/chunk", dependencies=[Depends(require_csrf)])
+async def chunked_upload_chunk(request: Request, job_id: str, offset: int = 0):
+    """Append one piece, if it continues where the file currently ends."""
+    if not SETTINGS.chunked_upload_enabled:
+        raise HTTPException(404)
+    account = _account(request)
+    if not account:
+        raise HTTPException(401, "Sign in to continue this upload.")
+    try:
+        session = await run_in_threadpool(load_chunked, job_id, int(account["id"]))
+        body = await request.body()
+        received = await run_in_threadpool(append_chunk, session, offset, body)
+    except ChunkedUploadError as exc:
+        return _chunked_failure(exc)
+    # Every piece pushes the expiry out. Without this the sweep reclaims an
+    # upload that is still arriving, which is exactly the slow transfer this
+    # path exists to carry.
+    await run_in_threadpool(extend_lease, job_id)
+    return JSONResponse({"offset": received, "declared": session.declared_bytes,
+                         "complete": received >= session.declared_bytes})
+
+
+@app.get("/api/upload/{job_id}/status")
+async def chunked_upload_status(request: Request, job_id: str):
+    """Where to resume. Lets a reloaded page pick up an upload in progress."""
+    if not SETTINGS.chunked_upload_enabled:
+        raise HTTPException(404)
+    account = _account(request)
+    if not account:
+        raise HTTPException(401, "Sign in to continue this upload.")
+    try:
+        session = await run_in_threadpool(load_chunked, job_id, int(account["id"]))
+    except ChunkedUploadError as exc:
+        return _chunked_failure(exc)
+    return JSONResponse({"offset": session.received_bytes,
+                         "declared": session.declared_bytes,
+                         "complete": session.complete})
+
+
+@app.post("/api/upload/{job_id}/abort", dependencies=[Depends(require_csrf)])
+async def chunked_upload_abort(request: Request, job_id: str):
+    """Give the capacity back rather than waiting for the sweep.
+
+    max_pending_uploads is 2, so two abandoned sessions lock an account out of
+    uploading until their leases expire. Somebody who changes their mind
+    should not have to wait fifteen minutes.
+    """
+    if not SETTINGS.chunked_upload_enabled:
+        raise HTTPException(404)
+    account = _account(request)
+    if not account:
+        raise HTTPException(401, "Sign in to continue this upload.")
+    account_id = int(account["id"])
+    try:
+        await run_in_threadpool(load_chunked, job_id, account_id)
+    except ChunkedUploadError as exc:
+        return _chunked_failure(exc)
+    await run_in_threadpool(_release_chunked, account_id, job_id)
+    return JSONResponse({"released": True})
+
+
+@app.post("/api/upload/{job_id}/finish", dependencies=[Depends(require_csrf)])
+async def chunked_upload_finish(request: Request, job_id: str):
+    """Hand the assembled file to the pipeline the single-request path uses.
+
+    Everything after the bytes land is identical for both paths - the
+    container check, the malware scan, the container normalisation, the
+    decode, the duration and pixel limits, the selection frame, the job row -
+    so it is called rather than copied. A second implementation of two hundred
+    lines of upload handling is a second implementation to keep in step, and
+    the one thing worse than an upload path with a bug is two of them with
+    different bugs.
+
+    The form answers were captured at `begin`, before any footage was
+    accepted, and are replayed here.
+    """
+    if not SETTINGS.chunked_upload_enabled:
+        raise HTTPException(404)
+    account = _account(request)
+    if not account:
+        raise HTTPException(401, "Sign in to continue this upload.")
+    account_id = int(account["id"])
+    try:
+        session = await run_in_threadpool(load_chunked, job_id, account_id)
+        video_path = await run_in_threadpool(finalise_chunked, session)
+    except ChunkedUploadError as exc:
+        return _chunked_failure(exc)
+
+    form = session.form
+
+    def text(name: str, fallback: str = "") -> str:
+        value = form.get(name)
+        return fallback if value is None else str(value)
+
+    def number(name: str, fallback: float) -> float:
+        try:
+            return float(form.get(name))
+        except (TypeError, ValueError):
+            return fallback
+
+    def flag(name: str) -> bool:
+        value = form.get(name)
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    # The handler reads the job id off request.state, because for /upload the
+    # admission middleware puts it there. Here admission happened at `begin`,
+    # so the same slot is filled from the session rather than re-reserved.
+    request.state.upload_job_id = session.job_id
+    # The handler renders the frame page unless the caller asked for JSON, and
+    # the caller here is always a script. Forcing it makes finish's contract
+    # its own rather than a consequence of what the client happened to send -
+    # and the first run of this returned a 200 HTML page, which the success
+    # check below then read as a failure and handed the reservation back
+    # underneath a fight that had actually uploaded.
+    request.scope["headers"] = [
+        (name, value) for name, value in request.scope["headers"]
+        if name != b"accept"
+    ] + [(b"accept", b"application/json")]
+    # Starlette memoises request.headers on first read, and require_csrf has
+    # already read it by the time this runs - so rewriting the scope alone
+    # changed nothing and the handler went on rendering HTML.
+    request.__dict__.pop("_headers", None)
+    background = BackgroundTasks()
+    try:
+        response = await upload(
+            request=request,
+            background=background,
+            video=StoredUpload(video_path, session.original_name),
+            fight_type=text("fight_type", "competition"),
+            analysis_target=text("analysis_target", "BOTH"),
+            ruleset=text("ruleset", "K1"),
+            start_seconds=number("start_seconds", 0.0),
+            end_seconds=text("end_seconds"),
+            round_count=int(number("round_count", 3)),
+            round_duration_seconds=number("round_duration_seconds", 0.0),
+            break_duration_seconds=number("break_duration_seconds", 60.0),
+            selected_rounds=text("selected_rounds", "ALL"),
+            openai_identity_recovery=flag("openai_identity_recovery"),
+            external_ai_guardian_permission=flag("external_ai_guardian_permission"),
+            fighter_id=text("fighter_id"),
+            fighter_name=text("fighter_name"),
+            rights_confirmed=flag("rights_confirmed"),
+            people_permissions_confirmed=flag("people_permissions_confirmed"),
+            minor_permission_status=text("minor_permission_status", "no_minors"),
+        )
+    except HTTPException as exc:
+        # The pipeline refused the file - not a video, would not decode, too
+        # long. The reservation has to go back, exactly as the single-request
+        # path's `finally` would have returned it.
+        await run_in_threadpool(_release_chunked, account_id, job_id)
+        raise exc
+    except Exception:
+        await run_in_threadpool(_release_chunked, account_id, job_id)
+        raise
+
+    # Any refusal, however it is spelled. Listing the success codes instead
+    # meant a response nobody anticipated was treated as a failure.
+    if response.status_code >= 400:
+        await run_in_threadpool(_release_chunked, account_id, job_id)
+        return response
+    # The job owns the reservation now; only the storage lease is handed back,
+    # because the fight row is what accounts for the bytes from here on.
+    await run_in_threadpool(release_upload_storage, job_id)
+    # upload() collects deferred work - the shot profile scan - on the
+    # BackgroundTasks it was handed. Calling it directly means attaching them
+    # to the response ourselves, or they are silently dropped.
+    response.background = background
+    return response
 
 
 @app.put("/api/upload/probe", include_in_schema=False, dependencies=[Depends(require_csrf)])

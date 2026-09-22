@@ -527,66 +527,213 @@
     // A re-encode here would therefore destroy some uploaders' analyses and
     // not others', with nothing to say which. The upload-size problem belongs
     // to the host's request-body cap, and that is where it gets fixed.
+    // The single-request upload, kept exactly as it was and used whenever
+    // the chunked path is unavailable - the flag switched off, a deploy
+    // that predates it, or a browser without fetch/Blob.slice.
+    const legacySend=()=>{
     const body=new FormData(form);body.set('video',file);
-    const request=new XMLHttpRequest();
-    showProgress('active');progressBar.style.width='2%';progressText.textContent='Uploading fight video…';uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');uploadSubmit.textContent='Uploading 0%';
-    request.open('POST',form.action,true);request.setRequestHeader('Accept','application/json');
-    let started=Date.now(),lastLoaded=0,lastMoved=Date.now(),stallTimer=null;
-    // The estimate is built from a trailing window, not from the average since
-    // the upload began, and it is never allowed to climb by more than a little.
-    //
-    // Averaging from the start means a connection that slows makes the number
-    // go UP - "20 seconds left" becoming 21, 22, 27 - which reads as the upload
-    // going backwards. A trailing window reacts to the connection you have now,
-    // and the ratchet stops a single slow second undoing a minute of progress.
-    const samples=[];
-    // A bare percentage is why a slow upload feels broken: at 89% there is no
-    // way to tell thirty seconds from ten minutes. Show the bytes, the rate and
-    // the estimate, and say so plainly when the connection stops moving.
-    stallTimer=setInterval(()=>{if(Date.now()-lastMoved>20000)progressText.textContent='Upload paused — waiting for your connection. It resumes on its own.';},5000);
-    request.upload.addEventListener('load',()=>{progressBar.style.width='100%';progressText.textContent='Upload complete. Preparing your fight…';uploadSubmit.textContent='Almost there';});
-    request.upload.addEventListener('progress',upload=>{if(!upload.lengthComputable)return;
-      if(upload.loaded>lastLoaded){lastLoaded=upload.loaded;lastMoved=Date.now();}
-      const percent=Math.min(99,Math.max(1,Math.round(upload.loaded/upload.total*100)));
-      samples.push([Date.now(),upload.loaded]);
-      while(samples.length>2&&Date.now()-samples[0][0]>8000)samples.shift();
-      const first=samples[0],last=samples[samples.length-1];
-      const windowSecs=(last[0]-first[0])/1000;
-      const overall=(Date.now()-started)/1000;
-      const rate=windowSecs>1.5?(last[1]-first[1])/windowSecs
-                :(overall>1?upload.loaded/overall:0);
-      const left=rate>0?(upload.total-upload.loaded)/rate:0;
-      progressBar.style.width=`${percent}%`;
-      const sent=upload.total>0&&upload.loaded>=upload.total;
-      progressText.textContent=sent?`${fmtMB(upload.total)} sent · finishing…`
-        :rate>0?`${fmtMB(upload.loaded)} of ${fmtMB(upload.total)} · ${(rate/1048576).toFixed(1)} MB/s · ${fmtLeft(left)}`
-        :`Uploading ${fmtMB(upload.total)}…`;
-      uploadSubmit.textContent=`Uploading ${percent}%`});
-    request.addEventListener('loadend',()=>{clearInterval(stallTimer);releasePage()});
-    // Released here, not in loadend: 'load' fires first, and every branch
-    // below navigates. Leaving the flag set meant the beforeunload guard
-    // blocked WarriorIQ's own redirect with "Leave site?" the moment the
-    // upload finished - the bar stopping at 99% and the fight never starting.
-    // The server explains its own refusals in payload.detail. Anything that
-    // is not our JSON came from in front of the application - the host
-    // rejecting the request body, a gateway timing out - and reporting all of
-    // those as "could not prepare this video" sent people back to re-export a
-    // file that was never the problem. The status is the only evidence there
-    // is, so it is turned into something the uploader can act on and quote.
-    const uploadFailureFor=status=>{
-      if(status===413)return 'The server refused this video because the file is too large. A shorter clip, or the same fight at a lower resolution, will go through.';
-      if(status===429)return 'Too many uploads in a short time. Wait a few minutes and try again.';
-      if(status===502||status===503||status===504)return 'The server did not answer in time. Wait a moment and try again.';
-      if(!status)return 'The upload stopped before it reached WarriorIQ. Check your signal and try again.';
-      return `WarriorIQ could not prepare this video (error ${status}). Please try again, and tell support that number if it keeps happening.`;
+      const request=new XMLHttpRequest();
+      showProgress('active');progressBar.style.width='2%';progressText.textContent='Uploading fight video…';uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');uploadSubmit.textContent='Uploading 0%';
+      request.open('POST',form.action,true);request.setRequestHeader('Accept','application/json');
+      let started=Date.now(),lastLoaded=0,lastMoved=Date.now(),stallTimer=null;
+      // The estimate is built from a trailing window, not from the average since
+      // the upload began, and it is never allowed to climb by more than a little.
+      //
+      // Averaging from the start means a connection that slows makes the number
+      // go UP - "20 seconds left" becoming 21, 22, 27 - which reads as the upload
+      // going backwards. A trailing window reacts to the connection you have now,
+      // and the ratchet stops a single slow second undoing a minute of progress.
+      const samples=[];
+      // A bare percentage is why a slow upload feels broken: at 89% there is no
+      // way to tell thirty seconds from ten minutes. Show the bytes, the rate and
+      // the estimate, and say so plainly when the connection stops moving.
+      stallTimer=setInterval(()=>{if(Date.now()-lastMoved>20000)progressText.textContent='Upload paused — waiting for your connection. It resumes on its own.';},5000);
+      request.upload.addEventListener('load',()=>{progressBar.style.width='100%';progressText.textContent='Upload complete. Preparing your fight…';uploadSubmit.textContent='Almost there';});
+      request.upload.addEventListener('progress',upload=>{if(!upload.lengthComputable)return;
+        if(upload.loaded>lastLoaded){lastLoaded=upload.loaded;lastMoved=Date.now();}
+        const percent=Math.min(99,Math.max(1,Math.round(upload.loaded/upload.total*100)));
+        samples.push([Date.now(),upload.loaded]);
+        while(samples.length>2&&Date.now()-samples[0][0]>8000)samples.shift();
+        const first=samples[0],last=samples[samples.length-1];
+        const windowSecs=(last[0]-first[0])/1000;
+        const overall=(Date.now()-started)/1000;
+        const rate=windowSecs>1.5?(last[1]-first[1])/windowSecs
+                  :(overall>1?upload.loaded/overall:0);
+        const left=rate>0?(upload.total-upload.loaded)/rate:0;
+        progressBar.style.width=`${percent}%`;
+        const sent=upload.total>0&&upload.loaded>=upload.total;
+        progressText.textContent=sent?`${fmtMB(upload.total)} sent · finishing…`
+          :rate>0?`${fmtMB(upload.loaded)} of ${fmtMB(upload.total)} · ${(rate/1048576).toFixed(1)} MB/s · ${fmtLeft(left)}`
+          :`Uploading ${fmtMB(upload.total)}…`;
+        uploadSubmit.textContent=`Uploading ${percent}%`});
+      request.addEventListener('loadend',()=>{clearInterval(stallTimer);releasePage()});
+      // Released here, not in loadend: 'load' fires first, and every branch
+      // below navigates. Leaving the flag set meant the beforeunload guard
+      // blocked WarriorIQ's own redirect with "Leave site?" the moment the
+      // upload finished - the bar stopping at 99% and the fight never starting.
+      // The server explains its own refusals in payload.detail. Anything that
+      // is not our JSON came from in front of the application - the host
+      // rejecting the request body, a gateway timing out - and reporting all of
+      // those as "could not prepare this video" sent people back to re-export a
+      // file that was never the problem. The status is the only evidence there
+      // is, so it is turned into something the uploader can act on and quote.
+      const uploadFailureFor=status=>{
+        if(status===413)return 'The server refused this video because the file is too large. A shorter clip, or the same fight at a lower resolution, will go through.';
+        if(status===429)return 'Too many uploads in a short time. Wait a few minutes and try again.';
+        if(status===502||status===503||status===504)return 'The server did not answer in time. Wait a moment and try again.';
+        if(!status)return 'The upload stopped before it reached WarriorIQ. Check your signal and try again.';
+        return `WarriorIQ could not prepare this video (error ${status}). Please try again, and tell support that number if it keeps happening.`;
+      };
+      request.addEventListener('load',()=>{releasePage();let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';ready={jobId:payload.job_id,nextUrl:payload.next_url};advance();return}restore(payload.detail||uploadFailureFor(request.status))});
+      request.addEventListener('error',()=>restore('The upload connection stopped. Check your signal and try again.'));
+      request.addEventListener('abort',()=>restore('The upload was cancelled. Your video is still selected.'));
+      uploadInFlight=true;
+      request.send(body);
+      // After send(), so a browser that stalls decoding the local file
+      // never delays the bytes leaving.
+      openPicker(file);
     };
-    request.addEventListener('load',()=>{releasePage();let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';ready={jobId:payload.job_id,nextUrl:payload.next_url};advance();return}restore(payload.detail||uploadFailureFor(request.status))});
-    request.addEventListener('error',()=>restore('The upload connection stopped. Check your signal and try again.'));
-    request.addEventListener('abort',()=>restore('The upload was cancelled. Your video is still selected.'));
+
+  /* Send the fight in pieces, so one dropped connection costs one piece.
+   *
+   * A phone films 1080p at 8-17 Mbps, so two minutes is 140-260 MB, and the
+   * single POST below has to survive the whole transfer. Measured against the
+   * live host that runs at about 187 KiB/s - roughly twenty-three minutes in
+   * one request - and a connection that drops at minute twenty has nothing to
+   * resume from.
+   *
+   * Sequential, never parallel: the server is a small number of Passenger
+   * workers, and firing chunks at once would occupy all of them for the
+   * length of somebody's upload.
+   *
+   * Falls back to that single POST whenever this path is unavailable, so the
+   * feature flag is a real rollback and an old browser is not stranded.
+   */
+  const FALLBACK = Symbol('fallback');
+  const chunkedUpload = async (file, onProgress, shouldStop) => {
+    const fields = {};
+    new FormData(form).forEach((value, key) => {
+      if (key !== 'video' && key !== 'csrf_token') fields[key] = value;
+    });
+    // Checkboxes are absent from FormData when unticked; the server reads
+    // them as consent, so send the answer rather than the absence.
+    ['rights_confirmed', 'people_permissions_confirmed', 'openai_identity_recovery',
+     'external_ai_guardian_permission'].forEach((name) => {
+      const box = form.querySelector(`[name="${name}"]`);
+      if (box) fields[name] = Boolean(box.checked);
+    });
+
+    const opened = await fetch('/api/upload/begin', {
+      method: 'POST',
+      headers: wiqCsrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ ...fields, filename: file.name, size: file.size }),
+    });
+    // 404 is the flag switched off, or a deploy that predates this path.
+    if (opened.status === 404) throw FALLBACK;
+    const session = await opened.json().catch(() => ({}));
+    if (!opened.ok) {
+      const error = new Error(session.detail || 'Upload could not start.');
+      error.status = opened.status;
+      throw error;
+    }
+
+    const job = session.job_id;
+    const size = Math.max(65536, Number(session.chunk_size) || 1048576);
+    let offset = Number(session.offset) || 0;
+    let attempts = 0;
+    while (offset < file.size) {
+      if (shouldStop && shouldStop()) {
+        // Hand the capacity straight back; max_pending_uploads is 2, so a
+        // lease left behind locks the account out until it expires.
+        fetch(`/api/upload/${job}/abort`, { method: 'POST', headers: wiqCsrfHeaders() })
+          .catch(() => {});
+        const cancelled = new Error('The upload was cancelled. Your video is still selected.');
+        cancelled.cancelled = true;
+        throw cancelled;
+      }
+      const piece = file.slice(offset, Math.min(offset + size, file.size));
+      let response;
+      try {
+        response = await fetch(`/api/upload/${job}/chunk?offset=${offset}`, {
+          method: 'PUT',
+          headers: wiqCsrfHeaders({ 'Content-Type': 'application/octet-stream' }),
+          body: piece,
+        });
+      } catch (err) {
+        // A blip, not a refusal. Three tries with a widening gap, then give
+        // up and say so - the bytes already accepted stay on the server, so
+        // a later attempt resumes rather than restarting.
+        if (++attempts > 3) throw new Error('The upload connection stopped. Check your signal and try again.');
+        await new Promise((r) => setTimeout(r, 400 * attempts));
+        continue;
+      }
+      if (response.status === 409) {
+        // The server knows where the file really ends; believe it. This is
+        // both a lost response being retried and a genuine resume.
+        const told = await response.json().catch(() => ({}));
+        if (typeof told.offset === 'number') { offset = told.offset; continue; }
+      }
+      if (!response.ok) {
+        const refused = await response.json().catch(() => ({}));
+        const error = new Error(refused.detail || 'The upload was refused.');
+        error.status = response.status;
+        throw error;
+      }
+      const progress = await response.json();
+      offset = Number(progress.offset) || offset;
+      attempts = 0;
+      if (onProgress) onProgress(offset, file.size);
+    }
+
+    const finished = await fetch(`/api/upload/${job}/finish`, {
+      method: 'POST', headers: wiqCsrfHeaders(),
+    });
+    const payload = await finished.json().catch(() => ({}));
+    if (!finished.ok || !payload.next_url) {
+      const error = new Error(payload.detail || 'WarriorIQ could not prepare this video.');
+      error.status = finished.status;
+      throw error;
+    }
+    return payload;
+  };
+
+    // Progress is reported the same way either path sends, so the bar,
+    // the rate and the estimate behave identically.
+    const chunkStarted=Date.now();const chunkSamples=[];
+    const reportChunked=(loaded,total)=>{
+      const percent=Math.min(99,Math.max(1,Math.round(loaded/total*100)));
+      chunkSamples.push([Date.now(),loaded]);
+      while(chunkSamples.length>2&&Date.now()-chunkSamples[0][0]>8000)chunkSamples.shift();
+      const first=chunkSamples[0],last=chunkSamples[chunkSamples.length-1];
+      const windowSecs=(last[0]-first[0])/1000;
+      const overall=(Date.now()-chunkStarted)/1000;
+      const rate=windowSecs>1.5?(last[1]-first[1])/windowSecs:(overall>1?loaded/overall:0);
+      const left=rate>0?(total-loaded)/rate:0;
+      progressBar.style.width=`${percent}%`;
+      progressText.textContent=loaded>=total?`${fmtMB(total)} sent · finishing…`
+        :rate>0?`${fmtMB(loaded)} of ${fmtMB(total)} · ${(rate/1048576).toFixed(1)} MB/s · ${fmtLeft(left)}`
+        :`Uploading ${fmtMB(total)}…`;
+      uploadSubmit.textContent=`Uploading ${percent}%`;
+    };
+
+    showProgress('active');progressBar.style.width='2%';progressText.textContent='Uploading fight video…';
+    uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');uploadSubmit.textContent='Uploading 0%';
     uploadInFlight=true;
-    request.send(body);
-    // After send(), so a browser that stalls decoding the local file
-    // never delays the bytes leaving.
+    chunkedUpload(file,reportChunked,()=>false).then((payload)=>{
+      releasePage();
+      progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';
+      uploadSubmit.textContent='Video ready';
+      ready={jobId:payload.job_id,nextUrl:payload.next_url};
+      advance();
+    }).catch((error)=>{
+      if(error===FALLBACK){uploadInFlight=false;legacySend();return}
+      releasePage();
+      if(error&&error.status===401){progressText.textContent='Sign in to analyse this fight…';
+        location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}
+      restore((error&&error.message)||uploadFailureFor(error&&error.status));
+    });
+    // After the first request is away, so a browser that stalls decoding
+    // the local file never delays the bytes leaving.
     openPicker(file);
   });
 })();
