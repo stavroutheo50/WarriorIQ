@@ -1,0 +1,235 @@
+{
+  "schema": "warrioriq.strike_counts.v1",
+  "fights": [
+    {
+      "fight": "5736",
+      "pack": "cropmotion",
+      "labels_file": "labels_5736_claude_binary.json",
+      "families": {
+        "kick": {
+          "proposed": 31,
+          "judged": 17,
+          "confirmed": 7,
+          "over_count": 10,
+          "precision": 0.4118,
+          "wrong_fighter": 0,
+          "wrong_family": 0,
+          "unsure": 14,
+          "unlabelled": 0,
+          "arrived_judged": 8,
+          "arrived_confirmed": 3,
+          "arrived_precision": 0.375
+        },
+        "punch": {
+          "proposed": 28,
+          "judged": 14,
+          "confirmed": 6,
+          "over_count": 8,
+          "precision": 0.4286,
+          "wrong_fighter": 0,
+          "wrong_family": 0,
+          "unsure": 14,
+          "unlabelled": 0,
+          "arrived_judged": 6,
+          "arrived_confirmed": 4,
+          "arrived_precision": 0.6667
+        }
+      },
+      "fighters": {
+        "A": {
+          "proposed": 41,
+          "judged": 23,
+          "confirmed": 12,
+          "over_count": 11,
+          "precision": 0.5217,
+          "wrong_fighter": 0,
+          "wrong_family": 0,
+          "unsure": 18,
+          "unlabelled": 0,
+          "arrived_judged": 11,
+          "arrived_confirmed": 7,
+          "arrived_precision": 0.6364
+        },
+        "B": {
+          "proposed": 18,
+          "judged": 8,
+          "confirmed": 1,
+          "over_count": 7,
+          "precision": 0.125,
+          "wrong_fighter": 0,
+          "wrong_family": 0,
+          "unsure": 10,
+          "unlabelled": 0,
+          "arrived_judged": 3,
+          "arrived_confirmed": 0,
+          "arrived_precision": 0.0
+        }
+      }
+    },
+    {
+      "fight": "fights/athens_iphone_1080p.mov",
+      "pack": "athens_hd",
+      "labels_file": "labels_athens_hd_claude.json",
+      "families": {
+        "kick": {
+          "proposed": 31,
+          "judged": 27,
+          "confirmed": 14,
+          "over_count": 13,
+          "precision": 0.5185,
+          "wrong_fighter": 0,
+          "wrong_family": 3,
+          "unsure": 4,
+          "unlabelled": 0,
+          "arrived_judged": 10,
+          "arrived_confirmed": 8,
+          "arrived_precision": 0.8
+        },
+        "punch": {
+          "proposed": 29,
+          "judged": 27,
+          "confirmed": 15,
+          "over_count": 12,
+          "precision": 0.5556,
+          "wrong_fighter": 0,
+          "wrong_family": 0,
+          "unsure": 2,
+          "unlabelled": 0,
+          "arrived_judged": 13,
+          "arrived_confirmed": 11,
+          "arrived_precision": 0.8462
+        }
+      },
+      "fighters": {
+        "A": {
+          "proposed": 31,
+          "judged": 31,
+          "confirmed": 19,
+          "over_count": 12,
+          "precision": 0.6129,
+          "wrong_fighter": 0,
+          "wrong_family": 2,
+          "unsure": 0,
+          "unlabelled": 0,
+          "arrived_judged": 14,
+          "arrived_confirmed": 14,
+          "arrived_precision": 1.0
+        },
+        "B": {
+          "proposed": 29,
+          "judged": 23,
+          "confirmed": 13,
+          "over_count": 10,
+          "precision": 0.5652,
+          "wrong_fighter": 0,
+          "wrong_family": 1,
+          "unsure": 6,
+          "unlabelled": 0,
+          "arrived_judged": 9,
+          "arrived_confirmed": 7,
+          "arrived_precision": 0.7778
+        }
+      }
+    },
+    {
+      "fight": "fights/1.mp4",
+      "pack": "pack_1mp4",
+      "labels_file": "labels_pack_1mp4_claude.json",
+      "families": {
+        "kick": {
+          "proposed": 52,
+          "judged": 3,
+          "confirmed": 2,
+          "over_count": 1,
+          "precision": 0.6667,
+          "wrong_fighter": 0,
+          "wrong_family": 0,
+          "unsure": 0,
+          "unlabelled": 49,
+          "arrived_judged": 2,
+          "arrived_confirmed": 2,
+          "arrived_precision": 1.0
+        },
+        "punch": {
+          "proposed": 49,
+          "judged": 1,
+          "confirmed": 1,
+          "over_count": 0,
+          "precision": 1.0,
+          "wrong_fighter": 0,
+          "wrong_family": 0,
+          "unsure": 4,
+          "unlabelled": 44,
+          "arrived_judged": 0,
+          "arrived_confirmed": 0,
+          "arrived_precision": null
+        }
+      },
+      "fighters": {
+        "A": {
+          "proposed": 58,
+          "judged": 2,
+          "confirmed": 2,
+          "over_count": 0,
+          "precision": 1.0,
+          "wrong_fighter": 0,
+          "wrong_family": 0,
+          "unsure": 2,
+          "unlabelled": 54,
+          "arrived_judged": 2,
+          "arrived_confirmed": 2,
+          "arrived_precision": 1.0
+        },
+        "B": {
+          "proposed": 43,
+          "judged": 2,
+          "confirmed": 1,
+          "over_count": 1,
+          "precision": 0.5,
+          "wrong_fighter": 0,
+          "wrong_family": 0,
+          "unsure": 2,
+          "unlabelled": 39,
+          "arrived_judged": 0,
+          "arrived_confirmed": 0,
+          "arrived_precision": null
+        }
+      }
+    }
+  ],
+  "totals": {
+    "kick": {
+      "proposed": 114,
+      "judged": 47,
+      "confirmed": 23,
+      "over_count": 24,
+      "precision": 0.4894,
+      "wrong_fighter": 0,
+      "wrong_family": 3,
+      "unsure": 18,
+      "unlabelled": 49,
+      "arrived_judged": 20,
+      "arrived_confirmed": 13,
+      "arrived_precision": 0.65
+    },
+    "punch": {
+      "proposed": 106,
+      "judged": 42,
+      "confirmed": 22,
+      "over_count": 20,
+      "precision": 0.5238,
+      "wrong_fighter": 0,
+      "wrong_family": 0,
+      "unsure": 20,
+      "unlabelled": 44,
+      "arrived_judged": 19,
+      "arrived_confirmed": 15,
+      "arrived_precision": 0.7895
+    }
+  },
+  "measures": {
+    "precision": "confirmed / judged, over proposals a human ruled on",
+    "over_count": "judged - confirmed, on the labelled subset",
+    "recall": "not measurable from labels on proposals; see measure_strike_recall.py"
+  }
+}
