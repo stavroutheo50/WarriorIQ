@@ -916,6 +916,20 @@ class Settings:
         8 * 1024 * 1024,
         int(os.getenv("WARRIORIQ_MAX_UPLOAD_BYTES", str(130 * 1024 * 1024))),
     )
+    # A disposable endpoint that measures what this host will actually accept
+    # in one request body, and how it delivers it.
+    #
+    # The 130 MiB ceiling above is attributed to the host, but the evidence
+    # for that is thinner than it looks: the recorded symptom - refused at
+    # exactly 130 MiB with a 500 rather than a 413 - is reproduced exactly by
+    # WarriorIQ's own UploadBodyLimitMiddleware when a body arrives without a
+    # Content-Length, and 130 MiB is exactly this application's default. The
+    # live host, asked directly, returns 100 Continue for a declared 200 MiB.
+    #
+    # So before an upload architecture is designed around that ceiling, the
+    # ceiling gets measured. Off by default, admin-only, writes nothing to
+    # disk; turn it on, measure, turn it off.
+    upload_probe_enabled: bool = env_bool("WARRIORIQ_UPLOAD_PROBE", False)
     max_video_duration_seconds: int = max(60, int(os.getenv("WARRIORIQ_MAX_VIDEO_SECONDS", "10800")))
     max_video_pixels: int = max(640 * 360, int(os.getenv("WARRIORIQ_MAX_VIDEO_PIXELS", str(3840 * 2160))))
     malware_scan_command: str = os.getenv("WARRIORIQ_MALWARE_SCAN_COMMAND", "").strip()

@@ -5064,6 +5064,67 @@ def _deployed_commit() -> str:
 RUNNING_COMMIT = _deployed_commit()
 
 
+@app.put("/api/upload/probe", include_in_schema=False, dependencies=[Depends(require_csrf)])
+async def upload_probe(request: Request):
+    """Measure what this host accepts in one request body, and how.
+
+    The 130 MiB ceiling WarriorIQ enforces is attributed to the web host, and
+    that attribution is doubtful. The recorded symptom - refused at exactly
+    130 MiB with a 500 rather than a 413 - is exactly what this application's
+    own UploadBodyLimitMiddleware does when a body arrives with no
+    Content-Length to pre-check, and 130 MiB is exactly the default of
+    SETTINGS.max_upload_bytes. Asked directly, the live host returns
+    100 Continue for a declared 200 MiB, so Apache is not refusing on size
+    before the body.
+
+    Designing a chunked upload around a ceiling nobody has measured would be
+    building on the same guess. So this measures three things a local test
+    cannot:
+
+      * the largest body this host will carry into the application;
+      * whether it arrives streamed or buffered, which decides chunk size;
+      * how long it is allowed to take, which is a separate wall from size.
+
+    It writes nothing. The body is counted and discarded, so a probe cannot
+    fill the disk or leave an orphan. Off by default, admin only, and it
+    deliberately bypasses no limit - the point is to find out where they are.
+    """
+    if not SETTINGS.upload_probe_enabled:
+        raise HTTPException(404)
+    if not _is_admin(request):
+        raise HTTPException(404)
+    _enforce_rate_limit(request, "upload-probe", 20, 600)
+    declared = request.headers.get("content-length")
+    started = time.perf_counter()
+    received = 0
+    pieces = 0
+    largest = 0
+    # Streamed, never read(): the question is partly whether this host hands
+    # the body over in pieces at all, and request.body() would hide that by
+    # buffering it first.
+    async for chunk in request.stream():
+        received += len(chunk)
+        if chunk:
+            pieces += 1
+            largest = max(largest, len(chunk))
+    elapsed = time.perf_counter() - started
+    LOGGER.info("upload_probe received=%d declared=%s pieces=%d seconds=%.2f",
+                received, declared, pieces, elapsed)
+    return JSONResponse({
+        "received_bytes": received,
+        "received_mib": round(received / 1048576, 2),
+        "declared_content_length": declared,
+        # More than one piece means the body streamed. One piece the size of
+        # the whole body means something upstream buffered it, and a chunk
+        # size has to be chosen against that rather than against the wire.
+        "pieces": pieces,
+        "largest_piece_bytes": largest,
+        "streamed": pieces > 1,
+        "seconds": round(elapsed, 2),
+        "app_limit_mib": round(min(SETTINGS.max_fight_bytes, SETTINGS.max_upload_bytes) / 1048576, 1),
+    })
+
+
 @app.get("/health", include_in_schema=False)
 def health_check(request: Request):
     """Minimal deployment probe with no account, model or filesystem details.
