@@ -62,24 +62,19 @@ class BodyLimitBehaviourTests(unittest.TestCase):
         self.assertEqual(response.status_code, 413)
         self.assertIn("maximum allowed size", response.text)
 
-    def test_an_over_size_body_without_a_length_returns_500_not_413(self):
-        """The bug, pinned.
+    def test_an_over_size_body_without_a_length_is_refused_cleanly_too(self):
+        """This returned 500, and that 500 is why the ceiling is 130 MiB.
+
+        The middleware rewrote the status on the way out, which only works
+        when something downstream turns the exception into a response - and
+        only the multipart parser does. A raw body had nobody to catch it, so
+        the MultiPartException escaped as a 500.
 
         max_upload_bytes' comment records the live symptom as "refused at
-        exactly 130 MiB, three times running, with a 500 rather than a 413"
-        and attributes it to the web host. This reproduces that symptom with
-        no host involved: when there is no Content-Length to pre-check, the
-        MultiPartException raised inside the streaming guard escapes as a 500.
-
-        130 MiB is also exactly this application's own default, which is not a
-        number a web host would pick.
-
-        None of that proves the host has no limit of its own - only that the
-        evidence for one is also explained by this. tools/probe_upload_limits.py
-        settles it against the real host.
-
-        This test asserts the *current* behaviour so the fix is a deliberate
-        change rather than a silent one.
+        exactly 130 MiB, three times running, with a 500 rather than a 413",
+        attributes it to the web host, and sets the ceiling to match. The
+        symptom reproduces with no host involved, and 130 MiB is exactly this
+        application's own default.
         """
         oversize = self.limit + MIB
 
@@ -92,10 +87,19 @@ class BodyLimitBehaviourTests(unittest.TestCase):
 
         response = self.client.post("/upload", content=streamed(),
                                     headers={"Content-Type": "application/octet-stream"})
-        self.assertEqual(
-            response.status_code, 500,
-            "if this is now 413 the escape was fixed - update max_upload_bytes' "
-            "comment, which blames the host for it")
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("maximum allowed size", response.text)
+
+    def test_a_refusal_the_application_already_answered_is_left_alone(self):
+        """The one case where answering here would be wrong: if a response is
+        already on the wire, its status cannot be taken back."""
+        import inspect
+
+        from core.upload_security import UploadBodyLimitMiddleware as middleware
+
+        source = inspect.getsource(middleware.__call__)
+        self.assertIn("if responded or not (exceeded or timed_out):", source)
+        self.assertIn("raise", source)
 
 
 class AdmissionRunsBeforeTheBodyIsWeighedTests(unittest.TestCase):

@@ -905,13 +905,32 @@ class Settings:
         50 * 1024 * 1024,
         int(os.getenv("WARRIORIQ_MAX_FIGHT_BYTES", str(2 * 1024 * 1024 * 1024))),
     )
-    # What the web host will actually accept in one request body, which is not
-    # the same thing as what WarriorIQ would allow. Measured against the live
-    # server: the body is refused at exactly 130 MiB, three times running, with
-    # a 500 rather than a 413 - so an upload ran for a minute and then died
-    # with no usable message. max_fight_bytes above says 2 GB and cannot be
-    # honoured while this is smaller. Raise this once the host's
-    # LimitRequestBody is raised, and the page follows it.
+    # What one request body may carry. **This was attributed to the web host
+    # and the attribution is doubtful.**
+    #
+    # The comment here used to read: "Measured against the live server: the
+    # body is refused at exactly 130 MiB, three times running, with a 500
+    # rather than a 413." Every part of that is also explained by WarriorIQ
+    # refusing its own upload:
+    #
+    #   * 130 MiB is exactly this default. No web host picks that number.
+    #   * UploadBodyLimitMiddleware produced that exact 500 on any body with
+    #     no Content-Length to pre-check, with no host involved. Fixed now -
+    #     it answers 413 - so the symptom that set this ceiling is gone.
+    #   * The live host answers 100 Continue to a declared 200 MiB on /upload,
+    #     so Apache is not refusing on size before the body arrives.
+    #   * a2wsgi passes Content-Length through and streams the body.
+    #
+    # What has NOT been done is pushing a real body over 130 MiB at the live
+    # site, which is the one test that settles it; see
+    # tools/probe_upload_limits.py. Until somebody runs it this stays where it
+    # is, because lowering a ceiling is cheap and discovering the hard way that
+    # the host does refuse is not.
+    #
+    # max_fight_bytes above says 2 GB and cannot be honoured while this is
+    # smaller. The chunked upload path does not go through this limit at all -
+    # each of its requests is one chunk - so raising this is about the legacy
+    # single-request /upload only.
     max_upload_bytes: int = max(
         8 * 1024 * 1024,
         int(os.getenv("WARRIORIQ_MAX_UPLOAD_BYTES", str(130 * 1024 * 1024))),

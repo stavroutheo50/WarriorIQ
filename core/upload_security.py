@@ -61,13 +61,16 @@ class UploadBodyLimitMiddleware:
             return await JSONResponse({"detail": "This upload exceeds the maximum allowed size."}, status_code=413)(scope, receive, send)
         received = 0
         exceeded = False
+        timed_out = False
+        responded = False
         deadline = time.monotonic() + SETTINGS.upload_timeout_seconds
 
         async def limited_receive():
-            nonlocal received, exceeded
+            nonlocal received, exceeded, timed_out
             try:
                 message = await asyncio.wait_for(receive(), timeout=max(0, deadline - time.monotonic()))
             except asyncio.TimeoutError as exc:
+                timed_out = True
                 raise MultiPartException("The upload took too long. Please retry on a stable connection.") from exc
             received += len(message.get("body", b""))
             if received > limit:
@@ -77,11 +80,43 @@ class UploadBodyLimitMiddleware:
             return message
 
         async def limited_send(message):
-            if exceeded and message["type"] == "http.response.start":
-                message = {**message, "status": 413}
+            nonlocal responded
+            if message["type"] == "http.response.start":
+                responded = True
+                if exceeded:
+                    message = {**message, "status": 413}
             await send(message)
 
-        await self.app(scope, limited_receive, limited_send)
+        # Rewriting the status on the way out only works when something
+        # downstream turns the exception into a response, and only the
+        # multipart parser does. A raw body - which is what a chunked upload
+        # sends, and what a misbehaving client sends - has nobody to catch it,
+        # so the MultiPartException escaped as a **500**.
+        #
+        # That is not a hypothetical. max_upload_bytes' own comment records the
+        # live symptom as "refused at exactly 130 MiB, three times running,
+        # with a 500 rather than a 413", blames the web host for it, and sets
+        # the ceiling to match. The same symptom reproduces here with no host
+        # involved, on any body that arrives without a Content-Length to
+        # pre-check.
+        #
+        # So the refusal is answered here rather than hoping somebody
+        # downstream does it. `responded` guards the one case where it would be
+        # wrong: if the application has already begun a response, the status is
+        # on the wire and the exception has to travel.
+        try:
+            await self.app(scope, limited_receive, limited_send)
+        except MultiPartException:
+            if responded or not (exceeded or timed_out):
+                raise
+            if exceeded:
+                await JSONResponse(
+                    {"detail": "This upload exceeds the maximum allowed size."},
+                    status_code=413)(scope, receive, send)
+            else:
+                await JSONResponse(
+                    {"detail": "The upload took too long. Please retry on a stable connection."},
+                    status_code=408)(scope, receive, send)
 
 
 def reserve_upload_storage(account_id: int, job_id: str, byte_limit: int) -> None:
