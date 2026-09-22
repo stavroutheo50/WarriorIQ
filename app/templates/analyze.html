@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><link rel="stylesheet" href="/static/frame-picker.css?v={{asset_version}}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><link rel="stylesheet" href="/static/frame-picker.css?v={{asset_version}}"><script src="/static/preflight.js?v={{asset_version}}" defer></script>{% endblock %}
 {% block title %}{{sport_label}} fight analysis · WarriorIQ{% endblock %}
 {% block description %}Upload a {{sport_label}} bout to WarriorIQ for evidence-linked analysis scored under {{sport_label}} rules, with coaching priorities and a fighter-specific training plan.{% endblock %}
 {% block content %}
@@ -27,7 +27,15 @@
     {% if allowance %}<div class="console-allowance"><span>{{allowance.plan.label}}</span><strong>{{allowance.plan.limit_label}}</strong></div>{% endif %}
     {% set allowance_exhausted = allowance and allowance.remaining == 0 %}
     <form id="fightUploadForm" action="/upload" method="post" enctype="multipart/form-data" data-sport="{{sport}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-      <div class="field upload-field"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="{{fight_video_accept}}" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}Resets automatically{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% else %}{{fight_video_label}} &mdash; up to {{ (upload_limit_bytes / 1048576) | round | int }} MB{% endif %}</div></div>
+      <div class="field upload-field"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="{{fight_video_accept}}" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}Resets automatically{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% else %}{{fight_video_label}} &mdash; up to {{ (upload_limit_bytes / 1048576) | round | int }} MB{% endif %}</div>
+      {#- Filled in by the pre-upload check. Hidden until there is something
+          measured to say, so an empty panel never occupies the page. #}
+      <div class="preflight" id="preflightPanel" hidden aria-live="polite">
+        <div class="preflight-head"><span class="preflight-mark" aria-hidden="true"></span>
+          <b id="preflightTitle"></b></div>
+        <ul class="preflight-points" id="preflightPoints"></ul>
+        <p class="small muted" id="preflightMeasured"></p>
+      </div></div>
 
       {# Rounds and fight type used to be posted hidden, derived from the
          video's duration as a single round spanning the whole file. That was
@@ -211,13 +219,16 @@
   // checks the container's magic bytes regardless - so it stays cheap and its
   // messages say what to do next.
   const MIN_UPLOAD_BYTES=512*1024, MIN_FIGHT_SECONDS=10;
-  const EMPTY_HINT='MP4, MOV, MKV, AVI, M4V or WEBM — up to '+fmtMB(UPLOAD_LIMIT);
+  // Built from the same list the server refuses on, via core.upload_security.
+  const EMPTY_HINT={{fight_video_label|tojson}}+' — up to '+fmtMB(UPLOAD_LIMIT);
+  // The worker's own probe thresholds, from core/preflight_client.py.
+  const PREFLIGHT_LIMITS={{preflight_limits|safe}};
   const fileProblem=(f)=>{
     if(f.type&&!f.type.startsWith('video/'))return 'That file is not a video. Pick the clip from your camera roll.';
     if(f.size<MIN_UPLOAD_BYTES)return `That file is ${fmtMB(f.size)} — too small to be a fight. Pick the full clip.`;
     if(overLimit(f.size))return `That file is ${fmtMB(f.size)}. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p instead of 4K, or trim to a single round.`;
     return null};
-  const rejectFile=(message)=>{videoInput.value='';fileButtonText.textContent='Choose fight video';fileStatus.textContent=message;fileStatus.dataset.tone='bad';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');uploadCard.dataset.uploadState='empty';uploadSubmit.disabled=true;uploadSubmit.textContent='Choose a video to continue';window.wiqToast(message,'error')};
+  const rejectFile=(message)=>{hidePreflight();videoInput.value='';fileButtonText.textContent='Choose fight video';fileStatus.textContent=message;fileStatus.dataset.tone='bad';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');uploadCard.dataset.uploadState='empty';uploadSubmit.disabled=true;uploadSubmit.textContent='Choose a video to continue';window.wiqToast(message,'error')};
   // Duration needs the browser to read the header, which it will only do
   // asynchronously - so the file is accepted first and withdrawn if it turns
   // out to be too short to hold a round.
@@ -275,8 +286,85 @@
     fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);
     uploadCard.dataset.uploadState=ready?'ready':'empty';
     uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';
+    if(!ready)hidePreflight();
     syncSubmit();
-    if(ready){checkDuration(file);window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video selected. Press upload to send it.','success')}};
+    if(ready){checkDuration(file);runPreflight(file);window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video selected. Press upload to send it.','success')}};
+  /* The pre-upload quality check.
+   *
+   * Step 01 on the landing page promises this. Until now it read the file's
+   * size and its duration and nothing else, so the reason an analysis gets
+   * withheld - fighters too small in the frame - was first discovered on the
+   * worker, minutes after an upload the filmer could not have known was
+   * pointless.
+   *
+   * It warns; it never blocks. Nothing here has been validated well enough to
+   * refuse somebody's fight on, and a check that is wrong AND final is worse
+   * than one that is wrong and advisory.
+   */
+  const preflightPanel=document.getElementById('preflightPanel');
+  const preflightTitle=document.getElementById('preflightTitle');
+  const preflightPoints=document.getElementById('preflightPoints');
+  const preflightMeasured=document.getElementById('preflightMeasured');
+  let preflightToken=0;
+  const showPreflight=(tone,title,points,measured)=>{
+    if(!preflightPanel)return;
+    preflightPanel.dataset.tone=tone;
+    preflightTitle.textContent=title;
+    preflightPoints.innerHTML='';
+    points.forEach((text)=>{const li=document.createElement('li');li.textContent=text;preflightPoints.appendChild(li)});
+    preflightMeasured.textContent=measured||'';
+    preflightPanel.hidden=false};
+  const hidePreflight=()=>{if(preflightPanel)preflightPanel.hidden=true};
+  const runPreflight=(file)=>{
+    if(!window.wiqPreflight||!preflightPanel)return;
+    const token=++preflightToken;
+    showPreflight('checking','Checking the footage…',[],'Reading a few frames on this device. Nothing is uploaded yet.');
+    window.wiqPreflight.measure(file,PREFLIGHT_LIMITS).then((m)=>{
+      // A newer file was chosen while this one was still decoding.
+      if(token!==preflightToken)return;
+      if(!m.measured){hidePreflight();return}
+      const points=[];
+      let tone='ok';
+      const longEdge=Math.max(m.width,m.height);
+      if(longEdge<PREFLIGHT_LIMITS.min_usable_long_edge){
+        tone='bad';
+        points.push(`This video is ${m.width}×${m.height}. Below about ${PREFLIGHT_LIMITS.min_usable_long_edge} pixels across, a limb is a few pixels wide and no framing rescues it.`)}
+      if(m.framingMeasured){
+        const net=Math.round(m.networkPx);
+        const share=Math.round(m.subjectShare*100);
+        if(net<PREFLIGHT_LIMITS.detector_floor_px){
+          tone='bad';
+          points.push(`The fighters fill about ${share}% of the picture's height. That reaches roughly ${net} pixels inside the detector, below the ${PREFLIGHT_LIMITS.detector_floor_px} where it starts finding people at all — so an analysis of this clip would very likely be withheld.`);
+          points.push('Film from the edge of the mat or ring, not from the seats. Filling about a third of the picture height with the fighters is what this needs.')}
+        else if(net<PREFLIGHT_LIMITS.detector_reliable_px){
+          tone='warn';
+          points.push(`The fighters fill about ${share}% of the picture's height, reaching roughly ${net} pixels inside the detector. It becomes reliable around ${PREFLIGHT_LIMITS.detector_reliable_px}, so expect gaps where one fighter is dropped.`);
+          points.push('A few steps closer, or filming the near corner rather than the whole hall, moves this more than any setting does.')}
+        else{
+          points.push(`The fighters fill about ${share}% of the picture's height, which is big enough for the detector to work with.`)}}
+      else{
+        // Say what stopped the measurement rather than reporting a number
+        // that was not measured.
+        const why={'camera moving':'The camera moves too much between frames to measure how big the fighters are. Resting the phone on something would fix both that and the measurement.',
+                   'nothing moving':'Almost nothing moves in the frames sampled, so the fighters could not be sized. If this clip is mostly a still mat or a break, trim it to the round.',
+                   'undecodable':'','timeout':'','no dimensions':'','no frames decoded':''}[m.reason];
+        if(why){tone=tone==='bad'?'bad':'warn';points.push(why)}}
+      if(m.fps!==null&&m.fps<PREFLIGHT_LIMITS.min_usable_fps){
+        tone=tone==='bad'?'bad':'warn';
+        points.push(`This runs at about ${Math.round(m.fps)} frames per second. Fast hands fall between frames below about ${PREFLIGHT_LIMITS.min_usable_fps}.`)}
+      if(m.portrait){
+        points.push('The phone was upright. Turning it sideways fits both fighters in and leaves them bigger in the picture.')}
+      if(!points.length)return void hidePreflight();
+      const title=tone==='bad'?'This footage will probably not analyse well'
+                 :tone==='warn'?'This should work, with gaps'
+                 :'Nothing obviously wrong with this recording';
+      // Never "this will be accurate": the honest claim is about what was
+      // checked, not about the outcome. Same sentence the worker's probe uses.
+      const measured=`Checked on this device before uploading: ${m.width}×${m.height}`
+        +(m.fps!==null?`, ${Math.round(m.fps)} fps`:'')
+        +(m.framingMeasured?`, fighters about ${Math.round(m.subjectShare*100)}% of frame height`:'')
+        +'. You can upload it anyway.';
+      showPreflight(tone,title,points,measured)}).catch(()=>{if(token===preflightToken)hidePreflight()})};
   const restore=(message)=>{if(typeof picker!=='undefined'&&picker){picker.hidden=true;pickerOpen=false;chosenSeconds=null;form.hidden=false;if(localUrl){URL.revokeObjectURL(localUrl);localUrl=null}}showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
   // Rounds are no longer asked for, but they still decide where the round
   // lines fall for per-round scoring, so they are derived rather than guessed.

@@ -87,6 +87,7 @@ from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
+from core.preflight_client import client_thresholds
 from core.upload_security import (
     FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS, FIGHT_VIDEO_LABEL,
     UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, looks_like_video, scan_upload,
@@ -246,6 +247,9 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 # core.upload_security, so neither can drift from what the server accepts.
 templates.env.globals["fight_video_accept"] = FIGHT_VIDEO_ACCEPT
 templates.env.globals["fight_video_label"] = FIGHT_VIDEO_LABEL
+# The pre-upload check compares footage against the same numbers the worker's
+# probe uses, rather than a second set copied into JavaScript.
+templates.env.globals["preflight_limits"] = json.dumps(client_thresholds())
 
 # Every page pulled eight separate stylesheets, so a phone opening WarriorIQ
 # made eight blocking round trips to a shared host before it could paint

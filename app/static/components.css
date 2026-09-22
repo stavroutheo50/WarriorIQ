@@ -266,3 +266,59 @@
 .kick-minimum-table td.met{color:#3ddc84}
 .kick-minimum-table td.unconfirmed{color:#98a2b3}
 .kick-minimum .small{margin:10px 0 0}
+
+/* The pre-upload quality check.
+ *
+ * Reuses the tone vocabulary the rest of the setup page already speaks -
+ * a left border in the tone's colour over a near-transparent wash - so a
+ * warning here reads the same as one in the report that follows it.
+ *
+ * Tones: checking (measuring), ok, warn, bad. "bad" is still only advice;
+ * the upload button stays enabled behind it on purpose.
+ */
+.preflight {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--wiq-edge);
+  border-left: 2px solid var(--wiq-text-secondary);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .022);
+  color: var(--wiq-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.62;
+}
+.preflight[data-tone="ok"]       { border-left-color: var(--wiq-success); }
+.preflight[data-tone="warn"]     { border-left-color: var(--wiq-warning); }
+.preflight[data-tone="bad"]      { border-left-color: var(--wiq-danger, #e96a6a); }
+.preflight[data-tone="checking"] { border-left-color: var(--wiq-text-secondary); }
+
+.preflight-head { display: flex; align-items: center; gap: 8px; }
+.preflight-head b { color: var(--wiq-text); font-size: 13px; }
+
+/* A dot rather than an icon font: one element, no extra request, and it
+ * carries the tone colour without needing a second rule per tone. */
+.preflight-mark {
+  flex: none;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.preflight[data-tone="ok"] .preflight-mark       { background: var(--wiq-success); }
+.preflight[data-tone="warn"] .preflight-mark     { background: var(--wiq-warning); }
+.preflight[data-tone="bad"] .preflight-mark      { background: var(--wiq-danger, #e96a6a); }
+.preflight[data-tone="checking"] .preflight-mark { animation: preflight-pulse 1.1s ease-in-out infinite; }
+
+@keyframes preflight-pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+
+/* The check reads frames on the device; a spinner that never stops is worse
+ * than none for anyone who has asked for less movement. */
+@media (prefers-reduced-motion: reduce) {
+  .preflight[data-tone="checking"] .preflight-mark { animation: none; opacity: .6; }
+}
+
+.preflight-points { margin: 8px 0 0; padding-left: 17px; }
+.preflight-points:empty { display: none; }
+.preflight-points li { margin: 0 0 5px; }
+.preflight-points li:last-child { margin-bottom: 0; }
+.preflight p:empty { display: none; }
+.preflight p { margin: 8px 0 0; }
