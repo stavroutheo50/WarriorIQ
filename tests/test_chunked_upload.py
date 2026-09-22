@@ -143,6 +143,38 @@ class CeilingTests(unittest.TestCase):
         self.assertEqual(SETTINGS.max_chunked_upload_bytes, 512 * MIB)
         self.assertLess(SETTINGS.max_chunked_upload_bytes, SETTINGS.max_fight_bytes)
 
+    def test_both_paths_accept_the_same_size(self):
+        """The page states one limit, and either path may serve the upload.
+
+        The copy under the file picker and the client's own size check both
+        read min(max_fight_bytes, max_upload_bytes). If the fallback accepted
+        less than the chunked path, that number would be a lie for whoever
+        fell back - and the fallback is exactly the case nobody is watching.
+        """
+        from app.main import MAX_FIGHT_BYTES
+
+        shown = min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes)
+        self.assertEqual(
+            shown, min(MAX_FIGHT_BYTES, SETTINGS.max_chunked_upload_bytes),
+            "the two upload paths disagree about the largest fight allowed")
+
+    def test_the_ceiling_clears_what_a_phone_actually_produces(self):
+        """The audit's case: two minutes of 1080p is 140-260 MB, and 130 MiB
+        refused all of it."""
+        from app.main import MAX_FIGHT_BYTES
+
+        shown = min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes)
+        self.assertGreater(shown, 260 * 1000 * 1000)
+
+    def test_a_pending_upload_cannot_reserve_the_whole_account_budget(self):
+        """Storage is reserved for the original and its web derivative, for
+        every pending upload at once."""
+        from app.main import MAX_FIGHT_BYTES
+
+        reserved = min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes) * 2
+        self.assertLess(reserved * SETTINGS.max_pending_uploads,
+                        SETTINGS.account_storage_bytes)
+
     def test_a_chunk_is_far_below_any_plausible_body_ceiling(self):
         """The point of chunking: no single request goes near the wall."""
         self.assertLessEqual(SETTINGS.upload_chunk_bytes, 32 * MIB)

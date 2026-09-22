@@ -925,12 +925,20 @@ class Settings:
     # pushed at the live /upload; 134 MiB crossed the wire and the application
     # answered 401 on its own terms, with nothing in front of it refusing.
     #
-    # This value is therefore WarriorIQ's own choice and not a constraint. It
-    # stays at 130 MiB anyway, because the chunked path now carries anything
-    # large and each of its requests is one 8 MiB chunk - so raising this only
-    # affects the legacy single-request /upload, where a bigger body buys a
-    # longer transfer with no resume. Raise it if that path has to carry a
-    # full round again; otherwise leave it.
+    # This value is therefore WarriorIQ's own choice and not a constraint, and
+    # it is now the same 512 MB the chunked path accepts.
+    #
+    # Matched deliberately, because the page states one limit - the copy under
+    # the file picker and the client's own size check both read
+    # min(max_fight_bytes, max_upload_bytes) - and a fallback that accepts
+    # less than the main path would make that number a lie for whoever fell
+    # back. The audit's case is the one this fixes: a phone filming two
+    # minutes of 1080p produces 140-260 MB, which 130 MiB refused outright.
+    #
+    # What is proven is 134 MiB through the live host. 512 MB in a single
+    # request is not, and this path has no resume if it fails - which is an
+    # argument for the chunked path being the default, not for stating a
+    # smaller number than WarriorIQ will accept.
     #
     # max_fight_bytes above says 2 GB and cannot be honoured while this is
     # smaller. The chunked upload path does not go through this limit at all -
@@ -938,7 +946,7 @@ class Settings:
     # single-request /upload only.
     max_upload_bytes: int = max(
         8 * 1024 * 1024,
-        int(os.getenv("WARRIORIQ_MAX_UPLOAD_BYTES", str(130 * 1024 * 1024))),
+        int(os.getenv("WARRIORIQ_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024))),
     )
     # A disposable endpoint that measures what this host will actually accept
     # in one request body, and how it delivers it.
