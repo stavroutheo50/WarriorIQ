@@ -2410,6 +2410,58 @@ class ComponentStylesReachTheirPagesTests(unittest.TestCase):
         self.assertFalse(undefined, f"button variants with no CSS: {sorted(undefined)}")
 
 
+class SitemapTests(unittest.TestCase):
+    """What the sitemap offers and what a page permits must be one decision.
+
+    The sport setup pages were absent from the sitemap *and* served
+    noindex,nofollow - so adding them to the sitemap alone would have pointed
+    a crawler at pages that refuse to be indexed.
+    """
+
+    def setUp(self):
+        self.client = TestClient(app)
+        # SETTINGS is a frozen dataclass; the suite's convention for a
+        # temporary override is object.__setattr__, restored in tearDown.
+        self._base = SETTINGS.public_base_url
+        object.__setattr__(SETTINGS, "public_base_url", "https://warrioriq.eu")
+
+    def tearDown(self):
+        object.__setattr__(SETTINGS, "public_base_url", self._base)
+        self.client.close()
+
+    def test_the_analyze_pages_are_offered_and_indexable(self):
+        sitemap = self.client.get("/sitemap.xml").text
+        for path in ("/analyze", "/analyze/kickboxing", "/analyze/boxing",
+                     "/analyze/muay_thai", "/analyze/taekwondo", "/analyze/mma"):
+            with self.subTest(path=path):
+                self.assertIn(f"<loc>https://warrioriq.eu{path}</loc>", sitemap)
+                page = self.client.get(path)
+                self.assertEqual(page.status_code, 200)
+                self.assertIn('content="index,follow', page.text)
+                self.assertNotIn('content="noindex,nofollow"', page.text)
+                self.assertIn(
+                    f'<link rel="canonical" href="https://warrioriq.eu{path}"', page.text)
+
+    def test_nothing_in_the_sitemap_refuses_to_be_indexed(self):
+        """The bug in one direction, guarded in both."""
+        sitemap = self.client.get("/sitemap.xml").text
+        for path in re.findall(r"<loc>https://warrioriq\.eu([^<]*)</loc>", sitemap):
+            with self.subTest(path=path):
+                page = self.client.get(path or "/")
+                self.assertEqual(page.status_code, 200)
+                self.assertNotIn('content="noindex,nofollow"', page.text)
+
+    def test_no_private_route_reaches_the_sitemap(self):
+        from app.main import PRIVATE_ROUTE_PREFIXES
+
+        sitemap = self.client.get("/sitemap.xml").text
+        for path in re.findall(r"<loc>https://warrioriq\.eu([^<]*)</loc>", sitemap):
+            with self.subTest(path=path):
+                self.assertFalse(
+                    path.startswith(PRIVATE_ROUTE_PREFIXES),
+                    f"{path} is a private route and must not be advertised")
+
+
 class FormLabellingTests(unittest.TestCase):
     """Every control on the upload form must have an accessible name.
 

@@ -345,12 +345,22 @@ def _configure_logging() -> None:
 
 _configure_logging()
 
+# Every page that may be indexed, and - because sitemap_xml is built from this
+# same tuple - every page offered to a crawler. They were two hand-maintained
+# lists with the same contents, which is how /analyze came to be missing from
+# both: the sport setup pages carry a unique title, description and body per
+# sport and are the natural landing page for "kickboxing fight analysis", but
+# they were served noindex,nofollow with no canonical URL and were absent from
+# the sitemap. One list, so a page cannot be offered to a crawler that the
+# page itself then refuses.
 PUBLIC_INDEX_ROUTES = (
     "/", "/pricing", "/privacy", "/legal", "/terms", "/cookies",
     "/acceptable-use", "/refunds", "/video-upload-policy", "/sports-medical-disclaimer",
     "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
     "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
     "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
+    "/analyze", "/analyze/kickboxing", "/analyze/boxing", "/analyze/muay_thai",
+    "/analyze/taekwondo", "/analyze/mma",
 )
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
@@ -5093,15 +5103,9 @@ def readiness_check():
 @app.get("/sitemap.xml")
 def sitemap_xml():
     base = SETTINGS.public_base_url
-    routes = (
-        "/", "/pricing", "/privacy", "/legal", "/terms", "/cookies", "/acceptable-use",
-        "/refunds", "/video-upload-policy", "/sports-medical-disclaimer", "/eula", "/dmca",
-        "/accessibility", "/ai-transparency", "/security", "/subprocessors", "/contact",
-        "/kickboxing-fight-analysis", "/k1-fight-analysis",
-        "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
-    )
+    # The same tuple the noindex rule reads, rather than a second copy of it.
     urls = "" if not base else "".join(
-        f"<url><loc>{html.escape(base + path)}</loc></url>" for path in routes
+        f"<url><loc>{html.escape(base + path)}</loc></url>" for path in PUBLIC_INDEX_ROUTES
     )
     return Response(
         f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
