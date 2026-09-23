@@ -82,7 +82,7 @@ from core.db import (
 )
 from core.evidence_trust import report_evidence_trust
 from core.coaching import build_coaching, build_training_plan
-from core.payments import roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
+from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
@@ -5574,6 +5574,8 @@ def pricing_page(request: Request):
         name="pricing.html",
         context={
             "request": request, "plans": PLANS,
+            # Seven cards cannot be compared on a phone; this can.
+            "plan_comparison": plan_comparison(),
             # So a plan too small for this roster says so on the card, rather
             # than failing after somebody has committed to buying it.
             "roster_held": len(list_fighters(int(account["profile_id"]))) if account else 0,

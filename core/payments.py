@@ -310,3 +310,44 @@ def plans_for(audience: str) -> list[tuple[str, dict]]:
     """
     wanted = "coach" if str(audience).strip().lower() == "coach" else "athlete"
     return [(key, plan) for key, plan in PLANS.items() if plan.get("audience") == wanted]
+
+
+# What "Complete report" and friends are called in one word, for a table cell
+# that has about six characters to work with on a phone.
+_REPORT_WORD = {"compact": "Compact", "expanded": "Expanded", "full": "Complete"}
+
+
+def comparison_rows() -> list[dict]:
+    """Every plan as one row, so they can be read side by side.
+
+    Seven plans stacked as cards is about 7,500 px on a phone. Comparing two
+    of them means scrolling past the other five and remembering, which is not
+    comparing - and the cards cannot be made short enough to fix it, because
+    what makes them long is the detail somebody wants once they have chosen.
+
+    So the choosing happens here, in four numbers a phone shows at once, and
+    the cards stay for the detail. Each row links to its own card.
+
+    The fields are the ones that actually separate the plans. `limit_label`
+    was not usable: it says "3 analyses every day" for an athlete plan and
+    "Up to 5 fighters" for a coach one, so a column of it compares two
+    different quantities.
+    """
+    rows = []
+    for key, plan in PLANS.items():
+        unlimited = bool(plan.get("unlimited"))
+        roster = plan.get("roster_limit")
+        daily = plan.get("daily_limit")
+        rows.append({
+            "key": key,
+            "label": plan.get("label"),
+            "price": plan.get("price"),
+            "period": plan.get("period"),
+            # "Unlimited" rather than a blank: an empty cell in a comparison
+            # reads as "this plan does not have that".
+            "fighters": "Unlimited" if (unlimited or roster is None) else str(roster),
+            "daily": "Unlimited" if (unlimited or daily is None) else str(daily),
+            "report": _REPORT_WORD.get(str(plan.get("report_tier")), "Complete"),
+            "audience": plan.get("audience"),
+        })
+    return rows

@@ -38,6 +38,41 @@
   everything else is the same on every one.
 </p>
 
+{#- Seven plans stacked as cards is about 7,500px on a phone, and comparing
+    two of them means scrolling past the other five and remembering. The
+    choosing happens here, in four numbers visible at once; the cards below
+    stay for the detail somebody wants after they have chosen.
+
+    A real <table>, because it is one: a screen reader announces the column
+    when it reads the cell, which a grid of divs cannot do. See
+    core/payments.comparison_rows. -#}
+<div class="plan-compare-wrap">
+  <table class="plan-compare">
+    <caption class="small muted">Every plan at a glance. Tap a row for the full details.</caption>
+    <thead>
+      <tr>
+        <th scope="col">Plan</th>
+        <th scope="col">Price</th>
+        <th scope="col">Fighters</th>
+        <th scope="col"><abbr title="Analyses per day">Per day</abbr></th>
+        <th scope="col" class="compare-report">Report</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in plan_comparison %}
+      <tr{% if row.key == current_plan_key %} class="is-current"{% endif %}>
+        <th scope="row"><a href="#plan-{{row.key}}">{{row.label}}</a>{% if row.key == current_plan_key %}
+          <span class="compare-current">Current</span>{% endif %}</th>
+        <td>{{row.price}}</td>
+        <td>{{row.fighters}}</td>
+        <td>{{row.daily}}</td>
+        <td class="compare-report">{{row.report}}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
 <div class="pricing-grid">
 {% for key,plan in plans.items() %}
   <section class="card pricing-card {% if key == 'athlete_pro' %}featured{% elif key == 'gym' %}gym-featured{% endif %}" id="plan-{{key}}" data-plan="{{key}}">
