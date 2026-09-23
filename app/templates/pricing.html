@@ -50,14 +50,32 @@
       <div class="eyebrow">{{plan.label}}</div>
       {% if key == current_plan_key %}<span class="current-plan">Current plan</span>{% endif %}
     </div>
-    {# While checkout is closed a paid price is a future price, and printing it
-       as though it were chargeable today is what made this page argue with its
-       own banner. Starter is genuinely €0 forever, so it is not rewritten. #}
-    {% if not payments_enabled and key != 'free' %}
-      <div class="plan-price">Not open yet</div>
-      <div class="small muted">{{plan.price}} {{plan.period}} when billing opens</div>
-    {% else %}
+    {# A paid price while checkout is closed is a future price, and printing it
+       as though it were chargeable today would make this page argue with its
+       own banner. That was right, and the fix for it put the wrong fact in the
+       headline: six of the seven cards led with "Not open yet" at 38px and
+       carried the price at 15px grey underneath, so every paid plan read as a
+       dead product next to Starter's confident €0.
+
+       The price is the permanent fact and the closure is a state that ends, so
+       the price is the headline and the state is a badge. Three things still
+       say it and none of them is buried: the notice at the top of the page,
+       the badge on every paid card, and "when billing opens" directly under
+       the number.
+
+       Starter is genuinely €0 forever, so none of this applies to it. #}
+    {#- The badge sits with the price rather than in the banner at the top of
+        the card. Two reasons. It qualifies the number, so it belongs next to
+        the number. And the banner slot is the plan's own highlight - putting
+        this there gave all six paid cards an identical badge and deleted the
+        one line on each that helps somebody choose between them. -#}
+    <div class="plan-price-row">
       <div class="plan-price">{{plan.price}}</div>
+      {% if not payments_enabled and key != 'free' %}<span class="plan-early">Free in early access</span>{% endif %}
+    </div>
+    {% if not payments_enabled and key != 'free' %}
+      <div class="small muted">{{plan.period}}, when billing opens</div>
+    {% else %}
       <div class="small muted">{{plan.period}}</div>
     {% endif %}
     <details class="billing-details">

@@ -736,7 +736,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         for key in ("free", "athlete", "athlete_pro", "coach_5", "coach_15", "coach_30", "gym"):
             self.assertIn(f'data-plan="{key}"', pricing)
         self.assertIn("€89.99", pricing)
-        self.assertIn('class="plan-banner">Most flexible', pricing)
+        self.assertIn('class="plan-banner">Most analyses', pricing)
 
     def _sign_in(self, email="uploader@example.com"):
         """Analysis is account-only, so upload tests need a signed-in browser."""

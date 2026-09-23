@@ -3773,20 +3773,34 @@ class PlanBadgeTests(unittest.TestCase):
         page = self._render("free")
         self.assertNotIn("Preview this plan", page)
 
-    def test_a_closed_checkout_does_not_price_a_plan_nobody_can_buy(self):
-        """The page used to argue with itself.
+    def test_a_closed_checkout_never_lets_a_price_stand_unqualified(self):
+        """The page used to argue with itself, and the first fix overcorrected.
 
-        It printed €9.99 to €89.99 as each card's headline price next to a
-        banner claiming every plan was free during early access, and neither
-        was true. Nothing makes a paid plan free: accounts.plan defaults to
+        It printed €9.99 to €89.99 as each card's headline next to a banner
+        claiming every plan was free during early access, and neither was
+        true. Nothing makes a paid plan free: accounts.plan defaults to
         'free', the only way off it is a per-account grant the operator makes
-        by hand, and checkout is shut, so nobody can be on a paid plan at all.
+        by hand, and checkout is shut.
 
-        With payments disabled a paid card must not headline a price, because
-        that price cannot be charged today - it says what the plan will cost
-        instead. Starter is genuinely €0 forever and keeps its number.
+        The banner was the false part. The fix changed the headline as well,
+        so six of seven cards led with "Not open yet" at 38px and carried the
+        price at 15px grey - and every paid plan read as a dead product beside
+        Starter's confident €0.
+
+        The price is the permanent fact and the closure is a state that ends,
+        so the price is the headline again. What this now guards is the thing
+        that actually went wrong: a price may never stand unqualified. Three
+        things have to say so - the notice on the page, a badge on the card,
+        and the period line under the number - and the old false claim must
+        not come back.
+
+        This is a stronger guarantee than suppressing the number was, because
+        it checks the disclosure exists rather than checking the price is
+        hidden.
         """
         import re
+
+        from core.payments import PLANS
 
         page = self._render("free")
         self.assertIn("Paid plans are not open yet", page)
@@ -3796,17 +3810,48 @@ class PlanBadgeTests(unittest.TestCase):
             key = re.search(r'data-plan="([^"]+)"', card)
             if not key:
                 continue
+            key = key.group(1)
             card = card.split("</section>", 1)[0]
             headline = re.search(r'class="plan-price">(.*?)</div>', card, re.S)
-            self.assertIsNotNone(headline, key.group(1))
+            self.assertIsNotNone(headline, key)
             headline = headline.group(1).strip()
-            if key.group(1) == "free":
+            if key == "free":
+                # Genuinely €0 forever, so nothing qualifies it.
                 self.assertEqual("€0", headline)
-            else:
-                self.assertEqual("Not open yet", headline, key.group(1))
-                # The real price still has to be visible, just not as the
-                # headline - hiding it would be the opposite mistake.
-                self.assertIn("when billing opens", card, key.group(1))
+                self.assertNotIn("Free in early access", card)
+                continue
+            self.assertEqual(PLANS[key]["price"], headline, key)
+            self.assertIn("Free in early access", card, key)
+            self.assertIn("when billing opens", card, key)
+            self.assertNotIn("Not open yet", card, key)
+
+    def test_a_plan_still_says_what_it_is_for_while_checkout_is_closed(self):
+        """The badge is a state, and it must not eat the plan's own line.
+
+        A first attempt put "Free in early access" in the highlight banner's
+        slot. It rendered identically on all six paid cards and removed the
+        one line on each that helps somebody choose between them, which is a
+        worse page than the one being fixed.
+        """
+        page = self._render("free")
+        for highlight in ("Most analyses", "Fits most club rosters", "Best for teams"):
+            with self.subTest(highlight=highlight):
+                self.assertIn('class="plan-banner">%s' % highlight, page)
+
+    def test_no_badge_claims_a_popularity_that_cannot_exist(self):
+        """Nobody is on a paid plan - checkout is shut and the only route onto
+        one is a grant made by hand - so a badge counting subscribers is a
+        statistic about an empty population."""
+        from core.payments import PLANS as ALL
+
+        for key, plan in ALL.items():
+            highlight = plan.get("highlight")
+            if not highlight:
+                continue
+            with self.subTest(plan=key):
+                self.assertNotIn("Most clubs", highlight)
+                self.assertNotIn("Most popular", highlight)
+                self.assertNotIn("Most chosen", highlight)
 
     def test_a_paid_card_offers_one_action_and_it_is_about_that_plan(self):
         """Pressing "Coach 30" used to look like it had selected Coach 30.

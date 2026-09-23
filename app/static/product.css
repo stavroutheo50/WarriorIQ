@@ -337,3 +337,12 @@ table td{font-size:12px}
    the round/duration fields sit at the same visual weight as the other inputs. */
 .field input[type=number]{-moz-appearance:textfield}
 .field input[type=number]:hover,.field input[type=number]:focus{-moz-appearance:number-input}
+
+/* The early-access badge, beside the price it qualifies.
+ *
+ * Reads as information rather than promotion - the calm green the rest of the
+ * product uses for "this is fine", not the banner's promotional gradient,
+ * because it states a fact about availability and is not a sales claim.
+ */
+.plan-price-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:10px}
+.plan-early{padding:5px 9px;border:1px solid #2c5f4a;border-radius:99px;background:#16342a;color:#8fe3bd;font-size:11px;font-weight:850;letter-spacing:.6px;white-space:nowrap}

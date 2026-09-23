@@ -79,7 +79,11 @@ PLANS = {
         "training_items": None,
         "can_share": True,
         "can_correct": True,
-        "highlight": "Most flexible",
+        # "Most flexible" described nothing. Athlete Pro is the same single
+        # fighter and the same features as Athlete; what it buys is ten
+        # analyses a day against three. Volume is the difference, so volume is
+        # what the badge says.
+        "highlight": "Most analyses",
         "credits": 0,
         "roster_limit": 1,
         "audience": "athlete",
@@ -134,7 +138,14 @@ PLANS = {
         "training_items": None,
         "can_share": True,
         "can_correct": True,
-        "highlight": "Most clubs",
+        # Was "Most clubs", which claimed a popularity that cannot exist:
+        # checkout is closed, nobody is on any paid plan, and the only route
+        # onto one is a grant made by hand. A claim about how many people
+        # chose this is a statistic about an empty population.
+        #
+        # What is true is the roster size - fifteen fighters covers a typical
+        # club - so the badge claims that instead.
+        "highlight": "Fits most club rosters",
         "credits": 0,
         "roster_limit": 15,
         "audience": "coach",
