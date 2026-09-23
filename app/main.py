@@ -3900,6 +3900,41 @@ def result_page(request: Request, job_id: str):
     return response
 
 
+@app.get("/result/{job_id}/report.json", include_in_schema=False)
+def download_report_json(request: Request, job_id: str):
+    """Hand the owner their own analysis, as the file the analyser wrote.
+
+    Everything measured about a fight already exists as one JSON document on
+    disk - it is what the report page renders from - and there was no way to
+    get a copy of it. That matters in three ways, in increasing order of how
+    often it comes up:
+
+      * it is the reader's own data, and an account export exists for the
+        account but not for the analyses inside it;
+      * a coach who wants the numbers in a spreadsheet has to retype them off
+        a page that deliberately shows fewer of them than it holds;
+      * and when an analysis comes out wrong, the report is the evidence. Not
+        being able to send it means describing it instead, which is how
+        "tracking was bad on the red corner" ends up standing in for four
+        hundred frames of measurement.
+
+    Owner only, through the same check the report page uses, and no-store:
+    this is somebody's footage measured, not a public document.
+    """
+    if not _authorized_job(request, job_id):
+        raise HTTPException(404)
+    path = _require_completed_artifact(job_id, "report.json")
+    if not path.exists():
+        raise HTTPException(404, "Fight report not found")
+    return FileResponse(
+        path, media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="warrioriq-{job_id}.json"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 @app.post("/api/annotations/{job_id}", dependencies=[Depends(require_csrf)])
 def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
     # Every correction writes an .npz sequence to disk, so this is the one

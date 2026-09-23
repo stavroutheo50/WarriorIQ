@@ -192,16 +192,29 @@ class Handler(BaseHTTPRequestHandler):
                 state, css = f"done - {answered}", "done"
             else:
                 state, css = f"{answered} of {total}" if total else f"{answered} answered", "part"
+            # tools/label_queue.py --write leaves this behind. Most of a
+            # pack's unanswered clips move no decision anybody is waiting on;
+            # these are the ones that do, and saying how many turns "label the
+            # pack" into a job with an end in sight.
+            deciding = ""
+            try:
+                queue = json.loads((pack / "queue.json").read_text(encoding="utf-8"))
+                outstanding = len(queue.get("ids") or [])
+                if outstanding:
+                    deciding = (f'<span class="queue">{outstanding} of these decide '
+                                f'whether punches can be shown</span>')
+            except (OSError, ValueError):
+                pass
             rows.append(
                 f'<li><a href="/{pack.name}/">{pack.name}</a> '
-                f'<span class="{css}">{state}</span></li>')
+                f'<span class="{css}">{state}</span>{deciding}</li>')
         return (
             "<!doctype html><meta charset=utf-8><title>WarriorIQ label packs</title>"
             "<style>body{background:#0f1115;color:#eef1f5;font:16px/1.6 system-ui;"
             "margin:0;padding:40px}h1{font-size:19px}li{margin:10px 0}"
             "a{color:#ffb020}span{color:#98a2b3;font-size:13px;margin-left:10px}"
             ".todo{color:#7ee787}.part{color:#e3b341}.done{color:#6e7681}"
-            ".warn{color:#f85149}</style>"
+            ".warn{color:#f85149}.queue{color:#ffb020;display:block;margin:2px 0 0 0}</style>"
             "<h1>WarriorIQ label packs</h1><p style='color:#98a2b3;font-size:14px'>"
             "Answers save to disk as you give them. Closing the tab loses nothing.</p><ul>"
             + "".join(rows) + "</ul>")
