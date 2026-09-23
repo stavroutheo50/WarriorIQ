@@ -346,3 +346,100 @@
 .metric-standing article[data-standing="needs_work"] { border-left-color: var(--wiq-warning); }
 /* No reference and not measured both read as "we are not telling you this is
  * good or bad", so they share the neutral edge they inherit. */
+
+/* The visual report.
+ *
+ * Fighter identity is red and blue, which is what the report already calls
+ * them in words - "Red corner" above Fighter A, "Blue corner" above B - while
+ * rendering A blue and B gold. The words and the colours contradicted each
+ * other on the page where knowing which fighter you are matters most.
+ *
+ * The pair is validated against this surface rather than chosen by eye:
+ * inside the dark lightness band, above the chroma floor, colourblind
+ * separation 22.5 (protan) against a floor of 8, and both clear 3:1 on the
+ * canvas. Outcome is never carried by these hues - it is carried by position
+ * and length - so the status colours stay reserved for status.
+ */
+.visual-report{--mine:#d9545e;--theirs:#5b8ff0}
+.vs-hint{margin:6px 0 18px}
+.visual-heading{margin:24px 0 4px;font-size:13px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--wiq-text-secondary)}
+
+.h2h{display:grid;gap:11px}
+.h2h-row{display:grid;grid-template-columns:minmax(0,1fr) 96px minmax(0,1fr);
+  align-items:center;gap:10px}
+.h2h-bar{display:flex;align-items:center;gap:8px;min-width:0}
+.h2h-bar.left{flex-direction:row-reverse}
+.h2h-bar b{font-size:16px;font-variant-numeric:tabular-nums;min-width:46px}
+.h2h-bar.left b{text-align:right}
+/* 4px rounded ends, anchored to the centre line the labels sit on. */
+.h2h-fill{display:block;height:24px;border-radius:4px}
+.h2h-fill.mine{background:var(--mine);color:var(--mine)}
+.h2h-fill.theirs{background:var(--theirs);color:var(--theirs)}
+/* The leader is ringed rather than recoloured: recolouring would make the
+ * hue mean "winner" in one row and "fighter" in every other. */
+.h2h-fill.leads{box-shadow:0 0 0 2px var(--wiq-canvas),0 0 0 3px currentColor}
+.h2h-label{text-align:center}
+.h2h-label span{display:block;font-size:12px;color:var(--wiq-text-secondary)}
+.h2h-label small{display:block;font-size:10px;color:var(--wiq-text-tertiary);margin-top:1px}
+
+.strike-maps{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
+.strike-map{padding:14px;border:1px solid var(--wiq-edge);border-radius:13px;
+  background:rgba(255,255,255,.015);color:var(--wiq-text)}
+.strike-map h3{margin:0 0 10px;font-size:12px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--wiq-text-secondary)}
+.strike-figure{display:grid;grid-template-columns:58px minmax(0,1fr);gap:12px;align-items:center}
+.zone-mine{fill:var(--mine)}
+.zone-theirs{fill:var(--theirs)}
+.zone-stroke-mine{stroke:var(--mine)}
+.zone-stroke-theirs{stroke:var(--theirs)}
+.strike-zones{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.strike-zones li{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:8px}
+.strike-zones b{font-size:19px;font-weight:900;text-align:right;font-variant-numeric:tabular-nums}
+.strike-zones b.mine{color:var(--mine)}
+.strike-zones b.theirs{color:var(--theirs)}
+.strike-zones span{font-size:12px;color:var(--wiq-text-secondary)}
+.strike-zones li.none b,.strike-zones li.none span{color:var(--wiq-text-tertiary);opacity:.55}
+
+.fight-tl{position:relative;height:96px;margin-top:8px;border:1px solid var(--wiq-edge);
+  border-radius:12px;background:rgba(255,255,255,.015);overflow:hidden}
+.fight-tl-mid{position:absolute;left:0;right:0;top:50%;height:1px;
+  background:var(--wiq-edge-strong)}
+.tl-strike{position:absolute;width:7px;height:28px;border-radius:3px;transform:translateX(-50%)}
+.tl-strike.mine{top:14px;background:var(--mine)}
+.tl-strike.theirs{top:54px;background:var(--theirs)}
+.tl-guard{position:absolute;bottom:3px;width:2px;height:11px;border-radius:1px;
+  background:var(--wiq-warning);transform:translateX(-50%)}
+.fight-tl-key{display:flex;flex-wrap:wrap;gap:14px;margin-top:9px;
+  font-size:11px;color:var(--wiq-text-tertiary)}
+.fight-tl-key span{display:flex;align-items:center;gap:6px}
+.key-dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+.key-dot.mine{background:var(--mine)}
+.key-dot.theirs{background:var(--theirs)}
+.key-dot.guard{width:2px;height:11px;border-radius:1px;background:var(--wiq-warning)}
+
+.visual-split{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:6px}
+.defence-mix,.chain-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:7px}
+.defence-mix li{display:grid;grid-template-columns:64px minmax(0,1fr) 26px;
+  align-items:center;gap:9px}
+.defence-mix span{font-size:12px;color:var(--wiq-text-secondary)}
+.defence-bar{display:block;height:15px;border-radius:4px;background:rgba(255,255,255,.05)}
+.defence-bar b{display:block;height:100%;border-radius:4px;background:var(--mine)}
+.defence-count{font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+.chain-list li{display:grid;grid-template-columns:20px minmax(0,1fr);align-items:center;gap:10px}
+.chain-list b{font-size:12px;color:var(--wiq-text-tertiary);font-variant-numeric:tabular-nums}
+.chain-pips{display:flex;flex-wrap:wrap;gap:4px}
+.chain-pips i{width:11px;height:11px;border-radius:3px;background:var(--mine)}
+
+@media (max-width:760px){
+  .strike-maps,.visual-split{grid-template-columns:1fr}
+  .visual-split{gap:8px}
+  .h2h-row{grid-template-columns:minmax(0,1fr) 76px minmax(0,1fr);gap:6px}
+  .h2h-bar b{font-size:14px;min-width:38px}
+  .h2h-fill{height:20px}
+}
+/* Forced colours strip the fills, so identity would be lost. Give each side a
+ * border the high-contrast palette keeps. */
+@media (forced-colors: active){
+  .h2h-fill,.tl-strike,.chain-pips i,.defence-bar b{border:1px solid currentColor}
+}

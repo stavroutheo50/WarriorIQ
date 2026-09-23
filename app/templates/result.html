@@ -332,6 +332,131 @@
   <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'Keep the measured baseline'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Build the next clean sample'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% endif %}</article></div>
   {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary"><div class="eyebrow">Final coaching summary · Fighter {{primary}}</div><h2>What this fight says to work on next</h2><div class="performance-insights">{% set worked = keep[1] if keep|length > 1 else (keep[0] if keep else None) %}<article><span>What worked</span><strong>{{worked.title if worked else 'No supported strength yet'}}</strong><p>{{worked.detail if worked else 'The report needs more evidence before naming a strength.'}}</p></article><article><span>What hurt performance</span><strong>{{fix[0].title if fix else 'No supported weakness yet'}}</strong><p>{{fix[0].detail if fix else 'The report does not invent a weakness without evidence.'}}</p></article>{% set plan=report.training_plan[primary]|default([]) %}<article><span>Next training priority</span><strong>{{plan[0].focus if plan else 'Collect a cleaner sample'}}</strong><p>{{plan[0].work if plan else 'Use a clear full-body camera angle and keep both fighters visible.'}}</p></article><article><span>Success target</span><strong>{{plan[0].goal if plan else 'Improve usable evidence'}}</strong><p>This target comes from Fighter {{primary}}’s measured report, not a generic template.</p></article></div></section>{% endif %}
 </section>
+{#- Read without reading.
+
+    The analysis already computed all of this - defence counts, combination
+    lengths, which targets a fighter was caught on, the seconds their guard
+    dropped - and the report showed none of it, while spending ten thousand
+    characters on prose. Nothing here is a new measurement; it is the same
+    numbers placed where a fighter can see them.
+
+    Legs and knees only, from the arrived outcomes the published timeline
+    already uses. A map fed from the raw stream would quietly republish the
+    punch count this product does not trust. See core/report_visuals.py. -#}
+{% if visuals %}
+<section class="card visual-report" id="report-visual">
+  <div class="analysis-quality-heading">
+    <div><span class="eyebrow">Your round at a glance</span>
+      <h2>You vs your opponent</h2></div>
+    <span class="quality-focus">Fighter {{visuals.focus}}</span>
+  </div>
+  <p class="small muted vs-hint">Longer bar wins. {{visuals.counts}}</p>
+
+  <div class="h2h">
+    {% for row in visuals.head_to_head %}
+    <div class="h2h-row">
+      <div class="h2h-bar left">
+        <b>{{row.a}}{{row.suffix|default('')}}</b>
+        <i class="h2h-fill mine{% if row.leader == 'a' %} leads{% endif %}"
+           style="width:{{'%.1f'|format(row.a_width)}}%"></i>
+      </div>
+      <div class="h2h-label"><span>{{row.label}}</span><small>{{row.sub}}</small></div>
+      <div class="h2h-bar">
+        <b>{{row.b}}{{row.suffix|default('')}}</b>
+        <i class="h2h-fill theirs{% if row.leader == 'b' %} leads{% endif %}"
+           style="width:{{'%.1f'|format(row.b_width)}}%"></i>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {#- Where it arrived. The silhouette carries the location, so the eye finds
+      "head" without a legend to read. -#}
+  <div class="strike-maps">
+    {% for map in [{'title':'You hit','zones':visuals.landed,'side':'mine'},
+                   {'title':'You got hit','zones':visuals.taken,'side':'theirs'}] %}
+    <div class="strike-map">
+      <h3>{{map.title}}</h3>
+      <div class="strike-figure">
+        {% set peak = [map.zones.head, map.zones.body, map.zones.leg] | max %}
+        <svg viewBox="0 0 40 96" width="58" height="96" aria-hidden="true" focusable="false">
+          <circle cx="20" cy="11" r="8.5" fill="none" stroke="currentColor" stroke-width="2" opacity=".18"/>
+          <rect x="10" y="23" width="20" height="30" rx="6" fill="none" stroke="currentColor" stroke-width="2" opacity=".18"/>
+          <path d="M14 55 L12 92 M26 55 L28 92" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".18"/>
+          {% if map.zones.head %}<circle cx="20" cy="11" r="8.5" class="zone-{{map.side}}"
+             opacity="{{'%.2f'|format(map.zones.head / peak * 0.85)}}"/>{% endif %}
+          {% if map.zones.body %}<rect x="10" y="23" width="20" height="30" rx="6" class="zone-{{map.side}}"
+             opacity="{{'%.2f'|format(map.zones.body / peak * 0.85)}}"/>{% endif %}
+          {% if map.zones.leg %}<path d="M14 55 L12 92 M26 55 L28 92" fill="none" stroke-width="5"
+             stroke-linecap="round" class="zone-stroke-{{map.side}}"
+             opacity="{{'%.2f'|format(map.zones.leg / peak * 0.85)}}"/>{% endif %}
+        </svg>
+        <ul class="strike-zones">
+          {% for label, count in [('Head', map.zones.head), ('Body', map.zones.body), ('Legs', map.zones.leg)] %}
+          <li{% if not count %} class="none"{% endif %}>
+            <b class="{{map.side}}">{{count}}</b><span>{{label}}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {#- Position is time, side is who. A fighter finds the busy stretch and the
+      quiet one without being told which is which. -#}
+  {% if visuals.timeline and visuals.span_seconds %}
+  <h3 class="visual-heading">When it happened</h3>
+  <div class="fight-tl">
+    <div class="fight-tl-mid"></div>
+    {% for mark in visuals.timeline %}
+    <i class="tl-strike {{'mine' if mark.mine else 'theirs'}}"
+       style="left:{{'%.2f'|format(mark.at / visuals.span_seconds * 100)}}%"
+       title="{{'%.1f'|format(mark.at)}}s"></i>
+    {% endfor %}
+    {% for at in visuals.guard_low %}
+    <i class="tl-guard" style="left:{{'%.2f'|format(at / visuals.span_seconds * 100)}}%"
+       title="Guard dropped at {{at}}s"></i>
+    {% endfor %}
+  </div>
+  <div class="fight-tl-key">
+    <span><i class="key-dot mine"></i>You</span>
+    <span><i class="key-dot theirs"></i>Opponent</span>
+    <span><i class="key-dot guard"></i>Your guard dropped</span>
+  </div>
+  {% endif %}
+
+  <div class="visual-split">
+    {% if visuals.defences %}
+    <div>
+      <h3 class="visual-heading">How you defended</h3>
+      <p class="small muted">{{visuals.defence_total}} defensive actions.</p>
+      <ul class="defence-mix">
+        {% for name, count in visuals.defences.items() %}
+        <li><span>{{name|capitalize}}</span>
+          <i class="defence-bar"><b style="width:{{'%.0f'|format(count / visuals.defence_max * 100)}}%"></b></i>
+          <b class="defence-count">{{count}}</b></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if visuals.chains %}
+    <div>
+      <h3 class="visual-heading">Combinations</h3>
+      <p class="small muted">{{visuals.chain_count}} chain{{'' if visuals.chain_count == 1 else 's'}},
+        longest was {{visuals.chain_longest}}. Each block is one strike without a break.</p>
+      <ul class="chain-list">
+        {% for length in visuals.chains %}
+        <li><b>{{length}}</b><span class="chain-pips">{% for _ in range(length) %}<i></i>{% endfor %}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
 <details class="report-deep-dive"><summary><span><strong>Complete performance report and training plan</strong><small>Open the full movement, scoring, coaching, and integrity detail</small></span><b aria-hidden="true">＋</b></summary><div class="report-deep-dive-body">
 {#- Built from the same two gates that decide whether each section is emitted,
     so a chip cannot outlive its section. Strikes, Combinations and Key moments

@@ -94,6 +94,7 @@ from core.chunked_upload import (
     load as load_chunked,
 )
 from core.preflight_client import client_thresholds
+from core.report_visuals import build as report_visuals
 from core.upload_security import (
     FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS, FIGHT_VIDEO_LABEL,
     UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, looks_like_video, scan_upload,
@@ -1007,6 +1008,17 @@ def _reports_for_profile(profile_id: int) -> list[dict]:
             continue
         records.append({"job_id": fight["job_id"], "created_at": fight["created_at"], "report": report})
     return records
+
+
+def _visual_focus(report: dict) -> str:
+    """Whose round the visual sections are about.
+
+    The same choice the vitals strip at the top of the page makes, so the two
+    cannot disagree about which fighter "you" means.
+    """
+    video = report.get("video") or {}
+    focus = str(video.get("focus_fighter") or video.get("analysis_target") or "A")
+    return focus if focus in ("A", "B") else "A"
 
 
 def _analysis_quality_summary(report: dict) -> dict:
@@ -3864,6 +3876,9 @@ def result_page(request: Request, job_id: str):
         "identity": sport_identity(report.get("scorecard", {}).get("sport", "kickboxing")),
         "report_access": report_access,
         "analysis_quality": _analysis_quality_summary(report),
+        # Built at render time rather than stored in the report, so every
+        # analysis already on disk gains these sections without being re-run.
+        "visuals": report_visuals(report, _visual_focus(report)),
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
         "score_withheld": _score_withheld(report, job_id),
