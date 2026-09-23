@@ -5093,6 +5093,26 @@ RUNNING_COMMIT = _deployed_commit()
 # --------------------------------------------------------------------------
 
 
+def _chunked_enabled() -> None:
+    """404 when the path is switched off, before anything else runs.
+
+    As an inline check at the top of each handler this ran *after*
+    require_csrf, so a caller with no token got 403 - which says the route
+    exists. Live, that is what /api/upload/probe answered while disabled. A
+    switched-off endpoint should be indistinguishable from one that was never
+    built, and dependencies run in order, so the gate goes first.
+    """
+    if not SETTINGS.chunked_upload_enabled:
+        raise HTTPException(404)
+
+
+def _probe_enabled() -> None:
+    """The same, for the diagnostic endpoint - which matters more, because it
+    exists to absorb large bodies."""
+    if not SETTINGS.upload_probe_enabled:
+        raise HTTPException(404)
+
+
 def _chunked_failure(error: ChunkedUploadError) -> JSONResponse:
     payload = {"detail": error.detail}
     if error.offset is not None:
@@ -5107,7 +5127,7 @@ def _release_chunked(account_id: int, job_id: str) -> None:
     release_upload_storage(job_id)
 
 
-@app.post("/api/upload/begin", dependencies=[Depends(require_csrf)])
+@app.post("/api/upload/begin", dependencies=[Depends(_chunked_enabled), Depends(require_csrf)])
 async def chunked_upload_begin(request: Request):
     """Reserve capacity and open a session, before any bytes are sent.
 
@@ -5122,8 +5142,6 @@ async def chunked_upload_begin(request: Request):
     request path rather than looser: not one byte of somebody's footage is
     accepted before they have said they have the right to upload it.
     """
-    if not SETTINGS.chunked_upload_enabled:
-        raise HTTPException(404)
     account = _account(request)
     if not account:
         return JSONResponse(
@@ -5187,11 +5205,9 @@ def _unwind_chunked(account_id: int, job_id: str, reserved: bool) -> None:
         release_upload_storage(job_id)
 
 
-@app.put("/api/upload/{job_id}/chunk", dependencies=[Depends(require_csrf)])
+@app.put("/api/upload/{job_id}/chunk", dependencies=[Depends(_chunked_enabled), Depends(require_csrf)])
 async def chunked_upload_chunk(request: Request, job_id: str, offset: int = 0):
     """Append one piece, if it continues where the file currently ends."""
-    if not SETTINGS.chunked_upload_enabled:
-        raise HTTPException(404)
     account = _account(request)
     if not account:
         raise HTTPException(401, "Sign in to continue this upload.")
@@ -5209,11 +5225,9 @@ async def chunked_upload_chunk(request: Request, job_id: str, offset: int = 0):
                          "complete": received >= session.declared_bytes})
 
 
-@app.get("/api/upload/{job_id}/status")
+@app.get("/api/upload/{job_id}/status", dependencies=[Depends(_chunked_enabled)])
 async def chunked_upload_status(request: Request, job_id: str):
     """Where to resume. Lets a reloaded page pick up an upload in progress."""
-    if not SETTINGS.chunked_upload_enabled:
-        raise HTTPException(404)
     account = _account(request)
     if not account:
         raise HTTPException(401, "Sign in to continue this upload.")
@@ -5226,7 +5240,7 @@ async def chunked_upload_status(request: Request, job_id: str):
                          "complete": session.complete})
 
 
-@app.post("/api/upload/{job_id}/abort", dependencies=[Depends(require_csrf)])
+@app.post("/api/upload/{job_id}/abort", dependencies=[Depends(_chunked_enabled), Depends(require_csrf)])
 async def chunked_upload_abort(request: Request, job_id: str):
     """Give the capacity back rather than waiting for the sweep.
 
@@ -5234,8 +5248,6 @@ async def chunked_upload_abort(request: Request, job_id: str):
     uploading until their leases expire. Somebody who changes their mind
     should not have to wait fifteen minutes.
     """
-    if not SETTINGS.chunked_upload_enabled:
-        raise HTTPException(404)
     account = _account(request)
     if not account:
         raise HTTPException(401, "Sign in to continue this upload.")
@@ -5248,7 +5260,7 @@ async def chunked_upload_abort(request: Request, job_id: str):
     return JSONResponse({"released": True})
 
 
-@app.post("/api/upload/{job_id}/finish", dependencies=[Depends(require_csrf)])
+@app.post("/api/upload/{job_id}/finish", dependencies=[Depends(_chunked_enabled), Depends(require_csrf)])
 async def chunked_upload_finish(request: Request, job_id: str):
     """Hand the assembled file to the pipeline the single-request path uses.
 
@@ -5263,8 +5275,6 @@ async def chunked_upload_finish(request: Request, job_id: str):
     The form answers were captured at `begin`, before any footage was
     accepted, and are replayed here.
     """
-    if not SETTINGS.chunked_upload_enabled:
-        raise HTTPException(404)
     account = _account(request)
     if not account:
         raise HTTPException(401, "Sign in to continue this upload.")
@@ -5359,7 +5369,8 @@ async def chunked_upload_finish(request: Request, job_id: str):
     return response
 
 
-@app.put("/api/upload/probe", include_in_schema=False, dependencies=[Depends(require_csrf)])
+@app.put("/api/upload/probe", include_in_schema=False,
+         dependencies=[Depends(_probe_enabled), Depends(require_csrf)])
 async def upload_probe(request: Request):
     """Measure what this host accepts in one request body, and how.
 
@@ -5384,8 +5395,6 @@ async def upload_probe(request: Request):
     fill the disk or leave an orphan. Off by default, admin only, and it
     deliberately bypasses no limit - the point is to find out where they are.
     """
-    if not SETTINGS.upload_probe_enabled:
-        raise HTTPException(404)
     if not _is_admin(request):
         raise HTTPException(404)
     _enforce_rate_limit(request, "upload-probe", 20, 600)

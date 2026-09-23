@@ -129,6 +129,47 @@ class ProbeEndpointTests(unittest.TestCase):
         object.__setattr__(SETTINGS, "upload_probe_enabled", False)
         self.assertEqual(self.client.put("/api/upload/probe", content=b"x").status_code, 404)
 
+    def test_it_is_absent_to_a_caller_with_no_csrf_token_either(self):
+        """How an outsider actually meets it, and the case this test missed.
+
+        The suite's BrowserClient adds the CSRF header automatically, so this
+        class was reaching the handler's flag check and seeing its 404. A
+        caller without a token met require_csrf first and got a 403 - which
+        says the route exists. Live, that is exactly what the disabled probe
+        answered. The gate is a dependency ahead of require_csrf now, so a
+        switched-off endpoint looks like one that was never built.
+        """
+        from fastapi.testclient import TestClient as RawClient
+
+        object.__setattr__(SETTINGS, "upload_probe_enabled", False)
+        raw = RawClient(app)
+        try:
+            self.assertEqual(raw.put("/api/upload/probe", content=b"x").status_code, 404)
+        finally:
+            raw.close()
+
+    def test_the_chunked_endpoints_hide_the_same_way(self):
+        from fastapi.testclient import TestClient as RawClient
+
+        previous = SETTINGS.chunked_upload_enabled
+        object.__setattr__(SETTINGS, "chunked_upload_enabled", False)
+        raw = RawClient(app)
+        job = "abcdef123456"
+        try:
+            for method, path, kwargs in (
+                    ("post", "/api/upload/begin", {"json": {}}),
+                    ("put", "/api/upload/%s/chunk?offset=0" % job, {"content": b"x"}),
+                    ("get", "/api/upload/%s/status" % job, {}),
+                    ("post", "/api/upload/%s/abort" % job, {}),
+                    ("post", "/api/upload/%s/finish" % job, {})):
+                with self.subTest(path=path):
+                    self.assertEqual(
+                        getattr(raw, method)(path, **kwargs).status_code, 404,
+                        "%s reveals itself while switched off" % path)
+        finally:
+            raw.close()
+            object.__setattr__(SETTINGS, "chunked_upload_enabled", previous)
+
     def test_it_is_still_absent_to_a_stranger_when_switched_on(self):
         """404 rather than 403: an endpoint that absorbs large bodies should
         not advertise itself to someone who cannot use it."""

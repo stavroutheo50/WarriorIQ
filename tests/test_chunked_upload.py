@@ -269,7 +269,7 @@ class LeaseTests(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1]
                   / "app" / "main.py").read_text(encoding="utf-8")
         start = source.index("async def chunked_upload_chunk")
-        body = source[start:source.index("@app.get(\"/api/upload/{job_id}/status\")", start)]
+        body = source[start:source.index("/api/upload/{job_id}/status", start)]
         self.assertIn("extend_lease", body)
 
     def test_the_part_file_ages_out_with_its_job(self):
