@@ -967,6 +967,12 @@ class Settings:
     # So before an upload architecture is designed around that ceiling, the
     # ceiling gets measured. Off by default, admin-only, writes nothing to
     # disk; turn it on, measure, turn it off.
+    # Squeeze the concatenated stylesheets before serving them. On by
+    # default; the switch exists because a minifier is the kind of thing that
+    # breaks one page on one browser, and the first question then is whether
+    # it was the minifier. Turning this off answers that in a restart instead
+    # of a deploy.
+    css_minify_enabled: bool = env_bool("WARRIORIQ_CSS_MINIFY", True)
     upload_probe_enabled: bool = env_bool("WARRIORIQ_UPLOAD_PROBE", False)
 
     # ------------------------------------------------------------

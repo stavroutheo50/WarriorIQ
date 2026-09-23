@@ -93,6 +93,7 @@ from core.chunked_upload import (
     discard as discard_chunked, extend_lease, finalise as finalise_chunked,
     load as load_chunked,
 )
+from core.css_minify import minify as minify_css
 from core.preflight_client import client_thresholds
 from core.report_visuals import build as report_visuals
 from core.upload_security import (
@@ -287,7 +288,13 @@ def _build_css_bundle(names: tuple[str, ...]) -> str:
             parts.append(f"/* {name} */\n{path.read_text(encoding='utf-8')}")
         except OSError:
             LOGGER.warning("css_bundle_missing file=%s", name)
-    return "\n".join(parts)
+    # Concatenated, then squeezed. Both happen once, at import: 216 KB of
+    # stylesheet reached every page on a site whose heaviest page carries
+    # one image. The files stay readable on disk; only what goes over the
+    # wire is shrunk, and core/css_minify.py is deliberately timid about
+    # what it will touch.
+    joined = "\n".join(parts)
+    return minify_css(joined) if SETTINGS.css_minify_enabled else joined
 
 
 CSS_BUNDLE_TEXT = {key: _build_css_bundle(names) for key, names in CSS_BUNDLES.items()}
