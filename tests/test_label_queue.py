@@ -131,5 +131,70 @@ class ArrivedIsTheDecidingSetTests(unittest.TestCase):
         self.assertIs(queue_module.ARRIVED_OUTCOMES, ARRIVED_OUTCOMES)
 
 
+class SavingAnswersTests(unittest.TestCase):
+    """Answers on disk are the only copy: labelpack/ is gitignored.
+
+    The save path replaced the file with whatever the page was holding, and
+    the page restored its state from localStorage alone. A browser that had
+    never opened that pack started empty, so the first keystroke wrote a file
+    containing one answer. Reproduced against the real cropmotion pack, which
+    held 91: one POST left one.
+    """
+
+    def test_a_page_answering_a_subset_keeps_the_rest(self):
+        from tools.serve_label_pack import merge_answers
+
+        existing = {"labels": [{"id": 1, "technique": "jab"},
+                               {"id": 2, "technique": "none"}],
+                    "unsure": [3], "wrong_person": [{"id": 4}]}
+        incoming = {"scope": [2], "labels": [{"id": 2, "technique": "cross"}],
+                    "unsure": [], "wrong_person": []}
+        merged = merge_answers(existing, incoming)
+        self.assertEqual(sorted(l["id"] for l in merged["labels"]), [1, 2])
+        self.assertEqual([l["technique"] for l in merged["labels"] if l["id"] == 2],
+                         ["cross"], "the answer inside the scope must be the new one")
+        self.assertEqual([l["technique"] for l in merged["labels"] if l["id"] == 1],
+                         ["jab"], "an answer outside the scope must survive untouched")
+        self.assertEqual(merged["unsure"], [3])
+        self.assertEqual(merged["wrong_person"], [{"id": 4}])
+
+    def test_an_answer_can_still_change_family_inside_its_scope(self):
+        """Merging must not mean "can never be corrected"."""
+        from tools.serve_label_pack import merge_answers
+
+        merged = merge_answers(
+            {"labels": [{"id": 7, "technique": "jab"}], "unsure": [], "wrong_person": []},
+            {"scope": [7], "labels": [], "unsure": [7], "wrong_person": []})
+        self.assertEqual(merged["labels"], [])
+        self.assertEqual(merged["unsure"], [7])
+
+    def test_a_page_that_does_not_declare_a_scope_still_writes_whole(self):
+        """Older pages always covered the entire pack, so replacing is right
+        for them. Kept so a pack built before this change keeps working."""
+        from tools.serve_label_pack import merge_answers
+
+        merged = merge_answers({"labels": [{"id": 1, "technique": "jab"}]},
+                               {"labels": [{"id": 9, "technique": "cross"}]})
+        self.assertEqual([l["id"] for l in merged["labels"]], [9])
+
+    def test_the_header_of_an_existing_file_is_not_thrown_away(self):
+        from tools.serve_label_pack import merge_answers
+
+        merged = merge_answers(
+            {"labelled_by": "claude-opus-5, 2026-09-07", "labels": []},
+            {"scope": [], "labels": [], "unsure": [], "wrong_person": []})
+        self.assertEqual(merged["labelled_by"], "claude-opus-5, 2026-09-07")
+
+    def test_ids_compare_the_same_whether_they_arrive_as_text_or_number(self):
+        """The page sends numbers; some files on disk hold strings."""
+        from tools.serve_label_pack import merge_answers
+
+        merged = merge_answers({"labels": [{"id": "5", "technique": "jab"}]},
+                               {"scope": [5], "labels": [{"id": 5, "technique": "cross"}],
+                                "unsure": [], "wrong_person": []})
+        self.assertEqual(len(merged["labels"]), 1, "5 and \"5\" are the same clip")
+        self.assertEqual(merged["labels"][0]["technique"], "cross")
+
+
 if __name__ == "__main__":
     unittest.main()
