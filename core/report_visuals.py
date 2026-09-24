@@ -22,8 +22,14 @@ already on disk gains it without being re-run.
 **What it may not show.** Punch counting is switched off - checked against
 video, the count was overstated by eleven in two bouts of three. A body map
 fed from the raw event stream would quietly republish exactly that number in
-a new shape. So everything here counts legs and knees only, from the same
+a new shape. So everything here counts kicks only, from the same
 `ARRIVED_OUTCOMES` set the published timeline uses, and the page says so.
+
+Knees are excluded too, which is less obvious. They were folded in with kicks
+because both are a leg arriving, so a misnamed one was harmless. Labelling the
+HD bout at family level found five proposed knees and not one real knee: three
+were kicks and two were punches. Keeping the bucket would publish the withheld
+family under another name, so it goes.
 """
 
 from __future__ import annotations
@@ -32,16 +38,18 @@ from collections import Counter
 
 from core.report import ARRIVED_OUTCOMES
 
-# The families that may be counted. Punches are excluded deliberately; see the
-# module docstring and core/report.py's STRIKE_COUNTS_PRECISION_VALIDATED.
-COUNTABLE = ("kick", "knee")
+# The families that may be counted. Punches are excluded deliberately, and
+# knees with them because the knee bucket was measured to contain punches;
+# see the module docstring and core/report.py's
+# STRIKE_COUNTS_PRECISION_VALIDATED.
+COUNTABLE = ("kick",)
 
 # Body zones, in the order a person reads a body.
 ZONES = ("head", "body", "leg")
 
 
 def _countable(event: dict) -> bool:
-    """A leg strike that arrived, which is the only thing safe to count."""
+    """A kick that arrived, which is the only thing safe to count."""
     technique = str(event.get("technique") or "").lower()
     if not any(word in technique for word in COUNTABLE):
         return False
@@ -70,7 +78,7 @@ def head_to_head(metrics: dict, mine: str, theirs: str, landed: dict) -> list[di
     """
     a, b = metrics.get(mine) or {}, metrics.get(theirs) or {}
     rows = [
-        {"key": "landed", "label": "Strikes landed", "sub": "legs and knees",
+        {"key": "landed", "label": "Kicks landed", "sub": "kicks only",
          "a": landed.get(mine, 0), "b": landed.get(theirs, 0), "absolute": False},
         {"key": "guard", "label": "Guard up", "sub": "% of the round",
          "a": _percent(a.get("guard_index")), "b": _percent(b.get("guard_index")),
@@ -173,5 +181,5 @@ def build(report: dict, focus: str = "A") -> dict | None:
         "span_seconds": round(span, 1) if span > 0 else 0.0,
         # Said once, in one place, so every section below inherits it rather
         # than repeating a disclaimer five times.
-        "counts": "Legs and knees only. Hands are not counted yet.",
+        "counts": "Kicks only. Hands and knees are not counted yet.",
     }

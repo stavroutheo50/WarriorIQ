@@ -3742,7 +3742,7 @@ class ObservedSummaryTests(unittest.TestCase):
     """The middle setting between a scorecard and a blank page."""
 
     @staticmethod
-    def _report(cov_a=0.40, cov_b=0.30, a=(1, 1, 0), b=(0, 0, 1)):
+    def _report(cov_a=0.40, cov_b=0.30, a=(1, 1, 0), b=(0, 1, 0)):
         def fighter(cov, counts):
             return {"observation_coverage": cov, "punch_attempts": counts[0],
                     "kick_attempts": counts[1], "knee_attempts": counts[2],
@@ -3777,19 +3777,32 @@ class ObservedSummaryTests(unittest.TestCase):
         # nothing with the hands.
         self.assertEqual(seen["A"]["punches_withheld"], 1)
 
-    def test_a_knee_is_counted_as_a_leg_strike(self):
-        """A knee and a round kick are both a leg arriving.
+    def test_a_knee_is_not_counted_as_a_leg_strike(self):
+        """It used to be, and the reason was sound until it was measured.
 
-        Judged by eye on real footage the two are a coin flip, so reporting
-        them apart would name a distinction the footage does not carry - and
-        knees were previously dropped entirely while a knee column that could
-        only ever read zero stayed on the page.
+        A knee and a round kick are both a leg arriving, so a misnamed knee
+        was still a leg and the count survived the confusion. Labelling the
+        HD bout at family level found the confusion does not stop at the leg:
+        of five proposed knees, **none was a knee** - three were kicks and two
+        were punches.
+
+        Punches are the family this report withholds on purpose. A bucket
+        that is 40% punches republishes them under another name, so the bucket
+        goes. The cost is three real kicks per five proposals, an under-count,
+        which is the direction everything on this page already errs in.
         """
         from core.report import observed_summary
 
-        seen = observed_summary(self._report(b=(0, 0, 1)))["fighters"]
-        self.assertEqual(seen["B"]["families"], {"kick": 1})
-        self.assertEqual(seen["B"]["actions_evidenced"], 1)
+        # A fighter whose only evidenced actions are knees now has nothing to
+        # report, rather than a kick count built from misnamed punches.
+        self.assertIsNone(observed_summary(self._report(a=(0, 0, 0), b=(0, 0, 1))))
+
+        seen = observed_summary(self._report(a=(0, 2, 3)))["fighters"]
+        self.assertEqual(seen["A"]["families"], {"kick": 2})
+        self.assertEqual(seen["A"]["actions_evidenced"], 2)
+        # And the omission is stated rather than silent, the same way the
+        # withheld punches are.
+        self.assertEqual(seen["A"]["knees_withheld"], 3)
 
     def test_knees_reach_the_attempt_tier_at_all(self):
         from pathlib import Path
@@ -3811,10 +3824,9 @@ class ObservedSummaryTests(unittest.TestCase):
         report = self._report(a=(3, 2, 1))
         stats = report["statistics"]["fighters"]["A"]
         seen = observed_summary(report)["fighters"]["A"]
-        # Kicks and knees, from the same statistics block - not the punch
-        # total, and not a recount of the raw event list.
-        self.assertEqual(seen["actions_evidenced"],
-                         stats["kick_attempts"] + stats["knee_attempts"])
+        # Kicks, from the same statistics block - not the punch total, not
+        # the knee total, and not a recount of the raw event list.
+        self.assertEqual(seen["actions_evidenced"], stats["kick_attempts"])
 
     def test_the_share_of_the_round_travels_with_the_count(self):
         from core.report import observed_summary
@@ -3879,7 +3891,7 @@ class ObservedSummaryTests(unittest.TestCase):
         rendered = re.sub(r"\{#.*?#\}", "", page, flags=re.S)
         self.assertNotIn("at least {{seen.actions_evidenced}}", rendered)
         self.assertNotIn("the real numbers are higher", rendered)
-        self.assertIn("Leg strikes only", rendered)
+        self.assertIn("Kicks only.", rendered)
         self.assertIn("punch count was overstated", rendered)
 
     def test_the_page_shows_it_only_when_the_score_is_withheld(self):
@@ -3969,18 +3981,22 @@ class KickMinimumTests(unittest.TestCase):
         self.assertIn("not a shortfall by the fighter", card["note"])
         self.assertFalse(card["is_a_floor"])
 
-    def test_a_knee_counts_toward_the_kick_minimum(self):
-        """Knees are illegal in Full Contact, so a knee there is a misread kick.
+    def test_a_knee_does_not_count_toward_the_kick_minimum(self):
+        """This rule carries a minus point, so the count must not be inflated.
 
-        Kick against knee is a coin flip on this footage, and folding them is
-        what `observed_summary` already does for the same reason.
+        Knees are illegal in Full Contact, which is why a knee here was read
+        as a misnamed kick and folded in. Family labelling of the HD bout
+        says two of every five proposed knees are punches, and crediting a
+        kickboxer with kicks they did not throw is the one direction this
+        check must never err in.
+
+        Leaving them out only lowers a floor that can confirm compliance and
+        can never allege a shortfall, so nobody is penalised by the omission.
         """
         from core.report import kick_minimum_check
 
         card = kick_minimum_check(self._report("FULL_CONTACT", a_kicks=(3, 2), a_knees=(3, 0)))
-        # The folding is what this test is about; confirmation is gated
-        # separately on whether the count has been validated at all.
-        self.assertEqual(card["rounds"][0]["fighters"]["A"]["kicks_evidenced"], 6)
+        self.assertEqual(card["rounds"][0]["fighters"]["A"]["kicks_evidenced"], 3)
 
     def test_a_report_without_rounds_yields_nothing(self):
         from core.report import kick_minimum_check
