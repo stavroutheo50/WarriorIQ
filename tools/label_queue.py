@@ -58,6 +58,15 @@ from tools.evaluate_strike_counts import (
 DECIDES = ("punch", "arrived")
 
 
+def _sweep_finished_queues(queue: dict) -> None:
+    """Remove the queue file of any pack with nothing left to decide."""
+    for stale in sorted((PROJECT_ROOT / "labelpack").glob("*/queue.json")):
+        if stale.parent.name not in queue:
+            stale.unlink()
+            print(f"  {stale.parent.name}: nothing left to decide, "
+                  f"removed {stale.relative_to(PROJECT_ROOT)}")
+
+
 def _answered_in_pack(pack: Path) -> set[int]:
     """Ids somebody already answered through the label page.
 
@@ -163,6 +172,15 @@ def main() -> int:
     arguments = parser.parse_args()
 
     queue = build(everything=arguments.all)
+
+    if arguments.write:
+        # A pack that has run out of deciding clips must lose its queue file,
+        # or the label server keeps advertising work that is finished. This
+        # runs before the "nothing left" exit, because answering the final
+        # clip is exactly when a queue file becomes stale - and taking the
+        # early return first left pack_1mp4 advertising twenty answered clips.
+        _sweep_finished_queues(queue)
+
     if not queue:
         print("Nothing left to label.")
         return 0
@@ -198,17 +216,6 @@ def main() -> int:
                 "ids": [row["id"] for row in rows],
             }, indent=2) + "\n", encoding="utf-8")
             print(f"    wrote {target.relative_to(PROJECT_ROOT)}")
-        print()
-
-    if arguments.write:
-        # A pack that has run out of deciding clips must lose its queue file,
-        # or the label server keeps advertising work that is finished. This is
-        # how cropmotion came to offer ten clips that all had answers.
-        for stale in sorted((PROJECT_ROOT / "labelpack").glob("*/queue.json")):
-            if stale.parent.name not in queue:
-                stale.unlink()
-                print(f"  {stale.parent.name}: nothing left to decide, "
-                      f"removed {stale.relative_to(PROJECT_ROOT)}")
         print()
 
     print("Then re-measure:")
