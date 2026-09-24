@@ -196,5 +196,65 @@ class SavingAnswersTests(unittest.TestCase):
         self.assertEqual(merged["labels"][0]["technique"], "cross")
 
 
+class TwoAnswerStoresTests(unittest.TestCase):
+    """The same clips have answers in two files, and the queue read one.
+
+    tools/labels_*.json holds the verdicts the evaluation harness reads.
+    labelpack/<pack>/<pack>-labels.json holds whatever was answered in the
+    browser. Nothing joined them, so the queue offered ten cropmotion clips
+    that every one already had an answer for - the page opened and said
+    "that's all of them" before a single question was asked.
+    """
+
+    def test_an_answer_given_in_the_browser_retires_the_clip(self):
+        import json
+
+        from tools.evaluate_strike_counts import _pack_path, discover
+        from tools.label_queue import _answered_in_pack, build
+
+        queue = build()
+        if not queue:
+            self.skipTest("no label packs in this checkout")
+        for pack_name, rows in queue.items():
+            pack = PROJECT_ROOT / "labelpack" / pack_name
+            answered = _answered_in_pack(pack)
+            for row in rows:
+                with self.subTest(pack=pack_name, id=row["id"]):
+                    self.assertNotIn(row["id"], answered)
+        # And the store really does hold answers, so the check above is not
+        # passing because it is comparing against an empty set.
+        packs = [_pack_path(str(json.loads(p.read_text(encoding="utf-8")).get("pack") or ""))
+                 for p in discover()]
+        self.assertTrue(any(_answered_in_pack(p) for p in packs),
+                        "no pack has browser-written answers; this test proves nothing")
+
+    def test_unsure_retires_a_clip_too(self):
+        """Not evidence, but somebody already looked and said what they could.
+        Asking again spends the only thing the queue exists to save."""
+        import json
+        import tempfile
+
+        from tools.label_queue import _answered_in_pack
+
+        with tempfile.TemporaryDirectory() as folder:
+            pack = Path(folder) / "demo"
+            pack.mkdir()
+            (pack / "demo-labels.json").write_text(json.dumps({
+                "labels": [{"id": 1, "technique": "jab"}],
+                "unsure": [2],
+                "wrong_person": [{"id": 3}],
+            }), encoding="utf-8")
+            self.assertEqual(_answered_in_pack(pack), {1, 2, 3})
+
+    def test_a_pack_with_nothing_left_keeps_no_queue_file(self):
+        """A stale queue.json keeps the label server advertising finished work."""
+        from tools.label_queue import build
+
+        live = build()
+        for path in (PROJECT_ROOT / "labelpack").glob("*/queue.json"):
+            with self.subTest(pack=path.parent.name):
+                self.assertIn(path.parent.name, live)
+
+
 if __name__ == "__main__":
     unittest.main()

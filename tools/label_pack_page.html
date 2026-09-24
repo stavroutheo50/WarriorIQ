@@ -214,7 +214,10 @@ function record(value) {
 }
 
 function render() {
-  const done = Object.keys(labels).length;
+  // Only what is on this page. `labels` also holds answers restored from
+  // disk for clips this page is not showing, and counting those read
+  // "94 of 10 done" on a ten-clip queue.
+  const done = items.filter((i) => i.id in labels).length;
   document.getElementById("job").textContent = DATA.job;
   document.getElementById("count").textContent = done + " of " + items.length + " done";
   document.getElementById("prog").style.width = (100 * done / items.length) + "%";

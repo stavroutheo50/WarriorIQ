@@ -180,6 +180,11 @@ class Handler(BaseHTTPRequestHandler):
         if old_items in html:
             html = html.replace(old_items, new_items)
 
+        old_done = "  const done = Object.keys(labels).length;"
+        new_done = "  const done = items.filter((i) => i.id in labels).length;"
+        if old_done in html:
+            html = html.replace(old_done, new_done)
+
         old_payload = "    job: DATA.job, video: DATA.video,"
         new_payload = ("    job: DATA.job, video: DATA.video," + newline
                        + "    scope: items.map((i) => i.id),")
@@ -297,8 +302,12 @@ class Handler(BaseHTTPRequestHandler):
                 queue = json.loads((pack / "queue.json").read_text(encoding="utf-8"))
                 outstanding = len(queue.get("ids") or [])
                 if outstanding:
-                    deciding = (f'<span class="queue">{outstanding} of these decide '
-                                f'whether punches can be shown</span>')
+                    # A link, not a sentence. Saying "20 of these decide" while
+                    # the only way in showed all 141 left the reader to find
+                    # them, which is the work the queue existed to remove.
+                    deciding = (f'<span class="queue"><a href="/{pack.name}/?queue=1">'
+                                f'Answer just the {outstanding} that decide whether '
+                                f'punches can be shown &rarr;</a></span>')
             except (OSError, ValueError):
                 pass
             rows.append(
