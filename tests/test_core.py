@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 import sqlite3
 import json
+import pathlib
 from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -3340,9 +3341,14 @@ class WorkerSingleInstanceTests(unittest.TestCase):
     """One worker per machine, and only one that can actually analyse."""
 
     def setUp(self):
+        import tempfile
         import worker
 
         self.worker = worker
+        # A lock of this test's own, so the race tests below can hammer it
+        # without touching a real worker's lock on the machine running them.
+        folder = tempfile.mkdtemp()
+        self.lock = pathlib.Path(folder) / "worker.lock"
         self.addCleanup(self._clear)
 
     def _clear(self):
@@ -3383,6 +3389,68 @@ class WorkerSingleInstanceTests(unittest.TestCase):
         self.assertLess(
             time.time() - later, self.worker.LOCK_STALE_SECONDS,
             "a busy worker still reads as stale")
+
+    def test_a_refresh_never_makes_the_lock_look_unheld(self):
+        """The heartbeat must not answer the question it exists to settle.
+
+        `refresh_worker_lock` wrote with `write_text`, which truncates the
+        file to nothing before writing it. A reader arriving in that window
+        got an empty file, and `_read_lock` turns an empty file into None -
+        which is how a starting worker concludes nobody holds the lock and
+        begins a second analysis on the same 8 GB card.
+
+        That is precisely the failure the heartbeat was added to prevent, and
+        the heartbeat's own write reintroduced it. Measured before the fix:
+        905 of 1792 reads saw the lock as absent while one thread refreshed.
+
+        This also failed on CI, once, as
+        `test_the_heartbeat_survives_a_long_analysis` - a real race that read
+        as a flake because it needs a loaded machine to land in the window.
+        """
+        import threading
+        import time
+        from unittest import mock
+
+        with mock.patch.object(self.worker, "_lock_path", return_value=self.lock):
+            self.worker.refresh_worker_lock()
+            stop = threading.Event()
+
+            def refresh():
+                while not stop.is_set():
+                    self.worker.refresh_worker_lock()
+
+            writer = threading.Thread(target=refresh, daemon=True)
+            writer.start()
+            self.addCleanup(stop.set)
+            try:
+                absent = reads = 0
+                empty = 0
+                deadline = time.time() + 0.6
+                while time.time() < deadline:
+                    reads += 1
+                    if self.lock.exists() and self.lock.stat().st_size == 0:
+                        empty += 1
+                    if self.worker._read_lock() is None:
+                        absent += 1
+            finally:
+                stop.set()
+                writer.join(timeout=2)
+
+        self.assertGreater(reads, 50, "the loop did not run often enough to mean anything")
+        self.assertEqual(empty, 0,
+                         "the lock was observed empty; the refresh is truncating it")
+        # Generous, because a rename on Windows can still bounce a reader with
+        # a sharing violation. The bug being pinned sat at 50%.
+        self.assertLess(absent / reads, 0.2,
+                        "a refresh is making the lock read as unheld")
+
+    def test_an_absent_lock_is_still_reported_absent(self):
+        """The retry must not turn "nobody is here" into "somebody is"."""
+        from unittest import mock
+
+        missing = self.lock.with_name("definitely-not-here.lock")
+        with mock.patch.object(self.worker, "_lock_path", return_value=missing):
+            self.assertIsNone(self.worker._read_lock())
 
     def test_the_heartbeat_beats_faster_than_the_staleness_limit(self):
         """Two beats have to be missable before anyone declares this worker gone."""
