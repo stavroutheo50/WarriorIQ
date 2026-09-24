@@ -187,6 +187,95 @@ def discover(labels_dir: Path = LABELS_DIR) -> list[Path]:
     return found
 
 
+def translate_page_store(pack_dir: Path) -> dict | None:
+    """Read the answers given in the browser, in the shape this tool expects.
+
+    There are two answer stores for the same clips and this tool read one.
+    `tools/labels_*.json` holds verdicts; `labelpack/<pack>/<pack>-labels.json`
+    holds whatever was answered through tools/serve_label_pack.py, written
+    straight to disk as each answer was given. Nothing joined them, so 195
+    answers given by hand were invisible to the measurement that decides
+    whether punch counting can be published.
+
+    They are not a second opinion of the same kind. Every `labels_*.json` in
+    this repository says in its own header that it was written by a model.
+    The page store was filled in by a person watching the clips, and the two
+    are told apart by how often they refuse to answer: the model marks
+    `unsure` on 21-23% of clips in every pack it did, and the page store
+    marks 0%, 0%, 0% and 11%.
+
+    The page records what the labeller thought the strike *was*, not just
+    whether one happened, so the family error comes out of the same answer:
+
+      technique "none"   -> the detector proposed a strike and none happened
+      any other technique -> a strike happened; if its family is not the one
+                             proposed, that is FAMILY WRONG
+      in `unsure`        -> looked at, could not tell
+      in `wrong_person`  -> something happened, to somebody else. The report
+                            would credit the wrong athlete, so it is counted
+                            exactly as WRONG FIGHTER is for the model labels.
+    """
+    path = pack_dir / f"{pack_dir.name}-labels.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("labels"):
+        return None
+    # A file carrying `labelled_by` or `skip_reasons` was written by a script,
+    # not by the page. Those are the machine passes and they are already
+    # represented; reading them here would count one opinion twice.
+    if "labelled_by" in data or "skip_reasons" in data:
+        return None
+
+    labels = []
+    for item in data.get("labels") or []:
+        identifier = _as_label_id(item.get("id"))
+        if identifier is None:
+            continue
+        technique = str(item.get("technique") or "").strip().lower()
+        if technique in ("", "none"):
+            labels.append({"id": identifier, "verdict": REJECTED})
+            continue
+        judged = family_of(technique)
+        proposed = family_of(str(item.get("proposed") or ""))
+        why = "FAMILY WRONG" if judged != proposed else ""
+        labels.append({"id": identifier, "verdict": CONFIRMED, "why": why})
+    for value in data.get("unsure") or []:
+        identifier = _as_label_id(value)
+        if identifier is not None:
+            labels.append({"id": identifier, "verdict": UNSURE})
+    for item in data.get("wrong_person") or []:
+        identifier = _as_label_id((item or {}).get("id"))
+        if identifier is not None:
+            labels.append({"id": identifier, "verdict": CONFIRMED,
+                           "why": "WRONG FIGHTER"})
+
+    return {
+        "pack": pack_dir.name,
+        "fight": str(data.get("video") or pack_dir.name),
+        "labels": labels,
+        "labeller": "answered by hand through the label page",
+        "_source_file": path.name,
+    }
+
+
+def _as_label_id(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def discover_page_stores(packs_dir: Path = PACKS_DIR) -> list[Path]:
+    """Packs whose answers were given in the browser rather than by a script."""
+    found = []
+    for pack in sorted(packs_dir.glob("*")):
+        if pack.is_dir() and translate_page_store(pack):
+            found.append(pack)
+    return found
+
+
 def provenance(data: dict) -> dict:
     """Who made these labels, and whether they are ground truth.
 
@@ -237,7 +326,19 @@ def _pack_path(pack: str) -> Path:
 
 
 def evaluate(labels_path: Path) -> FightResult | None:
-    data = json.loads(labels_path.read_text(encoding="utf-8"))
+    """Score one answer set. Either store, told apart by what it is.
+
+    A directory is a pack whose answers were given in the browser; a file is
+    a verdict set written by a script. Both end up in the same shape here,
+    because both are somebody saying what they saw.
+    """
+    if labels_path.is_dir():
+        data = translate_page_store(labels_path)
+        if data is None:
+            return None
+        labels_path = labels_path / str(data["_source_file"])
+    else:
+        data = json.loads(labels_path.read_text(encoding="utf-8"))
     pack_dir = _pack_path(str(data.get("pack") or ""))
     index = pack_dir / "index.json"
     if not index.exists():
@@ -351,22 +452,49 @@ def render(results: list[FightResult]) -> str:
             lines.append(f"  {wrong} confirmed strike(s) were attributed to the wrong fighter")
         lines.append("")
 
-    lines.append("-" * 74)
-    lines.append("All labelled fights")
-    lines.append(f"  {'family':<8}{'proposed':>9}{'judged':>8}{'real':>6}"
-                 f"{'over':>6}{'precision':>11}{'shown':>9}{'unsure':>8}{'unseen':>8}")
-    for name in ("punch", "kick"):
-        tally = totals.get(name)
-        if not tally:
-            continue
-        lines.append(
-            f"  {name:<8}{tally.proposed:>9}{tally.judged:>8}{tally.confirmed:>6}"
-            f"{tally.over_count:>+6}{_rate(tally.precision):>11}"
-            f"{_rate(tally.arrived_precision):>9}"
-            f"{tally.unsure:>8}{tally.unlabelled:>8}")
-    lines.append("")
+    # Never one pooled number. A model's opinion and a person's are different
+    # kinds of evidence, and averaging them produces a figure that is neither
+    # - while quietly letting the larger pile decide.
+    def pool(chosen: list[FightResult]) -> dict[str, Tally]:
+        out: dict[str, Tally] = {}
+        for item in chosen:
+            for name, tally in item.families.items():
+                out.setdefault(name, Tally()).merge(tally)
+        return out
 
-    punch, kick = totals.get("punch"), totals.get("kick")
+    by_hand = [r for r in results if not r.source.get("machine_generated")]
+    by_model = [r for r in results if r.source.get("machine_generated")]
+
+    for title, chosen in (("Answered by hand", by_hand),
+                          ("Answered by a model", by_model)):
+        if not chosen:
+            continue
+        grouped = pool(chosen)
+        lines.append("-" * 74)
+        lines.append(f"{title}  ({len(chosen)} "
+                     f"{'pack' if len(chosen) == 1 else 'packs'})")
+        lines.append(f"  {'family':<8}{'proposed':>9}{'judged':>8}{'real':>6}"
+                     f"{'over':>6}{'precision':>11}{'shown':>9}{'unsure':>8}"
+                     f"{'unseen':>8}")
+        for name in ("punch", "kick"):
+            tally = grouped.get(name)
+            if not tally:
+                continue
+            lines.append(
+                f"  {name:<8}{tally.proposed:>9}{tally.judged:>8}{tally.confirmed:>6}"
+                f"{tally.over_count:>+6}{_rate(tally.precision):>11}"
+                f"{_rate(tally.arrived_precision):>9}"
+                f"{tally.unsure:>8}{tally.unlabelled:>8}")
+        lines.append("")
+
+    # The sentences below read from the human answers when there are any,
+    # because that is the evidence this decision is allowed to rest on.
+    deciding = pool(by_hand) if by_hand else totals
+    lines.append(("Read below from the answers given by hand."
+                  if by_hand else
+                  "Read below from model answers - there are no human ones."))
+    lines.append("")
+    punch, kick = deciding.get("punch"), deciding.get("kick")
     if punch and punch.judged:
         lines.append(f"Punch precision is {_rate(punch.precision).strip()} over "
                      f"{punch.judged} judged proposals, overstating by "
@@ -386,6 +514,12 @@ def render(results: list[FightResult]) -> str:
     lines.append("core.report.STRIKE_COUNTS_PRECISION_VALIDATED is the switch this")
     lines.append("number governs. Nothing here turns it on by itself - that is a")
     lines.append("decision about what is good enough to publish, not a computation.")
+    if by_hand and by_model:
+        lines.append("")
+        lines.append("The two blocks above are not two measurements of one thing. The")
+        lines.append("model marks itself unsure on 21-23% of clips in every pack it")
+        lines.append("did; the hand answers do so on 0-11%. Where they disagree, the")
+        lines.append("hand answer is the evidence and the model's is a hypothesis.")
     if results and all(r.source.get("machine_generated") for r in results):
         lines.append("")
         lines.append("!! EVERY LABEL ABOVE WAS WRITTEN BY A MODEL, NOT A PERSON.")
@@ -408,8 +542,16 @@ def summarise(results: list[FightResult]) -> dict:
         "totals": {k: v.as_dict() for k, v in sorted(totals.items())},
         # Travels with the numbers, so a baseline committed today cannot be
         # read next month as though a person had produced it.
-        "label_sources": {r.pack: dict(r.source) for r in results},
-        "human_ground_truth": not all(r.source.get("machine_generated") for r in results),
+        # Keyed by the answer file, not by the pack. cropmotion and pack_1mp4
+        # have answers in both stores, and keying by pack silently dropped one
+        # of the two - which is the same mistake, in the summary, that the
+        # queue made by reading only one store.
+        "label_sources": {r.labels_file: dict(r.source, pack=r.pack) for r in results},
+        "human_ground_truth": any(
+            not r.source.get("machine_generated") and
+            any(t.judged for t in r.families.values()) for r in results),
+        # True only when a person actually ruled on something, not merely when
+        # a human-shaped file exists.
         "measures": {
             "precision": "confirmed / judged, over proposals a human ruled on",
             "over_count": "judged - confirmed, on the labelled subset",
@@ -438,10 +580,13 @@ def main() -> int:
     parser.add_argument("--baseline", help="an earlier --json file to compare against")
     arguments = parser.parse_args()
 
-    results = [r for r in (evaluate(p) for p in discover()) if r is not None]
+    # Both stores. The human answers are listed after the machine ones and
+    # are never averaged with them - see render(), which reports them apart.
+    sources = discover() + discover_page_stores()
+    results = [r for r in (evaluate(p) for p in sources) if r is not None]
     if not results:
-        print("No labelled fights found. Label packs live in labelpack/ and their "
-              "verdicts in tools/labels_*.json.")
+        print("No labelled fights found. Label packs live in labelpack/, with "
+              "answers in the pack itself or in tools/labels_*.json.")
         return 1
 
     print(render(results))

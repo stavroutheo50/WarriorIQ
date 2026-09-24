@@ -187,10 +187,37 @@ class ProvenanceTests(unittest.TestCase):
         summary = summarise(results)
         self.assertIn("human_ground_truth", summary)
         self.assertIn("label_sources", summary)
-        # Every pack in the repository is machine-labelled today, so this is
-        # False. If it ever becomes True somebody has done real labelling and
-        # the warning should stop being printed.
+        # tools/labels_*.json alone is all machine. The answers given through
+        # the label page live elsewhere and are found by discover_page_stores;
+        # this asserts the machine set is still correctly described as one.
         self.assertFalse(summary["human_ground_truth"])
+
+    def test_hand_answers_are_recognised_as_ground_truth(self):
+        from tools.evaluate_strike_counts import (
+            discover, discover_page_stores, evaluate, summarise)
+
+        results = [r for r in (evaluate(p) for p in
+                               discover() + discover_page_stores()) if r]
+        if not any(not r.source.get("machine_generated") for r in results):
+            self.skipTest("no hand-answered packs in this checkout")
+        summary = summarise(results)
+        self.assertTrue(summary["human_ground_truth"])
+
+    def test_a_pack_answered_in_both_stores_keeps_both(self):
+        """Keyed by pack, one silently replaced the other - the same mistake
+        the queue made by reading a single store."""
+        from tools.evaluate_strike_counts import (
+            discover, discover_page_stores, evaluate, summarise)
+
+        results = [r for r in (evaluate(p) for p in
+                               discover() + discover_page_stores()) if r]
+        if len(results) < 2:
+            self.skipTest("not enough label sets in this checkout")
+        summary = summarise(results)
+        self.assertEqual(len(summary["label_sources"]), len(results))
+        packs = [v["pack"] for v in summary["label_sources"].values()]
+        self.assertGreater(len(packs), len(set(packs)),
+                           "expected at least one pack answered in both stores")
 
     def test_the_report_warns_when_nothing_was_judged_by_a_person(self):
         from tools.evaluate_strike_counts import discover, evaluate, render
@@ -217,6 +244,87 @@ class ProvenanceTests(unittest.TestCase):
                         "athens_hd is well judged and must not be flagged thin")
         self.assertGreater(by_pack.get("pack_1mp4", 0), 0.5,
                            "pack_1mp4 is mostly unjudged and should be flagged")
+
+
+class PageStoreTranslationTests(unittest.TestCase):
+    """Answers given in the browser, read as verdicts.
+
+    195 answers were given by hand through tools/serve_label_pack.py and none
+    of them reached this measurement, because it read only tools/labels_*.json.
+    """
+
+    @staticmethod
+    def _pack(folder, **payload):
+        import json as json_module
+
+        pack = Path(folder) / "demo"
+        pack.mkdir()
+        (pack / "demo-labels.json").write_text(
+            json_module.dumps({"job": "demo", "video": "f.mp4", **payload}),
+            encoding="utf-8")
+        return pack
+
+    def test_no_technique_means_the_detector_was_wrong(self):
+        from tools.evaluate_strike_counts import REJECTED, translate_page_store
+
+        with tempfile.TemporaryDirectory() as folder:
+            pack = self._pack(folder, labels=[
+                {"id": 1, "technique": "none", "proposed": "jab"}])
+            verdicts = translate_page_store(pack)["labels"]
+        self.assertEqual(verdicts, [{"id": 1, "verdict": REJECTED}])
+
+    def test_a_named_technique_confirms_a_strike(self):
+        from tools.evaluate_strike_counts import CONFIRMED, translate_page_store
+
+        with tempfile.TemporaryDirectory() as folder:
+            pack = self._pack(folder, labels=[
+                {"id": 2, "technique": "cross", "proposed": "jab"}])
+            verdicts = translate_page_store(pack)["labels"]
+        self.assertEqual(verdicts[0]["verdict"], CONFIRMED)
+        self.assertEqual(verdicts[0]["why"], "",
+                         "a cross proposed as a jab is the right family")
+
+    def test_the_judged_family_is_compared_with_the_proposed_one(self):
+        """The page records what the labeller thought it was, so the family
+        error comes out of the same answer rather than needing a second one."""
+        from tools.evaluate_strike_counts import translate_page_store
+
+        with tempfile.TemporaryDirectory() as folder:
+            pack = self._pack(folder, labels=[
+                {"id": 3, "technique": "left_low_kick", "proposed": "jab"}])
+            verdicts = translate_page_store(pack)["labels"]
+        self.assertEqual(verdicts[0]["why"], "FAMILY WRONG")
+
+    def test_the_wrong_person_is_counted_as_the_wrong_fighter(self):
+        """Something happened, to somebody else. The report would credit the
+        wrong athlete, which is what WRONG FIGHTER already means here."""
+        from tools.evaluate_strike_counts import translate_page_store
+
+        with tempfile.TemporaryDirectory() as folder:
+            pack = self._pack(folder, labels=[{"id": 4, "technique": "jab",
+                                               "proposed": "jab"}],
+                              wrong_person=[{"id": 9}])
+            verdicts = translate_page_store(pack)["labels"]
+        self.assertIn({"id": 9, "verdict": "strike", "why": "WRONG FIGHTER"},
+                      verdicts)
+
+    def test_a_script_written_file_is_left_to_the_other_reader(self):
+        """f2_gateh, f3_gateh and fam3 carry `labelled_by` and `skip_reasons`.
+        Reading them here as well would count one opinion twice."""
+        from tools.evaluate_strike_counts import translate_page_store
+
+        with tempfile.TemporaryDirectory() as folder:
+            pack = self._pack(folder, labels=[{"id": 1, "technique": "jab"}],
+                              labelled_by="claude-opus-5")
+            self.assertIsNone(translate_page_store(pack))
+
+    def test_hand_answers_are_not_labelled_machine_generated(self):
+        from tools.evaluate_strike_counts import provenance, translate_page_store
+
+        with tempfile.TemporaryDirectory() as folder:
+            pack = self._pack(folder, labels=[{"id": 1, "technique": "jab"}])
+            data = translate_page_store(pack)
+        self.assertFalse(provenance(data)["machine_generated"])
 
 
 if __name__ == "__main__":
