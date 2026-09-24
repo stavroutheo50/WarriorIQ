@@ -75,7 +75,16 @@ class RealLabelTests(unittest.TestCase):
         self.labels = PROJECT_ROOT / "tools" / "labels_athens_hd_claude.json"
         if not self.labels.exists():
             self.skipTest("athens_hd labels are not in this checkout")
+        # The labels file is tracked; the pack it refers to is not. labelpack/
+        # is gitignored - the clips are crops of identifiable people at a real
+        # tournament - so on a fresh checkout `evaluate` finds no index.json
+        # and returns None. Guarding on the labels file alone meant these four
+        # tests ran on CI and failed there every time, while passing on any
+        # machine that happened to have the pack. Skip on what is actually
+        # needed, which is the pack.
         self.result = evaluate(self.labels)
+        if self.result is None:
+            self.skipTest("labelpack/athens_hd is not in this checkout (it is gitignored)")
 
     def test_it_reads_the_pack_and_finds_both_families(self):
         self.assertIsNotNone(self.result)
