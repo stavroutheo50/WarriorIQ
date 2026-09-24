@@ -73,11 +73,27 @@ class PunchGateTests(unittest.TestCase):
         row = [r for r in build(report, "A")["head_to_head"] if r["key"] == "landed"][0]
         self.assertEqual(row["a"], 0)
 
-    def test_knees_count_with_kicks(self):
-        """The report already treats them as one family: by eye a knee and a
-        round kick are a coin flip."""
+    def test_a_knee_never_reaches_the_strike_count_either(self):
+        """The knee bucket was measured and it holds punches.
+
+        Knees used to be counted with kicks, because both are a leg arriving
+        and a misnamed one was still a leg. Labelling the HD bout at family
+        level found five proposed knees and not one real knee: three were
+        kicks, **two were punches**.
+
+        So the bucket is a coin flip between a family this page publishes and
+        the family it exists to withhold, which makes it exactly as unsafe as
+        a raw punch count wearing a different label.
+        """
         report = _report(events=[_event(technique="left_knee", target="body")])
-        self.assertEqual(build(report, "A")["landed"]["body"], 1)
+        self.assertEqual(build(report, "A")["landed"]["body"], 0)
+
+    def test_the_countable_families_are_kicks_alone(self):
+        """Pinned as a set rather than through a rendered number, so that
+        widening it is a deliberate edit to this test and not a side effect."""
+        from core.report_visuals import COUNTABLE
+
+        self.assertEqual(tuple(COUNTABLE), ("kick",))
 
     def test_only_strikes_that_arrived_are_counted(self):
         report = _report(events=[
@@ -89,7 +105,11 @@ class PunchGateTests(unittest.TestCase):
         self.assertTrue({"clean", "blocked"} <= set(ARRIVED_OUTCOMES))
 
     def test_the_page_says_what_it_counted(self):
-        self.assertIn("Hands are not counted", build(_report(), "A")["counts"])
+        counts = build(_report(), "A")["counts"]
+        # Both omissions are named. A fighter who threw knees and sees no
+        # knees should be told the analysis withheld them, not left to
+        # conclude the analysis missed them.
+        self.assertIn("Hands and knees are not counted", counts)
 
 
 class HeadToHeadTests(unittest.TestCase):
@@ -179,8 +199,15 @@ class RealReportTests(unittest.TestCase):
         self.visuals = build(json.loads(stored.read_text(encoding="utf-8")), "A")
 
     def test_it_reshapes_a_real_report(self):
-        self.assertEqual(self.visuals["landed"], {"head": 1, "body": 4, "leg": 4})
-        self.assertEqual(self.visuals["taken"], {"head": 0, "body": 2, "leg": 1})
+        """The figures here moved when knees stopped being counted.
+
+        Fighter A's map went 1/4/4 to 1/3/2 and what they took went 0/2/1 to
+        0/2/0 - nine published strikes down to six, across both fighters 12
+        down to 8. That is the size of the knee bucket on a real bout, and on
+        this footage two of every five in it were punches.
+        """
+        self.assertEqual(self.visuals["landed"], {"head": 1, "body": 3, "leg": 2})
+        self.assertEqual(self.visuals["taken"], {"head": 0, "body": 2, "leg": 0})
         self.assertEqual(self.visuals["defence_total"], 22)
         self.assertEqual(self.visuals["chain_longest"], 8)
         self.assertEqual(len(self.visuals["head_to_head"]), 5)

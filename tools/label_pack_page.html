@@ -145,9 +145,22 @@ const SERVED = location.protocol === "http:" || location.protocol === "https:";
 // so a page that had never once written to disk showed "saving to disk" in
 // green from the moment it loaded.
 let saveState = SERVED ? "unproven" : "local";
-let labels = {};
-try { labels = JSON.parse(localStorage.getItem(store) || "{}"); } catch (e) { labels = {}; }
-const items = DATA.candidates;
+// Answers already on disk come first, then anything this browser remembers
+// on top. Starting from an empty object instead cost 91 answers: the payload
+// is built from what the page holds, so a page that had not been told what
+// was already saved sent a file containing the one answer just given.
+let labels = Object.assign({}, window.__SAVED__ || {});
+try { Object.assign(labels, JSON.parse(localStorage.getItem(store) || "{}")); } catch (e) { }
+// Only the clips worth answering, when the server says which those are.
+// Falls back to the whole pack if the filter would empty the page, so a
+// stale queue can never present nothing to do.
+const items = (function () {
+  const only = window.__QUEUE__;
+  if (!Array.isArray(only) || !only.length) return DATA.candidates;
+  const wanted = new Set(only);
+  const kept = DATA.candidates.filter((c) => wanted.has(c.id));
+  return kept.length ? kept : DATA.candidates;
+})();
 let at = 0;
 let pending = null;          // family chosen, offering the optional detail
 
@@ -201,7 +214,10 @@ function record(value) {
 }
 
 function render() {
-  const done = Object.keys(labels).length;
+  // Only what is on this page. `labels` also holds answers restored from
+  // disk for clips this page is not showing, and counting those read
+  // "94 of 10 done" on a ten-clip queue.
+  const done = items.filter((i) => i.id in labels).length;
   document.getElementById("job").textContent = DATA.job;
   document.getElementById("count").textContent = done + " of " + items.length + " done";
   document.getElementById("prog").style.width = (100 * done / items.length) + "%";
@@ -306,6 +322,10 @@ document.addEventListener("keydown", (ev) => {
 function buildPayload() {
   return {
     job: DATA.job, video: DATA.video,
+    // Which clips this page was responsible for. The server replaces the
+    // answers inside this set and keeps every answer outside it, so a page
+    // showing 20 of 141 clips cannot delete the other 121.
+    scope: items.map((i) => i.id),
     labels: items.filter((i) => i.id in labels
                               && labels[i.id] !== "__unsure__"
                               && labels[i.id] !== "__wrongperson__")

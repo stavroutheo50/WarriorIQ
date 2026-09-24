@@ -80,8 +80,8 @@
         {% endfor %}
       </tbody>
     </table>
-    <p class="small muted">Knees are counted as kicks here: a knee strike is illegal in Full
-      Contact, so a leg arriving is a kick this analysis named a knee.</p>
+    <p class="small muted">Kicks only. Strikes this analysis named a knee are left out:
+      checked against video, none of them was a knee and some were punches.</p>
   </div>
   {% endif %}
 </section>
@@ -115,8 +115,8 @@
         of displayed actions were real, the rest being the opponent's strike
         credited to the defender, a moment where nothing happened, or the
         referee. An inflated count must not be sold as a minimum. -#}
-    <p class="observed-note">Not a score. <strong>Leg strikes only</strong> &mdash; kicks and knees
-      together. We checked every strike this analysis proposed across three real bouts against the
+    <p class="observed-note">Not a score. <strong>Kicks only.</strong>
+      We checked every strike this analysis proposed across three real bouts against the
       video: the kick count came out right in all three, and the punch count was overstated by
       eleven in two of them. At this camera distance an arm extension is a few pixels, so punches
       are counted internally and deliberately not shown until that changes.</p>
@@ -128,8 +128,9 @@
         <span class="observed-basis">leg strike{{ '' if seen.actions_evidenced == 1 else 's' }}
           in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
         <span class="observed-families">
-          <em>knees counted as kicks</em>{% if seen.punches_withheld %} &middot;
-          punches not shown{% endif %}
+          <em>kicks only</em>{% if seen.punches_withheld %} &middot;
+          punches not shown{% endif %}{% if seen.knees_withheld %} &middot;
+          knees not shown{% endif %}
         </span>
       </div>
       {% endfor %}
@@ -340,9 +341,10 @@
     characters on prose. Nothing here is a new measurement; it is the same
     numbers placed where a fighter can see them.
 
-    Legs and knees only, from the arrived outcomes the published timeline
-    already uses. A map fed from the raw stream would quietly republish the
-    punch count this product does not trust. See core/report_visuals.py. -#}
+    Kicks only, from the arrived outcomes the published timeline already
+    uses. A map fed from the raw stream would quietly republish the punch
+    count this product does not trust - and so would the knee bucket, which
+    was measured to hold punches. See core/report_visuals.py. -#}
 {% if visuals %}
 <section class="card visual-report" id="report-visual">
   <div class="analysis-quality-heading">

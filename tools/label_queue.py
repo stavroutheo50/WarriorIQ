@@ -58,6 +58,44 @@ from tools.evaluate_strike_counts import (
 DECIDES = ("punch", "arrived")
 
 
+def _answered_in_pack(pack: Path) -> set[int]:
+    """Ids somebody already answered through the label page.
+
+    There are two answer stores for the same clips and this queue read only
+    one. tools/labels_*.json holds the verdicts the evaluation harness reads;
+    labelpack/<pack>/<pack>-labels.json holds whatever was answered in the
+    browser, written straight by the label server.
+
+    Nothing joined them, so the queue offered ten cropmotion clips that all
+    had answers already - the page opened, saw every one of them answered and
+    said "that's all of them". A queue that asks for work already done is
+    worse than no queue, because it is believed.
+
+    Unsure and wrong-person count as answered here. They are not evidence,
+    and the harness is right to ignore them, but somebody has already looked
+    at that clip and said what they could - asking again spends the one thing
+    this queue exists to save.
+    """
+    path = pack / f"{pack.name}-labels.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    seen: set[int] = set()
+    for key in ("labels", "wrong_person"):
+        for item in data.get(key) or []:
+            try:
+                seen.add(int((item or {}).get("id")))
+            except (TypeError, ValueError):
+                continue
+    for item in data.get("unsure") or []:
+        try:
+            seen.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return seen
+
+
 def _unlabelled(labels_path: Path) -> tuple[str, list[dict], dict]:
     data = json.loads(labels_path.read_text(encoding="utf-8"))
     pack = _pack_path(str(data.get("pack") or ""))
@@ -73,6 +111,7 @@ def _unlabelled(labels_path: Path) -> tuple[str, list[dict], dict]:
         int(l["id"]) for l in data.get("labels", []) if "id" in l
         and str(l.get("verdict") or "").strip().lower() in {CONFIRMED, REJECTED}
     }
+    judged |= _answered_in_pack(pack)
     out = []
     for identifier, candidate in candidates.items():
         if identifier in judged:
@@ -159,6 +198,17 @@ def main() -> int:
                 "ids": [row["id"] for row in rows],
             }, indent=2) + "\n", encoding="utf-8")
             print(f"    wrote {target.relative_to(PROJECT_ROOT)}")
+        print()
+
+    if arguments.write:
+        # A pack that has run out of deciding clips must lose its queue file,
+        # or the label server keeps advertising work that is finished. This is
+        # how cropmotion came to offer ten clips that all had answers.
+        for stale in sorted((PROJECT_ROOT / "labelpack").glob("*/queue.json")):
+            if stale.parent.name not in queue:
+                stale.unlink()
+                print(f"  {stale.parent.name}: nothing left to decide, "
+                      f"removed {stale.relative_to(PROJECT_ROOT)}")
         print()
 
     print("Then re-measure:")

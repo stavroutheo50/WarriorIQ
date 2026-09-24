@@ -117,7 +117,89 @@ class Handler(BaseHTTPRequestHandler):
         page = pack / "label.html"
         if not page.exists():
             return self._send(404, b"pack has no label.html", "text/plain; charset=utf-8")
-        return self._send(200, page.read_bytes(), "text/html; charset=utf-8")
+        query = self.path.split("?", 1)[1] if "?" in self.path else ""
+        html = self._prepare(pack, page.read_text(encoding="utf-8"),
+                             deciding_only="queue=1" in query)
+        return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def _prepare(self, pack: Path, html: str, deciding_only: bool) -> str:
+        """Hand the page what is already on disk, and optionally the short list.
+
+        Packs are built once and kept, so most label.html files on this machine
+        predate both of these. Rather than rebuild them - which needs the
+        original videos, and some of those are gone - the two lines that matter
+        are brought up to date here, on the way out. A pack built from today's
+        template already has them and is left alone.
+        """
+        saved = self._saved(pack)
+        answers = {}
+        for item in saved.get("labels") or []:
+            identifier = _as_id((item or {}).get("id"))
+            if identifier is not None and item.get("technique"):
+                answers[identifier] = item["technique"]
+        for identifier in (_as_id(v) for v in saved.get("unsure") or []):
+            if identifier is not None:
+                answers[identifier] = "__unsure__"
+        for item in saved.get("wrong_person") or []:
+            identifier = _as_id((item or {}).get("id"))
+            if identifier is not None:
+                answers[identifier] = "__wrongperson__"
+
+        queue = []
+        if deciding_only:
+            try:
+                queue = [i for i in (_as_id(v) for v in json.loads(
+                    (pack / "queue.json").read_text(encoding="utf-8")).get("ids") or [])
+                    if i is not None]
+            except (OSError, ValueError):
+                queue = []
+
+        # `</` inside a script element would end it early, whatever the quoting.
+        def embed(value):
+            return json.dumps(value).replace("</", "<" + chr(92) + "/")
+
+        seed = ("<script>window.__SAVED__=" + embed({str(k): v for k, v in answers.items()})
+                + ";window.__QUEUE__=" + embed(queue) + ";</script>")
+
+        newline = chr(10)
+        old_restore = ('let labels = {};' + newline
+                       + 'try { labels = JSON.parse(localStorage.getItem(store) || "{}"); }'
+                       ' catch (e) { labels = {}; }')
+        new_restore = ('let labels = Object.assign({}, window.__SAVED__ || {});' + newline
+                       + 'try { Object.assign(labels, '
+                       'JSON.parse(localStorage.getItem(store) || "{}")); } catch (e) { }')
+        if old_restore in html:
+            html = html.replace(old_restore, new_restore)
+
+        old_items = "const items = DATA.candidates;"
+        new_items = ("const items = (function () { const only = window.__QUEUE__;"
+                     " if (!Array.isArray(only) || !only.length) return DATA.candidates;"
+                     " const wanted = new Set(only);"
+                     " const kept = DATA.candidates.filter((c) => wanted.has(c.id));"
+                     " return kept.length ? kept : DATA.candidates; })();")
+        if old_items in html:
+            html = html.replace(old_items, new_items)
+
+        old_done = "  const done = Object.keys(labels).length;"
+        new_done = "  const done = items.filter((i) => i.id in labels).length;"
+        if old_done in html:
+            html = html.replace(old_done, new_done)
+
+        old_payload = "    job: DATA.job, video: DATA.video,"
+        new_payload = ("    job: DATA.job, video: DATA.video," + newline
+                       + "    scope: items.map((i) => i.id),")
+        if old_payload in html and "scope: items.map" not in html:
+            html = html.replace(old_payload, new_payload)
+
+        return html.replace("<script>", seed + "<script>", 1)
+
+    def _saved(self, pack: Path) -> dict:
+        try:
+            loaded = json.loads(
+                (pack / f"{pack.name}-labels.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
 
     def do_POST(self) -> None:                # noqa: N802 - stdlib's spelling
         if not self._authorized():
@@ -142,6 +224,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, b"payload is for another pack", "text/plain; charset=utf-8")
 
         destination = pack / f"{parts[0]}-labels.json"
+        existing = {}
+        if destination.exists():
+            try:
+                loaded = json.loads(destination.read_text(encoding="utf-8"))
+                existing = loaded if isinstance(loaded, dict) else {}
+            except (OSError, ValueError):
+                # Unreadable, so nothing can be merged into it - but it is
+                # still somebody's answers, and it is not this handler's place
+                # to decide they are worthless. Refuse rather than replace.
+                return self._send(409, b"saved answers are unreadable; not overwriting",
+                                  "text/plain; charset=utf-8")
+            # One untouched copy of whatever was there before the first write
+            # of this run, kept because the failure it guards against already
+            # happened once and the answers are hours of somebody watching.
+            keep = pack / f"{parts[0]}-labels.backup.json"
+            if existing and not keep.exists():
+                keep.write_text(json.dumps(existing, indent=1), encoding="utf-8")
+        payload = merge_answers(existing, payload)
+
         # Written beside the pack, then moved into place, so an interrupted
         # write cannot truncate a good file. This is somebody's only copy.
         temporary = destination.with_suffix(".json.part")
@@ -201,8 +302,12 @@ class Handler(BaseHTTPRequestHandler):
                 queue = json.loads((pack / "queue.json").read_text(encoding="utf-8"))
                 outstanding = len(queue.get("ids") or [])
                 if outstanding:
-                    deciding = (f'<span class="queue">{outstanding} of these decide '
-                                f'whether punches can be shown</span>')
+                    # A link, not a sentence. Saying "20 of these decide" while
+                    # the only way in showed all 141 left the reader to find
+                    # them, which is the work the queue existed to remove.
+                    deciding = (f'<span class="queue"><a href="/{pack.name}/?queue=1">'
+                                f'Answer just the {outstanding} that decide whether '
+                                f'punches can be shown &rarr;</a></span>')
             except (OSError, ValueError):
                 pass
             rows.append(
@@ -218,6 +323,52 @@ class Handler(BaseHTTPRequestHandler):
             "<h1>WarriorIQ label packs</h1><p style='color:#98a2b3;font-size:14px'>"
             "Answers save to disk as you give them. Closing the tab loses nothing.</p><ul>"
             + "".join(rows) + "</ul>")
+
+
+
+def _as_id(value):
+    """Ids arrive as ints from the page and as strings from older files."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def merge_answers(existing: dict, incoming: dict) -> dict:
+    """Fold a page's answers into the file without dropping the rest.
+
+    The page used to send its whole state and the server used to write it
+    straight over the file. That is safe only while the page knows everything
+    the file knows, and it did not: answers were restored from localStorage
+    alone, so a browser that had never seen this pack started empty. Measured
+    on cropmotion, which held 91 answers - one keystroke replaced the file
+    with a single label. The clips are crops of real people at a real
+    tournament and the videos they came from are not all still around.
+
+    So the page now declares its `scope`, the ids it is answering for. Answers
+    inside it come from the page; answers outside it are kept from disk. A
+    page showing 20 of 141 clips can no longer speak for the other 121.
+
+    A payload with no scope is an older page, which always covered the whole
+    pack, so it is still written whole.
+    """
+    scope = incoming.get("scope")
+    merged = {k: v for k, v in incoming.items() if k != "scope"}
+    if not isinstance(scope, list):
+        out = dict(existing)
+        out.update(merged)
+        return out
+
+    inside = {i for i in (_as_id(v) for v in scope) if i is not None}
+    for key, id_of in (("labels", lambda e: (e or {}).get("id")),
+                       ("unsure", lambda e: e),
+                       ("wrong_person", lambda e: (e or {}).get("id"))):
+        kept = [e for e in (existing.get(key) or [])
+                if _as_id(id_of(e)) not in inside]
+        merged[key] = kept + list(incoming.get(key) or [])
+    out = dict(existing)
+    out.update(merged)
+    return out
 
 
 def _lan_address() -> str:

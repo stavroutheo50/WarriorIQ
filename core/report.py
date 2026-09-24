@@ -230,12 +230,20 @@ def observed_summary(report: dict) -> dict | None:
         coverage = float(item.get("observation_coverage") or 0.0)
         if coverage < MIN_COVERAGE_TO_REPORT_OBSERVED:
             continue
-        # A knee and a round kick are both a leg arriving, and judged by eye
-        # the two are a coin flip - five right and five wrong - so they are one
-        # family. Punches are excluded entirely; see the docstring for the
-        # counts that decided it.
-        kicks = int(item.get("kick_attempts") or 0) + int(item.get("knee_attempts") or 0)
+        # Knees are not counted, and the reason they used to be is worth
+        # keeping: a knee and a round kick are both a leg arriving, so a
+        # misnamed knee was still a leg and the count survived. Family-level
+        # labelling of the HD bout says the confusion does not stop at the
+        # leg. Of five proposed knees, none was a knee - three were kicks and
+        # **two were punches**.
+        #
+        # A bucket that is 40% the family this report deliberately withholds
+        # cannot be published, whatever the label on it says. Dropping it
+        # loses three real kicks per five proposals, which is an under-count,
+        # and under-counting is the direction everything here already errs in.
+        kicks = int(item.get("kick_attempts") or 0)
         punches_withheld = int(item.get("punch_attempts") or 0)
+        knees_withheld = int(item.get("knee_attempts") or 0)
         if kicks <= 0:
             continue
         out[fighter] = {
@@ -245,6 +253,7 @@ def observed_summary(report: dict) -> dict | None:
             # Surfaced so the page can say the omission is deliberate rather
             # than leaving a coach wondering why their boxer threw nothing.
             "punches_withheld": punches_withheld,
+            "knees_withheld": knees_withheld,
         }
     if not out:
         return None
@@ -281,11 +290,16 @@ def kick_minimum_check(report: dict) -> dict | None:
     shortfall would be accusing an athlete of a penalty on the strength of our
     own dropped frames.
 
-    Knees count toward the kick total here. In Full Contact a knee strike is
-    illegal, so a leg arriving is a kick that the family classifier called a
-    knee - judged by eye on real footage that distinction is a coin flip, which
-    is the same reason `observed_summary` reports two families rather than
-    three.
+    Knees do NOT count toward the kick total, and used to. The old reasoning
+    was that in Full Contact a knee is illegal, so a leg arriving must be a
+    kick the family classifier misnamed. Family-level labelling of the HD bout
+    says the misnaming is wider than that: of five proposed knees, three were
+    kicks and two were punches. Counting them would credit a kickboxer with
+    kicks they did not throw, against a rule that carries a minus point.
+
+    Excluding them only lowers a floor that can confirm compliance and can
+    never allege a shortfall, so it costs nothing a fighter can be penalised
+    for. Same measurement, same direction, as `observed_summary`.
     """
     ruleset = ((report.get("scorecard") or {}).get("ruleset")
                or (report.get("request") or {}).get("ruleset"))
@@ -306,8 +320,7 @@ def kick_minimum_check(report: dict) -> dict | None:
         fighters = {}
         for fighter in ("A", "B"):
             families = ((item.get("fighters") or {}).get(fighter) or {}).get("families") or {}
-            evidenced = (int((families.get("kick") or {}).get("attempts") or 0)
-                         + int((families.get("knee") or {}).get("attempts") or 0))
+            evidenced = int((families.get("kick") or {}).get("attempts") or 0)
             fighters[fighter] = {
                 "kicks_evidenced": evidenced,
                 # True only when the floor alone clears the bar. False here
