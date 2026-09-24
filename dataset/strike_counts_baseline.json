@@ -5,6 +5,10 @@
       "fight": "5736",
       "pack": "cropmotion",
       "labels_file": "labels_5736_claude_binary.json",
+      "source": {
+        "labeller": "claude-opus-5",
+        "machine_generated": true
+      },
       "families": {
         "kick": {
           "proposed": 31,
@@ -70,6 +74,10 @@
       "fight": "fights/athens_iphone_1080p.mov",
       "pack": "athens_hd",
       "labels_file": "labels_athens_hd_claude.json",
+      "source": {
+        "labeller": "claude-opus-5",
+        "machine_generated": true
+      },
       "families": {
         "kick": {
           "proposed": 31,
@@ -135,6 +143,10 @@
       "fight": "fights/1.mp4",
       "pack": "pack_1mp4",
       "labels_file": "labels_pack_1mp4_claude.json",
+      "source": {
+        "labeller": "claude-opus-5",
+        "machine_generated": true
+      },
       "families": {
         "kick": {
           "proposed": 52,
@@ -227,6 +239,21 @@
       "arrived_precision": 0.7895
     }
   },
+  "label_sources": {
+    "cropmotion": {
+      "labeller": "claude-opus-5",
+      "machine_generated": true
+    },
+    "athens_hd": {
+      "labeller": "claude-opus-5",
+      "machine_generated": true
+    },
+    "pack_1mp4": {
+      "labeller": "claude-opus-5",
+      "machine_generated": true
+    }
+  },
+  "human_ground_truth": false,
   "measures": {
     "precision": "confirmed / judged, over proposals a human ruled on",
     "over_count": "judged - confirmed, on the labelled subset",

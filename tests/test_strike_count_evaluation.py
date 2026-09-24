@@ -143,5 +143,72 @@ class SuppressionIsDisplayOnlyTests(unittest.TestCase):
             "evaluated from it any more")
 
 
+class ProvenanceTests(unittest.TestCase):
+    """A number is only as good as who produced the labels under it.
+
+    Every label set in this repository was written by Claude and says so in
+    its own header. The harness read them as though a person had, and
+    reported a precision figure that was one model grading another model's
+    output - on exactly the case in dispute, whether a few pixels of arm
+    movement was a punch.
+    """
+
+    def test_a_machine_label_set_is_recognised_as_one(self):
+        from tools.evaluate_strike_counts import provenance
+
+        machine = provenance({
+            "labeller": "claude-opus-5",
+            "_what_this_is": ["MACHINE-GENERATED, by Claude, from the filmstrips."],
+        })
+        self.assertTrue(machine["machine_generated"])
+        self.assertEqual(machine["labeller"], "claude-opus-5")
+
+    def test_a_human_label_set_is_not_flagged(self):
+        from tools.evaluate_strike_counts import provenance
+
+        human = provenance({"labeller": "a coach", "_what_this_is": ["Watched on video."]})
+        self.assertFalse(human["machine_generated"])
+
+    def test_the_summary_says_whether_it_rests_on_human_judgement(self):
+        from tools.evaluate_strike_counts import discover, evaluate, summarise
+
+        results = [r for r in (evaluate(p) for p in discover()) if r]
+        if not results:
+            self.skipTest("no label packs in this checkout")
+        summary = summarise(results)
+        self.assertIn("human_ground_truth", summary)
+        self.assertIn("label_sources", summary)
+        # Every pack in the repository is machine-labelled today, so this is
+        # False. If it ever becomes True somebody has done real labelling and
+        # the warning should stop being printed.
+        self.assertFalse(summary["human_ground_truth"])
+
+    def test_the_report_warns_when_nothing_was_judged_by_a_person(self):
+        from tools.evaluate_strike_counts import discover, evaluate, render
+
+        results = [r for r in (evaluate(p) for p in discover()) if r]
+        if not results:
+            self.skipTest("no label packs in this checkout")
+        text = render(results)
+        self.assertIn("WRITTEN BY A MODEL", text)
+        self.assertIn("never the evidence that settles it", text)
+
+    def test_thinness_is_measured_rather_than_read_off_the_header(self):
+        """The first version matched "could not tell" in a header and flagged
+        athens_hd, whose header contains that phrase while describing a
+        different pack - to explain why that one is weak and this one is not.
+        """
+        from tools.evaluate_strike_counts import discover, evaluate, thinness
+
+        by_pack = {r.pack: thinness(r) for r in
+                   (x for x in (evaluate(p) for p in discover()) if x)}
+        if "athens_hd" not in by_pack:
+            self.skipTest("no label packs in this checkout")
+        self.assertLess(by_pack["athens_hd"], 0.5,
+                        "athens_hd is well judged and must not be flagged thin")
+        self.assertGreater(by_pack.get("pack_1mp4", 0), 0.5,
+                           "pack_1mp4 is mostly unjudged and should be flagged")
+
+
 if __name__ == "__main__":
     unittest.main()

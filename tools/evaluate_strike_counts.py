@@ -161,12 +161,14 @@ class FightResult:
     fight: str
     pack: str
     labels_file: str
+    source: dict = field(default_factory=dict)
     families: dict[str, Tally] = field(default_factory=dict)
     per_fighter: dict[str, Tally] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
             "fight": self.fight, "pack": self.pack, "labels_file": self.labels_file,
+            "source": dict(self.source),
             "families": {k: v.as_dict() for k, v in sorted(self.families.items())},
             "fighters": {k: v.as_dict() for k, v in sorted(self.per_fighter.items())},
         }
@@ -183,6 +185,47 @@ def discover(labels_dir: Path = LABELS_DIR) -> list[Path]:
         if data.get("labels") and data.get("pack"):
             found.append(path)
     return found
+
+
+def provenance(data: dict) -> dict:
+    """Who made these labels, and whether they are ground truth.
+
+    Every label set in this repository was written by Claude and says so in
+    its own header - "MACHINE-GENERATED, by Claude... NOT human ground truth.
+    Kept separate from human labels for that reason." This tool read them all
+    as though a person had made them, and reported a precision figure that
+    was really one model grading another model's output.
+
+    That is not a small caveat. The question these numbers are asked to
+    settle is whether a detector is right often enough to publish, and an
+    answer produced by the same family of model shares its blind spots -
+    particularly on the exact case in dispute, a few pixels of arm movement.
+
+    So provenance travels with the number from here on.
+    """
+    described = data.get("_what_this_is")
+    text = " ".join(described) if isinstance(described, list) else str(described or "")
+    labeller = str(data.get("labeller") or "unknown")
+    machine = "MACHINE-GENERATED" in text or "claude" in labeller.lower()
+    return {"labeller": labeller, "machine_generated": machine}
+
+
+def thinness(result: "FightResult") -> float:
+    """What share of this pack's proposals nobody ever ruled on.
+
+    This replaced a phrase match, which got it backwards. The first version
+    looked for "could not tell" in a pack's header and flagged athens_hd -
+    whose header contains that phrase while describing a *different* pack,
+    to explain why that one is weak and this one is not. A heuristic that
+    reads English and misattributes it is worse than no heuristic.
+
+    The harness already counts what matters, so it counts it: a pack where
+    most proposals were never judged is thin evidence whatever its header
+    says, and that is arithmetic rather than reading comprehension.
+    """
+    proposed = sum(t.proposed for t in result.families.values())
+    judged = sum(t.judged for t in result.families.values())
+    return 0.0 if not proposed else 1.0 - (judged / proposed)
 
 
 def _pack_path(pack: str) -> Path:
@@ -213,6 +256,7 @@ def evaluate(labels_path: Path) -> FightResult | None:
         fight=str(data.get("fight") or pack_dir.name),
         pack=pack_dir.name,
         labels_file=labels_path.name,
+        source=provenance(data),
     )
 
     for identifier, candidate in candidates.items():
@@ -282,7 +326,14 @@ def render(results: list[FightResult]) -> str:
 
     totals: dict[str, Tally] = {}
     for result in results:
-        lines.append(f"{result.fight}  ({result.labels_file})")
+        marks = []
+        if result.source.get("machine_generated"):
+            marks.append("machine-labelled by " + str(result.source.get("labeller")))
+        unjudged = thinness(result)
+        if unjudged >= 0.5:
+            marks.append(f"{unjudged:.0%} of its proposals were never ruled on")
+        suffix = ("  [" + "; ".join(marks) + "]") if marks else ""
+        lines.append(f"{result.fight}  ({result.labels_file}){suffix}")
         lines.append(f"  {'family':<8}{'proposed':>9}{'judged':>8}{'real':>6}"
                      f"{'over':>6}{'precision':>11}{'shown':>9}{'unsure':>8}{'unseen':>8}")
         for name in ("punch", "kick"):
@@ -335,6 +386,14 @@ def render(results: list[FightResult]) -> str:
     lines.append("core.report.STRIKE_COUNTS_PRECISION_VALIDATED is the switch this")
     lines.append("number governs. Nothing here turns it on by itself - that is a")
     lines.append("decision about what is good enough to publish, not a computation.")
+    if results and all(r.source.get("machine_generated") for r in results):
+        lines.append("")
+        lines.append("!! EVERY LABEL ABOVE WAS WRITTEN BY A MODEL, NOT A PERSON.")
+        lines.append("   Each label file says so in its own header. These numbers are")
+        lines.append("   one model grading another model's output, and the two share")
+        lines.append("   blind spots on exactly the case in dispute - whether a few")
+        lines.append("   pixels of arm movement was a punch. A signal worth following,")
+        lines.append("   never the evidence that settles it.")
     return "\n".join(lines)
 
 
@@ -347,6 +406,10 @@ def summarise(results: list[FightResult]) -> dict:
         "schema": "warrioriq.strike_counts.v1",
         "fights": [r.as_dict() for r in results],
         "totals": {k: v.as_dict() for k, v in sorted(totals.items())},
+        # Travels with the numbers, so a baseline committed today cannot be
+        # read next month as though a person had produced it.
+        "label_sources": {r.pack: dict(r.source) for r in results},
+        "human_ground_truth": not all(r.source.get("machine_generated") for r in results),
         "measures": {
             "precision": "confirmed / judged, over proposals a human ruled on",
             "over_count": "judged - confirmed, on the labelled subset",
