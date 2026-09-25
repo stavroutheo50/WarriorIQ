@@ -119,13 +119,27 @@ def _width(value: float, ceiling: float) -> float:
     return max(3.0, min(100.0, float(value) / ceiling * 100.0))
 
 
-def build(report: dict, focus: str = "A") -> dict | None:
-    """Everything the visual sections need, or None when there is nothing."""
+def build(report: dict, focus: str = "A", outcomes_counted: bool = True) -> dict | None:
+    """Everything the visual sections need, or None when there is nothing.
+
+    `outcomes_counted` is whether this report's statistics validated strike
+    outcomes. When they did not, the page says "whether a kick landed is not
+    counted yet" - and this section then printed "Kicks landed 7" and filled
+    "You hit / You got hit" maps from the raw event list's unvalidated
+    outcomes, directly under it. So without counted outcomes nothing here
+    says what landed: no landed row, no body maps, no strike timeline. The
+    movement rows and the guard-drop markers are measured from pose and stay.
+
+    A sport with no kicks (boxing) gets the same treatment, since a kicks-only
+    count there is a row of zeros that reads as "nobody landed anything".
+    """
     metrics = report.get("metrics") or {}
     if focus not in metrics:
         return None
     other = "B" if focus == "A" else "A"
-    events = [e for e in (report.get("events") or []) if _countable(e)]
+    sport = str((report.get("scorecard") or {}).get("sport") or "")
+    strikes_shown = outcomes_counted and sport != "boxing"
+    events = [e for e in (report.get("events") or []) if _countable(e)] if strikes_shown else []
 
     landed_by = {
         side: len([e for e in events if str(e.get("fighter")) == side])
@@ -153,6 +167,8 @@ def build(report: dict, focus: str = "A") -> dict | None:
             continue
         if not _countable(event):
             continue
+        if not strikes_shown:
+            continue
         timeline.append({
             "at": round(float(event.get("peak_time") or 0.0), 2),
             "mine": str(event.get("fighter")) == focus,
@@ -164,10 +180,14 @@ def build(report: dict, focus: str = "A") -> dict | None:
 
     defences = {k: int(v) for k, v in (mine.get("defenses") or {}).items() if v}
 
+    rows = head_to_head(metrics, focus, other, landed_by)
+    if not strikes_shown:
+        rows = [row for row in rows if row["key"] != "landed"]
     return {
         "focus": focus,
         "opponent": other,
-        "head_to_head": head_to_head(metrics, focus, other, landed_by),
+        "strikes_shown": strikes_shown,
+        "head_to_head": rows,
         "landed": _zones([e for e in events if str(e.get("fighter")) == focus]),
         "taken": _zones([e for e in events if str(e.get("fighter")) == other]),
         "defences": dict(sorted(defences.items(), key=lambda kv: -kv[1])),
@@ -181,5 +201,7 @@ def build(report: dict, focus: str = "A") -> dict | None:
         "span_seconds": round(span, 1) if span > 0 else 0.0,
         # Said once, in one place, so every section below inherits it rather
         # than repeating a disclaimer five times.
-        "counts": "Kicks only. Hands and knees are not counted yet.",
+        "counts": ("Kicks only. Hands and knees are not counted yet." if strikes_shown else
+                   "Movement only. Whether strikes landed is not counted yet, so nothing "
+                   "here says who landed what."),
     }

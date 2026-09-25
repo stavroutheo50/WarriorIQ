@@ -556,6 +556,13 @@ def build_preliminary_scorecard(
             "winner_estimate": None,
             "status": "punch_counting_unavailable",
             "disclaimer": (
+                # Boxing has no kicks, so the general wording - hands and
+                # feet, the leg-strike count - described a sport it is not.
+                "No score is shown. Boxing is scored on punches, and WarriorIQ's punch "
+                "counting is not accurate enough yet - checked against video, the punch "
+                "count was overstated. Movement, guard, balance and coverage below are "
+                "unaffected."
+                if scorecard.get("sport") == "boxing" else
                 "No score is shown. Scoring a round needs both hands and feet counted, and "
                 "WarriorIQ's punch counting is not accurate enough yet - checked against video, "
                 "the kick count came out right and the punch count did not. Scoring on kicks "
