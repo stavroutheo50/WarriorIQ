@@ -9,8 +9,25 @@ def _number(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
 
 
+def identity_failed(record: dict, fighter: str) -> bool:
+    """Did the report behind this record say its fighters could not be trusted?
+
+    Such a report tells its reader the result is not safe to use, and the
+    Progress page then charted its guard and balance anyway - "Guard 20%,
+    +11 pts" from a run whose own page withheld everything. A number the
+    report disowns cannot become a trend. Missing flags (legacy rows) are not
+    treated as failures; they carry pose coverage only.
+    """
+    integrity = (record.get("report") or {}).get("integrity") or {}
+    if integrity.get("identity_evidence_trusted") is False:
+        return True
+    return (integrity.get("fighter_identity_trusted") or {}).get(fighter) is False
+
+
 def _point(record: dict, fighter: str) -> dict | None:
     report = record.get("report") or {}
+    if identity_failed(record, fighter):
+        return None
     video = report.get("video", {})
     target = video.get("analysis_target", "BOTH")
     focus = video.get("focus_fighter") or target
@@ -95,6 +112,9 @@ def build_progress(records: list[dict], fighter: str) -> dict:
     return {
         "fighter": fighter,
         "fight_count": len(points),
+        # Said on the page, so a library of twenty fights showing three points
+        # explains itself instead of looking like lost data.
+        "identity_failed_count": sum(identity_failed(record, fighter) for record in ordered),
         "points": points,
         "latest": latest,
         "trends": trends,

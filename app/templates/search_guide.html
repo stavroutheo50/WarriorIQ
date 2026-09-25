@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{page.title}}{% endblock %}
 {% block description %}{{page.description}}{% endblock %}
-{% block head %}<script type="application/ld+json">{{schema|tojson}}</script>{% endblock %}
+{% block head %}<script nonce="{{ request.state.csp_nonce }}" type="application/ld+json">{{schema|tojson}}</script>{% endblock %}
 {% block content %}
 <article class="search-guide">
   <header class="search-guide-hero" data-reveal>

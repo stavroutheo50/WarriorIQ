@@ -366,6 +366,7 @@ class PublicPageTests(unittest.TestCase):
         setup page names what it will be silent about in full - before an hour
         is spent on an upload, rather than in the finished report.
         """
+        from core.report import STRIKE_COUNTS_PRECISION_VALIDATED
         from core.scoring import SPORTS, sport_unobserved
 
         with self.signed_in():
@@ -379,13 +380,33 @@ class PublicPageTests(unittest.TestCase):
                 # Each unobserved action is named, not summarised away.
                 for action in missing:
                     self.assertIn(action, setup.text)
-                self.assertIn(
-                    'data-covered="no"' if missing else 'data-covered="yes"',
-                    setup.text,
-                )
+                # While punch and knee counts are withheld no setup page may
+                # claim full coverage: it said "We count punches, kicks and
+                # knees" on every sport, and boxing reports then had no
+                # strike numbers at all.
+                if missing or not STRIKE_COUNTS_PRECISION_VALIDATED:
+                    self.assertIn('data-covered="no"', setup.text)
+                else:
+                    self.assertIn('data-covered="yes"', setup.text)
+                self.assertNotIn("We count punches, kicks and knees", setup.text)
         # A sport with gaps must not be presented as fully covered.
         self.assertIn('data-covered="no"', chooser)
-        self.assertIn('data-covered="yes"', chooser)
+        if STRIKE_COUNTS_PRECISION_VALIDATED:
+            self.assertIn('data-covered="yes"', chooser)
+        else:
+            self.assertNotIn("Full scoring coverage", chooser)
+
+    def test_boxing_is_warned_before_upload_that_it_gets_no_punch_counts(self):
+        from core.report import STRIKE_COUNTS_PRECISION_VALIDATED
+
+        if STRIKE_COUNTS_PRECISION_VALIDATED:
+            self.skipTest("punch counts are published")
+        with self.signed_in():
+            boxing = self.client.get("/analyze/boxing").text
+            kickboxing = self.client.get("/analyze/kickboxing").text
+        self.assertIn("Boxing reports have no punch counts yet", boxing)
+        self.assertIn("Your report counts kicks.", kickboxing)
+        self.assertIn("Punches and knees are not counted yet", kickboxing)
 
     def test_choosing_a_sport_never_waits_on_an_animation(self):
         """The five cards are the page, so they may not fade in on scroll.
@@ -1226,6 +1247,7 @@ class PublicPageTests(unittest.TestCase):
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader
 
         from app.main import _analysis_quality_summary, sport_identity
+        from core.report import unattributed_kick_total
 
         class Stub:
             def __init__(self, **kw): self.__dict__.update(kw)
@@ -1247,6 +1269,8 @@ class PublicPageTests(unittest.TestCase):
             report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
             analysis_quality=_analysis_quality_summary(report), can_share=False,
             sharing=None, score_withheld=None, unavailable=[], kick_minimum=None,
+            # As result_page builds it: one unattributed total, only on failure.
+            kick_total=None if trusted else unattributed_kick_total(report),
         )
 
     def test_the_identity_fix_is_the_first_thing_on_a_failed_report(self):
@@ -1279,15 +1303,45 @@ class PublicPageTests(unittest.TestCase):
         """
         page = self._render_identity(trusted=False)
         self.assertNotIn("Movement scorecard", page)
-        self.assertNotIn("Fighter A leg strikes", page)
-        self.assertNotIn("Fighter B leg strikes", page)
-        # The unattributed total survives, because it is still true.
-        self.assertIn("Leg strikes seen, both fighters", page)
+        self.assertNotIn("Fighter A kicks thrown", page)
+        self.assertNotIn("Fighter B kicks thrown", page)
+        # Nor any of the other per-fighter strike blocks that used to print
+        # three different totals beside the failure notice.
+        self.assertNotIn("Kicks we could count", page)
+        self.assertNotIn("You got hit", page)
+        # The unattributed total survives, because it is still true - with
+        # attempts and landed labelled separately.
+        self.assertIn("Kicks thrown, both fighters", page)
+        self.assertIn("Kicks landed, both fighters", page)
+
+    def test_a_failed_report_gives_exactly_one_kick_total(self):
+        """Three totals on one page - 31, 24 and 34 - for the same kicks.
+
+        Per-fighter kicks, arrived kicks from the raw event list, and leg
+        strikes including knees, each from a different source. The combined
+        figure is the statistics block's kick attempts, summed, and nothing
+        else on the page states a kick total.
+        """
+        import re
+
+        page = self._render_identity(trusted=False)
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
+        self.assertEqual(text.count("Kicks thrown, both fighters"), 1)
+        self.assertNotIn("Leg strikes seen", text)
 
     def test_a_healthy_report_keeps_the_numbers_it_can_stand_behind(self):
         page = self._render_identity(trusted=True)
-        self.assertIn("Fighter A leg strikes", page)
-        self.assertNotIn("Leg strikes seen, both fighters", page)
+        self.assertIn("Fighter A kicks thrown", page)
+        self.assertNotIn("Kicks thrown, both fighters", page)
+
+    def test_one_message_about_strike_counting(self):
+        """"Punch and kick counting is switched off" sat on the same page as
+        "Kicks we could count". Both were true of different families and read
+        together as a contradiction."""
+        for trusted in (True, False):
+            page = self._render_identity(trusted=trusted)
+            with self.subTest(trusted=trusted):
+                self.assertNotIn("Punch and kick counting is switched off", page)
 
     def test_a_healthy_report_is_not_told_it_needs_a_step(self):
         page = self._render_identity(trusted=True)
@@ -1876,7 +1930,10 @@ class PublicPageTests(unittest.TestCase):
 
     def test_history_new_analysis_button_targets_the_upload_card(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "history.html").read_text(encoding="utf-8")
-        self.assertIn('href="/analyze">Analyze another fight', template)
+        self.assertIn('href="/analyze">{% if fights %}Analyze another fight', template)
+        # A signed-out visitor has no library to add to and is offered sign-in
+        # instead, so the button is not rendered for them at all.
+        self.assertIn("{% if signed_in %}<a class=\"btn\" data-motion-primary href=\"/analyze\">", template)
 
     def test_coach_workspace_uses_the_selected_fighter_and_one_click_plan(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "coach.html").read_text(encoding="utf-8")
@@ -2471,9 +2528,14 @@ class SmallUiConsistencyTests(unittest.TestCase):
 
     def test_the_sport_chip_is_absent_where_sport_means_nothing(self):
         self.client.get("/analyze/muay_thai")
-        for path in ("/pricing", "/dashboard", "/coach"):
+        for path in ("/privacy", "/terms", "/legal"):
             with self.subTest(path=path):
                 self.assertNotIn('class="sport-switch-name"', self.client.get(path).text)
+        # Plans, Progress and Coach are workspace tabs beside Analyze and the
+        # library; the header must not change shape between them.
+        for path in ("/pricing", "/dashboard", "/coach"):
+            with self.subTest(path=path):
+                self.assertIn('class="sport-switch-name"', self.client.get(path).text)
         # And still present where it is the switcher for the page.
         self.assertIn('class="sport-switch-name"', self.client.get("/analyze/boxing").text)
 
@@ -3464,7 +3526,7 @@ class NoPunchClaimLeaksTests(unittest.TestCase):
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader
 
         from app.main import _analysis_quality_summary
-        from core.report import kick_minimum_check, observed_summary
+        from core.report import kick_minimum_check, observed_summary, unattributed_kick_total
 
         class Stub:
             def __init__(self, **kw): self.__dict__.update(kw)
@@ -3480,6 +3542,10 @@ class NoPunchClaimLeaksTests(unittest.TestCase):
             request=Stub(url=Stub(path="/result/x"), state=Stub(csrf_token="t" * 43, account=None)),
             report=report, job_id="x", observed=observed_summary(report),
             kick_minimum=kick_minimum_check(report), asset_version="t",
+            # As result_page passes it: the one unattributed total when the
+            # identity check failed, nothing otherwise.
+            kick_total=(None if report.get("integrity", {}).get("identity_evidence_trusted", True)
+                        else unattributed_kick_total(report)),
             analysis_quality=_analysis_quality_summary(report),
             report_access={"report_tier": "full"}, can_share=False, sharing=None)
 
@@ -3542,7 +3608,7 @@ class NoPunchClaimLeaksTests(unittest.TestCase):
         that row used to print total attempts including punches.
         """
         text = self._render(self._report())
-        self.assertIn("leg strikes", text.lower())
+        self.assertIn("kicks thrown", text.lower())
         self.assertNotIn("Fighter A attempts", text)
 
 
@@ -3598,7 +3664,7 @@ class NoUnsupportedClaimSurvivesTests(NoPunchClaimLeaksTests):
         no content left.
         """
         text = self._render(self._untrusted_report()).lower()
-        for shown in ("movement", "pressure", "centre", "guard", "balance", "leg strikes"):
+        for shown in ("movement", "pressure", "centre", "guard", "balance", "kicks thrown"):
             with self.subTest(number=shown):
                 self.assertIn(shown, text)
 
@@ -3821,7 +3887,10 @@ class PlanBadgeTests(unittest.TestCase):
                 self.assertNotIn("Free in early access", card)
                 continue
             self.assertEqual(PLANS[key]["price"], headline, key)
-            self.assertIn("Free in early access", card, key)
+            # "Free in early access" read as "this paid plan is free now",
+            # beside a banner saying everyone is on Starter.
+            self.assertIn("Billing not open yet", card, key)
+            self.assertNotIn("Free in early access", card, key)
             self.assertIn("when billing opens", card, key)
             self.assertNotIn("Not open yet", card, key)
 

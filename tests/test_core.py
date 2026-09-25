@@ -3963,10 +3963,16 @@ class ObservedSummaryTests(unittest.TestCase):
         self.assertIn("punch count was overstated", rendered)
 
     def test_the_page_shows_it_only_when_the_score_is_withheld(self):
+        """Built only instead of a scorecard, and never when identity failed:
+        per-fighter kicks are an attribution the failed check disowns."""
         from pathlib import Path
 
+        source = Path("app/main.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'if identity_trusted and not (report.get("scorecard") or {}).get("available")',
+            source)
         page = Path("app/templates/result.html").read_text(encoding="utf-8")
-        self.assertIn("not report.scorecard.available and observed", page)
+        self.assertIn("{% elif observed %}", page)
 
 
 class KickMinimumTests(unittest.TestCase):

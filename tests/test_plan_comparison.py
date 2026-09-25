@@ -98,6 +98,7 @@ class ComparisonPageTests(unittest.TestCase):
         """The cards carry that, and saying it seven more times in a table
         whose job is to be scannable would undo the point of it."""
         body = self.page.split('class="plan-compare"')[1].split("</table>")[0]
+        self.assertNotIn("Billing not open yet", body)
         self.assertNotIn("Free in early access", body)
 
 

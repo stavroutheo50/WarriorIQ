@@ -72,7 +72,7 @@
   </section>
 </section>
 {% endblock %}
-{% block scripts %}<script>
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
 (()=>{
   const form=document.querySelector('.auth-form');
   if(!form)return;

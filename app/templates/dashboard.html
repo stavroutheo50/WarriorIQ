@@ -12,12 +12,13 @@
    rather than repeated on each card. #}
 <header class="athlete-head">
   <div class="athlete-id">
-    <span class="athlete-avatar" aria-hidden="true">{{profile.display_name[:1]|upper}}</span>
+    {% set athlete = athlete_name|default(profile.display_name, true) %}
+    <span class="athlete-avatar" aria-hidden="true">{{athlete[:1]|upper}}</span>
     <div>
       <div class="eyebrow">Athlete progress</div>
-      <h1>{{profile.display_name}}</h1>
+      <h1>{{athlete}}</h1>
       <p class="small muted">Followed as Fighter {{progress.fighter}} in reports</p>
-      <p class="athlete-sub">{% if progress.fight_count %}{{progress.fight_count}} measured fight{{'' if progress.fight_count == 1 else 's'}}{% if progress.action_fight_count %} · {{progress.action_fight_count}} with validated actions{% endif %}{% else %}No measured fights yet{% endif %}</p>
+      <p class="athlete-sub">{% if progress.fight_count %}{{progress.fight_count}} measured fight{{'' if progress.fight_count == 1 else 's'}}{% if progress.action_fight_count %} · {{progress.action_fight_count}} with validated actions{% endif %}{% else %}No measured fights yet{% endif %}{% if progress.identity_failed_count %} · {{progress.identity_failed_count}} left out because the identity check failed{% endif %}</p>
     </div>
   </div>
   <div class="athlete-actions">
@@ -88,4 +89,4 @@
 {% endif %}
 {% endif %}
 {% endblock %}
-{% block scripts %}{% if profile and progress.fight_count %}<script>const points={{progress.points|tojson}},metricKey={{progress.trend_key|tojson}},metricLabel={{progress.trend_label|tojson}},svg=document.getElementById('movementChart'),values=points.map((p,i)=>({i,v:p[metricKey]})).filter(p=>p.v!==null);if(values.length){const w=640,h=230,pad=34,min=Math.min(...values.map(p=>p.v)),max=Math.max(...values.map(p=>p.v)),range=Math.max(.1,max-min),x=i=>pad+(points.length===1?(w-2*pad)/2:i*(w-2*pad)/Math.max(1,points.length-1)),y=v=>h-pad-(v-min)*(h-2*pad)/range;for(let n=0;n<4;n++){const yy=pad+n*(h-2*pad)/3;svg.insertAdjacentHTML('beforeend',`<line x1="${pad}" y1="${yy}" x2="${w-pad}" y2="${yy}" class="chart-grid"/>`)}svg.insertAdjacentHTML('beforeend',`<polyline points="${values.map(p=>`${x(p.i)},${y(p.v)}`).join(' ')}" class="chart-line"/>`);for(const p of values)svg.insertAdjacentHTML('beforeend',`<circle cx="${x(p.i)}" cy="${y(p.v)}" r="5" class="chart-point"><title>${metricLabel}: ${(p.v*100).toFixed(0)}%</title></circle>`)}else svg.insertAdjacentHTML('beforeend','<text x="320" y="120" text-anchor="middle" class="chart-empty">No supported movement trend yet</text>');</script>{% endif %}{% endblock %}
+{% block scripts %}{% if profile and progress.fight_count %}<script nonce="{{ request.state.csp_nonce }}">const points={{progress.points|tojson}},metricKey={{progress.trend_key|tojson}},metricLabel={{progress.trend_label|tojson}},svg=document.getElementById('movementChart'),values=points.map((p,i)=>({i,v:p[metricKey]})).filter(p=>p.v!==null);if(values.length){const w=640,h=230,pad=34,min=Math.min(...values.map(p=>p.v)),max=Math.max(...values.map(p=>p.v)),range=Math.max(.1,max-min),x=i=>pad+(points.length===1?(w-2*pad)/2:i*(w-2*pad)/Math.max(1,points.length-1)),y=v=>h-pad-(v-min)*(h-2*pad)/range;for(let n=0;n<4;n++){const yy=pad+n*(h-2*pad)/3;svg.insertAdjacentHTML('beforeend',`<line x1="${pad}" y1="${yy}" x2="${w-pad}" y2="${yy}" class="chart-grid"/>`)}svg.insertAdjacentHTML('beforeend',`<polyline points="${values.map(p=>`${x(p.i)},${y(p.v)}`).join(' ')}" class="chart-line"/>`);for(const p of values)svg.insertAdjacentHTML('beforeend',`<circle cx="${x(p.i)}" cy="${y(p.v)}" r="5" class="chart-point"><title>${metricLabel}: ${(p.v*100).toFixed(0)}%</title></circle>`)}else svg.insertAdjacentHTML('beforeend','<text x="320" y="120" text-anchor="middle" class="chart-empty">No supported movement trend yet</text>');</script>{% endif %}{% endblock %}

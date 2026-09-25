@@ -38,6 +38,16 @@ This checklist is an engineering and operations control, not a substitute for le
 ## Security and resilience
 
 - [ ] Run production behind HTTPS only; enable HSTS after confirming every subdomain supports HTTPS.
+- [ ] Stop the host announcing its software versions. Responses carry `X-Powered-By: Phusion Passenger 6.1.8` and
+      `Server: Apache`, which Apache and Passenger add after the app has answered, so the app cannot remove them.
+      Both directives are server-config only (not `.htaccess`), so on cPanel they go in a WHM include or ask the host:
+      ```apache
+      ServerTokens Prod
+      ServerSignature Off
+      PassengerShowVersionInHeader off
+      ```
+      Verify afterwards with `curl -sI https://WarriorIQ.eu/ | grep -iE "^(server|x-powered-by):"` — expect
+      `Server: Apache` and no version anywhere.
 - [ ] Store secrets outside source control; rotate them; separate development, staging and production.
 - [x] Add rate limiting for signup, login, uploads, analysis start, sharing, export and support endpoints.
       *(Code side done 2026-09-07. Limits count against the visitor, not the proxy: keying on `request.client.host` put every

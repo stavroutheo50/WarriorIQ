@@ -17,6 +17,7 @@ import os
 import hashlib
 import secrets
 import zipfile
+from collections import Counter
 from copy import deepcopy
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
@@ -103,13 +104,13 @@ from core.upload_security import (
 )
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
-    refresh_identity_integrity,
+    STRIKE_COUNTS_PRECISION_VALIDATED, refresh_identity_integrity, unattributed_kick_total,
 )
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_unobserved
+from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
 from core.social_auth import SOCIAL_AUTH
@@ -385,9 +386,11 @@ PUBLIC_INDEX_ROUTES = (
     "/analyze/taekwondo", "/analyze/mma",
 )
 # Pages where the sport chip is noise rather than navigation. Kept next to the
-# other route groupings so it is obvious there are three of them.
-SPORT_IRRELEVANT_PREFIXES = ("/pricing", "/dashboard", "/coach", "/profile",
-                             "/settings", "/legal", "/privacy", "/terms")
+# other route groupings so it is obvious there are three of them. Plans,
+# Progress and Coach used to be listed too, which made the header change shape
+# between the main workspace tabs - the chip appeared on Analyze and the fight
+# library and vanished on the three tabs beside them.
+SPORT_IRRELEVANT_PREFIXES = ("/profile", "/settings", "/legal", "/privacy", "/terms")
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/dashboard", "/history",
@@ -473,6 +476,15 @@ class StartPayload(BaseModel):
     fighter_b_box: list[float]
     focus_fighter: str | None = None
     analysis_target: str | None = None
+    # Which corner Fighter A is in, as the person drawing the boxes says it.
+    # Optional so older clients keep working; None means "not said", and the
+    # report then names no corner rather than guessing red for A.
+    fighter_a_corner: str | None = None
+
+
+class PairCheckPayload(BaseModel):
+    fighter_a_box: list[float]
+    fighter_b_box: list[float]
 
 
 class DeletePayload(BaseModel):
@@ -1006,10 +1018,13 @@ def _reports_for_profile(profile_id: int) -> list[dict]:
                 report = cached[1]
             else:
                 full_report = json.loads(path.read_text(encoding="utf-8"))
-                report = {
+                # The identity gate is re-applied, as the report page does,
+                # so a fight the report now withholds is not charted here.
+                report = refresh_identity_integrity({
                     key: full_report.get(key, {})
-                    for key in ("video", "setup", "integrity", "metrics", "coaching", "training_plan")
-                }
+                    for key in ("video", "setup", "integrity", "metrics", "coaching",
+                                "training_plan", "tracking")
+                })
                 _progress_report_cache[str(path)] = (modified, report)
         except (OSError, json.JSONDecodeError):
             continue
@@ -1200,6 +1215,9 @@ async def viewer_context(request: Request, call_next):
         if request.url.query:
             target += f"?{request.url.query}"
         return RedirectResponse(target, status_code=308)
+    # One unpredictable value per response, carried by every <script> the
+    # templates emit, so the policy can name it instead of 'unsafe-inline'.
+    request.state.csp_nonce = secrets.token_urlsafe(18)
     request.state.account = resolve_session(request.cookies.get(SESSION_COOKIE))
     guest_id = request.cookies.get(GUEST_COOKIE)
     new_guest = not guest_id or len(guest_id) < 24 or len(guest_id) > 96
@@ -1351,7 +1369,10 @@ async def viewer_context(request: Request, call_next):
     # is reachable; gating the policy on consent hid the tag from Google's own
     # detection and made a correct install look absent.
     analytics_allowed = bool(SETTINGS.analytics_measurement_id or SETTINGS.gtm_container_id)
-    script_src = "'self' 'unsafe-inline'"
+    # A per-response nonce rather than 'unsafe-inline': an injected <script>
+    # cannot know the value, so it does not run. Inline on*= attributes cannot
+    # carry a nonce, which is why the templates have none (see base.html).
+    script_src = f"'self' 'nonce-{request.state.csp_nonce}'"
     connect_src = "'self'"
     img_src = "'self' data:"
     # Tag Manager's noscript fallback is an iframe, which default-src would
@@ -1365,8 +1386,11 @@ async def viewer_context(request: Request, call_next):
             frame_src += " https://www.googletagmanager.com"
     # Sign-in forms redirect to the provider, and form-action is enforced across
     # that redirect: with 'self' alone every social button is blocked by the
-    # browser before it leaves the page.
-    form_action = " ".join(["'self'", *SOCIAL_AUTH.form_action_origins])
+    # browser before it leaves the page. Only the pages carrying those forms
+    # need the provider origins, and only /login carries the legacy GitHub
+    # recovery line - so github.com is no longer allowed on every page of a
+    # site that offers no GitHub sign-up.
+    form_action = " ".join(["'self'", *SOCIAL_AUTH.form_action_origins_for(request.url.path)])
     # blob: in media-src is the fight the visitor just chose, played from their
     # own device while it uploads. A blob: URL names something this page itself
     # created from a file the person picked - it cannot address anything remote
@@ -1912,6 +1936,15 @@ def _wake_analysis_worker(job_id: str) -> None:
     threading.Thread(target=run, name=f"wiq-wake-{job_id}", daemon=True).start()
 
 
+def _looks_alike_message(similarity: float) -> str:
+    return (
+        f"These two look {similarity:.0%} alike to us, where a bout we can read "
+        "is usually nearer 60%. We will still analyse it, but we may mix them up - "
+        "if the report says so, pick them again on a frame where their kit or "
+        "headguards differ most."
+    )
+
+
 def _analysis_started_response(request: Request, job_id: str, deferred: bool = False,
                               looks_alike: float | None = None,
                               on_official: dict | None = None) -> JSONResponse:
@@ -1922,12 +1955,7 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
         **({"notice": _deferred_analysis_message()} if deferred else {}),
         **({"fighters_look_alike": {
             "similarity": round(float(looks_alike), 3),
-            "message": (
-                f"These two look {looks_alike:.0%} alike to us, where a bout we can read "
-                "is usually nearer 60%. We will still analyse it, but we may mix them up - "
-                "if the report says so, pick them again on a frame where their kit or "
-                "headguards differ most."
-            ),
+            "message": _looks_alike_message(float(looks_alike)),
         }} if looks_alike is not None else {}),
         **({"seed_looks_like_official": on_official} if on_official else {}),
     })
@@ -2432,6 +2460,44 @@ def home(request: Request):
     )
 
 
+def _reported_strike_families(sport: str) -> dict:
+    """The strike families a report for this sport will actually count.
+
+    `sport_counted_families` is what the sport scores. The report publishes
+    less: while STRIKE_COUNTS_PRECISION_VALIDATED is False only kicks are
+    shown, because the punch count was measured overstated and the knee bucket
+    was measured to contain punches (core/report.py observed_summary).
+    """
+    counted = sport_counted_families(sport)
+    if STRIKE_COUNTS_PRECISION_VALIDATED:
+        reported, withheld = counted, ()
+    else:
+        reported = tuple(family for family in counted if family == "kicks")
+        withheld = tuple(family for family in counted if family != "kicks")
+    return {
+        "reported_families": _prose_list(reported),
+        "withheld_families": _prose_list(withheld),
+        "no_strike_counts": not reported,
+    }
+
+
+def _sport_coverage_badge(sport: str) -> dict:
+    """The one-line coverage badge on a sport's chooser card.
+
+    Boxing's card said "Full scoring coverage" while every boxing report
+    withheld punches, the only thing boxing scores. The badge now describes
+    what a report will count, not what the detector proposes.
+    """
+    reported = _reported_strike_families(sport)
+    if reported["no_strike_counts"]:
+        return {"covered": "no", "label": "No punch counts yet"}
+    if reported["withheld_families"]:
+        return {"covered": "no", "label": "Kick counts only"}
+    if sport_unobserved(sport):
+        return {"covered": "no", "label": "Striking read only"}
+    return {"covered": "yes", "label": "Full scoring coverage"}
+
+
 def _prose_list(items) -> str:
     """"a, b and c" - built here rather than with a chain of template filters."""
     items = [str(item) for item in items if item]
@@ -2465,6 +2531,9 @@ def _sport_context(request: Request, sport: str) -> dict:
         "request": request,
         "sport": sport,
         "sport_label": RULESET_SPORTS[sport],
+        # "a MMA bout" read wrong: the article follows the sound, and MMA
+        # starts with "em".
+        "sport_article": "an" if RULESET_SPORTS[sport].startswith(("MMA", "A", "E", "I", "O", "U")) else "a",
         # Preselected on the round pickers. See SPORT_ROUND_DEFAULTS.
         "default_round_count": default_rounds,
         "default_round_seconds": default_seconds,
@@ -2491,6 +2560,11 @@ def _sport_context(request: Request, sport: str) -> dict:
         "unobserved": sport_unobserved(sport),
         # What this sport can actually score, rather than a fixed sentence.
         "counted_families": _prose_list(sport_counted_families(sport)),
+        # What the *report* will show, which is narrower. Punch and knee counts
+        # are withheld until their precision is validated, so "We count
+        # punches, kicks and knees" was a promise every report then broke - and
+        # a boxing report has no strike numbers at all. Said before upload.
+        **_reported_strike_families(sport),
         # True when every ruleset in the sport shares the same blind spot. When
         # only one does - jumping-kick bonuses exist in Point Fighting and
         # nowhere else in kickboxing - the page has to say "depending on the
@@ -2563,6 +2637,7 @@ def choose_sport(request: Request):
             "sport_rulesets": {s: _ruleset_summary(s) for s in SPORTS},
             "identities": SPORT_IDENTITIES,
             "sport_unobserved": {sport: sport_unobserved(sport) for sport in SPORTS},
+            "sport_coverage": {sport: _sport_coverage_badge(sport) for sport in SPORTS},
             "version": SETTINGS.version,
         },
     )
@@ -2957,6 +3032,7 @@ def frame_page(request: Request, job_id: str):
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
+    _pin_sport_to_fight(request, _job_sport(job))
     return templates.TemplateResponse(request=request, name="frame.html", context={"request": request, "job_id": job_id, "job": job})
 
 
@@ -2989,10 +3065,19 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
     default_focus = str((profile or {}).get("default_fighter") or "A").upper()
     if default_focus not in {"A", "B"}:
         default_focus = "A"
+    # The fighter this upload was filed against on the setup page. It used to
+    # vanish here, so "Who are you training?" asked about "Fighter A / B" when
+    # the athlete had already said "Theodoulos" one step earlier.
+    _pin_sport_to_fight(request, _job_sport(job))
+    fighter = None
+    if profile_id is not None and str(job.get("fighter_id") or "").isdigit():
+        fighter = get_fighter(profile_id, int(job["fighter_id"]))
     return templates.TemplateResponse(
         request=request, name="select.html",
         context={"request": request, "job_id": job_id, "job": job,
-                 "default_focus": default_focus})
+                 "default_focus": default_focus,
+                 "fighter_name": (fighter or {}).get("name"),
+                 "default_corner": job.get("fighter_a_corner") or ""})
 
 
 @app.get("/selection-image/{job_id}")
@@ -3403,6 +3488,41 @@ def remote_worker_failed(request: Request, job_id: str, payload: WorkerFailurePa
     return {"ok": True}
 
 
+@app.post("/api/pair-check/{job_id}", dependencies=[Depends(require_csrf)])
+def pair_check(request: Request, job_id: str, payload: PairCheckPayload):
+    """Do the two boxed fighters look alike? Asked as soon as both are drawn.
+
+    The same comparison /api/start makes, moved to the moment it can still
+    change anything. It used to be answered only after Start, as a toast on
+    the way to the progress page - so two fighters in the same kit were found
+    out two or three minutes later, when the report withheld everything. Here
+    the person who can pick a better frame is still looking at this one.
+    """
+    _enforce_rate_limit(request, "pair-check", 60, 600)
+    job = _authorized_job(request, job_id)
+    if not job:
+        raise HTTPException(404)
+    chosen_frame = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
+    if chosen_frame is None:
+        return {"checked": False}
+    height, width = chosen_frame.shape[:2]
+    fighter_a_box = _validated_fighter_box(payload.fighter_a_box, width, height, "Fighter A")
+    fighter_b_box = _validated_fighter_box(payload.fighter_b_box, width, height, "Fighter B")
+    alike = fighter_pair_similarity(
+        _appearance_observation(chosen_frame, fighter_a_box),
+        _appearance_observation(chosen_frame, fighter_b_box),
+    )
+    if alike is None:
+        return {"checked": False}
+    looks_alike = float(alike) >= SETTINGS.max_fighter_pair_similarity
+    return {
+        "checked": True,
+        "similarity": round(float(alike), 3),
+        "looks_alike": looks_alike,
+        **({"message": _looks_alike_message(float(alike))} if looks_alike else {}),
+    }
+
+
 @app.post("/api/start/{job_id}", dependencies=[Depends(require_csrf)])
 def start(request: Request, job_id: str, payload: StartPayload):
     _enforce_rate_limit(request, "analysis-start", 12, 600)
@@ -3463,6 +3583,9 @@ def start(request: Request, job_id: str, payload: StartPayload):
     focus_fighter = (payload.focus_fighter or payload.analysis_target or "A").upper()
     if focus_fighter not in {"A", "B"}:
         raise HTTPException(400, "Choose Fighter A or Fighter B for the detailed report.")
+    fighter_a_corner = (payload.fighter_a_corner or "").strip().lower() or None
+    if fighter_a_corner not in {None, "red", "blue"}:
+        raise HTTPException(400, "Choose the red corner, the blue corner, or no corners for Fighter A.")
 
     _save_fighter_portrait(job_id, "A", fighter_a_box)
     _save_fighter_portrait(job_id, "B", fighter_b_box)
@@ -3477,6 +3600,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
         analysis_run_id = prepare_job_run(job_id, {
             "analysis_target": "BOTH", "focus_fighter": focus_fighter,
             "fighter_a_box": fighter_a_box, "fighter_b_box": fighter_b_box,
+            "fighter_a_corner": fighter_a_corner,
             **({"message": _deferred_analysis_message()} if capacity["deferred"] else {}),
         })
     except AnalysisStateNotPersisted as exc:
@@ -3540,6 +3664,7 @@ def progress_page(request: Request, job_id: str):
     if not authorized:
         raise HTTPException(404)
     job = get_job(job_id) or authorized
+    _pin_sport_to_fight(request, _job_sport(job))
     return templates.TemplateResponse(request=request, name="progress.html", context={
         "request": request, "job_id": job_id, "initial_status": _public_job_status(job_id, job),
     })
@@ -3767,8 +3892,8 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
         required = f"{SETTINGS.min_tracking_coverage_for_score * 100:.0f}%"
         return {
             "reason": (
-                f"We lost sight of a fighter too often. We followed the red corner for "
-                f"{_pct('fighter_A_coverage')} of the fight and the blue corner for "
+                f"We lost sight of a fighter too often. We followed Fighter A for "
+                f"{_pct('fighter_A_coverage')} of the fight and Fighter B for "
                 f"{_pct('fighter_B_coverage')}, and a fair score needs {required} of each."
             ),
             "fix": "Pick both fighters again on a frame where they are clearly apart, then re-run.",
@@ -3789,6 +3914,40 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
         "reason": "Tracking was not steady enough for a fair score.",
         "fix": "Pick both fighters again on a clearer frame, then re-run.",
     }
+
+
+def _pin_sport_to_fight(request: Request, sport: str | None) -> None:
+    """Name the fight's own sport in the header on a page about one fight.
+
+    The chip came from a cookie that /analyze/<sport> writes, so opening the
+    Muay Thai setup in another tab relabelled a kickboxing result "Muay Thai".
+    The cookie is a remembered preference for the analysis flow; a page about
+    one fight is about that fight's sport, whatever the last tab chose.
+    """
+    if sport in SPORTS:
+        request.state.active_sport = sport_identity(sport)
+
+
+def _job_sport(job: dict) -> str | None:
+    try:
+        return sport_of(str(job.get("ruleset") or ""))
+    except (KeyError, ValueError):
+        return None
+
+
+def _corner_labels(job: dict) -> dict:
+    """The corner each fighter was in, as the person who drew the boxes said.
+
+    This was hard-coded - Fighter A was always "Red corner" - and A is simply
+    whoever was boxed first, so on a WAKO clip where the blue fighter was
+    drawn first the report put the wrong colour over both of them. A corner
+    nobody stated is not named at all.
+    """
+    corner = str(job.get("fighter_a_corner") or "").lower()
+    if corner not in {"red", "blue"}:
+        return {"A": None, "B": None}
+    other = "blue" if corner == "red" else "red"
+    return {"A": f"{corner.title()} corner", "B": f"{other.title()} corner"}
 
 
 def _sharing_state(request: Request, job_id: str, profile_id: int | None) -> dict:
@@ -3877,22 +4036,33 @@ def result_page(request: Request, job_id: str):
         if _profile is not None else {"available": False}
     )
     can_share = bool(_account(request) and report_access.get("can_share"))
+    # Every per-fighter strike block is an attribution. When identity failed
+    # the page has already said it cannot tell whose strikes were whose, so
+    # the per-fighter kick cards, the "You hit / You got hit" visuals and the
+    # kick-minimum table are not built at all, and one unattributed total is
+    # given instead. See core.report.unattributed_kick_total.
+    identity_trusted = bool((report.get("integrity") or {}).get("identity_evidence_trusted", True))
+    _pin_sport_to_fight(request, report.get("scorecard", {}).get("sport") or _job_sport(job))
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
+        "corners": _corner_labels(job),
         "progress_since_last": progress_since_last,
         "identity": sport_identity(report.get("scorecard", {}).get("sport", "kickboxing")),
         "report_access": report_access,
         "analysis_quality": _analysis_quality_summary(report),
         # Built at render time rather than stored in the report, so every
         # analysis already on disk gains these sections without being re-run.
-        "visuals": report_visuals(report, _visual_focus(report)),
+        "visuals": report_visuals(report, _visual_focus(report)) if identity_trusted else None,
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
         "score_withheld": _score_withheld(report, job_id),
-        "observed": observed_summary(report) if not (report.get("scorecard") or {}).get("available") else None,
+        "observed": (observed_summary(report)
+                     if identity_trusted and not (report.get("scorecard") or {}).get("available")
+                     else None),
+        "kick_total": None if identity_trusted else unattributed_kick_total(report),
         # Only Full Contact has an obligatory kick count, so this is None for
         # every other discipline and the block simply does not render.
-        "kick_minimum": kick_minimum_check(report),
+        "kick_minimum": kick_minimum_check(report) if identity_trusted else None,
     })
     response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
     if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:
@@ -4256,6 +4426,7 @@ def replay_page(
         family.lower() if family else None,
         outcome.lower() if outcome else None,
     )
+    _pin_sport_to_fight(request, (report.get("scorecard") or {}).get("sport"))
     return templates.TemplateResponse(
         request=request,
         name="replay.html",
@@ -4555,6 +4726,21 @@ async def save_profile(
     return RedirectResponse("/profile", status_code=303)
 
 
+def _athlete_name(profile: dict, fights: list[dict]) -> str:
+    """Whose progress this is, by the name the fights were filed under.
+
+    The page printed the workspace display name, which starts as "My Athlete"
+    for everyone, while every fight in the library was filed under the actual
+    fighter. The fighter most fights were filed against wins; the display name
+    is the fallback for a workspace that never named one.
+    """
+    names = Counter(str(fight.get("fighter_name")).strip()
+                    for fight in fights if str(fight.get("fighter_name") or "").strip())
+    if names:
+        return names.most_common(1)[0][0]
+    return str(profile.get("display_name") or SETTINGS.default_profile_name)
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard_page(request: Request):
     profile_id = _profile_id(request)
@@ -4569,6 +4755,7 @@ def dashboard_page(request: Request):
         request=request, name="dashboard.html",
         context={
             "request": request, "profile": profile, "progress": progress,
+            "athlete_name": _athlete_name(profile, list_fights(profile_id)),
             "assignments": list_assignments(profile_id),
         },
     )

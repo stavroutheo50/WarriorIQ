@@ -186,6 +186,19 @@ class SocialAuthRegistry:
         """Origins a sign-in form is allowed to be redirected to."""
         return [AUTHORIZE_ORIGINS[key] for key in sorted(self._enabled) if key in AUTHORIZE_ORIGINS]
 
+    def form_action_origins_for(self, path: str) -> list[str]:
+        """The provider origins a page at `path` may submit a form to.
+
+        Only the sign-in pages carry provider buttons. Legacy providers are a
+        recovery line on /login alone, so /signup never allows them.
+        """
+        if path.startswith("/auth/") or path == "/login":
+            return self.form_action_origins
+        if path == "/signup":
+            return [AUTHORIZE_ORIGINS[key] for key in sorted(self._enabled)
+                    if key in AUTHORIZE_ORIGINS and key not in LEGACY_PROVIDER_LABELS]
+        return []
+
     def is_enabled(self, provider: str) -> bool:
         return provider in self._enabled
 
