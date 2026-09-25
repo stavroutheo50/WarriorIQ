@@ -481,4 +481,12 @@
    * paid plan above Athlete says "Complete", so it separates almost nothing
    * while costing the width that price and roster need. */
   .plan-compare .compare-report{display:none}
+  /* At 320px the plan name, or the name plus its "Current" badge, pushed the
+   * Per day column past the edge, and the wrapper's overflow:hidden cut it
+   * off rather than letting it scroll. The name may wrap and the badge takes
+   * its own line; scrolling is the fallback, never clipping. */
+  .plan-compare tbody th{white-space:normal}
+  .compare-current{display:inline-block;margin:3px 0 0}
+  .plan-compare thead th{letter-spacing:.04em}
+  .plan-compare-wrap{overflow-x:auto}
 }
