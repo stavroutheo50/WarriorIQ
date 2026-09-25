@@ -19,7 +19,12 @@
    was free to use, which is not something any code here does - it named the
    prices in the same breath, so the page contradicted itself and a reader had
    no way to tell which half was true. #}
-{% if not payments_enabled %}<div class="notice"><strong>Paid plans are not open yet.</strong> Everyone is on Starter, free, while WarriorIQ is in early access — no card is ever asked for. The prices below are what each plan will cost when billing opens, so you can tell us now which one you want.</div>{% endif %}
+{#- "Free in early access" on each paid card read as "this paid plan is free
+    now", beside a banner saying everyone is on Starter. Only Starter is open;
+    the paid cards say billing has not opened, and the banner says how to ask
+    for one - that promise had no visible way to keep it for a signed-out
+    visitor, whose cards only said "Create account first". -#}
+{% if not payments_enabled %}<div class="notice"><strong>Paid plans are not open yet.</strong> Everyone is on Starter, free, while WarriorIQ is in early access — no card is ever asked for. The prices below are what each plan will cost when billing opens. {% if account %}To tell us which one you want, press <b>Tell us you want &hellip;</b> on that plan's card.{% else %}To tell us which one you want, create a free account, then press <b>Tell us you want &hellip;</b> on that plan's card.{% endif %}</div>{% endif %}
 
 {% if allowance %}
 <section class="allowance-strip">
@@ -106,7 +111,7 @@
         one line on each that helps somebody choose between them. -#}
     <div class="plan-price-row">
       <div class="plan-price">{{plan.price}}</div>
-      {% if not payments_enabled and key != 'free' %}<span class="plan-early">Free in early access</span>{% endif %}
+      {% if not payments_enabled and key != 'free' %}<span class="plan-early">Billing not open yet</span>{% endif %}
     </div>
     {% if not payments_enabled and key != 'free' %}
       <div class="small muted">{{plan.period}}, when billing opens</div>
@@ -140,7 +145,8 @@
       {% if key in plans_wanted %}<p class="small muted plan-wanted">✓ Noted — you are on the list for {{plan.label}}. We will email you when billing opens.</p>
       {% else %}<form method="post" action="/plan-interest/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="/pricing"><button class="btn" type="submit">Tell us you want {{plan.label}}</button></form>{% endif %}
     {% else %}
-      <a class="btn secondary" href="/signup?next={% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Create account first</a>
+      {% if payments_enabled %}<a class="btn secondary" href="/signup?next={% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Create account first</a>
+      {% else %}<a class="btn secondary" href="/signup?next=/pricing">Create a free account to request {{plan.label}}</a>{% endif %}
     {% endif %}
   </section>
 {% endfor %}

@@ -605,6 +605,16 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
   font-weight: 700;
 }
 
+/* The unit of a figure that is not a percentage, so "0.6 Movement" says
+   what 0.6 is measured in. */
+.fight-vitals .vital-unit {
+  display: block;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--wiq-text-tertiary);
+  font-size: var(--wiq-text-micro);
+}
+
 .fight-vitals small {
   color: var(--wiq-text-tertiary);
   font-size: var(--wiq-text-micro);
@@ -764,4 +774,52 @@ fieldset.needs-attention {
   font-size: var(--wiq-text-lg, 20px);
   color: var(--wiq-text-tertiary);
   font-weight: 600;
+}
+
+/* --- Result page: one heading, readable sentences ------------------------
+   The page had two headings - a small "Fight analysis" and, a screen down,
+   a 76px "Your fight in numbers." - so it read as two pages stacked. The
+   hero carries the only h1; the numbers section is a section. */
+.result-hero .result-title {
+  margin: 6px 0 0;
+  font-size: clamp(30px, 4vw, 44px);
+  line-height: 1.02;
+  letter-spacing: -.035em;
+}
+
+.numbers-first-report > header h2 {
+  margin: 8px 0 0;
+  font-size: clamp(26px, 3.2vw, 36px);
+  line-height: 1.05;
+  letter-spacing: -.03em;
+}
+
+/* The sentence beside a withheld score is advice, and it was set in the
+   uppercase micro-label style meant for one-word captions. */
+.numbers-score > small {
+  max-width: 44ch;
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+  font-size: var(--wiq-text-sm);
+  line-height: 1.55;
+  text-align: left;
+}
+
+/* The kick card sized its columns for two fixed 170px figures, so a card
+   with one figure left a wide empty column beside a squeezed paragraph. */
+.numbers-unavailable {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px 32px;
+}
+
+.numbers-unavailable > div { flex: 0 0 auto; }
+.numbers-unavailable > div small { display: block; color: #98896d; font-size: 11px; }
+.numbers-unavailable > p { flex: 1 1 280px; }
+
+@media (max-width: 650px) {
+  .numbers-score > small { margin-left: 0; }
 }

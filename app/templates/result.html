@@ -9,8 +9,8 @@
    thousand pixels down was telling the reader the opposite of the truth. #}
 {% set identity_failed = not report.integrity.identity_evidence_trusted|default(true) %}
 <div class="section-title result-hero" data-reveal>
-  <div><div class="eyebrow">{% if identity_failed %}Needs one quick step{% else %}Analysis complete{% endif %}</div><h2>Fight analysis</h2></div>
-  <div class="selection-tools">{% if identity_failed %}<a class="btn" href="/select/{{job_id}}" data-motion-primary>Show me who is who</a>{% endif %}{% if can_share %}<form action="/share/{{job_id}}" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post" onsubmit="return confirm('Revoke {{sharing.links|length}} coach link{{'' if sharing.links|length == 1 else 's'}}? {{'Any link' if sharing.links|length == 1 else 'Every link'}} already sent to a coach stops working immediately and cannot be restored. Creating a new link gives a new address, which you would have to send again.')"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
+  <div><div class="eyebrow">{% if identity_failed %}Needs one quick step{% else %}Analysis complete{% endif %}</div>{#- The one page heading. "Your fight in numbers." further down was a second, larger h1 competing with this one. -#}<h1 class="result-title">Fight report</h1></div>
+  <div class="selection-tools">{% if identity_failed %}<a class="btn" href="/select/{{job_id}}" data-motion-primary>Show me who is who</a>{% endif %}{% if can_share %}<form action="/share/{{job_id}}" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post" data-confirm="Revoke {{sharing.links|length}} coach link{{'' if sharing.links|length == 1 else 's'}}? {{'Any link' if sharing.links|length == 1 else 'Every link'}} already sent to a coach stops working immediately and cannot be restored. Creating a new link gives a new address, which you would have to send again."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
 </div>
 {% if can_share and sharing %}
 {% if sharing.new_link %}
@@ -18,7 +18,7 @@
   <div class="eyebrow">Coach link created</div>
   <p class="muted">Send this to your coach. It opens the report summary without the original video, works for anyone holding it, and stops working on {{sharing.new_link_expires}}.</p>
   <div class="share-copy-row">
-    <input class="share-link-field" type="text" readonly value="{{sharing.new_link}}" aria-label="Coach link address" onfocus="this.select()">
+    <input class="share-link-field" type="text" readonly value="{{sharing.new_link}}" aria-label="Coach link address" data-select-on-focus>
     <button class="btn tiny" type="button" data-copy-link="{{sharing.new_link}}">Copy</button>
   </div>
   <p class="small muted share-once">This address is shown once. WarriorIQ stores only a fingerprint of it, so it cannot be displayed again &mdash; if you lose it, revoke and create a new one.</p>
@@ -36,7 +36,7 @@
 {% endif %}
 {% endif %}
 <section class="result-overview" aria-label="Fight summary" data-motion-sequence="result-summary">
-  <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="Fighter A portrait" onerror="this.hidden=true"><span><small>Red corner</small><strong>Fighter A</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="Fighter B portrait" onerror="this.hidden=true"><span><small>Blue corner</small><strong>Fighter B</strong></span></div></div>
+  <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="Fighter A portrait" data-hide-on-error><span>{% if corners and corners.A %}<small>{{corners.A}}</small>{% endif %}<strong>Fighter A</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="Fighter B portrait" data-hide-on-error><span>{% if corners and corners.B %}<small>{{corners.B}}</small>{% endif %}<strong>Fighter B</strong></span></div></div>
   <div class="result-context"><div><span>Ruleset</span><strong>{{report.scorecard.ruleset_label}}</strong></div>{# Read back in the same words the upload form used. This said "1 × 71s" on
    every fight, because the format was posted hidden as one round spanning the
    video; now that it is asked for, a 3x3min bout has to read like one. #}
@@ -94,50 +94,18 @@
 {% set vitals_primary = vitals_focus if vitals_focus in ['A','B'] else 'A' %}
 {% set m = report.metrics[vitals_primary] if report.metrics and vitals_primary in report.metrics else {} %}
   <div class="fight-vitals">
-    <article><b class="wiq-num">{% if m.footwork_body_lengths_per_second is not none %}{{'%.1f'|format(m.footwork_body_lengths_per_second)}}{% else %}&mdash;{% endif %}</b><span>Movement</span><small>how far you travel each second, in your own body lengths. A busy round is about 1.5</small></article><article><b class="wiq-num">{% if m.pressure_index is not none %}{{'%.0f'|format((m.pressure_index + 1) / 2 * 100)}}{% else %}&mdash;{% endif %}</b><span>Pressure</span><small>above 50 you walked at them, below 50 you gave ground</small></article><article><b class="wiq-num">{% if m.ring_center_control is not none %}{{'%.0f'|format(m.ring_center_control*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Centre</span><small>share of the fight you spent in the middle rather than on the outside</small></article><article><b class="wiq-num">{% if m.guard_index is not none %}{{'%.0f'|format(m.guard_index*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Guard</span><small>share of the fight your hands were up near your head</small></article><article><b class="wiq-num">{% if m.balance_index is not none %}{{'%.0f'|format(m.balance_index*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Balance</span><small>share of the fight you stayed in a balanced stance</small></article><article><b class="wiq-num">{% if m.pose_coverage is not none %}{{'%.0f'|format(m.pose_coverage*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Seen</span><small>share of the video the camera could see you clearly. Under 70% and the rest is less reliable</small></article>
+    <article><b class="wiq-num">{% if m.footwork_body_lengths_per_second is not none %}{{'%.1f'|format(m.footwork_body_lengths_per_second)}}{% else %}&mdash;{% endif %}</b><span>Movement <i class="vital-unit">body lengths / sec</i></span><small>how far you travel each second, in your own body lengths. A busy round is about 1.5</small></article><article><b class="wiq-num">{% if m.pressure_index is not none %}{{'%.0f'|format((m.pressure_index + 1) / 2 * 100)}}{% else %}&mdash;{% endif %}</b><span>Pressure <i class="vital-unit">0&ndash;100</i></span><small>above 50 you walked at them, below 50 you gave ground</small></article><article><b class="wiq-num">{% if m.ring_center_control is not none %}{{'%.0f'|format(m.ring_center_control*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Centre</span><small>share of the fight you spent in the middle rather than on the outside</small></article><article><b class="wiq-num">{% if m.guard_index is not none %}{{'%.0f'|format(m.guard_index*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Guard</span><small>share of the fight your hands were up near your head</small></article><article><b class="wiq-num">{% if m.balance_index is not none %}{{'%.0f'|format(m.balance_index*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Balance</span><small>share of the fight you stayed in a balanced stance</small></article><article><b class="wiq-num">{% if m.pose_coverage is not none %}{{'%.0f'|format(m.pose_coverage*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Seen</span><small>share of the video the camera could see you clearly. Under 70% and the rest is less reliable</small></article>
   </div>
   {#- Every number above is an average, and the reader is owed the ground it
      stands on. These used to be withheld entirely below 60% coverage, so a
      fighter saw a row of dashes and no reason for them. -#}
+  {% if identity_failed %}
+  <p class="vitals-basis small muted">The identity check failed, so these may mix in the other fighter's movement. Pick the fighters again and they will be yours alone.</p>
+  {% endif %}
   {% set seen = m.measurement %}
   {% if seen and seen.measured_frames %}
   <p class="vitals-basis small muted">Measured across {{'{:,}'.format(seen.measured_frames)}} of {{'{:,}'.format(seen.analyzed_frames)}} analysed frames{% if not seen.confident %} &mdash; just over {{'%.0f'|format(seen.share * 100)}}% of the fight, so read these as the part of the round WarriorIQ could see rather than the whole of it{% endif %}.</p>
   {% endif %}
-{#- Strikes come after the fighter's own numbers, deliberately. The pose
-    metrics above are measured and always available; the strike count is
-    one family out of two, because the punch count was overstated by
-    eleven in two of three checked bouts. The part that is true leads. -#}
-  {% if not report.scorecard.available and observed %}
-  <div class="observed">
-    <h3>Kicks we could count</h3>
-    {#- This used to end "so the real numbers are higher", presenting the count
-        as a floor. Hand-checking 178 clips showed the opposite: about a third
-        of displayed actions were real, the rest being the opponent's strike
-        credited to the defender, a moment where nothing happened, or the
-        referee. An inflated count must not be sold as a minimum. -#}
-    <p class="observed-note">Not a score. <strong>Kicks only.</strong>
-      We checked every strike this analysis proposed across three real bouts against the
-      video: the kick count came out right in all three, and the punch count was overstated by
-      eleven in two of them. At this camera distance an arm extension is a few pixels, so punches
-      are counted internally and deliberately not shown until that changes.</p>
-    <div class="observed-grid">
-      {% for who, seen in observed.fighters.items() %}
-      <div class="observed-card">
-        <span class="observed-who">Fighter {{who}}</span>
-        <strong>{{seen.actions_evidenced}}</strong>
-        <span class="observed-basis">leg strike{{ '' if seen.actions_evidenced == 1 else 's' }}
-          in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
-        <span class="observed-families">
-          <em>kicks only</em>{% if seen.punches_withheld %} &middot;
-          punches not shown{% endif %}{% if seen.knees_withheld %} &middot;
-          knees not shown{% endif %}
-        </span>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
 {#- The movement scorecard sits *below* the fighter's own numbers, not
     above them. It needs 85% tracking coverage on both fighters and real
     footage rarely reaches that - all three reference bouts produced 19%
@@ -244,15 +212,29 @@
 {% endif %}
 
 <section class="numbers-first-report" aria-labelledby="numbersTitle" data-motion-sequence="report-numbers">
-  <header><div><span class="eyebrow">Performance report · Fighter {{primary}}</span><h1 id="numbersTitle">Your fight in numbers.</h1></div><div class="numbers-score">{% if report.scorecard.available %}<span>Estimated score</span><strong>{{report.scorecard.totals.A}}–{{report.scorecard.totals.B}}</strong>{% else %}<span>Score</span><strong>—</strong><small>{% if score_withheld %}{{score_withheld.fix}}{% if score_withheld.action %} <a class="recheck-link" href="{{score_withheld.action.url}}">{{score_withheld.action.label}}</a>{% endif %}{% else %}Withheld{% endif %}</small>{% endif %}</div></header>
+  <header><div><span class="eyebrow">Performance report · Fighter {{primary}}</span><h2 id="numbersTitle">Your fight in numbers</h2></div><div class="numbers-score">{% if report.scorecard.available %}<span>Estimated score</span><strong>{{report.scorecard.totals.A}}–{{report.scorecard.totals.B}}</strong>{% else %}<span>Score</span><strong>—</strong><small>{% if score_withheld %}{{score_withheld.fix}}{% if score_withheld.action %} <a class="recheck-link" href="{{score_withheld.action.url}}">{{score_withheld.action.label}}</a>{% endif %}{% else %}Withheld{% endif %}</small>{% endif %}</div></header>
   {# Measured every fight, whatever the action model is doing. These come from
      pose geometry, so they survive the evidence gate that hides strike counts -
      which is why the report used to collapse to almost nothing. Big numbers,
      one word each: a fighter should read this in five seconds. #}
 
 
+  {#- Strikes come after the fighter's own numbers, deliberately. The pose
+      metrics above are measured and always available; the strike count is
+      one family out of two. The part that is true leads.
+
+      One message about strike counting, in one place. The page used to say
+      "Punch and kick counting is switched off" here while a panel higher up
+      was headed "Kicks we could count" - both true of different families,
+      read together a contradiction. Boxing gets its own wording: with punches
+      withheld a boxing report has no strike numbers at all, and says so. -#}
+  {% set strike_sport = report.scorecard.sport|default('kickboxing', true) %}
   {% if not stats_ready %}
-  <p class="vitals-note"><b>Punch and kick counting is switched off.</b> It is not accurate yet, so WarriorIQ does not show it. Everything above is measured from your body and is real.</p>
+  {% if strike_sport == 'boxing' %}
+  <p class="vitals-note"><b>No punch counts in this report.</b> Punch counting is not accurate enough yet, so a boxing report shows movement, guard and balance only. Everything above is measured from your body and is real.</p>
+  {% else %}
+  <p class="vitals-note"><b>Kicks only.</b> Punches and knees are not counted yet &mdash; checked against video, the kick count came out right and the punch count was overstated. Everything above is measured from your body and is real.</p>
+  {% endif %}
   {% endif %}
 
   {% if stats_ready %}
@@ -314,20 +296,48 @@
   </section>
   {% endif %}
   {% else %}
-  {#- Leg strikes, not total attempts. This showed `attempts`, which is every
-     proposed strike including punches - and the punch count was overstated by
-     eleven in two of the three bouts checked against video, so the total was
-     the one number here that was not defensible. -#}
-  {% macro legs(who) %}{% set st = fighter_stats.get(who, {}) %}{{ (st.kick_attempts|default(0)) + (st.knee_attempts|default(0)) }}{% endmacro %}
-  {# Per-fighter totals are attributions. When identity failed the report has
-     already said it lost track of which fighter was which, so "Fighter A: 19,
-     Fighter B: 22" is a split it cannot support - the strikes were seen, but
-     not whose they were. The count is given unattributed instead, which is
-     the part that survives. #}
-  {% if identity_failed %}
-  <div class="numbers-unavailable"><div><span>Leg strikes seen, both fighters</span><strong>{{ (legs('A')|int) + (legs('B')|int) }}</strong></div><p>Not split between the two fighters: the identity check failed, so WarriorIQ cannot say whose these were. Choose the fighters again at the top of this page and the split comes back. Punches are not counted at all &mdash; checked against video, the kick count came out right and the punch count did not.</p></div>
+  {#- Kick attempts, the one strike family the report stands behind, from the
+     same statistics block everywhere on this page so no two sections can
+     print different totals. Knees are left out: the knee bucket was measured
+     to contain punches (see core/report.py observed_summary). -#}
+  {% if strike_sport == 'boxing' %}
+  {# Nothing to show: punches are withheld and boxing has no kicks. #}
+  {% elif identity_failed %}
+  {# Per-fighter totals are attributions, and the page has already said it
+     could not tell the fighters apart - so one combined total, with attempts
+     and landed labelled separately. The per-fighter kick cards, the
+     "You hit / You got hit" maps and the kick-minimum table are not built
+     for this page at all (see result_page in app/main.py). #}
+  {% if kick_total %}
+  <div class="numbers-unavailable kick-total-combined">
+    <div><span>Kicks thrown, both fighters</span><strong>{{kick_total.attempts}}</strong><small>attempts</small></div>
+    <div><span>Kicks landed, both fighters</span>{% if kick_total.landed is not none %}<strong>{{kick_total.landed}}</strong><small>landed</small>{% else %}<strong>&mdash;</strong><small>not counted yet</small>{% endif %}</div>
+    <p>One total for the whole fight, not split between the fighters: the identity check failed, so WarriorIQ cannot say whose kicks these were. Choose the fighters again at the top of this page and the split comes back.</p>
+  </div>
+  {% endif %}
+  {% elif observed %}
+  <div class="observed">
+    <h3>Kicks we could count</h3>
+    <p class="observed-note">Not a score. Kick attempts only, each next to the share of the round we could follow that fighter. Whether a kick landed is not counted yet.</p>
+    <div class="observed-grid">
+      {% for who, seen in observed.fighters.items() %}
+      <div class="observed-card">
+        <span class="observed-who">Fighter {{who}}</span>
+        <strong>{{seen.actions_evidenced}}</strong>
+        <span class="observed-basis">kick{{ '' if seen.actions_evidenced == 1 else 's' }} thrown
+          in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
+        <span class="observed-families">
+          <em>kicks only</em>{% if seen.punches_withheld %} &middot;
+          punches not shown{% endif %}{% if seen.knees_withheld %} &middot;
+          knees not shown{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
   {% else %}
-  <div class="numbers-unavailable"><div><span>Fighter A leg strikes</span><strong>{{legs('A')}}</strong></div><div><span>Fighter B leg strikes</span><strong>{{legs('B')}}</strong></div><p>Punches are not counted &mdash; checked against video, the kick count came out right and the punch count did not. Landed, missed and blocked are hidden until WarriorIQ can count them accurately. Nothing here is guessed.</p></div>
+  {% macro kicks(who) %}{{ fighter_stats.get(who, {}).kick_attempts|default(0, true) }}{% endmacro %}
+  <div class="numbers-unavailable"><div><span>Fighter A kicks thrown</span><strong>{{kicks('A')}}</strong><small>attempts</small></div><div><span>Fighter B kicks thrown</span><strong>{{kicks('B')}}</strong><small>attempts</small></div><p>Attempts only. Landed, missed and blocked are hidden until WarriorIQ can count them accurately. Nothing here is guessed.</p></div>
   {% endif %}
   {% endif %}
   <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'Keep the measured baseline'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Build the next clean sample'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% endif %}</article></div>
@@ -494,7 +504,7 @@
 {% set m=report.metrics[fighter] %}
 <section class="card performance-card fighter-{{fighter|lower}}">
   <div style="display:flex;gap:16px;align-items:center">
-    <img src="/fighter-portrait/{{job_id}}/{{fighter}}" alt="Fighter {{fighter}}" style="width:84px;height:84px;object-fit:cover;border-radius:16px;border:1px solid var(--border)" onerror="this.style.display='none'">
+    <img src="/fighter-portrait/{{job_id}}/{{fighter}}" alt="Fighter {{fighter}}" style="width:84px;height:84px;object-fit:cover;border-radius:16px;border:1px solid var(--border)" data-hide-on-error>
     <div><div class="eyebrow">Fighter {{fighter}}</div><h2 style="margin:4px 0">Performance</h2></div>
   </div>
   <div class="performance-rail" tabindex="0" aria-label="Fighter {{fighter}} performance measurements; scroll horizontally for more">
@@ -754,7 +764,7 @@
 <aside class="notice ai-report-notice"><strong>AI-Assisted Analysis.</strong> WarriorIQ uses computer vision and AI; detection mistakes are possible. Statistics and scores are estimates, not guaranteed facts or an official judging decision. Use this report as training and performance guidance—not medical advice. Camera angle, resolution, obstruction and poor lighting can reduce analysis quality. <a class="text-link" href="/ai-transparency">How WarriorIQ AI works</a> · <a class="text-link" href="/sports-medical-disclaimer">Sports &amp; medical safety</a></aside>
 {% endblock %}
 {% block scripts %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (()=>{
   // wiqToast is defined in the base template's trailing script, so it is only
   // ever read inside the handler -- by click time it exists.

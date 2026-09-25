@@ -158,7 +158,11 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
             fight.get("ruleset"), fight.get("created_at")),
         "focus": focus,
         "coverage": round(min(coverage["A"], coverage["B"]), 3),
-        "usable": min(coverage["A"], coverage["B"]) >= _MIN_COVERAGE,
+        # Coverage says somebody was followed, not that it was the right
+        # somebody. A fight whose report failed the identity check disowns its
+        # own per-fighter numbers, so it is never a point on a trend.
+        "usable": (min(coverage["A"], coverage["B"]) >= _MIN_COVERAGE
+                   and (report.get("integrity") or {}).get("identity_evidence_trusted") is not False),
         "movement_verdict": verdict,
         "pressure": _metric(report, focus, "pressure_index"),
         "centre": _metric(report, focus, "ring_center_control"),

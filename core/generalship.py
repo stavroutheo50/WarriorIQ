@@ -29,6 +29,8 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass
 
+from core.metrics import ring_frame
+
 # A round has to be clearly one fighter's before it is called. Below this the
 # two were equal on what could be measured, and saying so is the honest answer
 # rather than splitting hairs to produce a winner.
@@ -184,17 +186,18 @@ def judge_fight(metrics, rounds, coverage: dict[str, float], minimum_coverage: f
         points = [record for side in ("A", "B") for record in positions_by_round[spec.number][side]]
         centre = {"A": [], "B": []}
         advance = {"A": [], "B": []}
-        if len(points) >= 10:
-            middle_x = statistics.fmean([record[2] for record in points])
-            middle_y = statistics.fmean([record[3] for record in points])
-            spread = statistics.fmean([
-                ((record[2] - middle_x) ** 2 + (record[3] - middle_y) ** 2) ** 0.5 for record in points
-            ]) or 1.0
+        # The middle of the area this round used, not the average of the two
+        # fighters' positions - that average is the point between them, which
+        # scored every round's "held the middle" at about 50/50. See
+        # core.metrics.ring_frame.
+        frame = ring_frame([(record[2], record[3]) for record in points]) if len(points) >= 10 else None
+        if frame is not None:
+            (middle_x, middle_y), spread = (float(frame[0][0]), float(frame[0][1])), frame[1]
             for fighter in ("A", "B"):
                 own = positions_by_round[spec.number][fighter]
                 for record in own:
                     distance = ((record[2] - middle_x) ** 2 + (record[3] - middle_y) ** 2) ** 0.5
-                    centre[fighter].append(max(0.0, 1.0 - distance / (spread * 2.0)))
+                    centre[fighter].append(max(0.0, 1.0 - distance / spread))
                 # Territory: did they finish the round nearer the middle than
                 # they started it? Ground taken, rather than ground held.
                 if len(own) >= 20:

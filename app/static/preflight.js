@@ -164,13 +164,18 @@
       if (columns[c] >= columnFloor) { if (left < 0) left = c; right = c; }
     }
     var boxHeight = top < 0 ? 0 : bottom - top + 1;
+    // Within 2% of the edge counts as touching it: the movement runs out of
+    // the picture there, which is what cropped-off feet look like.
+    var edge = Math.max(1, Math.round(height * 0.02));
     var boxWidth = left < 0 ? 0 : right - left + 1;
     var area = boxHeight * boxWidth;
     return {
       share: moved / (width * height),
       extent: boxHeight / height,
       spread: boxWidth / width,
-      density: area ? moved / area : 0
+      density: area ? moved / area : 0,
+      touchesBottom: top >= 0 && bottom >= height - edge,
+      touchesTop: top >= 0 && top < edge
     };
   }
 
@@ -459,13 +464,14 @@
 
           next.then(function () {
             clearTimeout(giveUp);
-            var extents = [], shares = [], densities = [], duplicates = 0;
+            var extents = [], shares = [], densities = [], duplicates = 0, cutAtFeet = 0;
             for (var i = 1; i < frames.length; i++) {
               var m = motionBetween(frames[i - 1], frames[i], canvas.width, canvas.height);
               if (m.share < IDENTICAL) { duplicates++; continue; }
               shares.push(m.share);
               extents.push(m.extent);
               densities.push(m.density);
+              if (m.touchesBottom) cutAtFeet++;
             }
             result.pairsCompared = shares.length;
             result.pairsDuplicate = duplicates;
@@ -506,6 +512,12 @@
                                   Math.min(limits.max_inference_size, stepped));
               result.networkPx = result.subjectPx * size / longEdge;
               result.framingMeasured = true;
+              // No pose model runs in the browser, so ankles cannot be seen
+              // directly. What can be seen is movement running off the bottom
+              // edge of the picture in most sampled frames - the feet are
+              // below the frame. The worker's probe checks the ankle
+              // keypoints themselves once the clip is uploaded.
+              result.feetCropped = cutAtFeet / extents.length >= 0.5;
             }
             release();
             resolve(result);

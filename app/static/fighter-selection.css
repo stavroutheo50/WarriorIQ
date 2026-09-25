@@ -76,3 +76,20 @@
 /* A visible focus ring, because this control exists for people navigating by
    keyboard and the default ring is invisible against the dark panel. */
 .pick-fighter input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}
+
+/* Fighter A's corner. A is whoever was boxed first, so the colour is asked
+   rather than assumed. */
+.corner-pick{border:1px solid rgba(255,255,255,.10);border-radius:9px;padding:9px 12px 11px;margin:14px 0 0;min-width:0}
+.corner-pick legend{padding:0 6px;font-size:11px;letter-spacing:1.3px;text-transform:uppercase;font-weight:800;color:#98a2b3}
+.corner-pick label{display:flex;align-items:center;gap:9px;padding:4px 2px;font-size:13.5px;cursor:pointer;line-height:1.4}
+.corner-pick label span{display:inline-flex;align-items:center;gap:7px}
+.corner-pick input{flex:none;width:16px;height:16px;accent-color:#8794ff}
+.corner-pick input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}
+.corner-pick small{display:block;margin-top:6px;font-size:12px;line-height:1.45}
+.corner-dot{display:inline-block;width:11px;height:11px;border-radius:50%}
+.corner-dot.red{background:#d9545e}
+.corner-dot.blue{background:#5b8ff0}
+
+/* Raised as soon as both boxes are drawn, before the analysis starts. */
+.pair-warning{margin:14px 0 0;padding:11px 13px;border:1px solid #7a5a2a;border-radius:10px;background:#261d0f;color:#ffd99a;font-size:13px;line-height:1.5}
+.pair-warning[hidden],.selection-edit-button[hidden]{display:none}

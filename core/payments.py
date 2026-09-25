@@ -183,7 +183,7 @@ PLANS = {
         "description": "The unlimited WarriorIQ suite for busy gyms and fight teams.",
         "limit_label": "Unlimited fighters",
         "report_label": "Complete report",
-        "features": ["Unlimited fight analyses", "Everything in Athlete Pro", "Complete reports for every fight", "Coach assignments and private sharing", "Saved fight library and comparisons", "Priority gym onboarding"],
+        "features": ["Unlimited fight analyses", "Everything in Coach 30", "Complete reports for every fight", "Coach assignments and private sharing", "Saved fight library and comparisons", "Priority gym onboarding"],
         "daily_limit": None,
         "monthly_limit": None,
         "unlimited": True,

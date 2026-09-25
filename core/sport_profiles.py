@@ -57,27 +57,27 @@ SPORT_IDENTITIES: dict[str, SportIdentity] = {
     "kickboxing": SportIdentity(
         "kickboxing", "Kickboxing", "KB", "92 130 239", "150 178 255",
         decided_by="Hands and feet score together; the ruleset decides which legs and knees count.",
-        report_frame="Every action that scores in kickboxing is one WarriorIQ observes directly.",
+        report_frame="Kicks are counted. Punch and knee counts are not shown until they are accurate enough.",
     ),
     "boxing": SportIdentity(
         "boxing", "Boxing", "BX", "233 106 106", "246 168 168",
         decided_by="Punches, and only punches. Output, accuracy and defence carry the round.",
-        report_frame="The one sport read in full: its entire scoring vocabulary is punches.",
+        report_frame="Punch counts are not shown yet, so a boxing report reads movement, guard and balance only.",
     ),
     "muay_thai": SportIdentity(
         "muay_thai", "Muay Thai", "MT", "226 154 74", "244 197 138",
         decided_by="Kicks and knees outscore hands, and the clinch decides close rounds.",
-        report_frame="Punches, kicks and knees are read. Elbows and clinch work are not.",
+        report_frame="Kicks are counted. Punch and knee counts are not shown yet; elbows and clinch work are not read.",
     ),
     "taekwondo": SportIdentity(
         "taekwondo", "Taekwondo", "TK", "85 198 223", "150 224 240",
         decided_by="Kicks decide it. Height and turning multiply what a kick is worth.",
-        report_frame="Kick and punch counts are read; electronic and rotation bonuses are not.",
+        report_frame="Kicks are counted. Punch counts are not shown yet; electronic and rotation bonuses are not read.",
     ),
     "mma": SportIdentity(
         "mma", "MMA", "MM", "160 138 232", "196 180 244",
         decided_by="Standing exchanges are one part of it. Most rounds turn on the ground.",
-        report_frame="A standing striking read only — takedowns and ground work are unread.",
+        report_frame="A standing kick count only — punches, takedowns and ground work are not counted.",
     ),
 }
 

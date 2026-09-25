@@ -271,6 +271,28 @@ def observed_summary(report: dict) -> dict | None:
     }
 
 
+def unattributed_kick_total(report: dict) -> dict | None:
+    """One kick total for the whole fight, for when identity failed.
+
+    A failed identity check means the report cannot say whose strikes were
+    whose, and the page used to answer that with three different totals from
+    three different sources: kicks per fighter (31), leg strikes including
+    knees (34) and arrived kicks from the raw event list (24). This is the one
+    number that survives - the statistics block's kick attempts, summed - with
+    landed kept separate and given only when the statistics trusted outcomes.
+    Never split by fighter, because that split is the thing that failed.
+    """
+    fighters = (report.get("statistics") or {}).get("fighters") or {}
+    if not fighters:
+        return None
+    rows = [fighters.get(fighter) or {} for fighter in ("A", "B")]
+    attempts = sum(int(row.get("kick_attempts") or 0) for row in rows)
+    landed_values = [row.get("kicks_landed") for row in rows]
+    landed = (sum(int(value) for value in landed_values)
+              if all(value is not None for value in landed_values) else None)
+    return {"attempts": attempts, "landed": landed}
+
+
 def kick_minimum_check(report: dict) -> dict | None:
     """Whether each round meets its discipline's obligatory kick count.
 

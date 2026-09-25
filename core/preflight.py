@@ -99,6 +99,15 @@ MIN_USABLE_LONG_EDGE = 256
 # empty is worth saying out loud.
 NOBODY_VISIBLE_SHARE = 0.33
 
+# Feet in shot. Stance, balance and every kick are read from the ankles, and a
+# clip framed from the knees up can look perfectly sized - the fighters fill
+# the whole height precisely because their legs run off the bottom. The
+# browser check once called exactly that "Nothing obviously wrong, fighters
+# fill 100% of height". COCO ankles are keypoints 15 and 16.
+_ANKLES = (15, 16)
+ANKLE_CONFIDENCE = 0.3
+ANKLES_VISIBLE_SHARE = 0.5
+
 
 @dataclass
 class Preflight:
@@ -118,6 +127,10 @@ class Preflight:
     # reports a healthy median and an empty half.
     frames_without_anybody: float = 0.0
     camera_shift_percent: float = 0.0
+    # Share of sampled fighter detections with at least one ankle found. None
+    # when the model gave no keypoints to judge by, which is not the same as
+    # the feet being out of shot.
+    ankles_visible_share: float | None = None
 
     recommended_inference_size: int = SETTINGS.default_imgsz
     subject_px_in_network: float = 0.0
@@ -143,6 +156,8 @@ class Preflight:
             "people_in_frame": round(self.people_in_frame, 1),
             "frames_without_anybody": round(self.frames_without_anybody, 3),
             "camera_shift_percent": round(self.camera_shift_percent, 2),
+            "ankles_visible_share": (None if self.ankles_visible_share is None
+                                     else round(self.ankles_visible_share, 3)),
             "recommended_inference_size": self.recommended_inference_size,
             "subject_px_in_network": round(self.subject_px_in_network, 0),
             "blocking": list(self.blocking),
@@ -254,9 +269,9 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     shifts = [_global_shift(frames[i], frames[i + 1]) for i in range(len(frames) - 1)]
     report.camera_shift_percent = float(np.median(shifts)) if shifts else 0.0
 
-    heights, counts = [], []
+    heights, counts, ankles = [], [], []
     for size in PROBE_SIZES:
-        heights, counts = [], []
+        heights, counts, ankles = [], [], []
         for frame in frames:
             result = model.predict(frame, imgsz=size, conf=SETTINGS.detection_conf,
                                    classes=[0], verbose=False)[0]
@@ -270,6 +285,7 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
             # everybody in a busy hall describes the hall.
             tall = np.sort(boxes[:, 3] - boxes[:, 1])[-3:]
             heights.extend(float(h) for h in tall)
+            ankles.extend(_ankles_seen(result, boxes))
         if heights:
             break
 
@@ -283,6 +299,7 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     report.subject_height_px = float(np.median(heights))
     report.subject_share_of_height = report.subject_height_px / max(1, report.height)
     report.people_in_frame = float(np.median(counts))
+    report.ankles_visible_share = (sum(ankles) / len(ankles)) if ankles else None
     report.frames_without_anybody = (
         sum(1 for c in counts if c == 0) / len(counts) if counts else 0.0)
     report.recommended_inference_size = inference_size_for_subject(
@@ -292,6 +309,26 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
 
     _judge(report)
     return report
+
+
+def _ankles_seen(result, boxes: np.ndarray) -> list[bool]:
+    """For the two tallest people in a frame, whether an ankle was found.
+
+    The two tallest because they are the fighters far more often than anybody
+    else in shot. Empty when the model returned no keypoint confidences.
+    """
+    keypoints = getattr(result, "keypoints", None)
+    confidence = getattr(keypoints, "conf", None) if keypoints is not None else None
+    if confidence is None:
+        return []
+    try:
+        values = confidence.cpu().numpy() if hasattr(confidence, "cpu") else np.asarray(confidence)
+    except (TypeError, ValueError):
+        return []
+    if values.ndim != 2 or values.shape[0] != len(boxes) or values.shape[1] <= max(_ANKLES):
+        return []
+    order = np.argsort(boxes[:, 3] - boxes[:, 1])[-2:]
+    return [bool(values[i, list(_ANKLES)].max() >= ANKLE_CONFIDENCE) for i in order]
 
 
 def _judge(report: Preflight) -> None:
@@ -345,6 +382,17 @@ def _judge(report: Preflight) -> None:
             "tall, so there is not enough detail. Send the original file "
             "from the phone rather than a copy shared through a messaging "
             "app, and record at 1080p or better.")
+
+    if (report.ankles_visible_share is not None
+            and report.ankles_visible_share < ANKLES_VISIBLE_SHARE):
+        report.warnings.append(
+            "The fighters' feet are out of shot in about "
+            f"{100 * (1 - report.ankles_visible_share):.0f}% of the frames checked. "
+            "Stance, balance and kicks are read from the ankles, so those will be "
+            "patchy or missing.")
+        report.advice.append(
+            "Frame the whole body, head to feet, with a little floor below the "
+            "fighters' feet.")
 
     # The camera being off the fight is not the same as the fight being hard to
     # see, and only this catches it. The WT Taekwondo tournament clip reported

@@ -1,29 +1,37 @@
 {% extends "base.html" %}
-{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><link rel="stylesheet" href="/static/frame-picker.css?v={{asset_version}}"><script src="/static/preflight.js?v={{asset_version}}" defer></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><link rel="stylesheet" href="/static/frame-picker.css?v={{asset_version}}"><script nonce="{{ request.state.csp_nonce }}" src="/static/preflight.js?v={{asset_version}}" defer></script>{% endblock %}
 {% block title %}{{sport_label}} fight analysis · WarriorIQ{% endblock %}
-{% block description %}Upload a {{sport_label}} bout to WarriorIQ for evidence-linked analysis scored under {{sport_label}} rules, with coaching priorities and a fighter-specific training plan.{% endblock %}
+{% block description %}Upload {{sport_article|default("a")}} {{sport_label}} bout to WarriorIQ for evidence-linked analysis scored under {{sport_label}} rules, with coaching priorities and a fighter-specific training plan.{% endblock %}
 {% block content %}
 <section class="setup">
   <header class="setup-head" data-reveal>
     <a class="quiet-back" href="/analyze">← All sports</a>
-    <div class="eyebrow">Step 2 of 3 · {{sport_label}}</div>
+    <div class="eyebrow">Step 1 of 4 · Upload · {{sport_label}}</div>
     <div class="setup-title"><span class="sport-crest" aria-hidden="true">{{identity.mark}}</span>
       <h1>Set up your {{sport_label}} fight.</h1></div>
     <p class="setup-decided">{{identity.decided_by}}</p>
-    {% if unobserved %}
+    {#- What the report will show, not what the sport scores. It said "We
+        count punches, kicks and knees" on every sport while every report said
+        punches and knees are not counted - so a boxer uploaded a bout and got
+        no strike numbers at all without being told. -#}
+    {% if no_strike_counts %}
+    <p class="setup-coverage setup-warning" data-covered="no" role="note"><b>{{sport_label}} reports have no punch counts yet.</b>
+      Punch counting is not accurate enough, so your report will show movement, pressure, ring centre, guard and balance &mdash; not how many punches were thrown or landed. Upload only if that is useful to you.</p>
+    {% else %}
+    <p class="setup-coverage" data-covered="no"><b>Your report counts {{ reported_families }}.</b>{% if withheld_families %}
+      {{ withheld_families|capitalize }} are not counted yet &mdash; checked against video, the count was not accurate enough to show.{% endif %}</p>
+    {% endif %}
     {#- "Not <thing>, which scores 2 to the body" reads as though the thing
         excluded is what scores 2, and with six excluded items in MMA the
         commas inside them merged into the list separators. A labelled list
         separated by semicolons cannot be read either way round. -#}
-    <p class="setup-coverage" data-covered="no"><b>We count {{ counted_families }}.</b>
-      Not counted: {{ unobserved | join("; ") }}. Your report says so too.</p>
-    {% else %}
-    <p class="setup-coverage" data-covered="yes"><b>We count everything that scores in {{sport_label}}.</b></p>
+    {% if unobserved %}
+    <p class="setup-coverage" data-covered="no">Not read at all: {{ unobserved | join("; ") }}. Your report says so too.</p>
     {% endif %}
   </header>
 
   <div class="setup-card" id="analyze" data-upload-state="empty">
-    <div class="console-head"><div><div class="eyebrow">Your fight</div><h2>Drop in a {{sport_label}} bout</h2></div><span class="console-badge">{% if allowance and allowance.remaining == 0 %}Limit reached{% elif allowance and allowance.remaining is not none %}{{allowance.remaining}} left{% elif allowance %}Unlimited{% else %}Sign in to analyse{% endif %}</span></div>
+    <div class="console-head"><div><div class="eyebrow">Your fight</div><h2>Drop in {{sport_article|default("a")}} {{sport_label}} bout</h2></div><span class="console-badge">{% if allowance and allowance.remaining == 0 %}Limit reached{% elif allowance and allowance.remaining is not none %}{{allowance.remaining}} left{% elif allowance %}Unlimited{% else %}Sign in to analyse{% endif %}</span></div>
     {% if allowance %}<div class="console-allowance"><span>{{allowance.plan.label}}</span><strong>{{allowance.plan.limit_label}}</strong></div>{% endif %}
     {% set allowance_exhausted = allowance and allowance.remaining == 0 %}
     <form id="fightUploadForm" action="/upload" method="post" enctype="multipart/form-data" data-sport="{{sport}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
@@ -153,14 +161,14 @@
       <p class="small muted" id="localPickerNote">This plays from your own phone or computer, so it does not wait for the upload. Pause where both fighters are visible from head to toe.</p>
       <video id="localVideo" controls preload="metadata" playsinline></video>
       <div class="frame-action-row">
-        <div class="frame-time" id="localFrameStatus" role="status" aria-live="polite"><span>Selected moment</span><strong>0.0s</strong></div>
+        <div class="frame-time" id="localFrameStatus" role="status" aria-live="polite"><span>Frame at</span><strong>0.0s</strong></div>
         <button class="btn" id="useLocalFrame" type="button" data-motion-primary>Use this frame <span aria-hidden="true">&#8594;</span></button>
       </div>
     </section>
   </div>
 </section>
 {% endblock %}
-{% block scripts %}<script>
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
 (()=>{
   const form=document.getElementById('fightUploadForm'),videoInput=document.getElementById('fightVideo'),fileStatus=document.getElementById('fileStatus'),fileButton=document.getElementById('fileButton'),fileButtonText=document.getElementById('fileButtonText'),uploadSubmit=document.getElementById('uploadSubmit'),uploadCard=document.getElementById('analyze'),progress=document.getElementById('uploadProgress'),progressBar=document.getElementById('uploadProgressBar'),progressText=document.getElementById('uploadProgressText');
   const sport=form.dataset.sport||'';
@@ -340,8 +348,15 @@
           tone='warn';
           points.push(`The fighters fill about ${share}% of the picture's height, reaching roughly ${net} pixels inside the detector. It becomes reliable around ${PREFLIGHT_LIMITS.detector_reliable_px}, so expect gaps where one fighter is dropped.`);
           points.push('A few steps closer, or filming the near corner rather than the whole hall, moves this more than any setting does.')}
-        else{
-          points.push(`The fighters fill about ${share}% of the picture's height, which is big enough for the detector to work with.`)}}
+        else if(!m.feetCropped){
+          points.push(`The fighters fill about ${share}% of the picture's height, which is big enough for the detector to work with.`)}
+        if(m.feetCropped){
+          // Filling the whole height is usually the legs running off the
+          // bottom, not a well-framed fight. This used to read "Nothing
+          // obviously wrong, fighters fill 100% of height" on exactly that.
+          tone=tone==='bad'?'bad':'warn';
+          points.push(`Movement runs off the bottom of the picture in most of the frames checked, so the fighters' feet are probably out of shot. Stance, balance and kicks are read from the ankles.`);
+          points.push('Frame the whole body, head to feet, with a little floor showing below the fighters.')}}
       else{
         // Say what stopped the measurement rather than reporting a number
         // that was not measured.
@@ -357,13 +372,14 @@
       if(!points.length)return void hidePreflight();
       const title=tone==='bad'?'This footage will probably not analyse well'
                  :tone==='warn'?'This should work, with gaps'
-                 :'Nothing obviously wrong with this recording';
+                 :'This recording looks usable';
       // Never "this will be accurate": the honest claim is about what was
       // checked, not about the outcome. Same sentence the worker's probe uses.
       const measured=`Checked on this device before uploading: ${m.width}×${m.height}`
         +(m.fps!==null?`, ${Math.round(m.fps)} fps`:'')
         +(m.framingMeasured?`, fighters about ${Math.round(m.subjectShare*100)}% of frame height`:'')
-        +'. You can upload it anyway.';
+        // "Anyway" only makes sense after a problem.
+        +(tone==='ok'?'.':'. You can upload it anyway.');
       showPreflight(tone,title,points,measured)}).catch(()=>{if(token===preflightToken)hidePreflight()})};
   const restore=(message)=>{if(typeof picker!=='undefined'&&picker){picker.hidden=true;pickerOpen=false;chosenSeconds=null;form.hidden=false;if(localUrl){URL.revokeObjectURL(localUrl);localUrl=null}}showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
   // Rounds are no longer asked for, but they still decide where the round
@@ -462,7 +478,7 @@
     advancing=true;
     useLocalFrame.disabled=true;useLocalFrame.setAttribute('aria-busy','true');
     useLocalFrame.textContent='Opening fighter selection…';
-    setPickStatus('Selected moment','Saving…');
+    setPickStatus('Frame at','Saving…');
     fetch(`/api/selection-frame/${ready.jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({seconds:chosenSeconds})})
       .then(response=>{if(!response.ok)throw new Error('frame');location.assign(`/select/${ready.jobId}`)})
       .catch(()=>location.assign(ready.nextUrl));
@@ -482,7 +498,7 @@
   useLocalFrame.addEventListener('click',()=>{
     if(!pickerOpen)return;
     chosenSeconds=Math.max(0,localVideo.currentTime||0);
-    setPickStatus('Selected moment',`${chosenSeconds.toFixed(1)}s`);
+    setPickStatus('Frame at',`${chosenSeconds.toFixed(1)}s`);
     if(ready){advance();return}
     useLocalFrame.disabled=true;useLocalFrame.setAttribute('aria-busy','true');
     useLocalFrame.textContent='Waiting for the upload…';

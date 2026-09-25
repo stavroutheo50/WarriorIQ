@@ -26,7 +26,7 @@
       <button class="btn secondary" type="submit">Add</button>
     </div>
   </form>
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
   // A name of nothing but spaces passes required= and then fails server-side,
   // which used to cost the visitor this page. Stop the request instead, and
   // say so where they are looking. The server check stays: this is the
@@ -133,7 +133,7 @@
 <section class="card"><div class="eyebrow">Saved evidence</div><h3>Fight library</h3><ul class="list-clean">{% for f in fights[:12] %}<li><a class="text-link" href="/result/{{f.job_id}}"><strong>Fight analysis</strong></a> · <span class="muted">{{f.choice_label}}</span></li>{% else %}<li class="muted">No fights saved.</li>{% endfor %}</ul></section>
 {% endif %}
 {% endblock %}
-{% block scripts %}<script>
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
 (()=>{
   // Filing was a full-page POST and reload, so choosing a fighter on row 12 of
   // a 15-row table threw the reader back to the top with nothing saying what

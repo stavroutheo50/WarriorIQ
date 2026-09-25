@@ -17,7 +17,7 @@
 {% if replay_mode == 'verified_actions' %}<div class="notice">Each timestamp is an evidence-supported action instant. Selecting it starts one second earlier so you can see the setup and impact.</div>{% else %}<div class="notice"><strong>Skeleton replay is ready.</strong> No action label passed the verification gate for this fight, so WarriorIQ provides neutral navigation chapters instead of guessing a technique. {% if identity_safe %}The video and Fighter {{focus}} skeleton still play normally.{% else %}The video still plays; the skeleton stays off until the fighters are confirmed.{% endif %}</div>{% endif %}
 {% endblock %}
 {% block scripts %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 const jobId={{job_id|tojson}},target={{focus|tojson}},identitySafe={{identity_safe|tojson}},video=document.getElementById('video'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d'),wrap=document.getElementById('wrap'),statusEl=document.getElementById('replay-status'),requestedValue=new URLSearchParams(window.location.search).get('t'),requestedTime=requestedValue===null?NaN:Number(requestedValue);let frames=[],mode=identitySafe?'overlay':'off';
 const edges=[[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
 function resize(){const r=video.getBoundingClientRect();canvas.width=Math.max(1,Math.floor(r.width*devicePixelRatio));canvas.height=Math.max(1,Math.floor(r.height*devicePixelRatio));canvas.style.width=r.width+'px';canvas.style.height=r.height+'px';draw()}

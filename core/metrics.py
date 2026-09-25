@@ -21,6 +21,28 @@ def _p(kp, idx):
     return p if p[0] > 0 and p[1] > 0 else None
 
 
+def ring_frame(points) -> tuple[np.ndarray, float] | None:
+    """The middle of the area this fight used, and how far out its edge is.
+
+    Taken from the extent of where the fighters went (5th to 95th percentile,
+    so one stray detection cannot stretch it), not from the average of their
+    positions. The average of two fighters' positions is simply the point
+    between them, so every fighter measured against it sat about the same
+    distance away as their opponent - and dividing by the average distance of
+    everybody then forced the pair to average 50%. That is why "Held the
+    centre" read 50-52% for both fighters on every bout checked.
+    """
+    points = np.asarray(points, dtype=np.float32)
+    if points.ndim != 2 or len(points) < 10:
+        return None
+    low = np.percentile(points, 5, axis=0)
+    high = np.percentile(points, 95, axis=0)
+    radius = float(np.max(high - low)) / 2.0
+    if radius < 1e-6:
+        return None
+    return (low + high) / 2.0, radius
+
+
 def _center(box):
     if box is None:
         return None
@@ -222,13 +244,13 @@ class MetricsAccumulator:
         everyone = [point for side in ("A", "B") for point in (self.positions.get(side) or [])]
         if not mine or len(everyone) < 10:
             return None
-        middle = np.mean(np.stack(everyone), axis=0)
-        spread = float(np.mean(np.linalg.norm(np.stack(everyone) - middle, axis=1)))
-        if spread < 1e-6:
+        frame = ring_frame(np.stack(everyone))
+        if frame is None:
             return None
+        middle, radius = frame
         distances = np.linalg.norm(np.stack(mine) - middle, axis=1)
-        # 1.0 is dead centre of the action; 0.0 is a full spread away from it.
-        return float(np.mean(np.clip(1.0 - distances / (spread * 2.0), 0.0, 1.0)))
+        # 1.0 is dead centre of the area used; 0.0 is at or beyond its edge.
+        return float(np.mean(np.clip(1.0 - distances / radius, 0.0, 1.0)))
 
     @staticmethod
     def _attack_stats(fighter: str, events: list[StrikeEvent]) -> dict:

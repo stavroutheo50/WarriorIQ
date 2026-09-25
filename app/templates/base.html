@@ -13,7 +13,7 @@
        it from Google's own tag detection, which reports the site as having no
        tag installed; denying storage instead keeps the install verifiable while
        still setting no analytics cookie for anyone who has not agreed. -->
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
     gtag('consent', 'default', {
@@ -28,7 +28,7 @@
 {% endif %}
 {% if gtm_id %}
   <!-- Google Tag Manager -->
-  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  <script nonce="{{ request.state.csp_nonce }}">(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
   new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
   j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
@@ -36,8 +36,8 @@
 {% endif %}
 {% if analytics_id %}
   <!-- Google tag (gtag.js) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id={{analytics_id}}"></script>
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}" async src="https://www.googletagmanager.com/gtag/js?id={{analytics_id}}"></script>
+  <script nonce="{{ request.state.csp_nonce }}">
     gtag('js', new Date());
     gtag('config', {{analytics_id|tojson}}, {anonymize_ip: true});
   </script>
@@ -52,7 +52,13 @@
   {#- Scripts read the token from here rather than from the cookie, which
      stays httponly. wiqCsrfHeaders() exists so a future fetch cannot
      forget the header by writing the object literal out by hand. -#}
-  <script>window.wiqCsrfHeaders=function(extra){var h=Object.assign({},extra||{});var m=document.querySelector('meta[name="csrf-token"]');if(m&&m.content)h["X-CSRF-Token"]=m.content;return h;};</script>
+  <script nonce="{{ request.state.csp_nonce }}">window.wiqCsrfHeaders=function(extra){var h=Object.assign({},extra||{});var m=document.querySelector('meta[name="csrf-token"]');if(m&&m.content)h["X-CSRF-Token"]=m.content;return h;};</script>
+  {#- Inline event-handler attributes cannot run under a nonce-based
+     Content-Security-Policy, so the few the templates used are data
+     attributes handled here. Image errors do not bubble and can fire while the
+     page is still parsing, so this listener is registered in the head, before
+     any <img>, and listens in the capture phase. -#}
+  <script nonce="{{ request.state.csp_nonce }}">document.addEventListener('error',function(e){var t=e.target;if(!t||t.tagName!=='IMG'||!t.hasAttribute('data-hide-on-error'))return;t.hidden=true;t.style.display='none';var c=t.getAttribute('data-error-parent-class');if(c&&t.parentElement)t.parentElement.classList.add(c)},true);</script>
   <meta name="description" content="{{page_description|striptags|trim}}">
   <meta name="application-name" content="WarriorIQ"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="WarriorIQ"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="robots" content="{% if request.state.noindex %}noindex,nofollow{% else %}index,follow,max-image-preview:large{% endif %}">
@@ -68,7 +74,7 @@
   <link rel="preload" href="/static/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/base.css?v={{asset_version}}">
   <link rel="manifest" href="/static/site.webmanifest"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="96x96" href="/static/warrioriq-logo-96.png"><link rel="icon" type="image/png" sizes="192x192" href="/static/warrioriq-logo-192.png"><link rel="apple-touch-icon" sizes="180x180" href="/static/warrioriq-logo-180.png">
-  {% if request.state.canonical_url %}<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/"},{"@type":"Organization","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/","logo":"{{request.state.social_image_url}}"},{"@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-linked combat sports fight analysis: kickboxing, boxing, Muay Thai, taekwondo and MMA.","url":"{{request.state.site_url}}/"}]}</script>{% endif %}
+  {% if request.state.canonical_url %}<script nonce="{{ request.state.csp_nonce }}" type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/"},{"@type":"Organization","name":"WarriorIQ","alternateName":"Warrior IQ","url":"{{request.state.site_url}}/","logo":"{{request.state.social_image_url}}"},{"@type":"SoftwareApplication","name":"WarriorIQ","applicationCategory":"SportsApplication","operatingSystem":"Web","description":"Evidence-linked combat sports fight analysis: kickboxing, boxing, Muay Thai, taekwondo and MMA.","url":"{{request.state.site_url}}/"}]}</script>{% endif %}
   {% block head %}{% endblock %}
   <link rel="stylesheet" href="/assets/shell.css?v={{asset_version}}">
 </head>
@@ -106,7 +112,7 @@
   {% if not request.state.cookie_preferences.decided %}<aside class="cookie-notice" id="cookieNotice" aria-labelledby="cookieTitle"><div><strong id="cookieTitle">Your cookie choice</strong><p>Essential cookies always stay on. Analytics stays off unless you accept, and advertising storage is always off.</p></div><div class="selection-tools"><form method="post" action="/cookie-preferences"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="{{request.url.path}}"><input type="hidden" name="choice" value="all"><button class="btn" type="submit">Accept All</button></form><form method="post" action="/cookie-preferences"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="{{request.url.path}}"><input type="hidden" name="choice" value="essential"><button class="btn secondary" type="submit">Reject Non-Essential</button></form><a class="btn secondary" href="/cookies#preferences">Manage Preferences</a></div></aside>{% endif %}
   <div class="app-toast" id="appToast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
   {% block scripts %}{% endblock %}
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
   (()=>{
     const path=location.pathname,menuButton=document.getElementById('mobileMenuButton'),mobileMenu=document.getElementById('mobileMenu'),navMore=document.getElementById('navMore'),toast=document.getElementById('appToast');
     // One place that knows how the panel opens and closes, so the toggle,
@@ -148,9 +154,37 @@
         :{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'};
       try{el.textContent=when.toLocaleString(undefined,opts).replace(',','')}catch{}
     });
+    // The header chip was rendered once, from whatever the job said when the
+    // page loaded, and never again: "Analyzing 0%" beside a page reading 35%,
+    // and still "Analyzing 0%" after the run had finished. It now follows the
+    // same job state the progress page reads. The progress page feeds it
+    // directly on every update; any other page asks /api/active-analysis.
+    const chip=document.getElementById('activeAnalysisLink'),chipLabel=document.getElementById('activeAnalysisLabel'),chipMobile=document.getElementById('activeAnalysisMobile');
+    window.wiqUpdateAnalysisChip=d=>{
+      if(!chip||!d||String(d.job_id)!==chip.dataset.analysisId)return;
+      const done=d.status==='complete',url=d.url||`/${done?'result':'progress'}/${d.job_id}`;
+      chip.dataset.analysisStatus=d.status||'';chip.href=url;if(chipMobile)chipMobile.href=url;
+      if(!chipLabel)return;
+      chipLabel.textContent=done?'Results ready':d.status==='interrupted'?'Analysis paused':d.status==='error'?'Analysis needs attention':`Analyzing ${Math.floor(Math.max(0,Math.min(99.9,Number(d.percent)||0)))}%`;
+      if(chipMobile)chipMobile.textContent=done?'● Open completed results':d.status==='error'?'● Analysis needs attention':'● Return to live analysis';
+    };
+    if(chip&&['queued','running'].includes(chip.dataset.analysisStatus)&&!path.startsWith(`/progress/${chip.dataset.analysisId}`)){
+      const poll=async()=>{
+        if(document.hidden)return;
+        try{const r=await fetch('/api/active-analysis',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();if(d.active)window.wiqUpdateAnalysisChip(d);if(!d.active||!['queued','running'].includes(d.status))clearInterval(timer);}catch{}
+      };
+      const timer=setInterval(poll,5000);poll();
+      document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
+    }
+    // Confirmations and select-on-focus, which used to be onsubmit= and
+    // onfocus= attributes; see the note in the head. Capture phase, so a
+    // cancelled confirmation stops the submit before any form's own listener
+    // swaps its button to "Working…".
+    document.addEventListener('submit',event=>{const message=event.target?.dataset?.confirm;if(message&&!window.confirm(message)){event.preventDefault();event.stopImmediatePropagation()}},true);
+    document.addEventListener('focusin',event=>{if(event.target?.matches?.('[data-select-on-focus]'))event.target.select()});
     let toastTimer;window.wiqToast=(message,tone='info')=>{clearTimeout(toastTimer);toast.textContent=message;toast.dataset.tone=tone;toast.hidden=false;requestAnimationFrame(()=>toast.classList.add('show'));toastTimer=setTimeout(()=>{toast.classList.remove('show');setTimeout(()=>toast.hidden=true,180)},2800)};
     document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{if(event.defaultPrevented||form.dataset.async==='true')return;const submitter=event.submitter;if(!submitter||submitter.name||submitter.dataset.keepLabel==='true')return;submitter.dataset.originalLabel=submitter.textContent;submitter.textContent=submitter.dataset.loadingLabel||'Working…';submitter.setAttribute('aria-busy','true');setTimeout(()=>{submitter.disabled=true},0)}));
   })();
   </script>
-  <script src="/static/motion.js?v={{asset_version}}" defer></script>
+  <script nonce="{{ request.state.csp_nonce }}" src="/static/motion.js?v={{asset_version}}" defer></script>
 </body></html>
