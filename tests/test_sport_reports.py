@@ -197,3 +197,54 @@ class MuayThaiAndMmaReportTests(unittest.TestCase):
         rendered = Environment().from_string(expression).render(report={"performance": {
             "pose_model": r"C:\Users\User\Documents\WarriorIQ\models\yolo26m-pose.engine"}})
         self.assertEqual(rendered, "yolo26m-pose.engine")
+
+
+class KickboxingReportTests(unittest.TestCase):
+    """Found reading all six kickboxing rulesets on the full plan."""
+
+    def test_the_bonus_gap_is_not_put_on_the_whole_sport(self):
+        """Every kickboxing report said "Kickboxing also scores jumping-kick
+        bonuses", which only the point-based rulesets award."""
+        from core.scoring import coverage_note
+
+        for ruleset in ("K1", "LOW_KICK", "FULL_CONTACT"):
+            self.assertEqual(coverage_note(ruleset), "", ruleset)
+        for ruleset in ("POINT_FIGHTING", "LIGHT_CONTACT", "KICK_LIGHT"):
+            note = coverage_note(ruleset)
+            self.assertIn("jumping-kick bonuses", note)
+            self.assertNotIn("Kickboxing also scores", note)
+
+    def test_the_note_never_claims_a_ruleset_scores_what_it_does_not(self):
+        """ITF's list item is a bonus the ITF does not use; "ITF also scores"
+        it contradicted itself."""
+        from core.scoring import RULESETS, coverage_note
+
+        for ruleset in RULESETS:
+            self.assertNotIn("also scores", coverage_note(ruleset), ruleset)
+
+    def test_stored_notes_are_replaced_when_a_report_opens(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn('report["scorecard"]["coverage_note"] = coverage_note(report["scorecard"]["ruleset"])',
+                      source)
+
+    def test_the_kick_minimum_does_not_promise_a_confirmation_it_withholds(self):
+        """"A round can be confirmed as meeting the minimum" above a table that
+        can confirm nothing while the count is unvalidated."""
+        from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
+        templates = Path(__file__).resolve().parents[1] / "app" / "templates"
+        page = (templates / "result.html").read_text(encoding="utf-8")
+        start = page.index("{% if kick_minimum %}")
+        block = page[start:page.index("{% endif %}\n</section>", start)] + "{% endif %}"
+        env = Environment(undefined=ChainableUndefined)
+        for validated, expected, absent in (
+                (False, "does not confirm this rule yet", "can be\n      confirmed"),
+                (True, "can be\n      confirmed", "does not confirm this rule yet")):
+            with self.subTest(validated=validated):
+                html = env.from_string(block).render(kick_minimum={
+                    "minimum": 6, "rule": "WAKO Full Contact.", "precision_validated": validated,
+                    "rounds": [{"round": 1, "fighters": {
+                        "A": {"kicks_evidenced": 7, "minimum_confirmed_met": validated},
+                        "B": {"kicks_evidenced": 3, "minimum_confirmed_met": False}}}]})
+                self.assertIn(expected, html)
+                self.assertNotIn(absent, html)
