@@ -162,7 +162,10 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
         # somebody. A fight whose report failed the identity check disowns its
         # own per-fighter numbers, so it is never a point on a trend.
         "usable": (min(coverage["A"], coverage["B"]) >= _MIN_COVERAGE
-                   and (report.get("integrity") or {}).get("identity_evidence_trusted") is not False),
+                   and (report.get("integrity") or {}).get("identity_evidence_trusted") is not False
+                   # Stored integrity predates the separability check, so it
+                   # is read from tracking directly as the report page does.
+                   and tracking.get("fighters_separable") is not False),
         "movement_verdict": verdict,
         "pressure": _metric(report, focus, "pressure_index"),
         "centre": _metric(report, focus, "ring_center_control"),
