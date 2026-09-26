@@ -2398,6 +2398,63 @@ class FurnitureReleaseTests(unittest.TestCase):
         manager.b.current_track_id = None
         self.assertIn(9, manager._furniture)
 
+    def test_a_fighter_standing_beside_the_other_through_a_stoppage_is_kept(self):
+        """A real WAKO Kick Light bout: both athletes stood still through a
+        referee count on six-second-old tracks, 0.9 body lengths apart, and
+        were released as furniture - then stayed banned from 57 s to 87 s,
+        including 13 s of fighting after the restart."""
+        manager, person = self._manager()
+        manager.a.current_track_id, manager.b.current_track_id = 9, 10
+        for frame in range(0, 300, 2):
+            manager._remember_positions([person(9, 200.0), person(10, 260.0)], frame)
+        manager.a.last_box, manager.b.last_box = person(9, 200.0).box, person(10, 260.0).box
+        manager.a.last_seen_source_frame = manager.b.last_seen_source_frame = 298
+
+        self.assertFalse(manager._release_if_furniture(manager.a))
+        self.assertFalse(manager._release_if_furniture(manager.b))
+        self.assertEqual((manager.a.current_track_id, manager.b.current_track_id), (9, 10))
+
+    def test_the_exemption_needs_the_other_fighter_seen_recently(self):
+        """Where the other fighter was some time ago proves nothing now, but a
+        fighter hidden for one frame as the bout restarts is still there."""
+        manager, person = self._manager()
+        manager.a.current_track_id, manager.b.current_track_id = 9, 10
+        for frame in range(0, 300, 2):
+            manager._remember_positions([person(9, 200.0)], frame)
+        manager.a.last_box, manager.b.last_box = person(9, 200.0).box, person(10, 260.0).box
+        manager.a.last_seen_source_frame, manager.b.last_seen_source_frame = 298, 293
+        self.assertFalse(manager._release_if_furniture(manager.a), "hidden for one frame")
+        manager.a.last_seen_source_frame, manager.b.last_seen_source_frame = 298, 120
+        self.assertTrue(manager._release_if_furniture(manager.a), "last seen six seconds ago")
+
+    def test_a_still_person_well_away_from_the_other_fighter_is_still_released(self):
+        """The spectator case the release exists for is unchanged."""
+        manager, person = self._manager()
+        manager.a.current_track_id, manager.b.current_track_id = 9, 10
+        for frame in range(0, 300, 2):
+            manager._remember_positions([person(9, 600.0), person(10, 200.0)], frame)
+        manager.a.last_box, manager.b.last_box = person(9, 600.0).box, person(10, 200.0).box
+        manager.a.last_seen_source_frame = manager.b.last_seen_source_frame = 298
+
+        self.assertTrue(manager._release_if_furniture(manager.a))
+
+    def test_a_stand_in_recovery_does_not_replace_the_fighters_own_track(self):
+        """A crop recovered where A was expected carries id -1001. It replaced
+        A's real track, so the next frame A's own track was a stranger, and a
+        stranger standing still through a stoppage is refused as too still -
+        123 frames of a real bout."""
+        manager, person = self._manager()
+        manager.a.current_track_id = 106
+        # Standing still through a stoppage: the stillness gates would refuse
+        # this track if it were new to A.
+        for frame in range(0, 300, 2):
+            manager._remember_positions([person(106, 100.0)], frame)
+        stand_in = person(-1001, 100.0)
+        manager._commit(manager.a, stand_in, 300, 0.6, recovered=True)
+        self.assertEqual(manager.a.current_track_id, 106)
+        own = manager._score(manager.a, person(106, 100.0), keep_id_bonus=False)
+        self.assertGreater(own, -100, "A's own track is not a stranger")
+
     def test_a_moving_fighter_is_never_released(self):
         """The release must cost a real fighter nothing."""
         manager, person = self._manager()
@@ -2910,7 +2967,9 @@ class HomelessFighterTests(unittest.TestCase):
         from core.types import PersonObservation
 
         manager = self._manager()
-        seated = np.asarray([300., 40., 330., 100.], dtype=np.float32)
+        # Off the mat, three body lengths from fighter A: a fighter standing
+        # beside the other is never released (furniture_partner_body_lengths).
+        seated = np.asarray([400., 40., 430., 100.], dtype=np.float32)
         manager.b.current_track_id = 5
         manager.b.last_box = seated.copy()
         # Six seconds of a person who has not moved at all.

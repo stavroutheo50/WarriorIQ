@@ -528,6 +528,10 @@ class PoseTracker:
                 best.track_id = -1001 if name == "A" else -1002
                 best.appearance = appearance_hist(frame, best.box)
                 best.pose_signature = pose_signature(best.keypoints, best.box)
+                # Scored like every detection, or the referee filter cannot see
+                # it: on a real bout A's stand-in was the referee, standing
+                # where A had been expected.
+                best.referee_prob = (referee_probabilities(frame, best.box.reshape(1, 4)) or [None])[0]
                 recovered.append(best)
         return recovered
 
