@@ -3888,6 +3888,31 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
             "reason": "You analysed one fighter, so there is no opponent to score against.",
             "fix": "Run it again and choose Analyze both fighters.",
         }
+    # Withheld because strike counting is not validated, not because of the
+    # footage. A boxing report said "Tracking was not steady enough" at 89%
+    # coverage, and a taekwondo report said "None were clear enough" above a
+    # panel counting 28 kicks - both sending the athlete to redo a selection
+    # or refilm a bout that was fine.
+    if status == "punch_counting_unavailable":
+        return {
+            "reason": (
+                "Boxing is scored on punches, and WarriorIQ cannot count punches accurately yet, "
+                "so there is nothing fair to score."
+                if scorecard.get("sport") == "boxing" else
+                "Scoring a round needs punches counted as well as kicks, and WarriorIQ cannot "
+                "count punches accurately yet."
+            ),
+            "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+        }
+    if (status == "insufficient_scoring_actions"
+            and not (report.get("integrity") or {}).get("action_metrics_trusted", False)):
+        return {
+            "reason": (
+                "Scoring needs to know which strikes landed, and WarriorIQ cannot tell that "
+                "reliably yet, so no strike is counted towards a score."
+            ),
+            "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+        }
     if status == "insufficient_observation_coverage":
         required = f"{SETTINGS.min_tracking_coverage_for_score * 100:.0f}%"
         return {
@@ -4046,13 +4071,21 @@ def result_page(request: Request, job_id: str):
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
+        # "Punches and knees are not counted" on taekwondo, which awards no
+        # knees - the note names only what this sport actually scores.
+        "withheld_families": _reported_strike_families(
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job) or "kickboxing"
+        )["withheld_families"],
         "progress_since_last": progress_since_last,
         "identity": sport_identity(report.get("scorecard", {}).get("sport", "kickboxing")),
         "report_access": report_access,
         "analysis_quality": _analysis_quality_summary(report),
         # Built at render time rather than stored in the report, so every
         # analysis already on disk gains these sections without being re-run.
-        "visuals": report_visuals(report, _visual_focus(report)) if identity_trusted else None,
+        "visuals": (report_visuals(
+            report, _visual_focus(report),
+            outcomes_counted=bool((report.get("statistics") or {}).get("action_labels_available")),
+        ) if identity_trusted else None),
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
         "score_withheld": _score_withheld(report, job_id),

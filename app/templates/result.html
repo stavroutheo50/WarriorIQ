@@ -151,7 +151,11 @@
 </section>
 {% endif %}
 
-{% if report.scorecard.coverage_note %}<aside class="notice coverage-notice"><strong>Striking read only.</strong> {{report.scorecard.sport_label}} also scores {% for action in report.scorecard.unobserved_actions %}{{action}}{% if not loop.last %}, {% endif %}{% endfor %}. WarriorIQ cannot see any of that, so the score below counts the punches, kicks and knees it observed and nothing else. Read it as a striking summary, not as the round.</aside>{% endif %}
+{#- Only beside a score. It said "the score below counts the punches, kicks
+    and knees it observed" on taekwondo reports that had no score and whose
+    sport awards no knees. The unscored case already says what the sport
+    scores that WarriorIQ cannot see, in the scorecard section. -#}
+{% if report.scorecard.coverage_note and report.scorecard.available %}<aside class="notice coverage-notice"><strong>Striking read only.</strong> {{report.scorecard.sport_label}} also scores {% for action in report.scorecard.unobserved_actions %}{{action}}{% if not loop.last %}, {% endif %}{% endfor %}. WarriorIQ cannot see any of that, so the score below counts only the strikes it observed. Read it as a striking summary, not as the round.</aside>{% endif %}
 
 {% if report_access.report_tier != 'full' %}<div class="report-access-banner"><div><span class="eyebrow">{{report_access.report_label}}</span><strong>{{report_access.label}} report depth</strong><p>{% if report_access.report_tier == 'compact' %}This view includes the essential summary, estimated scorecard, three key moments, and one coaching priority.{% else %}This view includes core performance, scorecard, coaching highlights, and a short training plan.{% endif %}</p></div><a class="btn secondary" href="/pricing">Compare report levels</a></div>{% endif %}
 
@@ -233,7 +237,7 @@
   {% if strike_sport == 'boxing' %}
   <p class="vitals-note"><b>No punch counts in this report.</b> Punch counting is not accurate enough yet, so a boxing report shows movement, guard and balance only. Everything above is measured from your body and is real.</p>
   {% else %}
-  <p class="vitals-note"><b>Kicks only.</b> Punches and knees are not counted yet &mdash; checked against video, the kick count came out right and the punch count was overstated. Everything above is measured from your body and is real.</p>
+  <p class="vitals-note"><b>Kicks only.</b> {{ (withheld_families or 'punches and knees')|capitalize }} are not counted yet &mdash; checked against video, the kick count came out right and the punch count was overstated. Everything above is measured from your body and is real.</p>
   {% endif %}
   {% endif %}
 
@@ -384,6 +388,7 @@
 
   {#- Where it arrived. The silhouette carries the location, so the eye finds
       "head" without a legend to read. -#}
+  {% if visuals.strikes_shown|default(true) %}
   <div class="strike-maps">
     {% for map in [{'title':'You hit','zones':visuals.landed,'side':'mine'},
                    {'title':'You got hit','zones':visuals.taken,'side':'theirs'}] %}
@@ -414,11 +419,12 @@
     </div>
     {% endfor %}
   </div>
+  {% endif %}
 
   {#- Position is time, side is who. A fighter finds the busy stretch and the
       quiet one without being told which is which. -#}
-  {% if visuals.timeline and visuals.span_seconds %}
-  <h3 class="visual-heading">When it happened</h3>
+  {% if (visuals.timeline or visuals.guard_low) and visuals.span_seconds %}
+  <h3 class="visual-heading">{% if visuals.timeline %}When it happened{% else %}When your guard dropped{% endif %}</h3>
   <div class="fight-tl">
     <div class="fight-tl-mid"></div>
     {% for mark in visuals.timeline %}
@@ -432,8 +438,8 @@
     {% endfor %}
   </div>
   <div class="fight-tl-key">
-    <span><i class="key-dot mine"></i>You</span>
-    <span><i class="key-dot theirs"></i>Opponent</span>
+    {% if visuals.timeline %}<span><i class="key-dot mine"></i>You</span>
+    <span><i class="key-dot theirs"></i>Opponent</span>{% endif %}
     <span><i class="key-dot guard"></i>Your guard dropped</span>
   </div>
   {% endif %}
@@ -671,7 +677,8 @@
     <div><div class="score">{{report.scorecard.totals.A}}</div><div class="muted">Fighter A</div></div>
     <div><div class="score">{{report.scorecard.totals.B}}</div><div class="muted">Fighter B</div></div>
   </div>{% else %}<div class="notice">{{report.scorecard.disclaimer}}</div>{% endif %}
-  <p class="small muted">{{report.scorecard.disclaimer}}</p>
+  {#- Printed once. The unscored branch above already carries it. -#}
+  {% if report.scorecard.available %}<p class="small muted">{{report.scorecard.disclaimer}}</p>{% endif %}
   {% if report.scorecard.coverage_note %}<p class="small coverage-line">{{report.scorecard.coverage_note}}</p>{% endif %}
   {% if report.scorecard.evidence and analysis_target == 'BOTH' and report.scorecard.status != 'identity_integrity_failed' %}<p class="small muted">Evidence used: {% if report.scorecard.evidence.evidence_source == 'unvalidated_action_candidates' %}{{report.scorecard.evidence.scoring_action_candidates}} unverified scoring candidates{% else %}{{report.scorecard.evidence.verified_scoring_actions}} verified scoring actions{% endif %} · A {{'%.0f'|format(report.scorecard.evidence.fighter_A_tracking_coverage*100)}}% / B {{'%.0f'|format(report.scorecard.evidence.fighter_B_tracking_coverage*100)}}% observation coverage.</p>{% endif %}
   {% if report.scorecard.available %}<div class="table-wrap"><table><thead><tr><th>Round</th><th>A</th><th>B</th><th>Estimate</th></tr></thead><tbody>{% for r in report.scorecard.rounds %}<tr><td>{{r.round}}</td><td>{{r.fighter_A}}</td><td>{{r.fighter_B}}</td><td>{{r.winner}}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
