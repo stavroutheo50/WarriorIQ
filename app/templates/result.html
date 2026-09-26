@@ -56,10 +56,20 @@
   {% if kick_minimum %}
   <div class="kick-minimum">
     <h3>Kick minimum &mdash; {{kick_minimum.minimum}} per round</h3>
+    {#- It promised "a round can be confirmed as meeting the minimum" while the
+        count is unvalidated, which is exactly when kick_minimum_check never
+        confirms one - so every round read "Not confirmed" under a sentence
+        saying rounds get confirmed. The wording follows the flag. -#}
     <p class="observed-note">{{kick_minimum.rule}}
+      {% if kick_minimum.precision_validated %}
       We count kicks we could evidence while we had sight of each fighter, so a round can be
       confirmed as meeting the minimum but never shown to have missed it &mdash; an unconfirmed
-      round is one we could not follow closely enough, not a shortfall by the fighter.</p>
+      round is one we could not follow closely enough, not a shortfall by the fighter.
+      {% else %}
+      WarriorIQ does not confirm this rule yet: the kick count is not checked round by round,
+      so every round shows as not confirmed. That is a limit of the analysis, never a
+      shortfall by the fighter. The kicks seen are shown so you can check them against the video.
+      {% endif %}</p>
     <table class="kick-minimum-table">
       <thead><tr><th>Round</th><th>Fighter A</th><th>Fighter B</th></tr></thead>
       <tbody>

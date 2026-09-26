@@ -110,7 +110,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved
+from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
 from core.social_auth import SOCIAL_AUTH
@@ -4092,6 +4092,12 @@ def result_page(request: Request, job_id: str):
     # reports analysed before this change say the same thing top and bottom.
     if score_withheld and score_withheld.get("disclaimer"):
         report["scorecard"]["disclaimer"] = score_withheld["disclaimer"]
+    # Written at analysis time too, and the stored copy blamed the whole sport
+    # for a ruleset-only gap; see core.scoring.coverage_note.
+    try:
+        report["scorecard"]["coverage_note"] = coverage_note(report["scorecard"]["ruleset"])
+    except (KeyError, ValueError):
+        pass
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),

@@ -418,6 +418,24 @@ def sport_counted_families(sport: str) -> tuple[str, ...]:
     return tuple(families)
 
 
+def coverage_note(ruleset: str) -> str:
+    """One sentence on what this ruleset involves that the analysis cannot see.
+
+    It read "{sport} also scores X, which this analysis cannot see". That put
+    the gap on the whole sport - every kickboxing report said kickboxing
+    scores jumping-kick bonuses, which only the point-based rulesets award -
+    and some items are not scoring at all ("bonuses used by some national
+    bodies but not by the ITF championship rules" became "ITF also scores
+    bonuses not used by the ITF"). A plain list of what cannot be seen is true for
+    every ruleset.
+    """
+    profile = RULESETS[normalize_ruleset(ruleset)]
+    if not profile.unobserved:
+        return ""
+    return ("Observed striking only. What this analysis cannot see: "
+            + "; ".join(profile.unobserved) + ".")
+
+
 def sport_unobserved(sport: str) -> tuple[str, ...]:
     """Everything a sport scores that the analysis cannot see, deduplicated.
 
@@ -747,11 +765,7 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
         # striking read of an MMA round is not a read of the round, and the
         # report has to say which one it is giving you.
         "unobserved_actions": list(profile.unobserved),
-        "coverage_note": (
-            f"Observed striking only. {profile.sport_label} also scores "
-            + ", ".join(profile.unobserved)
-            + ", which this analysis cannot see."
-        ) if profile.unobserved else "",
+        "coverage_note": coverage_note(key),
         "mode": "estimated_10_point_must" if profile.ten_point_must else "estimated_points",
         "rounds": [],
         "totals": {"A": 0, "B": 0},
