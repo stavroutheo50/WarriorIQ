@@ -660,10 +660,10 @@
     {% for c in progress.changes %}
     <div class="trend-cell" data-direction="{{c.direction}}">
       <span class="eyebrow">{{c.label}}</span>
-      <strong>{% if c.now is not none %}{{'%.2f'|format(c.now)}}{% else %}—{% endif %}</strong>
+      <strong>{{c.now|movement_value(c.key|default(''))}}</strong>
       <small>
         {% if c.direction == 'up' %}▲ up from{% elif c.direction == 'down' %}▼ down from{% else %}— steady at{% endif %}
-        {% if c.before is not none %}{{'%.2f'|format(c.before)}}{% endif %}
+        {% if c.before is not none %}{{c.before|movement_value(c.key|default(''))}}{% endif %}
       </small>
     </div>
     {% endfor %}

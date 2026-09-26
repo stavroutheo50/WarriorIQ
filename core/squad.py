@@ -137,6 +137,18 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
             else:
                 verdict = "level on movement"
 
+    identity_failed = (
+        (report.get("integrity") or {}).get("identity_evidence_trusted") is False
+        # Stored integrity predates the separability check, so it is read
+        # from tracking directly as the report page does.
+        or tracking.get("fighters_separable") is False
+    )
+    unusable_reason = (
+        "identity" if identity_failed
+        else "coverage" if min(coverage["A"], coverage["B"]) < _MIN_COVERAGE
+        else None
+    )
+
     coaching = ((report.get("coaching") or {}).get(focus) or {})
     improvements = coaching.get("improvements") or []
     scorecard = report.get("scorecard") or {}
@@ -161,17 +173,40 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
         # Coverage says somebody was followed, not that it was the right
         # somebody. A fight whose report failed the identity check disowns its
         # own per-fighter numbers, so it is never a point on a trend.
-        "usable": (min(coverage["A"], coverage["B"]) >= _MIN_COVERAGE
-                   and (report.get("integrity") or {}).get("identity_evidence_trusted") is not False
-                   # Stored integrity predates the separability check, so it
-                   # is read from tracking directly as the report page does.
-                   and tracking.get("fighters_separable") is not False),
+        "usable": not unusable_reason,
+        # Why a fight is set aside, in the words a coach needs. It said "too
+        # low to compare" beside 86% seen on a fight set aside because the two
+        # fighters looked alike - the coverage was fine, the identity was not.
+        "unusable_reason": unusable_reason,
         "movement_verdict": verdict,
         "pressure": _metric(report, focus, "pressure_index"),
         "centre": _metric(report, focus, "ring_center_control"),
         "footwork": _metric(report, focus, "footwork_body_lengths_per_second"),
         "priority": (improvements[0] or {}).get("title") if improvements else None,
     }
+
+
+def movement_value(value: float | None, key: str) -> str:
+    """A movement measurement in the units every other page uses.
+
+    The coach squad and the report's "since your last fight" card printed the
+    stored values raw - pressure 0.12, centre 0.64 - while the report's own
+    numbers row and Progress show the same fight as pressure 56 of 100 and
+    centre 64%. One fight, two sets of numbers.
+    """
+    if value is None:
+        return "—"
+    if key == "pressure":
+        return f"{(float(value) + 1) / 2 * 100:.0f}"
+    if key == "centre":
+        return f"{float(value) * 100:.0f}%"
+    if key == "footwork":
+        return f"{float(value):.1f}"
+    return f"{float(value):.2f}"
+
+
+# The unit shown after a movement value, where the number alone is not enough.
+MOVEMENT_UNITS = {"pressure": "of 100", "centre": "", "footwork": "body lengths/sec"}
 
 
 def _direction(newer: float | None, older: float | None) -> str:
@@ -235,13 +270,16 @@ def build_squad_view(fights: list[dict], limit: int = 25) -> dict:
         "fights": rows,
         "usable_count": len(usable),
         "unusable_count": len(rows) - len(usable),
+        "unusable_identity": sum(1 for row in rows if row.get("unusable_reason") == "identity"),
+        "unusable_coverage": sum(1 for row in rows if row.get("unusable_reason") == "coverage"),
         "trend": trend,
         "trend_available": bool(trend),
         "trend_sport": trend_sport,
         "trend_fighter": (usable[0].get("fighter_name") if usable else None),
         "note": (
             "Compared across the two most recent fights in the same sport that WarriorIQ "
-            "tracked well enough. Movement only - striking is not included."
+            "tracked well enough and could tell the fighters apart in. Movement only - "
+            "striking is not included."
         ),
     }
 
@@ -290,7 +328,7 @@ def compare_with_previous(report: dict, fights: list[dict], job_id: str) -> dict
     changes = []
     for key, label, higher_is_better in (
         ("pressure", "Pressure", True),
-        ("centre", "Holding the middle", True),
+        ("centre", "Centre", True),
         ("footwork", "Footwork", True),
     ):
         direction = _direction(current.get(key), previous.get(key))
@@ -298,7 +336,7 @@ def compare_with_previous(report: dict, fights: list[dict], job_id: str) -> dict
             continue
         better = direction == "steady" or ((direction == "up") == higher_is_better)
         changes.append({
-            "label": label, "direction": direction, "better": better,
+            "key": key, "label": label, "direction": direction, "better": better,
             "now": current.get(key), "before": previous.get(key),
         })
     if not changes:

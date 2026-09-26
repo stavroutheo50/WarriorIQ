@@ -116,3 +116,47 @@ class OneAthleteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CoachPageTests(unittest.TestCase):
+    """Found reading /coach with the same library."""
+
+    def test_movement_values_use_the_units_of_every_other_page(self):
+        """Coach printed pressure 0.12 and centre 0.64 for a fight the report
+        shows as 56 of 100 and 64%."""
+        from core.squad import movement_value
+
+        self.assertEqual(movement_value(0.12, "pressure"), "56")
+        self.assertEqual(movement_value(0.64, "centre"), "64%")
+        self.assertEqual(movement_value(1.17, "footwork"), "1.2")
+        self.assertEqual(movement_value(None, "centre"), "—")
+
+    def test_a_fight_set_aside_for_identity_says_so(self):
+        """"Too low to compare" beside 86% seen, on a fight set aside because
+        the two fighters looked alike."""
+        from core.squad import build_squad_view, summarize_fight
+
+        alike = {"video": {"focus_fighter": "A"},
+                 "tracking": {"fighter_A_coverage": .9, "fighter_B_coverage": .9,
+                              "fighters_separable": False}}
+        thin = {"video": {"focus_fighter": "A"},
+                "tracking": {"fighter_A_coverage": .6, "fighter_B_coverage": .9}}
+        self.assertEqual(summarize_fight(alike, {"job_id": "a"})["unusable_reason"], "identity")
+        self.assertEqual(summarize_fight(thin, {"job_id": "b"})["unusable_reason"], "coverage")
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "coach.html").read_text(
+            encoding="utf-8")
+        self.assertIn("identity check failed", page)
+        self.assertIn("squad.unusable_identity", page)
+
+    def test_the_coach_page_uses_the_current_name_for_centre(self):
+        from core.metric_catalog import RETIRED_NAMES
+
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "coach.html").read_text(
+            encoding="utf-8")
+        for retired in RETIRED_NAMES["ring_center_control"]:
+            self.assertNotIn(f"'{retired}'", page, retired)
+
+    def test_since_your_last_fight_carries_the_key_it_formats_by(self):
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(
+            encoding="utf-8")
+        self.assertIn("c.now|movement_value(c.key|default(''))", page)

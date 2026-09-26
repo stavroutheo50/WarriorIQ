@@ -113,6 +113,7 @@ from core.retention import (
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
+from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import (
@@ -263,6 +264,9 @@ templates.env.globals["preflight_limits"] = json.dumps(client_thresholds())
 # cannot call the same number three things in three sections.
 templates.env.globals["metric_catalog"] = METRIC_CATALOG
 templates.env.filters["metric_readings"] = metric_readings
+# Pressure 0-100, centre as a percentage, footwork in body lengths a second:
+# the units the report and Progress already use. See core.squad.movement_value.
+templates.env.filters["movement_value"] = squad_movement_value
 
 # Every page pulled eight separate stylesheets, so a phone opening WarriorIQ
 # made eight blocking round trips to a shared host before it could paint
