@@ -143,3 +143,57 @@ class TaekwondoWordingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MuayThaiAndMmaReportTests(unittest.TestCase):
+    """Found reading full-plan Muay Thai and MMA reports; true of every sport."""
+
+    def test_a_level_measurement_is_not_something_to_work_on(self):
+        """77.0% against 77.1% was "Work on: Holding the middle - level with
+        your opponent here", with a drill attached."""
+        from core.coaching import build_pose_coaching
+
+        own = {"guard_index": 0.12, "ring_center_control": 0.769, "balance_index": 0.76}
+        them = {"guard_index": 0.24, "ring_center_control": 0.771, "balance_index": 0.71}
+        titles = [item["title"] for item in build_pose_coaching("A", own, them)["improvements"]]
+        self.assertTrue(any("Guard" in title for title in titles), titles)
+        self.assertFalse(any("Holding the middle" in title for title in titles), titles)
+
+    def test_the_scorecard_box_agrees_with_the_reason_at_the_top(self):
+        """The stored text said "this analysis verified 4" beside "4
+        unverified scoring candidates" and "no strike is counted"."""
+        from app.main import _score_withheld
+
+        for status, sport in (("insufficient_scoring_actions", "muay_thai"),
+                              ("punch_counting_unavailable", "mma"),
+                              ("punch_counting_unavailable", "boxing")):
+            with self.subTest(status=status, sport=sport):
+                withheld = _score_withheld({
+                    "scorecard": {"available": False, "status": status, "sport": sport},
+                    "integrity": {"action_metrics_trusted": False}})
+                self.assertIn("No score is shown", withheld["disclaimer"])
+                self.assertNotIn("verified", withheld["disclaimer"])
+                self.assertNotIn("timeline", withheld["disclaimer"])
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn('report["scorecard"]["disclaimer"] = score_withheld["disclaimer"]', source)
+
+    def test_new_analyses_do_not_call_candidates_verified(self):
+        source = (Path(__file__).resolve().parents[1] / "core" / "report.py").read_text(encoding="utf-8")
+        self.assertNotIn('f"analysis verified {candidate_count}', source)
+
+    def test_the_kickboxing_rules_note_stays_on_kickboxing(self):
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(
+            encoding="utf-8")
+        self.assertIn("{% if report.scorecard.sport|default('kickboxing', true) == 'kickboxing' %}"
+                      "<p class=\"small muted\">{{report.integrity.rules_reference}}</p>", page)
+
+    def test_the_model_is_named_by_file_not_by_local_path(self):
+        from jinja2 import Environment
+
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(
+            encoding="utf-8")
+        expression = "{{ (report.performance.pose_model|string).replace('\\\\', '/').split('/')|last }}"
+        self.assertIn(expression, page)
+        rendered = Environment().from_string(expression).render(report={"performance": {
+            "pose_model": r"C:\Users\User\Documents\WarriorIQ\models\yolo26m-pose.engine"}})
+        self.assertEqual(rendered, "yolo26m-pose.engine")

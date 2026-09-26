@@ -3903,6 +3903,16 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
                 "count punches accurately yet."
             ),
             "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+            "disclaimer": (
+                "No score is shown. Boxing is scored on punches, and WarriorIQ's punch counting "
+                "is not accurate enough yet - checked against video, the punch count was "
+                "overstated. Movement, guard, balance and coverage below are unaffected."
+                if scorecard.get("sport") == "boxing" else
+                "No score is shown. Scoring a round needs punches counted as well as kicks, and "
+                "WarriorIQ's punch counting is not accurate enough yet - checked against video, "
+                "the kick count came out right and the punch count was overstated. Movement, "
+                "guard, balance and the kick count below are unaffected."
+            ),
         }
     if (status == "insufficient_scoring_actions"
             and not (report.get("integrity") or {}).get("action_metrics_trusted", False)):
@@ -3912,6 +3922,11 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
                 "reliably yet, so no strike is counted towards a score."
             ),
             "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+            "disclaimer": (
+                "No score is shown. A score needs to know which strikes landed, and WarriorIQ "
+                "cannot tell that reliably yet, so no strike is counted towards one. Movement, "
+                "guard, balance and coverage below are unaffected."
+            ),
         }
     if status == "insufficient_observation_coverage":
         required = f"{SETTINGS.min_tracking_coverage_for_score * 100:.0f}%"
@@ -4068,6 +4083,15 @@ def result_page(request: Request, job_id: str):
     # given instead. See core.report.unattributed_kick_total.
     identity_trusted = bool((report.get("integrity") or {}).get("identity_evidence_trusted", True))
     _pin_sport_to_fight(request, report.get("scorecard", {}).get("sport") or _job_sport(job))
+    score_withheld = _score_withheld(report, job_id)
+    # The scorecard box prints the disclaimer stored when the fight was
+    # analysed. For a score withheld because strike counting is not validated,
+    # that stored text could say "this analysis verified 4" and point at an
+    # "action timeline below" the page no longer shows, beside a reason at the
+    # top saying no strike is counted. The current wording replaces it, so
+    # reports analysed before this change say the same thing top and bottom.
+    if score_withheld and score_withheld.get("disclaimer"):
+        report["scorecard"]["disclaimer"] = score_withheld["disclaimer"]
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
@@ -4088,7 +4112,7 @@ def result_page(request: Request, job_id: str):
         ) if identity_trusted else None),
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
-        "score_withheld": _score_withheld(report, job_id),
+        "score_withheld": score_withheld,
         "observed": (observed_summary(report)
                      if identity_trusted and not (report.get("scorecard") or {}).get("available")
                      else None),

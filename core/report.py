@@ -524,10 +524,12 @@ def build_preliminary_scorecard(
             "winner_estimate": None,
             "status": "insufficient_scoring_actions",
             "disclaimer": (
+                # "verified" was wrong: these are unverified candidates, and
+                # the same page lists them as such.
                 "No score is shown. A round estimate needs at least "
                 f"{SETTINGS.min_verified_actions_for_score} scoring actions with enough evidence, and this "
-                f"analysis verified {candidate_count}. Movement, coverage and the detected "
-                "action timeline below are unaffected."
+                f"analysis found {candidate_count} candidate{'' if candidate_count == 1 else 's'}. "
+                "Movement and coverage below are unaffected."
                 if candidate_count
                 else "No preliminary score is shown because the automatic action engine found no scoring candidates with enough evidence."
             ),
