@@ -449,6 +449,7 @@ class DurableAnalysisStateTests(TestCase):
 
         analyzer = Path(analyzer_module.__file__).read_text(encoding="utf-8")
         self.assertNotIn("\"Following both fighters with SAM2\"", analyzer)
+        self.assertNotIn("\"Loading GPU models\"", analyzer)
         # The frame pass announces itself as soon as it starts...
         self.assertIn('progress("Analyzing fight", ANALYSIS_PHASE_START,', analyzer)
         self.assertLess(analyzer.index('progress("Analyzing fight", ANALYSIS_PHASE_START,'),

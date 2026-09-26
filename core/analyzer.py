@@ -668,7 +668,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     wall_start = time.perf_counter()
     _log_gpu_state()
     _log_host_memory(max(0, end_frame - start_frame), float(info.fps))
-    progress("Loading GPU models", 0.0, 0.0, 0.0)
+    # Not "GPU models": the machine running this may have no GPU.
+    progress("Loading analysis models", 0.0, 0.0, 0.0)
 
     pose_tracker = get_pose_tracker()
     # SAM2 unless WARRIORIQ_SAM_BACKEND says otherwise. Both backends return
