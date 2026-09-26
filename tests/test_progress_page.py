@@ -160,3 +160,78 @@ class CoachPageTests(unittest.TestCase):
         page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(
             encoding="utf-8")
         self.assertIn("c.now|movement_value(c.key|default(''))", page)
+
+
+class ComparePageTests(unittest.TestCase):
+    """Found reading /compare on five pairs from the same library."""
+
+    @staticmethod
+    def _report(focus="A", sport="kickboxing", integrity=None, tracking=None, **metrics):
+        return {
+            "video": {"focus_fighter": focus},
+            "scorecard": {"sport": sport},
+            "integrity": integrity or {},
+            "tracking": {"fighter_A_coverage": .95, "fighter_B_coverage": .95, **(tracking or {})},
+            "metrics": {focus: dict(metrics)},
+        }
+
+    def test_only_guard_and_balance_are_called_better_when_higher(self):
+        """"Higher is better on all five", while metric_catalog gives pressure,
+        centre and movement no direction."""
+        from core.squad import compare_movement
+
+        rows = {row["key"]: row for row in compare_movement([
+            self._report(pressure_index=.1, ring_center_control=.6, guard_index=.1, balance_index=.7),
+            self._report(pressure_index=.3, ring_center_control=.4, guard_index=.3, balance_index=.8),
+        ])["rows"]}
+        self.assertTrue(rows["guard_index"]["higher_is_better"])
+        self.assertTrue(rows["balance_index"]["higher_is_better"])
+        for key in ("pressure_index", "ring_center_control"):
+            self.assertFalse(rows[key]["higher_is_better"], key)
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "compare.html").read_text(
+            encoding="utf-8")
+        self.assertNotIn("Higher is better on all five", page)
+        self.assertIn("row.higher_is_better and row.leader == 'a'", page)
+
+    def test_the_rows_use_the_measurements_own_names(self):
+        from core.squad import compare_movement
+
+        labels = [row["label"] for row in compare_movement([
+            self._report(pressure_index=.1, ring_center_control=.6,
+                         footwork_body_lengths_per_second=1.0, guard_index=.1, balance_index=.7),
+            self._report(pressure_index=.2, ring_center_control=.5,
+                         footwork_body_lengths_per_second=1.1, guard_index=.2, balance_index=.8),
+        ])["rows"]]
+        self.assertEqual(labels, ["Pressure", "Centre", "Movement", "Guard", "Balance"])
+
+    def test_a_failed_identity_check_is_said_before_the_numbers(self):
+        from core.squad import compare_movement
+
+        result = compare_movement([
+            self._report(guard_index=.1),
+            self._report(guard_index=.3, tracking={"fighters_separable": False}),
+        ])
+        self.assertEqual(result["identity_failed"], [False, True])
+        result = compare_movement([
+            self._report(focus="B", guard_index=.1,
+                         integrity={"fighter_identity_trusted": {"A": True, "B": False}}),
+            self._report(guard_index=.3),
+        ])
+        self.assertEqual(result["identity_failed"], [True, False])
+
+    def test_different_sports_are_flagged(self):
+        from core.squad import compare_movement
+
+        self.assertTrue(compare_movement([
+            self._report(sport="boxing", guard_index=.2), self._report(guard_index=.2),
+        ])["different_sports"])
+        self.assertFalse(compare_movement([
+            self._report(guard_index=.2), self._report(guard_index=.2),
+        ])["different_sports"])
+
+    def test_two_different_fighters_are_named(self):
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "compare.html").read_text(
+            encoding="utf-8")
+        self.assertIn("Two different fighters.", page)
+        self.assertIn("picked[0].fighter_id != picked[1].fighter_id", page)
+        self.assertNotIn("Movement progress is still compared below", page)
