@@ -529,7 +529,7 @@ def build_preliminary_scorecard(
                 "No score is shown. A round estimate needs at least "
                 f"{SETTINGS.min_verified_actions_for_score} scoring actions with enough evidence, and this "
                 f"analysis found {candidate_count} candidate{'' if candidate_count == 1 else 's'}. "
-                "Movement and coverage below are unaffected."
+                "Movement, coverage, guard and balance below are unaffected."
                 if candidate_count
                 else "No preliminary score is shown because the automatic action engine found no scoring candidates with enough evidence."
             ),
