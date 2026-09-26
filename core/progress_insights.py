@@ -24,14 +24,23 @@ def identity_failed(record: dict, fighter: str) -> bool:
     return (integrity.get("fighter_identity_trusted") or {}).get(fighter) is False
 
 
+def followed_side(record: dict, fighter: str) -> str:
+    """Which corner the athlete was in on this fight.
+
+    The fight's own focus when it has one - that is the athlete chosen for its
+    detailed report - and the profile's default only for a fight analysed as
+    "both". It always used the default, so a fight where the athlete was boxed
+    second, as Fighter B, vanished from their own progress.
+    """
+    video = (record.get("report") or {}).get("video", {})
+    focus = video.get("focus_fighter") or video.get("analysis_target", "BOTH")
+    return focus if focus in {"A", "B"} else fighter
+
+
 def _point(record: dict, fighter: str) -> dict | None:
     report = record.get("report") or {}
+    fighter = followed_side(record, fighter)
     if identity_failed(record, fighter):
-        return None
-    video = report.get("video", {})
-    target = video.get("analysis_target", "BOTH")
-    focus = video.get("focus_fighter") or target
-    if focus not in {"BOTH", fighter}:
         return None
     metrics = report.get("metrics", {}).get(fighter)
     if not metrics:
@@ -51,6 +60,7 @@ def _point(record: dict, fighter: str) -> dict | None:
     return {
         "job_id": record.get("job_id"),
         "created_at": record.get("created_at", ""),
+        "side": fighter,
         "ruleset": RULESET_LABELS.get(ruleset, ruleset.replace("_", " ").title()),
         "action_trusted": bool(action_trusted),
         "accuracy": _number(attacks.get("accuracy")) if action_trusted else None,
@@ -97,9 +107,11 @@ def build_progress(records: list[dict], fighter: str) -> dict:
     focus: list[dict] = []
     plan: list[dict] = []
     if measured:
-        latest_report = measured[-1][0].get("report") or {}
-        focus = list(latest_report.get("coaching", {}).get(fighter, {}).get("improvements", []))[:3]
-        plan = list(latest_report.get("training_plan", {}).get(fighter, []))[:3]
+        latest_record, latest_point = measured[-1]
+        latest_report = latest_record.get("report") or {}
+        side = latest_point["side"]
+        focus = list(latest_report.get("coaching", {}).get(side, {}).get("improvements", []))[:3]
+        plan = list(latest_report.get("training_plan", {}).get(side, []))[:3]
     measured_coverage = [point["coverage"] for point in points if point.get("coverage") is not None]
     trend_key = next(
         (key for key in ("guard", "balance", "center") if sum(point.get(key) is not None for point in points) >= 2),
@@ -114,7 +126,8 @@ def build_progress(records: list[dict], fighter: str) -> dict:
         "fight_count": len(points),
         # Said on the page, so a library of twenty fights showing three points
         # explains itself instead of looking like lost data.
-        "identity_failed_count": sum(identity_failed(record, fighter) for record in ordered),
+        "identity_failed_count": sum(
+            identity_failed(record, followed_side(record, fighter)) for record in ordered),
         "points": points,
         "latest": latest,
         "trends": trends,

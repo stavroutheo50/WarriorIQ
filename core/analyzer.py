@@ -185,7 +185,7 @@ from core.preflight import Preflight
 from core.preflight import probe as probe_video
 from core.pose_smoothing import JointGate
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
-from core.report import build_report, write_report
+from core.report import build_report, identity_tracking, write_report
 from core.rtm_pose import refine as refine_fighter_pose
 from core.edgetam_recovery import build_recovery
 from core.sam_recovery import nearest_guidance, sam_sampling_stride
@@ -1453,6 +1453,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             "statistics": report.get("statistics", {}),
             "coaching": report.get("coaching", {}),
             "training_plan": report.get("training_plan", {}),
+            "tracking": identity_tracking(report.get("tracking", {})),
         },
     }
     if req.persist_result:

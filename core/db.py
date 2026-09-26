@@ -1510,6 +1510,9 @@ def save_completed_analysis(job_id: str, job: dict, report: dict, report_path: s
     """Persist the report only after its analysis generation has been committed."""
     if not job.get("persist_result"):
         return
+    # Imported here: core.db is loaded by everything, and core.report pulls in
+    # the scoring and coaching modules that nothing else in db needs.
+    from core.report import identity_tracking
     performance = report.get("performance", {})
     tracking = report.get("tracking", {})
     scorecard = report.get("scorecard", {})
@@ -1521,9 +1524,13 @@ def save_completed_analysis(job_id: str, job: dict, report: dict, report_path: s
         "within_budget": performance.get("within_video_length_budget"),
         "fighter_A_coverage": tracking.get("fighter_A_coverage", 0.0),
         "fighter_B_coverage": tracking.get("fighter_B_coverage", 0.0),
-        "progress_report": {key: report.get(key, {}) for key in (
-            "video", "setup", "integrity", "metrics", "statistics", "coaching", "training_plan",
-        )},
+        "progress_report": {
+            **{key: report.get(key, {}) for key in (
+                "video", "setup", "integrity", "metrics", "statistics", "coaching", "training_plan",
+            )},
+            # What the identity gate needs, so Progress re-applies it.
+            "tracking": identity_tracking(report.get("tracking", {})),
+        },
     }
     save_fight(
         job_id=job_id, profile_id=int(job.get("profile_id", 0)),

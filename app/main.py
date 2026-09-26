@@ -980,14 +980,53 @@ def _authorized_job(request: Request, job_id: str) -> dict | None:
     return None
 
 
+def _full_progress_report(path: Path) -> dict | None:
+    """The fields Progress needs from a full report, identity gate re-applied.
+
+    Cached by modification time, so each report is parsed once per process.
+    """
+    try:
+        modified = path.stat().st_mtime_ns
+        cached = _progress_report_cache.get(str(path))
+        if cached and cached[0] == modified:
+            return cached[1]
+        full_report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    report = refresh_identity_integrity({
+        key: full_report.get(key, {})
+        for key in ("video", "setup", "integrity", "metrics", "coaching",
+                    "training_plan", "tracking")
+    })
+    _progress_report_cache[str(path)] = (modified, report)
+    return report
+
+
 def _reports_for_profile(profile_id: int) -> list[dict]:
     records = []
     fights = list_fights(profile_id)
     newest_legacy_ids = {fight["job_id"] for fight in fights[:2]}
     for fight in reversed(fights):
+        base = {"job_id": fight["job_id"], "created_at": fight["created_at"],
+                "fighter_id": fight.get("fighter_id"), "fighter_name": fight.get("fighter_name")}
         compact = (fight.get("summary") or {}).get("progress_report")
         if isinstance(compact, dict):
-            records.append({"job_id": fight["job_id"], "created_at": fight["created_at"], "report": compact})
+            # The snapshot's integrity was stored at analysis time, before the
+            # "fighters look too alike" check counted - so a fight whose report
+            # page says "not safe to use" was still charted here. The gate is
+            # re-applied: from the snapshot's own tracking fields when it has
+            # them, from the full report (read once, cached) when it predates
+            # them.
+            if compact.get("tracking"):
+                report = refresh_identity_integrity(deepcopy(compact))
+            else:
+                full = _full_progress_report(Path(fight["report_path"]))
+                report = compact if full is None else {
+                    **compact, "integrity": full.get("integrity", compact.get("integrity", {})),
+                    "coaching": full.get("coaching", compact.get("coaching", {})),
+                    "training_plan": full.get("training_plan", compact.get("training_plan", {})),
+                }
+            records.append({**base, "report": report})
             continue
         if fight["job_id"] not in newest_legacy_ids:
             summary = fight.get("summary") or {}
@@ -1006,29 +1045,14 @@ def _reports_for_profile(profile_id: int) -> list[dict]:
                 },
                 "coaching": {}, "training_plan": {},
             }
-            records.append({"job_id": fight["job_id"], "created_at": fight["created_at"], "report": minimal})
+            records.append({**base, "report": minimal})
             continue
-        path = Path(fight["report_path"])
-        if not path.exists():
+        # The identity gate is re-applied, as the report page does, so a fight
+        # the report now withholds is not charted here.
+        report = _full_progress_report(Path(fight["report_path"]))
+        if report is None:
             continue
-        try:
-            modified = path.stat().st_mtime_ns
-            cached = _progress_report_cache.get(str(path))
-            if cached and cached[0] == modified:
-                report = cached[1]
-            else:
-                full_report = json.loads(path.read_text(encoding="utf-8"))
-                # The identity gate is re-applied, as the report page does,
-                # so a fight the report now withholds is not charted here.
-                report = refresh_identity_integrity({
-                    key: full_report.get(key, {})
-                    for key in ("video", "setup", "integrity", "metrics", "coaching",
-                                "training_plan", "tracking")
-                })
-                _progress_report_cache[str(path)] = (modified, report)
-        except (OSError, json.JSONDecodeError):
-            continue
-        records.append({"job_id": fight["job_id"], "created_at": fight["created_at"], "report": report})
+        records.append({**base, "report": report})
     return records
 
 
@@ -4804,6 +4828,12 @@ def _athlete_name(profile: dict, fights: list[dict]) -> str:
     return str(profile.get("display_name") or SETTINGS.default_profile_name)
 
 
+def _athlete_fighter_id(fights: list[dict]) -> int | None:
+    """The roster fighter this page follows: the one most fights are filed under."""
+    ids = Counter(fight["fighter_id"] for fight in fights if fight.get("fighter_id") is not None)
+    return ids.most_common(1)[0][0] if ids else None
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard_page(request: Request):
     profile_id = _profile_id(request)
@@ -4813,12 +4843,23 @@ def dashboard_page(request: Request):
             context={"request": request, "profile": None, "progress": None, "assignments": []},
         )
     profile = get_profile(profile_id) or {}
-    progress = build_progress(_reports_for_profile(profile_id), profile.get("default_fighter", "A"))
+    fights = list_fights(profile_id)
+    # One athlete's progress. The page is headed with one fighter's name, and
+    # it charted every fight in the workspace: a teammate's 40% guard became
+    # the athlete's "last fight" and the headline read -18 points. Fights with
+    # no roster fighter (analysed before the roster existed) stay in.
+    athlete_id = _athlete_fighter_id(fights)
+    records = [record for record in _reports_for_profile(profile_id)
+               if athlete_id is None or record.get("fighter_id") in (None, athlete_id)]
+    progress = build_progress(records, profile.get("default_fighter", "A"))
+    other_fights = sum(1 for fight in fights
+                       if athlete_id is not None and fight.get("fighter_id") not in (None, athlete_id))
     return templates.TemplateResponse(
         request=request, name="dashboard.html",
         context={
             "request": request, "profile": profile, "progress": progress,
-            "athlete_name": _athlete_name(profile, list_fights(profile_id)),
+            "athlete_name": _athlete_name(profile, fights),
+            "other_fighter_fights": other_fights,
             "assignments": list_assignments(profile_id),
         },
     )

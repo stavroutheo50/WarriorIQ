@@ -150,6 +150,20 @@ def _identity_seed_safe(tracking: dict, fighter: str) -> bool:
     return source == "pose_detector" and float(overlap or 0.0) >= SETTINGS.min_initial_iou
 
 
+# The tracking fields the identity gate reads. Saved with each fight's
+# progress snapshot so the Progress page can apply the same gate the report
+# page applies, without reopening the full report.
+IDENTITY_TRACKING_KEYS = (
+    "fighter_A_seed_source", "fighter_B_seed_source", "initial_iou_A", "initial_iou_B",
+    "fighter_A_coverage", "fighter_B_coverage", "fighters_separable", "fighter_pair_similarity",
+    "identity_confusions",
+)
+
+
+def identity_tracking(tracking: dict) -> dict:
+    return {key: tracking[key] for key in IDENTITY_TRACKING_KEYS if key in (tracking or {})}
+
+
 MIN_COVERAGE_TO_REPORT_OBSERVED = 0.15
 
 
@@ -596,10 +610,15 @@ def build_report(
     evidence_trust = automated_evidence_trust(classifier)
     automated_evidence_trusted = bool(evidence_trust["automated_evidence_trusted"])
     tracking = dict(tracking)
+    # Separability as well, exactly as refresh_identity_integrity applies it.
+    # Without it the report page (which refreshes) said "not safe to use"
+    # while the integrity stored here - and saved into the Progress snapshot -
+    # said trusted, so Progress charted a fight its own report disowned.
     identity_ready = {
         fighter: (
             _identity_seed_safe(tracking, fighter)
             and float(tracking.get(f"fighter_{fighter}_coverage", 0.0)) >= 0.45
+            and tracking.get("fighters_separable") is not False
         )
         for fighter in ("A", "B")
     }
