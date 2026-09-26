@@ -1109,9 +1109,10 @@ class EngagementRangeTests(unittest.TestCase):
         plan_b = build_training_plan(build_pose_coaching("B", b, a), "B", b)
         goals = " ".join(block["goal"] for block in plan_b)
 
-        # B is behind on pressure and footwork, so both must get real targets.
-        self.assertIn("pressure", goals)
-        self.assertIn("body lengths a second", goals)
+        # B is behind on balance, so that gets a real target. B also walked
+        # forward less, but pressure has no better direction, so no pressure drill.
+        self.assertIn("balance", goals)
+        self.assertNotIn("pressure", goals)
         self.assertNotIn("measured baseline", goals)
         # And each goal names what the opponent managed, as the benchmark.
         for block in plan_b:
@@ -1321,10 +1322,43 @@ class EngagementRangeTests(unittest.TestCase):
         coach_b = build_pose_coaching("B", b, a)
 
         self.assertNotEqual(coach_a["strengths"][0]["title"], coach_b["strengths"][0]["title"])
-        # A walked forward and B gave ground, so that is A's strength.
-        self.assertIn("Walking them down", coach_a["strengths"][0]["title"])
+        # A kept better balance than A's opponent, so that is A's strength. A
+        # also walked forward more, but pressure has no better direction: a
+        # counter-fighter gives ground on purpose.
+        self.assertIn("Balance", coach_a["strengths"][0]["title"])
         # B kept a better guard than A, so that is B's.
         self.assertIn("Guard", coach_b["strengths"][0]["title"])
+
+    def test_style_measurements_are_never_a_strength_or_a_fault(self):
+        """"Work on: Walking them down - behind your opponent here" told a
+        counter-fighter that giving ground was a fault. metric_catalog gives
+        pressure, centre and movement no better direction."""
+        from core.coaching import build_pose_coaching
+
+        styles = ("Walking them down", "Holding the middle", "Moving your feet")
+        forward = dict(guard_index=0.20, balance_index=0.70, ring_center_control=0.80,
+                       pressure_index=0.40, footwork_body_lengths_per_second=1.60)
+        counter = dict(guard_index=0.20, balance_index=0.70, ring_center_control=0.30,
+                       pressure_index=-0.40, footwork_body_lengths_per_second=0.60)
+        for own, other in ((forward, counter), (counter, forward), (counter, None)):
+            coaching = build_pose_coaching("A", own, other)
+            for group in ("strengths", "improvements"):
+                for item in coaching[group]:
+                    self.assertFalse(any(style in item["title"] for style in styles), item)
+            for drill in coaching["drills"]:
+                self.assertIn(drill["metric"], ("guard_index", "balance_index"))
+        # Level on guard and balance: nothing to work on, whatever the style.
+        coaching = build_pose_coaching("A", counter, forward)
+        self.assertEqual([item["title"] for item in coaching["improvements"]],
+                         ["Nothing behind your opponent"])
+        self.assertIn("walking them down 30", coaching["baseline_summary"])
+
+    def test_only_style_measurements_name_no_strength(self):
+        from core.coaching import build_pose_coaching
+
+        coaching = build_pose_coaching("A", {"pressure_index": 0.2}, {"pressure_index": 0.4})
+        self.assertEqual(coaching["strengths"], [])
+        self.assertEqual(coaching["improvements"], [])
 
     def test_nobody_is_told_to_fix_something_they_are_winning(self):
         """A fighter ahead on everything but one thing gets one thing to fix."""

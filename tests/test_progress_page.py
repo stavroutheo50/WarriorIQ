@@ -282,3 +282,32 @@ class SharedCoachLinkTests(unittest.TestCase):
                                                             "fighter_pair_similarity": .83},
                                                "video": {"analysis_target": "A"}})
         self.assertIn("matches at 83%", measured["scorecard"]["disclaimer"])
+
+
+class StyleIsNotAFaultTests(unittest.TestCase):
+    """"Work on: Walking them down" on the Coach squad, from coaching saved at
+    analysis time, after the report page had stopped saying it."""
+
+    def test_the_squad_priority_uses_the_current_coaching(self):
+        import tempfile
+        from core.squad import build_squad_view
+
+        report = {
+            "video": {"focus_fighter": "A", "analysis_target": "A"},
+            "tracking": {"fighter_A_coverage": .9, "fighter_B_coverage": .9,
+                         "fighter_A_initial_lock_safe": True},
+            "integrity": {"identity_evidence_trusted": True, "action_metrics_trusted": False},
+            "metrics": {"A": {"pose_coverage": .9, "guard_index": .2, "balance_index": .7,
+                              "pressure_index": -.1, "ring_center_control": .6},
+                        "B": {"pose_coverage": .9, "guard_index": .2, "balance_index": .7,
+                              "pressure_index": .2, "ring_center_control": .6}},
+            "coaching": {"A": {"improvements": [{"title": "Work on: Walking them down 45"}]}},
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "report.json"
+            path.write_text(json.dumps(report), encoding="utf-8")
+            view = build_squad_view([{"job_id": "x", "report_path": str(path),
+                                      "created_at": "2026-09-01", "ruleset": "K1"}])
+        priorities = [row.get("priority") for row in view["fights"]]
+        self.assertTrue(priorities, view)
+        self.assertNotIn("Work on: Walking them down 45", priorities)

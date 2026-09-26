@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from core.config import RULESET_LABELS
+from core.report import refresh_identity_integrity
 
 # Below this the fight was not watched well enough for its numbers to belong in
 # a comparison. Showing it anyway would let a badly tracked fight look like a
@@ -235,6 +236,10 @@ def build_squad_view(fights: list[dict], limit: int = 25) -> dict:
             report = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        # The same current gate and coaching the report page applies on every
+        # view. Without it the squad showed the priority saved at analysis
+        # time, after the coaching rules had changed.
+        refresh_identity_integrity(report)
         row = summarize_fight(report, fight)
         if row is not None:
             rows.append(row)
@@ -360,10 +365,9 @@ def compare_with_previous(report: dict, fights: list[dict], job_id: str) -> dict
 
 
 # The five identity-safe pose dimensions, in the order core/coaching.py
-# declares them. Higher is better for all five: build_pose_coaching ranks them
-# with reverse=True and calls the top one the fighter's strength, so a
-# comparison treating any of them as lower-is-better would contradict the
-# coaching shown on the same fight.
+# declares them. Only guard and balance have a better direction (see
+# core/metric_catalog.py), and they are the only two build_pose_coaching ranks
+# as a strength or a thing to work on.
 # Named as the report's numbers row and core/metric_catalog.py name them. The
 # coaching phrases ("Walking them down", "Holding the middle") are for coaching
 # advice; a table of measurements uses the measurements' own names.
