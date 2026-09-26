@@ -178,6 +178,10 @@ def _log_gpu_state() -> None:
 # rate says anything about how long the rest will take.
 ANALYSIS_PHASE_START = 35.0
 ANALYSIS_PHASE_SPAN = 63.0
+# The bar also moves at least this often during the frame pass, whatever the
+# frame count. On a machine without a GPU, 40 analysed frames took minutes,
+# and the bar sat still long enough to look frozen.
+PROGRESS_MAX_SILENCE_SECONDS = 5.0
 
 from core.identity import IdentityManager, fighter_pair_similarity
 from core.metrics import MetricsAccumulator
@@ -759,7 +763,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     canonical_b_box = [float(value) for value in initial_b.box]
     identity_referee = OpenAIIdentityReferee(req.openai_identity_recovery, first_frame, canonical_a_box, canonical_b_box)
 
-    progress("Following both fighters with SAM2", 1.0, time.perf_counter() - wall_start, 0.0, manager, None, quality, stage="tracking")
+    progress("Following both fighters", 1.0, time.perf_counter() - wall_start, 0.0, manager, None, quality, stage="tracking")
     sam_tracks = sam_recovery.track_segment(
         req.video_path,
         start_frame,
@@ -768,7 +772,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         canonical_a_box,
         canonical_b_box,
         progress_callback=lambda completed, total: progress(
-            "Following both fighters with SAM2",
+            "Following both fighters",
             2.0 + 33.0 * completed / max(1, total),
             time.perf_counter() - wall_start,
             segment_duration * completed / max(1, total),
@@ -780,6 +784,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     )
     sam_was_available = sam_recovery.available
     sam_recovery.release()
+    # The bar reserves 0-35% for SAM2. Without a GPU SAM2 is skipped at once,
+    # and the bar used to sit at 1% until the first frame-pass update, then
+    # jump past 50%. Mark the start of the frame pass as soon as it begins.
+    progress("Analyzing fight", ANALYSIS_PHASE_START, time.perf_counter() - wall_start, 0.0,
+             manager, None, quality, stage="analysis")
     # SAM2 reads the segment independently. Resume the pose pass immediately
     # after the already-consumed selection frame.
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame + 1)
@@ -815,6 +824,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     sam_stride = sam_sampling_stride(info.fps, end_frame - start_frame)
     current_frame = start_frame
     last_progress_emit = 0
+    last_progress_emit_at = time.perf_counter()
     # The start frame is already analyzed above. Schedule the next expensive
     # inference at the adaptive tracking stride instead of analyzing the very
     # next source frame again.
@@ -1095,8 +1105,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                     time.perf_counter() - pose_pass_start, segment_duration)
             current_imgsz = quality.imgsz
 
-            if analyzed_frames - last_progress_emit >= SETTINGS.progress_interval_frames:
+            if (analyzed_frames - last_progress_emit >= SETTINGS.progress_interval_frames
+                    or (analyzed_frames > last_progress_emit
+                        and time.perf_counter() - last_progress_emit_at >= PROGRESS_MAX_SILENCE_SECONDS)):
                 last_progress_emit = analyzed_frames
+                last_progress_emit_at = time.perf_counter()
                 percent = ANALYSIS_PHASE_START + ANALYSIS_PHASE_SPAN * processed_seconds / segment_duration
                 all_live_event_data = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
                 live_event_data = all_live_event_data[-160:]
