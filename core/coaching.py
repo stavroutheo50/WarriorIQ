@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from core.metric_catalog import BY_KEY
 from core.types import StrikeEvent
 
 
@@ -126,6 +127,11 @@ POSE_DIMENSIONS = [
 ]
 
 
+def _has_better_direction(key: str) -> bool:
+    metric = BY_KEY.get(key)
+    return metric is not None and metric.direction == "higher"
+
+
 def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -> dict:
     """Build useful coaching only from identity-safe pose measurements.
 
@@ -176,10 +182,16 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
             "note": "No identity-safe pose measurement was available for coaching.",
         }
 
-    comparable = [item for item in measured if item[0] is not None]
+    # Only a measurement with a known better direction can be a strength or a
+    # thing to work on. Pressure, centre and movement have none in
+    # core/metric_catalog.py: a counter-fighter gives ground on purpose, so
+    # "Work on: Walking them down - behind your opponent" told them their
+    # style was a fault. They stay in the baseline summary below.
+    ranked_items = [item for item in measured if _has_better_direction(item[2])]
+    comparable = [item for item in ranked_items if item[0] is not None]
     # Ranked on the comparison that exists: against the opponent when there is
     # one, against the reference band when there is not.
-    ranked = sorted(measured, key=lambda item: item[6], reverse=True)
+    ranked = sorted(ranked_items, key=lambda item: item[6], reverse=True)
     if comparable:
         ordered = sorted(comparable, key=lambda item: item[0], reverse=True)
         strongest = ordered[0]
@@ -192,10 +204,14 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
         # Holding the middle - level with your opponent here" plus a drill.
         behind = [item for item in ordered if item[0] <= -LEVEL_GAP]
         weakest = behind[-2:][::-1]
-    else:
-        # Only one fighter was analysed. Rank against the reference band.
+    elif ranked:
+        # Only one fighter was analysed. Rank against the reference band. With
+        # just guard and balance ranked, the bottom two would include the
+        # strength itself.
         strongest = ranked[0]
-        weakest = ranked[-2:][::-1]
+        weakest = [item for item in ranked[::-1] if item is not strongest][:2]
+    else:
+        strongest, weakest = None, []
 
     def _phrase(item) -> tuple[str, str]:
         gap, mine, key, label, _drill, _prescription, _rank = item
@@ -223,21 +239,24 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
             f"You {shown}{unit}, them {theirs_shown} - {side} your opponent here.",
         )
 
-    strength_title, strength_detail = _phrase(strongest)
-    strengths = [{
-        "title": strength_title,
-        "detail": strength_detail,
-        "evidence_times": _moment_times(own, strongest[2], want_low=False),
-    }]
+    strengths = []
+    if strongest is not None:
+        strength_title, strength_detail = _phrase(strongest)
+        strengths.append({
+            "title": strength_title,
+            "detail": strength_detail,
+            "evidence_times": _moment_times(own, strongest[2], want_low=False),
+        })
     improvements = []
     drills = []
     if comparable and not weakest:
         improvements.append({
             "title": "Nothing behind your opponent",
             "detail": (
-                "On every movement number measured you matched or beat them. "
-                "The next gain is in the striking, which WarriorIQ cannot "
-                "score yet."
+                "On guard and balance you matched or beat them. Pressure, "
+                "centre and movement depend on how you fight, so they are not "
+                "ranked. The next gain is in the striking, which WarriorIQ "
+                "cannot score yet."
             ),
             "evidence_times": [],
         })
