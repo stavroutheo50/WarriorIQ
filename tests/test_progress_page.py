@@ -235,3 +235,50 @@ class ComparePageTests(unittest.TestCase):
         self.assertIn("Two different fighters.", page)
         self.assertIn("picked[0].fighter_id != picked[1].fighter_id", page)
         self.assertNotIn("Movement progress is still compared below", page)
+
+
+class SharedCoachLinkTests(unittest.TestCase):
+    """Found opening /s/ links logged out, as the coach they are sent to."""
+
+    @staticmethod
+    def _page():
+        return (Path(__file__).resolve().parents[1] / "app" / "templates" / "shared.html").read_text(
+            encoding="utf-8")
+
+    def test_a_failed_identity_check_hides_the_numbers(self):
+        """An identity-failed fight still showed its numbers and priorities,
+        and told the coach to "return to fighter selection"."""
+        page = self._page()
+        self.assertIn("identity_ok=report.integrity.identity_evidence_trusted", page)
+        self.assertIn("Identity check failed.", page)
+        self.assertIn("{% if identity_ok %}<div class=\"metric-grid\">", page)
+
+    def test_the_movement_numbers_use_the_reports_units(self):
+        page = self._page()
+        for key, unit in (("footwork_body_lengths_per_second", "footwork"), ("pressure_index", "pressure"),
+                          ("ring_center_control", "centre"), ("guard_index", "centre"),
+                          ("balance_index", "centre"), ("pose_coverage", "centre")):
+            self.assertIn(f"{{{{m.{key}|default(none)|movement_value('{unit}')}}}}", page, key)
+        self.assertNotIn("Pose evidence", page)
+        self.assertNotIn("evidence validation gate", page)
+
+    def test_the_expiry_is_a_date_and_a_dead_link_says_why(self):
+        from app.main import _friendly_date
+
+        self.assertEqual(_friendly_date("2026-10-03T17:02:44.079794+00:00"), "03 Oct 2026")
+        self.assertIn("{{expires_label or expires_at}}", self._page())
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn("This coach link has expired or was turned off.", source)
+
+    def test_an_unmeasured_likeness_is_not_reported_as_zero(self):
+        """"Their kit matches at 0%" - the opposite of "too alike" - when an
+        older report had no similarity measurement."""
+        from core.report import refresh_identity_integrity
+
+        unknown = refresh_identity_integrity({"tracking": {"fighters_separable": False},
+                                              "video": {"analysis_target": "A"}})
+        self.assertNotIn("0%", unknown["scorecard"]["disclaimer"])
+        measured = refresh_identity_integrity({"tracking": {"fighters_separable": False,
+                                                            "fighter_pair_similarity": .83},
+                                               "video": {"analysis_target": "A"}})
+        self.assertIn("matches at 83%", measured["scorecard"]["disclaimer"])

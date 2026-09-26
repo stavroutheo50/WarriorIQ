@@ -5967,18 +5967,22 @@ def share_report(request: Request, job_id: str):
 
 @app.get("/s/{token}", response_class=HTMLResponse)
 def shared_report(request: Request, token: str):
+    # The person holding the link is a coach, not the athlete: a bare "Not
+    # Found" with "Start an analysis" told them nothing about what happened.
+    gone = "This coach link has expired or was turned off. Ask the athlete to send a new one."
     share = get_report_share(token_digest(token))
     if not share:
-        raise HTTPException(404)
+        raise HTTPException(404, gone)
     path = _require_completed_artifact(share["job_id"], "report.json")
     if not path.exists():
-        raise HTTPException(404)
+        raise HTTPException(404, gone)
     report = json.loads(path.read_text(encoding="utf-8"))
     _apply_report_annotations(report, [])
     refresh_identity_integrity(report)
     return templates.TemplateResponse(
         request=request, name="shared.html",
-        context={"request": request, "report": report, "expires_at": share["expires_at"]},
+        context={"request": request, "report": report, "expires_at": share["expires_at"],
+                 "expires_label": _friendly_date(share["expires_at"])},
     )
 
 
