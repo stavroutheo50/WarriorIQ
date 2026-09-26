@@ -55,7 +55,7 @@ class BoxingScorecardDisclaimerTests(unittest.TestCase):
 
     def test_boxing_disclaimer_describes_boxing(self):
         from core.report import STRIKE_COUNTS_PRECISION_VALIDATED, build_report
-        from core.types import AnalysisRequest, RoundSpec
+        from core.types import AnalysisRequest, RoundSpec, StrikeEvent
 
         if STRIKE_COUNTS_PRECISION_VALIDATED:
             self.skipTest("punch counts are published")
@@ -63,7 +63,17 @@ class BoxingScorecardDisclaimerTests(unittest.TestCase):
         req = AnalysisRequest(video_path="none.mp4", fighter_a_box=[0, 0, 10, 10],
                               fighter_b_box=[20, 0, 30, 10], ruleset="BOXING", round_count=1,
                               round_duration_seconds=60.0, break_duration_seconds=0.0)
-        report = build_report(req, "clip.mp4", [RoundSpec(1, 0.0, 60.0)], [], [],
+        # A boxing bout has punches in it; with none the report stops at
+        # "no scoring candidates" and never reaches the boxing wording.
+        punches = [StrikeEvent(
+            fighter=who, opponent="B" if who == "A" else "A", round_number=1,
+            start_frame=i * 30, peak_frame=i * 30 + 3, end_frame=i * 30 + 6,
+            start_time=i * 2.0, peak_time=i * 2.0 + .2, end_time=i * 2.0 + .4,
+            technique=technique, family="punch", limb="left_hand", outcome="clean", landed=True,
+            target="head", confidence=.9, contact_confidence=.8)
+            for i, (who, technique) in enumerate(
+                [("A", "jab"), ("B", "cross"), ("A", "left_hook"), ("B", "jab")] * 4)]
+        report = build_report(req, "clip.mp4", [RoundSpec(1, 0.0, 60.0)], punches, [],
                               sample["metrics"], sample["tracking"], sample["performance"],
                               sample["classifier"])
         disclaimer = report["scorecard"]["disclaimer"]
