@@ -680,7 +680,7 @@
   {#- Printed once. The unscored branch above already carries it. -#}
   {% if report.scorecard.available %}<p class="small muted">{{report.scorecard.disclaimer}}</p>{% endif %}
   {% if report.scorecard.coverage_note %}<p class="small coverage-line">{{report.scorecard.coverage_note}}</p>{% endif %}
-  {% if report.scorecard.evidence and analysis_target == 'BOTH' and report.scorecard.status != 'identity_integrity_failed' %}<p class="small muted">Evidence used: {% if report.scorecard.evidence.evidence_source == 'unvalidated_action_candidates' %}{{report.scorecard.evidence.scoring_action_candidates}} unverified scoring candidates{% else %}{{report.scorecard.evidence.verified_scoring_actions}} verified scoring actions{% endif %} · A {{'%.0f'|format(report.scorecard.evidence.fighter_A_tracking_coverage*100)}}% / B {{'%.0f'|format(report.scorecard.evidence.fighter_B_tracking_coverage*100)}}% observation coverage.</p>{% endif %}
+  {% if report.scorecard.evidence and analysis_target == 'BOTH' and report.scorecard.status not in ['identity_integrity_failed', 'fighters_not_separable'] %}<p class="small muted">Evidence used: {% if report.scorecard.evidence.evidence_source == 'unvalidated_action_candidates' %}{{report.scorecard.evidence.scoring_action_candidates}} unverified scoring candidates{% else %}{{report.scorecard.evidence.verified_scoring_actions}} verified scoring actions{% endif %} · A {{'%.0f'|format(report.scorecard.evidence.fighter_A_tracking_coverage*100)}}% / B {{'%.0f'|format(report.scorecard.evidence.fighter_B_tracking_coverage*100)}}% observation coverage.</p>{% endif %}
   {% if report.scorecard.available %}<div class="table-wrap"><table><thead><tr><th>Round</th><th>A</th><th>B</th><th>Estimate</th></tr></thead><tbody>{% for r in report.scorecard.rounds %}<tr><td>{{r.round}}</td><td>{{r.fighter_A}}</td><td>{{r.fighter_B}}</td><td>{{r.winner}}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
 </section>
 
@@ -740,7 +740,9 @@
   {% else %}
   {% for e in report.illegal_moves|default([]) %}{% if focus == 'BOTH' or focus == e.fighter %}<div class="event"><div>R{{e.round_number or '-'}}</div><div class="time">{{'%.2f'|format(e.peak_time)}}s</div><div><strong>Fighter {{e.fighter}}</strong> · {{e.technique.replace('_',' ')|title}}</div><div class="bad">Illegal</div><div class="small muted">{{e.legality_reason}}</div></div>{% endif %}{% else %}<p class="muted">Nothing was read clearly enough to flag as illegal for Fighter {{focus}} under this ruleset.</p>{% endfor %}
   {% endif %}
-  <p class="small muted">{{report.integrity.rules_reference}}</p>
+  {#- The stored reference names WAKO and K-1, which is only right for
+      kickboxing; it printed on Muay Thai and MMA reports too. -#}
+  {% if report.scorecard.sport|default('kickboxing', true) == 'kickboxing' %}<p class="small muted">{{report.integrity.rules_reference}}</p>{% endif %}
 </section>
 {% endif %}
 
@@ -755,7 +757,7 @@
   <tr><td>Fighter A first-frame identity gate</td><td>{% if report.tracking.fighter_A_initial_lock_safe|default(false) %}Passed · {{report.tracking.fighter_A_seed_source|replace('_',' ')|title}}{% else %}<span class="bad">Failed · choose Fighter A again</span>{% endif %}</td></tr>
   <tr><td>Fighter B first-frame identity gate</td><td>{% if report.tracking.fighter_B_initial_lock_safe|default(false) %}Passed · {{report.tracking.fighter_B_seed_source|replace('_',' ')|title}}{% else %}<span class="bad">Failed · choose Fighter B again</span>{% endif %}</td></tr>
   <tr><td>SAM2 continuous mask tracking</td><td>{% if report.tracking.sam_continuous_frames|default(0, true) > 0 %}Active · {{report.tracking.sam_continuous_frames}} propagated frames{% else %}Unavailable{% if report.tracking.sam_continuous_failure_reason %} · {{report.tracking.sam_continuous_failure_reason}}{% endif %}{% endif %}</td></tr>
-  <tr><td>Pose detector and ReID tracker</td><td>{{report.performance.pose_model}} · {{report.performance.gpu}}</td></tr>
+  <tr><td>Pose detector and ReID tracker</td><td>{#- File name only: the stored value is the worker's full local path, which does not belong on a report page. -#}{{ (report.performance.pose_model|string).replace('\\', '/').split('/')|last }} · {{report.performance.gpu}}</td></tr>
   <tr><td>Fighter A SAM-confirmed observations</td><td>{{report.tracking.fighter_A_sam_guided_frames|default(0)}}</td></tr>
   <tr><td>Fighter B SAM-confirmed observations</td><td>{{report.tracking.fighter_B_sam_guided_frames|default(0)}}</td></tr>
   <tr><td>Fighter A focused pose recoveries</td><td>{{report.tracking.fighter_A_guided_pose_recoveries|default(0)}}</td></tr>

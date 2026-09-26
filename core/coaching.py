@@ -93,6 +93,10 @@ def _measured_baseline_drills(fighter: str, own: dict) -> list[dict]:
 #
 # One source of truth on purpose. Two copies of a reference value drift, and
 # then the coaching text and the card disagree about what normal is.
+# Relative gap (mine - theirs) / (|mine| + |theirs|) under which two fighters
+# read as level. One constant for the wording and for what counts as behind.
+LEVEL_GAP = 0.02
+
 POSE_DIMENSIONS = [
     (
         "guard_index", "Guard", (0.17, 0.10),
@@ -182,7 +186,11 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
         # Only things the fighter is actually behind on. Taking the bottom two
         # regardless told a fighter who led on nearly everything to work on a
         # number they were winning, which reads as though nobody looked.
-        behind = [item for item in ordered if item[0] < 0]
+        #
+        # And only by more than the margin the wording calls "level". It used
+        # to take any negative gap, so 77.0% against 77.1% became "Work on:
+        # Holding the middle - level with your opponent here" plus a drill.
+        behind = [item for item in ordered if item[0] <= -LEVEL_GAP]
         weakest = behind[-2:][::-1]
     else:
         # Only one fighter was analysed. Rank against the reference band.
@@ -209,7 +217,7 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
             theirs_shown = f"{float(theirs):.1f}"
         else:
             theirs_shown = f"{float(theirs) * 100:.0f}%"
-        side = "better than" if gap > 0 else ("level with" if abs(gap) < 0.02 else "behind")
+        side = "level with" if abs(gap) < LEVEL_GAP else ("better than" if gap > 0 else "behind")
         return (
             f"{label} {shown}",
             f"You {shown}{unit}, them {theirs_shown} - {side} your opponent here.",
