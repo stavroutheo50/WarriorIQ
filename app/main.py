@@ -3964,7 +3964,13 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
                 f"{_pct('fighter_A_coverage')} of the fight and Fighter B for "
                 f"{_pct('fighter_B_coverage')}, and a fair score needs {required} of each."
             ),
-            "fix": "Pick both fighters again on a frame where they are clearly apart, then re-run.",
+            # When the recording itself is the cause - a 220-pixel copy sent
+            # through a messaging app - re-picking the fighters changes nothing.
+            # The preflight check already says what would; it was only shown
+            # in the downloadable report, and here the page told a fighter who
+            # had picked two people standing well apart to pick them apart.
+            "fix": (((report.get("tracking") or {}).get("recording") or {}).get("advice") or [None])[0]
+                   or "Pick both fighters again on a frame where they are clearly apart, then re-run.",
         }
     if status == "insufficient_scoring_actions":
         counted = (scorecard.get("evidence") or {}).get("scoring_action_candidates")
