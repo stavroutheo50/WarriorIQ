@@ -437,10 +437,13 @@ def refresh_identity_integrity(report: dict) -> dict:
             "disclaimer": (
                 (
                     "Scorecard withheld because the two fighters look too alike in this "
-                    "video to tell apart reliably. Their kit matches at "
-                    f"{float(tracking.get('fighter_pair_similarity') or 0.0):.0%} where a "
-                    "readable bout is usually nearer 60%, so any per-fighter total risks "
-                    "crediting the wrong athlete."
+                    "video to tell apart reliably. "
+                    # An older report without the measurement read "matches at 0%",
+                    # which says the opposite of "too alike".
+                    + (f"Their kit matches at {float(tracking['fighter_pair_similarity']):.0%} where a "
+                       "readable bout is usually nearer 60%, so any"
+                       if tracking.get("fighter_pair_similarity") is not None else "Any")
+                    + " per-fighter total risks crediting the wrong athlete."
                 ) if separable is False else (
                     f"Scorecard withheld because {failed} did not pass the fighter-identity gate. "
                     "Return to fighter selection and analyze again; person coverage alone cannot prove identity."
