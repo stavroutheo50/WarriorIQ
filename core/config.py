@@ -707,6 +707,20 @@ class Settings:
     max_release_spread_body_lengths: float = float(
         os.getenv("WARRIORIQ_MAX_RELEASE_SPREAD", "0.12")
     )
+    # A fighter standing this close to the other fighter is never released as
+    # furniture, however still. The release exists for an identity that has
+    # slid onto a seated spectator, and spectators are not on the mat.
+    #
+    # Measured 2026-09-26 on a real 94-second WAKO Kick Light bout: all four
+    # releases were the two athletes standing through a referee stoppage, 0.87
+    # to 0.96 body lengths apart, on tracks only six seconds old. Both stayed
+    # banned from 57 s to 87 s, including 13 s of fighting after the restart.
+    # Across the bout the pair stood 0.91 apart at the median and 1.23 at the
+    # 90th percentile; the mistaken pairs (fighter with coach or referee)
+    # measured in max_median_separation_body_lengths sat 2.71 to 3.25 apart.
+    furniture_partner_body_lengths: float = float(
+        os.getenv("WARRIORIQ_FURNITURE_PARTNER_DISTANCE", "1.5")
+    )
     # A second, much stricter reading of the same measurement over a much
     # shorter look. The 6 s guard above is calibrated to catch marginal cases
     # and so must wait; somebody who has not moved at all is decidable sooner.

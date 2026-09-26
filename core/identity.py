@@ -46,6 +46,15 @@ def normalized_distance(a, b) -> float:
     return d / scale
 
 
+def pair_separation(a, b) -> float:
+    """Distance between two people's centres, in their average body height."""
+    if a is None or b is None:
+        return 999.0
+    ca, cb = box_center(a), box_center(b)
+    body = max(20.0, ((float(a[3]) - float(a[1])) + (float(b[3]) - float(b[1]))) / 2.0)
+    return float(np.linalg.norm(ca - cb)) / body
+
+
 def size_similarity(a, b) -> float:
     aa, bb = box_area(a), box_area(b)
     if aa <= 0 or bb <= 0:
@@ -475,6 +484,12 @@ class IdentityManager:
                 and candidate.referee_prob is not None
                 and candidate.referee_prob >= SETTINGS.min_referee_probability):
             return self._refuse(state, "referee")
+        # A stand-in is a crop searched where one named fighter was expected
+        # (see core/pose_tracker.py), so it is evidence about that fighter
+        # only. Handing B's stand-in to A swapped them twice in the close-up of
+        # a real bout.
+        if candidate.track_id in (-1001, -1002) and candidate.track_id != (-1001 if state.name == "A" else -1002):
+            return self._refuse(state, "other_fighters_stand_in")
         # A learned appearance space when one is available, and the colour
         # histogram when it is not. Measured on real footage the histogram
         # cannot separate a referee from a fighter at all - their similarity
@@ -566,7 +581,15 @@ class IdentityManager:
         state.pose_signature = ema(state.pose_signature, sig, SETTINGS.pose_ema)
         if recovered and obs.track_id != state.current_track_id:
             state.recovery_count += 1
-        state.current_track_id = obs.track_id
+        # A crop found where this fighter was expected carries a stand-in id
+        # (-1001 / -1002, see core/pose_tracker.py), not a tracker track. It
+        # must not replace the real track: it did, and on the next frame the
+        # fighter's own track came back as a stranger and met the stillness
+        # gates meant for new tracks. Measured on a real Kick Light bout, A was
+        # refused as "too still" on 123 frames of a referee stoppage and the
+        # fighting after it, while standing exactly where A had been.
+        if obs.track_id is None or obs.track_id >= 0 or state.current_track_id is None:
+            state.current_track_id = obs.track_id
         state.identity_confidence = float(max(0.0, min(1.0, score)))
         state.missing_frames = 0
         if (obs.reid is not None
@@ -816,6 +839,18 @@ class IdentityManager:
         """
         track_id = state.current_track_id
         if track_id is None:
+            return False
+        # Standing beside the other fighter, both seen within the last second:
+        # a referee stoppage or a count, not a spectator. See
+        # SETTINGS.furniture_partner_body_lengths for the measurements. "The
+        # same frame" was too strict: as a bout restarts one fighter is often
+        # hidden behind the other for a single analysed frame, and on the real
+        # bout that released A at 9.2 s and then B, since A was gone.
+        other = self.b if state is self.a else self.a
+        if (other.current_track_id is not None
+                and abs(other.last_seen_source_frame - state.last_seen_source_frame) <= self.source_fps
+                and pair_separation(state.last_box, other.last_box)
+                <= SETTINGS.furniture_partner_body_lengths):
             return False
         spread = self._recent_spread(track_id, self.source_fps)
         # `max_release_spread_body_lengths`, not the switch threshold. Letting
