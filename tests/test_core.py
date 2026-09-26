@@ -2455,6 +2455,20 @@ class FurnitureReleaseTests(unittest.TestCase):
         own = manager._score(manager.a, person(106, 100.0), keep_id_bonus=False)
         self.assertGreater(own, -100, "A's own track is not a stranger")
 
+    def test_a_stand_in_goes_only_to_the_fighter_it_was_searched_for(self):
+        """B's stand-in handed to A swapped them twice in a real close-up."""
+        manager, person = self._manager()
+        self.assertEqual(manager._score(manager.a, person(-1002, 100.0), keep_id_bonus=False), -999.0)
+        self.assertEqual(manager.a.last_refusal, "other_fighters_stand_in")
+        self.assertNotEqual(manager._score(manager.a, person(-1001, 100.0), keep_id_bonus=False), -999.0)
+
+    def test_a_stand_in_is_checked_for_the_referee(self):
+        """A's stand-in was the referee, and nothing scored it."""
+        source = (Path(__file__).resolve().parents[1] / "core" / "pose_tracker.py").read_text(encoding="utf-8")
+        start = source.index('best.track_id = -1001 if name == "A" else -1002')
+        self.assertIn("best.referee_prob = (referee_probabilities(frame, best.box.reshape(1, 4))",
+                      source[start:start + 800])
+
     def test_a_moving_fighter_is_never_released(self):
         """The release must cost a real fighter nothing."""
         manager, person = self._manager()
