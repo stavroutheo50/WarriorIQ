@@ -311,3 +311,21 @@ class StyleIsNotAFaultTests(unittest.TestCase):
         priorities = [row.get("priority") for row in view["fights"]]
         self.assertTrue(priorities, view)
         self.assertNotIn("Work on: Walking them down 45", priorities)
+
+
+class RealFightFindingsTests(unittest.TestCase):
+    """Found running a real 94-second Kick Light bout, shared from a phone at
+    480x220, through upload, fighter pick, analysis and report."""
+
+    def test_low_coverage_from_a_small_video_says_to_send_the_original(self):
+        from app.main import _score_withheld
+
+        advice = ("The framing is fine - one fighter fills 35% of the picture - but the video "
+                  "is only 220 pixels tall, so there is not enough detail.")
+        report = {"scorecard": {"available": False, "status": "insufficient_observation_coverage"},
+                  "tracking": {"fighter_A_coverage": .49, "fighter_B_coverage": .54,
+                               "recording": {"measured": True, "advice": [advice]}}}
+        self.assertEqual(_score_withheld(report)["fix"], advice)
+        # Without a recording problem the old advice still applies.
+        del report["tracking"]["recording"]
+        self.assertIn("clearly apart", _score_withheld(report)["fix"])
