@@ -364,13 +364,23 @@ def compare_with_previous(report: dict, fights: list[dict], job_id: str) -> dict
 # with reverse=True and calls the top one the fighter's strength, so a
 # comparison treating any of them as lower-is-better would contradict the
 # coaching shown on the same fight.
+# Named as the report's numbers row and core/metric_catalog.py name them. The
+# coaching phrases ("Walking them down", "Holding the middle") are for coaching
+# advice; a table of measurements uses the measurements' own names.
 _MOVEMENT_DIMENSIONS: tuple[tuple[str, str], ...] = (
-    ("pressure_index", "Walking them down"),
-    ("ring_center_control", "Holding the middle"),
-    ("footwork_body_lengths_per_second", "Moving your feet"),
+    ("pressure_index", "Pressure"),
+    ("ring_center_control", "Centre"),
+    ("footwork_body_lengths_per_second", "Movement"),
     ("guard_index", "Guard"),
     ("balance_index", "Balance"),
 )
+
+# Where a higher number is better. metric_catalog gives pressure, centre and
+# movement no direction - a counter-fighter giving ground on purpose is not
+# doing worse - so the page may say which fight is higher on those, never
+# which is better. It said "Higher is better on all five" and bolded a winner
+# on every row.
+_HIGHER_IS_BETTER = frozenset({"guard_index", "balance_index"})
 
 
 def _display_value(key: str, value: float | None) -> tuple[str, float | None]:
@@ -419,9 +429,19 @@ def compare_movement(reports: list) -> dict:
             float(tracking.get("fighter_A_coverage", 0.0) or 0.0),
             float(tracking.get("fighter_B_coverage", 0.0) or 0.0),
         )
+        integrity = report.get("integrity") or {}
+        # The fight's own report says "not safe to use" when this is true; the
+        # comparison showed its numbers beside another fight with no word.
+        identity_failed = (
+            integrity.get("identity_evidence_trusted") is False
+            or (integrity.get("fighter_identity_trusted") or {}).get(focus) is False
+            or tracking.get("fighters_separable") is False
+        )
         sides.append({
             "report": report, "focus": focus,
             "coverage": round(coverage, 3), "usable": coverage >= _MIN_COVERAGE,
+            "identity_failed": identity_failed,
+            "sport": (report.get("scorecard") or {}).get("sport"),
         })
 
     rows = []
@@ -449,6 +469,7 @@ def compare_movement(reports: list) -> dict:
             "key": key, "label": label,
             "a": first_text, "b": second_text,
             "delta": delta_text, "leader": leader,
+            "higher_is_better": key in _HIGHER_IS_BETTER,
         })
 
     if not rows:
@@ -461,4 +482,7 @@ def compare_movement(reports: list) -> dict:
         # reader is told which is which.
         "coverage": [sides[0]["coverage"], sides[1]["coverage"]],
         "untrusted": [not sides[0]["usable"], not sides[1]["usable"]],
+        "identity_failed": [sides[0]["identity_failed"], sides[1]["identity_failed"]],
+        "different_sports": bool(sides[0]["sport"] and sides[1]["sport"]
+                                 and sides[0]["sport"] != sides[1]["sport"]),
     }

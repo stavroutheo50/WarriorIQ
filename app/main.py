@@ -4950,6 +4950,9 @@ def compare_page(request: Request, a: str = "", b: str = ""):
         name="compare.html",
         context={
             "request": request, "fights": fights, "a": a, "b": b, "reports": reports,
+            # Each card is headed with its fight, not "Fight analysis 1" - and
+            # the page can say when the two are different fighters.
+            "picked": [next((f for f in fights if f["job_id"] == job_id), None) for job_id in (a, b)],
             "signed_in": profile_id is not None,
             # The page promised a movement comparison "below" and rendered
             # nothing. These are the numbers that survive the strike gate.
