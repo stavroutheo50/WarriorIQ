@@ -442,6 +442,22 @@ class DurableAnalysisStateTests(TestCase):
         self.assertIn('"Saving completed report", 99.7', analyzer)
         self.assertIn('stage="report"', analyzer)
 
+    def test_the_bar_moves_when_sam2_is_skipped_and_on_a_slow_machine(self):
+        """Without a GPU the bar sat at "Following both fighters with SAM2 - 1%"
+        for five minutes, then jumped to 52%. SAM2 had been skipped at once."""
+        import core.analyzer as analyzer_module
+
+        analyzer = Path(analyzer_module.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("\"Following both fighters with SAM2\"", analyzer)
+        self.assertNotIn("\"Loading GPU models\"", analyzer)
+        # The frame pass announces itself as soon as it starts...
+        self.assertIn('progress("Analyzing fight", ANALYSIS_PHASE_START,', analyzer)
+        self.assertLess(analyzer.index('progress("Analyzing fight", ANALYSIS_PHASE_START,'),
+                        analyzer.index("pose_pass_start = time.perf_counter()"))
+        # ...and reports on time as well as on frame count.
+        self.assertIn("PROGRESS_MAX_SILENCE_SECONDS)):", analyzer)
+        self.assertLessEqual(analyzer_module.PROGRESS_MAX_SILENCE_SECONDS, 10.0)
+
     def test_current_analysis_pointer_advances_to_results_instead_of_disappearing(self):
         client = TestClient(app)
         job_id = "current-analysis-nav"
