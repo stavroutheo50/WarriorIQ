@@ -2086,6 +2086,8 @@ class PublicPageTests(unittest.TestCase):
         self.assertFalse(report["scorecard"]["available"])
         self.assertFalse(report["integrity"]["action_metrics_trusted"])
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_no_score_is_shown_while_punches_cannot_be_counted(self):
         """Was: high coverage plus enough candidates gave a preliminary score.
 

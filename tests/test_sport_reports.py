@@ -54,6 +54,8 @@ class WithheldScoreReasonTests(unittest.TestCase):
 class BoxingScorecardDisclaimerTests(unittest.TestCase):
     """Boxing's scorecard spoke of hands and feet and a leg-strike count."""
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_boxing_disclaimer_describes_boxing(self):
         from core.report import STRIKE_COUNTS_PRECISION_VALIDATED, build_report
         from core.types import AnalysisRequest, RoundSpec, StrikeEvent

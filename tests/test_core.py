@@ -3981,6 +3981,76 @@ class PublishedStrikeCountsCoreTests(unittest.TestCase):
         self.assertIn(ESTIMATE_NOTE, html)
 
 
+class EstimatedScoreTests(unittest.TestCase):
+    """With counts published, a fight gets a score labelled as an estimate,
+    built from every strike marked landed - and still no score when the
+    fighters were not followed well enough to attribute them."""
+
+    @staticmethod
+    def _events(n=8, confidence=0.45, contact=0.70, outcome="likely_landed"):
+        from core.types import StrikeEvent
+        out = []
+        for i in range(n):
+            who = "A" if i % 3 else "B"
+            out.append(StrikeEvent(
+                fighter=who, opponent="B" if who == "A" else "A", round_number=1,
+                start_frame=i * 60, peak_frame=i * 60 + 3, end_frame=i * 60 + 6,
+                start_time=i * 2.0, peak_time=i * 2.0 + .1, end_time=i * 2.0 + .2,
+                technique="cross", family="punch", limb="right_hand", outcome=outcome,
+                landed=True, target="head", confidence=confidence, contact_confidence=contact))
+        return out
+
+    @staticmethod
+    def _card(events, coverage=(0.93, 0.90), target="BOTH"):
+        from core.report import build_preliminary_scorecard
+        return build_preliminary_scorecard(
+            events, "K1", [1], {"fighter_A_coverage": coverage[0], "fighter_B_coverage": coverage[1]}, target)
+
+    def test_low_confidence_landed_strikes_give_an_estimated_score(self):
+        from core.report import ESTIMATED_SCORE_NOTE
+        card = self._card(self._events())
+        self.assertTrue(card["available"])
+        self.assertEqual(card["status"], "estimated_from_detector")
+        self.assertEqual(card["disclaimer"], ESTIMATED_SCORE_NOTE)
+        self.assertGreater(card["totals"]["A"], card["totals"]["B"])
+
+    def test_the_verified_bar_would_have_scored_nothing(self):
+        from core.scoring import score_fight
+        verified = score_fight(self._events(), "K1", [1])
+        self.assertEqual(verified["verified_actions_counted"], 0)
+
+    def test_missed_strikes_never_score(self):
+        card = self._card(self._events(outcome="missed"))
+        self.assertFalse(card["available"])
+
+    def test_poor_coverage_still_withholds_the_score(self):
+        card = self._card(self._events(), coverage=(0.93, 0.60))
+        self.assertFalse(card["available"])
+        self.assertEqual(card["status"], "insufficient_observation_coverage")
+
+    def test_one_fighter_analyses_still_get_no_score(self):
+        self.assertFalse(self._card(self._events(), target="A")["available"])
+
+    def test_a_stored_report_without_a_score_is_estimated_on_read(self):
+        from app.main import _estimate_score_withheld_for_punches
+        report = {
+            "scorecard": {"status": "punch_counting_unavailable", "available": False, "ruleset": "K1"},
+            "tracking": {"fighter_A_coverage": 0.93, "fighter_B_coverage": 0.90},
+            "rounds": [{"number": 1, "selected": True}],
+            "video": {"analysis_target": "BOTH"},
+            "events": [e.to_dict() for e in self._events()],
+        }
+        _estimate_score_withheld_for_punches(report)
+        self.assertTrue(report["scorecard"]["available"])
+        self.assertEqual(report["scorecard"]["status"], "estimated_from_detector")
+
+    def test_other_withheld_reasons_are_left_alone(self):
+        from app.main import _estimate_score_withheld_for_punches
+        report = {"scorecard": {"status": "fighters_not_separable", "available": False}}
+        _estimate_score_withheld_for_punches(report)
+        self.assertEqual(report["scorecard"]["status"], "fighters_not_separable")
+
+
 class ObservedSummaryTests(unittest.TestCase):
     """The middle setting between a scorecard and a blank page."""
 

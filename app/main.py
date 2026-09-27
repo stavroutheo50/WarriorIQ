@@ -1621,6 +1621,29 @@ def _confirmed_metrics(report: dict, events: list[StrikeEvent]) -> dict:
     return metrics
 
 
+def _estimate_score_withheld_for_punches(report: dict) -> None:
+    """Give a stored report the estimated score it would get today.
+
+    Reports analysed while punch counts were withheld stored the status
+    "punch_counting_unavailable" and no score. That status is only reached
+    after the identity and coverage checks passed, so rebuilding the
+    scorecard from the stored events changes nothing but that one decision.
+    Rebuilt on read, never written back.
+    """
+    if not STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED:
+        return
+    scorecard = report.get("scorecard") or {}
+    if scorecard.get("status") != "punch_counting_unavailable":
+        return
+    report["scorecard"] = build_preliminary_scorecard(
+        [_strike_from_dict(item) for item in report.get("events", [])],
+        scorecard.get("ruleset") or report.get("setup", {}).get("ruleset", "K1"),
+        [int(item["number"]) for item in report.get("rounds", []) if item.get("selected", True)],
+        report.get("tracking", {}),
+        report.get("video", {}).get("analysis_target", "BOTH"),
+    )
+
+
 def _withhold_unverified_action_report(report: dict, reason: str) -> None:
     ruleset = report.get("setup", {}).get("ruleset", "K1")
     round_numbers = [int(item["number"]) for item in report.get("rounds", []) if item.get("selected", True)]
@@ -4148,6 +4171,7 @@ def result_page(request: Request, job_id: str):
     # given instead. See core.report.unattributed_kick_total.
     identity_trusted = bool((report.get("integrity") or {}).get("identity_evidence_trusted", True))
     _pin_sport_to_fight(request, report.get("scorecard", {}).get("sport") or _job_sport(job))
+    _estimate_score_withheld_for_punches(report)
     score_withheld = _score_withheld(report, job_id)
     # The scorecard box prints the disclaimer stored when the fight was
     # analysed. For a score withheld because strike counting is not validated,

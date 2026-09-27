@@ -265,6 +265,13 @@ ESTIMATE_NOTE = (
     "punches and kicks, so treat these as estimates."
 )
 
+ESTIMATED_SCORE_NOTE = (
+    "Estimated score, not an official judges' score. It is built from every strike "
+    "WarriorIQ marked as landed, counted automatically and not checked by a person. "
+    "On a fight we checked by hand, about two in three of those were real strikes, "
+    "and the strike type was often wrong."
+)
+
 _FAMILY_OF_PLURAL = {"punches": "punch", "kicks": "kick", "knees": "knee"}
 
 
@@ -623,7 +630,11 @@ def build_preliminary_scorecard(
     coverage_b = float(tracking.get("fighter_B_coverage", 0))
     minimum_coverage = min(coverage_a, coverage_b)
     coverage_ok = minimum_coverage >= SETTINGS.min_tracking_coverage_for_score
-    scorecard = score_fight(events, ruleset, round_numbers, [], reliable=coverage_ok)
+    # With counts published but not validated, the score is built the same
+    # way - from the landed candidates - and labelled an estimate.
+    estimated = STRIKE_COUNTS_PUBLISHED and not STRIKE_COUNTS_PRECISION_VALIDATED
+    scorecard = score_fight(events, ruleset, round_numbers, [], reliable=coverage_ok,
+                            estimated=estimated)
     candidate_count = int(scorecard.get("verified_actions_counted", 0))
     scorecard["evidence"] = {
         "required_tracking_coverage_each": SETTINGS.min_tracking_coverage_for_score,
@@ -631,9 +642,10 @@ def build_preliminary_scorecard(
         "fighter_B_tracking_coverage": coverage_b,
         "scoring_action_candidates": candidate_count,
         "duplicate_action_candidates_removed": int(scorecard.get("duplicate_action_candidates_removed", 0)),
-        "action_confidence_required": 0.72,
-        "contact_confidence_required": 0.62,
-        "evidence_source": "unvalidated_action_candidates",
+        "action_confidence_required": None if estimated else 0.72,
+        "contact_confidence_required": None if estimated else 0.62,
+        "evidence_source": ("estimated_landed_candidates" if estimated
+                            else "unvalidated_action_candidates"),
     }
     if analysis_target != "BOTH":
         scorecard.update({
@@ -668,7 +680,7 @@ def build_preliminary_scorecard(
                 else "No preliminary score is shown because the automatic action engine found no scoring candidates with enough evidence."
             ),
         })
-    elif not STRIKE_COUNTS_PRECISION_VALIDATED:
+    elif not STRIKE_COUNTS_PRECISION_VALIDATED and not STRIKE_COUNTS_PUBLISHED:
         # **A kickboxing round cannot be scored on kicks alone.**
         #
         # Every ruleset here scores hands and feet, and K-1 weights a punch at
@@ -706,6 +718,10 @@ def build_preliminary_scorecard(
                 "count and the action timeline below are unaffected."
             ),
         })
+    elif estimated:
+        scorecard["available"] = True
+        scorecard["status"] = "estimated_from_detector"
+        scorecard["disclaimer"] = ESTIMATED_SCORE_NOTE
     else:
         scorecard["available"] = True
         scorecard["status"] = "preliminary_unvalidated"
