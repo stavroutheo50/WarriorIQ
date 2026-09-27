@@ -1191,6 +1191,37 @@ if __name__ == "__main__":
             "seconds": 7.5, "fighter": "B", "family": "kick", "verdict": "right"})
         self.assertEqual(refused.status_code, 403)
 
+    def test_the_sport_check_warns_only_on_a_confident_other_sport(self):
+        import base64
+        from unittest import mock
+
+        from core import sport_check
+        frame = "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8\xff\xe0" + b"0" * 64).decode()
+        with mock.patch.object(sport_check, "provider", return_value="anthropic"):
+            anonymous = self.client.post("/api/sport-check", json={"sport": "kickboxing", "frames": [frame]})
+            self.assertEqual(anonymous.status_code, 401)
+
+            register("sportcheck@example.com", "Strong-Local-Password")
+            self.client.post("/login", data={"email": "sportcheck@example.com",
+                                             "password": "Strong-Local-Password", "accept_policies": "true"})
+            seen = {"sport": "taekwondo", "confidence": 0.92, "reason": "white doboks, no gloves"}
+            with mock.patch.object(sport_check, "detect_sport", return_value=seen) as detect:
+                answer = self.client.post("/api/sport-check", json={"sport": "kickboxing", "frames": [frame]})
+            self.assertEqual(answer.status_code, 200, answer.text)
+            body = answer.json()
+            self.assertTrue(body["mismatch"])
+            self.assertEqual((body["detected_label"], body["chosen_label"]), ("Taekwondo", "Kickboxing"))
+            self.assertEqual(detect.call_args.args[0][0][:3], b"\xff\xd8\xff")
+
+            with mock.patch.object(sport_check, "detect_sport", return_value=None):
+                quiet = self.client.post("/api/sport-check", json={"sport": "kickboxing", "frames": [frame]})
+            self.assertEqual(quiet.json(), {"available": True, "mismatch": False})
+
+            bad = self.client.post("/api/sport-check", json={"sport": "kickboxing", "frames": ["x"]})
+            self.assertEqual(bad.status_code, 400)
+            unknown = self.client.post("/api/sport-check", json={"sport": "curling", "frames": [frame]})
+            self.assertEqual(unknown.status_code, 400)
+
 
 class UndecodableUploadTests(unittest.TestCase):
     """A file the server cannot decode is refused clearly, before it costs more."""

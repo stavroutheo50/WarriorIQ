@@ -102,6 +102,7 @@ from core.upload_security import (
     UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, looks_like_video, scan_upload,
     reserve_upload_storage, release_upload_storage,
 )
+from core import sport_check
 from core.fight_stats import _deduplicate as _deduplicate_strikes
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
@@ -510,6 +511,11 @@ class AnnotationPayload(BaseModel):
     target: str
     outcome: str
     manual: bool = False
+
+
+class SportCheckPayload(BaseModel):
+    sport: str
+    frames: list[str]
 
 
 class StrikeCheckPayload(BaseModel):
@@ -2664,6 +2670,9 @@ def _sport_context(request: Request, sport: str) -> dict:
         # asked which one this fight is about.
         "single_fighter": (_request_plan(request) or {}).get("roster_limit") == 1,
         "unobserved": sport_unobserved(sport),
+        # Only offered when a provider is configured; see core/sport_check.py.
+        "sport_check_enabled": sport_check.provider() is not None,
+        "sport_labels": {key: RULESET_SPORTS[key] for key in SPORTS},
         # What this sport can actually score, rather than a fixed sentence.
         "counted_families": _prose_list(sport_counted_families(sport)),
         # What the *report* will show, which is narrower. Punch and knee counts
@@ -4311,6 +4320,31 @@ def download_report_json(request: Request, job_id: str):
             "Cache-Control": "no-store",
         },
     )
+
+
+@app.post("/api/sport-check", dependencies=[Depends(require_csrf)])
+def check_sport(request: Request, payload: SportCheckPayload):
+    """Name the sport in three frames from the chosen video, before upload.
+
+    Advisory and off unless a provider is configured (core/sport_check.py).
+    The frames are forwarded to that provider and never stored here.
+    """
+    if sport_check.provider() is None:
+        return {"available": False}
+    if not _account(request):
+        raise HTTPException(401, "Sign in first")
+    _enforce_rate_limit(request, "sport_check", 20, 600)
+    if payload.sport not in SPORTS:
+        raise HTTPException(400, "Unknown sport")
+    try:
+        images = sport_check.decode_frames(payload.frames)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "Invalid frames") from exc
+    result = sport_check.verdict(payload.sport, sport_check.detect_sport(images))
+    if result.get("detected"):
+        result["detected_label"] = RULESET_SPORTS[result["detected"]]
+        result["chosen_label"] = RULESET_SPORTS[payload.sport]
+    return {"available": True, **result}
 
 
 @app.post("/api/strike-check/{job_id}", dependencies=[Depends(require_csrf)])

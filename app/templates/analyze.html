@@ -44,7 +44,18 @@
           <b id="preflightTitle"></b></div>
         <ul class="preflight-points" id="preflightPoints"></ul>
         <p class="small muted" id="preflightMeasured"></p>
-      </div></div>
+      </div>
+      {#- Only when a sport-check provider is configured (core/sport_check.py):
+          three stills from the chosen file, asked "which sport is this?",
+          before anything uploads. Advisory; it never blocks. -#}
+      {% if sport_check_enabled %}
+      <div class="preflight" id="sportCheck" data-tone="warn" hidden aria-live="polite">
+        <div class="preflight-head"><span class="preflight-mark" aria-hidden="true"></span>
+          <b id="sportCheckTitle"></b></div>
+        <p class="small" id="sportCheckText"></p>
+        <p class="small"><a class="text-link" id="sportCheckSwitch" href="#"></a> <span class="muted">&mdash; you will choose the video again there. Or carry on here if {{sport_label}} is right.</span></p>
+      </div>
+      {% endif %}</div>
 
       {# Rounds and fight type used to be posted hidden, derived from the
          video's duration as a single round spanning the whole file. That was
@@ -297,7 +308,7 @@
     uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';
     if(!ready)hidePreflight();
     syncSubmit();
-    if(ready){checkDuration(file);runPreflight(file);window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video selected. Press upload to send it.','success')}};
+    if(ready){checkDuration(file);runPreflight(file);runSportCheck(file);window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video selected. Press upload to send it.','success')}};
   /* The pre-upload quality check.
    *
    * Step 01 on the landing page promises this. Until now it read the file's
@@ -324,6 +335,25 @@
     preflightMeasured.textContent=measured||'';
     preflightPanel.hidden=false};
   const hidePreflight=()=>{if(preflightPanel)preflightPanel.hidden=true};
+  const sportCheck=document.getElementById('sportCheck');
+  let sportCheckToken=0;
+  const runSportCheck=(file)=>{
+    if(!sportCheck||!window.wiqPreflight||!window.wiqPreflight.snapshots)return;
+    const token=++sportCheckToken;
+    sportCheck.hidden=true;
+    window.wiqPreflight.snapshots(file,3,640).then((frames)=>{
+      if(token!==sportCheckToken||!frames.length)return null;
+      return fetch('/api/sport-check',{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({sport,frames})});
+    }).then((r)=>r&&r.ok?r.json():null).then((answer)=>{
+      if(token!==sportCheckToken||!answer||!answer.mismatch)return;
+      document.getElementById('sportCheckTitle').textContent=`This looks like ${answer.detected_label}, not ${answer.chosen_label}.`;
+      document.getElementById('sportCheckText').textContent=`The report scores the rules you pick here, so ${answer.chosen_label} rules on a ${answer.detected_label} bout would give the wrong numbers.${answer.reason?' What we saw: '+answer.reason:''}`;
+      const link=document.getElementById('sportCheckSwitch');
+      link.textContent=`Switch to ${answer.detected_label}`;
+      link.href=`/analyze/${encodeURIComponent(answer.detected)}`;
+      sportCheck.hidden=false;
+    }).catch(()=>{});
+  };
   const runPreflight=(file)=>{
     if(!window.wiqPreflight||!preflightPanel)return;
     const token=++preflightToken;
