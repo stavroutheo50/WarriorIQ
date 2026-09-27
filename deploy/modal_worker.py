@@ -47,21 +47,12 @@ import modal
 # and so does the machine running `modal deploy`, because the web app needs it.
 from fastapi import Request
 
-# models/ is gitignored, so nothing ships with the checkout. The tracker config
-# is small enough to carry here; the weights are fetched once into a Volume.
-TRACKER_YAML = """tracker_type: botsort
-track_high_thresh: 0.28
-track_low_thresh: 0.08
-new_track_thresh: 0.30
-track_buffer: 90
-match_thresh: 0.78
-fuse_score: true
-gmc_method: sparseOptFlow
-proximity_thresh: 0.45
-appearance_thresh: 0.72
-with_reid: true
-model: auto
-"""
+# The tracker settings ship with the checkout (models/warrioriq_botsort.yaml is
+# tracked) and are copied from there, not kept as a second copy here. The copy
+# that used to live here had drifted: it said `with_reid: true`, while the file
+# every local worker uses says false, with the measurements that show turning
+# it on made tracking worse. A cloud run must track exactly as a local one.
+TRACKER_SOURCE = "/app/models/warrioriq_botsort.yaml"
 
 DATA_DIR = "/data"
 
@@ -137,10 +128,11 @@ def _prepare_runtime() -> None:
     """Point WarriorIQ at the mounted volume and supply the tracker config."""
     models = f"{DATA_DIR}/models"
     os.makedirs(models, exist_ok=True)
-    tracker = f"{models}/warrioriq_botsort.yaml"
-    if not os.path.exists(tracker):
-        with open(tracker, "w", encoding="utf-8") as handle:
-            handle.write(TRACKER_YAML)
+    # Refreshed on every start, so a deploy with new settings is not shadowed
+    # by an old copy left on the Volume.
+    import shutil
+
+    shutil.copyfile(TRACKER_SOURCE, f"{models}/warrioriq_botsort.yaml")
     os.environ.update({
         "WARRIORIQ_DATA_DIR": DATA_DIR,
         "WARRIORIQ_WORKER_MODE": "remote",
