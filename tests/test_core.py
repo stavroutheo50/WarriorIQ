@@ -2462,27 +2462,6 @@ class FurnitureReleaseTests(unittest.TestCase):
         self.assertEqual(manager.a.last_refusal, "other_fighters_stand_in")
         self.assertNotEqual(manager._score(manager.a, person(-1001, 100.0), keep_id_bonus=False), -999.0)
 
-    def test_a_stand_in_that_looks_like_the_other_fighter_is_refused(self):
-        """At a knockdown the fallen fighter is not detected, and the crop
-        searched where he lay finds the one standing over him. Measured on a
-        real bout: 0.72-0.78 like red, 0.60-0.64 like blue - above the 0.55
-        floor, so blue's identity went to red."""
-        import numpy as np
-
-        manager, person = self._manager()
-        red, blue = np.zeros(8, dtype=np.float32), np.zeros(8, dtype=np.float32)
-        red[[0, 1]], blue[[6, 7]] = (1.0, 0.8), (1.0, 0.8)
-        manager.a.anchor_appearance, manager.b.anchor_appearance = red, blue
-        mostly_red = red + 0.2 * blue
-        crop = person(-1002, 300.0)
-        crop.appearance = mostly_red
-        self.assertEqual(manager._score(manager.b, crop, keep_id_bonus=False), -999.0)
-        self.assertEqual(manager.b.last_refusal, "stand_in_looks_like_the_other_fighter")
-        # Blue's own stand-in still counts.
-        own = person(-1002, 300.0)
-        own.appearance = blue + 0.2 * red
-        self.assertNotEqual(manager._score(manager.b, own, keep_id_bonus=False), -999.0)
-
     def test_a_stand_in_is_checked_for_the_referee(self):
         """A's stand-in was the referee, and nothing scored it."""
         source = (Path(__file__).resolve().parents[1] / "core" / "pose_tracker.py").read_text(encoding="utf-8")
