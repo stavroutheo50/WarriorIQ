@@ -3664,6 +3664,40 @@ class PublishedStrikeCountsTests(unittest.TestCase):
                 self.assertIsNone(re.search(pattern, text, re.I))
 
 
+class CountedStrikeListTests(unittest.TestCase):
+    """Every counted strike, listed with a link to that second of the fight,
+    built from the same list and duplicate rule as the statistics."""
+
+    @staticmethod
+    def _report():
+        feed = [
+            {"kind": "strike", "fighter": "A", "family": "punch", "time_seconds": 9.83, "round_number": 1},
+            # The same punch filed twice within 0.45 s: counted once, listed once.
+            {"kind": "strike", "fighter": "A", "family": "punch", "time_seconds": 10.0, "round_number": 1},
+            {"kind": "strike", "fighter": "B", "family": "kick", "time_seconds": 61.5, "round_number": 1},
+            {"kind": "strike", "fighter": "B", "family": "knee", "time_seconds": 70.0, "round_number": 1},
+        ]
+        return {"event_feed": feed}
+
+    def test_the_list_follows_the_statistics_duplicate_rule(self):
+        from app.main import _counted_strikes
+        rows = _counted_strikes(self._report(), ("punch", "kick", "knee"))
+        self.assertEqual([(r["fighter"], r["family"]) for r in rows],
+                         [("A", "punch"), ("B", "kick"), ("B", "knee")])
+        self.assertEqual(rows[1]["clock"], "1:01.5")
+
+    def test_only_the_families_the_sport_scores_are_listed(self):
+        from app.main import _counted_strikes
+        rows = _counted_strikes(self._report(), ("punch",))
+        self.assertEqual({r["family"] for r in rows}, {"punch"})
+
+    def test_each_row_links_to_that_second_of_the_replay(self):
+        rows = [{"fighter": "A", "family": "kick", "seconds": 61.5, "round": 1, "clock": "1:01.5"}]
+        page = NoPunchClaimLeaksTests._render(NoPunchClaimLeaksTests._report(), counted_strikes=rows)
+        self.assertIn("Watch every counted strike (1)", page)
+        self.assertIn('href="/replay/x?t=61.50"', page)
+
+
 @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
 class NoUnsupportedClaimSurvivesTests(NoPunchClaimLeaksTests):
     """Every claim that rests on the strike detector, checked in one place.

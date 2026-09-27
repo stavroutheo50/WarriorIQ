@@ -102,6 +102,7 @@ from core.upload_security import (
     UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, looks_like_video, scan_upload,
     reserve_upload_storage, release_upload_storage,
 )
+from core.fight_stats import _deduplicate as _deduplicate_strikes
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
@@ -1619,6 +1620,29 @@ def _confirmed_metrics(report: dict, events: list[StrikeEvent]) -> dict:
         dashboard["technique_execution_confidence"] = len(landed) / attempts if attempts else None
         dashboard["defense_response_rate"] = None
     return metrics
+
+
+def _counted_strikes(report: dict, families: tuple[str, ...]) -> list[dict]:
+    """Every strike behind the counts on the page, so a fighter can check them.
+
+    Built from the same list and the same duplicate rule as the statistics
+    block (fight_stats._deduplicate over event_feed), and filtered to the same
+    families, so the list and the number above it cannot disagree.
+    """
+    feed = report.get("event_feed") or []
+    rows = []
+    for item in _deduplicate_strikes(feed):
+        family = item.get("family")
+        if family not in families or item.get("fighter") not in {"A", "B"}:
+            continue
+        try:
+            seconds = float(item.get("time_seconds", item.get("peak_time")))
+        except (TypeError, ValueError):
+            continue
+        rows.append({"fighter": item["fighter"], "family": family, "seconds": seconds,
+                     "round": item.get("round_number"),
+                     "clock": "%d:%04.1f" % (int(seconds // 60), seconds % 60)})
+    return sorted(rows, key=lambda row: row["seconds"])
 
 
 def _estimate_score_withheld_for_punches(report: dict) -> None:
@@ -4214,6 +4238,10 @@ def result_page(request: Request, job_id: str):
                      else None),
         "kick_total": None if identity_trusted else unattributed_kick_total(report),
         "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
+        # Attributions, like the per-fighter cards, so only when identity held.
+        "counted_strikes": (_counted_strikes(report, published_families(
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job)))
+            if identity_trusted and STRIKE_COUNTS_PUBLISHED else []),
         "estimate_note": ESTIMATE_NOTE,
         "families_shown": published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job)),

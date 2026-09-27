@@ -244,6 +244,14 @@
 .observed-card strong{font-size:26px;line-height:1.1;font-weight:800}
 .observed-basis{font-size:12.5px;color:#98a2b3}
 .observed-families{margin-top:5px;font-size:12.5px;color:#c7cede}
+.counted-strikes{margin:14px 0;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px 14px}
+.counted-strikes summary{cursor:pointer;font-weight:700}
+.counted-strike-list{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px}
+.counted-strike-list a{display:flex;gap:10px;align-items:baseline;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.04);color:inherit;text-decoration:none}
+.counted-strike-list a:hover,.counted-strike-list a:focus-visible{background:rgba(255,255,255,.09)}
+.cs-time{font-variant-numeric:tabular-nums;font-weight:700}
+.cs-who{color:#98a2b3;font-size:12.5px}
+.cs-what{margin-left:auto;text-transform:capitalize}
 
 /* WAKO Full Contact obliges six kicks a round. The two states are deliberately
    not a pass and a fail: our kick count is a floor, so it can confirm a round
