@@ -104,7 +104,8 @@ from core.upload_security import (
 )
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
-    STRIKE_COUNTS_PRECISION_VALIDATED, refresh_identity_integrity, unattributed_kick_total,
+    ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
+    refresh_identity_integrity, unattributed_kick_total,
 )
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
@@ -2497,7 +2498,9 @@ def _reported_strike_families(sport: str) -> dict:
     was measured to contain punches (core/report.py observed_summary).
     """
     counted = sport_counted_families(sport)
-    if STRIKE_COUNTS_PRECISION_VALIDATED:
+    # STRIKE_COUNTS_PUBLISHED: every family the sport scores is shown, as an
+    # estimate, with ESTIMATE_NOTE beside it.
+    if STRIKE_COUNTS_PRECISION_VALIDATED or STRIKE_COUNTS_PUBLISHED:
         reported, withheld = counted, ()
     else:
         reported = tuple(family for family in counted if family == "kicks")
@@ -2506,6 +2509,8 @@ def _reported_strike_families(sport: str) -> dict:
         "reported_families": _prose_list(reported),
         "withheld_families": _prose_list(withheld),
         "no_strike_counts": not reported,
+        "counts_are_estimates": bool(reported) and not STRIKE_COUNTS_PRECISION_VALIDATED,
+        "estimate_note": ESTIMATE_NOTE,
     }
 
 
@@ -2521,6 +2526,12 @@ def _sport_coverage_badge(sport: str) -> dict:
         return {"covered": "no", "label": "No punch counts yet"}
     if reported["withheld_families"]:
         return {"covered": "no", "label": "Kick counts only"}
+    if sport == "mma":
+        # MMA is decided on the ground as much as on the feet, and none of
+        # takedowns, control or submissions is read yet.
+        return {"covered": "no", "label": "Strikes only, no grappling yet"}
+    if reported["counts_are_estimates"]:
+        return {"covered": "yes", "label": "Counts %s" % reported["reported_families"]}
     if sport_unobserved(sport):
         return {"covered": "no", "label": "Striking read only"}
     return {"covered": "yes", "label": "Full scoring coverage"}
@@ -4178,6 +4189,10 @@ def result_page(request: Request, job_id: str):
                      if identity_trusted and not (report.get("scorecard") or {}).get("available")
                      else None),
         "kick_total": None if identity_trusted else unattributed_kick_total(report),
+        "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
+        "estimate_note": ESTIMATE_NOTE,
+        "families_shown": published_families(
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job)),
         # Only Full Contact has an obligatory kick count, so this is None for
         # every other discipline and the block simply does not render.
         "kick_minimum": kick_minimum_check(report) if identity_trusted else None,

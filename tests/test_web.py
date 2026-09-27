@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from unittest import mock
 from pathlib import Path
 from unittest.mock import patch
@@ -396,6 +397,9 @@ class PublicPageTests(unittest.TestCase):
         else:
             self.assertNotIn("Full scoring coverage", chooser)
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
+    @unittest.mock.patch("app.main.STRIKE_COUNTS_PUBLISHED", False)
     def test_boxing_is_warned_before_upload_that_it_gets_no_punch_counts(self):
         from core.report import STRIKE_COUNTS_PRECISION_VALIDATED
 
@@ -1292,6 +1296,8 @@ class PublicPageTests(unittest.TestCase):
         self.assertLess(action, 6000,
                         "the fix belongs in the header block, not partway down the report")
 
+    # The kicks-only path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_a_failed_report_attributes_nothing_to_either_fighter(self):
         """It said both things on one page.
 
@@ -1314,6 +1320,8 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("Kicks thrown, both fighters", page)
         self.assertIn("Kicks landed, both fighters", page)
 
+    # The kicks-only path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_a_failed_report_gives_exactly_one_kick_total(self):
         """Three totals on one page - 31, 24 and 34 - for the same kicks.
 
@@ -3505,6 +3513,9 @@ class ReportOrderTests(unittest.TestCase):
         self.assertIn("promoting it opened the report with a refusal", page)
 
 
+# The withholding path, still reachable with the publish switch off; see
+# PublishedStrikeCountsTests for the path the product runs.
+@unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
 class NoPunchClaimLeaksTests(unittest.TestCase):
     """Render the page and look, rather than reading the guards.
 
@@ -3520,7 +3531,7 @@ class NoPunchClaimLeaksTests(unittest.TestCase):
     """
 
     @staticmethod
-    def _render(report):
+    def _render(report, **extra):
         import json as _json
 
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader
@@ -3547,7 +3558,7 @@ class NoPunchClaimLeaksTests(unittest.TestCase):
             kick_total=(None if report.get("integrity", {}).get("identity_evidence_trusted", True)
                         else unattributed_kick_total(report)),
             analysis_quality=_analysis_quality_summary(report),
-            report_access={"report_tier": "full"}, can_share=False, sharing=None)
+            report_access={"report_tier": "full"}, can_share=False, sharing=None, **extra)
 
     @staticmethod
     def _report(trusted=False):
@@ -3612,6 +3623,46 @@ class NoPunchClaimLeaksTests(unittest.TestCase):
         self.assertNotIn("Fighter A attempts", text)
 
 
+class PublishedStrikeCountsTests(unittest.TestCase):
+    """With STRIKE_COUNTS_PUBLISHED every family the sport scores reaches the
+    page, labelled as an estimate - and still nothing the detector cannot
+    support: no named punch, no accuracy."""
+
+    def _published(self, report):
+        from core.report import ESTIMATE_NOTE, published_families
+        return NoPunchClaimLeaksTests._render(report, strike_counts_published=True, estimate_note=ESTIMATE_NOTE,
+                            families_shown=published_families("kickboxing"))
+
+    def _unscored(self):
+        report = NoPunchClaimLeaksTests._report()
+        report["scorecard"].update({"available": False, "sport": "kickboxing"})
+        report["integrity"].update({"identity_evidence_trusted": True,
+                                    "fighter_identity_trusted": {"A": True, "B": True}})
+        return report
+
+    def test_punches_kicks_and_knees_are_counted_as_estimates(self):
+        import re
+
+        from core.report import ESTIMATE_NOTE
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", self._published(self._unscored())))
+        self.assertIn("Strikes we counted", text)
+        self.assertIn("6 punches", text)
+        self.assertIn("3 kicks", text)
+        self.assertIn("0 knees", text)
+        self.assertIn(ESTIMATE_NOTE, text)
+        self.assertNotIn("Kicks only", text)
+
+    def test_an_estimate_still_names_no_technique_and_claims_no_accuracy(self):
+        import re
+
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", self._published(self._unscored())))
+        for pattern in (r"\b(jab|cross|uppercut|hook|backfist)\b", r"(Best|Strongest) weapon\s*[A-Za-z]",
+                        r"Punches landed\s*\d"):
+            with self.subTest(pattern=pattern):
+                self.assertIsNone(re.search(pattern, text, re.I))
+
+
+@unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
 class NoUnsupportedClaimSurvivesTests(NoPunchClaimLeaksTests):
     """Every claim that rests on the strike detector, checked in one place.
 

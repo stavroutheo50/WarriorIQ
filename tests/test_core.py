@@ -3913,6 +3913,74 @@ class LimbFamilyTests(unittest.TestCase):
                       "travel must sum the path, not subtract two endpoints")
 
 
+class PublishedStrikeCountsCoreTests(unittest.TestCase):
+    """STRIKE_COUNTS_PUBLISHED: every family the sport scores is shown, as an
+    estimate, and nothing that needs a validated count is switched on."""
+
+    @staticmethod
+    def _report(sport="kickboxing", counts=(4, 3, 1)):
+        fighter = {"observation_coverage": 0.6, "punch_attempts": counts[0],
+                   "kick_attempts": counts[1], "knee_attempts": counts[2]}
+        return {"scorecard": {"sport": sport},
+                "statistics": {"fighters": {"A": dict(fighter), "B": dict(fighter)}}}
+
+    def test_kickboxing_shows_punches_kicks_and_knees(self):
+        from core.report import ESTIMATE_NOTE, observed_summary
+        card = observed_summary(self._report())
+        self.assertEqual(card["fighters"]["A"]["families"], {"punch": 4, "kick": 3, "knee": 1})
+        self.assertEqual(card["fighters"]["A"]["actions_evidenced"], 8)
+        self.assertEqual(card["estimate_note"], ESTIMATE_NOTE)
+        self.assertFalse(card["is_a_floor"], "an estimate is never presented as a minimum")
+
+    def test_each_sport_shows_only_what_it_scores(self):
+        from core.report import observed_summary
+        self.assertEqual(observed_summary(self._report("boxing"))["fighters"]["A"]["families"], {"punch": 4})
+        self.assertEqual(observed_summary(self._report("taekwondo"))["fighters"]["A"]["families"],
+                         {"punch": 4, "kick": 3})
+
+    def test_the_unattributed_total_counts_every_family(self):
+        from core.report import unattributed_kick_total
+        total = unattributed_kick_total(self._report())
+        self.assertEqual(total["attempts"], 16)
+        self.assertEqual(total["label"], "Strikes")
+
+    def test_a_boxer_with_punches_but_no_kicks_is_still_reported(self):
+        from core.report import observed_summary
+        self.assertIsNotNone(observed_summary(self._report("boxing", counts=(5, 0, 0))))
+
+    def test_the_sport_picker_says_what_is_counted(self):
+        from app.main import _sport_coverage_badge
+        self.assertEqual(_sport_coverage_badge("kickboxing")["label"], "Counts punches, kicks and knees")
+        self.assertEqual(_sport_coverage_badge("muay_thai")["label"], "Counts punches, kicks and knees")
+        self.assertEqual(_sport_coverage_badge("boxing")["label"], "Counts punches")
+        self.assertEqual(_sport_coverage_badge("taekwondo")["label"], "Counts punches and kicks")
+        self.assertEqual(_sport_coverage_badge("mma")["label"], "Strikes only, no grappling yet")
+
+    def test_the_downloaded_report_counts_every_family_and_says_it_is_an_estimate(self):
+        import shutil
+        import tempfile
+
+        from core.report import ESTIMATE_NOTE, write_report
+
+        fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
+        report = json.loads(fixture.read_text(encoding="utf-8"))
+        report.setdefault("integrity", {})["action_metrics_trusted"] = False
+        report.setdefault("scorecard", {})["sport"] = "kickboxing"
+        report.setdefault("tracking", {})["recording"] = {"subject_px_in_network": 80.0}
+        report["events"] = [
+            {"round_number": 1, "peak_time": t, "fighter": "A", "family": fam,
+             "technique": tech, "outcome": "likely_landed", "target": "body"}
+            for t, fam, tech in ((5.0, "punch", "jab"), (9.0, "kick", "right_low_kick"),
+                                 (14.0, "knee", "right_knee"))]
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        _, html_path = write_report(out, report)
+        html = html_path.read_text(encoding="utf-8")
+        self.assertIn("strikes that reached, of 3 flagged", html)
+        self.assertIn("<tr><td>Strikes flagged</td><td>3</td>", html)
+        self.assertIn(ESTIMATE_NOTE, html)
+
+
 class ObservedSummaryTests(unittest.TestCase):
     """The middle setting between a scorecard and a blank page."""
 
@@ -3924,6 +3992,8 @@ class ObservedSummaryTests(unittest.TestCase):
                     "total_strikes": sum(counts)}
         return {"statistics": {"fighters": {"A": fighter(cov_a, a), "B": fighter(cov_b, b)}}}
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_it_reports_kicks_and_withholds_punches(self):
         """Punches are counted internally and deliberately not shown.
 
@@ -3952,6 +4022,8 @@ class ObservedSummaryTests(unittest.TestCase):
         # nothing with the hands.
         self.assertEqual(seen["A"]["punches_withheld"], 1)
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_a_knee_is_not_counted_as_a_leg_strike(self):
         """It used to be, and the reason was sound until it was measured.
 
@@ -3987,6 +4059,8 @@ class ObservedSummaryTests(unittest.TestCase):
         window = source[start:source.index("return (", start) + 900]
         self.assertIn(chr(34) + "knee" + chr(34), window)
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_it_agrees_with_the_statistics_the_rest_of_the_page_shows(self):
         """Two honest numbers for one thing is worse than either alone.
 
@@ -4643,6 +4717,8 @@ class StandaloneReportHonestyTests(unittest.TestCase):
         _, html_path = write_report(out, report)
         return html_path.read_text(encoding="utf-8")
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_an_untrusted_analysis_withholds_what_the_web_report_withholds(self):
         html = self._write(trusted=False)
         for claim in ("Strongest weapon", "Accuracy", "jab", "uppercut"):
@@ -4739,6 +4815,8 @@ class StandaloneReportHonestyTests(unittest.TestCase):
 
         self.assertNotIn("Your recording", self._write(trusted=False, mutate=unmeasured))
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_the_headline_counts_what_the_table_lists(self):
         """They disagreed: the card counted every flagged kick while the table
         listed only the ones that arrived, so a reader saw a big number above a
@@ -4798,6 +4876,8 @@ class StandaloneReportHonestyTests(unittest.TestCase):
         self.assertIn("strikes that reached, of 2 flagged", html)
         self.assertIn("<tr><td>Strikes flagged</td><td>2</td>", html)
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_the_flagged_row_says_leg_strikes_only_when_it_counts_only_legs(self):
         events = [self._event(11.25, "A", "kick", "clean"),
                   self._event(22.50, "A", "punch", "blocked")]
@@ -4822,6 +4902,8 @@ class StandaloneReportHonestyTests(unittest.TestCase):
         self.assertIn("strikes that reached", html)
         self.assertNotIn("Punches are left out", html)
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_punches_are_withheld_when_the_fighters_are_too_small(self):
         """The same three bouts that produced 'punches reported 11, actually
         thrown 0' are exactly the ones below this line."""

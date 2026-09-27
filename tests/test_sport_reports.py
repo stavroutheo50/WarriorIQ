@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import unittest
+import unittest.mock
 from pathlib import Path
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
@@ -126,6 +127,9 @@ class VisualsWithoutCountedOutcomesTests(unittest.TestCase):
 class TaekwondoWordingTests(unittest.TestCase):
     """Taekwondo awards no knees, and its pages said knees were withheld."""
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
+    @unittest.mock.patch("app.main.STRIKE_COUNTS_PUBLISHED", False)
     def test_taekwondo_withholds_punches_only(self):
         from app.main import _reported_strike_families
         from core.report import STRIKE_COUNTS_PRECISION_VALIDATED

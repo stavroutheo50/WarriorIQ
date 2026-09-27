@@ -244,7 +244,9 @@
       withheld a boxing report has no strike numbers at all, and says so. -#}
   {% set strike_sport = report.scorecard.sport|default('kickboxing', true) %}
   {% if not stats_ready %}
-  {% if strike_sport == 'boxing' %}
+  {% if strike_counts_published %}
+  <p class="vitals-note"><b>Strike counts are estimates.</b> {{ estimate_note }} Everything above is measured from your body.</p>
+  {% elif strike_sport == 'boxing' %}
   <p class="vitals-note"><b>No punch counts in this report.</b> Punch counting is not accurate enough yet, so a boxing report shows movement, guard and balance only. Everything above is measured from your body and is real.</p>
   {% else %}
   <p class="vitals-note"><b>Kicks only.</b> {{ (withheld_families or 'punches and knees')|capitalize }} are not counted yet &mdash; checked against video, the kick count came out right and the punch count was overstated. Everything above is measured from your body and is real.</p>
@@ -314,7 +316,7 @@
      same statistics block everywhere on this page so no two sections can
      print different totals. Knees are left out: the knee bucket was measured
      to contain punches (see core/report.py observed_summary). -#}
-  {% if strike_sport == 'boxing' %}
+  {% if strike_sport == 'boxing' and not strike_counts_published %}
   {# Nothing to show: punches are withheld and boxing has no kicks. #}
   {% elif identity_failed %}
   {# Per-fighter totals are attributions, and the page has already said it
@@ -324,20 +326,32 @@
      for this page at all (see result_page in app/main.py). #}
   {% if kick_total %}
   <div class="numbers-unavailable kick-total-combined">
-    <div><span>Kicks thrown, both fighters</span><strong>{{kick_total.attempts}}</strong><small>attempts</small></div>
-    <div><span>Kicks landed, both fighters</span>{% if kick_total.landed is not none %}<strong>{{kick_total.landed}}</strong><small>landed</small>{% else %}<strong>&mdash;</strong><small>not counted yet</small>{% endif %}</div>
-    <p>One total for the whole fight, not split between the fighters: the identity check failed, so WarriorIQ cannot say whose kicks these were. {% if camera_lost %}A steadier recording brings the split back.{% else %}Choose the fighters again at the top of this page and the split comes back.{% endif %}</p>
+    <div><span>{{ kick_total.label|default('Kicks', true) }} thrown, both fighters</span><strong>{{kick_total.attempts}}</strong><small>attempts</small></div>
+    <div><span>{{ kick_total.label|default('Kicks', true) }} landed, both fighters</span>{% if kick_total.landed is not none %}<strong>{{kick_total.landed}}</strong><small>landed</small>{% else %}<strong>&mdash;</strong><small>not counted yet</small>{% endif %}</div>
+    <p>One total for the whole fight, not split between the fighters: the identity check failed, so WarriorIQ cannot say whose {{ (kick_total.label|default('Kicks', true))|lower }} these were. {% if camera_lost %}A steadier recording brings the split back.{% else %}Choose the fighters again at the top of this page and the split comes back.{% endif %}</p>
   </div>
   {% endif %}
   {% elif observed %}
   <div class="observed">
+    {% if observed.punches_reported or observed.families_shown|default([])|length > 1 %}
+    <h3>Strikes we counted</h3>
+    <p class="observed-note">Not a score. Strike attempts, each next to the share of the round we could follow that fighter. Whether a strike landed is not counted yet. {{ observed.estimate_note }}</p>
+    {% else %}
     <h3>Kicks we could count</h3>
     <p class="observed-note">Not a score. Kick attempts only, each next to the share of the round we could follow that fighter. Whether a kick landed is not counted yet.</p>
+    {% endif %}
     <div class="observed-grid">
       {% for who, seen in observed.fighters.items() %}
       <div class="observed-card">
         <span class="observed-who">Fighter {{who}}</span>
         <strong>{{seen.actions_evidenced}}</strong>
+        {% if seen.families|length > 1 or 'kick' not in seen.families %}
+        <span class="observed-basis">strike{{ '' if seen.actions_evidenced == 1 else 's' }} thrown
+          in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
+        <span class="observed-families">
+          {%- for family, n in seen.families.items() %}{{ ' &middot; '|safe if not loop.first }}{{ n }} {{ family }}{{ '' if n == 1 else ('es' if family == 'punch' else 's') }}{% endfor -%}
+        </span>
+        {% else %}
         <span class="observed-basis">kick{{ '' if seen.actions_evidenced == 1 else 's' }} thrown
           in the {{ (seen.followed_share * 100)|round|int }}% of the round we could follow them</span>
         <span class="observed-families">
@@ -345,13 +359,19 @@
           punches not shown{% endif %}{% if seen.knees_withheld %} &middot;
           knees not shown{% endif %}
         </span>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
   </div>
   {% else %}
+  {% if strike_counts_published %}
+  {% macro strikes(who) %}{% set st = fighter_stats.get(who, {}) %}{% set total = namespace(n=0) %}{% for family in families_shown %}{% set total.n = total.n + (st.get(family ~ '_attempts')|default(0, true)) %}{% endfor %}{{ total.n }}{% endmacro %}
+  <div class="numbers-unavailable"><div><span>Fighter A strikes thrown</span><strong>{{strikes('A')}}</strong><small>attempts</small></div><div><span>Fighter B strikes thrown</span><strong>{{strikes('B')}}</strong><small>attempts</small></div><p>Attempts only, estimated. {{ estimate_note }}</p></div>
+  {% else %}
   {% macro kicks(who) %}{{ fighter_stats.get(who, {}).kick_attempts|default(0, true) }}{% endmacro %}
   <div class="numbers-unavailable"><div><span>Fighter A kicks thrown</span><strong>{{kicks('A')}}</strong><small>attempts</small></div><div><span>Fighter B kicks thrown</span><strong>{{kicks('B')}}</strong><small>attempts</small></div><p>Attempts only. Landed, missed and blocked are hidden until WarriorIQ can count them accurately. Nothing here is guessed.</p></div>
+  {% endif %}
   {% endif %}
   {% endif %}
   <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'Keep the measured baseline'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Build the next clean sample'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% endif %}</article></div>
