@@ -25,6 +25,31 @@ class LabelledFightBenchmarkTests(unittest.TestCase):
                          "detection changed: review the numbers, then run "
                          "python tools/benchmark_labelled_fight.py --write-baseline")
 
+    def test_every_labelled_fight_matches_its_baseline(self):
+        for fight in bench.labelled_fights():
+            with self.subTest(fight=fight.name):
+                baseline = json.loads((fight / "baseline.json").read_text(encoding="utf-8"))
+                self.assertEqual(bench.run(fight), baseline)
+
+    def test_a_one_tap_answer_becomes_a_benchmark_label(self):
+        from unittest import mock
+
+        from tools import export_strike_checks as export
+        stored = [
+            {"event_time": 3.25, "predicted": {"family": "punch"},
+             "corrected": {"fighter": "A", "verdict": "kick", "source": "strike_check"}},
+            {"event_time": 5.0, "predicted": {"family": "kick"},
+             "corrected": {"fighter": "B", "verdict": "right", "source": "strike_check"}},
+            {"event_time": 6.0, "predicted": {"family": "punch"},
+             "corrected": {"fighter": "B", "verdict": "not_a_strike", "source": "strike_check"}},
+            {"event_time": 8.0, "predicted": {}, "corrected": {"technique": "jab"}},   # a full correction
+        ]
+        with mock.patch.object(export, "get_annotations", return_value=stored):
+            labels = export.labels_for("x")
+        self.assertEqual([(l["fighter"], l["answer"]) for l in labels],
+                         [("A", "kick"), ("B", "kick"), ("B", "none")])
+        self.assertEqual({bench._family(l["answer"]) for l in labels}, {"kick", None})
+
     def test_the_replay_reproduces_the_analysis(self):
         # The analysis of this track produced 42 events. A replay that did not
         # would be measuring a different pipeline from the one that runs.

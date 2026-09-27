@@ -1140,6 +1140,57 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+    def test_a_fighter_can_say_whether_a_counted_strike_was_right(self):
+        """One tap on a counted strike is stored as a family-level answer,
+        kept out of training data, and shown back on the page."""
+        account = register("checker@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "checker@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        job_id = "checkfight1"
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"video-placeholder")
+        feed = [{"kind": "strike", "fighter": "A", "family": "punch", "time_seconds": 3.25, "round_number": 1},
+                {"kind": "strike", "fighter": "B", "family": "kick", "time_seconds": 7.5, "round_number": 1}]
+        report = {"setup": {"ruleset": "K1"}, "scorecard": {"sport": "kickboxing"}, "event_feed": feed}
+        report_path = job_dir / "report.json"
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        database.save_fight(job_id, account["profile_id"], "f.mp4", str(video_path), str(report_path),
+                            "competition", "K1", "BOTH", {})
+
+        said = self.client.post(f"/api/strike-check/{job_id}", json={
+            "seconds": 3.25, "fighter": "A", "family": "punch", "verdict": "kick"})
+        self.assertEqual(said.status_code, 200, said.text)
+        stored = database.get_annotations(job_id)
+        self.assertEqual(len(stored), 1)
+        self.assertTrue(database.is_strike_check(stored[0]))
+        self.assertEqual(stored[0]["corrected"]["family"], "kick")
+
+        # Changing the answer replaces it rather than adding a second one.
+        self.client.post(f"/api/strike-check/{job_id}", json={
+            "seconds": 3.25, "fighter": "A", "family": "punch", "verdict": "right"})
+        stored = database.get_annotations(job_id)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored[0]["corrected"]["family"], "punch")
+
+        # Only strikes the report counted can be answered, only with known answers.
+        nothing_there = self.client.post(f"/api/strike-check/{job_id}", json={
+            "seconds": 5.0, "fighter": "A", "family": "punch", "verdict": "right"})
+        self.assertEqual(nothing_there.status_code, 404)
+        nonsense = self.client.post(f"/api/strike-check/{job_id}", json={
+            "seconds": 7.5, "fighter": "B", "family": "kick", "verdict": "maybe"})
+        self.assertEqual(nonsense.status_code, 400)
+
+        # Someone else's fight is refused.
+        self.client.post("/logout")
+        register("other@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "other@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        refused = self.client.post(f"/api/strike-check/{job_id}", json={
+            "seconds": 7.5, "fighter": "B", "family": "kick", "verdict": "right"})
+        self.assertEqual(refused.status_code, 403)
+
 
 class UndecodableUploadTests(unittest.TestCase):
     """A file the server cannot decode is refused clearly, before it costs more."""

@@ -246,12 +246,18 @@
 .observed-families{margin-top:5px;font-size:12.5px;color:#c7cede}
 .counted-strikes{margin:14px 0;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px 14px}
 .counted-strikes summary{cursor:pointer;font-weight:700}
-.counted-strike-list{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px}
+.counted-strike-list{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px}
 .counted-strike-list a{display:flex;gap:10px;align-items:baseline;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.04);color:inherit;text-decoration:none}
 .counted-strike-list a:hover,.counted-strike-list a:focus-visible{background:rgba(255,255,255,.09)}
 .cs-time{font-variant-numeric:tabular-nums;font-weight:700}
 .cs-who{color:#98a2b3;font-size:12.5px}
 .cs-what{margin-left:auto;text-transform:capitalize}
+.counted-strike-list li{display:flex;flex-direction:column;gap:4px}
+.cs-check{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:0 2px}
+.cs-check button{font:inherit;font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#c7cede;cursor:pointer}
+.cs-check button:hover,.cs-check button:focus-visible{background:rgba(255,255,255,.08)}
+.cs-check button:disabled{opacity:.5;cursor:default}
+.cs-said{font-size:12px;color:#98a2b3;width:100%}
 
 /* WAKO Full Contact obliges six kicks a round. The two states are deliberately
    not a pass and a fail: our kick count is a floor, so it can confirm a round

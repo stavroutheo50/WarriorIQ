@@ -690,6 +690,16 @@ def get_annotations(job_id: str) -> list[dict]:
     return [item for item in list_annotations() if item["job_id"] == job_id]
 
 
+def is_strike_check(annotation: dict) -> bool:
+    """A one-tap answer on a counted strike, not a full correction.
+
+    It names a family ("kick"), never a technique, so it must stay out of
+    training sequences and technique-accuracy figures, which both read the
+    technique as a class label.
+    """
+    return (annotation.get("corrected") or {}).get("source") == "strike_check"
+
+
 def record_legal_acceptance(
     kind: str,
     policy_version: str,
