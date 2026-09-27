@@ -256,7 +256,8 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
                 "On guard and balance you matched or beat them. Pressure, "
                 "centre and movement depend on how you fight, so they are not "
                 "ranked. The next gain is in the striking, which WarriorIQ "
-                "cannot score yet."
+                "can only estimate so far - watch your counted strikes on the "
+                "replay and judge them yourself."
             ),
             "evidence_times": [],
         })
