@@ -3857,6 +3857,17 @@ def _appearance_observation(image, box):
     )
 
 
+def _identity_lost_to_camera(report: dict) -> bool:
+    """The identity check failed because the fighters kept being found again.
+
+    Re-picking the fighters cannot help then, so every "pick them again" on
+    the page gives way to asking for a steadier recording.
+    """
+    from core.report import identity_churned
+
+    return any(identity_churned((report or {}).get("tracking") or {}).values())
+
+
 def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
     """Why this fight has no score, in words a fighter can act on.
 
@@ -3980,9 +3991,7 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
             "fix": "Footage shot closer, steadier or from the side usually reads far better.",
         }
     if status == "identity_integrity_failed":
-        tracking = report.get("tracking") or {}
-        if any(float(tracking.get(f"fighter_{side}_handoffs_per_minute") or 0.0)
-               > SETTINGS.max_identity_handoffs_per_minute for side in ("A", "B")):
+        if _identity_lost_to_camera(report):
             # Re-picking cannot help when the camera is the cause.
             return {
                 "reason": ("We kept losing the fighters and finding them again, so we cannot be sure "
@@ -4146,6 +4155,7 @@ def result_page(request: Request, job_id: str):
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
+        "camera_lost": _identity_lost_to_camera(report),
         # "Punches and knees are not counted" on taekwondo, which awards no
         # knees - the note names only what this sport actually scores.
         "withheld_families": _reported_strike_families(
