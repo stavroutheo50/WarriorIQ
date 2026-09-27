@@ -197,6 +197,11 @@ class IdentityManager:
         # Tracks readmitted after moving again, so the effect of the
         # ban lapsing is visible rather than inferred.
         self.forgiven_furniture = 0
+        # How often each fighter's identity moved from one tracker track to a
+        # different one. Stand-ins (-1001/-1002) are not tracks and are not
+        # counted. See SETTINGS.max_identity_handoffs_per_minute.
+        self.track_handoffs = {"A": 0, "B": 0}
+        self._last_real_track: dict[str, int | None] = {"A": None, "B": None}
         # Why identities were refused, not merely how often. A bare total
         # cannot tell an appearance gate rejecting the real fighter from a
         # motion gate correctly refusing a spectator, and those need
@@ -590,6 +595,11 @@ class IdentityManager:
         # fighting after it, while standing exactly where A had been.
         if obs.track_id is None or obs.track_id >= 0 or state.current_track_id is None:
             state.current_track_id = obs.track_id
+        if obs.track_id is not None and obs.track_id >= 0:
+            last = self._last_real_track.get(state.name)
+            if last is not None and last != obs.track_id:
+                self.track_handoffs[state.name] = self.track_handoffs.get(state.name, 0) + 1
+            self._last_real_track[state.name] = int(obs.track_id)
         state.identity_confidence = float(max(0.0, min(1.0, score)))
         state.missing_frames = 0
         if (obs.reid is not None

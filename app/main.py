@@ -3980,6 +3980,17 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
             "fix": "Footage shot closer, steadier or from the side usually reads far better.",
         }
     if status == "identity_integrity_failed":
+        tracking = report.get("tracking") or {}
+        if any(float(tracking.get(f"fighter_{side}_handoffs_per_minute") or 0.0)
+               > SETTINGS.max_identity_handoffs_per_minute for side in ("A", "B")):
+            # Re-picking cannot help when the camera is the cause.
+            return {
+                "reason": ("We kept losing the fighters and finding them again, so we cannot be sure "
+                           "the numbers belong to them. This happens when the camera moves a lot and "
+                           "the hall is busy."),
+                "fix": ("Film from one fixed spot - a tripod, or the phone held still against a rail - "
+                        "with the mat filling most of the picture, then upload again."),
+            }
         return {
             "reason": "We could not stay certain which fighter was which for the whole fight.",
             "fix": "Pick both fighters again on a clearer frame, then re-run.",
