@@ -4785,6 +4785,28 @@ class StandaloneReportHonestyTests(unittest.TestCase):
                 "family": family, "technique": "jab" if family == "punch" else "right_low_kick",
                 "outcome": outcome, "target": "head"}
 
+    def test_one_moment_filed_under_several_limbs_is_counted_once(self):
+        """The detector files one moment once per limb that moved, and contact
+        classification moves every copy onto the same impact frame. The
+        statistics and scorecard keep one label per fighter per instant; the
+        report card counted all of them, one moment four times."""
+        events = [self._event(87.67, "A", "punch", "blocked"),
+                  self._event(87.67, "A", "punch", "uncertain"),
+                  self._event(87.67, "A", "kick", "likely_landed"),
+                  self._event(90.00, "A", "kick", "missed")]
+        html = self._write(trusted=False, mutate=self._fight_with(201.0, events))
+        self.assertIn("strikes that reached, of 2 flagged", html)
+        self.assertIn("<tr><td>Strikes flagged</td><td>2</td>", html)
+
+    def test_the_flagged_row_says_leg_strikes_only_when_it_counts_only_legs(self):
+        events = [self._event(11.25, "A", "kick", "clean"),
+                  self._event(22.50, "A", "punch", "blocked")]
+        small = self._write(trusted=False, mutate=self._fight_with(90.0, events))
+        self.assertIn("<tr><td>Leg strikes flagged</td><td>1</td>", small)
+        big = self._write(trusted=False, mutate=self._fight_with(201.0, events))
+        self.assertIn("<tr><td>Strikes flagged</td><td>2</td>", big)
+        self.assertNotIn("Leg strikes flagged", big)
+
     def test_punches_are_counted_when_the_fighters_are_big_enough(self):
         """Punches were withheld outright on evidence from three messenger
         copies where a fighter reaches the network about 86-101px tall. On the
