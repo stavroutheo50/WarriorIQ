@@ -495,6 +495,17 @@ class IdentityManager:
         # a real bout.
         if candidate.track_id in (-1001, -1002) and candidate.track_id != (-1001 if state.name == "A" else -1002):
             return self._refuse(state, "other_fighters_stand_in")
+        # And a stand-in that looks clearly more like the other fighter is
+        # the other fighter: at a knockdown the fallen fighter is not
+        # detected, and the crop searched where he lay finds the one standing
+        # over him. See SETTINGS.stand_in_other_fighter_margin.
+        if candidate.track_id in (-1001, -1002) and candidate.appearance is not None:
+            other = self.b if state is self.a else self.a
+            if state.anchor_appearance is not None and other.anchor_appearance is not None:
+                own = appearance_similarity(state.anchor_appearance, candidate.appearance)
+                theirs = appearance_similarity(other.anchor_appearance, candidate.appearance)
+                if theirs - own > SETTINGS.stand_in_other_fighter_margin:
+                    return self._refuse(state, "stand_in_looks_like_the_other_fighter")
         # A learned appearance space when one is available, and the colour
         # histogram when it is not. Measured on real footage the histogram
         # cannot separate a referee from a fighter at all - their similarity
