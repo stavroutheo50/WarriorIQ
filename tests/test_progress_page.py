@@ -384,6 +384,23 @@ class HandheldCameraIdentityTests(unittest.TestCase):
         self.assertIn("camera moves a lot", withheld["reason"])
         self.assertIn("fixed spot", withheld["fix"])
 
+    def test_the_saved_report_fails_the_check_too(self):
+        """The page refused a fight the saved report - and so the Progress
+        snapshot - still called trusted: build_report had its own copy of the
+        gate without this rule."""
+        from core.report import build_report
+        from core.types import AnalysisRequest, RoundSpec
+
+        sample = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        tracking = dict(sample["tracking"], fighter_A_handoffs_per_minute=21.4,
+                        fighter_B_handoffs_per_minute=25.7)
+        req = AnalysisRequest(video_path="none.mp4", fighter_a_box=[0, 0, 10, 10],
+                              fighter_b_box=[20, 0, 30, 10], ruleset="K1", round_count=1,
+                              round_duration_seconds=60.0, break_duration_seconds=0.0)
+        report = build_report(req, "clip.mp4", [RoundSpec(1, 0.0, 60.0)], [], [],
+                              sample["metrics"], tracking, sample["performance"], sample["classifier"])
+        self.assertFalse(report["integrity"]["identity_evidence_trusted"])
+
     def test_the_progress_snapshot_keeps_what_the_check_reads(self):
         from core.report import IDENTITY_TRACKING_KEYS
 
