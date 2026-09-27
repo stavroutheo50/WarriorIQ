@@ -1,0 +1,44 @@
+"""The strike detector, scored against a competitor's answers on a real fight.
+
+tools/benchmark_labelled_fight.py replays the action engine over a stored pose
+track and matches its proposals to 72 hand-labelled moments. This pins the
+result: a change to detection that moves any number fails here until the new
+numbers are looked at and written with --write-baseline. That is the point -
+"the detector got better" becomes a diff of this file, not an impression.
+"""
+from __future__ import annotations
+
+import json
+import unittest
+
+from tools import benchmark_labelled_fight as bench
+
+
+class LabelledFightBenchmarkTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.now = bench.run()
+        cls.baseline = json.loads((bench.FIGHT / "baseline.json").read_text(encoding="utf-8"))
+
+    def test_the_numbers_match_the_stored_baseline(self):
+        self.assertEqual(self.now, self.baseline,
+                         "detection changed: review the numbers, then run "
+                         "python tools/benchmark_labelled_fight.py --write-baseline")
+
+    def test_the_replay_reproduces_the_analysis(self):
+        # The analysis of this track produced 42 events. A replay that did not
+        # would be measuring a different pipeline from the one that runs.
+        self.assertEqual(self.now["proposals_raw"], 42)
+
+    def test_every_counted_proposal_is_accounted_for(self):
+        parts = ("real_strike", "nothing_happened", "unsure", "unlabelled")
+        self.assertEqual(sum(self.now[p] for p in parts), self.now["proposals_counted"])
+
+    def test_the_ambiguous_moment_is_decided_by_majority(self):
+        moments = {(m["fighter"], m["time"]): m for m in bench.load_moments()}
+        self.assertIsNone(moments[("A", 87.67)]["truth"])      # cross, none, wrong person, none
+        self.assertEqual(moments[("A", 83.83)]["truth"], "punch")
+
+
+if __name__ == "__main__":
+    unittest.main()
