@@ -28,11 +28,20 @@ class LabelledFightBenchmarkTests(unittest.TestCase):
     def test_the_replay_reproduces_the_analysis(self):
         # The analysis of this track produced 42 events. A replay that did not
         # would be measuring a different pipeline from the one that runs.
-        self.assertEqual(self.now["proposals_raw"], 42)
+        self.assertEqual(self.now["all_proposals"]["proposals_raw"], 42)
 
     def test_every_counted_proposal_is_accounted_for(self):
         parts = ("real_strike", "nothing_happened", "unsure", "unlabelled")
-        self.assertEqual(sum(self.now[p] for p in parts), self.now["proposals_counted"])
+        for section in self.now.values():
+            self.assertEqual(sum(section[p] for p in parts), section["proposals_counted"])
+
+    def test_a_punch_thrown_at_nothing_is_not_counted_but_a_missed_kick_is(self):
+        from types import SimpleNamespace
+
+        from core.analyzer import _punch_thrown_at_nothing
+        self.assertTrue(_punch_thrown_at_nothing(SimpleNamespace(family="punch", outcome="missed")))
+        self.assertFalse(_punch_thrown_at_nothing(SimpleNamespace(family="kick", outcome="missed")))
+        self.assertFalse(_punch_thrown_at_nothing(SimpleNamespace(family="punch", outcome="blocked")))
 
     def test_the_ambiguous_moment_is_decided_by_majority(self):
         moments = {(m["fighter"], m["time"]): m for m in bench.load_moments()}

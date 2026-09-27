@@ -255,14 +255,16 @@ STRIKE_COUNTS_PRECISION_VALIDATED = False
 # federation minimum. Those still follow STRIKE_COUNTS_PRECISION_VALIDATED.
 #
 # The measurement behind the note: 72 clips from a Kick Light bout, labelled
-# by a competitor. Of 42 strikes the detector proposed, 20 were real strikes
-# and 10 were the right type; of 30 moments it called quiet, 4 held a strike.
+# by a competitor, kept in dataset/regression/kicklight_stavrou_ceschia and
+# scored by tools/benchmark_labelled_fight.py. Of the 16 moments a report
+# counts on that fight, 11 were real strikes and 6 of those the right type.
+# Re-run it and update this note whenever the numbers move.
 STRIKE_COUNTS_PUBLISHED = True
 
 ESTIMATE_NOTE = (
     "Automatic counts, not checked by a person. On a fight we checked by hand, "
-    "about half of the strikes WarriorIQ flagged were real, and it often mixed up "
-    "punches and kicks, so treat these as estimates."
+    "about two in three of the strikes WarriorIQ counted were real, and it often "
+    "mixed up punches and kicks, so treat these as estimates."
 )
 
 ESTIMATED_SCORE_NOTE = (

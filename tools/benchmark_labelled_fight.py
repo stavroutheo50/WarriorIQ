@@ -157,7 +157,16 @@ def score(events: list, moments: list[dict]) -> dict:
 
 
 def run() -> dict:
-    return score(replay(), load_moments())
+    """Two scores: every proposal, and the ones a report actually counts.
+
+    "counted" is what reaches the statistics block - the attempt tier in
+    core.analyzer._live_attempt_reliable - which is the number a fighter sees.
+    """
+    from core.analyzer import _live_attempt_reliable
+
+    events, moments = replay(), load_moments()
+    return {"all_proposals": score(events, moments),
+            "counted_in_report": score([e for e in events if _live_attempt_reliable(e)], moments)}
 
 
 def main() -> int:
@@ -174,9 +183,12 @@ def main() -> int:
         print(json.dumps(now, indent=1))
         return 0
     before = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
-    for key, value in now.items():
-        change = "" if key not in before or before[key] == value else "  (was %d)" % before[key]
-        print("%-26s %4d%s" % (key, value, change))
+    for section, numbers in now.items():
+        print(section)
+        was = before.get(section) or {}
+        for key, value in numbers.items():
+            change = "" if key not in was or was[key] == value else "  (was %d)" % was[key]
+            print("  %-26s %4d%s" % (key, value, change))
     return 0
 
 
