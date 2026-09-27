@@ -401,6 +401,23 @@ class HandheldCameraIdentityTests(unittest.TestCase):
                               sample["metrics"], tracking, sample["performance"], sample["classifier"])
         self.assertFalse(report["integrity"]["identity_evidence_trusted"])
 
+    def test_the_rest_of_the_page_stops_saying_pick_the_fighters_again(self):
+        """On the real handheld bout the headline asked for a steadier
+        recording while three other places said to re-pick the fighters."""
+        from app.main import _identity_lost_to_camera
+
+        self.assertTrue(_identity_lost_to_camera({"tracking": self._tracking(25.7)}))
+        self.assertFalse(_identity_lost_to_camera({"tracking": self._tracking(6.4)}))
+        self.assertFalse(_identity_lost_to_camera({"tracking": self._tracking(None)}))
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(
+            encoding="utf-8")
+        self.assertIn("{% if identity_failed and not camera_lost %}<a class=\"btn\" href=\"/select/", page)
+        for repick in ("Pick the fighters again and they will be yours alone.",
+                       "<a class=\"text-link\" href=\"/select/{{job_id}}\">Show me who is who</a>",
+                       "Choose the fighters again at the top of this page"):
+            before = page[:page.index(repick)]
+            self.assertIn("{% if camera_lost %}", before[-700:], repick)
+
     def test_the_progress_snapshot_keeps_what_the_check_reads(self):
         from core.report import IDENTITY_TRACKING_KEYS
 
