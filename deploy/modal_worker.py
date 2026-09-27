@@ -113,7 +113,12 @@ image = (
                 "**/__pycache__", "**/*.engine*", "**/warrioriq.sqlite3",
                 "**/.tmp", "**/fights", "**/.huggingface", "**/logs",
                 "**/.claude", "**/.idea", "**/.pytest_cache", "**/.ruff_cache",
-                "**/.env", "**/session-secret.txt", "**/*.log", "**/*.log.*"],
+                "**/.env", "**/session-secret.txt", "**/*.log", "**/*.log.*",
+                # A worker running on the same machine keeps rewriting its
+                # lock, and Modal aborts a deploy when an uploaded file
+                # changes mid-build ("worker.lock was modified during build
+                # process"). It is per-machine state that must never ship.
+                "**/worker.lock*", "**/tmp"],
     )
 )
 
