@@ -254,7 +254,7 @@
 .cs-what{margin-left:auto;text-transform:capitalize}
 .counted-strike-list li{display:flex;flex-direction:column;gap:4px}
 .cs-check{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:0 2px}
-.cs-check button{font:inherit;font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#c7cede;cursor:pointer}
+.cs-check button{font:inherit;font-size:13px;min-height:36px;padding:6px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#c7cede;cursor:pointer}
 .cs-check button:hover,.cs-check button:focus-visible{background:rgba(255,255,255,.08)}
 .cs-check button:disabled{opacity:.5;cursor:default}
 .cs-said{font-size:12px;color:#98a2b3;width:100%}

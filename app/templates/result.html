@@ -381,7 +381,7 @@
   {% if counted_strikes %}
   <details class="counted-strikes">
     <summary>Watch every counted strike ({{ counted_strikes|length }})</summary>
-    <p class="observed-note">Tap one to watch it. The replay starts a second before the strike.</p>
+    <p class="observed-note">Tap one to watch it. The replay starts a second before the strike.{% if can_check_strikes %} If one is wrong, say so: your answers are saved with this fight and are how WarriorIQ checks whether its counting is getting better.{% endif %}</p>
     <ol class="counted-strike-list">
       {% for s in counted_strikes %}
       <li data-seconds="{{ '%.3f'|format(s.seconds) }}" data-fighter="{{ s.fighter }}" data-family="{{ s.family }}">
@@ -398,7 +398,6 @@
       </li>
       {% endfor %}
     </ol>
-    {% if can_check_strikes %}<p class="observed-note">Tell us when one is wrong. Your answers are saved with this fight and are how WarriorIQ checks, fight by fight, whether its counting is getting better.</p>{% endif %}
   </details>
   {% if can_check_strikes %}
   <script nonce="{{ request.state.csp_nonce }}">
