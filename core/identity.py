@@ -197,6 +197,7 @@ class IdentityManager:
         # Tracks readmitted after moving again, so the effect of the
         # ban lapsing is visible rather than inferred.
         self.forgiven_furniture = 0
+        self._frame_now = 0
         # How often each fighter's identity moved from one tracker track to a
         # different one. Stand-ins (-1001/-1002) are not tracks and are not
         # counted. See SETTINGS.max_identity_handoffs_per_minute.
@@ -495,17 +496,16 @@ class IdentityManager:
         # a real bout.
         if candidate.track_id in (-1001, -1002) and candidate.track_id != (-1001 if state.name == "A" else -1002):
             return self._refuse(state, "other_fighters_stand_in")
-        # And a stand-in that looks clearly more like the other fighter is
-        # the other fighter: at a knockdown the fallen fighter is not
-        # detected, and the crop searched where he lay finds the one standing
-        # over him. See SETTINGS.stand_in_other_fighter_margin.
-        if candidate.track_id in (-1001, -1002) and candidate.appearance is not None:
+        # And a stand-in on top of where the other fighter is, is the other
+        # fighter: at a knockdown the fallen fighter is not detected, and the
+        # crop searched where he lay finds the one standing over him. See
+        # SETTINGS.stand_in_max_overlap_with_other.
+        if candidate.track_id in (-1001, -1002):
             other = self.b if state is self.a else self.a
-            if state.anchor_appearance is not None and other.anchor_appearance is not None:
-                own = appearance_similarity(state.anchor_appearance, candidate.appearance)
-                theirs = appearance_similarity(other.anchor_appearance, candidate.appearance)
-                if theirs - own > SETTINGS.stand_in_other_fighter_margin:
-                    return self._refuse(state, "stand_in_looks_like_the_other_fighter")
+            if (other.last_box is not None
+                    and self._frame_now - other.last_seen_source_frame <= self.source_fps / 2.0
+                    and box_iou(candidate.box, other.last_box) > SETTINGS.stand_in_max_overlap_with_other):
+                return self._refuse(state, "stand_in_on_the_other_fighter")
         # A learned appearance space when one is available, and the colour
         # histogram when it is not. Measured on real footage the histogram
         # cannot separate a referee from a fighter at all - their similarity
@@ -705,6 +705,7 @@ class IdentityManager:
         occlude frequently. Joint assignment prioritizes the selected clothing
         appearance plus motion and rejects an ambiguous A/B permutation.
         """
+        self._frame_now = source_frame
         self._remember_positions(people, source_frame)
         if not people:
             self.a.missing_frames += 1
@@ -792,6 +793,18 @@ class IdentityManager:
                 ai = bi = None
                 ambiguous = True
 
+        # Two fighters are never one person. When the two chosen boxes are
+        # mostly the same box and a stand-in is involved, the stand-in goes -
+        # both, if both are. Two real detections overlapping is a clinch and
+        # is left alone.
+        if (ai is not None and bi is not None
+                and box_iou(people[ai].box, people[bi].box) > SETTINGS.stand_in_max_overlap_with_other):
+            stand_in_a = people[ai].track_id in (-1001, -1002)
+            stand_in_b = people[bi].track_id in (-1001, -1002)
+            if stand_in_a:
+                ai = None
+            if stand_in_b:
+                bi = None
         a_obs = self._commit(self.a, people[ai], source_frame, scores_a[ai], recovered=people[ai].track_id != self.a.current_track_id) if ai is not None else None
         b_obs = self._commit(self.b, people[bi], source_frame, scores_b[bi], recovered=people[bi].track_id != self.b.current_track_id) if bi is not None else None
         for state, obs in ((self.a, a_obs), (self.b, b_obs)):

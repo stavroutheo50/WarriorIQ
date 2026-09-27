@@ -737,15 +737,15 @@ class Settings:
     # thin; 15 sits well inside the gap and should be revisited as more real
     # footage is checked.
     # A stand-in (a crop searched where one fighter was expected) is refused
-    # when it looks this much more like the *other* fighter than like its own.
-    # The absolute colour floor cannot do this job: measured on a real Kick
-    # Light knockdown, the red fighter scored 0.60-0.64 against the blue
-    # fighter's kit, above the 0.55 floor, so blue's stand-ins - searched where
-    # blue lay undetected on the mat - were red standing over him. Those crops
-    # scored 0.08-0.18 closer to red; the real fighters sat 0.13-0.18 closer to
-    # their own kit.
-    stand_in_other_fighter_margin: float = float(
-        os.getenv("WARRIORIQ_STAND_IN_OTHER_FIGHTER_MARGIN", "0.05")
+    # when it sits on top of where the other fighter is. Measured on a real
+    # Kick Light knockdown: the fallen blue fighter was not detected, and the
+    # crops searched where he lay found red standing over him - at 46.8 s both
+    # fighters' stand-ins were on red, overlapping about 0.9, and at 47.2 s
+    # blue's overlapped red's box of a moment earlier by 0.55. Colour could not
+    # separate these: red scored 0.60-0.64 against blue's kit, and the colour
+    # margins of correct and wrong stand-ins overlapped across the bout.
+    stand_in_max_overlap_with_other: float = float(
+        os.getenv("WARRIORIQ_STAND_IN_MAX_OVERLAP", "0.4")
     )
     max_identity_handoffs_per_minute: float = float(
         os.getenv("WARRIORIQ_MAX_IDENTITY_HANDOFFS_PER_MINUTE", "15")
