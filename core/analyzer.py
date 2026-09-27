@@ -46,7 +46,14 @@ from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
 # Expressed as a share of the range rather than a constant, because the last
 # constant here was calibrated against an older formula, survived a rescale of
 # it, and left six real fights showing 5 attempts out of 309 detections.
-ATTEMPT_CONFIDENCE = CONFIDENCE_FLOOR + 0.25 * (CONFIDENCE_CEILING - CONFIDENCE_FLOOR)
+#
+# A tenth of the range, down from a quarter. Scored against a competitor's
+# answers on the labelled Kick Light bout (tools/benchmark_labelled_fight.py),
+# the quarter bar kept 8 real strikes and 10 non-events and threw away 7 real
+# strikes: confidence from the rule-based detector does not separate the two
+# (real 0.40-0.81, non-events 0.41-0.77). A tenth still rejects a trigger with
+# essentially nothing behind it, which is all this gate is for.
+ATTEMPT_CONFIDENCE = CONFIDENCE_FLOOR + 0.10 * (CONFIDENCE_CEILING - CONFIDENCE_FLOOR)
 
 LOGGER = logging.getLogger("warrioriq.analysis")
 
@@ -213,6 +220,19 @@ def _live_event_reliable(event, ruleset: str) -> bool:
     )
 
 
+def _punch_thrown_at_nothing(event) -> bool:
+    """A punch whose hand never came near the opponent.
+
+    Labelled by a competitor on the Kick Light bout, 11 punches the analysis
+    called "missed" were proposed and not one was a real strike: they were a
+    lead hand reaching out at distance, measuring or feinting, which is not a
+    strike in any ruleset here. Missed kicks are left in - 3 of 5 were real.
+    The event itself is kept; it is only not counted as an attempt.
+    """
+    return (getattr(event, "family", None) == "punch"
+            and getattr(event, "outcome", None) == "missed")
+
+
 def _live_attempt_reliable(event) -> bool:
     """Return only identity-safe temporal attempts for the provisional live view.
 
@@ -232,6 +252,7 @@ def _live_attempt_reliable(event) -> bool:
         and math.isfinite(float(getattr(event, "peak_time", -1.0)))
         and float(getattr(event, "peak_time", -1.0)) >= 0.0
         and float(getattr(event, "confidence", 0.0)) >= ATTEMPT_CONFIDENCE
+        and not _punch_thrown_at_nothing(event)
         and float(event.metadata.get("attacker_identity_confidence", 1.0)) >= 0.76
         and float(event.metadata.get("opponent_identity_confidence", 1.0)) >= 0.76
     )
