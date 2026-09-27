@@ -329,3 +329,63 @@ class RealFightFindingsTests(unittest.TestCase):
         # Without a recording problem the old advice still applies.
         del report["tracking"]["recording"]
         self.assertIn("clearly apart", _score_withheld(report)["fix"])
+
+
+class HandheldCameraIdentityTests(unittest.TestCase):
+    """Athens European Cup, filmed handheld from the stands: coverage 82%, the
+    identity check passed, and the boxes were on spectators, coaches and the
+    opponent for most of the bout."""
+
+    @staticmethod
+    def _tracking(rate_a, rate_b=5.0):
+        tracking = {"fighter_A_seed_source": "manual_anchor", "fighter_B_seed_source": "manual_anchor",
+                    "fighter_A_coverage": .82, "fighter_B_coverage": .81, "fighters_separable": True}
+        if rate_a is not None:
+            tracking.update(fighter_A_handoffs_per_minute=rate_a, fighter_B_handoffs_per_minute=rate_b)
+        return tracking
+
+    def test_the_manager_counts_moves_between_real_tracks_only(self):
+        import numpy as np
+
+        from core.identity import IdentityManager
+        from core.types import PersonObservation
+
+        def person(track_id, x=100.0):
+            return PersonObservation(track_id=track_id, confidence=0.9,
+                                     box=np.asarray([x, 100, x + 30, 180], dtype=np.float32))
+
+        manager = IdentityManager(person(1), person(2, 300.0), 0, source_fps=30.0)
+        for frame, track in enumerate([5, 5, -1001, 5, 7, 7, -1001, 9]):
+            manager._commit(manager.a, person(track), frame, 0.8)
+        self.assertEqual(manager.track_handoffs["A"], 2, "5 to 7 and 7 to 9; stand-ins are not tracks")
+
+    def test_a_fighter_found_again_too_often_fails_the_identity_check(self):
+        from core.report import refresh_identity_integrity
+
+        report = refresh_identity_integrity({"tracking": self._tracking(21.4),
+                                             "video": {"analysis_target": "A"}})
+        self.assertFalse(report["integrity"]["identity_evidence_trusted"])
+        self.assertIn("find them again 21 times a minute", report["scorecard"]["disclaimer"])
+        self.assertIn("steadier recording", report["scorecard"]["disclaimer"])
+
+    def test_a_steady_camera_and_an_older_report_pass_as_before(self):
+        from core.report import refresh_identity_integrity
+
+        for tracking in (self._tracking(6.4), self._tracking(None)):
+            report = refresh_identity_integrity({"tracking": tracking, "video": {"analysis_target": "A"}})
+            self.assertTrue(report["integrity"]["identity_evidence_trusted"], tracking)
+
+    def test_the_page_asks_for_a_steadier_recording_not_a_re_pick(self):
+        from app.main import _score_withheld
+
+        report = {"scorecard": {"available": False, "status": "identity_integrity_failed"},
+                  "tracking": self._tracking(25.7)}
+        withheld = _score_withheld(report)
+        self.assertIn("camera moves a lot", withheld["reason"])
+        self.assertIn("fixed spot", withheld["fix"])
+
+    def test_the_progress_snapshot_keeps_what_the_check_reads(self):
+        from core.report import IDENTITY_TRACKING_KEYS
+
+        self.assertIn("fighter_A_handoffs_per_minute", IDENTITY_TRACKING_KEYS)
+        self.assertIn("fighter_B_handoffs_per_minute", IDENTITY_TRACKING_KEYS)

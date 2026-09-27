@@ -156,7 +156,7 @@ def _identity_seed_safe(tracking: dict, fighter: str) -> bool:
 IDENTITY_TRACKING_KEYS = (
     "fighter_A_seed_source", "fighter_B_seed_source", "initial_iou_A", "initial_iou_B",
     "fighter_A_coverage", "fighter_B_coverage", "fighters_separable", "fighter_pair_similarity",
-    "identity_confusions",
+    "identity_confusions", "fighter_A_handoffs_per_minute", "fighter_B_handoffs_per_minute",
 )
 
 
@@ -405,11 +405,22 @@ def refresh_identity_integrity(report: dict) -> dict:
     # "was it the right somebody", and this is the one case where the analysis
     # can know the answer is no before it starts.
     separable = tracking.get("fighters_separable")
+    # Coverage says somebody was followed; it cannot say it was the same
+    # somebody. An identity handed between tracks many times a minute - a
+    # panning handheld camera in a crowded hall - lands on spectators and the
+    # opponent while coverage stays high. Absent on older reports, which are
+    # judged as before.
+    churned = {
+        fighter: float(tracking.get(f"fighter_{fighter}_handoffs_per_minute") or 0.0)
+        > SETTINGS.max_identity_handoffs_per_minute
+        for fighter in ("A", "B")
+    }
     identity_ready = {
         fighter: (
             _identity_seed_safe(tracking, fighter)
             and float(tracking.get(f"fighter_{fighter}_coverage", 0.0)) >= 0.45
             and separable is not False
+            and not churned[fighter]
         )
         for fighter in ("A", "B")
     }
@@ -426,6 +437,10 @@ def refresh_identity_integrity(report: dict) -> dict:
         integrity["action_metrics_trusted"] = False
         integrity["coaching_evidence_mode"] = "withheld_identity_failure"
         failed = ", ".join(f"Fighter {fighter}" for fighter in required if not identity_ready.get(fighter, False))
+        churned_required = [fighter for fighter in required if churned[fighter]]
+        lost_hold = " and ".join(f"Fighter {fighter}" for fighter in churned_required)
+        handoff_rate = max((float(tracking.get(f"fighter_{fighter}_handoffs_per_minute") or 0.0)
+                            for fighter in churned_required), default=0.0)
         scorecard = report.setdefault("scorecard", {})
         scorecard.update({
             "available": False,
@@ -445,6 +460,11 @@ def refresh_identity_integrity(report: dict) -> dict:
                        if tracking.get("fighter_pair_similarity") is not None else "Any")
                     + " per-fighter total risks crediting the wrong athlete."
                 ) if separable is False else (
+                    f"Scorecard withheld because WarriorIQ could not keep hold of {lost_hold}: it had to "
+                    f"find them again {handoff_rate:.0f} times a minute, which on a moving camera in a busy "
+                    "hall means it was often following someone else. Re-picking the fighters will not fix "
+                    "this; a steadier recording will."
+                ) if lost_hold else (
                     f"Scorecard withheld because {failed} did not pass the fighter-identity gate. "
                     "Return to fighter selection and analyze again; person coverage alone cannot prove identity."
                 )

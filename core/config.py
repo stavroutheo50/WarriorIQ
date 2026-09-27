@@ -721,6 +721,24 @@ class Settings:
     furniture_partner_body_lengths: float = float(
         os.getenv("WARRIORIQ_FURNITURE_PARTNER_DISTANCE", "1.5")
     )
+    # Above this many hand-offs a minute - the fighter's identity moving from
+    # one tracker track to a different one - who the numbers belong to cannot
+    # be vouched for, and the identity check fails.
+    #
+    # Measured 2026-09-26, by eye on boxes drawn every few seconds:
+    #
+    #     WAKO Kick Light, fixed broadcast camera     6.4 / 7.0   right person
+    #     Athens European Cup, handheld from stands  21.4 / 25.7  mostly wrong
+    #
+    # On the second the camera panned throughout (4.97% of the frame against
+    # 0.13%) with about fifteen people in shot, and the tracker re-created
+    # people so often that recovery kept choosing spectators, coaches and the
+    # opponent - while coverage read 82% and the check passed. Two fights is
+    # thin; 15 sits well inside the gap and should be revisited as more real
+    # footage is checked.
+    max_identity_handoffs_per_minute: float = float(
+        os.getenv("WARRIORIQ_MAX_IDENTITY_HANDOFFS_PER_MINUTE", "15")
+    )
     # A second, much stricter reading of the same measurement over a much
     # shorter look. The 6 s guard above is calibrated to catch marginal cases
     # and so must wait; somebody who has not moved at all is decidable sooner.
