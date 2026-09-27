@@ -579,6 +579,20 @@ def is_verified_scoring_event(event: StrikeEvent, ruleset: str) -> bool:
     )
 
 
+def is_estimated_scoring_event(event: StrikeEvent, ruleset: str) -> bool:
+    """The looser bar for a score that is labelled an estimate.
+
+    Every legal strike the analysis marked as landed, with none of the
+    confidence, contact or foot-lift thresholds above. Those thresholds left
+    real fights with no scoring actions at all: on the hand-labelled Kick Light
+    bout not one event cleared them, so the scorecard could only ever read
+    "Not scored". Against that competitor's labels, 8 of the 12 events marked
+    landed were real strikes (7 of 8 "likely landed", 1 of 4 "clean"), though
+    the strike type was often wrong. The page says so beside the score.
+    """
+    return is_legal_event(event, ruleset) and event.outcome in {"clean", "likely_landed"}
+
+
 # One fighter cannot throw two different techniques at the same instant. The
 # detector does emit exactly that - measured on the three reference fights, one
 # frame was filed simultaneously as a right knee, a right hook *and* a left low
@@ -728,7 +742,7 @@ def _one_point_per_landed_action(event: StrikeEvent) -> int:
     return 1 if event.outcome in {"clean", "likely_landed"} else 0
 
 
-def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iterable[int], knockdowns: Iterable[KnockdownEvent] | None = None, *, reliable: bool = True) -> dict:
+def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iterable[int], knockdowns: Iterable[KnockdownEvent] | None = None, *, reliable: bool = True, estimated: bool = False) -> dict:
     key = normalize_ruleset(ruleset)
     profile = RULESETS[key]
     rounds = sorted(set(int(r) for r in round_numbers if r is not None))
@@ -741,7 +755,11 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
             kd_counts.setdefault(kd.round_number, {"A": 0, "B": 0})[kd.fighter] += 1
     illegal = []
 
-    verified_raw = [event for event in events if is_verified_scoring_event(event, key)]
+    # `estimated`: every landed candidate counts, and the caller labels the
+    # result as an estimate. See is_estimated_scoring_event.
+    counts_toward_score = is_estimated_scoring_event if estimated else is_verified_scoring_event
+    events = list(events)
+    verified_raw = [event for event in events if counts_toward_score(event, key)]
     verified_events, duplicate_count = deduplicate_scoring_events(verified_raw)
     verified_ids = {id(event) for event in verified_events}
     for event in events:

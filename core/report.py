@@ -13,7 +13,7 @@ from core.config import SETTINGS
 from core.evidence_trust import automated_evidence_trust
 from core.scoring import (
     SAME_INSTANT_SECONDS, event_legality, is_legal_event, is_verified_scoring_event,
-    minimum_kicks_per_round, score_fight,
+    minimum_kicks_per_round, score_fight, sport_counted_families,
 )
 from core.types import AnalysisRequest, DefenseEvent, RoundSpec, StrikeEvent
 
@@ -243,6 +243,52 @@ MIN_COVERAGE_TO_REPORT_OBSERVED = 0.15
 # nobody tuned against. See project-detector-measured-on-178-clips.
 STRIKE_COUNTS_PRECISION_VALIDATED = False
 
+# Whether punch, kick and knee counts are shown at all - a separate question
+# from whether they are validated, which is why it is a separate switch.
+#
+# Owner decision, 2026-09-27: every strike family a sport scores is shown,
+# because a report that counts kicks only was no use to a kickboxer, a boxer
+# or a Muay Thai fighter. The counts stay what they are - automatic, and not
+# validated - so they are labelled as estimates wherever they appear, with the
+# measured accuracy beside them (ESTIMATE_NOTE), and nothing that needs a
+# validated count is switched on by this: no "at least N", no confirmed
+# federation minimum. Those still follow STRIKE_COUNTS_PRECISION_VALIDATED.
+#
+# The measurement behind the note: 72 clips from a Kick Light bout, labelled
+# by a competitor. Of 42 strikes the detector proposed, 20 were real strikes
+# and 10 were the right type; of 30 moments it called quiet, 4 held a strike.
+STRIKE_COUNTS_PUBLISHED = True
+
+ESTIMATE_NOTE = (
+    "Automatic counts, not checked by a person. On a fight we checked by hand, "
+    "about half of the strikes WarriorIQ flagged were real, and it often mixed up "
+    "punches and kicks, so treat these as estimates."
+)
+
+ESTIMATED_SCORE_NOTE = (
+    "Estimated score, not an official judges' score. It is built from every strike "
+    "WarriorIQ marked as landed, counted automatically and not checked by a person. "
+    "On a fight we checked by hand, about two in three of those were real strikes, "
+    "and the strike type was often wrong."
+)
+
+_FAMILY_OF_PLURAL = {"punches": "punch", "kicks": "kick", "knees": "knee"}
+
+
+def published_families(sport: str | None) -> tuple[str, ...]:
+    """The strike families a report shows for this sport, singular.
+
+    Only what the sport scores - a boxing report does not list kicks the
+    detector proposed - and only kicks while counts are not published.
+    """
+    try:
+        scored = tuple(_FAMILY_OF_PLURAL[f] for f in sport_counted_families(sport or "kickboxing"))
+    except (KeyError, ValueError):
+        scored = ("punch", "kick", "knee")
+    if STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED:
+        return scored
+    return tuple(f for f in scored if f == "kick")
+
 
 def observed_summary(report: dict) -> dict | None:
     """What we can stand behind when the scorecard cannot be given.
@@ -300,13 +346,14 @@ def observed_summary(report: dict) -> dict | None:
     statistics = (report.get("statistics") or {}).get("fighters") or {}
     if not statistics:
         return None
+    shown = published_families((report.get("scorecard") or {}).get("sport"))
     out = {}
     for fighter in ("A", "B"):
         item = statistics.get(fighter) or {}
         coverage = float(item.get("observation_coverage") or 0.0)
         if coverage < MIN_COVERAGE_TO_REPORT_OBSERVED:
             continue
-        # Knees are not counted, and the reason they used to be is worth
+        # Knees were not counted, and the reason they used to be is worth
         # keeping: a knee and a round kick are both a leg arriving, so a
         # misnamed knee was still a leg and the count survived. Family-level
         # labelling of the HD bout says the confusion does not stop at the
@@ -317,26 +364,33 @@ def observed_summary(report: dict) -> dict | None:
         # cannot be published, whatever the label on it says. Dropping it
         # loses three real kicks per five proposals, which is an under-count,
         # and under-counting is the direction everything here already errs in.
-        kicks = int(item.get("kick_attempts") or 0)
-        punches_withheld = int(item.get("punch_attempts") or 0)
-        knees_withheld = int(item.get("knee_attempts") or 0)
-        if kicks <= 0:
+        #
+        # Both of those paragraphs still describe the detector. What changed is
+        # STRIKE_COUNTS_PUBLISHED: the families are shown as estimates, with
+        # the measured accuracy beside them, rather than withheld.
+        counts = {family: int(item.get("%s_attempts" % family) or 0) for family in shown}
+        total = sum(counts.values())
+        if total <= 0:
             continue
         out[fighter] = {
             "followed_share": coverage,
-            "actions_evidenced": kicks,
-            "families": {"kick": kicks},
+            "actions_evidenced": total,
+            "families": counts,
             # Surfaced so the page can say the omission is deliberate rather
             # than leaving a coach wondering why their boxer threw nothing.
-            "punches_withheld": punches_withheld,
-            "knees_withheld": knees_withheld,
+            "punches_withheld": 0 if "punch" in shown else int(item.get("punch_attempts") or 0),
+            "knees_withheld": 0 if "knee" in shown else int(item.get("knee_attempts") or 0),
         }
     if not out:
         return None
     return {
         "fighters": out,
-        "basis": "leg strikes the analysis flagged while it had sight of that fighter",
-        "punches_reported": False,
+        "basis": ("strikes the analysis flagged while it had sight of that fighter"
+                  if "punch" in shown or "knee" in shown else
+                  "leg strikes the analysis flagged while it had sight of that fighter"),
+        "families_shown": list(shown),
+        "punches_reported": "punch" in shown,
+        "estimate_note": ESTIMATE_NOTE,
         # Precision has been measured once, by hand, on three fights: about a
         # third of displayed actions were real. That is too small a sample to
         # publish as a product claim and far too weak to call the count a
@@ -362,11 +416,16 @@ def unattributed_kick_total(report: dict) -> dict | None:
     if not fighters:
         return None
     rows = [fighters.get(fighter) or {} for fighter in ("A", "B")]
-    attempts = sum(int(row.get("kick_attempts") or 0) for row in rows)
-    landed_values = [row.get("kicks_landed") for row in rows]
+    # With counts published this is every family the sport scores; the
+    # function keeps its name so callers and stored reports stay compatible.
+    shown = published_families((report.get("scorecard") or {}).get("sport"))
+    landed_key = {"punch": "punches_landed", "kick": "kicks_landed", "knee": "knees_landed"}
+    attempts = sum(int(row.get("%s_attempts" % family) or 0) for row in rows for family in shown)
+    landed_values = [row.get(landed_key[family]) for row in rows for family in shown]
     landed = (sum(int(value) for value in landed_values)
               if all(value is not None for value in landed_values) else None)
-    return {"attempts": attempts, "landed": landed}
+    return {"attempts": attempts, "landed": landed,
+            "label": "Kicks" if shown == ("kick",) else "Strikes"}
 
 
 def kick_minimum_check(report: dict) -> dict | None:
@@ -571,7 +630,11 @@ def build_preliminary_scorecard(
     coverage_b = float(tracking.get("fighter_B_coverage", 0))
     minimum_coverage = min(coverage_a, coverage_b)
     coverage_ok = minimum_coverage >= SETTINGS.min_tracking_coverage_for_score
-    scorecard = score_fight(events, ruleset, round_numbers, [], reliable=coverage_ok)
+    # With counts published but not validated, the score is built the same
+    # way - from the landed candidates - and labelled an estimate.
+    estimated = STRIKE_COUNTS_PUBLISHED and not STRIKE_COUNTS_PRECISION_VALIDATED
+    scorecard = score_fight(events, ruleset, round_numbers, [], reliable=coverage_ok,
+                            estimated=estimated)
     candidate_count = int(scorecard.get("verified_actions_counted", 0))
     scorecard["evidence"] = {
         "required_tracking_coverage_each": SETTINGS.min_tracking_coverage_for_score,
@@ -579,9 +642,10 @@ def build_preliminary_scorecard(
         "fighter_B_tracking_coverage": coverage_b,
         "scoring_action_candidates": candidate_count,
         "duplicate_action_candidates_removed": int(scorecard.get("duplicate_action_candidates_removed", 0)),
-        "action_confidence_required": 0.72,
-        "contact_confidence_required": 0.62,
-        "evidence_source": "unvalidated_action_candidates",
+        "action_confidence_required": None if estimated else 0.72,
+        "contact_confidence_required": None if estimated else 0.62,
+        "evidence_source": ("estimated_landed_candidates" if estimated
+                            else "unvalidated_action_candidates"),
     }
     if analysis_target != "BOTH":
         scorecard.update({
@@ -616,7 +680,7 @@ def build_preliminary_scorecard(
                 else "No preliminary score is shown because the automatic action engine found no scoring candidates with enough evidence."
             ),
         })
-    elif not STRIKE_COUNTS_PRECISION_VALIDATED:
+    elif not STRIKE_COUNTS_PRECISION_VALIDATED and not STRIKE_COUNTS_PUBLISHED:
         # **A kickboxing round cannot be scored on kicks alone.**
         #
         # Every ruleset here scores hands and feet, and K-1 weights a punch at
@@ -654,6 +718,10 @@ def build_preliminary_scorecard(
                 "count and the action timeline below are unaffected."
             ),
         })
+    elif estimated:
+        scorecard["available"] = True
+        scorecard["status"] = "estimated_from_detector"
+        scorecard["disclaimer"] = ESTIMATED_SCORE_NOTE
     else:
         scorecard["available"] = True
         scorecard["status"] = "preliminary_unvalidated"
@@ -883,8 +951,14 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     # readable - see PUNCHES_NEED_THIS_MANY_PIXELS.
     recording = (report.get("tracking") or {}).get("recording") or {}
     subject_pixels = float(recording.get("subject_px_in_network") or 0.0)
-    punches_are_readable = subject_pixels >= PUNCHES_NEED_THIS_MANY_PIXELS
-    countable_families = {"kick"} | ({"punch"} if punches_are_readable else set())
+    # With counts published every scored family is shown as an estimate,
+    # whatever the size of the fighters; ESTIMATE_NOTE says how far to trust it.
+    punches_are_readable = (STRIKE_COUNTS_PUBLISHED
+                            or subject_pixels >= PUNCHES_NEED_THIS_MANY_PIXELS)
+    if STRIKE_COUNTS_PUBLISHED:
+        countable_families = set(published_families((report.get("scorecard") or {}).get("sport")))
+    else:
+        countable_families = {"kick"} | ({"punch"} if punches_are_readable else set())
 
     kick_events = [e for e in _one_label_per_instant(report.get("events") or [])
                    if (e.get("family") or "") in countable_families]
@@ -961,8 +1035,9 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
                     "Punch counts, accuracy and named techniques are not shown for this "
                     "fight - the fighters are too small in the picture for WarriorIQ to "
                     "count hands reliably.")
+        estimate = (" " + ESTIMATE_NOTE) if STRIKE_COUNTS_PUBLISHED else ""
         note = "" if trusted else (
-            "<div class='muted'>%s %s</div>" % (measured, withheld))
+            "<div class='muted'>%s %s%s</div>" % (measured, withheld, escape(estimate)))
         # On a trusted run the timeline lists every key moment, so the flagged
         # count is what the table shows and the two already agree.
         if trusted:

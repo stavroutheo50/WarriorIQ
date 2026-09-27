@@ -19,7 +19,8 @@
       Punch counting is not accurate enough, so your report will show movement, pressure, ring centre, guard and balance &mdash; not how many punches were thrown or landed. Upload only if that is useful to you.</p>
     {% else %}
     <p class="setup-coverage" data-covered="no"><b>Your report counts {{ reported_families }}.</b>{% if withheld_families %}
-      {{ withheld_families|capitalize }} are not counted yet &mdash; checked against video, the count was not accurate enough to show.{% endif %}</p>
+      {{ withheld_families|capitalize }} are not counted yet &mdash; checked against video, the count was not accurate enough to show.{% endif %}{% if counts_are_estimates %}
+      {{ estimate_note }}{% endif %}</p>
     {% endif %}
     {#- "Not <thing>, which scores 2 to the body" reads as though the thing
         excluded is what scores 2, and with six excluded items in MMA the

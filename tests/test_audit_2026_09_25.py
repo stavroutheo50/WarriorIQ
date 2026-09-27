@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import re
 import unittest
+import unittest.mock
 
 import numpy as np
 
 
+# The kicks-only path, still reachable with the publish switch off.
+@unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
 class UnattributedKickTotalTests(unittest.TestCase):
     """Identity failed, and the page printed 31, 24 and 34 for the same kicks."""
 
@@ -176,6 +179,9 @@ class CornerLabelTests(unittest.TestCase):
 class ReportedFamiliesTests(unittest.TestCase):
     """"We count punches, kicks and knees" on every sport, then no punches."""
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
+    @unittest.mock.patch("app.main.STRIKE_COUNTS_PUBLISHED", False)
     def test_boxing_is_told_it_gets_no_strike_counts(self):
         from app.main import _reported_strike_families, _sport_coverage_badge
         from core.report import STRIKE_COUNTS_PRECISION_VALIDATED
@@ -185,6 +191,9 @@ class ReportedFamiliesTests(unittest.TestCase):
         self.assertTrue(_reported_strike_families("boxing")["no_strike_counts"])
         self.assertEqual(_sport_coverage_badge("boxing")["label"], "No punch counts yet")
 
+    # The withholding path, still reachable with the publish switch off.
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
+    @unittest.mock.patch("app.main.STRIKE_COUNTS_PUBLISHED", False)
     def test_kickboxing_says_kicks_only(self):
         from app.main import _reported_strike_families
         from core.report import STRIKE_COUNTS_PRECISION_VALIDATED
