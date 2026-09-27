@@ -12,7 +12,7 @@ from core.sport_profiles import build_sport_coaching
 from core.config import SETTINGS
 from core.evidence_trust import automated_evidence_trust
 from core.scoring import (
-    event_legality, is_legal_event, is_verified_scoring_event,
+    SAME_INSTANT_SECONDS, event_legality, is_legal_event, is_verified_scoring_event,
     minimum_kicks_per_round, score_fight,
 )
 from core.types import AnalysisRequest, DefenseEvent, RoundSpec, StrikeEvent
@@ -108,6 +108,35 @@ def _metric_row(label: str, value, key: str) -> str:
     context = "" if typical is None else f"typical ≈ {typical:.2f}"
     return (f"<tr><td>{escape(label)}</td><td>{float(value):.3f}</td>"
             f"<td class='muted'>{context}</td></tr>")
+
+
+def _one_label_per_instant(events: list[dict]) -> list[dict]:
+    """The report's copy of scoring.collapse_simultaneous_labels, for dicts.
+
+    The detector files one moment several times - once per limb that moved -
+    and contact classification then moves each copy onto the same impact
+    frame. On the hand-labelled Kick Light fight, 42 proposed events were 33
+    moments, and one of them was listed four times (a jab, a cross, an
+    uppercut and a low kick, all at 87.67s). The statistics block and the
+    scorecard already keep one label per fighter per instant; the report card
+    counted the raw list, so that moment was four of fighter A's "29 flagged".
+    Collapsed the same way, it is 21.
+    """
+    kept: list[dict] = []
+    for fighter in ("A", "B"):
+        own = sorted((e for e in events if e.get("fighter") == fighter),
+                     key=lambda e: float(e.get("peak_time") or 0.0))
+        groups: list[list[dict]] = []
+        for event in own:
+            if groups and (float(event.get("peak_time") or 0.0)
+                           - float(groups[-1][0].get("peak_time") or 0.0)) <= SAME_INSTANT_SECONDS:
+                groups[-1].append(event)
+            else:
+                groups.append([event])
+        kept.extend(max(group, key=lambda e: (float(e.get("contact_confidence") or 0.0),
+                                             float(e.get("confidence") or 0.0)))
+                    for group in groups)
+    return sorted(kept, key=lambda e: float(e.get("peak_time") or 0.0))
 
 
 def _timeline_event_reliable(event: StrikeEvent) -> bool:
@@ -857,7 +886,7 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     punches_are_readable = subject_pixels >= PUNCHES_NEED_THIS_MANY_PIXELS
     countable_families = {"kick"} | ({"punch"} if punches_are_readable else set())
 
-    kick_events = [e for e in (report.get("events") or [])
+    kick_events = [e for e in _one_label_per_instant(report.get("events") or [])
                    if (e.get("family") or "") in countable_families]
     def _arrived(event: dict) -> bool:
         outcome = event.get("outcome") or ""
@@ -892,13 +921,17 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         # what its own timeline lists.
         kicks = (int((attacks.get("families") or {}).get("kick") or 0) if trusted
                  else flagged_kicks.get(name, 0))
+        # On an untrusted run with readable punches this count includes them,
+        # and the row used to call it "leg strikes" regardless.
+        kicks_label = ("Strikes flagged" if not trusted and punches_are_readable
+                       else "Leg strikes flagged")
         # Every index gets the figure it should be read against. "Guard 0.110"
         # alone is unreadable - a coach cannot tell whether it is good, and the
         # report was showing four such numbers per fighter. The reference is
         # coaching's own POSE_DIMENSIONS, not a scale invented here, so the
         # card and the coaching text cannot disagree about what normal is.
         rows = [
-            f"<tr><td>Leg strikes flagged</td><td>{kicks}</td><td class='muted'></td></tr>",
+            f"<tr><td>{kicks_label}</td><td>{kicks}</td><td class='muted'></td></tr>",
             f"<tr><td>Pose coverage</td><td>{m['pose_coverage']*100:.1f}%</td><td class='muted'>of analysed frames</td></tr>",
             _metric_row("Footwork (body lengths/s)", m.get("footwork_body_lengths_per_second"), "footwork_body_lengths_per_second"),
             _metric_row("Guard", m.get("guard_index"), "guard_index"),
