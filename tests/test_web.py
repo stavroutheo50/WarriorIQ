@@ -3696,6 +3696,18 @@ class CountedStrikeListTests(unittest.TestCase):
         page = NoPunchClaimLeaksTests._render(NoPunchClaimLeaksTests._report(), counted_strikes=rows)
         self.assertIn("Watch every counted strike (1)", page)
         self.assertIn('href="/replay/x?t=61.50"', page)
+        self.assertNotIn('data-verdict=', page, "no answer buttons for a visitor who cannot save them")
+
+    def test_a_signed_in_owner_gets_the_answer_buttons(self):
+        rows = [{"fighter": "A", "family": "kick", "seconds": 61.5, "round": 1, "clock": "1:01.5",
+                 "check": "not_a_strike"}]
+        page = NoPunchClaimLeaksTests._render(NoPunchClaimLeaksTests._report(), counted_strikes=rows,
+                                              can_check_strikes=True)
+        for verdict in ("right", "not_a_strike", "punch", "knee"):
+            self.assertIn('data-verdict="%s"' % verdict, page)
+        self.assertNotIn('data-verdict="kick"', page, "no offer to relabel a kick as a kick")
+        self.assertIn("You said: <b>Not a strike</b>", page)
+        self.assertIn("/api/strike-check/x", page)
 
 
 @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)

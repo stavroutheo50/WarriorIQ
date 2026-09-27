@@ -156,7 +156,7 @@ def score(events: list, moments: list[dict]) -> dict:
         "unsure", "unlabelled", "labelled_strikes", "labelled_strikes_missed")}
 
 
-def run() -> dict:
+def run(fight: Path = FIGHT) -> dict:
     """Two scores: every proposal, and the ones a report actually counts.
 
     "counted" is what reaches the statistics block - the attempt tier in
@@ -164,9 +164,17 @@ def run() -> dict:
     """
     from core.analyzer import _live_attempt_reliable
 
-    events, moments = replay(), load_moments()
+    events, moments = replay(fight / "track.jsonl.gz"), load_moments(fight / "labels.json")
     return {"all_proposals": score(events, moments),
             "counted_in_report": score([e for e in events if _live_attempt_reliable(e)], moments)}
+
+
+def labelled_fights() -> list[Path]:
+    """Every fight folder with a track and labels: the Kick Light bout, and any
+    added by tools/export_strike_checks.py from fighters' one-tap answers."""
+    root = PROJECT_ROOT / "dataset" / "regression"
+    return sorted(p for p in root.iterdir()
+                  if p.is_dir() and (p / "track.jsonl.gz").exists() and (p / "labels.json").exists())
 
 
 def main() -> int:
@@ -175,20 +183,24 @@ def main() -> int:
     parser.add_argument("--write-baseline", action="store_true",
                         help="store these numbers as the comparison for the next run")
     args = parser.parse_args()
-    now = run()
-    baseline_path = FIGHT / "baseline.json"
-    if args.write_baseline:
-        baseline_path.write_text(json.dumps(now, indent=1) + "\n", encoding="utf-8")
+    results = {}
+    for fight in labelled_fights():
+        now = results[fight.name] = run(fight)
+        baseline_path = fight / "baseline.json"
+        if args.write_baseline:
+            baseline_path.write_text(json.dumps(now, indent=1) + "\n", encoding="utf-8")
+        if args.json:
+            continue
+        before = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
+        print(fight.name)
+        for section, numbers in now.items():
+            print("  " + section)
+            was = before.get(section) or {}
+            for key, value in numbers.items():
+                change = "" if key not in was or was[key] == value else "  (was %d)" % was[key]
+                print("    %-26s %4d%s" % (key, value, change))
     if args.json:
-        print(json.dumps(now, indent=1))
-        return 0
-    before = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
-    for section, numbers in now.items():
-        print(section)
-        was = before.get(section) or {}
-        for key, value in numbers.items():
-            change = "" if key not in was or was[key] == value else "  (was %d)" % was[key]
-            print("  %-26s %4d%s" % (key, value, change))
+        print(json.dumps(results, indent=1))
     return 0
 
 

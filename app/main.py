@@ -64,7 +64,7 @@ from core.db import (
     consume_password_reset_token,
     assign_fighter_to_fight, create_fighter, set_account_type, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
-    get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, get_fighter, get_profile,
+    get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, is_strike_check, get_fighter, get_profile,
     get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
     list_expired_fight_videos, list_fighters, list_fights, list_legal_acceptances, list_moderation_reports,
     link_oauth_identity, list_oauth_identities,
@@ -510,6 +510,18 @@ class AnnotationPayload(BaseModel):
     target: str
     outcome: str
     manual: bool = False
+
+
+class StrikeCheckPayload(BaseModel):
+    seconds: float
+    fighter: str
+    family: str
+    verdict: str
+
+
+# What a fighter can say about one counted strike, in one tap. "punch", "kick"
+# and "knee" mean it was a strike of that type rather than the one counted.
+STRIKE_CHECK_VERDICTS = ("right", "not_a_strike", "wrong_fighter", "punch", "kick", "knee")
 
 
 class WorkerIdentityPayload(BaseModel):
@@ -1643,6 +1655,14 @@ def _counted_strikes(report: dict, families: tuple[str, ...]) -> list[dict]:
                      "round": item.get("round_number"),
                      "clock": "%d:%04.1f" % (int(seconds // 60), seconds % 60)})
     return sorted(rows, key=lambda row: row["seconds"])
+
+
+def _with_checks(job_id: str, rows: list[dict]) -> list[dict]:
+    """The owner's earlier one-tap answers, so the page shows what they said."""
+    checks = _strike_checks(job_id)
+    for row in rows:
+        row["check"] = checks.get((row["fighter"], round(row["seconds"], 3)))
+    return rows
 
 
 def _estimate_score_withheld_for_punches(report: dict) -> None:
@@ -3416,6 +3436,8 @@ def remote_worker_dataset_backfill(request: Request):
 
     filled = skipped_no_consent = skipped_no_tracking = already = 0
     for annotation in list_annotations():
+        if is_strike_check(annotation):
+            continue      # a family, not a technique: never a training label
         if annotation.get("sequence_path"):
             already += 1
             continue
@@ -4239,9 +4261,10 @@ def result_page(request: Request, job_id: str):
         "kick_total": None if identity_trusted else unattributed_kick_total(report),
         "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
         # Attributions, like the per-fighter cards, so only when identity held.
-        "counted_strikes": (_counted_strikes(report, published_families(
-            (report.get("scorecard") or {}).get("sport") or _job_sport(job)))
+        "counted_strikes": (_with_checks(job_id, _counted_strikes(report, published_families(
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job))))
             if identity_trusted and STRIKE_COUNTS_PUBLISHED else []),
+        "can_check_strikes": bool(_account(request)),
         "estimate_note": ESTIMATE_NOTE,
         "families_shown": published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job)),
@@ -4288,6 +4311,60 @@ def download_report_json(request: Request, job_id: str):
             "Cache-Control": "no-store",
         },
     )
+
+
+@app.post("/api/strike-check/{job_id}", dependencies=[Depends(require_csrf)])
+def check_counted_strike(request: Request, job_id: str, payload: StrikeCheckPayload):
+    """One tap on a counted strike: right, not a strike, or another type.
+
+    Stored in the annotations table beside full corrections - one row per
+    fight and moment, no new schema - marked source "strike_check" so it can
+    be told apart. Open to any signed-in owner of the fight rather than only
+    correcting plans: these answers are what grows the labelled benchmark
+    (tools/export_strike_checks.py), and a free user's answer is as true as
+    a paying one's. Nothing is exported for training here; that still needs
+    the full correction and the owner's training consent.
+    """
+    _enforce_rate_limit(request, "strike_checks", 300, 300)
+    if not _account(request) or not _authorized_job(request, job_id):
+        raise HTTPException(403, "Sign in to check your own fight.")
+    fighter = payload.fighter.upper()
+    family = payload.family.lower()
+    verdict = payload.verdict.lower()
+    if (not math.isfinite(payload.seconds) or payload.seconds < 0
+            or fighter not in {"A", "B"} or family not in {"punch", "kick", "knee"}
+            or verdict not in STRIKE_CHECK_VERDICTS):
+        raise HTTPException(400, "Invalid answer")
+    report_path = _require_completed_artifact(job_id, "report.json")
+    if not report_path.exists():
+        raise HTTPException(404, "Fight report not found")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    counted = [row for row in _counted_strikes(report, (family,))
+               if row["fighter"] == fighter and abs(row["seconds"] - payload.seconds) <= 0.05]
+    if not counted:
+        raise HTTPException(404, "No counted strike at that moment")
+    seconds = round(counted[0]["seconds"], 3)
+    if verdict == "right":
+        truth = family
+    elif verdict in {"punch", "kick", "knee"}:
+        truth = verdict
+    else:
+        truth = "none"
+    predicted = {"fighter": fighter, "family": family, "technique": family}
+    corrected = {"fighter": fighter, "family": truth, "technique": truth,
+                 "verdict": verdict, "source": "strike_check"}
+    save_annotation(job_id, seconds, report.get("setup", {}).get("ruleset", "K1"), predicted, corrected)
+    return {"saved": True, "seconds": seconds, "verdict": verdict}
+
+
+def _strike_checks(job_id: str) -> dict[tuple[str, float], str]:
+    """This fight's one-tap answers, keyed by (fighter, seconds)."""
+    out = {}
+    for item in get_annotations(job_id):
+        corrected = item.get("corrected") or {}
+        if corrected.get("source") == "strike_check":
+            out[(corrected.get("fighter"), round(float(item["event_time"]), 3))] = corrected.get("verdict")
+    return out
 
 
 @app.post("/api/annotations/{job_id}", dependencies=[Depends(require_csrf)])
@@ -4500,7 +4577,8 @@ def validation_page(request: Request):
         raise HTTPException(404)
     profile_id = _profile_id(request)
     owned_jobs = {fight["job_id"] for fight in list_fights(profile_id)} if profile_id is not None else set()
-    annotations = [item for item in list_annotations() if item["job_id"] in owned_jobs]
+    annotations = [item for item in list_annotations()
+                   if item["job_id"] in owned_jobs and not is_strike_check(item)]
     dataset = audit_dataset_split(DATASET / "sequences", DATASET / "untouched_test")
     summary = accuracy_summary(annotations)
     end_to_end = assess_end_to_end_validation(end_to_end_metadata(summary))

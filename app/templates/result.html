@@ -384,10 +384,37 @@
     <p class="observed-note">Tap one to watch it. The replay starts a second before the strike.</p>
     <ol class="counted-strike-list">
       {% for s in counted_strikes %}
-      <li><a href="/replay/{{job_id}}?t={{ '%.2f'|format(s.seconds) }}"><span class="cs-time">{{ s.clock }}</span><span class="cs-who">Fighter {{ s.fighter }}</span><span class="cs-what">{{ s.family }}</span></a></li>
+      <li data-seconds="{{ '%.3f'|format(s.seconds) }}" data-fighter="{{ s.fighter }}" data-family="{{ s.family }}">
+        <a href="/replay/{{job_id}}?t={{ '%.2f'|format(s.seconds) }}"><span class="cs-time">{{ s.clock }}</span><span class="cs-who">Fighter {{ s.fighter }}</span><span class="cs-what">{{ s.family }}</span></a>
+        {% if can_check_strikes %}
+        <div class="cs-check" role="group" aria-label="Was this right?">
+          {% set labels = {'right': 'Right', 'not_a_strike': 'Not a strike', 'wrong_fighter': 'Other fighter', 'punch': 'It was a punch', 'kick': 'It was a kick', 'knee': 'It was a knee'} %}
+          <span class="cs-said" {% if not s.check %}hidden{% endif %}>You said: <b>{{ labels.get(s.check, '') }}</b></span>
+          <button type="button" data-verdict="right">Right</button>
+          <button type="button" data-verdict="not_a_strike">Not a strike</button>
+          {% for other in ['punch', 'kick', 'knee'] if other != s.family %}<button type="button" data-verdict="{{ other }}">Was a {{ other }}</button>{% endfor %}
+        </div>
+        {% endif %}
+      </li>
       {% endfor %}
     </ol>
+    {% if can_check_strikes %}<p class="observed-note">Tell us when one is wrong. Your answers are saved with this fight and are how WarriorIQ checks, fight by fight, whether its counting is getting better.</p>{% endif %}
   </details>
+  {% if can_check_strikes %}
+  <script nonce="{{ request.state.csp_nonce }}">
+  (()=>{const labels={right:'Right',not_a_strike:'Not a strike',wrong_fighter:'Other fighter',punch:'It was a punch',kick:'It was a kick',knee:'It was a knee'};
+  document.querySelectorAll('.counted-strike-list li').forEach(li=>li.querySelectorAll('.cs-check button').forEach(b=>b.addEventListener('click',async()=>{
+    const body={seconds:Number(li.dataset.seconds),fighter:li.dataset.fighter,family:li.dataset.family,verdict:b.dataset.verdict};
+    li.querySelectorAll('.cs-check button').forEach(x=>x.disabled=true);
+    try{const r=await fetch({{ ('/api/strike-check/' ~ job_id)|tojson }},{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
+      if(!r.ok)throw new Error(String(r.status));
+      const said=li.querySelector('.cs-said');said.hidden=false;said.querySelector('b').textContent=labels[b.dataset.verdict];
+      if(window.wiqToast)window.wiqToast('Saved. Thank you.','success');
+    }catch(err){if(window.wiqToast)window.wiqToast('Could not save that answer. Try again.','error');}
+    finally{li.querySelectorAll('.cs-check button').forEach(x=>x.disabled=false);}
+  })));})();
+  </script>
+  {% endif %}
   {% endif %}
   <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'Keep the measured baseline'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Build the next clean sample'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% endif %}</article></div>
   {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary"><div class="eyebrow">Final coaching summary · Fighter {{primary}}</div><h2>What this fight says to work on next</h2><div class="performance-insights">{% set worked = keep[1] if keep|length > 1 else (keep[0] if keep else None) %}<article><span>What worked</span><strong>{{worked.title if worked else 'No supported strength yet'}}</strong><p>{{worked.detail if worked else 'The report needs more evidence before naming a strength.'}}</p></article><article><span>What hurt performance</span><strong>{{fix[0].title if fix else 'No supported weakness yet'}}</strong><p>{{fix[0].detail if fix else 'The report does not invent a weakness without evidence.'}}</p></article>{% set plan=report.training_plan[primary]|default([]) %}<article><span>Next training priority</span><strong>{{plan[0].focus if plan else 'Collect a cleaner sample'}}</strong><p>{{plan[0].work if plan else 'Use a clear full-body camera angle and keep both fighters visible.'}}</p></article><article><span>Success target</span><strong>{{plan[0].goal if plan else 'Improve usable evidence'}}</strong><p>This target comes from Fighter {{primary}}’s measured report, not a generic template.</p></article></div></section>{% endif %}
