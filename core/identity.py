@@ -5,7 +5,6 @@ from collections import deque
 
 import numpy as np
 
-from core.camera_motion import matrix_scale, warp_box
 from core.config import SETTINGS
 from core.reid import pool as reid_pool
 from core.reid import similarity as reid_similarity
@@ -190,11 +189,6 @@ class IdentityManager:
         # did you move? Measured across every fight so far, fighters cover 24 to
         # 65 body lengths a minute; a man standing at the mat edge covered 9.6.
         self._track_history: dict[int, deque] = {}
-        # Current frame -> the first frame's view, so a track's history is
-        # recorded relative to the hall rather than the screen. Identity while
-        # the camera never moves. See apply_camera_motion.
-        self._world = np.eye(3, dtype=np.float64)
-        self.camera_corrected_frames = 0
         # Tracks proven to be scenery. A fighter released for standing
         # perfectly still must not be re-acquired on the next frame, or
         # the manager spends the fight letting go of the same chair.
@@ -246,15 +240,11 @@ class IdentityManager:
                 seen.append(np.asarray(person.reid, dtype=np.float32).ravel())
             history = self._track_history.setdefault(int(person.track_id), deque(maxlen=450))
             box = person.box
-            # In the first frame's view: a spectator stays still while the
-            # camera pans, and a fighter's travel is their own.
-            cx, cy = float((box[0] + box[2]) / 2.0), float((box[1] + box[3]) / 2.0)
-            wx, wy, _ = self._world @ np.asarray([cx, cy, 1.0])
             history.append((
                 source_frame,
-                float(wx),
-                float(wy),
-                max(1.0, float(box[3] - box[1]) * matrix_scale(self._world[:2])),
+                float((box[0] + box[2]) / 2.0),
+                float((box[1] + box[3]) / 2.0),
+                max(1.0, float(box[3] - box[1])),
             ))
 
     def _recent_travel(self, track_id: int | None, fps: float) -> float | None:
@@ -406,32 +396,6 @@ class IdentityManager:
             if person.track_id == track_id:
                 return person
         return None
-
-    def apply_camera_motion(self, matrix) -> None:
-        """Carry what is known about the fighters through a camera movement.
-
-        `matrix` maps the previous analysed frame onto this one (see
-        core/camera_motion.py). Without it, a pan made the real fighter look
-        like a jump and a seated spectator look like a mover.
-        """
-        if matrix is None:
-            return
-        m = np.asarray(matrix, dtype=np.float64)
-        full = np.vstack([m, [0.0, 0.0, 1.0]])
-        try:
-            inverse = np.linalg.inv(full)
-        except np.linalg.LinAlgError:
-            return
-        for state in (self.a, self.b):
-            if state.last_box is not None:
-                state.last_box = warp_box(state.last_box, m)
-            if state.prev_box is not None:
-                state.prev_box = warp_box(state.prev_box, m)
-            if state.velocity is not None:
-                state.velocity = (np.asarray(state.velocity, dtype=np.float64)
-                                  @ m[:, :2].T).astype(np.float32)
-        self._world = self._world @ inverse
-        self.camera_corrected_frames += 1
 
     def expected_boxes(self) -> dict:
         """Where each fighter should be on this frame, for a closer look.

@@ -17,7 +17,6 @@ import numpy as np
 import torch
 
 from core.action import ActionEngine
-from core.camera_motion import CameraMotionEstimator
 from core.config import OUTPUTS, SETTINGS
 from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
 from core.generalship import judge_fight
@@ -757,8 +756,6 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         first_frame,
     )
     manager = IdentityManager(initial_a, initial_b, start_frame, source_fps=info.fps)
-    camera_motion = CameraMotionEstimator()
-    camera_motion.update(first_frame, [person.box for person in first_people])
     # Can these two be told apart in this video at all? Asked once, at the
     # start, because no amount of work downstream recovers from "no".
     pair_similarity = fighter_pair_similarity(initial_a, initial_b)
@@ -905,10 +902,6 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 next_inference_frame = source_frame + max(1, inference_stride)
 
                 people = pose_tracker.track(frame, current_imgsz)
-                # Before anything asks where a fighter should be: move what is
-                # known about them by however far the camera moved.
-                manager.apply_camera_motion(
-                    camera_motion.update(frame, [person.box for person in people]))
                 guidance = nearest_guidance(sam_tracks, source_frame, sam_stride)
                 focused = pose_tracker.recover_from_guidance(frame, guidance, people)
                 for observation in focused:
@@ -1254,7 +1247,6 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "fighter_B_missing_frames": missing["B"],
         "fighter_A_recoveries": manager.a.recovery_count,
         "fighter_B_recoveries": manager.b.recovery_count,
-        "camera_motion_corrected_frames": manager.camera_corrected_frames,
         "fighter_A_track_handoffs": manager.track_handoffs["A"],
         "fighter_B_track_handoffs": manager.track_handoffs["B"],
         "fighter_A_handoffs_per_minute": round(manager.track_handoffs["A"] / (segment_duration / 60.0), 2),
