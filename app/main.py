@@ -60,11 +60,12 @@ from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
-    add_assignment, analysis_allowance, apply_checkout_event, consume_email_verification_token,
+    add_assignment, analysis_allowance, award_points, link_camp_mission, list_camp_missions,
+    list_points, list_training_sessions, record_training_session, apply_checkout_event, consume_email_verification_token,
     consume_password_reset_token,
     assign_fighter_to_fight, create_fighter, set_account_type, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
-    get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, is_strike_check, get_fighter, get_profile,
+    get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, is_down_check, is_strike_check, get_fighter, get_profile,
     get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
     list_expired_fight_videos, list_fighters, list_fights, list_legal_acceptances, list_moderation_reports,
     link_oauth_identity, list_oauth_identities,
@@ -99,14 +100,21 @@ from core.preflight_client import client_thresholds
 from core.report_visuals import build as report_visuals
 from core.upload_security import (
     FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS, FIGHT_VIDEO_LABEL,
-    UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, looks_like_video, scan_upload,
+    UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, limit_upload_route, looks_like_video,
+    scan_upload,
     reserve_upload_storage, release_upload_storage,
 )
+from core import sport_check
 from core.fight_stats import _deduplicate as _deduplicate_strikes
+from core.camp import (
+    DAILY_COUNTED_SESSIONS, IMPROVED_POINTS, MISSION_DONE_POINTS, SESSION_POINTS, camp_standing,
+    fight_camp_missions, mission_result, missions_from_report,
+)
+from core.training_check import check_training_video
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
-    refresh_identity_integrity, unattributed_kick_total,
+    refresh_identity_integrity, share_card, unattributed_kick_total,
 )
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
@@ -336,6 +344,7 @@ _rate_windows: dict[str, list[float]] = {}
 MAX_FIGHT_BYTES = SETTINGS.max_fight_bytes
 MAX_PROFILE_PHOTO_BYTES = 15 * 1024 * 1024
 MAX_PROFILE_VIDEO_BYTES = 500 * 1024 * 1024
+limit_upload_route("/profile", MAX_PROFILE_PHOTO_BYTES + MAX_PROFILE_VIDEO_BYTES)
 _progress_report_cache: dict[str, tuple[int, dict]] = {}
 LOGGER = logging.getLogger("warrioriq")
 
@@ -400,7 +409,7 @@ SPORT_IRRELEVANT_PREFIXES = ("/profile", "/settings", "/legal", "/privacy", "/te
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/dashboard", "/history",
-    "/compare", "/coach", "/profile", "/validation", "/s/", "/share/", "/shares/",
+    "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
     "/auth/",
 )
@@ -512,6 +521,11 @@ class AnnotationPayload(BaseModel):
     manual: bool = False
 
 
+class SportCheckPayload(BaseModel):
+    sport: str
+    frames: list[str]
+
+
 class StrikeCheckPayload(BaseModel):
     seconds: float
     fighter: str
@@ -522,6 +536,20 @@ class StrikeCheckPayload(BaseModel):
 # What a fighter can say about one counted strike, in one tap. "punch", "kick"
 # and "knee" mean it was a strike of that type rather than the one counted.
 STRIKE_CHECK_VERDICTS = ("right", "not_a_strike", "wrong_fighter", "punch", "kick", "knee")
+
+
+class DownCheckPayload(BaseModel):
+    seconds: float
+    verdict: str
+
+
+# Who went down at a moment core.ground found: the analysis cannot tell, so
+# the owner says. "nobody" means nobody went down there.
+DOWN_CHECK_VERDICTS = ("A", "B", "nobody")
+# Annotations are one row per fight and time. Strike answers are stored at
+# the strike's time rounded to the millisecond, so a down answer is stored
+# half a millisecond later and can never overwrite one at the same instant.
+DOWN_CHECK_TIME_OFFSET = 0.0005
 
 
 class WorkerIdentityPayload(BaseModel):
@@ -1444,7 +1472,7 @@ async def viewer_context(request: Request, call_next):
         f"img-src {img_src}; media-src 'self' blob:; connect-src {connect_src}; frame-src {frame_src}; "
         f"frame-ancestors 'none'; form-action {form_action}",
     )
-    if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/s/")):
+    if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/")):
         # setdefault, so a route that has already chosen keeps its value.
         # /media/ does exactly that: a fight video is private but not
         # volatile, and re-sending 101 MB on every seek is not privacy.
@@ -1662,6 +1690,26 @@ def _with_checks(job_id: str, rows: list[dict]) -> list[dict]:
     checks = _strike_checks(job_id)
     for row in rows:
         row["check"] = checks.get((row["fighter"], round(row["seconds"], 3)))
+    return rows
+
+
+def _went_down(job_id: str, report: dict) -> list[dict]:
+    """The moments someone went down (core.ground), with the owner's answers.
+
+    Not attributed to a fighter, so shown whether or not identity held: it
+    only says that someone was down at that second.
+    """
+    answers = _down_checks(job_id)
+    rows = []
+    for moment in (report.get("went_down") or {}).get("moments") or []:
+        try:
+            seconds = float(moment["seconds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        rows.append({"seconds": seconds, "round": moment.get("round"),
+                     "down_seconds": int(moment.get("down_seconds") or 0),
+                     "clock": "%d:%02d" % (int(seconds // 60), int(seconds % 60)),
+                     "check": answers.get(round(seconds, 3))})
     return rows
 
 
@@ -2664,6 +2712,9 @@ def _sport_context(request: Request, sport: str) -> dict:
         # asked which one this fight is about.
         "single_fighter": (_request_plan(request) or {}).get("roster_limit") == 1,
         "unobserved": sport_unobserved(sport),
+        # Only offered when a provider is configured; see core/sport_check.py.
+        "sport_check_enabled": sport_check.provider() is not None,
+        "sport_labels": {key: RULESET_SPORTS[key] for key in SPORTS},
         # What this sport can actually score, rather than a fixed sentence.
         "counted_families": _prose_list(sport_counted_families(sport)),
         # What the *report* will show, which is narrower. Punch and knee counts
@@ -3436,8 +3487,8 @@ def remote_worker_dataset_backfill(request: Request):
 
     filled = skipped_no_consent = skipped_no_tracking = already = 0
     for annotation in list_annotations():
-        if is_strike_check(annotation):
-            continue      # a family, not a technique: never a training label
+        if is_strike_check(annotation) or is_down_check(annotation):
+            continue      # one-tap answers, not a technique: never a training label
         if annotation.get("sequence_path"):
             already += 1
             continue
@@ -4265,6 +4316,11 @@ def result_page(request: Request, job_id: str):
             (report.get("scorecard") or {}).get("sport") or _job_sport(job))))
             if identity_trusted and STRIKE_COUNTS_PUBLISHED else []),
         "can_check_strikes": bool(_account(request)),
+        "went_down": _went_down(job_id, report),
+        # Stats-only story card for Instagram, TikTok, WhatsApp and the rest:
+        # an image made in the browser, no link and no video, so every plan.
+        "share_card": share_card(report) if _account(request) else None,
+        "went_down_note": (report.get("went_down") or {}).get("note"),
         "estimate_note": ESTIMATE_NOTE,
         "families_shown": published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job)),
@@ -4311,6 +4367,31 @@ def download_report_json(request: Request, job_id: str):
             "Cache-Control": "no-store",
         },
     )
+
+
+@app.post("/api/sport-check", dependencies=[Depends(require_csrf)])
+def check_sport(request: Request, payload: SportCheckPayload):
+    """Name the sport in three frames from the chosen video, before upload.
+
+    Advisory and off unless a provider is configured (core/sport_check.py).
+    The frames are forwarded to that provider and never stored here.
+    """
+    if sport_check.provider() is None:
+        return {"available": False}
+    if not _account(request):
+        raise HTTPException(401, "Sign in first")
+    _enforce_rate_limit(request, "sport_check", 20, 600)
+    if payload.sport not in SPORTS:
+        raise HTTPException(400, "Unknown sport")
+    try:
+        images = sport_check.decode_frames(payload.frames)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "Invalid frames") from exc
+    result = sport_check.verdict(payload.sport, sport_check.detect_sport(images))
+    if result.get("detected"):
+        result["detected_label"] = RULESET_SPORTS[result["detected"]]
+        result["chosen_label"] = RULESET_SPORTS[payload.sport]
+    return {"available": True, **result}
 
 
 @app.post("/api/strike-check/{job_id}", dependencies=[Depends(require_csrf)])
@@ -4364,6 +4445,42 @@ def _strike_checks(job_id: str) -> dict[tuple[str, float], str]:
         corrected = item.get("corrected") or {}
         if corrected.get("source") == "strike_check":
             out[(corrected.get("fighter"), round(float(item["event_time"]), 3))] = corrected.get("verdict")
+    return out
+
+
+@app.post("/api/down-check/{job_id}", dependencies=[Depends(require_csrf)])
+def check_went_down(request: Request, job_id: str, payload: DownCheckPayload):
+    """One tap on a moment someone went down: fighter A, fighter B, or nobody.
+
+    The analysis finds these moments but cannot yet tell who went down (see
+    core/ground.py), so the owner's answer is the only attribution there is.
+    Stored like a strike check, marked source "down_check".
+    """
+    _enforce_rate_limit(request, "down_checks", 120, 300)
+    if not _account(request) or not _authorized_job(request, job_id):
+        raise HTTPException(403, "Sign in to check your own fight.")
+    verdict = payload.verdict if payload.verdict in {"A", "B"} else payload.verdict.lower()
+    if not math.isfinite(payload.seconds) or payload.seconds < 0 or verdict not in DOWN_CHECK_VERDICTS:
+        raise HTTPException(400, "Invalid answer")
+    report_path = _require_completed_artifact(job_id, "report.json")
+    if not report_path.exists():
+        raise HTTPException(404, "Fight report not found")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    found = [row for row in _went_down(job_id, report) if abs(row["seconds"] - payload.seconds) <= 0.05]
+    if not found:
+        raise HTTPException(404, "No moment at that time")
+    seconds = round(found[0]["seconds"], 3)
+    save_annotation(job_id, seconds + DOWN_CHECK_TIME_OFFSET, report.get("setup", {}).get("ruleset", "K1"),
+                    {"event": "went_down"}, {"went_down": verdict, "source": "down_check"})
+    return {"saved": True, "seconds": seconds, "verdict": verdict}
+
+
+def _down_checks(job_id: str) -> dict[float, str]:
+    """This fight's answers on who went down, keyed by the moment's seconds."""
+    out = {}
+    for item in get_annotations(job_id):
+        if is_down_check(item):
+            out[round(float(item["event_time"]) - DOWN_CHECK_TIME_OFFSET, 3)] = item["corrected"].get("went_down")
     return out
 
 
@@ -4504,7 +4621,7 @@ def review_evidence_page(request: Request, job_id: str, page: int = 1, mode: str
         return RedirectResponse(f"/select/{job_id}", status_code=303)
     mode = "dataset" if mode == "dataset" else "scorecard"
     all_candidates = _review_candidates(report, mode)
-    annotations = get_annotations(job_id)
+    annotations = [item for item in get_annotations(job_id) if not is_down_check(item)]
     annotation_map = {f"{float(item['event_time']):.3f}": item for item in annotations}
     per_page = 40
     page_count = max(1, math.ceil(len(all_candidates) / per_page))
@@ -4547,7 +4664,8 @@ def complete_evidence_review(
         if not report.get("integrity", {}).get("identity_evidence_trusted", True):
             return RedirectResponse(f"/select/{job_id}", status_code=303)
         candidates = _review_candidates(report, mode)
-        reviewed_times = [float(item["event_time"]) for item in get_annotations(job_id)]
+        reviewed_times = [float(item["event_time"]) for item in get_annotations(job_id)
+                          if not is_down_check(item)]
         remaining = [item for item in candidates if not any(abs(float(item["peak_time"]) - value) <= .02 for value in reviewed_times)]
         if remaining:
             raise HTTPException(409, f"Review the remaining {len(remaining)} candidates before completing the fight.")
@@ -4578,7 +4696,7 @@ def validation_page(request: Request):
     profile_id = _profile_id(request)
     owned_jobs = {fight["job_id"] for fight in list_fights(profile_id)} if profile_id is not None else set()
     annotations = [item for item in list_annotations()
-                   if item["job_id"] in owned_jobs and not is_strike_check(item)]
+                   if item["job_id"] in owned_jobs and not is_strike_check(item) and not is_down_check(item)]
     dataset = audit_dataset_split(DATASET / "sequences", DATASET / "untouched_test")
     summary = accuracy_summary(annotations)
     end_to_end = assess_end_to_end_validation(end_to_end_metadata(summary))
@@ -5010,37 +5128,6 @@ def _athlete_fighter_id(fights: list[dict]) -> int | None:
     return ids.most_common(1)[0][0] if ids else None
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
-def dashboard_page(request: Request):
-    profile_id = _profile_id(request)
-    if profile_id is None:
-        return templates.TemplateResponse(
-            request=request, name="dashboard.html",
-            context={"request": request, "profile": None, "progress": None, "assignments": []},
-        )
-    profile = get_profile(profile_id) or {}
-    fights = list_fights(profile_id)
-    # One athlete's progress. The page is headed with one fighter's name, and
-    # it charted every fight in the workspace: a teammate's 40% guard became
-    # the athlete's "last fight" and the headline read -18 points. Fights with
-    # no roster fighter (analysed before the roster existed) stay in.
-    athlete_id = _athlete_fighter_id(fights)
-    records = [record for record in _reports_for_profile(profile_id)
-               if athlete_id is None or record.get("fighter_id") in (None, athlete_id)]
-    progress = build_progress(records, profile.get("default_fighter", "A"))
-    other_fights = sum(1 for fight in fights
-                       if athlete_id is not None and fight.get("fighter_id") not in (None, athlete_id))
-    return templates.TemplateResponse(
-        request=request, name="dashboard.html",
-        context={
-            "request": request, "profile": profile, "progress": progress,
-            "athlete_name": _athlete_name(profile, fights),
-            "other_fighter_fights": other_fights,
-            "assignments": list_assignments(profile_id),
-        },
-    )
-
-
 @app.get("/history", response_class=HTMLResponse)
 def history_page(request: Request):
     profile_id = _profile_id(request)
@@ -5133,45 +5220,88 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     )
 
 
+@app.get("/camp", response_class=HTMLResponse)
+@app.get("/dashboard", response_class=HTMLResponse)
 @app.get("/coach", response_class=HTMLResponse)
-def coach_page(request: Request, error: str = "", name: str = ""):
+def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = ""):
+    """Fight Camp: missions from the latest fight, progress, and the squad.
+
+    Progress (/dashboard) and the coach portal (/coach) were two pages about
+    the same thing - what this athlete should work on and whether it is
+    working. They are one page now. Both old addresses still answer, with the
+    same page, because sign-in lands on /dashboard and the coach forms return
+    to /coach#squad and /coach#assignments.
+    """
     profile_id = _profile_id(request)
-    profile = get_profile(profile_id) if profile_id is not None else None
-    fights = list_fights(profile_id) if profile_id is not None else []
+    if profile_id is None:
+        return templates.TemplateResponse(
+            request=request, name="camp.html",
+            context={"request": request, "profile": None, "signed_in": False, "progress": None,
+                     "assignments": [], "camp": None},
+        )
+    profile = get_profile(profile_id) or {}
+    fights = list_fights(profile_id)
     for fight in fights:
         # The saved-evidence list printed the raw ruleset enum beside every
         # entry: "Fight analysis · KICK_LIGHT".
         fight["choice_label"] = fight_choice_label(
             fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
             fight.get("fighter_name"))
-    latest = None
-    focus = (profile or {}).get("default_fighter", "A")
-    suggested_assignments: list[dict] = []
-    if fights:
-        path = Path(fights[0]["report_path"])
-        if path.exists():
-            latest = json.loads(path.read_text(encoding="utf-8"))
-            _apply_report_annotations(latest, [])
-            refresh_identity_integrity(latest)
-            focus = latest.get("video", {}).get("focus_fighter") or latest.get("video", {}).get("analysis_target", focus)
-            if focus not in {"A", "B"}:
-                focus = (profile or {}).get("default_fighter", "A")
-            suggested_assignments = list(latest.get("training_plan", {}).get(focus, []))[:3]
+    # One athlete's progress. The page is headed with one fighter's name, and
+    # it charted every fight in the workspace: a teammate's 40% guard became
+    # the athlete's "last fight" and the headline read -18 points. Fights with
+    # no roster fighter (analysed before the roster existed) stay in.
+    athlete_id = _athlete_fighter_id(fights)
+    records = [record for record in _reports_for_profile(profile_id)
+               if athlete_id is None or record.get("fighter_id") in (None, athlete_id)]
+    default_fighter = profile.get("default_fighter", "A")
+    progress = build_progress(records, default_fighter)
+    other_fights = sum(1 for fight in fights
+                       if athlete_id is not None and fight.get("fighter_id") not in (None, athlete_id))
+    assignments = list_assignments(profile_id)
+
+    newest_first = [{"job_id": r["job_id"], "created_at": r.get("created_at"), "report": r["report"],
+                     "fighter": _camp_fighter(r["report"], default_fighter)} for r in reversed(records)]
+    camp = fight_camp_missions(newest_first, assignments)
+    # The big award: a fight after the mission was taken shows its number
+    # moved. Checked here, where the fights are already loaded; award_points
+    # gives it once however often the page is opened.
+    results = {}
+    for mission in list_camp_missions(profile_id):
+        later = [r for r in reversed(newest_first)
+                 if r["job_id"] != mission["job_id"] and str(r.get("created_at") or "") > mission["created_at"]]
+        result = mission_result(mission, later)
+        if result is not None:
+            results[mission["assignment_id"]] = result
+            if result["improved"]:
+                award_points(profile_id, IMPROVED_POINTS, "improved", str(mission["assignment_id"]))
+    sessions = list_training_sessions(profile_id)
+    counted = {}
+    for item in sessions:
+        if item["verdict"] == "counted" and item["assignment_id"] is not None:
+            counted[item["assignment_id"]] = counted.get(item["assignment_id"], 0) + 1
     return templates.TemplateResponse(
-        request=request, name="coach.html",
+        request=request, name="camp.html",
         context={
-            "request": request, "fights": fights, "latest": latest,
-            "identity": sport_identity((latest or {}).get("scorecard", {}).get("sport", "kickboxing")) if latest else None,
-            "assignments": list_assignments(profile_id) if profile_id is not None else [],
-            "signed_in": profile_id is not None,
-            "focus": focus,
-            "suggested_assignments": suggested_assignments,
+            "request": request, "profile": profile, "signed_in": True, "progress": progress,
+            "athlete_name": _athlete_name(profile, fights),
+            "other_fighter_fights": other_fights,
+            "assignments": assignments,
+            "camp": camp,
+            "standing": camp_standing(list_points(profile_id), sessions, datetime.now(timezone.utc).date()),
+            "sessions_by_item": counted,
+            "mission_results": results,
+            "session_message": TRAINING_VERDICT_MESSAGES.get(session, "").format(
+                points=SESSION_POINTS, cap=DAILY_COUNTED_SESSIONS),
+            "points_rules": {"session": SESSION_POINTS, "daily": DAILY_COUNTED_SESSIONS,
+                             "done": MISSION_DONE_POINTS, "improved": IMPROVED_POINTS},
+            "fights": fights,
             # A coach triages a squad; an athlete fixes one thing. This is the
             # coach half - every fight in order and which way the numbers are
             # moving. See core/squad.py.
             "squad": build_squad_view(fights),
             # The roster is what the per-row assign control offers.
-            "roster": list_fighters(profile_id) if profile_id is not None else [],
+            "roster": list_fighters(profile_id),
             # A rejected roster addition comes back here rather than as a 400
             # page, so the coach keeps the squad they were looking at. The
             # typed name comes back with it - being told the name was wrong
@@ -5268,7 +5398,7 @@ def create_coach_assignment(
     request: Request,
     title: str = Form(...),
     detail: str = Form(""),
-    next_path: str = Form("/coach#assignments"),
+    next_path: str = Form("/camp#assignments"),
 ):
     profile_id = _profile_id(request)
     if profile_id is None:
@@ -5277,19 +5407,132 @@ def create_coach_assignment(
     if not title:
         raise HTTPException(400, "Assignment title is required.")
     add_assignment(profile_id, title, detail)
-    return RedirectResponse(_safe_next(next_path, "/coach#assignments"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/camp#assignments"), status_code=303)
 
 
 @app.post("/coach/assignments/{assignment_id}/toggle", dependencies=[Depends(require_csrf)])
 def update_coach_assignment(
     request: Request,
     assignment_id: int,
-    next_path: str = Form("/coach#assignments"),
+    next_path: str = Form("/camp#assignments"),
 ):
     profile_id = _profile_id(request)
     if profile_id is None or not toggle_assignment(assignment_id, profile_id):
         raise HTTPException(404)
-    return RedirectResponse(_safe_next(next_path, "/coach#assignments"), status_code=303)
+    # Finishing something you trained for: once per item, and only with at
+    # least one counted session behind it, so ticking a box alone earns nothing.
+    done = any(item["id"] == assignment_id and item["status"] == "complete"
+               for item in list_assignments(profile_id))
+    trained = any(session["assignment_id"] == assignment_id and session["verdict"] == "counted"
+                  for session in list_training_sessions(profile_id))
+    if done and trained:
+        award_points(profile_id, MISSION_DONE_POINTS, "mission_done", str(assignment_id))
+    return RedirectResponse(_safe_next(next_path, "/camp#assignments"), status_code=303)
+
+
+@app.post("/camp/missions", dependencies=[Depends(require_csrf)])
+def take_camp_mission(request: Request, job_id: str = Form(...), index: int = Form(...)):
+    """Take on a mission: it joins the list, remembering the number it is for.
+
+    The mission is rebuilt from the fight's own report rather than read from
+    the form, so the number a later fight is compared with is the measured
+    one and not whatever a request says it was.
+    """
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/camp", status_code=303)
+    fight = get_fight(job_id)
+    if not fight or int(fight["profile_id"]) != profile_id:
+        raise HTTPException(404)
+    report = json.loads(Path(fight["report_path"]).read_text(encoding="utf-8"))
+    refresh_identity_integrity(report)
+    fighter = _camp_fighter(report, (get_profile(profile_id) or {}).get("default_fighter", "A"))
+    missions = missions_from_report(report, fighter)["missions"]
+    if not 0 <= index < len(missions):
+        raise HTTPException(404)
+    mission = missions[index]
+    detail = (mission["exercise"] or "") + (f" Target: {mission['target']}" if mission["target"] else "")
+    assignment_id = add_assignment(profile_id, mission["title"][:100], detail.strip()[:600])
+    if mission.get("metric") and mission.get("measured") is not None:
+        link_camp_mission(assignment_id, profile_id, job_id, fighter, mission["metric"], mission["measured"])
+    return RedirectResponse("/camp#missions", status_code=303)
+
+
+# Training clips are checked and deleted inside the request, so they have to
+# fit one: under the host's ~134 MiB request ceiling (core/chunked_upload.py).
+TRAINING_UPLOAD_BYTES = 120 * 1024 * 1024
+limit_upload_route("/camp/sessions/", TRAINING_UPLOAD_BYTES)
+TRAINING_VERDICT_MESSAGES = {
+    "counted": "Session counted: +{points} points.",
+    "daily_cap": "Session counted, but you have had today's {cap} sessions' points. It still counts for your streak.",
+    "duplicate": "That clip was already uploaded, so it was not counted again.",
+    "too_short": "That clip is under a minute. Film at least one minute of the drill.",
+    "too_long": "That clip is over 20 minutes. Upload one drill at a time.",
+    "no_movement": "Nothing was moving in most of that clip. Film yourself doing the drill.",
+    "unreadable": "That file could not be read as a video.",
+    "too_large": "That video's resolution is too high to check. Film at 1080p or lower.",
+}
+
+
+@app.post("/camp/sessions/{assignment_id}", dependencies=[Depends(require_csrf)])
+def upload_training_session(request: Request, assignment_id: int, video: UploadFile = File(...)):
+    """One training clip for one item on the list: checked, scored, deleted.
+
+    Only the clip's fingerprint and what the check found are kept
+    (training_sessions); the video is removed before the response, whatever
+    the verdict. See core/training_check.py for what the check can and cannot
+    tell.
+    """
+    _enforce_rate_limit(request, "training_sessions", 12, 3600)
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/camp", status_code=303)
+    if not any(item["id"] == assignment_id for item in list_assignments(profile_id)):
+        raise HTTPException(404)
+    folder = UPLOADS / "training"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{uuid.uuid4().hex}.video"
+    try:
+        digest = _save_upload_limited(video, path, TRAINING_UPLOAD_BYTES)
+        # The same two gates as a fight, before any decoder sees the file: the
+        # bytes have to be a video container, and the malware scan has to pass.
+        if not looks_like_video(path):
+            found = {"verdict": "unreadable", "duration_seconds": None, "moving_share": None}
+            earlier = []
+        else:
+            scan = scan_upload(path)
+            if not scan["clean"]:
+                if scan["status"] == "infected":
+                    record_security_event("malware_upload_blocked", severity="warning")
+                    raise HTTPException(400, "This file did not pass the upload safety scan.")
+                raise HTTPException(503, "Uploads are paused because the safety scanner is unavailable.")
+            earlier = list_training_sessions(profile_id)
+            if any(session["video_sha256"] == digest for session in earlier):
+                found = {"verdict": "duplicate", "duration_seconds": None, "moving_share": None}
+            else:
+                found = check_training_video(str(path))
+    finally:
+        path.unlink(missing_ok=True)
+    verdict, points = found["verdict"], 0
+    if verdict == "counted":
+        today = datetime.now(timezone.utc).date().isoformat()
+        paid_today = sum(1 for session in earlier
+                         if session["points"] > 0 and str(session["created_at"]).startswith(today))
+        if paid_today < DAILY_COUNTED_SESSIONS:
+            points = SESSION_POINTS
+    session_id = record_training_session(profile_id, assignment_id, digest, found["duration_seconds"],
+                                         found["moving_share"], verdict, points)
+    if points:
+        award_points(profile_id, points, "session", str(session_id))
+    shown = "daily_cap" if verdict == "counted" and not points else verdict
+    return RedirectResponse(f"/camp?session={shown}#assignments", status_code=303)
+
+
+def _camp_fighter(report: dict, default_fighter: str) -> str:
+    """The fighter a report follows for this athlete."""
+    video = report.get("video") or {}
+    fighter = video.get("focus_fighter") or video.get("analysis_target")
+    return fighter if fighter in {"A", "B"} else default_fighter
 
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -6218,6 +6461,13 @@ def export_account_data(request: Request, password: str = Form(...),
         "fights": fights,
         "annotations": annotations,
         "coach_assignments": list_assignments(profile_id),
+        # Fight Camp: missions taken, training sessions (the check's findings
+        # and a fingerprint - the clips themselves are never kept) and points.
+        "fight_camp": {
+            "missions": list_camp_missions(profile_id),
+            "training_sessions": list_training_sessions(profile_id),
+            "points": list_points(profile_id),
+        },
         "connected_sign_in_identities": list_oauth_identities(int(account["id"])),
         "legal_acceptances": list_legal_acceptances(profile_id=profile_id),
     }

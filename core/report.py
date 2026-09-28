@@ -292,6 +292,52 @@ def published_families(sport: str | None) -> tuple[str, ...]:
     return tuple(f for f in scored if f == "kick")
 
 
+SHARE_CARD_NOTE = "Automatic estimate by WarriorIQ, not checked by a person."
+
+
+def share_card(report: dict) -> dict | None:
+    """What a stats-only story card may show, per fighter; None when it may not.
+
+    Built from the numbers the result page already shows - the strike
+    attempts in the statistics block, the estimated score, the first
+    strength and improvement in the coaching - so the card never says
+    anything the page does not. No names and no video: the opponent did not
+    agree to be posted, and a still frame could show a minor.
+
+    Per-fighter numbers are attributions, so when the identity check failed
+    there is no card at all rather than one that may be the other fighter's.
+    """
+    if not (report.get("integrity") or {}).get("identity_evidence_trusted", True):
+        return None
+    statistics = (report.get("statistics") or {}).get("fighters") or {}
+    if not statistics:
+        return None
+    scorecard = report.get("scorecard") or {}
+    sport = scorecard.get("sport")
+    families = published_families(sport)
+    totals = scorecard.get("totals") or {}
+    scored = bool(scorecard.get("available")) and None not in (totals.get("A"), totals.get("B"))
+    fighters = {}
+    for fighter in ("A", "B"):
+        item = statistics.get(fighter) or {}
+        strikes = {family: int(item.get(f"{family}_attempts") or 0) for family in families}
+        coaching = (report.get("coaching") or {}).get(fighter) or {}
+        strengths = coaching.get("strengths") or []
+        improvements = coaching.get("improvements") or []
+        fighters[fighter] = {
+            "strikes": strikes,
+            "total": sum(strikes.values()),
+            "strength": strengths[0].get("title") if strengths else None,
+            "working_on": improvements[0].get("title") if improvements else None,
+        }
+    return {
+        "sport": scorecard.get("sport_label") or (sport or "").replace("_", " ").title() or "Fight",
+        "fighters": fighters,
+        "score": {"A": totals["A"], "B": totals["B"]} if scored else None,
+        "note": SHARE_CARD_NOTE,
+    }
+
+
 def observed_summary(report: dict) -> dict | None:
     """What we can stand behind when the scorecard cannot be given.
 

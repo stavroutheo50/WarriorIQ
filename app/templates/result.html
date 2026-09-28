@@ -10,7 +10,7 @@
 {% set identity_failed = not report.integrity.identity_evidence_trusted|default(true) %}
 <div class="section-title result-hero" data-reveal>
   <div><div class="eyebrow">{% if identity_failed and camera_lost %}Needs a steadier recording{% elif identity_failed %}Needs one quick step{% else %}Analysis complete{% endif %}</div>{#- The one page heading. "Your fight in numbers." further down was a second, larger h1 competing with this one. -#}<h1 class="result-title">Fight report</h1></div>
-  <div class="selection-tools">{% if identity_failed and not camera_lost %}<a class="btn" href="/select/{{job_id}}" data-motion-primary>Show me who is who</a>{% endif %}{% if can_share %}<form action="/share/{{job_id}}" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post" data-confirm="Revoke {{sharing.links|length}} coach link{{'' if sharing.links|length == 1 else 's'}}? {{'Any link' if sharing.links|length == 1 else 'Every link'}} already sent to a coach stops working immediately and cannot be restored. Creating a new link gives a new address, which you would have to send again."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
+  <div class="selection-tools">{% if identity_failed and not camera_lost %}<a class="btn" href="/select/{{job_id}}" data-motion-primary>Show me who is who</a>{% endif %}{% if share_card %}<button class="btn" type="button" data-share-card-open>Share to story</button>{% endif %}{% if can_share %}<form action="/share/{{job_id}}" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post" data-confirm="Revoke {{sharing.links|length}} coach link{{'' if sharing.links|length == 1 else 's'}}? {{'Any link' if sharing.links|length == 1 else 'Every link'}} already sent to a coach stops working immediately and cannot be restored. Creating a new link gives a new address, which you would have to send again."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
 </div>
 {% if can_share and sharing %}
 {% if sharing.new_link %}
@@ -414,6 +414,66 @@
   })));})();
   </script>
   {% endif %}
+  {% endif %}
+  {#- Moments someone went down (core/ground.py). The analysis cannot yet
+      tell which fighter, so it does not guess: it asks. Not scored. -#}
+  {% if went_down %}
+  <details class="counted-strikes went-down">
+    <summary>Moments a fighter went down ({{ went_down|length }})</summary>
+    <p class="observed-note">{{ went_down_note }} Tap one to watch it.{% if can_check_strikes %} Then say who went down: your answers are saved with this fight.{% endif %}</p>
+    <ol class="counted-strike-list went-down-list">
+      {% for m in went_down %}
+      <li data-seconds="{{ '%.3f'|format(m.seconds) }}">
+        <a href="/replay/{{job_id}}?t={{ '%.2f'|format(m.seconds) }}"><span class="cs-time">{{ m.clock }}</span>{% if m.round %}<span class="cs-who">Round {{ m.round }}</span>{% endif %}<span class="cs-what">down about {{ m.down_seconds }}s</span></a>
+        {% if can_check_strikes %}
+        <div class="cs-check" role="group" aria-label="Who went down?">
+          {% set labels = {'A': 'Fighter A went down', 'B': 'Fighter B went down', 'nobody': 'Nobody went down'} %}
+          <span class="cs-said" {% if not m.check %}hidden{% endif %}>You said: <b>{{ labels.get(m.check, '') }}</b></span>
+          <button type="button" data-verdict="A">Fighter A</button>
+          <button type="button" data-verdict="B">Fighter B</button>
+          <button type="button" data-verdict="nobody">Nobody went down</button>
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </details>
+  {% if can_check_strikes %}
+  <script nonce="{{ request.state.csp_nonce }}">
+  (()=>{const labels={A:'Fighter A went down',B:'Fighter B went down',nobody:'Nobody went down'};
+  document.querySelectorAll('.went-down-list li').forEach(li=>li.querySelectorAll('.cs-check button').forEach(b=>b.addEventListener('click',async()=>{
+    const body={seconds:Number(li.dataset.seconds),verdict:b.dataset.verdict};
+    li.querySelectorAll('.cs-check button').forEach(x=>x.disabled=true);
+    try{const r=await fetch({{ ('/api/down-check/' ~ job_id)|tojson }},{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
+      if(!r.ok)throw new Error(String(r.status));
+      const said=li.querySelector('.cs-said');said.hidden=false;said.querySelector('b').textContent=labels[b.dataset.verdict];
+      if(window.wiqToast)window.wiqToast('Saved. Thank you.','success');
+    }catch(err){if(window.wiqToast)window.wiqToast('Could not save that answer. Try again.','error');}
+    finally{li.querySelectorAll('.cs-check button').forEach(x=>x.disabled=false);}
+  })));})();
+  </script>
+  {% endif %}
+  {% endif %}
+  {#- Stats-only story card, drawn in the browser (static/share_card.js)
+      from core.report.share_card: no names, no video, estimates labelled. -#}
+  {% if share_card %}
+  <script type="application/json" id="shareCardData">{{ share_card|tojson }}</script>
+  <dialog class="share-card-dialog" id="shareCardDialog" data-side="{{ primary }}" aria-labelledby="shareCardTitle">
+    <h2 id="shareCardTitle">Share to your story</h2>
+    <p class="muted">Stats only: no names and no video. Your opponent is not on it.</p>
+    {% if focus == 'BOTH' %}
+    <fieldset class="share-card-side"><legend>Which fighter were you?</legend>
+      <label><input type="radio" name="shareSide" value="A"> Fighter A{% if corners.A %} ({{ corners.A }}){% endif %}</label>
+      <label><input type="radio" name="shareSide" value="B"> Fighter B{% if corners.B %} ({{ corners.B }}){% endif %}</label>
+    </fieldset>
+    {% endif %}
+    <canvas width="1080" height="1920" aria-label="Preview of the story image"></canvas>
+    <div class="share-card-actions">
+      <button class="btn" type="button" data-share-card-send>Share or save image</button>
+      <button class="btn secondary" type="button" data-share-card-close>Close</button>
+    </div>
+  </dialog>
+  <script nonce="{{ request.state.csp_nonce }}" src="/static/share_card.js?v={{asset_version}}" defer></script>
   {% endif %}
   <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'Keep the measured baseline'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Build the next clean sample'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% endif %}</article></div>
   {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary"><div class="eyebrow">Final coaching summary · Fighter {{primary}}</div><h2>What this fight says to work on next</h2><div class="performance-insights">{% set worked = keep[1] if keep|length > 1 else (keep[0] if keep else None) %}<article><span>What worked</span><strong>{{worked.title if worked else 'No supported strength yet'}}</strong><p>{{worked.detail if worked else 'The report needs more evidence before naming a strength.'}}</p></article><article><span>What hurt performance</span><strong>{{fix[0].title if fix else 'No supported weakness yet'}}</strong><p>{{fix[0].detail if fix else 'The report does not invent a weakness without evidence.'}}</p></article>{% set plan=report.training_plan[primary]|default([]) %}<article><span>Next training priority</span><strong>{{plan[0].focus if plan else 'Collect a cleaner sample'}}</strong><p>{{plan[0].work if plan else 'Use a clear full-body camera angle and keep both fighters visible.'}}</p></article><article><span>Success target</span><strong>{{plan[0].goal if plan else 'Improve usable evidence'}}</strong><p>This target comes from Fighter {{primary}}’s measured report, not a generic template.</p></article></div></section>{% endif %}

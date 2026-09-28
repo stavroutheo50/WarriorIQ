@@ -1137,9 +1137,6 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(database.get_fight_review(job_id)["status"], "complete")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_a_fighter_can_say_whether_a_counted_strike_was_right(self):
         """One tap on a counted strike is stored as a family-level answer,
         kept out of training data, and shown back on the page."""
@@ -1190,6 +1187,240 @@ if __name__ == "__main__":
         refused = self.client.post(f"/api/strike-check/{job_id}", json={
             "seconds": 7.5, "fighter": "B", "family": "kick", "verdict": "right"})
         self.assertEqual(refused.status_code, 403)
+
+    def test_the_sport_check_warns_only_on_a_confident_other_sport(self):
+        import base64
+        from unittest import mock
+
+        from core import sport_check
+        frame = "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8\xff\xe0" + b"0" * 64).decode()
+        with mock.patch.object(sport_check, "provider", return_value="anthropic"):
+            anonymous = self.client.post("/api/sport-check", json={"sport": "kickboxing", "frames": [frame]})
+            self.assertEqual(anonymous.status_code, 401)
+
+            register("sportcheck@example.com", "Strong-Local-Password")
+            self.client.post("/login", data={"email": "sportcheck@example.com",
+                                             "password": "Strong-Local-Password", "accept_policies": "true"})
+            seen = {"sport": "taekwondo", "confidence": 0.92, "reason": "white doboks, no gloves"}
+            with mock.patch.object(sport_check, "detect_sport", return_value=seen) as detect:
+                answer = self.client.post("/api/sport-check", json={"sport": "kickboxing", "frames": [frame]})
+            self.assertEqual(answer.status_code, 200, answer.text)
+            body = answer.json()
+            self.assertTrue(body["mismatch"])
+            self.assertEqual((body["detected_label"], body["chosen_label"]), ("Taekwondo", "Kickboxing"))
+            self.assertEqual(detect.call_args.args[0][0][:3], b"\xff\xd8\xff")
+
+            with mock.patch.object(sport_check, "detect_sport", return_value=None):
+                quiet = self.client.post("/api/sport-check", json={"sport": "kickboxing", "frames": [frame]})
+            self.assertEqual(quiet.json(), {"available": True, "mismatch": False})
+
+            bad = self.client.post("/api/sport-check", json={"sport": "kickboxing", "frames": ["x"]})
+            self.assertEqual(bad.status_code, 400)
+            unknown = self.client.post("/api/sport-check", json={"sport": "curling", "frames": [frame]})
+            self.assertEqual(unknown.status_code, 400)
+
+    def test_the_owner_says_who_went_down_at_each_moment(self):
+        """The analysis lists moments someone went down but not who; the
+        owner's one-tap answer is saved, shown back, never overwrites a
+        strike answer at the same second and never becomes a training label."""
+        account = register("downs@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "downs@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        job_id = "downfight1"
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"video-placeholder")
+        feed = [{"kind": "strike", "fighter": "A", "family": "punch", "time_seconds": 12.0, "round_number": 1}]
+        report = {"setup": {"ruleset": "MMA"}, "scorecard": {"sport": "mma"}, "event_feed": feed,
+                  "went_down": {"moments": [{"seconds": 12.0, "round": 1, "down_seconds": 6, "last_seconds": 17.0}],
+                                "note": "Found automatically.", "attributed": False}}
+        report_path = job_dir / "report.json"
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        database.save_fight(job_id, account["profile_id"], "f.mp4", str(video_path), str(report_path),
+                            "competition", "MMA", "BOTH", {})
+
+        struck = self.client.post(f"/api/strike-check/{job_id}", json={
+            "seconds": 12.0, "fighter": "A", "family": "punch", "verdict": "right"})
+        self.assertEqual(struck.status_code, 200, struck.text)
+        said = self.client.post(f"/api/down-check/{job_id}", json={"seconds": 12.0, "verdict": "B"})
+        self.assertEqual(said.status_code, 200, said.text)
+        stored = database.get_annotations(job_id)
+        self.assertEqual(len(stored), 2, "the down answer must not overwrite the strike answer")
+        down = [item for item in stored if database.is_down_check(item)]
+        self.assertEqual(len(down), 1)
+        self.assertEqual(down[0]["corrected"]["went_down"], "B")
+        self.assertFalse(database.is_strike_check(down[0]))
+        self.assertEqual(webapp._down_checks(job_id), {12.0: "B"})
+        self.assertEqual(webapp._strike_checks(job_id), {("A", 12.0): "right"})
+
+        # Changing the answer replaces it.
+        self.client.post(f"/api/down-check/{job_id}", json={"seconds": 12.0, "verdict": "nobody"})
+        self.assertEqual(webapp._down_checks(job_id), {12.0: "nobody"})
+        self.assertEqual(len(database.get_annotations(job_id)), 2)
+
+        # Only listed moments, only known answers.
+        self.assertEqual(self.client.post(f"/api/down-check/{job_id}",
+                                          json={"seconds": 40.0, "verdict": "A"}).status_code, 404)
+        self.assertEqual(self.client.post(f"/api/down-check/{job_id}",
+                                          json={"seconds": 12.0, "verdict": "both"}).status_code, 400)
+
+        # Someone else's fight is refused.
+        self.client.post("/logout")
+        register("downs-other@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "downs-other@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        refused = self.client.post(f"/api/down-check/{job_id}", json={"seconds": 12.0, "verdict": "A"})
+        self.assertEqual(refused.status_code, 403)
+
+    def test_fight_camp_missions_sessions_and_points(self):
+        """Take a mission, train for it, finish it, and let the next fight judge it."""
+        import cv2
+        import numpy as np
+
+        account = register("camper@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "camper@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        profile_id = int(account["profile_id"])
+        why = "You 10%, them 16% - behind your opponent here."
+
+        def save(job_id, guard, drills, created_at):
+            job_dir = webapp.OUTPUTS / job_id
+            job_dir.mkdir()
+            video_path = webapp.UPLOADS / f"{job_id}.mp4"
+            video_path.write_bytes(b"video-placeholder")
+            report = {
+                "setup": {"ruleset": "K1"}, "video": {"focus_fighter": "A", "analysis_target": "BOTH"},
+                "integrity": {"identity_evidence_trusted": True},
+                # Tracking as a real fight that passed the identity check has it:
+                # the page re-applies the gate, and a fight without it fails.
+                "tracking": {"fighter_A_seed_source": "pose_detector", "fighter_B_seed_source": "pose_detector",
+                             "initial_iou_A": 0.72, "initial_iou_B": 0.93, "fighter_A_coverage": 0.82,
+                             "fighter_B_coverage": 0.81, "fighters_separable": True, "identity_confusions": 0},
+                # Both fighters: a saved report's coaching is rebuilt from these
+                # on reload, and a drill needs A behind B.
+                "metrics": {"A": {"guard_index": guard}, "B": {"guard_index": 0.16}},
+                "coaching": {"A": {"improvements": [{"title": "Work on: Guard", "detail": why, "evidence_times": [3.0]}],
+                                   "drills": [{"name": "Fighter A · Guard-return audit", "why": why,
+                                               "metric": "guard_index", "label": "Guard", "measured": guard,
+                                               "prescription": "4 x 90 sec."}] if drills else []}},
+                "training_plan": {"A": [{"focus": "Block 1: Fighter A · Guard-return audit",
+                                         "goal": "Raise guard from 10% to 18%."}] if drills else []},
+            }
+            report_path = job_dir / "report.json"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            database.save_fight(job_id, profile_id, "f.mp4", str(video_path), str(report_path),
+                                "competition", "K1", "BOTH", {})
+            with database.connection() as con:
+                con.execute("UPDATE fights SET created_at=? WHERE job_id=?", (created_at, job_id))
+
+        def clip(name, moving=True, shade=40):
+            path = webapp.UPLOADS / name
+            writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10, (160, 120))
+            for i in range(650):
+                frame = np.full((120, 160, 3), shade, dtype=np.uint8)
+                x = (i * 7) % 120 if moving else 60
+                cv2.rectangle(frame, (x, 30), (x + 40, 100), (230, 230, 230), -1)
+                writer.write(frame)
+            writer.release()
+            return path.read_bytes()
+
+        def upload(item_id, data):
+            response = self.client.post(f"/camp/sessions/{item_id}", files={"video": ("s.mp4", data, "video/mp4")},
+                                        follow_redirects=False)
+            self.assertEqual(response.status_code, 303, response.text)
+            return response.headers["location"].split("session=")[1].split("#")[0]
+
+        save("campfight1", 0.10, True, "2026-09-01T10:00:00+00:00")
+        page = self.client.get("/camp").text
+        self.assertIn("Guard-return audit", page)
+        self.assertIn("Take on this mission", page)
+
+        taken = self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 0}, follow_redirects=False)
+        self.assertEqual(taken.status_code, 303)
+        item = database.list_assignments(profile_id)[0]
+        self.assertEqual(item["title"], "Guard-return audit")
+        self.assertEqual(database.list_camp_missions(profile_id)[0]["measured"], 0.10)
+        self.assertEqual(self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 5}).status_code, 404)
+
+        # Ticking it off before training earns nothing.
+        self.client.post(f"/coach/assignments/{item['id']}/toggle")
+        self.assertEqual(database.list_points(profile_id), [])
+        self.client.post(f"/coach/assignments/{item['id']}/toggle")      # reopen
+
+        first = clip("one.mp4")
+        self.assertEqual(upload(item["id"], first), "counted")
+        self.assertEqual(upload(item["id"], first), "duplicate")
+        self.assertEqual(upload(item["id"], clip("still.mp4", moving=False)), "no_movement")
+        self.assertEqual(upload(item["id"], clip("two.mp4", shade=60)), "counted")
+        self.assertEqual(upload(item["id"], clip("three.mp4", shade=80)), "daily_cap")
+        self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 20)
+        self.assertEqual(list((webapp.UPLOADS / "training").iterdir()), [], "training clips must not be kept")
+
+        self.client.post(f"/coach/assignments/{item['id']}/toggle")      # complete, after training
+        self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 45)
+        self.client.post(f"/coach/assignments/{item['id']}/toggle")      # reopen and finish again:
+        self.client.post(f"/coach/assignments/{item['id']}/toggle")      # still only once
+        self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 45)
+
+        # The next fight moves the number: the big award, once however often the page is opened.
+        save("campfight2", 0.15, False, "2099-01-01T10:00:00+00:00")
+        self.client.get("/camp")
+        page = self.client.get("/camp").text
+        self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 145)
+        self.assertIn("improved", page)
+        self.assertIn("Level", page)
+
+        exported = database.list_training_sessions(profile_id)
+        self.assertTrue(all("video" not in key or key == "video_sha256" for key in exported[0]))
+
+        # Nobody else can train against this list.
+        self.client.post("/logout")
+        register("camper-other@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "camper-other@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        refused = self.client.post(f"/camp/sessions/{item['id']}", files={"video": ("s.mp4", first, "video/mp4")})
+        self.assertEqual(refused.status_code, 404)
+        self.assertEqual(self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 0}).status_code, 404)
+
+    def test_every_upload_form_refuses_an_oversized_body_before_storing_it(self):
+        """A single huge request must not fill the disk before a handler's own check."""
+        from core.upload_security import upload_body_limit
+
+        def scope(path):
+            return {"type": "http", "method": "POST", "path": path, "headers": []}
+        self.assertEqual(upload_body_limit(scope("/camp/sessions/7")),
+                         webapp.TRAINING_UPLOAD_BYTES + 1024 * 1024)
+        self.assertEqual(upload_body_limit(scope("/profile")),
+                         webapp.MAX_PROFILE_PHOTO_BYTES + webapp.MAX_PROFILE_VIDEO_BYTES + 1024 * 1024)
+        self.assertIsNotNone(upload_body_limit(scope("/upload")))
+        self.assertIsNone(upload_body_limit(scope("/camp")))
+        register("big@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "big@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        too_big = str(webapp.TRAINING_UPLOAD_BYTES + 5 * 1024 * 1024)
+        refused = self.client.post("/camp/sessions/1", content=b"x", headers={
+            "content-type": "multipart/form-data; boundary=x", "content-length": too_big})
+        self.assertEqual(refused.status_code, 413)
+
+    def test_a_training_upload_that_is_not_a_video_is_never_decoded(self):
+        from unittest import mock
+        account = register("notvideo@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "notvideo@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        item_id = database.add_assignment(int(account["profile_id"]), "Bag work", "")
+        with mock.patch.object(webapp, "check_training_video") as decoder:
+            response = self.client.post(f"/camp/sessions/{item_id}", files={"video": ("drill.mp4", b"not a video", "video/mp4")},
+                                        follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("session=unreadable", response.headers["location"])
+        decoder.assert_not_called()
+        self.assertEqual(database.list_points(int(account["profile_id"])), [])
+
+    def test_a_report_without_went_down_moments_lists_none(self):
+        """Reports analysed before this existed have no went_down key."""
+        self.assertEqual(webapp._went_down("nosuchjob", {"event_feed": []}), [])
+
 
 
 class UndecodableUploadTests(unittest.TestCase):
@@ -2157,3 +2388,7 @@ class AccountDeletionCoverageTests(unittest.TestCase):
         self.assertEqual(
             missed, set(),
             f"these tables hold account data and survive deletion: {sorted(missed)}")
+
+
+if __name__ == "__main__":
+    unittest.main()

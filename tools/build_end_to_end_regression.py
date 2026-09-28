@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.annotations import accuracy_summary
 from core.config import UPLOADS
 from app.state import completed_artifact_directory
-from core.db import get_fight, is_strike_check, list_annotations
+from core.db import get_fight, is_down_check, is_strike_check, list_annotations
 from core.regression_manifest import build_regression_manifest, file_sha256
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 
@@ -56,8 +56,8 @@ def main() -> None:
 
     grouped: dict[str, list[dict]] = defaultdict(list)
     for annotation in list_annotations():
-        if is_strike_check(annotation):
-            continue      # family-level one-tap answers; see core.db.is_strike_check
+        if is_strike_check(annotation) or is_down_check(annotation):
+            continue      # one-tap answers; see core.db.is_strike_check and is_down_check
         grouped[str(annotation["job_id"])].append(_public_annotation(annotation))
     if not grouped:
         raise RuntimeError("No human-reviewed annotations exist. Review real fight events before building a regression manifest.")

@@ -527,5 +527,55 @@
     });
   }
 
-  global.wiqPreflight = { measure: measure };
+  /* A few JPEG stills from the chosen file, for the optional sport check.
+   *
+   * Taken here, on the athlete's device, so the question "is this the sport
+   * you picked?" can be answered before a single byte of video is uploaded.
+   * Spread across the middle of the clip, where the fight is, and kept small:
+   * 640 px wide is plenty to tell a glove from a dobok, and keeps each frame
+   * well under the server's size limit. Resolves [] on any failure - the
+   * check is a courtesy and must never stand between a fighter and an upload.
+   */
+  function snapshots(file, count, width) {
+    count = count || 3;
+    width = width || 640;
+    var url = URL.createObjectURL(file);
+    var video = document.createElement('video');
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+    var release = function () {
+      try { video.removeAttribute('src'); video.load(); } catch (err) { /* nothing to undo */ }
+      URL.revokeObjectURL(url);
+    };
+    return new Promise(function (resolve) {
+      var giveUp = setTimeout(function () { release(); resolve([]); }, 20000);
+      video.onerror = function () { clearTimeout(giveUp); release(); resolve([]); };
+      video.onloadedmetadata = function () {
+        var duration = video.duration;
+        if (!isFinite(duration) || duration <= 0 || !video.videoWidth) {
+          clearTimeout(giveUp); release(); resolve([]); return;
+        }
+        var scale = Math.min(1, width / video.videoWidth);
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
+        var context = canvas.getContext('2d');
+        var shots = [];
+        var times = [];
+        for (var i = 0; i < count; i++) times.push(duration * (0.25 + 0.5 * i / Math.max(1, count - 1)));
+        var next = function (index) {
+          if (index >= times.length) { clearTimeout(giveUp); release(); resolve(shots); return; }
+          grab(video, canvas, context, times[index]).then(function () {
+            shots.push(canvas.toDataURL('image/jpeg', 0.8));
+            next(index + 1);
+          }, function () { next(index + 1); });
+        };
+        next(0);
+      };
+    });
+  }
+
+  global.wiqPreflight = { measure: measure, snapshots: snapshots };
 })(window);

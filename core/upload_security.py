@@ -43,15 +43,44 @@ def is_fight_upload(scope) -> bool:
     return path == FIGHT_UPLOAD_PATH
 
 
+# Every other route that takes a file, with its own ceiling: (exact path or
+# prefix ending in "/", byte limit). Without an entry, a route's multipart body
+# is spooled to disk in full before the handler's own size check runs, so a
+# single request could fill the disk however small the handler's limit is.
+# Registered by app.main next to the limits themselves (limit_upload_route).
+_OTHER_UPLOAD_ROUTES: list[tuple[str, int]] = []
+
+
+def limit_upload_route(path: str, byte_limit: int) -> None:
+    """Bound this route's request body while it streams in, not after."""
+    _OTHER_UPLOAD_ROUTES.append((path, int(byte_limit)))
+
+
+def upload_body_limit(scope) -> int | None:
+    """The body ceiling for this request, or None when it is not an upload route."""
+    if is_fight_upload(scope):
+        return min(SETTINGS.max_fight_bytes, SETTINGS.max_upload_bytes) + 1024 * 1024
+    if scope.get("type") != "http" or scope.get("method") != "POST":
+        return None
+    path = scope.get("path") or ""
+    root = (scope.get("root_path") or "").rstrip("/")
+    if root and path.startswith(root):
+        path = path[len(root):] or "/"
+    for route, byte_limit in _OTHER_UPLOAD_ROUTES:
+        if path == route or (route.endswith("/") and path.startswith(route)):
+            return byte_limit + 1024 * 1024      # room for the form fields around the file
+    return None
+
+
 class UploadBodyLimitMiddleware:
     """Bound multipart spooling, including requests with no Content-Length."""
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if not is_fight_upload(scope):
+        limit = upload_body_limit(scope)
+        if limit is None:
             return await self.app(scope, receive, send)
-        limit = min(SETTINGS.max_fight_bytes, SETTINGS.max_upload_bytes) + 1024 * 1024
         headers = dict(scope.get("headers", []))
         try:
             too_large = int(headers.get(b"content-length", b"0")) > limit

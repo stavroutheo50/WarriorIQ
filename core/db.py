@@ -421,6 +421,51 @@ def init_db() -> None:
                 PRIMARY KEY(day, path)
             );
             CREATE INDEX IF NOT EXISTS idx_page_views_day ON page_views(day);
+
+            -- Fight Camp (core/camp.py). New tables only; nothing existing
+            -- changes. A mission is an assignment taken from a fight's drill,
+            -- with the number it was meant to move, so a later fight can say
+            -- whether it did.
+            CREATE TABLE IF NOT EXISTS camp_missions (
+                assignment_id INTEGER PRIMARY KEY,
+                profile_id INTEGER NOT NULL,
+                job_id TEXT NOT NULL,
+                fighter TEXT NOT NULL,
+                metric TEXT NOT NULL,
+                measured REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(assignment_id) REFERENCES coach_assignments(id),
+                FOREIGN KEY(profile_id) REFERENCES profiles(id)
+            );
+            -- One uploaded training session and what the check found. The
+            -- video itself is deleted once checked; only its fingerprint is
+            -- kept, so the same clip cannot be counted twice.
+            CREATE TABLE IF NOT EXISTS training_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                assignment_id INTEGER,
+                video_sha256 TEXT NOT NULL,
+                duration_seconds REAL,
+                moving_share REAL,
+                verdict TEXT NOT NULL,
+                points INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_training_sessions_profile ON training_sessions(profile_id, created_at);
+            -- Every point ever given, and why. (reason, ref) is unique per
+            -- profile, so an award can be attempted any number of times and
+            -- is only ever made once.
+            CREATE TABLE IF NOT EXISTS points_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                points INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                ref TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(profile_id, reason, ref),
+                FOREIGN KEY(profile_id) REFERENCES profiles(id)
+            );
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -698,6 +743,15 @@ def is_strike_check(annotation: dict) -> bool:
     technique as a class label.
     """
     return (annotation.get("corrected") or {}).get("source") == "strike_check"
+
+
+def is_down_check(annotation: dict) -> bool:
+    """A one-tap answer on who went down at a moment, not a strike label.
+
+    It has no technique at all, so like is_strike_check it must stay out of
+    training sequences and technique-accuracy figures.
+    """
+    return (annotation.get("corrected") or {}).get("source") == "down_check"
 
 
 def record_legal_acceptance(
@@ -1660,6 +1714,65 @@ def add_assignment(profile_id: int, title: str, detail: str) -> int:
         return int(cursor.lastrowid)
 
 
+def link_camp_mission(assignment_id: int, profile_id: int, job_id: str, fighter: str,
+                      metric: str, measured: float) -> None:
+    """Remember which fight and number a taken mission came from."""
+    init_db()
+    with connection() as con:
+        con.execute(
+            """INSERT OR IGNORE INTO camp_missions(assignment_id,profile_id,job_id,fighter,metric,measured,created_at)
+               VALUES(?,?,?,?,?,?,?)""",
+            (int(assignment_id), int(profile_id), job_id, fighter, metric, float(measured),
+             datetime.now(timezone.utc).isoformat()))
+
+
+def list_camp_missions(profile_id: int) -> list[dict]:
+    init_db()
+    with connection() as con:
+        rows = con.execute("SELECT * FROM camp_missions WHERE profile_id=?", (int(profile_id),)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def record_training_session(profile_id: int, assignment_id: int | None, video_sha256: str,
+                            duration_seconds: float | None, moving_share: float | None,
+                            verdict: str, points: int) -> int:
+    init_db()
+    with connection() as con:
+        cursor = con.execute(
+            """INSERT INTO training_sessions(profile_id,assignment_id,video_sha256,duration_seconds,
+               moving_share,verdict,points,created_at) VALUES(?,?,?,?,?,?,?,?)""",
+            (int(profile_id), assignment_id, video_sha256, duration_seconds, moving_share, verdict,
+             int(points), datetime.now(timezone.utc).isoformat()))
+        return int(cursor.lastrowid)
+
+
+def list_training_sessions(profile_id: int) -> list[dict]:
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM training_sessions WHERE profile_id=? ORDER BY id DESC", (int(profile_id),)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def award_points(profile_id: int, points: int, reason: str, ref: str) -> bool:
+    """Give points once per (reason, ref). True only when this call gave them."""
+    init_db()
+    with connection() as con:
+        cursor = con.execute(
+            """INSERT OR IGNORE INTO points_ledger(profile_id,points,reason,ref,created_at)
+               VALUES(?,?,?,?,?)""",
+            (int(profile_id), int(points), reason, str(ref), datetime.now(timezone.utc).isoformat()))
+        return cursor.rowcount == 1
+
+
+def list_points(profile_id: int) -> list[dict]:
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM points_ledger WHERE profile_id=? ORDER BY id DESC", (int(profile_id),)).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_assignments(profile_id: int) -> list[dict]:
     init_db()
     with connection() as con:
@@ -1774,6 +1887,9 @@ def delete_account(account_id: int) -> dict | None:
             "DELETE FROM athlete_ratings WHERE fighter_id IN"
             " (SELECT id FROM fighters WHERE profile_id=?)", (profile_id,))
         con.execute("DELETE FROM fighters WHERE profile_id=?", (profile_id,))
+        con.execute("DELETE FROM camp_missions WHERE profile_id=?", (profile_id,))
+        con.execute("DELETE FROM training_sessions WHERE profile_id=?", (profile_id,))
+        con.execute("DELETE FROM points_ledger WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM legal_acceptances WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM analysis_usage WHERE account_id=?", (account_id,))
