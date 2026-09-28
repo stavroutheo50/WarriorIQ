@@ -504,3 +504,10 @@
   .plan-compare thead th{letter-spacing:.04em}
   .plan-compare-wrap{overflow-x:auto}
 }
+.share-card-dialog{max-width:min(420px,calc(100vw - 32px));width:100%;border:1px solid rgba(255,255,255,.12);border-radius:16px;background:#0b1224;color:inherit;padding:18px}
+.share-card-dialog::backdrop{background:rgba(3,6,14,.72)}
+.share-card-dialog h2{margin:0 0 4px;font-size:20px}
+.share-card-dialog canvas{display:block;width:100%;max-width:300px;height:auto;margin:12px auto;border-radius:12px;border:1px solid rgba(255,255,255,.1)}
+.share-card-side{border:0;padding:0;margin:10px 0 0;display:flex;gap:14px;flex-wrap:wrap}
+.share-card-side legend{font-size:13px;color:#98a2b3;margin-bottom:4px}
+.share-card-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}

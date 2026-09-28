@@ -107,7 +107,7 @@ from core.fight_stats import _deduplicate as _deduplicate_strikes
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
-    refresh_identity_integrity, unattributed_kick_total,
+    refresh_identity_integrity, share_card, unattributed_kick_total,
 )
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
@@ -4309,6 +4309,9 @@ def result_page(request: Request, job_id: str):
             if identity_trusted and STRIKE_COUNTS_PUBLISHED else []),
         "can_check_strikes": bool(_account(request)),
         "went_down": _went_down(job_id, report),
+        # Stats-only story card for Instagram, TikTok, WhatsApp and the rest:
+        # an image made in the browser, no link and no video, so every plan.
+        "share_card": share_card(report) if _account(request) else None,
         "went_down_note": (report.get("went_down") or {}).get("note"),
         "estimate_note": ESTIMATE_NOTE,
         "families_shown": published_families(
