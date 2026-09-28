@@ -1273,10 +1273,6 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "fighter_B_recoveries": manager.b.recovery_count,
         "fighter_A_track_handoffs": manager.track_handoffs["A"],
         "fighter_B_track_handoffs": manager.track_handoffs["B"],
-        # Times each was moved back onto the person who looks like their
-        # selection (IdentityManager._audit_against_selection).
-        "fighter_A_selection_refinds": manager.selection_refinds["A"],
-        "fighter_B_selection_refinds": manager.selection_refinds["B"],
         "fighter_A_handoffs_per_minute": round(manager.track_handoffs["A"] / (segment_duration / 60.0), 2),
         "fighter_B_handoffs_per_minute": round(manager.track_handoffs["B"] / (segment_duration / 60.0), 2),
         "fighter_A_sam_recoveries": manager.a.sam_recovery_count,

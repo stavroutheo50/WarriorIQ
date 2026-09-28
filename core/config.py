@@ -394,20 +394,6 @@ class Settings:
     # allowing a fighter to be recovered after a tracker-ID reset.
     min_reid_score: float = 0.48
     min_reid_margin: float = 0.05
-    # Checking each frame's choice against the fighters the user picked
-    # (IdentityManager._audit_against_selection). Every other part of the
-    # choice is relative to the previous frame - where the box was, how big,
-    # what it looked like - so once it slides onto somebody else, all of it
-    # argues for staying there. The picked fighter's own clothing does not
-    # move. A fighter is moved to a person who looks like their selection at
-    # least this much (colour histogram similarity, 0-1)...
-    selection_audit: bool = env_bool("WARRIORIQ_SELECTION_AUDIT", True)
-    selection_audit_min_similarity: float = float(os.getenv("WARRIORIQ_SELECTION_AUDIT_MIN", "0.80"))
-    # ...by this much more than the person they are on now...
-    selection_audit_margin: float = float(os.getenv("WARRIORIQ_SELECTION_AUDIT_MARGIN", "0.06"))
-    # ...and by this much more than they look like the other fighter's
-    # selection, so two fighters dressed alike are never traded on colour.
-    selection_audit_separation: float = float(os.getenv("WARRIORIQ_SELECTION_AUDIT_SEPARATION", "0.06"))
     max_normalized_jump: float = 1.65
     max_missing_analyzed_frames: int = 20
     missing_before_recovery: int = 4
