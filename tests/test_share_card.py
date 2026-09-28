@@ -15,7 +15,7 @@ def report(**overrides):
         }},
         "scorecard": {"available": True, "sport": "kickboxing", "sport_label": "Kickboxing",
                       "totals": {"A": 29, "B": 28}},
-        "coaching": {"A": {"strengths": [{"title": "Busy jab"}], "improvements": [{"title": "Guard drops after kicks"}]}},
+        "coaching": {"A": {"strengths": [{"title": "Busy jab"}], "improvements": [{"title": "Work on: Guard drops after kicks", "evidence_times": [3.0]}]}},
         "video": {"original_name": "Nikos Papadopoulos vs Someone.mp4"},
         "setup": {"fighter_name": "Nikos"},
     }
@@ -34,6 +34,11 @@ class ShareCardTests(unittest.TestCase):
         self.assertEqual(card["fighters"]["A"]["working_on"], "Guard drops after kicks")
         self.assertIsNone(card["fighters"]["B"]["strength"])
         self.assertTrue(card["note"])
+
+    def test_a_fighter_behind_on_nothing_has_nothing_to_work_on_on_the_card(self):
+        card = share_card(report(coaching={"A": {"strengths": [], "improvements": [
+            {"title": "Nothing behind your opponent", "detail": "...", "evidence_times": []}]}}))
+        self.assertIsNone(card["fighters"]["A"]["working_on"])
 
     def test_only_the_families_the_sport_scores(self):
         card = share_card(report(scorecard={"available": False, "sport": "boxing", "totals": {}}))

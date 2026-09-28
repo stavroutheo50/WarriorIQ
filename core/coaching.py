@@ -240,13 +240,26 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
         )
 
     strengths = []
+    # A strength has to be one. The best-ranked number used to be called the
+    # strength whatever it was, so a fighter level with or behind their
+    # opponent on everything still got one, and the title was the bare number:
+    # "Strength: Guard 22%" reads as a weak guard even where 22% was ahead of
+    # the opponent's 12%. The title now says what makes it a strength; the
+    # numbers stay in the detail.
     if strongest is not None:
-        strength_title, strength_detail = _phrase(strongest)
-        strengths.append({
-            "title": strength_title,
-            "detail": strength_detail,
-            "evidence_times": _moment_times(own, strongest[2], want_low=False),
-        })
+        gap, _mine, _key, label = strongest[0], strongest[1], strongest[2], strongest[3]
+        if gap is not None and gap >= LEVEL_GAP:
+            title = f"{label}: ahead of your opponent"
+        elif gap is None and strongest[6] > 0:
+            title = f"{label}: your best measured area"
+        else:
+            title = None
+        if title is not None:
+            strengths.append({
+                "title": title,
+                "detail": _phrase(strongest)[1],
+                "evidence_times": _moment_times(own, strongest[2], want_low=False),
+            })
     improvements = []
     drills = []
     if comparable and not weakest:

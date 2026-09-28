@@ -1329,6 +1329,22 @@ class EngagementRangeTests(unittest.TestCase):
         # B kept a better guard than A, so that is B's.
         self.assertIn("Guard", coach_b["strengths"][0]["title"])
 
+    def test_a_strength_is_only_a_number_the_fighter_is_ahead_on(self):
+        """"Strength: Guard 22%" read as a weak guard, and a fighter behind on
+        everything was still handed a strength."""
+        from core.coaching import build_pose_coaching
+
+        ahead = build_pose_coaching("A", dict(guard_index=0.22, balance_index=0.70),
+                                    dict(guard_index=0.12, balance_index=0.70))
+        self.assertEqual(ahead["strengths"][0]["title"], "Guard: ahead of your opponent")
+        self.assertIn("22%", ahead["strengths"][0]["detail"])
+        behind = build_pose_coaching("A", dict(guard_index=0.10, balance_index=0.60),
+                                     dict(guard_index=0.20, balance_index=0.75))
+        self.assertEqual(behind["strengths"], [])
+        level = build_pose_coaching("A", dict(guard_index=0.20, balance_index=0.70),
+                                    dict(guard_index=0.20, balance_index=0.70))
+        self.assertEqual(level["strengths"], [])
+
     def test_style_measurements_are_never_a_strength_or_a_fault(self):
         """"Work on: Walking them down - behind your opponent here" told a
         counter-fighter that giving ground was a fault. metric_catalog gives
