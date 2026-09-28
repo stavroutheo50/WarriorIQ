@@ -1,0 +1,110 @@
+"""The picture a shared fight link shows in WhatsApp, Facebook and the rest.
+
+A link preview needs an image at an address, so this one is drawn on the
+server from core.report.share_card - the same numbers as the story card and
+the result page - rather than taken from the browser. The owner chooses what
+to post; they do not get to choose what the numbers say.
+
+Drawn with OpenCV, which the web host already has. Its built-in fonts are
+ASCII only, which is one reason the owner's name is left to the page (where
+any alphabet works) and never drawn here.
+"""
+
+from __future__ import annotations
+
+import cv2
+import numpy as np
+
+W, H = 1200, 630
+# BGR, matching static/share_card.js.
+BACKGROUND = (22, 10, 7)
+INK = (255, 247, 244)
+MUTED = (194, 168, 154)
+CYAN = (255, 215, 79)
+TRACK = (83, 54, 36)
+CORNER_COLOURS = {"red": (143, 113, 255), "blue": (255, 160, 90)}
+FAMILY_LABELS = {"punch": "Punches", "kick": "Kicks", "knee": "Knees"}
+FONT = cv2.FONT_HERSHEY_DUPLEX
+
+
+def _glow(canvas: np.ndarray, centre: tuple[int, int], radius: float, colour: tuple[int, int, int], strength: float) -> None:
+    ys, xs = np.mgrid[0:H, 0:W]
+    distance = np.sqrt((xs - centre[0]) ** 2 + (ys - centre[1]) ** 2) / radius
+    weight = (np.clip(1.0 - distance, 0.0, 1.0) ** 2 * strength)[..., None]
+    canvas[:] = (canvas * (1 - weight) + np.array(colour, dtype=np.float32) * weight).astype(np.uint8)
+
+
+_background: np.ndarray | None = None
+
+
+def _backdrop() -> np.ndarray:
+    """The glows are the same on every card, and most of the drawing time: made once."""
+    global _background
+    if _background is None:
+        canvas = np.zeros((H, W, 3), dtype=np.uint8)
+        canvas[:] = BACKGROUND
+        _glow(canvas, (120, 90), 620, CYAN, 0.22)
+        _glow(canvas, (W - 60, H - 40), 560, CORNER_COLOURS["red"], 0.16)
+        _background = canvas
+    return _background.copy()
+
+
+def _text(canvas, text, x, y, scale, colour, thickness=2, right=False):
+    width = cv2.getTextSize(text, FONT, scale, thickness)[0][0]
+    cv2.putText(canvas, text, (x - width if right else x, y), FONT, scale, colour, thickness, cv2.LINE_AA)
+    return width
+
+
+def _ascii(text: str) -> str:
+    return "".join(ch if 32 <= ord(ch) < 127 else "-" if ch in "–—" else "" for ch in str(text))
+
+
+def preview_png(card: dict, side: str, corner: str | None) -> bytes:
+    """1200x630 PNG for one fighter of one fight's share card.
+
+    `side` is the fighter the owner was ("A" or "B") and `corner` their corner
+    ("red", "blue" or None when nobody said).
+    """
+    other = "B" if side == "A" else "A"
+    me = card["fighters"][side]
+    canvas = _backdrop()
+
+    x = 64
+    width = _text(canvas, "WARRIOR ", x, 92, 1.5, INK, 3)
+    _text(canvas, "IQ", x + width, 92, 1.5, CYAN, 3)
+    _text(canvas, _ascii(f"{card.get('sport') or 'Fight'} - fight analysis").upper(), x, 138, 0.8, MUTED, 2)
+
+    label = f"{corner.upper()} CORNER" if corner in CORNER_COLOURS else f"FIGHTER {side}"
+    colour = CORNER_COLOURS.get(corner or "", INK)
+    size = cv2.getTextSize(label, FONT, 0.8, 2)[0]
+    right = W - 64
+    cv2.rectangle(canvas, (right - size[0] - 36, 58), (right, 108), colour, 2, cv2.LINE_AA)
+    _text(canvas, label, right - 18, 93, 0.8, colour, 2, right=True)
+
+    # The total, big, then what it is made of.
+    _text(canvas, str(int(me["total"])), x - 6, 380, 6.0, INK, 14)
+    _text(canvas, "strikes thrown", x, 440, 1.0, MUTED, 2)
+
+    families = [family for family in ("punch", "kick", "knee") if family in me["strikes"]]
+    top = max([1] + [int(me["strikes"][family]) for family in families])
+    left, bar_right, y = 560, W - 64, 230
+    for family in families:
+        value = int(me["strikes"][family])
+        _text(canvas, FAMILY_LABELS[family], left, y, 1.0, INK, 2)
+        _text(canvas, str(value), bar_right, y, 1.0, INK, 2, right=True)
+        cv2.rectangle(canvas, (left, y + 18), (bar_right, y + 30), TRACK, -1, cv2.LINE_AA)
+        filled = left + max(12, int((bar_right - left) * value / top))
+        cv2.rectangle(canvas, (left, y + 18), (filled, y + 30), CYAN, -1, cv2.LINE_AA)
+        y += 84
+
+    if card.get("score"):
+        score = f"{card['score'][side]} - {card['score'][other]}"
+        _text(canvas, "Estimated score", left, 505, 0.8, MUTED, 2)
+        _text(canvas, score, bar_right, 510, 1.6, INK, 3, right=True)
+
+    _text(canvas, "warrioriq.eu", x, 580, 1.1, INK, 2)
+    _text(canvas, "Automatic estimate, not checked by a person", W - 64, 578, 0.6, MUTED, 1, right=True)
+    ok, encoded = cv2.imencode(".png", canvas)
+    if not ok:
+        raise RuntimeError("could not encode the preview image")
+    return encoded.tobytes()

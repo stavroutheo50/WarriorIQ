@@ -574,3 +574,44 @@
 .camp-finished .mission-card{opacity:.8}
 .camp-add .assignment-builder{margin-top:12px}
 @media (max-width:760px){.camp-today{grid-template-columns:1fr;padding:16px}.camp-next-actions .btn,.camp-next-actions form,.camp-next-actions label{width:100%;justify-content:center}.assignment-actions{justify-content:flex-start}}
+/* A fight's public link (story.html): the stats-only card as a page. */
+.story-page{max-width:760px;margin:24px auto 48px;display:grid;gap:16px}
+.story-head h1{margin:8px 0 10px;font-size:clamp(34px,6vw,56px);line-height:1.02}
+.story-corner{display:inline-block;padding:5px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2);font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#c7cede}
+.story-corner.corner-red{border-color:#ff718f;color:#ff718f}
+.story-corner.corner-blue{border-color:#5aa0ff;color:#7fb1ff}
+.story-hero{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:18px;background:radial-gradient(420px 220px at 0 0,rgba(79,215,255,.16),transparent),rgba(255,255,255,.03)}
+.story-total{display:flex;flex-direction:column}
+.story-total strong{font-size:clamp(72px,16vw,128px);line-height:.9}
+.story-total span{color:#9aa8c2;font-size:18px;margin-top:6px}
+.story-score{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.story-score strong{font-size:clamp(40px,8vw,64px);line-height:1}
+.story-compare{display:grid;gap:14px}
+.story-compare-head{display:flex;justify-content:space-between;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#9aa8c2}
+.story-row{display:grid;grid-template-columns:44px 1fr 44px;align-items:center;gap:12px}
+.story-row>b{font-size:22px}
+.story-row>b:last-child{text-align:right;color:#9aa8c2}
+.story-bars{display:grid;gap:4px}
+.story-label{font-size:14px;color:#c7cede}
+.story-bar{display:block;height:9px;border-radius:999px;background:#243653;overflow:hidden}
+.story-bar i{display:block;height:100%;border-radius:999px}
+.story-bar.mine i{background:#4fd7ff}
+.story-bar.theirs i{background:#6b7a96}
+.story-notes{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.story-note{display:flex;flex-direction:column;gap:6px;border-left:4px solid #4fd7ff}
+.story-note.working{border-left-color:#ff718f}
+.story-note strong{font-size:18px}
+.story-disclaimer{margin:0}
+.story-cta{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:18px;border-color:rgba(79,215,255,.28)}
+.story-cta h2{margin:6px 0 6px}
+.story-cta p{margin:0;max-width:420px}
+.story-cta-actions{display:flex;flex-wrap:wrap;gap:8px}
+@media (max-width:560px){.story-notes{grid-template-columns:1fr}.story-score{align-items:flex-start}.story-cta-actions,.story-cta-actions .btn{width:100%;justify-content:center}}
+/* The share dialog's link half (result.html). */
+.share-card-link{margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.1);display:grid;gap:10px}
+.share-card-link h3{margin:0;font-size:16px}
+.share-card-link p{margin:0}
+.share-link-row{display:flex;gap:8px;flex-wrap:wrap}
+.share-link-row input[type=text]{flex:1 1 200px;min-width:0}
+.share-link-name{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px}
+.share-link-name input[type=text]{flex:1 1 160px;min-width:0}

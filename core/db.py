@@ -4,6 +4,7 @@ import atexit
 import collections
 import json
 import logging
+import secrets
 import sqlite3
 import threading
 import time
@@ -466,6 +467,23 @@ def init_db() -> None:
                 UNIQUE(profile_id, reason, ref),
                 FOREIGN KEY(profile_id) REFERENCES profiles(id)
             );
+            -- A public link to one fight's stats-only card, made by its
+            -- owner to post (warrioriq.eu/f/<token>). The token is kept as is,
+            -- not as a digest like a coach link's: the page shows only what
+            -- the owner chose to post, and they need the address again later.
+            CREATE TABLE IF NOT EXISTS story_shares (
+                token TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                profile_id INTEGER NOT NULL,
+                side TEXT NOT NULL,
+                corner TEXT,
+                name TEXT,
+                created_at TEXT NOT NULL,
+                revoked_at TEXT,
+                FOREIGN KEY(job_id) REFERENCES fights(job_id),
+                FOREIGN KEY(profile_id) REFERENCES profiles(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_story_shares_job ON story_shares(job_id, profile_id);
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -661,6 +679,7 @@ def delete_fight(job_id: str) -> dict | None:
         con.execute("DELETE FROM annotations WHERE job_id=?", (job_id,))
         con.execute("DELETE FROM fight_reviews WHERE job_id=?", (job_id,))
         con.execute("DELETE FROM report_shares WHERE job_id=?", (job_id,))
+        con.execute("DELETE FROM story_shares WHERE job_id=?", (job_id,))
         con.execute("DELETE FROM legal_acceptances WHERE resource_id=?", (job_id,))
         con.execute("DELETE FROM fights WHERE job_id=?", (job_id,))
     return fight
@@ -1861,6 +1880,65 @@ def list_points(profile_id: int) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def story_share(job_id: str, profile_id: int, side: str, corner: str | None, name: str | None) -> str:
+    """The live public link for this fight and side, made if there is none.
+
+    One per fight and side, so sharing twice posts the same address. The
+    corner ("red", "blue" or None) is the one stated when the fighters were
+    picked; the name is whatever the owner chose to put on the page this
+    time, or nothing.
+    """
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        row = con.execute(
+            "SELECT token FROM story_shares WHERE job_id=? AND profile_id=? AND side=? AND revoked_at IS NULL",
+            (job_id, int(profile_id), side)).fetchone()
+        if row:
+            con.execute("UPDATE story_shares SET corner=?, name=? WHERE token=?", (corner, name, row["token"]))
+            return str(row["token"])
+        token = secrets.token_urlsafe(9)
+        con.execute(
+            "INSERT INTO story_shares(token,job_id,profile_id,side,corner,name,created_at) VALUES(?,?,?,?,?,?,?)",
+            (token, job_id, int(profile_id), side, corner, name, now))
+        return token
+
+
+def get_story_share(token: str) -> dict | None:
+    init_db()
+    with connection() as con:
+        row = con.execute("SELECT * FROM story_shares WHERE token=? AND revoked_at IS NULL", (token,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_story_shares(job_id: str, profile_id: int) -> list[dict]:
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM story_shares WHERE job_id=? AND profile_id=? AND revoked_at IS NULL ORDER BY created_at",
+            (job_id, int(profile_id))).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_profile_story_shares(profile_id: int) -> list[dict]:
+    """Every public link this profile made, turned off or not, for the data export."""
+    init_db()
+    with connection() as con:
+        rows = con.execute("SELECT * FROM story_shares WHERE profile_id=? ORDER BY created_at",
+                           (int(profile_id),)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def revoke_story_shares(job_id: str, profile_id: int) -> int:
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE story_shares SET revoked_at=? WHERE job_id=? AND profile_id=? AND revoked_at IS NULL",
+            (now, job_id, int(profile_id)))
+        return cursor.rowcount
+
+
 def list_assignments(profile_id: int) -> list[dict]:
     init_db()
     with connection() as con:
@@ -1976,6 +2054,7 @@ def delete_account(account_id: int) -> dict | None:
             " (SELECT id FROM fighters WHERE profile_id=?)", (profile_id,))
         con.execute("DELETE FROM fighters WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM camp_missions WHERE profile_id=?", (profile_id,))
+        con.execute("DELETE FROM story_shares WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM training_sessions WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM points_ledger WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))

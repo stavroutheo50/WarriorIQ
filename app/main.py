@@ -75,6 +75,7 @@ from core.db import (
     record_security_event, record_subscription_action, release_analysis, reserve_analysis,
     list_active_report_shares, resolve_moderation_report, revoke_account_sessions,
     revoke_report_shares, save_annotation,
+    get_story_share, list_profile_story_shares, list_story_shares, revoke_story_shares, story_share,
     save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
     set_account_status, set_annotation_sequence,
     page_view_summary, plan_interest_counts, plans_wanted_by, policies_outdated,
@@ -113,6 +114,7 @@ from core.camp import (
     fight_camp_missions, mission_board, mission_result, missions_from_report, next_step, paid_sessions_on,
 )
 from core.training_check import check_training_video
+from core.share_image import preview_png as story_preview_png
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
@@ -1474,7 +1476,7 @@ async def viewer_context(request: Request, call_next):
         f"img-src {img_src}; media-src 'self' blob:; connect-src {connect_src}; frame-src {frame_src}; "
         f"frame-ancestors 'none'; form-action {form_action}",
     )
-    if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/")):
+    if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/", "/f/")):
         # setdefault, so a route that has already chosen keeps its value.
         # /media/ does exactly that: a fight video is private but not
         # volatile, and re-sending 101 MB on every seek is not privacy.
@@ -4239,6 +4241,23 @@ def _require_completed_artifact(job_id: str, name: str) -> Path:
     return directory / name
 
 
+def _score_and_identity_as_shown(report: dict) -> None:
+    """Decide, on read, whether the score may be shown and whose numbers are whose.
+
+    The result page's rules, kept in one place because the public fight link
+    (story_page) must show exactly what the owner's own page shows.
+    """
+    coverage_ok = min(float(report.get("tracking", {}).get("fighter_A_coverage", 0)), float(report.get("tracking", {}).get("fighter_B_coverage", 0))) >= SETTINGS.min_tracking_coverage_for_score
+    report.setdefault("scorecard", {})["available"] = bool(report.get("scorecard", {}).get("available", coverage_ok) and coverage_ok)
+    if report.get("video", {}).get("analysis_target", "BOTH") != "BOTH":
+        report["scorecard"]["available"] = False
+        report["scorecard"]["disclaimer"] = "To receive an estimated scorecard, choose Analyze both fighters. A one-fighter analysis does not count the opponent's points."
+    # Customer reports are fully automatic. Human annotations remain isolated
+    # in the model-validation lab and never become required report work.
+    _apply_report_annotations(report, [])
+    refresh_identity_integrity(report)
+
+
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result_page(request: Request, job_id: str):
     job = _authorized_job(request, job_id)
@@ -4252,15 +4271,7 @@ def result_page(request: Request, job_id: str):
     report = json.loads(path.read_text(encoding="utf-8"))
     if "key_moments" not in report:
         report["key_moments"] = [e for e in report.get("events", []) if e.get("outcome") in {"clean", "likely_landed"} and float(e.get("confidence", 0)) >= .72 and float(e.get("contact_confidence", 0)) >= .62][:18]
-    coverage_ok = min(float(report.get("tracking", {}).get("fighter_A_coverage", 0)), float(report.get("tracking", {}).get("fighter_B_coverage", 0))) >= SETTINGS.min_tracking_coverage_for_score
-    report.setdefault("scorecard", {})["available"] = bool(report.get("scorecard", {}).get("available", coverage_ok) and coverage_ok)
-    if report.get("video", {}).get("analysis_target", "BOTH") != "BOTH":
-        report["scorecard"]["available"] = False
-        report["scorecard"]["disclaimer"] = "To receive an estimated scorecard, choose Analyze both fighters. A one-fighter analysis does not count the opponent's points."
-    # Customer reports are fully automatic. Human annotations remain isolated
-    # in the model-validation lab and never become required report work.
-    _apply_report_annotations(report, [])
-    refresh_identity_integrity(report)
+    _score_and_identity_as_shown(report)
     report_access = _request_plan(request)
     # Opening the exact completed report acknowledges its one-time notification.
     # Without this reset, the green "Results ready" chip was written back on
@@ -4339,6 +4350,11 @@ def result_page(request: Request, job_id: str):
         # Stats-only story card for Instagram, TikTok, WhatsApp and the rest:
         # an image made in the browser, no link and no video, so every plan.
         "share_card": share_card(report) if _account(request) else None,
+        # The fight's live public links, one per fighter (story_page).
+        "story_links": [
+            {"side": link["side"], "name": link["name"], "url": f"{_public_base(request)}/f/{link['token']}"}
+            for link in (list_story_shares(job_id, _profile) if _profile is not None and _account(request) else [])
+        ],
         "went_down_note": (report.get("went_down") or {}).get("note"),
         "estimate_note": ESTIMATE_NOTE,
         "families_shown": published_families(
@@ -6461,6 +6477,96 @@ def revoke_shares(request: Request, job_id: str):
     return RedirectResponse(f"/result/{job_id}?revoked={revoked}", status_code=303)
 
 
+# ---- Fight links ------------------------------------------------------------
+#
+# A public page for one fight's stats-only card (warrioriq.eu/f/<token>), made
+# by the fight's owner to post. Its link preview carries the card as a picture
+# (core/share_image.py), so on WhatsApp, Facebook and Messenger the post is the
+# stats with warrioriq.eu under them, and tapping it opens the page. Only what
+# core.report.share_card allows is on it: no video, and no opponent's name.
+
+STORY_NAME_CHARS = 40
+STORY_GONE = "This fight link was turned off by the fighter who shared it."
+
+
+def _story_card(job_id: str) -> dict | None:
+    """The fight's share card, built by the same steps as its result page."""
+    try:
+        report = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
+    except (HTTPException, OSError, json.JSONDecodeError):
+        return None
+    _score_and_identity_as_shown(report)
+    _estimate_score_withheld_for_punches(report)
+    return share_card(report)
+
+
+def _story_name(value: str) -> str | None:
+    """The owner's name for the page: printable characters, one space apart, kept short."""
+    cleaned = " ".join("".join(ch for ch in value if ch.isprintable()).split())
+    return cleaned[:STORY_NAME_CHARS] or None
+
+
+@app.post("/story/{job_id}", dependencies=[Depends(require_csrf)])
+def create_story_link(request: Request, job_id: str, side: str = Form(...), name: str = Form("")):
+    """Make (or reuse) the public link for one fight and one fighter."""
+    _enforce_rate_limit(request, "story-link", 20, 3600)
+    profile_id = _profile_id(request)
+    fight = get_fight(job_id)
+    if profile_id is None or not fight or int(fight["profile_id"]) != profile_id:
+        raise HTTPException(404)
+    if side not in {"A", "B"}:
+        raise HTTPException(400, "Choose which fighter you were.")
+    if _story_card(job_id) is None:
+        raise HTTPException(409, "This fight has no stats that can be shared.")
+    job = _authorized_job(request, job_id) or {}
+    corner = str(job.get("fighter_a_corner") or "").lower()
+    if corner in {"red", "blue"} and side == "B":
+        corner = "blue" if corner == "red" else "red"
+    token = story_share(job_id, profile_id, side, corner if corner in {"red", "blue"} else None,
+                        _story_name(name))
+    return {"url": f"{_public_base(request)}/f/{token}"}
+
+
+@app.post("/story/{job_id}/revoke", dependencies=[Depends(require_csrf)])
+def revoke_story_links(request: Request, job_id: str):
+    profile_id = _profile_id(request)
+    fight = get_fight(job_id)
+    if profile_id is None or not fight or int(fight["profile_id"]) != profile_id:
+        raise HTTPException(404)
+    return {"revoked": revoke_story_shares(job_id, profile_id)}
+
+
+def _live_story(token: str) -> tuple[dict, dict]:
+    share = get_story_share(token)
+    card = _story_card(share["job_id"]) if share else None
+    if not share or card is None:
+        raise HTTPException(404, STORY_GONE)
+    return share, card
+
+
+@app.get("/f/{token}", response_class=HTMLResponse)
+def story_page(request: Request, token: str):
+    share, card = _live_story(token)
+    side = share["side"]
+    fight = get_fight(share["job_id"]) or {}
+    base = _public_base(request)
+    # Not cached (the middleware's no-store for /f/): turning a link off has to
+    # take effect for the next person who opens it.
+    return templates.TemplateResponse(request=request, name="story.html", context={
+        "request": request, "card": card, "side": side, "other": "B" if side == "A" else "A",
+        "corner": share.get("corner"), "name": share.get("name"),
+        "fought_at": fight.get("created_at"),
+        "page_url": f"{base}/f/{token}", "image_url": f"{base}/f/{token}/card.png",
+    })
+
+
+@app.get("/f/{token}/card.png")
+def story_preview(token: str):
+    share, card = _live_story(token)
+    return Response(story_preview_png(card, share["side"], share.get("corner")), media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=600"})
+
+
 @app.post("/account/export", dependencies=[Depends(require_csrf)])
 def export_account_data(request: Request, password: str = Form(...),
                         next_path: str = Form("/profile")):
@@ -6518,6 +6624,7 @@ def export_account_data(request: Request, password: str = Form(...),
             "training_sessions": list_training_sessions(profile_id),
             "points": list_points(profile_id),
         },
+        "fight_links": list_profile_story_shares(profile_id),
         "connected_sign_in_identities": list_oauth_identities(int(account["id"])),
         "legal_acceptances": list_legal_acceptances(profile_id=profile_id),
     }
