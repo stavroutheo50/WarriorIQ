@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{#- A fight's stats-only card as a public page (app.main.story_page): the
+    address a fighter posts, and the picture its link preview shows. Only
+    core.report.share_card's numbers: no video, no opponent's name. -#}
+{% set me = card.fighters[side] %}{% set them = card.fighters[other] %}
+{% set corner_label = (corner|title ~ ' corner') if corner else ('Fighter ' ~ side) %}
+{% set who = name or corner_label %}
+{% set headline %}{{ me.total }} strikes thrown{% if card.score %} · estimated score {{ card.score[side] }}–{{ card.score[other] }}{% endif %}{% endset %}
+{% block title %}{{ who }} · {{ card.sport }} fight analysis · WarriorIQ{% endblock %}
+{% block description %}{{ headline }}. Automatic fight analysis by WarriorIQ.{% endblock %}
+{% block social %}
+  <meta property="og:type" content="website"><meta property="og:site_name" content="WarriorIQ">
+  <meta property="og:title" content="{{ who }} · {{ card.sport }} fight analysis">
+  <meta property="og:description" content="{{ headline }}. {{ card.note }}">
+  <meta property="og:url" content="{{ page_url }}">
+  <meta property="og:image" content="{{ image_url }}"><meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="{{ headline }}">
+  <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{{ who }} · {{ card.sport }} fight analysis">
+  <meta name="twitter:description" content="{{ headline }}. {{ card.note }}"><meta name="twitter:image" content="{{ image_url }}">
+{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
+{% block content %}
+{% set labels = {'punch': 'Punches', 'kick': 'Kicks', 'knee': 'Knees'} %}
+<article class="story-page">
+  <header class="story-head">
+    <div class="eyebrow">{{ card.sport }} · Fight analysis{% if fought_at %} · <time datetime="{{ fought_at }}" data-local="date">{{ fought_at|fight_moment(false) }}</time>{% endif %}</div>
+    <h1>{{ name or 'Fight analysis' }}</h1>
+    <span class="story-corner{% if corner %} corner-{{ corner }}{% endif %}">{{ corner_label }}</span>
+  </header>
+
+  <section class="story-hero card">
+    <div class="story-total"><strong class="wiq-num">{{ me.total }}</strong><span>strikes thrown</span></div>
+    {% if card.score %}
+    <div class="story-score"><span class="eyebrow">Estimated score</span><strong class="wiq-num">{{ card.score[side] }} – {{ card.score[other] }}</strong><small class="muted">{{ corner_label }} – opponent</small></div>
+    {% endif %}
+  </section>
+
+  <section class="card story-compare" aria-label="Strikes, fighter and opponent">
+    <div class="story-compare-head"><span>{{ who }}</span><span>Opponent</span></div>
+    {% for family, value in me.strikes.items() %}
+    {% set theirs = them.strikes.get(family, 0) %}{% set top = [value, theirs, 1]|max %}
+    <div class="story-row">
+      <b class="wiq-num">{{ value }}</b>
+      <div class="story-bars"><span class="story-label">{{ labels.get(family, family|title) }}</span>
+        <span class="story-bar mine"><i style="width:{{ (value * 100 // top) }}%"></i></span>
+        <span class="story-bar theirs"><i style="width:{{ (theirs * 100 // top) }}%"></i></span></div>
+      <b class="wiq-num">{{ theirs }}</b>
+    </div>
+    {% endfor %}
+  </section>
+
+  {% if me.strength or me.working_on %}
+  <section class="story-notes">
+    {% if me.strength %}<div class="card story-note strength"><span class="eyebrow">Strength</span><strong>{{ me.strength }}</strong></div>{% endif %}
+    {% if me.working_on %}<div class="card story-note working"><span class="eyebrow">Working on</span><strong>{{ me.working_on }}</strong></div>{% endif %}
+  </section>
+  {% endif %}
+
+  <p class="small muted story-disclaimer">{{ card.note }} Counts are attempts WarriorIQ saw on the video; the score is an estimate, not an official result.</p>
+
+  <section class="card story-cta">
+    <div><div class="eyebrow">WarriorIQ</div><h2>Get this for your own fights</h2>
+      <p class="muted">Upload a fight video and WarriorIQ counts the strikes, estimates the score and builds a training plan from what it saw.</p></div>
+    <div class="story-cta-actions"><a class="btn" href="/analyze" data-motion-primary>Analyse your fight <span aria-hidden="true">→</span></a><a class="btn secondary" href="/">How it works</a></div>
+  </section>
+</article>
+{% endblock %}

@@ -526,12 +526,8 @@
 .mission-actions form{margin:0}
 .camp-progress,.camp-squad{margin-top:28px}
 @media (max-width:560px){.mission-card{flex-direction:column;gap:8px}.mission-actions .btn{width:100%;justify-content:center}}
-.camp-standing{display:grid;grid-template-columns:auto 1fr auto;gap:18px 28px;align-items:center;margin:4px 0 12px;padding:16px 18px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)}
-.camp-standing>div{display:flex;flex-direction:column;gap:2px}
-.camp-standing strong{font-size:34px;line-height:1}
 .camp-level-bar{display:block;height:10px;border-radius:999px;background:#243653;overflow:hidden;margin:4px 0}
 .camp-level-bar i{display:block;height:100%;background:#4fd7ff;border-radius:999px}
-.camp-rules{grid-column:1/-1}
 .camp-rules summary{cursor:pointer;font-size:14px;color:#c7cede}
 .camp-rules li{margin:6px 0}
 .assignment-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
@@ -541,7 +537,98 @@
 .session-upload input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
 .camp-item-status{color:#98a2b3}
 .camp-item-status .up{color:#52d6a3}
-@media (max-width:560px){.camp-standing{grid-template-columns:1fr 1fr}.camp-level{grid-column:1/-1;order:3}.camp-rules{order:4}.assignment-actions{justify-content:flex-start}}
-.camp-spend{grid-column:1/-1;display:flex!important;flex-direction:row!important;flex-wrap:wrap;align-items:center;gap:10px 14px}
-.camp-spend form{margin:0}
 .camp-note{grid-column:1/-1;margin:0}
+/* Fight Camp: the next step, with the points beside it (camp.html #today). */
+.camp-today{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px 22px;margin:4px 0 14px;padding:20px;border-radius:18px;border:1px solid rgba(79,215,255,.28);background:radial-gradient(420px 200px at 0 0,rgba(79,215,255,.12),transparent),rgba(255,255,255,.03)}
+.camp-next h2{margin:6px 0 8px;font-size:clamp(22px,3vw,30px);line-height:1.15}
+.camp-next p{margin:0 0 12px}
+.camp-next-actions{display:flex;flex-wrap:wrap;gap:8px}
+.camp-next-actions form{margin:0}
+.camp-standing{display:grid;gap:14px;align-content:start;padding:14px 16px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.18)}
+.camp-standing>div{display:flex;flex-direction:column;gap:3px}
+.camp-streak{flex-direction:row!important;align-items:baseline;gap:8px!important}
+.camp-streak strong{font-size:28px;line-height:1}
+.camp-spend form{margin:2px 0 0}
+.camp-spend .btn{width:100%;justify-content:center}
+.camp-today .camp-note{grid-column:1/-1;margin:0}
+.camp-rules{grid-column:1/-1}
+/* One card per mission, whatever its stage (core.camp.mission_board). */
+.mission-card{flex-direction:column;gap:0}
+.mission-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.stage-pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.02em;background:rgba(255,255,255,.08);color:#c7cede}
+.stage-new .stage-pill{background:rgba(79,215,255,.16);color:#4fd7ff}
+.stage-training .stage-pill{background:rgba(255,196,77,.16);color:#ffc44d}
+.stage-waiting .stage-pill{background:rgba(143,160,255,.16);color:#aab6ff}
+.stage-improved .stage-pill{background:rgba(82,214,163,.16);color:#52d6a3}
+.stage-training{border-color:rgba(255,196,77,.28)}
+.stage-improved{border-color:rgba(82,214,163,.3)}
+.mission-meter{margin:12px 0 4px;display:grid;gap:5px;max-width:520px}
+.mission-meter-labels{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#c7cede}
+.mission-bar{position:relative;display:block;height:10px;border-radius:999px;background:#243653}
+.mission-bar i{display:block;height:100%;border-radius:999px;background:#52d6a3}
+.mission-bar em{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:#ffc44d;border-radius:2px}
+.mission-meter .up{color:#52d6a3}
+.camp-finished,.camp-add{margin-top:16px}
+.camp-finished summary,.camp-add summary{cursor:pointer;font-size:14px;color:#c7cede}
+.camp-finished .mission-list{margin-top:12px}
+.camp-finished .mission-card{opacity:.8}
+.camp-add .assignment-builder{margin-top:12px}
+@media (max-width:760px){.camp-today{grid-template-columns:1fr;padding:16px}.camp-next-actions .btn,.camp-next-actions form,.camp-next-actions label{width:100%;justify-content:center}.assignment-actions{justify-content:flex-start}}
+/* A fight's public link (story.html): the stats-only card as a page. */
+.story-page{max-width:760px;margin:24px auto 48px;display:grid;gap:16px}
+.story-head h1{margin:8px 0 10px;font-size:clamp(34px,6vw,56px);line-height:1.02}
+.story-corner{display:inline-block;padding:5px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2);font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#c7cede}
+.story-corner.corner-red{border-color:#ff718f;color:#ff718f}
+.story-corner.corner-blue{border-color:#5aa0ff;color:#7fb1ff}
+.story-hero{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:18px;background:radial-gradient(420px 220px at 0 0,rgba(79,215,255,.16),transparent),rgba(255,255,255,.03)}
+.story-total{display:flex;flex-direction:column}
+.story-total strong{font-size:clamp(72px,16vw,128px);line-height:.9}
+.story-total span{color:#9aa8c2;font-size:18px;margin-top:6px}
+.story-score{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.story-score strong{font-size:clamp(40px,8vw,64px);line-height:1}
+.story-compare{display:grid;gap:14px}
+.story-compare-head{display:flex;justify-content:space-between;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#9aa8c2}
+.story-row{display:grid;grid-template-columns:44px 1fr 44px;align-items:center;gap:12px}
+.story-row>b{font-size:22px}
+.story-row>b:last-child{text-align:right;color:#9aa8c2}
+.story-bars{display:grid;gap:4px}
+.story-label{font-size:14px;color:#c7cede}
+.story-bar{display:block;height:9px;border-radius:999px;background:#243653;overflow:hidden}
+.story-bar i{display:block;height:100%;border-radius:999px}
+.story-bar.mine i{background:#4fd7ff}
+.story-bar.theirs i{background:#6b7a96}
+.story-notes{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.story-note{display:flex;flex-direction:column;gap:6px;border-left:4px solid #4fd7ff}
+.story-note.working{border-left-color:#ff718f}
+.story-note strong{font-size:18px}
+.story-disclaimer{margin:0}
+.story-cta{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:18px;border-color:rgba(79,215,255,.28)}
+.story-cta h2{margin:6px 0 6px}
+.story-cta p{margin:0;max-width:420px}
+.story-cta-actions{display:flex;flex-wrap:wrap;gap:8px}
+@media (max-width:560px){.story-notes{grid-template-columns:1fr}.story-score{align-items:flex-start}.story-cta-actions,.story-cta-actions .btn{width:100%;justify-content:center}}
+/* The share dialog's link half (result.html). */
+.share-card-link{margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.1);display:grid;gap:10px}
+.share-card-link h3{margin:0;font-size:16px}
+.share-card-link p{margin:0}
+.share-link-row{display:flex;gap:8px;flex-wrap:wrap}
+.share-link-row input[type=text]{flex:1 1 200px;min-width:0}
+.share-link-name{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px}
+.share-link-name input[type=text]{flex:1 1 160px;min-width:0}
+/* Fight Camp: rank, this week's target and where points came from. */
+.camp-rank{font-size:22px;font-weight:800;letter-spacing:.01em;color:#ffc44d}
+.camp-week{flex-direction:row!important;align-items:center;gap:12px!important}
+.camp-week>span:last-child{display:flex;flex-direction:column;gap:2px}
+.camp-week-ring{--done:0;flex:none;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(closest-side,#10192b 76%,transparent 78%),conic-gradient(#52d6a3 calc(var(--done) * 1%),#243653 0)}
+.camp-week-ring b{font-size:14px}
+.camp-history summary{cursor:pointer;font-size:13px;color:#c7cede}
+.camp-history ul{margin:8px 0 0;display:grid;gap:4px;font-size:13px}
+.camp-history .up{color:#52d6a3}
+.camp-history .down{color:#ff718f}
+/* The squad, folded away unless this is a coach's workspace. */
+.camp-squad>summary{cursor:pointer;list-style:none;display:flex;flex-direction:column;gap:4px;padding:14px 0}
+.camp-squad>summary::-webkit-details-marker{display:none}
+.camp-squad>summary h2{margin:0}
+.camp-squad>summary h2::after{content:" ▾";font-size:.6em;color:#98a2b3}
+.camp-squad[open]>summary h2::after{content:" ▴"}
+.progress-trend{margin-top:16px}

@@ -481,6 +481,23 @@
       <button class="btn" type="button" data-share-card-send>Share or save image</button>
       <button class="btn secondary" type="button" data-share-card-close>Close</button>
     </div>
+    {#- A public page with the same numbers (app.main.story_page), for a post
+        people can tap: link previews show its picture with warrioriq.eu. -#}
+    <div class="share-card-link" data-story-job="{{ job_id }}">
+      <h3>Link to your stats</h3>
+      <p class="small muted">A page on warrioriq.eu with these numbers. On WhatsApp, Facebook and Messenger the link shows the stats with warrioriq.eu under them. On Instagram, add the Link sticker to your story and paste it.</p>
+      <label class="share-link-name"><input type="checkbox" data-story-show-name> Put my name on it
+        <input type="text" maxlength="40" data-story-name value="{{ report.setup.fighter_name|default('', true) }}" placeholder="Your name" aria-label="Your name"></label>
+      <div class="share-link-row">
+        <input type="text" readonly data-story-url placeholder="No link yet" aria-label="Your fight link">
+        <button class="btn" type="button" data-story-create>Create link</button>
+      </div>
+      <div class="share-link-row">
+        <button class="btn secondary" type="button" data-story-share hidden>Share link</button>
+        <button class="btn secondary" type="button" data-story-revoke hidden>Turn off link</button>
+      </div>
+    </div>
+    <script type="application/json" id="storyLinks">{{ story_links|tojson }}</script>
   </dialog>
   <script nonce="{{ request.state.csp_nonce }}" src="/static/share_card.js?v={{asset_version}}" defer></script>
   {% endif %}

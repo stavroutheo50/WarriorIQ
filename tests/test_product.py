@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 import cv2
 import numpy as np
 from browser_client import BrowserClient as TestClient
-from starlette.responses import RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse
 
 import app.main as webapp
 import core.db as database
@@ -1273,6 +1273,114 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         refused = self.client.post(f"/api/down-check/{job_id}", json={"seconds": 12.0, "verdict": "A"})
         self.assertEqual(refused.status_code, 403)
 
+    def test_a_fight_link_shows_the_result_pages_numbers_and_can_be_turned_off(self):
+        """warrioriq.eu/f/<token>: the stats-only card as a page anyone can open."""
+        account = register("linker@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "linker@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        profile_id = int(account["profile_id"])
+
+        def strike(fighter, second):
+            return {"fighter": fighter, "round_number": 1, "peak_time": second, "technique": "jab",
+                    "family": "punch", "limb": "hand", "outcome": "clean", "confidence": 0.9,
+                    "contact_confidence": 0.8, "target": "head"}
+
+        def save(job_id, coverage=0.9, trusted=True):
+            job_dir = webapp.OUTPUTS / job_id
+            job_dir.mkdir()
+            video_path = webapp.UPLOADS / f"{job_id}.mp4"
+            video_path.write_bytes(b"video-placeholder")
+            report = {
+                "setup": {"ruleset": "K1", "fighter_name": "Nikos"},
+                "video": {"focus_fighter": "A", "analysis_target": "BOTH", "original_name": "Nikos vs Giorgos.mp4"},
+                "integrity": {"identity_evidence_trusted": trusted},
+                # The page re-applies the identity gate from these, so a fight
+                # that failed it has to fail it here: a lock that never held.
+                "tracking": {"fighter_A_seed_source": "pose_detector", "fighter_B_seed_source": "pose_detector",
+                             "initial_iou_A": 0.72 if trusted else 0.05, "initial_iou_B": 0.93,
+                             "fighter_A_coverage": coverage, "fighter_B_coverage": coverage,
+                             "fighters_separable": True, "identity_confusions": 0},
+                "metrics": {"A": {}, "B": {}},
+                "rounds": [{"number": 1, "selected": True}],
+                "events": [strike("A", 5 + i) for i in range(8)] + [strike("B", 50 + i) for i in range(3)],
+                "statistics": {"fighters": {"A": {"punch_attempts": 41, "kick_attempts": 28, "knee_attempts": 7},
+                                            "B": {"punch_attempts": 12, "kick_attempts": 30, "knee_attempts": 0}}},
+                "scorecard": {"available": True, "sport": "kickboxing", "sport_label": "Kickboxing",
+                              "totals": {"A": 29, "B": 28}},
+            }
+            report_path = job_dir / "report.json"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            database.save_fight(job_id, profile_id, "f.mp4", str(video_path), str(report_path),
+                                "competition", "K1", "BOTH", {})
+
+        def owners_card(job_id):
+            """The share card the owner's own result page is given."""
+            seen = {}
+
+            def capture(**kwargs):
+                seen[kwargs["name"]] = kwargs["context"]
+                return HTMLResponse("")
+
+            with patch.object(webapp.templates, "TemplateResponse", side_effect=capture):
+                self.assertEqual(self.client.get(f"/result/{job_id}").status_code, 200)
+            return seen["result.html"]["share_card"]
+
+        save("linkfight")
+        card = owners_card("linkfight")
+        self.assertEqual(card["score"], {"A": 8, "B": 3}, "rebuilt from the events, as the page shows it")
+        made = self.client.post("/story/linkfight", data={"side": "A", "name": "  Nikos \n  P  "})
+        self.assertEqual(made.status_code, 200, made.text)
+        url = made.json()["url"]
+        token = url.rsplit("/", 1)[1]
+        self.assertTrue(url.endswith(f"/f/{token}"))
+        self.assertEqual(self.client.post("/story/linkfight", data={"side": "A", "name": "Nikos P"}).json()["url"],
+                         url, "sharing again posts the same address")
+        self.assertNotEqual(self.client.post("/story/linkfight", data={"side": "B"}).json()["url"], url)
+        self.assertEqual(self.client.post("/story/linkfight", data={"side": "C"}).status_code, 400)
+
+        with TestClient(app) as anyone:
+            page = anyone.get(f"/f/{token}")
+            self.assertEqual(page.status_code, 200)
+            self.assertEqual(page.headers["cache-control"], "no-store")
+            self.assertIn(f'<strong class="wiq-num">{card["fighters"]["A"]["total"]}</strong>', page.text)
+            self.assertIn("8 – 3", page.text, "the owner's page's score, not the one stored at analysis")
+            self.assertIn(f'property="og:image" content="{url}/card.png"', page.text)
+            self.assertIn('name="twitter:card" content="summary_large_image"', page.text)
+            self.assertIn('content="noindex,nofollow"', page.text)
+            self.assertIn("<h1>Nikos P</h1>", page.text, "the name the owner chose, and only that")
+            self.assertNotIn("Giorgos", page.text, "not the opponent, not the file name")
+            image = anyone.get(f"/f/{token}/card.png")
+            self.assertEqual((image.status_code, image.headers["content-type"]), (200, "image/png"))
+            self.assertTrue(image.content.startswith(b"\x89PNG"))
+            self.assertEqual(anyone.get("/f/not-a-real-link").status_code, 404)
+
+            # Nobody else can make or turn off a link to this fight.
+            register("stranger@example.com", "Strong-Local-Password")
+            anyone.post("/login", data={"email": "stranger@example.com",
+                                        "password": "Strong-Local-Password", "accept_policies": "true"})
+            self.assertEqual(anyone.post("/story/linkfight", data={"side": "A"}).status_code, 404)
+            self.assertEqual(anyone.post("/story/linkfight/revoke").status_code, 404)
+            self.assertEqual(anyone.get(f"/f/{token}").status_code, 200)
+
+            # A fight the owner's own page scores no more than the link does:
+            # below the coverage the score needs, neither shows one.
+            save("thinfight", coverage=0.6)
+            self.assertIsNone(owners_card("thinfight")["score"])
+            thin = self.client.post("/story/thinfight", data={"side": "A"}).json()["url"].rsplit("/", 1)[1]
+            self.assertNotIn("Estimated score", anyone.get(f"/f/{thin}").text)
+            # No link for a fight whose fighters could not be told apart.
+            save("lostfight", trusted=False)
+            self.assertEqual(self.client.post("/story/lostfight", data={"side": "A"}).status_code, 409)
+
+            exported = self.client.post("/account/export", data={"password": "Strong-Local-Password"})
+            self.assertIn(token, {link["token"] for link in exported.json()["fight_links"]})
+
+            self.assertEqual(self.client.post("/story/linkfight/revoke").json(), {"revoked": 2})
+            gone = anyone.get(f"/f/{token}")
+            self.assertEqual(gone.status_code, 404)
+            self.assertIn("turned off by the fighter", gone.text)
+            self.assertEqual(anyone.get(f"/f/{token}/card.png").status_code, 404)
+
     def test_fight_camp_missions_sessions_and_points(self):
         """Take a mission, train for it, finish it, and let the next fight judge it."""
         import cv2
@@ -1335,6 +1443,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         page = self.client.get("/camp").text
         self.assertIn("Guard-return audit", page)
         self.assertIn("Take on this mission", page)
+        self.assertIn("Start a mission: Guard-return audit", page, "the next step, at the top")
+        self.assertIn("Guard <b class=\"wiq-num\">10.0%</b>", page, "the bar starts at the measured number")
 
         taken = self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 0}, follow_redirects=False)
         self.assertEqual(taken.status_code, 303)
@@ -1342,6 +1452,9 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(item["title"], "Guard-return audit")
         self.assertEqual(database.list_camp_missions(profile_id)[0]["measured"], 0.10)
         self.assertEqual(self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 5}).status_code, 404)
+        page = self.client.get("/camp").text
+        self.assertIn("Train: Guard-return audit", page)
+        self.assertEqual(page.count("<h3>Guard-return audit</h3>"), 1, "one card, not a mission and a list item")
 
         # Ticking it off before training earns nothing.
         self.client.post(f"/coach/assignments/{item['id']}/toggle")
@@ -1350,6 +1463,12 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
 
         first = clip("one.mp4")
         self.assertEqual(upload(item["id"], first), "counted")
+        page = self.client.get("/camp?session=counted").text
+        self.assertIn('data-points="+10 points"', page, "the pop-up for points just earned")
+        self.assertIn("1/3", page, "this week's sessions against the target")
+        self.assertIn("Rookie", page)
+        self.assertIn("Training session", page, "where the points came from")
+        self.assertNotIn('data-points="', self.client.get("/camp?session=duplicate").text)
         self.assertEqual(upload(item["id"], first), "duplicate")
         self.assertEqual(upload(item["id"], clip("still.mp4", moving=False)), "no_movement")
         self.assertEqual(upload(item["id"], clip("two.mp4", shade=60)), "counted")
@@ -1359,6 +1478,9 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
 
         self.client.post(f"/coach/assignments/{item['id']}/toggle")      # complete, after training
         self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 45)
+        page = self.client.get("/camp").text
+        self.assertIn("Waiting for your next fight", page)
+        self.assertIn("Analyse your next fight", page)
         self.client.post(f"/coach/assignments/{item['id']}/toggle")      # reopen and finish again:
         self.client.post(f"/coach/assignments/{item['id']}/toggle")      # still only once
         self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 45)
@@ -1369,6 +1491,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         page = self.client.get("/camp").text
         self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 145)
         self.assertIn("improved", page)
+        self.assertIn("Improved ✓", page)
+        self.assertIn("Next fight: <b class=\"wiq-num\">15.0%</b>", page)
         self.assertIn("Level", page)
 
         exported = database.list_training_sessions(profile_id)

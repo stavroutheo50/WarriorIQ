@@ -471,6 +471,15 @@ def _metric_progress(key: str, current: float) -> tuple[float, Callable[[float],
     return min(0.95, current + 0.08), lambda value: f"{_pct(value)}%"
 
 
+def metric_goal(key: str, current: float) -> tuple[float, Callable[[float], str]]:
+    """The training plan's goal for one number, and how to say it.
+
+    For Fight Camp, which draws each mission's bar to the same goal the plan's
+    sentence names (see _metric_progress for why there is only one copy).
+    """
+    return _metric_progress(key, current)
+
+
 # Four weeks, each changing how the drill is done rather than only how much of
 # it. A plan that repeats the same drill at the same intensity is a list, not
 # training: the correction has to survive resistance before it survives a fight.

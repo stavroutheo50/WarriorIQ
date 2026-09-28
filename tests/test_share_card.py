@@ -60,5 +60,28 @@ class ShareCardTests(unittest.TestCase):
         self.assertNotIn("Someone", text)
 
 
+class PreviewImageTests(unittest.TestCase):
+    """The picture a shared link's preview shows (core.share_image)."""
+
+    def test_a_link_preview_sized_png_for_either_fighter(self):
+        import cv2
+        import numpy as np
+
+        from core.share_image import preview_png
+
+        card = share_card(report())
+        for side, corner in (("A", "red"), ("B", None)):
+            image = cv2.imdecode(np.frombuffer(preview_png(card, side, corner), np.uint8), cv2.IMREAD_COLOR)
+            self.assertEqual(image.shape, (630, 1200, 3))
+
+    def test_no_score_and_any_sport_name_still_draw(self):
+        from core.share_image import preview_png
+
+        card = share_card(report(scorecard={"available": False, "sport": "muay_thai", "sport_label": "Muay Thai – Ελλάδα",
+                                            "totals": {}}))
+        self.assertIsNone(card["score"])
+        self.assertTrue(preview_png(card, "A", "blue").startswith(b"\x89PNG"))
+
+
 if __name__ == "__main__":
     unittest.main()

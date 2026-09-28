@@ -1,9 +1,13 @@
 /* Stats-only story card (1080x1920) for Instagram, TikTok, WhatsApp and the rest.
  *
  * Drawn in the browser from the numbers the result page already shows
- * (core.report.share_card), so nothing is uploaded and no link is created.
- * No names and no video frames. On a phone "Share" opens the system share
- * sheet with the image; elsewhere the image is downloaded.
+ * (core.report.share_card), so nothing is uploaded for it. No names and no
+ * video frames. On a phone "Share" opens the system share sheet with the
+ * image; elsewhere the image is downloaded.
+ *
+ * The dialog can also make a link: a public page with the same numbers
+ * (app.main.story_page), which is what a post needs to be tapped. Only
+ * made when asked, one per fighter, and it can be turned off.
  */
 (function () {
   "use strict";
@@ -95,6 +99,82 @@
     ctx.font = font(700, 38); ctx.fillStyle = INK; ctx.fillText("warrioriq.eu", x, H - 96);
   }
 
+  function toast(message, kind) { if (window.wiqToast) window.wiqToast(message, kind); }
+
+  function initLink(box, currentSide) {
+    var job = box.dataset.storyJob, links = {};
+    try {
+      JSON.parse(document.getElementById("storyLinks").textContent).forEach(function (link) { links[link.side] = link; });
+    } catch (err) { links = {}; }
+    var url = box.querySelector("[data-story-url]"), create = box.querySelector("[data-story-create]");
+    var share = box.querySelector("[data-story-share]"), revoke = box.querySelector("[data-story-revoke]");
+    var showName = box.querySelector("[data-story-show-name]"), name = box.querySelector("[data-story-name]");
+
+    function show() {
+      var link = links[currentSide()];
+      url.value = link ? link.url : "";
+      create.textContent = link ? "Copy link" : "Create link";
+      share.hidden = !(link && navigator.share);
+      revoke.hidden = !Object.keys(links).length;
+      if (link && link.name) { showName.checked = true; name.value = link.name; }
+    }
+
+    async function copy(text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+      } catch (err) { /* fall through to selecting it */ }
+      url.focus(); url.select();
+      return false;
+    }
+
+    function post(path, body) {
+      return fetch(path, { method: "POST", body: body, credentials: "same-origin",
+                           headers: window.wiqCsrfHeaders ? window.wiqCsrfHeaders() : {} });
+    }
+
+    // Always asks the server, which hands back the same address for the same
+    // fighter: the name on the page follows whatever is ticked now.
+    create.addEventListener("click", async function () {
+      var side = currentSide(), body = new FormData();
+      body.append("side", side);
+      body.append("name", showName.checked ? name.value : "");
+      create.disabled = true;
+      try {
+        var response = await post("/story/" + encodeURIComponent(job), body);
+        if (!response.ok) throw new Error(String(response.status));
+        var made = await response.json();
+        links[side] = { side: side, url: made.url, name: showName.checked ? name.value : null };
+        show();
+        toast(await copy(made.url) ? "Link copied. Paste it into your story's Link sticker, or send it."
+                                    : "Your link is ready: copy it from the box.", "success");
+      } catch (err) {
+        toast("Could not make the link. Try again.", "error");
+      } finally {
+        create.disabled = false;
+      }
+    });
+    share.addEventListener("click", async function () {
+      var link = links[currentSide()];
+      if (!link) return;
+      try { await navigator.share({ title: "My fight on WarriorIQ", url: link.url }); }
+      catch (err) { if (err && err.name !== "AbortError") toast("Could not open sharing. Copy the link instead.", "error"); }
+    });
+    revoke.addEventListener("click", async function () {
+      if (!window.confirm("Turn off your links to this fight? Anyone who opens one will see it was turned off.")) return;
+      try {
+        var response = await post("/story/" + encodeURIComponent(job) + "/revoke", new FormData());
+        if (!response.ok) throw new Error(String(response.status));
+        links = {};
+        show();
+        toast("Links turned off.", "success");
+      } catch (err) {
+        toast("Could not turn the links off. Try again.", "error");
+      }
+    });
+    show();
+    return { sideChanged: show };
+  }
+
   function blobOf(canvas) {
     return new Promise(function (resolve) { canvas.toBlob(resolve, "image/png"); });
   }
@@ -106,9 +186,11 @@
     var card = JSON.parse(data.textContent), canvas = dialog.querySelector("canvas");
     var side = dialog.dataset.side === "B" ? "B" : "A";
     function render() { draw(canvas, card, side); }
+    var box = dialog.querySelector("[data-story-job]");
+    var link = box ? initLink(box, function () { return side; }) : null;
     dialog.querySelectorAll("input[name=shareSide]").forEach(function (input) {
       input.checked = input.value === side;
-      input.addEventListener("change", function () { side = input.value; render(); });
+      input.addEventListener("change", function () { side = input.value; render(); if (link) link.sideChanged(); });
     });
     open.addEventListener("click", function () { render(); dialog.showModal(); });
     dialog.querySelector("[data-share-card-close]").addEventListener("click", function () { dialog.close(); });
