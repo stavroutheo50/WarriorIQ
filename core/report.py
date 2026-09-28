@@ -324,11 +324,17 @@ def share_card(report: dict) -> dict | None:
         coaching = (report.get("coaching") or {}).get(fighter) or {}
         strengths = coaching.get("strengths") or []
         improvements = coaching.get("improvements") or []
+        # Only a real weakness, one the analysis could point to in the fight:
+        # "Nothing behind your opponent" is a sentence, not a thing to work on.
+        weak = next((item for item in improvements if item.get("evidence_times")), None)
+        working_on = None
+        if weak is not None:
+            working_on = str(weak.get("title") or "").removeprefix("Work on: ") or None
         fighters[fighter] = {
             "strikes": strikes,
             "total": sum(strikes.values()),
             "strength": strengths[0].get("title") if strengths else None,
-            "working_on": improvements[0].get("title") if improvements else None,
+            "working_on": working_on,
         }
     return {
         "sport": scorecard.get("sport_label") or (sport or "").replace("_", " ").title() or "Fight",

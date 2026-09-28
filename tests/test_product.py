@@ -1508,6 +1508,15 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(database.analysis_allowance(account_id)["bonus_remaining"], 1)
         self.assertTrue(database.reserve_analysis(account_id, "bonus-job-3"))
 
+    def test_an_mma_video_analysed_as_kickboxing_is_called_out(self):
+        report = {"scorecard": {"sport": "kickboxing"},
+                  "went_down": {"moments": [{"seconds": 40.0, "down_seconds": 27}, {"seconds": 90.0, "down_seconds": 7}]}}
+        wrong = webapp._wrong_sport(report, {"ruleset": "K1"})
+        self.assertEqual((wrong["ground_seconds"], wrong["chosen"]), (34, "Kickboxing"))
+        self.assertIsNone(webapp._wrong_sport({**report, "scorecard": {"sport": "mma"}}, {"ruleset": "MMA"}))
+        knockdown = {"scorecard": {"sport": "kickboxing"}, "went_down": {"moments": [{"seconds": 40.0, "down_seconds": 3}]}}
+        self.assertIsNone(webapp._wrong_sport(knockdown, {"ruleset": "K1"}))
+
     def test_a_report_without_went_down_moments_lists_none(self):
         """Reports analysed before this existed have no went_down key."""
         self.assertEqual(webapp._went_down("nosuchjob", {"event_feed": []}), [])

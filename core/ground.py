@@ -194,3 +194,24 @@ class DownWatch:
 
     def summary(self, rounds=None) -> dict:
         return {"moments": self.moments(rounds), "note": NOTE, "attributed": False}
+
+
+# Sustained ground fighting is what MMA has and the striking sports do not.
+# Measured with this module on real footage: a Kick Light bout with two
+# knockdowns gave one 2-second moment in total, a taekwondo bout none, and two
+# pankration (MMA-style) bouts 39 and 23 seconds with spells of 27 and 23. A
+# knockdown is short; a ground fight is not. Both thresholds have to be met,
+# so one long moment alone - a fighter knocked out and slow to get up - is
+# not enough, and neither are several short knockdowns.
+GRAPPLING_TOTAL_SECONDS = 15
+GRAPPLING_LONGEST_SECONDS = 10
+STRIKING_SPORTS = frozenset({"kickboxing", "boxing", "muay_thai", "taekwondo"})
+
+
+def looks_like_grappling(went_down: dict | None) -> dict | None:
+    """{"ground_seconds", "longest_seconds"} when a video shows MMA-style ground fighting."""
+    moments = (went_down or {}).get("moments") or []
+    seconds = [int(m.get("down_seconds") or 0) for m in moments]
+    if sum(seconds) >= GRAPPLING_TOTAL_SECONDS and max(seconds, default=0) >= GRAPPLING_LONGEST_SECONDS:
+        return {"ground_seconds": sum(seconds), "longest_seconds": max(seconds)}
+    return None

@@ -12,6 +12,15 @@
   <div><div class="eyebrow">{% if identity_failed and camera_lost %}Needs a steadier recording{% elif identity_failed %}Needs one quick step{% else %}Analysis complete{% endif %}</div>{#- The one page heading. "Your fight in numbers." further down was a second, larger h1 competing with this one. -#}<h1 class="result-title">Fight report</h1></div>
   <div class="selection-tools">{% if identity_failed and not camera_lost %}<a class="btn" href="/select/{{job_id}}" data-motion-primary>Show me who is who</a>{% endif %}{% if share_card %}<button class="btn" type="button" data-share-card-open>Share to story</button>{% endif %}{% if can_share %}<form action="/share/{{job_id}}" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post" data-confirm="Revoke {{sharing.links|length}} coach link{{'' if sharing.links|length == 1 else 's'}}? {{'Any link' if sharing.links|length == 1 else 'Every link'}} already sent to a coach stops working immediately and cannot be restored. Creating a new link gives a new address, which you would have to send again."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
 </div>
+{#- An MMA video analysed as a striking sport (app.main._wrong_sport). Said
+    plainly, as the athlete asked: which sport it looks like, and why. -#}
+{% if wrong_sport %}
+<section class="notice bad-notice wrong-sport" role="alert">
+  <strong>You have probably uploaded the wrong kind of video.</strong>
+  This looks like an MMA video: there were {{ wrong_sport.ground_seconds }} seconds of fighting on the ground, which {{ wrong_sport.chosen }} does not have. Analyse it as MMA to get a report that fits it.
+  <a class="text-link" href="/analyze/mma">Analyse an MMA video</a>
+</section>
+{% endif %}
 {% if can_share and sharing %}
 {% if sharing.new_link %}
 <section class="card share-panel share-panel-new" aria-label="Coach link created" data-reveal>
