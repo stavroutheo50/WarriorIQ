@@ -138,5 +138,24 @@ class DownWatchTests(unittest.TestCase):
         self.assertTrue(summary["note"])
 
 
+
+class DownCheckExportTests(unittest.TestCase):
+    def test_the_summary_counts_false_alarms_and_who_went_down(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from tools.export_down_checks import summary
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name, answers in (("downs_one", ["A", "nobody", None]), ("downs_two", ["B", "A"])):
+                (root / name).mkdir()
+                (root / name / "labels.json").write_text(json.dumps({"moments": [
+                    {"seconds": float(i), "answer": answer} for i, answer in enumerate(answers)]}))
+            result = summary(root)
+        self.assertEqual((result["fights"], result["answered"], result["nobody"]), (2, 4, 1))
+        self.assertEqual((result["fighter_A"], result["fighter_B"], result["flags_right"]), (2, 1, 0.75))
+
+
 if __name__ == "__main__":
     unittest.main()
