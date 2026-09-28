@@ -60,7 +60,7 @@ from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
-    add_assignment, analysis_allowance, award_points, link_camp_mission, list_camp_missions,
+    add_assignment, analysis_allowance, apply_subscription_change, award_points, link_camp_mission, list_camp_missions,
     list_points, list_training_sessions, record_training_session, apply_checkout_event, consume_email_verification_token,
     consume_password_reset_token,
     assign_fighter_to_fight, create_fighter, set_account_type, create_moderation_report, create_oauth_account, delete_account, delete_fight,
@@ -84,7 +84,7 @@ from core.db import (
 )
 from core.evidence_trust import report_evidence_trust
 from core.coaching import build_coaching, build_training_plan
-from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, verify_webhook
+from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core.notifications import send_transactional_email
 from core.progress_insights import build_progress
@@ -6622,4 +6622,15 @@ async def stripe_webhook(request: Request):
                     receipt_payload,
                 )
                 record_security_event("purchase_confirmed", account_id=int(account_id), resource_type="plan", resource_id=plan_key)
+        return {"received": True}
+    # Everything after checkout: renewals, failed cards, cancellations taking
+    # effect, plan changes, full refunds and chargebacks. See
+    # core.payments.subscription_change for what each one does.
+    change = subscription_change(event)
+    if change is not None:
+        changed = apply_subscription_change(str(event.get("id", "")), str(event.get("type", "")), change)
+        if changed is not None and change.get("plan") == "free":
+            record_security_event(f"plan_ended_{change['status']}", account_id=changed,
+                                  severity="warning" if change["status"] == "disputed" else "info",
+                                  resource_type="plan", resource_id="free")
     return {"received": True}

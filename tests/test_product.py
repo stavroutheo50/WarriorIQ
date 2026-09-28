@@ -1417,6 +1417,62 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         decoder.assert_not_called()
         self.assertEqual(database.list_points(int(account["profile_id"])), [])
 
+    def test_the_plan_follows_the_subscription_after_checkout(self):
+        """Paid, cancelled at Stripe, refunded: the account's plan has to follow,
+        each event once, and only events Stripe signed count."""
+        account = register("payer@example.com", "Strong-Local-Password")
+        account_id = int(account["id"])
+
+        def deliver(event):
+            with mock.patch.object(webapp, "verify_webhook", return_value=event):
+                return self.client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "t=1,v1=x"})
+
+        def plan():
+            row = database.get_account(account_id)
+            return row["plan"], row["subscription_status"]
+
+        paid = deliver({"id": "evt_checkout", "type": "checkout.session.completed", "data": {"object": {
+            "metadata": {"warrioriq_account_id": str(account_id), "warrioriq_plan": "athlete"},
+            "payment_status": "paid", "customer": "cus_42", "subscription": "sub_42",
+            "amount_total": 999, "currency": "eur", "created": 1_790_000_000}}})
+        self.assertEqual(paid.status_code, 200, paid.text)
+        self.assertEqual(plan(), ("athlete", "active"))
+
+        failed = {"id": "evt_fail", "type": "invoice.payment_failed", "data": {"object": {
+            "subscription": "sub_42", "customer": "cus_42", "lines": {"data": []}}}}
+        deliver(failed)
+        self.assertEqual(plan(), ("athlete", "past_due"), "Stripe is still retrying: the plan stays")
+
+        ended = {"id": "evt_end", "type": "customer.subscription.deleted", "data": {"object": {
+            "id": "sub_42", "customer": "cus_42", "status": "canceled", "items": {"data": []}}}}
+        deliver(ended)
+        self.assertEqual(plan(), ("free", "cancelled"))
+
+        # A redelivered event is applied once: a later renewal is not undone by a replay.
+        deliver({"id": "evt_renew", "type": "invoice.paid", "data": {"object": {
+            "subscription": "sub_42", "customer": "cus_42", "lines": {"data": []}}}})
+        deliver(ended)
+        self.assertEqual(plan(), ("free", "active"))
+
+        # An event for a subscription nobody here holds changes nobody.
+        deliver({"id": "evt_other", "type": "customer.subscription.deleted", "data": {"object": {
+            "id": "sub_other", "customer": "cus_other", "status": "canceled", "items": {"data": []}}}})
+        self.assertEqual(plan(), ("free", "active"))
+
+        # And an unsigned or forged request is refused before any of this.
+        with mock.patch.object(webapp, "verify_webhook", side_effect=ValueError("bad signature")):
+            forged = self.client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "forged"})
+        self.assertEqual(forged.status_code, 400)
+
+    def test_a_chargeback_ends_the_plan(self):
+        account = register("disputer@example.com", "Strong-Local-Password")
+        database.apply_checkout_event("evt_c2", "checkout.session.completed", int(account["id"]), "athlete", 0,
+                                      customer_id="cus_7", subscription_id="sub_7", subscription_status="active")
+        dispute = {"id": "evt_dispute", "type": "charge.dispute.created", "data": {"object": {"customer": "cus_7"}}}
+        with mock.patch.object(webapp, "verify_webhook", return_value=dispute):
+            self.client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "t=1,v1=x"})
+        self.assertEqual(database.get_account(int(account["id"]))["plan"], "free")
+
     def test_a_report_without_went_down_moments_lists_none(self):
         """Reports analysed before this existed have no went_down key."""
         self.assertEqual(webapp._went_down("nosuchjob", {"event_feed": []}), [])
