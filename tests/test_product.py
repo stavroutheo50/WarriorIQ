@@ -1383,6 +1383,40 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(refused.status_code, 404)
         self.assertEqual(self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 0}).status_code, 404)
 
+    def test_every_upload_form_refuses_an_oversized_body_before_storing_it(self):
+        """A single huge request must not fill the disk before a handler's own check."""
+        from core.upload_security import upload_body_limit
+
+        def scope(path):
+            return {"type": "http", "method": "POST", "path": path, "headers": []}
+        self.assertEqual(upload_body_limit(scope("/camp/sessions/7")),
+                         webapp.TRAINING_UPLOAD_BYTES + 1024 * 1024)
+        self.assertEqual(upload_body_limit(scope("/profile")),
+                         webapp.MAX_PROFILE_PHOTO_BYTES + webapp.MAX_PROFILE_VIDEO_BYTES + 1024 * 1024)
+        self.assertIsNotNone(upload_body_limit(scope("/upload")))
+        self.assertIsNone(upload_body_limit(scope("/camp")))
+        register("big@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "big@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        too_big = str(webapp.TRAINING_UPLOAD_BYTES + 5 * 1024 * 1024)
+        refused = self.client.post("/camp/sessions/1", content=b"x", headers={
+            "content-type": "multipart/form-data; boundary=x", "content-length": too_big})
+        self.assertEqual(refused.status_code, 413)
+
+    def test_a_training_upload_that_is_not_a_video_is_never_decoded(self):
+        from unittest import mock
+        account = register("notvideo@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "notvideo@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        item_id = database.add_assignment(int(account["profile_id"]), "Bag work", "")
+        with mock.patch.object(webapp, "check_training_video") as decoder:
+            response = self.client.post(f"/camp/sessions/{item_id}", files={"video": ("drill.mp4", b"not a video", "video/mp4")},
+                                        follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("session=unreadable", response.headers["location"])
+        decoder.assert_not_called()
+        self.assertEqual(database.list_points(int(account["profile_id"])), [])
+
     def test_a_report_without_went_down_moments_lists_none(self):
         """Reports analysed before this existed have no went_down key."""
         self.assertEqual(webapp._went_down("nosuchjob", {"event_feed": []}), [])

@@ -100,7 +100,8 @@ from core.preflight_client import client_thresholds
 from core.report_visuals import build as report_visuals
 from core.upload_security import (
     FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS, FIGHT_VIDEO_LABEL,
-    UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, looks_like_video, scan_upload,
+    UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, limit_upload_route, looks_like_video,
+    scan_upload,
     reserve_upload_storage, release_upload_storage,
 )
 from core import sport_check
@@ -343,6 +344,7 @@ _rate_windows: dict[str, list[float]] = {}
 MAX_FIGHT_BYTES = SETTINGS.max_fight_bytes
 MAX_PROFILE_PHOTO_BYTES = 15 * 1024 * 1024
 MAX_PROFILE_VIDEO_BYTES = 500 * 1024 * 1024
+limit_upload_route("/profile", MAX_PROFILE_PHOTO_BYTES + MAX_PROFILE_VIDEO_BYTES)
 _progress_report_cache: dict[str, tuple[int, dict]] = {}
 LOGGER = logging.getLogger("warrioriq")
 
@@ -5459,6 +5461,7 @@ def take_camp_mission(request: Request, job_id: str = Form(...), index: int = Fo
 # Training clips are checked and deleted inside the request, so they have to
 # fit one: under the host's ~134 MiB request ceiling (core/chunked_upload.py).
 TRAINING_UPLOAD_BYTES = 120 * 1024 * 1024
+limit_upload_route("/camp/sessions/", TRAINING_UPLOAD_BYTES)
 TRAINING_VERDICT_MESSAGES = {
     "counted": "Session counted: +{points} points.",
     "daily_cap": "Session counted, but you have had today's {cap} sessions' points. It still counts for your streak.",
@@ -5467,6 +5470,7 @@ TRAINING_VERDICT_MESSAGES = {
     "too_long": "That clip is over 20 minutes. Upload one drill at a time.",
     "no_movement": "Nothing was moving in most of that clip. Film yourself doing the drill.",
     "unreadable": "That file could not be read as a video.",
+    "too_large": "That video's resolution is too high to check. Film at 1080p or lower.",
 }
 
 
@@ -5490,11 +5494,23 @@ def upload_training_session(request: Request, assignment_id: int, video: UploadF
     path = folder / f"{uuid.uuid4().hex}.video"
     try:
         digest = _save_upload_limited(video, path, TRAINING_UPLOAD_BYTES)
-        earlier = list_training_sessions(profile_id)
-        if any(session["video_sha256"] == digest for session in earlier):
-            found = {"verdict": "duplicate", "duration_seconds": None, "moving_share": None}
+        # The same two gates as a fight, before any decoder sees the file: the
+        # bytes have to be a video container, and the malware scan has to pass.
+        if not looks_like_video(path):
+            found = {"verdict": "unreadable", "duration_seconds": None, "moving_share": None}
+            earlier = []
         else:
-            found = check_training_video(str(path))
+            scan = scan_upload(path)
+            if not scan["clean"]:
+                if scan["status"] == "infected":
+                    record_security_event("malware_upload_blocked", severity="warning")
+                    raise HTTPException(400, "This file did not pass the upload safety scan.")
+                raise HTTPException(503, "Uploads are paused because the safety scanner is unavailable.")
+            earlier = list_training_sessions(profile_id)
+            if any(session["video_sha256"] == digest for session in earlier):
+                found = {"verdict": "duplicate", "duration_seconds": None, "moving_share": None}
+            else:
+                found = check_training_video(str(path))
     finally:
         path.unlink(missing_ok=True)
     verdict, points = found["verdict"], 0
