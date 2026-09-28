@@ -2,6 +2,11 @@
 {% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
 {% block title %}Fight Camp · WarriorIQ{% endblock %}
 {% block content %}
+{% macro camp_item_status(item) -%}
+{%- set n = sessions_by_item.get(item.id, 0) if sessions_by_item else 0 -%}
+{%- set r = mission_results.get(item.id) if mission_results else none -%}
+{%- if n or r %}<br><small class="camp-item-status">{% if n %}{{ n }} session{{ '' if n == 1 else 's' }} counted{% endif %}{% if n and r %} · {% endif %}{% if r %}Next fight: {{ '%.0f'|format(r.before * 100) if r.before <= 1.5 else '%.1f'|format(r.before) }} → {{ '%.0f'|format(r.after * 100) if r.after <= 1.5 else '%.1f'|format(r.after) }}{% if r.improved %} <b class="up">improved</b>{% else %} <span class="muted">not yet</span>{% endif %}{% endif %}</small>{% endif -%}
+{%- endmacro %}
 {#- Fight Camp: what the old Progress (/dashboard) and Coach (/coach) pages
     were each half of. Missions from the latest fight, the athlete's list,
     their progress, and the coach's squad tools, on one page. -#}
@@ -27,6 +32,22 @@
     <a class="btn" data-motion-primary href="/analyze">New analysis <span aria-hidden="true">→</span></a>
   </div>
 </header>
+<section class="camp-standing" aria-label="Your Fight Camp points">
+  <div><span class="eyebrow">Level</span><strong class="wiq-num">{{ standing.level }}</strong></div>
+  <div class="camp-level"><span class="eyebrow">{{ standing.points }} points</span>
+    <span class="camp-level-bar" role="progressbar" aria-valuemin="0" aria-valuemax="{{ standing.level_size }}" aria-valuenow="{{ standing.into_level }}" aria-label="Points towards level {{ standing.level + 1 }}"><i style="width:{{ (standing.into_level * 100 // standing.level_size) }}%"></i></span>
+    <small class="muted">{{ standing.level_size - standing.into_level }} to level {{ standing.level + 1 }}</small></div>
+  <div><span class="eyebrow">Streak</span><strong class="wiq-num">{{ standing.streak_weeks }}</strong><small class="muted">week{{ '' if standing.streak_weeks == 1 else 's' }} training</small></div>
+  <details class="camp-rules"><summary>How points work</summary>
+    <ul class="list-clean small">
+      <li><b>+{{ points_rules.session }}</b> for each training session you upload for something on your list: at least a minute of you doing the drill. Up to {{ points_rules.daily }} sessions a day earn points.</li>
+      <li><b>+{{ points_rules.done }}</b> when you finish an item you uploaded at least one session for.</li>
+      <li><b>+{{ points_rules.improved }}</b> when your next analysed fight shows a mission's number actually improved.</li>
+      <li>Every 100 points is a level. Your streak is the weeks in a row with at least one counted session.</li>
+      <li class="muted">The upload check sees that a real video shows someone moving. It cannot tell who, or which drill, which is why the big points only come from your next fight. Clips are deleted as soon as they are checked.</li>
+    </ul>
+  </details>
+</section>
 <nav class="camp-jump" aria-label="Fight Camp sections"><a href="#missions">Missions</a><a href="#assignments">Your list</a><a href="#progress">Progress</a><a href="#squad-tools">Squad</a></nav>
 
 {#- Missions: the report's own drills, each chosen because a measured
@@ -53,10 +74,9 @@
           {% if m.status == 'complete' %}<span class="pill">Done ✓</span>
           {% elif m.status == 'active' %}<span class="pill">On your list</span>
           {% else %}
-          <form action="/coach/assignments" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-            <input type="hidden" name="title" value="{{ m.title }}">
-            <input type="hidden" name="detail" value="{{ m.exercise or '' }}{% if m.target %} Target: {{ m.target }}{% endif %}">
-            <input type="hidden" name="next_path" value="/camp#missions">
+          <form action="/camp/missions" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <input type="hidden" name="job_id" value="{{ camp.job_id }}">
+            <input type="hidden" name="index" value="{{ loop.index0 }}">
             <button class="btn" type="submit">Take on this mission</button>
           </form>
           {% endif %}
@@ -77,12 +97,14 @@
 
 <section class="card" id="assignments">
   {% set active_assignments = assignments|selectattr('status','equalto','active')|list %}{% set completed_assignments = assignments|selectattr('status','equalto','complete')|list %}{% set active_count = active_assignments|length %}{% set completed_count = completed_assignments|length %}
-  <div class="section-title assignment-title" style="margin-top:0"><div><div class="eyebrow">Your list</div><h2>Work between reviews</h2><p class="muted">Missions you take on land here, next to anything you or your coach add. Tick them off as you train.</p></div><div class="assignment-counts"><span><strong>{{active_count}}</strong> active</span><span><strong>{{completed_count}}</strong> complete</span></div></div>
+  <div class="section-title assignment-title" style="margin-top:0"><div><div class="eyebrow">Your list</div><h2>Work between reviews</h2><p class="muted">Missions you take on land here, next to anything you or your coach add. Upload a session when you train, and tick an item off when it is done.</p></div><div class="assignment-counts"><span><strong>{{active_count}}</strong> active</span><span><strong>{{completed_count}}</strong> complete</span></div></div>
 
+
+  {% if session_message %}<p class="notice" role="status">{{ session_message }}</p>{% endif %}
 
   <form action="/coach/assignments" method="post" class="assignment-builder"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="row"><div class="field"><label for="assignmentTitle">Assignment</label><input id="assignmentTitle" name="title" maxlength="100" placeholder="Example: Guard recovery rounds" required></div><div class="field"><label for="assignmentDetail">Clear success target</label><input id="assignmentDetail" name="detail" maxlength="600" placeholder="Example: Four rounds; both hands return after every exchange"></div></div><button class="btn" type="submit">Add custom assignment</button></form>
 
-  <div class="assignment-board"><div><h3>Active work</h3><ul class="list-clean assignment-list">{% for item in active_assignments %}<li class="assignment-row"><span><strong>{{item.title}}</strong><br><span class="muted">{{item.detail or 'Complete this assignment before the next review.'}}</span></span><form action="/coach/assignments/{{item.id}}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">✓ Mark complete</button></form></li>{% else %}<li class="muted">Nothing on your list. Take on a mission above, or add your own.</li>{% endfor %}</ul></div><div><h3>Completed work</h3><ul class="list-clean assignment-list completed-list">{% for item in completed_assignments %}<li class="assignment-row completed"><span><strong>{{item.title}}</strong><br><span class="muted">{{item.detail or 'Completed assignment.'}}</span></span><form action="/coach/assignments/{{item.id}}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Reopen</button></form></li>{% else %}<li class="muted">Completed assignments will stay here for the next coach review.</li>{% endfor %}</ul></div></div>
+  <div class="assignment-board"><div><h3>Active work</h3><ul class="list-clean assignment-list">{% for item in active_assignments %}<li class="assignment-row"><span><strong>{{item.title}}</strong><br><span class="muted">{{item.detail or 'Complete this assignment before the next review.'}}</span>{{ camp_item_status(item) }}</span><span class="assignment-actions"><form class="session-upload" action="/camp/sessions/{{item.id}}" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="btn secondary">Upload a session<input type="file" name="video" accept="video/*" required></label><button class="btn secondary" type="submit" data-session-submit>Send</button></form><form action="/coach/assignments/{{item.id}}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">✓ Mark complete</button></form></span></li>{% else %}<li class="muted">Nothing on your list. Take on a mission above, or add your own.</li>{% endfor %}</ul></div><div><h3>Completed work</h3><ul class="list-clean assignment-list completed-list">{% for item in completed_assignments %}<li class="assignment-row completed"><span><strong>{{item.title}}</strong><br><span class="muted">{{item.detail or 'Completed assignment.'}}</span>{{ camp_item_status(item) }}</span><form action="/coach/assignments/{{item.id}}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Reopen</button></form></li>{% else %}<li class="muted">Completed assignments will stay here for the next coach review.</li>{% endfor %}</ul></div></div>
 </section>
 
 <div id="progress" class="camp-progress">
@@ -259,7 +281,16 @@
 </div>
 {% endif %}
 {% endblock %}
-{% block scripts %}{% if profile and progress.fight_count %}<script nonce="{{ request.state.csp_nonce }}">const points={{progress.points|tojson}},metricKey={{progress.trend_key|tojson}},metricLabel={{progress.trend_label|tojson}},svg=document.getElementById('movementChart'),values=points.map((p,i)=>({i,v:p[metricKey]})).filter(p=>p.v!==null);if(values.length){const w=640,h=230,pad=34,min=Math.min(...values.map(p=>p.v)),max=Math.max(...values.map(p=>p.v)),range=Math.max(.1,max-min),x=i=>pad+(points.length===1?(w-2*pad)/2:i*(w-2*pad)/Math.max(1,points.length-1)),y=v=>h-pad-(v-min)*(h-2*pad)/range;for(let n=0;n<4;n++){const yy=pad+n*(h-2*pad)/3;svg.insertAdjacentHTML('beforeend',`<line x1="${pad}" y1="${yy}" x2="${w-pad}" y2="${yy}" class="chart-grid"/>`)}svg.insertAdjacentHTML('beforeend',`<polyline points="${values.map(p=>`${x(p.i)},${y(p.v)}`).join(' ')}" class="chart-line"/>`);for(const p of values)svg.insertAdjacentHTML('beforeend',`<circle cx="${x(p.i)}" cy="${y(p.v)}" r="5" class="chart-point"><title>${metricLabel}: ${(p.v*100).toFixed(0)}%</title></circle>`)}else svg.insertAdjacentHTML('beforeend','<text x="320" y="120" text-anchor="middle" class="chart-empty">No supported movement trend yet</text>');</script>{% endif %}{% if profile %}<script nonce="{{ request.state.csp_nonce }}">
+{% block scripts %}{% if profile %}<script nonce="{{ request.state.csp_nonce }}">
+// Choosing the file is the whole action; the Send button stays for anyone without JavaScript.
+document.querySelectorAll('.session-upload').forEach(form=>{
+  const input=form.querySelector('input[type=file]'),send=form.querySelector('[data-session-submit]'),label=form.querySelector('label');
+  if(send)send.hidden=true;
+  input.addEventListener('change',()=>{if(!input.files.length)return;
+    if(input.files[0].size>120*1024*1024){if(window.wiqToast)window.wiqToast('That clip is over 120 MB. Film at 720p, or upload a shorter clip.','error');input.value='';return;}
+    label.firstChild.textContent='Checking your session…';form.submit();});
+});
+</script>{% endif %}{% if profile and progress.fight_count %}<script nonce="{{ request.state.csp_nonce }}">const points={{progress.points|tojson}},metricKey={{progress.trend_key|tojson}},metricLabel={{progress.trend_label|tojson}},svg=document.getElementById('movementChart'),values=points.map((p,i)=>({i,v:p[metricKey]})).filter(p=>p.v!==null);if(values.length){const w=640,h=230,pad=34,min=Math.min(...values.map(p=>p.v)),max=Math.max(...values.map(p=>p.v)),range=Math.max(.1,max-min),x=i=>pad+(points.length===1?(w-2*pad)/2:i*(w-2*pad)/Math.max(1,points.length-1)),y=v=>h-pad-(v-min)*(h-2*pad)/range;for(let n=0;n<4;n++){const yy=pad+n*(h-2*pad)/3;svg.insertAdjacentHTML('beforeend',`<line x1="${pad}" y1="${yy}" x2="${w-pad}" y2="${yy}" class="chart-grid"/>`)}svg.insertAdjacentHTML('beforeend',`<polyline points="${values.map(p=>`${x(p.i)},${y(p.v)}`).join(' ')}" class="chart-line"/>`);for(const p of values)svg.insertAdjacentHTML('beforeend',`<circle cx="${x(p.i)}" cy="${y(p.v)}" r="5" class="chart-point"><title>${metricLabel}: ${(p.v*100).toFixed(0)}%</title></circle>`)}else svg.insertAdjacentHTML('beforeend','<text x="320" y="120" text-anchor="middle" class="chart-empty">No supported movement trend yet</text>');</script>{% endif %}{% if profile %}<script nonce="{{ request.state.csp_nonce }}">
 (()=>{
   // Filing was a full-page POST and reload, so choosing a fighter on row 12 of
   // a 15-row table threw the reader back to the top with nothing saying what

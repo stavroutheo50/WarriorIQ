@@ -13,6 +13,8 @@ two apart it may be the opponent's weakness.
 
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
+
 MAX_MISSIONS = 3
 
 
@@ -80,3 +82,77 @@ def fight_camp_missions(records: list[dict], assignments: list[dict]) -> dict:
         }
     return {"job_id": None, "fighter": None, "created_at": None, "missions": [],
             "reason": "identity" if skipped_for_identity else "no_fight", "skipped_newer_fight": False}
+
+
+# ---- Points --------------------------------------------------------------
+#
+# Sized to what each step proves. A counted session proves a real video with
+# someone moving in it (core/training_check.py) - not who, not which drill -
+# so it is worth little and capped per day. Finishing a mission after
+# training for it is worth more. The big award is the only one the athlete
+# cannot give themselves: their next fight showing the number moved.
+SESSION_POINTS = 10
+DAILY_COUNTED_SESSIONS = 2
+MISSION_DONE_POINTS = 25
+IMPROVED_POINTS = 100
+LEVEL_POINTS = 100
+
+# How far a number has to move to count as improved rather than noise, in
+# the units it is stored in: a share (guard 0.10 -> 0.13 is 3 points), the
+# pressure index (-1..1, so 0.06 is 3 on the 0-100 scale shown) and footwork
+# in body lengths a second.
+_IMPROVED_BY = {"pressure_index": 0.06, "footwork_body_lengths_per_second": 0.1}
+_DEFAULT_IMPROVED_BY = 0.03
+
+
+def improved_by(metric: str) -> float:
+    return _IMPROVED_BY.get(metric, _DEFAULT_IMPROVED_BY)
+
+
+def mission_result(mission: dict, later: list[dict]) -> dict | None:
+    """The first later fight that measured the mission's number, and whether it moved.
+
+    `later` are fights analysed after the mission was taken, oldest first,
+    each {"job_id", "report", "fighter"}. Drills are only prescribed for a
+    number that was behind, and for every such number higher is better.
+    A fight whose identity check failed says nothing about this athlete.
+    """
+    for record in later:
+        report = record["report"]
+        if not (report.get("integrity") or {}).get("identity_evidence_trusted", True):
+            continue
+        value = ((report.get("metrics") or {}).get(record["fighter"]) or {}).get(mission["metric"])
+        if value is None:
+            continue
+        value = float(value)
+        return {"job_id": record["job_id"], "before": float(mission["measured"]), "after": value,
+                "improved": value >= float(mission["measured"]) + improved_by(mission["metric"])}
+    return None
+
+
+def camp_standing(points: list[dict], sessions: list[dict], today: date) -> dict:
+    """Points, level and weekly streak from the ledger and the sessions.
+
+    The streak is the number of weeks in a row, up to this week or last,
+    with at least one counted session: a week not over yet does not break it.
+    """
+    total = sum(int(item["points"]) for item in points)
+    weeks = set()
+    for session in sessions:
+        if session.get("verdict") == "counted":
+            year, week, _ = _day(session["created_at"]).isocalendar()
+            weeks.add((year, week))
+    streak = 0
+    year, week, _ = today.isocalendar()
+    cursor = today
+    if (year, week) not in weeks:
+        cursor = today - timedelta(days=7)
+    while cursor.isocalendar()[:2] in weeks:
+        streak += 1
+        cursor = cursor - timedelta(days=7)
+    return {"points": total, "level": 1 + total // LEVEL_POINTS,
+            "into_level": total % LEVEL_POINTS, "level_size": LEVEL_POINTS, "streak_weeks": streak}
+
+
+def _day(stamp: str) -> date:
+    return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).date()

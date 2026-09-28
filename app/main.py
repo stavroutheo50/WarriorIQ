@@ -60,7 +60,8 @@ from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
-    add_assignment, analysis_allowance, apply_checkout_event, consume_email_verification_token,
+    add_assignment, analysis_allowance, award_points, link_camp_mission, list_camp_missions,
+    list_points, list_training_sessions, record_training_session, apply_checkout_event, consume_email_verification_token,
     consume_password_reset_token,
     assign_fighter_to_fight, create_fighter, set_account_type, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
@@ -104,7 +105,11 @@ from core.upload_security import (
 )
 from core import sport_check
 from core.fight_stats import _deduplicate as _deduplicate_strikes
-from core.camp import fight_camp_missions
+from core.camp import (
+    DAILY_COUNTED_SESSIONS, IMPROVED_POINTS, MISSION_DONE_POINTS, SESSION_POINTS, camp_standing,
+    fight_camp_missions, mission_result, missions_from_report,
+)
+from core.training_check import check_training_video
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
@@ -5216,7 +5221,7 @@ def compare_page(request: Request, a: str = "", b: str = ""):
 @app.get("/camp", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
 @app.get("/coach", response_class=HTMLResponse)
-def fight_camp_page(request: Request, error: str = "", name: str = ""):
+def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = ""):
     """Fight Camp: missions from the latest fight, progress, and the squad.
 
     Progress (/dashboard) and the coach portal (/coach) were two pages about
@@ -5253,16 +5258,26 @@ def fight_camp_page(request: Request, error: str = "", name: str = ""):
                        if athlete_id is not None and fight.get("fighter_id") not in (None, athlete_id))
     assignments = list_assignments(profile_id)
 
-    def followed(report: dict) -> str:
-        video = report.get("video") or {}
-        fighter = video.get("focus_fighter") or video.get("analysis_target")
-        return fighter if fighter in {"A", "B"} else default_fighter
-
-    camp = fight_camp_missions(
-        [{"job_id": r["job_id"], "created_at": r.get("created_at"), "report": r["report"],
-          "fighter": followed(r["report"])} for r in reversed(records)],
-        assignments,
-    )
+    newest_first = [{"job_id": r["job_id"], "created_at": r.get("created_at"), "report": r["report"],
+                     "fighter": _camp_fighter(r["report"], default_fighter)} for r in reversed(records)]
+    camp = fight_camp_missions(newest_first, assignments)
+    # The big award: a fight after the mission was taken shows its number
+    # moved. Checked here, where the fights are already loaded; award_points
+    # gives it once however often the page is opened.
+    results = {}
+    for mission in list_camp_missions(profile_id):
+        later = [r for r in reversed(newest_first)
+                 if r["job_id"] != mission["job_id"] and str(r.get("created_at") or "") > mission["created_at"]]
+        result = mission_result(mission, later)
+        if result is not None:
+            results[mission["assignment_id"]] = result
+            if result["improved"]:
+                award_points(profile_id, IMPROVED_POINTS, "improved", str(mission["assignment_id"]))
+    sessions = list_training_sessions(profile_id)
+    counted = {}
+    for item in sessions:
+        if item["verdict"] == "counted" and item["assignment_id"] is not None:
+            counted[item["assignment_id"]] = counted.get(item["assignment_id"], 0) + 1
     return templates.TemplateResponse(
         request=request, name="camp.html",
         context={
@@ -5271,6 +5286,13 @@ def fight_camp_page(request: Request, error: str = "", name: str = ""):
             "other_fighter_fights": other_fights,
             "assignments": assignments,
             "camp": camp,
+            "standing": camp_standing(list_points(profile_id), sessions, datetime.now(timezone.utc).date()),
+            "sessions_by_item": counted,
+            "mission_results": results,
+            "session_message": TRAINING_VERDICT_MESSAGES.get(session, "").format(
+                points=SESSION_POINTS, cap=DAILY_COUNTED_SESSIONS),
+            "points_rules": {"session": SESSION_POINTS, "daily": DAILY_COUNTED_SESSIONS,
+                             "done": MISSION_DONE_POINTS, "improved": IMPROVED_POINTS},
             "fights": fights,
             # A coach triages a squad; an athlete fixes one thing. This is the
             # coach half - every fight in order and which way the numbers are
@@ -5395,7 +5417,106 @@ def update_coach_assignment(
     profile_id = _profile_id(request)
     if profile_id is None or not toggle_assignment(assignment_id, profile_id):
         raise HTTPException(404)
+    # Finishing something you trained for: once per item, and only with at
+    # least one counted session behind it, so ticking a box alone earns nothing.
+    done = any(item["id"] == assignment_id and item["status"] == "complete"
+               for item in list_assignments(profile_id))
+    trained = any(session["assignment_id"] == assignment_id and session["verdict"] == "counted"
+                  for session in list_training_sessions(profile_id))
+    if done and trained:
+        award_points(profile_id, MISSION_DONE_POINTS, "mission_done", str(assignment_id))
     return RedirectResponse(_safe_next(next_path, "/camp#assignments"), status_code=303)
+
+
+@app.post("/camp/missions", dependencies=[Depends(require_csrf)])
+def take_camp_mission(request: Request, job_id: str = Form(...), index: int = Form(...)):
+    """Take on a mission: it joins the list, remembering the number it is for.
+
+    The mission is rebuilt from the fight's own report rather than read from
+    the form, so the number a later fight is compared with is the measured
+    one and not whatever a request says it was.
+    """
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/camp", status_code=303)
+    fight = get_fight(job_id)
+    if not fight or int(fight["profile_id"]) != profile_id:
+        raise HTTPException(404)
+    report = json.loads(Path(fight["report_path"]).read_text(encoding="utf-8"))
+    refresh_identity_integrity(report)
+    fighter = _camp_fighter(report, (get_profile(profile_id) or {}).get("default_fighter", "A"))
+    missions = missions_from_report(report, fighter)["missions"]
+    if not 0 <= index < len(missions):
+        raise HTTPException(404)
+    mission = missions[index]
+    detail = (mission["exercise"] or "") + (f" Target: {mission['target']}" if mission["target"] else "")
+    assignment_id = add_assignment(profile_id, mission["title"][:100], detail.strip()[:600])
+    if mission.get("metric") and mission.get("measured") is not None:
+        link_camp_mission(assignment_id, profile_id, job_id, fighter, mission["metric"], mission["measured"])
+    return RedirectResponse("/camp#missions", status_code=303)
+
+
+# Training clips are checked and deleted inside the request, so they have to
+# fit one: under the host's ~134 MiB request ceiling (core/chunked_upload.py).
+TRAINING_UPLOAD_BYTES = 120 * 1024 * 1024
+TRAINING_VERDICT_MESSAGES = {
+    "counted": "Session counted: +{points} points.",
+    "daily_cap": "Session counted, but you have had today's {cap} sessions' points. It still counts for your streak.",
+    "duplicate": "That clip was already uploaded, so it was not counted again.",
+    "too_short": "That clip is under a minute. Film at least one minute of the drill.",
+    "too_long": "That clip is over 20 minutes. Upload one drill at a time.",
+    "no_movement": "Nothing was moving in most of that clip. Film yourself doing the drill.",
+    "unreadable": "That file could not be read as a video.",
+}
+
+
+@app.post("/camp/sessions/{assignment_id}", dependencies=[Depends(require_csrf)])
+def upload_training_session(request: Request, assignment_id: int, video: UploadFile = File(...)):
+    """One training clip for one item on the list: checked, scored, deleted.
+
+    Only the clip's fingerprint and what the check found are kept
+    (training_sessions); the video is removed before the response, whatever
+    the verdict. See core/training_check.py for what the check can and cannot
+    tell.
+    """
+    _enforce_rate_limit(request, "training_sessions", 12, 3600)
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/camp", status_code=303)
+    if not any(item["id"] == assignment_id for item in list_assignments(profile_id)):
+        raise HTTPException(404)
+    folder = UPLOADS / "training"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{uuid.uuid4().hex}.video"
+    try:
+        digest = _save_upload_limited(video, path, TRAINING_UPLOAD_BYTES)
+        earlier = list_training_sessions(profile_id)
+        if any(session["video_sha256"] == digest for session in earlier):
+            found = {"verdict": "duplicate", "duration_seconds": None, "moving_share": None}
+        else:
+            found = check_training_video(str(path))
+    finally:
+        path.unlink(missing_ok=True)
+    verdict, points = found["verdict"], 0
+    if verdict == "counted":
+        today = datetime.now(timezone.utc).date().isoformat()
+        paid_today = sum(1 for session in earlier
+                         if session["points"] > 0 and str(session["created_at"]).startswith(today))
+        if paid_today < DAILY_COUNTED_SESSIONS:
+            points = SESSION_POINTS
+    session_id = record_training_session(profile_id, assignment_id, digest, found["duration_seconds"],
+                                         found["moving_share"], verdict, points)
+    if points:
+        award_points(profile_id, points, "session", str(session_id))
+    shown = "daily_cap" if verdict == "counted" and not points else verdict
+    return RedirectResponse(f"/camp?session={shown}#assignments", status_code=303)
+
+
+def _camp_fighter(report: dict, default_fighter: str) -> str:
+    """The fighter a report follows for this athlete."""
+    video = report.get("video") or {}
+    fighter = video.get("focus_fighter") or video.get("analysis_target")
+    return fighter if fighter in {"A", "B"} else default_fighter
 
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -6324,6 +6445,13 @@ def export_account_data(request: Request, password: str = Form(...),
         "fights": fights,
         "annotations": annotations,
         "coach_assignments": list_assignments(profile_id),
+        # Fight Camp: missions taken, training sessions (the check's findings
+        # and a fingerprint - the clips themselves are never kept) and points.
+        "fight_camp": {
+            "missions": list_camp_missions(profile_id),
+            "training_sessions": list_training_sessions(profile_id),
+            "points": list_points(profile_id),
+        },
         "connected_sign_in_identities": list_oauth_identities(int(account["id"])),
         "legal_acceptances": list_legal_acceptances(profile_id=profile_id),
     }
