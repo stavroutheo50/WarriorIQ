@@ -615,3 +615,20 @@
 .share-link-row input[type=text]{flex:1 1 200px;min-width:0}
 .share-link-name{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px}
 .share-link-name input[type=text]{flex:1 1 160px;min-width:0}
+/* Fight Camp: rank, this week's target and where points came from. */
+.camp-rank{font-size:22px;font-weight:800;letter-spacing:.01em;color:#ffc44d}
+.camp-week{flex-direction:row!important;align-items:center;gap:12px!important}
+.camp-week>span:last-child{display:flex;flex-direction:column;gap:2px}
+.camp-week-ring{--done:0;flex:none;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(closest-side,#10192b 76%,transparent 78%),conic-gradient(#52d6a3 calc(var(--done) * 1%),#243653 0)}
+.camp-week-ring b{font-size:14px}
+.camp-history summary{cursor:pointer;font-size:13px;color:#c7cede}
+.camp-history ul{margin:8px 0 0;display:grid;gap:4px;font-size:13px}
+.camp-history .up{color:#52d6a3}
+.camp-history .down{color:#ff718f}
+/* The squad, folded away unless this is a coach's workspace. */
+.camp-squad>summary{cursor:pointer;list-style:none;display:flex;flex-direction:column;gap:4px;padding:14px 0}
+.camp-squad>summary::-webkit-details-marker{display:none}
+.camp-squad>summary h2{margin:0}
+.camp-squad>summary h2::after{content:" ▾";font-size:.6em;color:#98a2b3}
+.camp-squad[open]>summary h2::after{content:" ▴"}
+.progress-trend{margin-top:16px}

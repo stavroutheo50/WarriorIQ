@@ -112,6 +112,7 @@ from core.camp import (
     DAILY_COUNTED_SESSIONS, IMPROVED_POINTS, MISSION_DONE_POINTS, REDEEM_COST, REDEEM_PER_MONTH,
     SESSION_POINTS, camp_standing,
     fight_camp_missions, mission_board, mission_result, missions_from_report, next_step, paid_sessions_on,
+    points_history,
 )
 from core.training_check import check_training_video
 from core.share_image import preview_png as story_preview_png
@@ -5319,6 +5320,7 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
             counted[item["assignment_id"]] = counted.get(item["assignment_id"], 0) + 1
     today = datetime.now(timezone.utc).date()
     board = mission_board(camp, assignments, linked, results, counted)
+    points = list_points(profile_id)
     return templates.TemplateResponse(
         request=request, name="camp.html",
         context={
@@ -5327,13 +5329,16 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
             "other_fighter_fights": other_fights,
             "assignments": assignments,
             "camp": camp,
-            "standing": camp_standing(list_points(profile_id), sessions, today),
+            "standing": camp_standing(points, sessions, today),
+            "points_history": points_history(points),
             # One card per mission at whatever stage it is, and the one thing
             # to do next at the top. See core/camp.py.
             "board": board,
             "today": next_step(camp, board, paid_sessions_on(sessions, today), bool(fights)),
             "session_message": TRAINING_VERDICT_MESSAGES.get(session, "").format(
                 points=SESSION_POINTS, cap=DAILY_COUNTED_SESSIONS),
+            # For the pop-up: only a session that just earned points.
+            "session_points": SESSION_POINTS if session == "counted" else 0,
             "points_rules": {"session": SESSION_POINTS, "daily": DAILY_COUNTED_SESSIONS,
                              "done": MISSION_DONE_POINTS, "improved": IMPROVED_POINTS,
                              "redeem_cost": REDEEM_COST, "redeem_per_month": REDEEM_PER_MONTH},

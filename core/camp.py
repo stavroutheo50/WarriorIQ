@@ -104,6 +104,16 @@ LEVEL_POINTS = 100
 # can be spent but never bought or cashed out.
 REDEEM_COST = 200
 REDEEM_PER_MONTH = 2
+# Counted sessions a week that make a good week. A target, not a cap: every
+# session still counts for points up to the daily cap.
+WEEKLY_TARGET = 3
+# A name for each stretch of levels, reached by earning points. Cosmetic: it
+# says how much training someone has put in, not how good they are.
+RANKS = ((1, "Rookie"), (3, "Prospect"), (5, "Contender"), (8, "Challenger"), (12, "Champion"))
+# What each kind of ledger entry is called on the page (core.db.award_points
+# reasons, and redeem_points_for_analysis's spend).
+_POINT_REASONS = {"session": "Training session", "mission_done": "Mission finished",
+                  "improved": "Your fight showed the improvement", "redeem_analysis": "Extra analysis"}
 
 # How far a number has to move to count as improved rather than noise, in
 # the units it is stored in: a share (guard 0.10 -> 0.13 is 3 points), the
@@ -161,8 +171,24 @@ def camp_standing(points: list[dict], sessions: list[dict], today: date) -> dict
     while cursor.isocalendar()[:2] in weeks:
         streak += 1
         cursor = cursor - timedelta(days=7)
-    return {"points": total, "balance": balance, "level": 1 + total // LEVEL_POINTS,
-            "into_level": total % LEVEL_POINTS, "level_size": LEVEL_POINTS, "streak_weeks": streak}
+    level = 1 + total // LEVEL_POINTS
+    rank = [name for at, name in RANKS if level >= at][-1]
+    next_rank = next(((at, name) for at, name in RANKS if at > level), None)
+    this_week = sum(1 for session in sessions if session.get("verdict") == "counted"
+                    and _day(session["created_at"]).isocalendar()[:2] == (year, week))
+    return {"points": total, "balance": balance, "level": level,
+            "into_level": total % LEVEL_POINTS, "level_size": LEVEL_POINTS, "streak_weeks": streak,
+            "rank": rank, "next_rank": next_rank[1] if next_rank else None,
+            "next_rank_level": next_rank[0] if next_rank else None,
+            "week_sessions": this_week, "week_target": WEEKLY_TARGET}
+
+
+def points_history(points: list[dict], limit: int = 5) -> list[dict]:
+    """The newest ledger entries, named, so an athlete can see where points came from."""
+    newest = sorted(points, key=lambda item: (str(item.get("created_at") or ""), int(item.get("id") or 0)),
+                    reverse=True)
+    return [{"points": int(item["points"]), "label": _POINT_REASONS.get(str(item.get("reason")), "Points"),
+             "created_at": item.get("created_at")} for item in newest[:limit]]
 
 
 def _day(stamp: str) -> date:

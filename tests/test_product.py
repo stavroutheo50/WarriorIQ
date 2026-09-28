@@ -1463,6 +1463,12 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
 
         first = clip("one.mp4")
         self.assertEqual(upload(item["id"], first), "counted")
+        page = self.client.get("/camp?session=counted").text
+        self.assertIn('data-points="+10 points"', page, "the pop-up for points just earned")
+        self.assertIn("1/3", page, "this week's sessions against the target")
+        self.assertIn("Rookie", page)
+        self.assertIn("Training session", page, "where the points came from")
+        self.assertNotIn('data-points="', self.client.get("/camp?session=duplicate").text)
         self.assertEqual(upload(item["id"], first), "duplicate")
         self.assertEqual(upload(item["id"], clip("still.mp4", moving=False)), "no_movement")
         self.assertEqual(upload(item["id"], clip("two.mp4", shade=60)), "counted")

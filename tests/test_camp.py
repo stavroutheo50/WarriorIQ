@@ -3,9 +3,9 @@
 import unittest
 from datetime import date
 
-from core.camp import (DAILY_COUNTED_SESSIONS, camp_standing, fight_camp_missions, improved_by,
+from core.camp import (DAILY_COUNTED_SESSIONS, WEEKLY_TARGET, camp_standing, fight_camp_missions, improved_by,
                        mission_board, mission_progress, mission_result, missions_from_report, next_step,
-                       paid_sessions_on)
+                       paid_sessions_on, points_history)
 
 
 def report(trusted=True, drills=True):
@@ -112,6 +112,28 @@ class StandingTests(unittest.TestCase):
     def test_sessions_that_did_not_count_do_not_make_a_streak(self):
         sessions = [self.session("2026-09-29", "no_movement"), self.session("2026-09-22", "duplicate")]
         self.assertEqual(camp_standing([], sessions, self.TODAY)["streak_weeks"], 0)
+
+    def test_a_rank_for_each_stretch_of_levels(self):
+        def rank(points):
+            standing = camp_standing([{"points": points}], [], self.TODAY)
+            return standing["rank"], standing["next_rank"], standing["next_rank_level"]
+        self.assertEqual(rank(0), ("Rookie", "Prospect", 3))
+        self.assertEqual(rank(250), ("Prospect", "Contender", 5))
+        self.assertEqual(rank(1100), ("Champion", None, None))
+
+    def test_this_weeks_counted_sessions_against_the_target(self):
+        sessions = [self.session(self.TODAY.isoformat()), self.session(self.TODAY.isoformat(), "no_movement"),
+                    self.session("2026-09-01")]
+        standing = camp_standing([], sessions, self.TODAY)
+        self.assertEqual((standing["week_sessions"], standing["week_target"]), (1, WEEKLY_TARGET))
+
+    def test_points_history_newest_first_and_named(self):
+        points = [{"id": 1, "points": 10, "reason": "session", "created_at": "2026-09-28T09:00:00+00:00"},
+                  {"id": 2, "points": 100, "reason": "improved", "created_at": "2026-09-28T10:00:00+00:00"},
+                  {"id": 3, "points": -200, "reason": "redeem_analysis", "created_at": "2026-09-28T11:00:00+00:00"}]
+        history = points_history(points, limit=2)
+        self.assertEqual([(item["points"], item["label"]) for item in history],
+                         [(-200, "Extra analysis"), (100, "Your fight showed the improvement")])
 
 
 
