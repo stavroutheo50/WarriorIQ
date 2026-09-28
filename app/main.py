@@ -61,7 +61,7 @@ from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
     add_assignment, analysis_allowance, apply_subscription_change, award_points, link_camp_mission, list_camp_missions,
-    list_points, list_training_sessions, record_training_session, apply_checkout_event, consume_email_verification_token,
+    list_points, list_training_sessions, record_training_session, redeem_points_for_analysis, apply_checkout_event, consume_email_verification_token,
     consume_password_reset_token,
     assign_fighter_to_fight, create_fighter, set_account_type, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
@@ -107,7 +107,8 @@ from core.upload_security import (
 from core import sport_check
 from core.fight_stats import _deduplicate as _deduplicate_strikes
 from core.camp import (
-    DAILY_COUNTED_SESSIONS, IMPROVED_POINTS, MISSION_DONE_POINTS, SESSION_POINTS, camp_standing,
+    DAILY_COUNTED_SESSIONS, IMPROVED_POINTS, MISSION_DONE_POINTS, REDEEM_COST, REDEEM_PER_MONTH,
+    SESSION_POINTS, camp_standing,
     fight_camp_missions, mission_result, missions_from_report,
 )
 from core.training_check import check_training_video
@@ -5223,7 +5224,7 @@ def compare_page(request: Request, a: str = "", b: str = ""):
 @app.get("/camp", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
 @app.get("/coach", response_class=HTMLResponse)
-def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = ""):
+def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = "", redeem: str = ""):
     """Fight Camp: missions from the latest fight, progress, and the squad.
 
     Progress (/dashboard) and the coach portal (/coach) were two pages about
@@ -5294,7 +5295,11 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
             "session_message": TRAINING_VERDICT_MESSAGES.get(session, "").format(
                 points=SESSION_POINTS, cap=DAILY_COUNTED_SESSIONS),
             "points_rules": {"session": SESSION_POINTS, "daily": DAILY_COUNTED_SESSIONS,
-                             "done": MISSION_DONE_POINTS, "improved": IMPROVED_POINTS},
+                             "done": MISSION_DONE_POINTS, "improved": IMPROVED_POINTS,
+                             "redeem_cost": REDEEM_COST, "redeem_per_month": REDEEM_PER_MONTH},
+            "redeem_message": REDEEM_MESSAGES.get(redeem, "").format(cost=REDEEM_COST, cap=REDEEM_PER_MONTH),
+            "extra_analyses": (analysis_allowance(int(account["id"]))["bonus_remaining"]
+                               if (account := _account(request)) else 0),
             "fights": fights,
             # A coach triages a squad; an athlete fixes one thing. This is the
             # coach half - every fight in order and which way the numbers are
@@ -5472,6 +5477,30 @@ TRAINING_VERDICT_MESSAGES = {
     "unreadable": "That file could not be read as a video.",
     "too_large": "That video's resolution is too high to check. Film at 1080p or lower.",
 }
+
+
+REDEEM_MESSAGES = {
+    "bought": "Done: you have an extra analysis. It is used when your plan's own analyses run out.",
+    "not_enough_points": "Not enough points yet: a free analysis costs {cost}.",
+    "monthly_cap": "You have had this month's {cap} free analyses. More next month.",
+}
+
+
+@app.post("/camp/redeem", dependencies=[Depends(require_csrf)])
+def redeem_camp_points(request: Request):
+    """Spend Fight Camp points on one extra analysis (core.db.redeem_points_for_analysis)."""
+    _enforce_rate_limit(request, "camp_redeem", 10, 3600)
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/camp", status_code=303)
+    outcome = redeem_points_for_analysis(profile_id, REDEEM_COST, REDEEM_PER_MONTH,
+                                         datetime.now(timezone.utc).strftime("%Y-%m"))
+    if outcome == "bought":
+        account = _account(request)
+        record_security_event("points_redeemed_for_analysis",
+                              account_id=int(account["id"]) if account else None,
+                              resource_type="points", resource_id=str(REDEEM_COST))
+    return RedirectResponse(f"/camp?redeem={outcome}", status_code=303)
 
 
 @app.post("/camp/sessions/{assignment_id}", dependencies=[Depends(require_csrf)])

@@ -96,6 +96,12 @@ DAILY_COUNTED_SESSIONS = 2
 MISSION_DONE_POINTS = 25
 IMPROVED_POINTS = 100
 LEVEL_POINTS = 100
+# Spending points: one extra analysis for REDEEM_COST, at most REDEEM_PER_MONTH
+# a month. Each one is real processing time on the analysis machine, and the
+# cap keeps the points worth earning rather than a second, free plan. Points
+# can be spent but never bought or cashed out.
+REDEEM_COST = 200
+REDEEM_PER_MONTH = 2
 
 # How far a number has to move to count as improved rather than noise, in
 # the units it is stored in: a share (guard 0.10 -> 0.13 is 3 points), the
@@ -136,7 +142,10 @@ def camp_standing(points: list[dict], sessions: list[dict], today: date) -> dict
     The streak is the number of weeks in a row, up to this week or last,
     with at least one counted session: a week not over yet does not break it.
     """
-    total = sum(int(item["points"]) for item in points)
+    # The level follows what was earned, so spending points never takes a
+    # level away; the balance is what is left to spend.
+    total = sum(int(item["points"]) for item in points if int(item["points"]) > 0)
+    balance = sum(int(item["points"]) for item in points)
     weeks = set()
     for session in sessions:
         if session.get("verdict") == "counted":
@@ -150,7 +159,7 @@ def camp_standing(points: list[dict], sessions: list[dict], today: date) -> dict
     while cursor.isocalendar()[:2] in weeks:
         streak += 1
         cursor = cursor - timedelta(days=7)
-    return {"points": total, "level": 1 + total // LEVEL_POINTS,
+    return {"points": total, "balance": balance, "level": 1 + total // LEVEL_POINTS,
             "into_level": total % LEVEL_POINTS, "level_size": LEVEL_POINTS, "streak_weeks": streak}
 
 
