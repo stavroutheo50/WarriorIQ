@@ -526,12 +526,8 @@
 .mission-actions form{margin:0}
 .camp-progress,.camp-squad{margin-top:28px}
 @media (max-width:560px){.mission-card{flex-direction:column;gap:8px}.mission-actions .btn{width:100%;justify-content:center}}
-.camp-standing{display:grid;grid-template-columns:auto 1fr auto;gap:18px 28px;align-items:center;margin:4px 0 12px;padding:16px 18px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)}
-.camp-standing>div{display:flex;flex-direction:column;gap:2px}
-.camp-standing strong{font-size:34px;line-height:1}
 .camp-level-bar{display:block;height:10px;border-radius:999px;background:#243653;overflow:hidden;margin:4px 0}
 .camp-level-bar i{display:block;height:100%;background:#4fd7ff;border-radius:999px}
-.camp-rules{grid-column:1/-1}
 .camp-rules summary{cursor:pointer;font-size:14px;color:#c7cede}
 .camp-rules li{margin:6px 0}
 .assignment-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
@@ -541,7 +537,40 @@
 .session-upload input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
 .camp-item-status{color:#98a2b3}
 .camp-item-status .up{color:#52d6a3}
-@media (max-width:560px){.camp-standing{grid-template-columns:1fr 1fr}.camp-level{grid-column:1/-1;order:3}.camp-rules{order:4}.assignment-actions{justify-content:flex-start}}
-.camp-spend{grid-column:1/-1;display:flex!important;flex-direction:row!important;flex-wrap:wrap;align-items:center;gap:10px 14px}
-.camp-spend form{margin:0}
 .camp-note{grid-column:1/-1;margin:0}
+/* Fight Camp: the next step, with the points beside it (camp.html #today). */
+.camp-today{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px 22px;margin:4px 0 14px;padding:20px;border-radius:18px;border:1px solid rgba(79,215,255,.28);background:radial-gradient(420px 200px at 0 0,rgba(79,215,255,.12),transparent),rgba(255,255,255,.03)}
+.camp-next h2{margin:6px 0 8px;font-size:clamp(22px,3vw,30px);line-height:1.15}
+.camp-next p{margin:0 0 12px}
+.camp-next-actions{display:flex;flex-wrap:wrap;gap:8px}
+.camp-next-actions form{margin:0}
+.camp-standing{display:grid;gap:14px;align-content:start;padding:14px 16px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.18)}
+.camp-standing>div{display:flex;flex-direction:column;gap:3px}
+.camp-streak{flex-direction:row!important;align-items:baseline;gap:8px!important}
+.camp-streak strong{font-size:28px;line-height:1}
+.camp-spend form{margin:2px 0 0}
+.camp-spend .btn{width:100%;justify-content:center}
+.camp-today .camp-note{grid-column:1/-1;margin:0}
+.camp-rules{grid-column:1/-1}
+/* One card per mission, whatever its stage (core.camp.mission_board). */
+.mission-card{flex-direction:column;gap:0}
+.mission-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.stage-pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.02em;background:rgba(255,255,255,.08);color:#c7cede}
+.stage-new .stage-pill{background:rgba(79,215,255,.16);color:#4fd7ff}
+.stage-training .stage-pill{background:rgba(255,196,77,.16);color:#ffc44d}
+.stage-waiting .stage-pill{background:rgba(143,160,255,.16);color:#aab6ff}
+.stage-improved .stage-pill{background:rgba(82,214,163,.16);color:#52d6a3}
+.stage-training{border-color:rgba(255,196,77,.28)}
+.stage-improved{border-color:rgba(82,214,163,.3)}
+.mission-meter{margin:12px 0 4px;display:grid;gap:5px;max-width:520px}
+.mission-meter-labels{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#c7cede}
+.mission-bar{position:relative;display:block;height:10px;border-radius:999px;background:#243653}
+.mission-bar i{display:block;height:100%;border-radius:999px;background:#52d6a3}
+.mission-bar em{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:#ffc44d;border-radius:2px}
+.mission-meter .up{color:#52d6a3}
+.camp-finished,.camp-add{margin-top:16px}
+.camp-finished summary,.camp-add summary{cursor:pointer;font-size:14px;color:#c7cede}
+.camp-finished .mission-list{margin-top:12px}
+.camp-finished .mission-card{opacity:.8}
+.camp-add .assignment-builder{margin-top:12px}
+@media (max-width:760px){.camp-today{grid-template-columns:1fr;padding:16px}.camp-next-actions .btn,.camp-next-actions form,.camp-next-actions label{width:100%;justify-content:center}.assignment-actions{justify-content:flex-start}}

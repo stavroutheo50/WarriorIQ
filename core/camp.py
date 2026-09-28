@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
+from core.coaching import POSE_DIMENSIONS, metric_goal
+
 MAX_MISSIONS = 3
 
 
@@ -165,3 +167,135 @@ def camp_standing(points: list[dict], sessions: list[dict], today: date) -> dict
 
 def _day(stamp: str) -> date:
     return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).date()
+
+
+def paid_sessions_on(sessions: list[dict], day: date) -> int:
+    """Sessions that earned points on one day, which the daily cap counts."""
+    stamp = day.isoformat()
+    return sum(1 for session in sessions
+               if int(session.get("points") or 0) > 0 and str(session.get("created_at") or "").startswith(stamp))
+
+
+# ---- The board -------------------------------------------------------------
+#
+# One card per mission, whatever stage it has reached. Missions from the
+# latest fight and the athlete's own list used to be two sections, and a
+# mission taken on in the first reappeared in the second: three steps and two
+# places for one thing.
+
+_LABELS = {key: label for key, label, *_ in POSE_DIMENSIONS}
+# Cards the athlete is working on first, finished ones last.
+_GROUP = {"training": 0, "new": 1, "waiting": 2, "not_yet": 3, "improved": 3, "done": 3}
+
+
+def mission_progress(metric: str | None, measured: float | None, result: dict | None = None) -> dict | None:
+    """Where a mission's number was, where the plan aims it, and where the next fight put it.
+
+    The goal is the training plan's own (core.coaching.metric_goal), so the bar
+    and the plan's sentence name the same number. The tick marks where the
+    improvement award starts (improved_by), which is the rule mission_result
+    judges by. The bar only ever fills from a fight that measured the number:
+    before one has, it is empty rather than guessed.
+    """
+    if not metric or measured is None:
+        return None
+    before = float(measured)
+    goal, show = metric_goal(metric, before)
+    span = goal - before
+    if span <= 0:
+        return None
+    unlock = before + improved_by(metric)
+    progress = {
+        "label": _LABELS.get(metric, "This number"),
+        "before": show(before), "goal": show(goal), "unlock": show(unlock),
+        "tick": round(min(1.0, (unlock - before) / span) * 100),
+        "after": None, "fill": 0, "improved": None,
+    }
+    if result is not None:
+        after = float(result["after"])
+        progress.update(after=show(after), improved=bool(result["improved"]),
+                        fill=round(max(0.0, min(1.0, (after - before) / span)) * 100))
+    return progress
+
+
+def mission_board(camp: dict, assignments: list[dict], linked: dict, results: dict,
+                  sessions_by_item: dict) -> list[dict]:
+    """Every mission as one card with its stage.
+
+    `camp` is fight_camp_missions' answer; `assignments` the athlete's list;
+    `linked` the camp_missions rows by assignment id (which fight and number a
+    taken mission came from); `results` mission_result by assignment id; and
+    `sessions_by_item` counted sessions by assignment id.
+
+    Stages: "new" (from the latest fight, not taken yet), "training" (on the
+    list), "waiting" (finished training, no fight has measured it since),
+    "improved" or "not_yet" (a later fight measured it), and "done" (the
+    athlete's own item, ticked off - nothing measures those).
+    """
+    missions = camp.get("missions") or []
+    latest = {str(m.get("title") or "").strip().lower(): m for m in missions}
+    cards = []
+    for item in assignments:
+        mission = latest.get(str(item.get("title") or "").strip().lower(), {})
+        link = linked.get(item["id"])
+        result = results.get(item["id"])
+        if result is not None:
+            stage = "improved" if result["improved"] else "not_yet"
+        elif item.get("status") == "active":
+            stage = "training"
+        elif link is not None:
+            stage = "waiting"
+        else:
+            stage = "done"
+        cards.append({
+            "stage": stage, "assignment": item, "index": None,
+            "title": item["title"], "detail": item.get("detail"), "why": mission.get("why"),
+            "evidence_seconds": mission.get("evidence_seconds"),
+            "sessions": int(sessions_by_item.get(item["id"], 0)),
+            "progress": mission_progress(link["metric"], link["measured"], result) if link else None,
+        })
+    for index, mission in enumerate(missions):
+        if mission.get("status") is not None:
+            continue     # already on the list, as the card above
+        cards.append({
+            "stage": "new", "assignment": None, "index": index,
+            "title": mission["title"], "detail": mission.get("exercise"), "why": mission.get("why"),
+            "target": mission.get("target"), "evidence_seconds": mission.get("evidence_seconds"),
+            "sessions": 0, "progress": mission_progress(mission.get("metric"), mission.get("measured")),
+        })
+
+    def group(card: dict) -> int:
+        # Still on the list, whatever a fight has said since: keep it with the
+        # work in hand rather than among the finished.
+        if card["assignment"] is not None and card["assignment"].get("status") == "active":
+            return 0
+        return _GROUP[card["stage"]]
+
+    for card in cards:
+        card["finished"] = group(card) == _GROUP["done"]
+    return sorted(cards, key=group)
+
+
+def next_step(camp: dict, board: list[dict], paid_today: int, has_fight: bool) -> dict:
+    """The one thing to do next, for the top of the page.
+
+    In order: train for something on the list (or rest, once today's points
+    are in), take on a mission, analyse the fight that will judge the
+    training, and otherwise analyse a fight.
+    """
+    training = [card for card in board
+                if card["assignment"] is not None and card["assignment"].get("status") == "active"]
+    if training:
+        if paid_today < DAILY_COUNTED_SESSIONS:
+            # The item trained least so far: min() keeps the board's order on a tie.
+            return {"kind": "upload", "card": min(training, key=lambda card: card["sessions"])}
+        return {"kind": "rested", "card": None}
+    new = [card for card in board if card["stage"] == "new"]
+    if new:
+        return {"kind": "take", "card": new[0]}
+    waiting = [card for card in board if card["stage"] == "waiting"]
+    if waiting:
+        return {"kind": "next_fight", "card": waiting[0]}
+    if not has_fight:
+        return {"kind": "first_fight", "card": None}
+    return {"kind": "analyse", "card": None, "reason": camp.get("reason")}

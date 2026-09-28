@@ -1335,6 +1335,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         page = self.client.get("/camp").text
         self.assertIn("Guard-return audit", page)
         self.assertIn("Take on this mission", page)
+        self.assertIn("Start a mission: Guard-return audit", page, "the next step, at the top")
+        self.assertIn("Guard <b class=\"wiq-num\">10.0%</b>", page, "the bar starts at the measured number")
 
         taken = self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 0}, follow_redirects=False)
         self.assertEqual(taken.status_code, 303)
@@ -1342,6 +1344,9 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(item["title"], "Guard-return audit")
         self.assertEqual(database.list_camp_missions(profile_id)[0]["measured"], 0.10)
         self.assertEqual(self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 5}).status_code, 404)
+        page = self.client.get("/camp").text
+        self.assertIn("Train: Guard-return audit", page)
+        self.assertEqual(page.count("<h3>Guard-return audit</h3>"), 1, "one card, not a mission and a list item")
 
         # Ticking it off before training earns nothing.
         self.client.post(f"/coach/assignments/{item['id']}/toggle")
@@ -1359,6 +1364,9 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
 
         self.client.post(f"/coach/assignments/{item['id']}/toggle")      # complete, after training
         self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 45)
+        page = self.client.get("/camp").text
+        self.assertIn("Waiting for your next fight", page)
+        self.assertIn("Analyse your next fight", page)
         self.client.post(f"/coach/assignments/{item['id']}/toggle")      # reopen and finish again:
         self.client.post(f"/coach/assignments/{item['id']}/toggle")      # still only once
         self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 45)
@@ -1369,6 +1377,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         page = self.client.get("/camp").text
         self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 145)
         self.assertIn("improved", page)
+        self.assertIn("Improved ✓", page)
+        self.assertIn("Next fight: <b class=\"wiq-num\">15.0%</b>", page)
         self.assertIn("Level", page)
 
         exported = database.list_training_sessions(profile_id)

@@ -2,10 +2,49 @@
 {% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
 {% block title %}Fight Camp · WarriorIQ{% endblock %}
 {% block content %}
-{% macro camp_item_status(item) -%}
-{%- set n = sessions_by_item.get(item.id, 0) if sessions_by_item else 0 -%}
-{%- set r = mission_results.get(item.id) if mission_results else none -%}
-{%- if n or r %}<br><small class="camp-item-status">{% if n %}{{ n }} session{{ '' if n == 1 else 's' }} counted{% endif %}{% if n and r %} · {% endif %}{% if r %}Next fight: {{ '%.0f'|format(r.before * 100) if r.before <= 1.5 else '%.1f'|format(r.before) }} → {{ '%.0f'|format(r.after * 100) if r.after <= 1.5 else '%.1f'|format(r.after) }}{% if r.improved %} <b class="up">improved</b>{% else %} <span class="muted">not yet</span>{% endif %}{% endif %}</small>{% endif -%}
+{% macro session_form(card, label, style) -%}
+<form class="session-upload" action="/camp/sessions/{{ card.assignment.id }}" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="btn{{ ' ' ~ style if style }}">{{ label }}<input type="file" name="video" accept="video/*" required></label><button class="btn secondary" type="submit" data-session-submit>Send</button></form>
+{%- endmacro %}
+{% macro take_form(card, label) -%}
+<form action="/camp/missions" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="job_id" value="{{ camp.job_id }}"><input type="hidden" name="index" value="{{ card.index }}"><button class="btn" type="submit">{{ label }}</button></form>
+{%- endmacro %}
+{#- One mission at whatever stage it has reached (core.camp.mission_board). -#}
+{% macro mission_card(card) -%}
+{%- set stages = {'new': 'New mission', 'training': 'Training', 'waiting': 'Waiting for your next fight',
+                  'improved': 'Improved ✓', 'not_yet': 'Not yet', 'done': 'Done ✓'} -%}
+{%- set p = card.progress -%}
+<li class="mission-card stage-{{ card.stage }}">
+  <div class="mission-body">
+    <div class="mission-head"><span class="stage-pill">{{ stages[card.stage] }}</span>{% if card.sessions %}<small class="muted">{{ card.sessions }} session{{ '' if card.sessions == 1 else 's' }} counted</small>{% endif %}</div>
+    <h3>{{ card.title }}</h3>
+    {% if card.why %}<p class="muted">Why: {{ card.why }}</p>{% endif %}
+    {% if card.assignment is none %}
+      {% if card.detail %}<p><strong>Do:</strong> {{ card.detail }}</p>{% endif %}
+      {% if card.target %}<p class="mission-target"><strong>Target next fight:</strong> {{ card.target }}</p>{% endif %}
+    {% elif card.detail %}<p class="muted">{{ card.detail }}</p>{% endif %}
+    {#- Before -> goal, filled only by a fight that measured it. The tick is
+        where the improvement award starts. -#}
+    {% if p %}
+    <div class="mission-meter">
+      <div class="mission-meter-labels"><span>{{ p.label }} <b class="wiq-num">{{ p.before }}</b></span><span>Goal <b class="wiq-num">{{ p.goal }}</b></span></div>
+      <span class="mission-bar" role="img" aria-label="{{ p.label }}: {{ p.before }} before{% if p.after is not none %}, {{ p.after }} in the next fight{% endif %}, goal {{ p.goal }}"><i style="width:{{ p.fill }}%"></i><em style="left:{{ p.tick }}%"></em></span>
+      <small class="muted">{% if p.after is not none %}Next fight: <b class="wiq-num">{{ p.after }}</b>{% if p.improved %} · <b class="up">improved, +{{ points_rules.improved }} points</b>{% else %} · not yet. {{ p.unlock }} or more earns +{{ points_rules.improved }} points.{% endif %}{% else %}Your next analysed fight fills this bar. {{ p.unlock }} or more earns +{{ points_rules.improved }} points.{% endif %}</small>
+    </div>
+    {% endif %}
+    <div class="mission-actions">
+      {% if card.assignment is none %}
+        {{ take_form(card, 'Take on this mission') }}
+      {% elif card.assignment.status == 'active' %}
+        {{ session_form(card, 'Upload a session', 'secondary') }}
+        <form action="/coach/assignments/{{ card.assignment.id }}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">✓ Mark complete</button></form>
+      {% else %}
+        {% if card.stage == 'waiting' %}<a class="btn" href="/analyze">Analyse your next fight</a>{% endif %}
+        <form action="/coach/assignments/{{ card.assignment.id }}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Reopen</button></form>
+      {% endif %}
+      {% if card.evidence_seconds is not none and camp.job_id %}<a class="text-link" href="/replay/{{ camp.job_id }}?t={{ '%.2f'|format(card.evidence_seconds) }}">Watch where it happened</a>{% endif %}
+    </div>
+  </div>
+</li>
 {%- endmacro %}
 {#- Fight Camp: what the old Progress (/dashboard) and Coach (/coach) pages
     were each half of. Missions from the latest fight, the athlete's list,
@@ -32,88 +71,94 @@
     <a class="btn" data-motion-primary href="/analyze">New analysis <span aria-hidden="true">→</span></a>
   </div>
 </header>
-<section class="camp-standing" aria-label="Your Fight Camp points">
-  <div><span class="eyebrow">Level</span><strong class="wiq-num">{{ standing.level }}</strong></div>
-  <div class="camp-level"><span class="eyebrow">{{ standing.points }} points</span>
-    <span class="camp-level-bar" role="progressbar" aria-valuemin="0" aria-valuemax="{{ standing.level_size }}" aria-valuenow="{{ standing.into_level }}" aria-label="Points towards level {{ standing.level + 1 }}"><i style="width:{{ (standing.into_level * 100 // standing.level_size) }}%"></i></span>
-    <small class="muted">{{ standing.level_size - standing.into_level }} to level {{ standing.level + 1 }}</small></div>
-  <div><span class="eyebrow">Streak</span><strong class="wiq-num">{{ standing.streak_weeks }}</strong><small class="muted">week{{ '' if standing.streak_weeks == 1 else 's' }} training</small></div>
-  <div class="camp-spend">
-    <span class="eyebrow">{{ standing.balance }} to spend</span>
-    <form action="/camp/redeem" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-      <button class="btn{% if standing.balance < points_rules.redeem_cost %} secondary{% endif %}" type="submit" {% if standing.balance < points_rules.redeem_cost %}disabled{% endif %}>Get a free analysis · {{ points_rules.redeem_cost }} points</button>
-    </form>
-    {% if extra_analyses %}<small class="muted">{{ extra_analyses }} extra analys{{ 'is' if extra_analyses == 1 else 'es' }} ready</small>{% endif %}
+{#- The one thing to do next (core.camp.next_step), with the points beside it. -#}
+<section class="camp-today" id="today" aria-labelledby="todayTitle">
+  <div class="camp-next">
+    <span class="eyebrow">Today</span>
+    {% if today.kind == 'upload' %}
+      <h2 id="todayTitle">Train: {{ today.card.title }}</h2>
+      <p class="muted">Film at least a minute of you doing the drill and upload it: +{{ points_rules.session }} points, up to {{ points_rules.daily }} sessions a day.{% if today.card.sessions %} {{ today.card.sessions }} session{{ '' if today.card.sessions == 1 else 's' }} counted so far.{% endif %}</p>
+      <div class="camp-next-actions">{{ session_form(today.card, "Upload today's session", '') }}</div>
+    {% elif today.kind == 'rested' %}
+      <h2 id="todayTitle">Today's training points are in</h2>
+      <p class="muted">You have had today's {{ points_rules.daily }} counted sessions. Come back tomorrow, or analyse your next fight to see whether the training moved your numbers.</p>
+      <div class="camp-next-actions"><a class="btn secondary" href="/analyze">Analyse a fight</a></div>
+    {% elif today.kind == 'take' %}
+      <h2 id="todayTitle">Start a mission: {{ today.card.title }}</h2>
+      {% if today.card.why %}<p class="muted">{{ today.card.why }}</p>{% endif %}
+      <div class="camp-next-actions">{{ take_form(today.card, 'Take on this mission') }}</div>
+    {% elif today.kind == 'next_fight' %}
+      {% set p = today.card.progress %}
+      <h2 id="todayTitle">Analyse your next fight</h2>
+      <p class="muted">{% if p %}It shows whether your training moved {{ p.label|lower }}: {{ p.before }} last time, and {{ p.unlock }} or more earns +{{ points_rules.improved }} points.{% else %}It shows whether your training worked.{% endif %}</p>
+      <div class="camp-next-actions"><a class="btn" href="/analyze">Analyse your next fight <span aria-hidden="true">→</span></a></div>
+    {% elif today.kind == 'first_fight' %}
+      <h2 id="todayTitle">Analyse your first fight</h2>
+      <p class="muted">Your missions come from it: a drill for each number where you were behind your opponent.</p>
+      <div class="camp-next-actions"><a class="btn" href="/analyze">Analyse a fight <span aria-hidden="true">→</span></a></div>
+    {% else %}
+      <h2 id="todayTitle">Analyse your next fight</h2>
+      <p class="muted">{% if today.reason == 'identity' %}WarriorIQ could not tell who was who in your recent fights, so it has no missions for you. Analyse a fight where both fighters stay in view.{% elif today.reason == 'no_drill' %}Your latest fight had no number far enough behind to build a drill around. Add your own mission below, or analyse your next fight.{% else %}Every analysed fight gives you new missions.{% endif %}</p>
+      <div class="camp-next-actions"><a class="btn" href="/analyze">Analyse a fight <span aria-hidden="true">→</span></a></div>
+    {% endif %}
+    {% if session_message %}<p class="notice camp-note" role="status">{{ session_message }}</p>{% endif %}
+  </div>
+  <div class="camp-standing" aria-label="Your Fight Camp points">
+    <div class="camp-level"><span class="eyebrow">Level {{ standing.level }} · {{ standing.points }} points</span>
+      <span class="camp-level-bar" role="progressbar" aria-valuemin="0" aria-valuemax="{{ standing.level_size }}" aria-valuenow="{{ standing.into_level }}" aria-label="Points towards level {{ standing.level + 1 }}"><i style="width:{{ (standing.into_level * 100 // standing.level_size) }}%"></i></span>
+      <small class="muted">{{ standing.level_size - standing.into_level }} to level {{ standing.level + 1 }}</small></div>
+    <div class="camp-streak"><strong class="wiq-num">{{ standing.streak_weeks }}</strong><small class="muted">week{{ '' if standing.streak_weeks == 1 else 's' }} in a row training</small></div>
+    <div class="camp-spend">
+      <span class="eyebrow">{{ standing.balance }} to spend</span>
+      <form action="/camp/redeem" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <button class="btn{% if standing.balance < points_rules.redeem_cost %} secondary{% endif %}" type="submit" {% if standing.balance < points_rules.redeem_cost %}disabled{% endif %}>Free analysis · {{ points_rules.redeem_cost }} points</button>
+      </form>
+      {% if extra_analyses %}<small class="muted">{{ extra_analyses }} extra analys{{ 'is' if extra_analyses == 1 else 'es' }} ready</small>{% endif %}
+    </div>
   </div>
   {% if redeem_message %}<p class="notice camp-note" role="status">{{ redeem_message }}</p>{% endif %}
   <details class="camp-rules"><summary>How points work</summary>
     <ul class="list-clean small">
-      <li><b>+{{ points_rules.session }}</b> for each training session you upload for something on your list: at least a minute of you doing the drill. Up to {{ points_rules.daily }} sessions a day earn points.</li>
-      <li><b>+{{ points_rules.done }}</b> when you finish an item you uploaded at least one session for.</li>
-      <li><b>+{{ points_rules.improved }}</b> when your next analysed fight shows a mission's number actually improved.</li>
+      <li><b>+{{ points_rules.session }}</b> for each training session you upload for one of your missions: at least a minute of you doing the drill. Up to {{ points_rules.daily }} sessions a day earn points.</li>
+      <li><b>+{{ points_rules.done }}</b> when you finish a mission you uploaded at least one session for.</li>
+      <li><b>+{{ points_rules.improved }}</b> when your next analysed fight shows a mission's number actually improved: the tick on its bar.</li>
       <li>Every 100 points is a level. Your streak is the weeks in a row with at least one counted session.</li>
       <li><b>{{ points_rules.redeem_cost }} points</b> buy one extra analysis, up to {{ points_rules.redeem_per_month }} a month. It is used when your plan's own analyses for the day or month run out, and given back if the analysis fails. Spending points never lowers your level. Points cannot be bought or turned into money.</li>
       <li class="muted">The upload check sees that a real video shows someone moving. It cannot tell who, or which drill, which is why the big points only come from your next fight. Clips are deleted as soon as they are checked.</li>
     </ul>
   </details>
 </section>
-<nav class="camp-jump" aria-label="Fight Camp sections"><a href="#missions">Missions</a><a href="#assignments">Your list</a><a href="#progress">Progress</a><a href="#squad-tools">Squad</a></nav>
-
-{#- Missions: the report's own drills, each chosen because a measured
-    number was behind (core/camp.py). No drill, no mission: the reason is
-    shown instead of generic advice. -#}
+<nav class="camp-jump" aria-label="Fight Camp sections"><a href="#missions">Missions</a><a href="#progress">Progress</a><a href="#squad-tools">Squad</a></nav>
+{#- Every mission on one board: new ones from the latest fight, the ones in
+    training, the ones a fight is about to judge. #assignments is kept for
+    the coach forms and old links that land here. -#}
+{% set open_cards = board|rejectattr('finished')|list %}{% set finished_cards = board|selectattr('finished')|list %}
 <section class="card camp-missions" id="missions">
-  <div class="section-title" style="margin-top:0">
-    <div><div class="eyebrow">Missions</div><h2>What to train next</h2>
-      {% if camp.missions %}<p class="muted">From your fight on <time datetime="{{camp.created_at}}" data-local="date">{{camp.created_at|fight_moment(false)}}</time>. Each one is a drill WarriorIQ picked because one of your numbers was behind.</p>{% endif %}</div>
+  <div class="section-title" id="assignments" style="margin-top:0">
+    <div><div class="eyebrow">Missions</div><h2>Your training</h2>
+      {% if camp.missions %}<p class="muted">New missions come from your fight on <time datetime="{{camp.created_at}}" data-local="date">{{camp.created_at|fight_moment(false)}}</time>: each is a drill WarriorIQ picked because one of your numbers was behind.</p>{% endif %}</div>
     {% if camp.job_id %}<a class="text-link" href="/result/{{camp.job_id}}">Open that fight →</a>{% endif %}
   </div>
-  {% if camp.missions %}
-  <ol class="mission-list">
-    {% for m in camp.missions %}
-    <li class="mission-card{% if m.status == 'complete' %} done{% endif %}">
-      <span class="mission-number" aria-hidden="true">{{ loop.index }}</span>
-      <div class="mission-body">
-        <h3>{{ m.title }}</h3>
-        {% if m.why %}<p class="muted">Why: {% if m.label %}{{ m.label }} — {% endif %}{{ m.why }}</p>{% endif %}
-        {% if m.exercise %}<p><strong>Do:</strong> {{ m.exercise }}</p>{% endif %}
-        {% if m.target %}<p class="mission-target"><strong>Target next fight:</strong> {{ m.target }}</p>{% endif %}
-        <div class="mission-actions">
-          {% if m.evidence_seconds is not none %}<a class="btn secondary" href="/replay/{{camp.job_id}}?t={{ '%.2f'|format(m.evidence_seconds) }}">Watch where it happened</a>{% endif %}
-          {% if m.status == 'complete' %}<span class="pill">Done ✓</span>
-          {% elif m.status == 'active' %}<span class="pill">On your list</span>
-          {% else %}
-          <form action="/camp/missions" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-            <input type="hidden" name="job_id" value="{{ camp.job_id }}">
-            <input type="hidden" name="index" value="{{ loop.index0 }}">
-            <button class="btn" type="submit">Take on this mission</button>
-          </form>
-          {% endif %}
-        </div>
-      </div>
-    </li>
-    {% endfor %}
-  </ol>
+  {% if open_cards %}
+  <ol class="mission-list">{% for card in open_cards %}{{ mission_card(card) }}{% endfor %}</ol>
   {% elif camp.reason == 'identity' %}
   <p class="muted">WarriorIQ could not tell the two fighters apart in your recent fights, so it cannot say whose weak spots it saw. Open the fight and show it who is who, or analyze a video where both fighters stay in view.</p>
   {% elif camp.reason == 'no_drill' %}
   <p class="muted">Your latest fight did not show any measured number far enough behind to build a drill around, so there is no mission from it. Nothing is made up to fill this space: add your own below, or analyze your next fight.</p>
+  {% elif not finished_cards %}
+  <p class="muted">Analyze a fight and your first missions appear here.</p>
   {% else %}
-  <p class="muted">Analyze a fight and your first missions appear here.</p><a class="btn" href="/analyze">Analyze a fight</a>
+  <p class="muted">Nothing in training right now. Analyze your next fight for new missions, or add your own below.</p>
   {% endif %}
   {% if camp.skipped_newer_fight %}<p class="small muted">Your newest fight is not used: its identity check failed.</p>{% endif %}
-</section>
-
-<section class="card" id="assignments">
-  {% set active_assignments = assignments|selectattr('status','equalto','active')|list %}{% set completed_assignments = assignments|selectattr('status','equalto','complete')|list %}{% set active_count = active_assignments|length %}{% set completed_count = completed_assignments|length %}
-  <div class="section-title assignment-title" style="margin-top:0"><div><div class="eyebrow">Your list</div><h2>Work between reviews</h2><p class="muted">Missions you take on land here, next to anything you or your coach add. Upload a session when you train, and tick an item off when it is done.</p></div><div class="assignment-counts"><span><strong>{{active_count}}</strong> active</span><span><strong>{{completed_count}}</strong> complete</span></div></div>
-
-
-  {% if session_message %}<p class="notice" role="status">{{ session_message }}</p>{% endif %}
-
-  <form action="/coach/assignments" method="post" class="assignment-builder"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="row"><div class="field"><label for="assignmentTitle">Assignment</label><input id="assignmentTitle" name="title" maxlength="100" placeholder="Example: Guard recovery rounds" required></div><div class="field"><label for="assignmentDetail">Clear success target</label><input id="assignmentDetail" name="detail" maxlength="600" placeholder="Example: Four rounds; both hands return after every exchange"></div></div><button class="btn" type="submit">Add custom assignment</button></form>
-
-  <div class="assignment-board"><div><h3>Active work</h3><ul class="list-clean assignment-list">{% for item in active_assignments %}<li class="assignment-row"><span><strong>{{item.title}}</strong><br><span class="muted">{{item.detail or 'Complete this assignment before the next review.'}}</span>{{ camp_item_status(item) }}</span><span class="assignment-actions"><form class="session-upload" action="/camp/sessions/{{item.id}}" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="btn secondary">Upload a session<input type="file" name="video" accept="video/*" required></label><button class="btn secondary" type="submit" data-session-submit>Send</button></form><form action="/coach/assignments/{{item.id}}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">✓ Mark complete</button></form></span></li>{% else %}<li class="muted">Nothing on your list. Take on a mission above, or add your own.</li>{% endfor %}</ul></div><div><h3>Completed work</h3><ul class="list-clean assignment-list completed-list">{% for item in completed_assignments %}<li class="assignment-row completed"><span><strong>{{item.title}}</strong><br><span class="muted">{{item.detail or 'Completed assignment.'}}</span>{{ camp_item_status(item) }}</span><form action="/coach/assignments/{{item.id}}/toggle" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Reopen</button></form></li>{% else %}<li class="muted">Completed assignments will stay here for the next coach review.</li>{% endfor %}</ul></div></div>
+  {% if finished_cards %}
+  <details class="camp-finished"><summary>Finished ({{ finished_cards|length }})</summary>
+    <ol class="mission-list">{% for card in finished_cards %}{{ mission_card(card) }}{% endfor %}</ol>
+  </details>
+  {% endif %}
+  <details class="camp-add"><summary>Add your own mission</summary>
+    <form action="/coach/assignments" method="post" class="assignment-builder"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="row"><div class="field"><label for="assignmentTitle">Mission</label><input id="assignmentTitle" name="title" maxlength="100" placeholder="Example: Guard recovery rounds" required></div><div class="field"><label for="assignmentDetail">Clear success target</label><input id="assignmentDetail" name="detail" maxlength="600" placeholder="Example: Four rounds; both hands return after every exchange"></div></div><button class="btn" type="submit">Add to my missions</button></form>
+  </details>
 </section>
 
 <div id="progress" class="camp-progress">

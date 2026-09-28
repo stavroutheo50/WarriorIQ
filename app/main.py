@@ -110,7 +110,7 @@ from core.ground import STRIKING_SPORTS, looks_like_grappling
 from core.camp import (
     DAILY_COUNTED_SESSIONS, IMPROVED_POINTS, MISSION_DONE_POINTS, REDEEM_COST, REDEEM_PER_MONTH,
     SESSION_POINTS, camp_standing,
-    fight_camp_missions, mission_result, missions_from_report,
+    fight_camp_missions, mission_board, mission_result, missions_from_report, next_step, paid_sessions_on,
 )
 from core.training_check import check_training_video
 from core.report import (
@@ -5286,7 +5286,9 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
     # moved. Checked here, where the fights are already loaded; award_points
     # gives it once however often the page is opened.
     results = {}
+    linked = {}
     for mission in list_camp_missions(profile_id):
+        linked[mission["assignment_id"]] = mission
         later = [r for r in reversed(newest_first)
                  if r["job_id"] != mission["job_id"] and str(r.get("created_at") or "") > mission["created_at"]]
         result = mission_result(mission, later)
@@ -5299,6 +5301,8 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
     for item in sessions:
         if item["verdict"] == "counted" and item["assignment_id"] is not None:
             counted[item["assignment_id"]] = counted.get(item["assignment_id"], 0) + 1
+    today = datetime.now(timezone.utc).date()
+    board = mission_board(camp, assignments, linked, results, counted)
     return templates.TemplateResponse(
         request=request, name="camp.html",
         context={
@@ -5307,9 +5311,11 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
             "other_fighter_fights": other_fights,
             "assignments": assignments,
             "camp": camp,
-            "standing": camp_standing(list_points(profile_id), sessions, datetime.now(timezone.utc).date()),
-            "sessions_by_item": counted,
-            "mission_results": results,
+            "standing": camp_standing(list_points(profile_id), sessions, today),
+            # One card per mission at whatever stage it is, and the one thing
+            # to do next at the top. See core/camp.py.
+            "board": board,
+            "today": next_step(camp, board, paid_sessions_on(sessions, today), bool(fights)),
             "session_message": TRAINING_VERDICT_MESSAGES.get(session, "").format(
                 points=SESSION_POINTS, cap=DAILY_COUNTED_SESSIONS),
             "points_rules": {"session": SESSION_POINTS, "daily": DAILY_COUNTED_SESSIONS,
@@ -5562,17 +5568,14 @@ def upload_training_session(request: Request, assignment_id: int, video: UploadF
         path.unlink(missing_ok=True)
     verdict, points = found["verdict"], 0
     if verdict == "counted":
-        today = datetime.now(timezone.utc).date().isoformat()
-        paid_today = sum(1 for session in earlier
-                         if session["points"] > 0 and str(session["created_at"]).startswith(today))
-        if paid_today < DAILY_COUNTED_SESSIONS:
+        if paid_sessions_on(earlier, datetime.now(timezone.utc).date()) < DAILY_COUNTED_SESSIONS:
             points = SESSION_POINTS
     session_id = record_training_session(profile_id, assignment_id, digest, found["duration_seconds"],
                                          found["moving_share"], verdict, points)
     if points:
         award_points(profile_id, points, "session", str(session_id))
     shown = "daily_cap" if verdict == "counted" and not points else verdict
-    return RedirectResponse(f"/camp?session={shown}#assignments", status_code=303)
+    return RedirectResponse(f"/camp?session={shown}#today", status_code=303)
 
 
 def _camp_fighter(report: dict, default_fighter: str) -> str:
