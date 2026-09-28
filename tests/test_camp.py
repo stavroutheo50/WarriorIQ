@@ -95,6 +95,10 @@ class StandingTests(unittest.TestCase):
         standing = camp_standing([{"points": 100}, {"points": 25}, {"points": 10}], [], self.TODAY)
         self.assertEqual((standing["points"], standing["level"], standing["into_level"]), (135, 2, 35))
 
+    def test_spending_lowers_the_balance_not_the_level(self):
+        standing = camp_standing([{"points": 250}, {"points": -200}], [], self.TODAY)
+        self.assertEqual((standing["level"], standing["balance"]), (3, 50))
+
     def test_streak_counts_weeks_in_a_row(self):
         sessions = [self.session("2026-09-29"), self.session("2026-09-22"), self.session("2026-09-15"),
                     self.session("2026-09-01")]

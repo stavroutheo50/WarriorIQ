@@ -1473,6 +1473,41 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             self.client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "t=1,v1=x"})
         self.assertEqual(database.get_account(int(account["id"]))["plan"], "free")
 
+    def test_points_buy_an_extra_analysis_used_only_when_the_plan_runs_out(self):
+        account = register("spender@example.com", "Strong-Local-Password")
+        account_id, profile_id = int(account["id"]), int(account["profile_id"])
+        self.client.post("/login", data={"email": "spender@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+
+        def redeem():
+            response = self.client.post("/camp/redeem", follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            return response.headers["location"].split("redeem=")[1]
+
+        self.assertEqual(redeem(), "not_enough_points")
+        database.award_points(profile_id, 450, "session", "seed")
+        self.assertEqual(redeem(), "bought")
+        self.assertEqual(redeem(), "bought")
+        self.assertEqual(redeem(), "monthly_cap", "two a month, however many points are left")
+        balance = sum(p["points"] for p in database.list_points(profile_id))
+        self.assertEqual(balance, 50)
+        page = self.client.get("/camp").text
+        self.assertIn("2 extra analyses ready", page)
+        self.assertIn("50 to spend", page)
+
+        # The free plan's own analysis for today goes first; the bought ones after it.
+        allowance = database.analysis_allowance(account_id)
+        self.assertEqual((allowance["remaining"], allowance["bonus_remaining"]), (3, 2))
+        self.assertTrue(database.reserve_analysis(account_id, "plan-job"))
+        self.assertEqual(database.analysis_allowance(account_id)["bonus_remaining"], 2)
+        self.assertTrue(database.reserve_analysis(account_id, "bonus-job-1"))
+        self.assertTrue(database.reserve_analysis(account_id, "bonus-job-2"))
+        self.assertFalse(database.reserve_analysis(account_id, "one-too-many"))
+        # A failed analysis gives its bought analysis back.
+        self.assertTrue(database.release_analysis(account_id, "bonus-job-2"))
+        self.assertEqual(database.analysis_allowance(account_id)["bonus_remaining"], 1)
+        self.assertTrue(database.reserve_analysis(account_id, "bonus-job-3"))
+
     def test_a_report_without_went_down_moments_lists_none(self):
         """Reports analysed before this existed have no went_down key."""
         self.assertEqual(webapp._went_down("nosuchjob", {"event_feed": []}), [])

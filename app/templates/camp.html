@@ -38,12 +38,21 @@
     <span class="camp-level-bar" role="progressbar" aria-valuemin="0" aria-valuemax="{{ standing.level_size }}" aria-valuenow="{{ standing.into_level }}" aria-label="Points towards level {{ standing.level + 1 }}"><i style="width:{{ (standing.into_level * 100 // standing.level_size) }}%"></i></span>
     <small class="muted">{{ standing.level_size - standing.into_level }} to level {{ standing.level + 1 }}</small></div>
   <div><span class="eyebrow">Streak</span><strong class="wiq-num">{{ standing.streak_weeks }}</strong><small class="muted">week{{ '' if standing.streak_weeks == 1 else 's' }} training</small></div>
+  <div class="camp-spend">
+    <span class="eyebrow">{{ standing.balance }} to spend</span>
+    <form action="/camp/redeem" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+      <button class="btn{% if standing.balance < points_rules.redeem_cost %} secondary{% endif %}" type="submit" {% if standing.balance < points_rules.redeem_cost %}disabled{% endif %}>Get a free analysis · {{ points_rules.redeem_cost }} points</button>
+    </form>
+    {% if extra_analyses %}<small class="muted">{{ extra_analyses }} extra analys{{ 'is' if extra_analyses == 1 else 'es' }} ready</small>{% endif %}
+  </div>
+  {% if redeem_message %}<p class="notice camp-note" role="status">{{ redeem_message }}</p>{% endif %}
   <details class="camp-rules"><summary>How points work</summary>
     <ul class="list-clean small">
       <li><b>+{{ points_rules.session }}</b> for each training session you upload for something on your list: at least a minute of you doing the drill. Up to {{ points_rules.daily }} sessions a day earn points.</li>
       <li><b>+{{ points_rules.done }}</b> when you finish an item you uploaded at least one session for.</li>
       <li><b>+{{ points_rules.improved }}</b> when your next analysed fight shows a mission's number actually improved.</li>
       <li>Every 100 points is a level. Your streak is the weeks in a row with at least one counted session.</li>
+      <li><b>{{ points_rules.redeem_cost }} points</b> buy one extra analysis, up to {{ points_rules.redeem_per_month }} a month. It is used when your plan's own analyses for the day or month run out, and given back if the analysis fails. Spending points never lowers your level. Points cannot be bought or turned into money.</li>
       <li class="muted">The upload check sees that a real video shows someone moving. It cannot tell who, or which drill, which is why the big points only come from your next fight. Clips are deleted as soon as they are checked.</li>
     </ul>
   </details>

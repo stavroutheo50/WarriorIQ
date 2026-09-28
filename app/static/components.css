@@ -542,3 +542,6 @@
 .camp-item-status{color:#98a2b3}
 .camp-item-status .up{color:#52d6a3}
 @media (max-width:560px){.camp-standing{grid-template-columns:1fr 1fr}.camp-level{grid-column:1/-1;order:3}.camp-rules{order:4}.assignment-actions{justify-content:flex-start}}
+.camp-spend{grid-column:1/-1;display:flex!important;flex-direction:row!important;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.camp-spend form{margin:0}
+.camp-note{grid-column:1/-1;margin:0}

@@ -1668,6 +1668,49 @@ def _usage_period(plan: dict, moment: datetime) -> tuple[str, int | None]:
     return "unavailable", 0
 
 
+# Fight Camp: analyses bought with points (core/camp.py). A purchase is a
+# negative points_ledger entry with reason REDEEM_REASON; using one is an
+# analysis_usage row under BONUS_PERIOD_KEY. Left = bought - used, so a failed
+# analysis released by release_analysis is simply available again.
+REDEEM_REASON = "redeem_analysis"
+BONUS_PERIOD_KEY = "bonus"
+
+
+def _bonus_analyses_left(con, account_id: int) -> int:
+    bought = int(con.execute(
+        """SELECT COUNT(*) FROM points_ledger WHERE reason=? AND profile_id=
+           (SELECT profile_id FROM accounts WHERE id=?)""", (REDEEM_REASON, int(account_id))).fetchone()[0])
+    used = int(con.execute(
+        "SELECT COUNT(*) FROM analysis_usage WHERE account_id=? AND period_key=?",
+        (int(account_id), BONUS_PERIOD_KEY)).fetchone()[0])
+    return max(0, bought - used)
+
+
+def redeem_points_for_analysis(profile_id: int, cost: int, monthly_cap: int, month: str) -> str:
+    """Buy one analysis with points: "bought", "not_enough_points" or "monthly_cap".
+
+    The balance check, the monthly count and the purchase happen in one
+    locked transaction, so two quick clicks cannot both spend the same points.
+    """
+    init_db()
+    with connection() as con:
+        con.execute("BEGIN IMMEDIATE")
+        balance = int(con.execute("SELECT COALESCE(SUM(points),0) FROM points_ledger WHERE profile_id=?",
+                                  (int(profile_id),)).fetchone()[0])
+        this_month = int(con.execute(
+            "SELECT COUNT(*) FROM points_ledger WHERE profile_id=? AND reason=? AND ref LIKE ?",
+            (int(profile_id), REDEEM_REASON, f"{month}:%")).fetchone()[0])
+        if this_month >= monthly_cap:
+            return "monthly_cap"
+        if balance < cost:
+            return "not_enough_points"
+        con.execute(
+            "INSERT INTO points_ledger(profile_id,points,reason,ref,created_at) VALUES(?,?,?,?,?)",
+            (int(profile_id), -int(cost), REDEEM_REASON, f"{month}:{this_month + 1}",
+             datetime.now(timezone.utc).isoformat()))
+        return "bought"
+
+
 def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None) -> bool:
     """Atomically reserve one analysis against the account's current plan."""
     moment = now or datetime.now(timezone.utc)
@@ -1691,7 +1734,13 @@ def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None) 
                 (account_id, period_key),
             ).fetchone()[0])
             if used >= limit:
-                return False
+                # The plan's allowance is spent: an analysis bought with Fight
+                # Camp points is used instead, if there is one. It is recorded
+                # under its own period key, so release_analysis gives it back
+                # exactly as it gives back a plan analysis.
+                if _bonus_analyses_left(con, account_id) <= 0:
+                    return False
+                period_key = BONUS_PERIOD_KEY
         con.execute(
             "INSERT INTO analysis_usage(job_id,account_id,period_key,created_at) VALUES(?,?,?,?)",
             (job_id, account_id, period_key, moment.astimezone(timezone.utc).isoformat()),
@@ -1721,12 +1770,16 @@ def analysis_allowance(account_id: int, now: datetime | None = None) -> dict:
             "SELECT COUNT(*) FROM analysis_usage WHERE account_id=? AND period_key=?",
             (account_id, period_key),
         ).fetchone()[0])
+        bonus = _bonus_analyses_left(con, account_id)
     return {
         "plan": plan,
         "period_key": period_key,
         "used": used,
         "limit": limit,
-        "remaining": None if limit is None else max(0, limit - used),
+        # Analyses bought with Fight Camp points count as remaining too, so
+        # every page that asks "can this person analyse a fight" agrees.
+        "remaining": None if limit is None else max(0, limit - used) + bonus,
+        "bonus_remaining": bonus,
     }
 
 
