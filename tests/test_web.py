@@ -1883,7 +1883,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("It is not ground-truth identity or action accuracy", template)
 
     def test_progress_uses_supported_movement_metrics_when_actions_are_unvalidated(self):
-        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "dashboard.html").read_text(encoding="utf-8")
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(encoding="utf-8")
         for label in ("Guard", "Balance", "Ring centre", "Pose evidence"):
             self.assertIn(f'<span class="label">{label}</span>', template)
         self.assertIn("Movement progress is ready", template)
@@ -1944,10 +1944,12 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("{% if signed_in %}<a class=\"btn\" data-motion-primary href=\"/analyze\">", template)
 
     def test_coach_workspace_uses_the_selected_fighter_and_one_click_plan(self):
-        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "coach.html").read_text(encoding="utf-8")
-        self.assertIn("latest.coaching[focus]", template)
+        template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(encoding="utf-8")
+        # Fight Camp replaced the coach page's one-click suggestions with
+        # missions built from the followed fighter's own drills (core/camp.py).
+        self.assertIn("camp.missions", template)
         self.assertNotIn("for fighter in ['A','B']", template)
-        self.assertIn("One-click suggestions", template)
+        self.assertIn("Take on this mission", template)
         self.assertIn("Mark complete", template)
 
     def test_advanced_report_diagnostics_stay_available_but_folded_away(self):
@@ -1984,7 +1986,8 @@ class PublicPageTests(unittest.TestCase):
         """Splitting the navigation must not cost an account holder anything."""
         with self.signed_in():
             menu = self.client.get("/").text.split('<div class="mobile-menu"', 1)[1].split('</div>', 1)[0]
-        for label in (">Analyze<", ">Fight library<", ">Progress<", ">Coach<", ">Plans<"):
+        # Progress and Coach are one page now, Fight Camp.
+        for label in (">Analyze<", ">Fight library<", ">Fight Camp<", ">Plans<"):
             self.assertIn(label, menu)
         self.assertNotIn("Accuracy", menu, "still never the accuracy lab")
 
@@ -4052,8 +4055,11 @@ class CoachFilenameTests(unittest.TestCase):
     """/pricing carries the check-marked promise "No video filename shown"."""
 
     def test_the_squad_table_shows_a_fight_label_not_the_uploaded_filename(self):
-        coach = (Path(__file__).resolve().parents[1] / "app" / "templates"
-                 / "coach.html").read_text(encoding="utf-8")
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                / "camp.html").read_text(encoding="utf-8")
+        # The squad table only: Fight Camp also carries the athlete's own
+        # history table, which has always had a Ruleset column.
+        coach = page.split('id="squad"', 1)[1].split("</table>", 1)[0]
         self.assertNotIn("f.name", coach)
         self.assertIn("{{f.label}}", coach)
         # The raw enum went with it: KICK_LIGHT is not a thing to show a coach.
@@ -4196,8 +4202,7 @@ class ReadableValueTests(unittest.TestCase):
         # local-time script, data-date="..." for the sort - holds the stored
         # value on purpose; that is machine data, not something a reader sees.
         raw = re.compile(r'(?<!=")\{\{\s*[a-z_]+\.(?:created_at(?:\[[^\]]*\])?|ruleset)\s*\}\}')
-        for name in ("profile.html", "history.html", "dashboard.html", "settings.html",
-                     "coach.html", "compare.html"):
+        for name in ("profile.html", "history.html", "camp.html", "settings.html", "compare.html"):
             page = (templates / name).read_text(encoding="utf-8")
             self.assertEqual(
                 raw.findall(page), [],

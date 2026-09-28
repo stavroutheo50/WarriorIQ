@@ -511,3 +511,18 @@
 .share-card-side{border:0;padding:0;margin:10px 0 0;display:flex;gap:14px;flex-wrap:wrap}
 .share-card-side legend{font-size:13px;color:#98a2b3;margin-bottom:4px}
 .share-card-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.camp-jump{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 18px}
+.camp-jump a{padding:8px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.12);color:inherit;text-decoration:none;font-size:14px}
+.camp-jump a:hover,.camp-jump a:focus-visible{background:rgba(255,255,255,.08)}
+.mission-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.mission-card{display:flex;gap:16px;padding:16px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+.mission-card.done{opacity:.7}
+.mission-number{flex:none;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:rgba(79,215,255,.14);color:#4fd7ff}
+.mission-body{min-width:0;flex:1}
+.mission-body h3{margin:4px 0 6px}
+.mission-body p{margin:4px 0}
+.mission-target{color:#c7cede}
+.mission-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.mission-actions form{margin:0}
+.camp-progress,.camp-squad{margin-top:28px}
+@media (max-width:560px){.mission-card{flex-direction:column;gap:8px}.mission-actions .btn{width:100%;justify-content:center}}

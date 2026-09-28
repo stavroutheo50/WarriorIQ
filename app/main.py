@@ -104,6 +104,7 @@ from core.upload_security import (
 )
 from core import sport_check
 from core.fight_stats import _deduplicate as _deduplicate_strikes
+from core.camp import fight_camp_missions
 from core.report import (
     build_preliminary_scorecard, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
@@ -401,7 +402,7 @@ SPORT_IRRELEVANT_PREFIXES = ("/profile", "/settings", "/legal", "/privacy", "/te
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/dashboard", "/history",
-    "/compare", "/coach", "/profile", "/validation", "/s/", "/share/", "/shares/",
+    "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
     "/auth/",
 )
@@ -1464,7 +1465,7 @@ async def viewer_context(request: Request, call_next):
         f"img-src {img_src}; media-src 'self' blob:; connect-src {connect_src}; frame-src {frame_src}; "
         f"frame-ancestors 'none'; form-action {form_action}",
     )
-    if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/s/")):
+    if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/")):
         # setdefault, so a route that has already chosen keeps its value.
         # /media/ does exactly that: a fight video is private but not
         # volatile, and re-sending 101 MB on every seek is not privacy.
@@ -5120,37 +5121,6 @@ def _athlete_fighter_id(fights: list[dict]) -> int | None:
     return ids.most_common(1)[0][0] if ids else None
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
-def dashboard_page(request: Request):
-    profile_id = _profile_id(request)
-    if profile_id is None:
-        return templates.TemplateResponse(
-            request=request, name="dashboard.html",
-            context={"request": request, "profile": None, "progress": None, "assignments": []},
-        )
-    profile = get_profile(profile_id) or {}
-    fights = list_fights(profile_id)
-    # One athlete's progress. The page is headed with one fighter's name, and
-    # it charted every fight in the workspace: a teammate's 40% guard became
-    # the athlete's "last fight" and the headline read -18 points. Fights with
-    # no roster fighter (analysed before the roster existed) stay in.
-    athlete_id = _athlete_fighter_id(fights)
-    records = [record for record in _reports_for_profile(profile_id)
-               if athlete_id is None or record.get("fighter_id") in (None, athlete_id)]
-    progress = build_progress(records, profile.get("default_fighter", "A"))
-    other_fights = sum(1 for fight in fights
-                       if athlete_id is not None and fight.get("fighter_id") not in (None, athlete_id))
-    return templates.TemplateResponse(
-        request=request, name="dashboard.html",
-        context={
-            "request": request, "profile": profile, "progress": progress,
-            "athlete_name": _athlete_name(profile, fights),
-            "other_fighter_fights": other_fights,
-            "assignments": list_assignments(profile_id),
-        },
-    )
-
-
 @app.get("/history", response_class=HTMLResponse)
 def history_page(request: Request):
     profile_id = _profile_id(request)
@@ -5243,45 +5213,71 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     )
 
 
+@app.get("/camp", response_class=HTMLResponse)
+@app.get("/dashboard", response_class=HTMLResponse)
 @app.get("/coach", response_class=HTMLResponse)
-def coach_page(request: Request, error: str = "", name: str = ""):
+def fight_camp_page(request: Request, error: str = "", name: str = ""):
+    """Fight Camp: missions from the latest fight, progress, and the squad.
+
+    Progress (/dashboard) and the coach portal (/coach) were two pages about
+    the same thing - what this athlete should work on and whether it is
+    working. They are one page now. Both old addresses still answer, with the
+    same page, because sign-in lands on /dashboard and the coach forms return
+    to /coach#squad and /coach#assignments.
+    """
     profile_id = _profile_id(request)
-    profile = get_profile(profile_id) if profile_id is not None else None
-    fights = list_fights(profile_id) if profile_id is not None else []
+    if profile_id is None:
+        return templates.TemplateResponse(
+            request=request, name="camp.html",
+            context={"request": request, "profile": None, "signed_in": False, "progress": None,
+                     "assignments": [], "camp": None},
+        )
+    profile = get_profile(profile_id) or {}
+    fights = list_fights(profile_id)
     for fight in fights:
         # The saved-evidence list printed the raw ruleset enum beside every
         # entry: "Fight analysis · KICK_LIGHT".
         fight["choice_label"] = fight_choice_label(
             fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
             fight.get("fighter_name"))
-    latest = None
-    focus = (profile or {}).get("default_fighter", "A")
-    suggested_assignments: list[dict] = []
-    if fights:
-        path = Path(fights[0]["report_path"])
-        if path.exists():
-            latest = json.loads(path.read_text(encoding="utf-8"))
-            _apply_report_annotations(latest, [])
-            refresh_identity_integrity(latest)
-            focus = latest.get("video", {}).get("focus_fighter") or latest.get("video", {}).get("analysis_target", focus)
-            if focus not in {"A", "B"}:
-                focus = (profile or {}).get("default_fighter", "A")
-            suggested_assignments = list(latest.get("training_plan", {}).get(focus, []))[:3]
+    # One athlete's progress. The page is headed with one fighter's name, and
+    # it charted every fight in the workspace: a teammate's 40% guard became
+    # the athlete's "last fight" and the headline read -18 points. Fights with
+    # no roster fighter (analysed before the roster existed) stay in.
+    athlete_id = _athlete_fighter_id(fights)
+    records = [record for record in _reports_for_profile(profile_id)
+               if athlete_id is None or record.get("fighter_id") in (None, athlete_id)]
+    default_fighter = profile.get("default_fighter", "A")
+    progress = build_progress(records, default_fighter)
+    other_fights = sum(1 for fight in fights
+                       if athlete_id is not None and fight.get("fighter_id") not in (None, athlete_id))
+    assignments = list_assignments(profile_id)
+
+    def followed(report: dict) -> str:
+        video = report.get("video") or {}
+        fighter = video.get("focus_fighter") or video.get("analysis_target")
+        return fighter if fighter in {"A", "B"} else default_fighter
+
+    camp = fight_camp_missions(
+        [{"job_id": r["job_id"], "created_at": r.get("created_at"), "report": r["report"],
+          "fighter": followed(r["report"])} for r in reversed(records)],
+        assignments,
+    )
     return templates.TemplateResponse(
-        request=request, name="coach.html",
+        request=request, name="camp.html",
         context={
-            "request": request, "fights": fights, "latest": latest,
-            "identity": sport_identity((latest or {}).get("scorecard", {}).get("sport", "kickboxing")) if latest else None,
-            "assignments": list_assignments(profile_id) if profile_id is not None else [],
-            "signed_in": profile_id is not None,
-            "focus": focus,
-            "suggested_assignments": suggested_assignments,
+            "request": request, "profile": profile, "signed_in": True, "progress": progress,
+            "athlete_name": _athlete_name(profile, fights),
+            "other_fighter_fights": other_fights,
+            "assignments": assignments,
+            "camp": camp,
+            "fights": fights,
             # A coach triages a squad; an athlete fixes one thing. This is the
             # coach half - every fight in order and which way the numbers are
             # moving. See core/squad.py.
             "squad": build_squad_view(fights),
             # The roster is what the per-row assign control offers.
-            "roster": list_fighters(profile_id) if profile_id is not None else [],
+            "roster": list_fighters(profile_id),
             # A rejected roster addition comes back here rather than as a 400
             # page, so the coach keeps the squad they were looking at. The
             # typed name comes back with it - being told the name was wrong
@@ -5378,7 +5374,7 @@ def create_coach_assignment(
     request: Request,
     title: str = Form(...),
     detail: str = Form(""),
-    next_path: str = Form("/coach#assignments"),
+    next_path: str = Form("/camp#assignments"),
 ):
     profile_id = _profile_id(request)
     if profile_id is None:
@@ -5387,19 +5383,19 @@ def create_coach_assignment(
     if not title:
         raise HTTPException(400, "Assignment title is required.")
     add_assignment(profile_id, title, detail)
-    return RedirectResponse(_safe_next(next_path, "/coach#assignments"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/camp#assignments"), status_code=303)
 
 
 @app.post("/coach/assignments/{assignment_id}/toggle", dependencies=[Depends(require_csrf)])
 def update_coach_assignment(
     request: Request,
     assignment_id: int,
-    next_path: str = Form("/coach#assignments"),
+    next_path: str = Form("/camp#assignments"),
 ):
     profile_id = _profile_id(request)
     if profile_id is None or not toggle_assignment(assignment_id, profile_id):
         raise HTTPException(404)
-    return RedirectResponse(_safe_next(next_path, "/coach#assignments"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/camp#assignments"), status_code=303)
 
 
 @app.get("/privacy", response_class=HTMLResponse)

@@ -143,7 +143,7 @@ class CoachPageTests(unittest.TestCase):
                 "tracking": {"fighter_A_coverage": .6, "fighter_B_coverage": .9}}
         self.assertEqual(summarize_fight(alike, {"job_id": "a"})["unusable_reason"], "identity")
         self.assertEqual(summarize_fight(thin, {"job_id": "b"})["unusable_reason"], "coverage")
-        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "coach.html").read_text(
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(
             encoding="utf-8")
         self.assertIn("identity check failed", page)
         self.assertIn("squad.unusable_identity", page)
@@ -151,7 +151,7 @@ class CoachPageTests(unittest.TestCase):
     def test_the_coach_page_uses_the_current_name_for_centre(self):
         from core.metric_catalog import RETIRED_NAMES
 
-        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "coach.html").read_text(
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(
             encoding="utf-8")
         for retired in RETIRED_NAMES["ring_center_control"]:
             self.assertNotIn(f"'{retired}'", page, retired)
