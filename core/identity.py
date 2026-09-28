@@ -223,6 +223,9 @@ class IdentityManager:
         # Frames each fighter was unassigned, so the reasons above have a
         # denominator and the two fighters' shares can be compared directly.
         self.missing_frames_by_fighter: dict[str, int] = {"A": 0, "B": 0}
+        # Times each fighter was moved back onto the person who looks like the
+        # fighter the user picked. See _audit_against_selection.
+        self.selection_refinds = {"A": 0, "B": 0}
         # Frames where A and B were equally plausible either way round.
         self.confusions = 0
         self.last_confusion_frame: int | None = None
@@ -791,6 +794,8 @@ class IdentityManager:
         furniture_b = self._release_if_furniture(self.b)
         a_obs = None if furniture_a else a_obs
         b_obs = None if furniture_b else b_obs
+        if SETTINGS.selection_audit:
+            a_obs, b_obs = self._audit_against_selection(people, a_obs, b_obs, source_frame)
 
         # Why *this fighter* is unassigned in *this frame*, judged against the
         # one person standing closest to where they were last seen. Counted
@@ -830,6 +835,76 @@ class IdentityManager:
             else:
                 self._blocked("lost_to_the_other_fighter", state.name)
         return a_obs, b_obs
+
+    def _audit_against_selection(
+        self,
+        people: list[PersonObservation],
+        a_obs: PersonObservation | None,
+        b_obs: PersonObservation | None,
+        source_frame: int,
+    ) -> tuple[PersonObservation | None, PersonObservation | None]:
+        """Move a fighter back onto the person who looks like the one the user picked.
+
+        Everything the joint assignment weighs is relative to the previous
+        frame: where the box was, how big it was, what it looked like lately,
+        which tracker ID it held. Once it has slid onto somebody else, every
+        one of those argues for staying on them, and the only fixed reference -
+        the clothing of the fighter the user picked - is one term among many.
+        Measured on a handheld pankration bout marked by hand (ma640): the
+        real fighter A was in view and the closest match to A's selection in
+        12 of the 15 standing frames where A's box was on someone else.
+
+        So after the assignment, each fighter is checked against the picked
+        fighters' clothing. A fighter moves when another person in view looks
+        like their selection clearly (selection_audit_min_similarity), clearly
+        more than the person they are on (selection_audit_margin), and clearly
+        more than they look like the other fighter's selection
+        (selection_audit_separation). The last keeps two fighters dressed alike
+        from being traded on colour, which is also why nothing moves when the
+        two selections cannot be told apart. The referee is never a candidate,
+        and neither is anyone standing perfectly still.
+
+        A fighter can be moved onto the person the other fighter holds, which
+        leaves the other unassigned for this frame rather than guessing.
+        """
+        out = {"A": a_obs, "B": b_obs}
+        for state, other in ((self.a, self.b), (self.b, self.a)):
+            if state.anchor_appearance is None or other.anchor_appearance is None:
+                continue
+            mine, theirs = out[state.name], out[other.name]
+            current = (appearance_similarity(state.anchor_appearance, mine.appearance)
+                       if mine is not None and mine.appearance is not None else 0.0)
+            best, best_similarity = None, 0.0
+            for person in people:
+                if person is mine or person.appearance is None:
+                    continue
+                if (not state.anchor_is_referee and person.referee_prob is not None
+                        and person.referee_prob >= SETTINGS.min_referee_probability):
+                    continue
+                if (person.track_id is not None and person.track_id >= 0
+                        and self._is_motionless(person.track_id, self.source_fps)):
+                    continue
+                own = appearance_similarity(state.anchor_appearance, person.appearance)
+                if (own < SETTINGS.selection_audit_min_similarity
+                        or own < current + SETTINGS.selection_audit_margin
+                        or own - appearance_similarity(other.anchor_appearance, person.appearance)
+                        < SETTINGS.selection_audit_separation):
+                    continue
+                if own > best_similarity:
+                    best, best_similarity = person, own
+            if best is None:
+                continue
+            if best is theirs:
+                out[other.name] = None
+                other.missing_frames += 1
+                other.identity_confidence = 0.0
+            # A jump, not a step: the old motion and the recent look belonged
+            # to the person being left.
+            state.velocity = None
+            state.appearance = state.anchor_appearance.copy()
+            out[state.name] = self._commit(state, best, source_frame, best_similarity, recovered=True)
+            self.selection_refinds[state.name] += 1
+        return out["A"], out["B"]
 
     def _release_if_furniture(self, state: FighterState) -> bool:
         """Let go of a fighter that has turned out to be a seated spectator.
