@@ -106,6 +106,7 @@ from core.upload_security import (
 )
 from core import sport_check
 from core.fight_stats import _deduplicate as _deduplicate_strikes
+from core.ground import STRIKING_SPORTS, looks_like_grappling
 from core.camp import (
     DAILY_COUNTED_SESSIONS, IMPROVED_POINTS, MISSION_DONE_POINTS, REDEEM_COST, REDEEM_PER_MONTH,
     SESSION_POINTS, camp_standing,
@@ -1692,6 +1693,22 @@ def _with_checks(job_id: str, rows: list[dict]) -> list[dict]:
     for row in rows:
         row["check"] = checks.get((row["fighter"], round(row["seconds"], 3)))
     return rows
+
+
+def _wrong_sport(report: dict, job: dict) -> dict | None:
+    """An MMA video analysed as a striking sport, told plainly (core.ground.looks_like_grappling).
+
+    Worked out from the fight itself, so it costs nothing and needs no AI
+    service. It can tell ground fighting from stand-up, and nothing finer:
+    kickboxing against taekwondo against boxing is not separable this way.
+    """
+    sport = (report.get("scorecard") or {}).get("sport") or _job_sport(job)
+    if sport not in STRIKING_SPORTS:
+        return None
+    grappling = looks_like_grappling(report.get("went_down"))
+    if grappling is None:
+        return None
+    return {**grappling, "chosen": RULESET_SPORTS.get(sport, sport)}
 
 
 def _went_down(job_id: str, report: dict) -> list[dict]:
@@ -4318,6 +4335,7 @@ def result_page(request: Request, job_id: str):
             if identity_trusted and STRIKE_COUNTS_PUBLISHED else []),
         "can_check_strikes": bool(_account(request)),
         "went_down": _went_down(job_id, report),
+        "wrong_sport": _wrong_sport(report, job),
         # Stats-only story card for Instagram, TikTok, WhatsApp and the rest:
         # an image made in the browser, no link and no video, so every plan.
         "share_card": share_card(report) if _account(request) else None,

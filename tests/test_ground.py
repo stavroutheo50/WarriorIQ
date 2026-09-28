@@ -157,5 +157,29 @@ class DownCheckExportTests(unittest.TestCase):
         self.assertEqual((result["fighter_A"], result["fighter_B"], result["flags_right"]), (2, 1, 0.75))
 
 
+class GrapplingTests(unittest.TestCase):
+    """Measured down time: Kick Light 2 s (two knockdowns), taekwondo none,
+    pankration bouts 2+3+7+27 and 23 seconds."""
+
+    def moments(self, *seconds):
+        return {"moments": [{"seconds": float(i), "down_seconds": s} for i, s in enumerate(seconds)]}
+
+    def test_striking_bouts_measured_on_real_footage_stay_quiet(self):
+        self.assertIsNone(ground.looks_like_grappling(self.moments(2)))
+        self.assertIsNone(ground.looks_like_grappling(self.moments()))
+        self.assertIsNone(ground.looks_like_grappling(None))
+
+    def test_the_mma_style_bouts_are_recognised(self):
+        self.assertEqual(ground.looks_like_grappling(self.moments(2, 3, 7, 27)),
+                         {"ground_seconds": 39, "longest_seconds": 27})
+        self.assertIsNotNone(ground.looks_like_grappling(self.moments(23)))
+
+    def test_several_short_knockdowns_are_not_a_ground_fight(self):
+        self.assertIsNone(ground.looks_like_grappling(self.moments(5, 5, 5, 5)))
+
+    def test_one_fighter_slow_to_get_up_is_not_either(self):
+        self.assertIsNone(ground.looks_like_grappling(self.moments(12)))
+
+
 if __name__ == "__main__":
     unittest.main()
