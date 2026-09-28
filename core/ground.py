@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import math
 
+from core.video import round_at_time
+
 # Joint indices (COCO): shoulders, hips, ankles.
 _SHOULDERS, _HIPS, _ANKLES = (5, 6), (11, 12), (15, 16)
 _JOINT_CONFIDENCE = 0.4
@@ -43,6 +45,10 @@ _NEAR_BODY_LENGTHS = 1.5
 # the fighters were the false moments on a real bout; their lowest point is
 # well up the picture from the fighters' feet.
 _SAME_FLOOR_BODY_LENGTHS = 0.35
+# Lying is looser: nobody watches a fight lying down, and a camera that zooms
+# in as a fighter goes down puts their lowest point well below where the
+# fighter's feet were a moment before.
+_LYING_FLOOR_BODY_LENGTHS = 0.6
 # Sitting or kneeling counts only for the fighter's own box (the tracked
 # fighter is one of the people seen, so the overlap is near total), or for
 # someone beside the place a fighter was last seen while the tracker has lost
@@ -54,7 +60,7 @@ _SAME_PERSON_IOU = 0.5
 MIN_DOWN_FRAMES_PER_SECOND = 2
 # A moment is a new one after this long without anyone down, so a ground
 # spell with a few missed seconds stays one moment.
-GAP_SECONDS = 4.0
+GAP_SECONDS = 6.0
 # And needs this many down seconds to be listed at all.
 MIN_DOWN_SECONDS = 2
 
@@ -115,13 +121,12 @@ class DownWatch:
         self._last_boxes: dict[str, list[float]] = {}
         self._seconds: dict[int, dict] = {}
 
-    def observe(self, seconds: float, round_number: int | None, people, fighter_a, fighter_b) -> None:
+    def observe(self, seconds: float, people, fighter_a, fighter_b) -> None:
         current = {}
         for name, fighter in (("A", fighter_a), ("B", fighter_b)):
             if fighter is not None and getattr(fighter, "box", None) is not None:
                 current[name] = self._last_boxes[name] = [float(v) for v in fighter.box]
-        second = self._seconds.setdefault(int(seconds), {"frames": 0, "down": 0, "first_down": None,
-                                                          "round": round_number})
+        second = self._seconds.setdefault(int(seconds), {"frames": 0, "down": 0, "first_down": None})
         second["frames"] += 1
         if self._someone_down(people, current):
             second["down"] += 1
@@ -139,7 +144,8 @@ class DownWatch:
                 continue
             posture = pose_down(person.keypoints, person.keypoint_conf)
             if posture == "lying":
-                if any(self._beside(person.box, box) for box in self._last_boxes.values()):
+                if any(self._beside(person.box, box, _LYING_FLOOR_BODY_LENGTHS)
+                       for box in self._last_boxes.values()):
                     return True
             elif posture == "sitting":
                 # Seated spectators and kneeling officials sit too, often
@@ -155,13 +161,18 @@ class DownWatch:
         return False
 
     @staticmethod
-    def _beside(box, anchor) -> bool:
+    def _beside(box, anchor, floor: float = _SAME_FLOOR_BODY_LENGTHS) -> bool:
         height = max(1.0, float(anchor[3]) - float(anchor[1]))
         (cx, cy), (ax, ay) = _centre(box), _centre(anchor)
         return (math.hypot(cx - ax, cy - ay) <= _NEAR_BODY_LENGTHS * height
-                and abs(float(box[3]) - float(anchor[3])) <= _SAME_FLOOR_BODY_LENGTHS * height)
+                and abs(float(box[3]) - float(anchor[3])) <= floor * height)
 
-    def moments(self) -> list[dict]:
+    def moments(self, rounds=None) -> list[dict]:
+        """Each moment: when it started, which round, how many seconds down.
+
+        With `rounds`, a moment outside every selected round (a break, a
+        round not asked for) is dropped, like the strikes there.
+        """
         down = sorted(s for s, v in self._seconds.items() if v["down"] >= MIN_DOWN_FRAMES_PER_SECOND)
         spells: list[list[int]] = []
         for second in down:
@@ -173,10 +184,13 @@ class DownWatch:
         for spell in spells:
             if len(spell) < MIN_DOWN_SECONDS:
                 continue
-            first = self._seconds[spell[0]]
-            out.append({"seconds": round(first["first_down"], 3), "round": first["round"],
+            start = self._seconds[spell[0]]["first_down"]
+            spec = round_at_time(rounds, start) if rounds is not None else None
+            if rounds is not None and (spec is None or not spec.selected):
+                continue
+            out.append({"seconds": round(start, 3), "round": spec.number if spec else None,
                         "down_seconds": len(spell), "last_seconds": float(spell[-1])})
         return out
 
-    def summary(self) -> dict:
-        return {"moments": self.moments(), "note": NOTE, "attributed": False}
+    def summary(self, rounds=None) -> dict:
+        return {"moments": self.moments(rounds), "note": NOTE, "attributed": False}

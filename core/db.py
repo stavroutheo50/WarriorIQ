@@ -700,6 +700,15 @@ def is_strike_check(annotation: dict) -> bool:
     return (annotation.get("corrected") or {}).get("source") == "strike_check"
 
 
+def is_down_check(annotation: dict) -> bool:
+    """A one-tap answer on who went down at a moment, not a strike label.
+
+    It has no technique at all, so like is_strike_check it must stay out of
+    training sequences and technique-accuracy figures.
+    """
+    return (annotation.get("corrected") or {}).get("source") == "down_check"
+
+
 def record_legal_acceptance(
     kind: str,
     policy_version: str,

@@ -20,6 +20,7 @@ from core.action import ActionEngine
 from core.config import OUTPUTS, SETTINGS
 from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
 from core.generalship import judge_fight
+from core.ground import DownWatch
 from core.round_detect import RoundDetector
 from core.contact import (
     assess_selection,
@@ -862,6 +863,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     observed_separations: list[float] = []
     travel = {"A": _Travel(), "B": _Travel()}
     fighter_finder = FighterFinder()
+    down_watch = DownWatch()
     round_detector = RoundDetector()
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
 
@@ -1087,6 +1089,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             travel["B"].add(seconds, fighter_b)
             fighter_finder.observe(seconds, people)
             fighter_finder.observe_selected(fighter_a, fighter_b)
+            down_watch.observe(seconds, people, fighter_a, fighter_b)
             round_detector.observe(seconds, _pair_separation(fighter_a, fighter_b))
 
             if tracking_file is not None:
@@ -1413,6 +1416,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         },
         observed_fighters=_observed_fighter_mismatch(fighter_finder),
     )
+    # Moments someone went down, against the rounds as finally found. Not
+    # attributed to a fighter and not scored; see core/ground.py.
+    report["went_down"] = down_watch.summary(rounds)
     progress(
         "Finalizing coaching priorities", 99.2, time.perf_counter() - wall_start, segment_duration,
         manager, None, quality, stage="report", live_events_snapshot=final_live_events,

@@ -64,7 +64,7 @@ from core.db import (
     consume_password_reset_token,
     assign_fighter_to_fight, create_fighter, set_account_type, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
-    get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, is_strike_check, get_fighter, get_profile,
+    get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, is_down_check, is_strike_check, get_fighter, get_profile,
     get_report_share, init_db, list_accounts, list_all_fight_storage, list_annotations, list_assignments,
     list_expired_fight_videos, list_fighters, list_fights, list_legal_acceptances, list_moderation_reports,
     link_oauth_identity, list_oauth_identities,
@@ -528,6 +528,20 @@ class StrikeCheckPayload(BaseModel):
 # What a fighter can say about one counted strike, in one tap. "punch", "kick"
 # and "knee" mean it was a strike of that type rather than the one counted.
 STRIKE_CHECK_VERDICTS = ("right", "not_a_strike", "wrong_fighter", "punch", "kick", "knee")
+
+
+class DownCheckPayload(BaseModel):
+    seconds: float
+    verdict: str
+
+
+# Who went down at a moment core.ground found: the analysis cannot tell, so
+# the owner says. "nobody" means nobody went down there.
+DOWN_CHECK_VERDICTS = ("A", "B", "nobody")
+# Annotations are one row per fight and time. Strike answers are stored at
+# the strike's time rounded to the millisecond, so a down answer is stored
+# half a millisecond later and can never overwrite one at the same instant.
+DOWN_CHECK_TIME_OFFSET = 0.0005
 
 
 class WorkerIdentityPayload(BaseModel):
@@ -1668,6 +1682,26 @@ def _with_checks(job_id: str, rows: list[dict]) -> list[dict]:
     checks = _strike_checks(job_id)
     for row in rows:
         row["check"] = checks.get((row["fighter"], round(row["seconds"], 3)))
+    return rows
+
+
+def _went_down(job_id: str, report: dict) -> list[dict]:
+    """The moments someone went down (core.ground), with the owner's answers.
+
+    Not attributed to a fighter, so shown whether or not identity held: it
+    only says that someone was down at that second.
+    """
+    answers = _down_checks(job_id)
+    rows = []
+    for moment in (report.get("went_down") or {}).get("moments") or []:
+        try:
+            seconds = float(moment["seconds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        rows.append({"seconds": seconds, "round": moment.get("round"),
+                     "down_seconds": int(moment.get("down_seconds") or 0),
+                     "clock": "%d:%02d" % (int(seconds // 60), int(seconds % 60)),
+                     "check": answers.get(round(seconds, 3))})
     return rows
 
 
@@ -3445,8 +3479,8 @@ def remote_worker_dataset_backfill(request: Request):
 
     filled = skipped_no_consent = skipped_no_tracking = already = 0
     for annotation in list_annotations():
-        if is_strike_check(annotation):
-            continue      # a family, not a technique: never a training label
+        if is_strike_check(annotation) or is_down_check(annotation):
+            continue      # one-tap answers, not a technique: never a training label
         if annotation.get("sequence_path"):
             already += 1
             continue
@@ -4274,6 +4308,8 @@ def result_page(request: Request, job_id: str):
             (report.get("scorecard") or {}).get("sport") or _job_sport(job))))
             if identity_trusted and STRIKE_COUNTS_PUBLISHED else []),
         "can_check_strikes": bool(_account(request)),
+        "went_down": _went_down(job_id, report),
+        "went_down_note": (report.get("went_down") or {}).get("note"),
         "estimate_note": ESTIMATE_NOTE,
         "families_shown": published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job)),
@@ -4398,6 +4434,42 @@ def _strike_checks(job_id: str) -> dict[tuple[str, float], str]:
         corrected = item.get("corrected") or {}
         if corrected.get("source") == "strike_check":
             out[(corrected.get("fighter"), round(float(item["event_time"]), 3))] = corrected.get("verdict")
+    return out
+
+
+@app.post("/api/down-check/{job_id}", dependencies=[Depends(require_csrf)])
+def check_went_down(request: Request, job_id: str, payload: DownCheckPayload):
+    """One tap on a moment someone went down: fighter A, fighter B, or nobody.
+
+    The analysis finds these moments but cannot yet tell who went down (see
+    core/ground.py), so the owner's answer is the only attribution there is.
+    Stored like a strike check, marked source "down_check".
+    """
+    _enforce_rate_limit(request, "down_checks", 120, 300)
+    if not _account(request) or not _authorized_job(request, job_id):
+        raise HTTPException(403, "Sign in to check your own fight.")
+    verdict = payload.verdict if payload.verdict in {"A", "B"} else payload.verdict.lower()
+    if not math.isfinite(payload.seconds) or payload.seconds < 0 or verdict not in DOWN_CHECK_VERDICTS:
+        raise HTTPException(400, "Invalid answer")
+    report_path = _require_completed_artifact(job_id, "report.json")
+    if not report_path.exists():
+        raise HTTPException(404, "Fight report not found")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    found = [row for row in _went_down(job_id, report) if abs(row["seconds"] - payload.seconds) <= 0.05]
+    if not found:
+        raise HTTPException(404, "No moment at that time")
+    seconds = round(found[0]["seconds"], 3)
+    save_annotation(job_id, seconds + DOWN_CHECK_TIME_OFFSET, report.get("setup", {}).get("ruleset", "K1"),
+                    {"event": "went_down"}, {"went_down": verdict, "source": "down_check"})
+    return {"saved": True, "seconds": seconds, "verdict": verdict}
+
+
+def _down_checks(job_id: str) -> dict[float, str]:
+    """This fight's answers on who went down, keyed by the moment's seconds."""
+    out = {}
+    for item in get_annotations(job_id):
+        if is_down_check(item):
+            out[round(float(item["event_time"]) - DOWN_CHECK_TIME_OFFSET, 3)] = item["corrected"].get("went_down")
     return out
 
 
@@ -4538,7 +4610,7 @@ def review_evidence_page(request: Request, job_id: str, page: int = 1, mode: str
         return RedirectResponse(f"/select/{job_id}", status_code=303)
     mode = "dataset" if mode == "dataset" else "scorecard"
     all_candidates = _review_candidates(report, mode)
-    annotations = get_annotations(job_id)
+    annotations = [item for item in get_annotations(job_id) if not is_down_check(item)]
     annotation_map = {f"{float(item['event_time']):.3f}": item for item in annotations}
     per_page = 40
     page_count = max(1, math.ceil(len(all_candidates) / per_page))
@@ -4581,7 +4653,8 @@ def complete_evidence_review(
         if not report.get("integrity", {}).get("identity_evidence_trusted", True):
             return RedirectResponse(f"/select/{job_id}", status_code=303)
         candidates = _review_candidates(report, mode)
-        reviewed_times = [float(item["event_time"]) for item in get_annotations(job_id)]
+        reviewed_times = [float(item["event_time"]) for item in get_annotations(job_id)
+                          if not is_down_check(item)]
         remaining = [item for item in candidates if not any(abs(float(item["peak_time"]) - value) <= .02 for value in reviewed_times)]
         if remaining:
             raise HTTPException(409, f"Review the remaining {len(remaining)} candidates before completing the fight.")
@@ -4612,7 +4685,7 @@ def validation_page(request: Request):
     profile_id = _profile_id(request)
     owned_jobs = {fight["job_id"] for fight in list_fights(profile_id)} if profile_id is not None else set()
     annotations = [item for item in list_annotations()
-                   if item["job_id"] in owned_jobs and not is_strike_check(item)]
+                   if item["job_id"] in owned_jobs and not is_strike_check(item) and not is_down_check(item)]
     dataset = audit_dataset_split(DATASET / "sequences", DATASET / "untouched_test")
     summary = accuracy_summary(annotations)
     end_to_end = assess_end_to_end_validation(end_to_end_metadata(summary))
