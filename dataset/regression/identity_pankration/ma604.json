@@ -1,0 +1,652 @@
+{
+ "archive_item": "Subfightercom-BobbyMoralesAge162008CaliforniaPankrationChampionshipsMa604",
+ "start_seconds": 4.0,
+ "end_seconds": 219.0,
+ "fighter_a_box": [
+  2,
+  43,
+  85,
+  222
+ ],
+ "fighter_b_box": [
+  238,
+  48,
+  280,
+  192
+ ],
+ "fighter_a": "camo shorts",
+ "fighter_b": "black shorts, yellow gloves",
+ "referee": "black shirt, khaki shorts",
+ "frames": [
+  {
+   "time_seconds": 4.0,
+   "source_frame": 120,
+   "phase": "standing",
+   "A": [
+    2.0,
+    43.6,
+    85.2,
+    222.0
+   ],
+   "B": [
+    238.3,
+    48.1,
+    280.4,
+    192.5
+   ]
+  },
+  {
+   "time_seconds": 8.0,
+   "source_frame": 240,
+   "phase": "standing",
+   "A": [
+    0.2,
+    67.7,
+    66.0,
+    209.0
+   ],
+   "B": [
+    260.8,
+    56.4,
+    315.3,
+    193.0
+   ]
+  },
+  {
+   "time_seconds": 12.0,
+   "source_frame": 360,
+   "phase": "standing",
+   "A": [
+    79.8,
+    57.8,
+    157.8,
+    227.9
+   ],
+   "B": [
+    146.1,
+    60.1,
+    194.8,
+    172.6
+   ]
+  },
+  {
+   "time_seconds": 16.0,
+   "source_frame": 480,
+   "phase": "standing",
+   "A": [
+    151.9,
+    52.0,
+    250.8,
+    224.9
+   ],
+   "B": [
+    0.1,
+    37.3,
+    76.5,
+    236.1
+   ]
+  },
+  {
+   "time_seconds": 20.0,
+   "source_frame": 600,
+   "phase": "standing",
+   "A": [
+    165.9,
+    46.7,
+    243.1,
+    175.7
+   ],
+   "B": [
+    113.1,
+    37.7,
+    162.5,
+    193.8
+   ]
+  },
+  {
+   "time_seconds": 24.0,
+   "source_frame": 720,
+   "phase": "standing",
+   "A": [
+    192.5,
+    59.6,
+    260.5,
+    193.4
+   ],
+   "B": [
+    0.2,
+    55.4,
+    68.6,
+    174.2
+   ]
+  },
+  {
+   "time_seconds": 28.0,
+   "source_frame": 840,
+   "phase": "standing",
+   "A": [
+    197.8,
+    63.2,
+    256.3,
+    193.6
+   ],
+   "B": [
+    91.2,
+    60.7,
+    158.5,
+    178.4
+   ]
+  },
+  {
+   "time_seconds": 32.0,
+   "source_frame": 960,
+   "phase": "standing",
+   "A": [
+    201.0,
+    39.9,
+    269.8,
+    175.5
+   ],
+   "B": [
+    109.1,
+    45.2,
+    158.4,
+    190.1
+   ]
+  },
+  {
+   "time_seconds": 36.0,
+   "source_frame": 1080,
+   "phase": "standing",
+   "A": [
+    183.1,
+    39.8,
+    273.2,
+    182.3
+   ],
+   "B": [
+    79.3,
+    42.3,
+    156.3,
+    204.6
+   ]
+  },
+  {
+   "time_seconds": 40.0,
+   "source_frame": 1200,
+   "phase": "standing",
+   "A": [
+    152.9,
+    18.2,
+    240.7,
+    239.0
+   ],
+   "B": [
+    75.7,
+    33.5,
+    153.7,
+    212.3
+   ]
+  },
+  {
+   "time_seconds": 44.0,
+   "source_frame": 1320,
+   "phase": "standing",
+   "A": [
+    17.3,
+    49.9,
+    102.6,
+    202.6
+   ],
+   "B": [
+    166.2,
+    47.9,
+    287.9,
+    220.0
+   ]
+  },
+  {
+   "time_seconds": 48.0,
+   "source_frame": 1440,
+   "phase": "standing",
+   "A": [
+    206.6,
+    30.7,
+    258.4,
+    210.2
+   ],
+   "B": [
+    30.3,
+    36.3,
+    95.1,
+    225.8
+   ]
+  },
+  {
+   "time_seconds": 52.0,
+   "source_frame": 1560,
+   "phase": "standing",
+   "A": [
+    110.9,
+    21.1,
+    157.6,
+    217.1
+   ],
+   "B": [
+    248.0,
+    33.6,
+    319.8,
+    226.5
+   ]
+  },
+  {
+   "time_seconds": 56.0,
+   "source_frame": 1680,
+   "phase": "standing",
+   "A": [
+    0.2,
+    26.9,
+    77.5,
+    232.9
+   ],
+   "B": [
+    226.6,
+    38.0,
+    281.4,
+    209.8
+   ]
+  },
+  {
+   "time_seconds": 60.0,
+   "source_frame": 1800,
+   "phase": "standing",
+   "A": [
+    6.0,
+    50.8,
+    88.7,
+    217.4
+   ],
+   "B": [
+    228.1,
+    60.3,
+    260.9,
+    189.0
+   ]
+  },
+  {
+   "time_seconds": 64.0,
+   "source_frame": 1920,
+   "phase": "standing",
+   "A": [
+    0.6,
+    39.1,
+    115.2,
+    239.2
+   ],
+   "B": [
+    109.7,
+    52.1,
+    299.2,
+    239.4
+   ]
+  },
+  {
+   "time_seconds": 68.0,
+   "source_frame": 2040,
+   "phase": "standing",
+   "A": [
+    70.3,
+    35.6,
+    168.7,
+    198.2
+   ],
+   "B": [
+    212.3,
+    36.3,
+    268.2,
+    177.1
+   ]
+  },
+  {
+   "time_seconds": 72.0,
+   "source_frame": 2160,
+   "phase": "standing",
+   "A": [
+    41.9,
+    52.4,
+    145.5,
+    199.3
+   ],
+   "B": [
+    229.8,
+    38.6,
+    280.7,
+    184.6
+   ]
+  },
+  {
+   "time_seconds": 76.0,
+   "source_frame": 2280,
+   "phase": "standing",
+   "A": [
+    212.2,
+    33.2,
+    282.5,
+    187.0
+   ],
+   "B": [
+    0.9,
+    39.6,
+    68.9,
+    191.7
+   ]
+  },
+  {
+   "time_seconds": 80.0,
+   "source_frame": 2400,
+   "phase": "standing",
+   "A": [
+    128.8,
+    51.3,
+    175.4,
+    169.3
+   ],
+   "B": [
+    141.9,
+    47.3,
+    220.4,
+    209.1
+   ]
+  },
+  {
+   "time_seconds": 84.0,
+   "source_frame": 2520,
+   "phase": "standing",
+   "A": [
+    167.0,
+    37.0,
+    277.7,
+    205.7
+   ],
+   "B": [
+    67.1,
+    25.5,
+    138.6,
+    220.9
+   ]
+  },
+  {
+   "time_seconds": 88.0,
+   "source_frame": 2640,
+   "phase": "standing",
+   "A": [
+    85.7,
+    43.4,
+    137.6,
+    187.5
+   ],
+   "B": [
+    182.6,
+    56.5,
+    282.0,
+    214.6
+   ]
+  },
+  {
+   "time_seconds": 92.0,
+   "source_frame": 2760,
+   "phase": "standing",
+   "A": [
+    122.6,
+    29.4,
+    195.2,
+    185.9
+   ],
+   "B": [
+    203.6,
+    37.0,
+    307.2,
+    208.5
+   ]
+  },
+  {
+   "time_seconds": 96.0,
+   "source_frame": 2880,
+   "phase": "standing",
+   "A": [
+    58.9,
+    43.7,
+    156.4,
+    226.0
+   ],
+   "B": [
+    207.3,
+    49.5,
+    253.0,
+    187.5
+   ]
+  },
+  {
+   "time_seconds": 100.0,
+   "source_frame": 3000,
+   "phase": "ground",
+   "pair": [
+    151.5,
+    61.8,
+    276.7,
+    239.5
+   ]
+  },
+  {
+   "time_seconds": 104.0,
+   "source_frame": 3120,
+   "phase": "standing",
+   "A": [
+    226.4,
+    26.3,
+    283.6,
+    176.5
+   ],
+   "B": [
+    191.6,
+    63.5,
+    260.5,
+    171.2
+   ]
+  },
+  {
+   "time_seconds": 108.0,
+   "source_frame": 3240,
+   "phase": "ground",
+   "pair": [
+    174.0,
+    22.8,
+    273.2,
+    164.0
+   ]
+  },
+  {
+   "time_seconds": 132.03333333333333,
+   "source_frame": 3960,
+   "phase": "ground",
+   "pair": [
+    111.9,
+    66.1,
+    210.7,
+    180.6
+   ]
+  },
+  {
+   "time_seconds": 136.03333333333333,
+   "source_frame": 4080,
+   "phase": "ground",
+   "pair": [
+    93.4,
+    80.9,
+    206.6,
+    178.1
+   ]
+  },
+  {
+   "time_seconds": 148.03333333333333,
+   "source_frame": 4440,
+   "phase": "ground",
+   "pair": [
+    144.0,
+    47.1,
+    239.7,
+    237.8
+   ]
+  },
+  {
+   "time_seconds": 152.03333333333333,
+   "source_frame": 4560,
+   "phase": "ground",
+   "pair": [
+    132.9,
+    75.4,
+    296.6,
+    229.6
+   ]
+  },
+  {
+   "time_seconds": 156.03333333333333,
+   "source_frame": 4680,
+   "phase": "ground",
+   "pair": [
+    103.0,
+    8.1,
+    247.4,
+    207.1
+   ]
+  },
+  {
+   "time_seconds": 164.03333333333333,
+   "source_frame": 4920,
+   "phase": "standing",
+   "A": [
+    157.5,
+    22.2,
+    233.9,
+    180.1
+   ],
+   "B": [
+    123.8,
+    47.8,
+    162.7,
+    133.7
+   ]
+  },
+  {
+   "time_seconds": 168.03333333333333,
+   "source_frame": 5040,
+   "phase": "standing",
+   "A": [
+    106.5,
+    55.9,
+    158.0,
+    145.9
+   ],
+   "B": [
+    187.3,
+    23.9,
+    225.1,
+    130.1
+   ]
+  },
+  {
+   "time_seconds": 172.03333333333333,
+   "source_frame": 5160,
+   "phase": "standing",
+   "A": [
+    131.6,
+    144.3,
+    259.3,
+    213.8
+   ],
+   "B": [
+    127.5,
+    12.1,
+    232.2,
+    189.7
+   ]
+  },
+  {
+   "time_seconds": 176.03333333333333,
+   "source_frame": 5280,
+   "phase": "ground",
+   "pair": [
+    59.9,
+    16.8,
+    255.2,
+    193.8
+   ]
+  },
+  {
+   "time_seconds": 180.03333333333333,
+   "source_frame": 5400,
+   "phase": "ground",
+   "pair": [
+    2.3,
+    76.1,
+    174.9,
+    201.1
+   ]
+  },
+  {
+   "time_seconds": 184.03333333333333,
+   "source_frame": 5520,
+   "phase": "ground",
+   "pair": [
+    37.8,
+    64.0,
+    239.7,
+    204.5
+   ]
+  },
+  {
+   "time_seconds": 188.03333333333333,
+   "source_frame": 5640,
+   "phase": "ground",
+   "pair": [
+    46.7,
+    75.3,
+    238.0,
+    172.4
+   ]
+  },
+  {
+   "time_seconds": 192.03333333333333,
+   "source_frame": 5760,
+   "phase": "ground",
+   "pair": [
+    93.1,
+    58.9,
+    253.6,
+    194.3
+   ]
+  },
+  {
+   "time_seconds": 196.03333333333333,
+   "source_frame": 5880,
+   "phase": "ground",
+   "pair": [
+    48.7,
+    11.9,
+    275.5,
+    183.9
+   ]
+  },
+  {
+   "time_seconds": 200.03333333333333,
+   "source_frame": 6000,
+   "phase": "ground",
+   "pair": [
+    79.7,
+    70.0,
+    274.4,
+    162.5
+   ]
+  }
+ ]
+}

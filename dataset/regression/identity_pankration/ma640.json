@@ -1,0 +1,434 @@
+{
+ "archive_item": "Subfightercom-BobbyMoralesAge162008CaliforniaPankrationChampionshipsMa640",
+ "start_seconds": 10.0,
+ "end_seconds": 129.0,
+ "fighter_a_box": [
+  39,
+  33,
+  96,
+  212
+ ],
+ "fighter_b_box": [
+  236,
+  43,
+  284,
+  193
+ ],
+ "fighter_a": "shirtless, black shorts",
+ "fighter_b": "black shirt with a red logo on the back, yellow gloves",
+ "referee": "black shirt, khaki shorts",
+ "frames": [
+  {
+   "time_seconds": 10.003334444814937,
+   "source_frame": 300,
+   "phase": "standing",
+   "A": [
+    39.3,
+    33.2,
+    96.1,
+    212.1
+   ],
+   "B": [
+    236.4,
+    43.4,
+    284.3,
+    193.3
+   ]
+  },
+  {
+   "time_seconds": 14.004668222740912,
+   "source_frame": 420,
+   "phase": "standing",
+   "A": [
+    75.1,
+    39.1,
+    158.8,
+    209.7
+   ],
+   "B": [
+    199.8,
+    40.7,
+    267.1,
+    195.7
+   ]
+  },
+  {
+   "time_seconds": 18.00600200066689,
+   "source_frame": 540,
+   "phase": "standing",
+   "A": [
+    119.4,
+    36.1,
+    166.4,
+    204.3
+   ],
+   "B": [
+    246.4,
+    39.3,
+    297.9,
+    186.2
+   ]
+  },
+  {
+   "time_seconds": 22.007335778592864,
+   "source_frame": 660,
+   "phase": "standing",
+   "A": null,
+   "B": [
+    113.4,
+    52.0,
+    194.8,
+    225.9
+   ]
+  },
+  {
+   "time_seconds": 26.00866955651884,
+   "source_frame": 780,
+   "phase": "standing",
+   "A": [
+    173.0,
+    39.8,
+    255.0,
+    197.0
+   ],
+   "B": [
+    81.9,
+    60.9,
+    200.8,
+    196.7
+   ]
+  },
+  {
+   "time_seconds": 30.010003334444814,
+   "source_frame": 900,
+   "phase": "standing",
+   "A": [
+    99.1,
+    29.8,
+    159.5,
+    213.8
+   ],
+   "B": [
+    166.6,
+    43.3,
+    213.2,
+    190.0
+   ]
+  },
+  {
+   "time_seconds": 34.01133711237079,
+   "source_frame": 1020,
+   "phase": "standing",
+   "A": [
+    73.8,
+    34.2,
+    147.4,
+    196.8
+   ],
+   "B": [
+    210.9,
+    45.6,
+    277.9,
+    191.5
+   ]
+  },
+  {
+   "time_seconds": 38.01267089029676,
+   "source_frame": 1140,
+   "phase": "standing",
+   "A": [
+    186.3,
+    34.8,
+    245.7,
+    192.7
+   ],
+   "B": [
+    77.5,
+    40.1,
+    142.0,
+    197.6
+   ]
+  },
+  {
+   "time_seconds": 42.01400466822274,
+   "source_frame": 1260,
+   "phase": "standing",
+   "A": [
+    33.5,
+    32.6,
+    112.8,
+    227.6
+   ],
+   "B": [
+    203.6,
+    45.0,
+    280.9,
+    239.6
+   ]
+  },
+  {
+   "time_seconds": 46.01533844614871,
+   "source_frame": 1380,
+   "phase": "standing",
+   "A": [
+    98.8,
+    30.1,
+    172.1,
+    201.5
+   ],
+   "B": [
+    176.2,
+    42.3,
+    253.9,
+    219.8
+   ]
+  },
+  {
+   "time_seconds": 50.01667222407469,
+   "source_frame": 1500,
+   "phase": "standing",
+   "A": [
+    199.3,
+    30.5,
+    252.8,
+    186.0
+   ],
+   "B": [
+    79.3,
+    41.7,
+    141.5,
+    206.3
+   ]
+  },
+  {
+   "time_seconds": 54.01800600200066,
+   "source_frame": 1620,
+   "phase": "standing",
+   "A": [
+    198.5,
+    27.2,
+    277.4,
+    202.7
+   ],
+   "B": [
+    102.4,
+    62.7,
+    233.5,
+    203.7
+   ]
+  },
+  {
+   "time_seconds": 58.01933977992664,
+   "source_frame": 1740,
+   "phase": "standing",
+   "A": [
+    97.5,
+    20.2,
+    151.9,
+    208.4
+   ],
+   "B": [
+    240.8,
+    35.6,
+    312.5,
+    221.9
+   ]
+  },
+  {
+   "time_seconds": 62.02067355785261,
+   "source_frame": 1860,
+   "phase": "standing",
+   "A": [
+    190.8,
+    34.3,
+    247.1,
+    199.9
+   ],
+   "B": [
+    114.7,
+    44.8,
+    178.2,
+    228.5
+   ]
+  },
+  {
+   "time_seconds": 66.02200733577858,
+   "source_frame": 1980,
+   "phase": "standing",
+   "A": [
+    214.4,
+    13.7,
+    290.8,
+    175.1
+   ],
+   "B": [
+    121.4,
+    35.6,
+    257.0,
+    188.5
+   ]
+  },
+  {
+   "time_seconds": 70.02334111370456,
+   "source_frame": 2100,
+   "phase": "standing",
+   "A": [
+    237.1,
+    38.5,
+    285.6,
+    176.5
+   ],
+   "B": [
+    91.4,
+    61.9,
+    165.1,
+    163.1
+   ]
+  },
+  {
+   "time_seconds": 74.02467489163054,
+   "source_frame": 2220,
+   "phase": "standing",
+   "A": [
+    210.9,
+    14.9,
+    271.5,
+    223.2
+   ],
+   "B": [
+    36.0,
+    30.7,
+    116.6,
+    212.3
+   ]
+  },
+  {
+   "time_seconds": 78.02600866955652,
+   "source_frame": 2340,
+   "phase": "standing",
+   "A": [
+    91.0,
+    33.3,
+    156.5,
+    186.5
+   ],
+   "B": [
+    196.9,
+    42.2,
+    240.0,
+    167.0
+   ]
+  },
+  {
+   "time_seconds": 82.0273424474825,
+   "source_frame": 2460,
+   "phase": "standing",
+   "A": [
+    13.3,
+    22.1,
+    79.1,
+    218.8
+   ],
+   "B": [
+    186.7,
+    40.9,
+    265.7,
+    229.7
+   ]
+  },
+  {
+   "time_seconds": 86.02867622540846,
+   "source_frame": 2580,
+   "phase": "standing",
+   "A": [
+    125.4,
+    34.7,
+    192.5,
+    176.7
+   ],
+   "B": [
+    111.2,
+    79.9,
+    207.6,
+    208.5
+   ]
+  },
+  {
+   "time_seconds": 90.03001000333444,
+   "source_frame": 2700,
+   "phase": "ground",
+   "pair": [
+    2.1,
+    42.8,
+    300.6,
+    195.1
+   ]
+  },
+  {
+   "time_seconds": 94.03134378126042,
+   "source_frame": 2820,
+   "phase": "ground",
+   "pair": [
+    15.2,
+    27.2,
+    241.3,
+    161.7
+   ]
+  },
+  {
+   "time_seconds": 98.0326775591864,
+   "source_frame": 2940,
+   "phase": "ground",
+   "pair": [
+    89.3,
+    62.8,
+    206.0,
+    184.8
+   ]
+  },
+  {
+   "time_seconds": 102.03401133711236,
+   "source_frame": 3060,
+   "phase": "ground",
+   "pair": [
+    107.0,
+    34.9,
+    293.7,
+    174.4
+   ]
+  },
+  {
+   "time_seconds": 106.03534511503834,
+   "source_frame": 3180,
+   "phase": "ground",
+   "pair": [
+    57.0,
+    66.5,
+    234.7,
+    171.7
+   ]
+  },
+  {
+   "time_seconds": 110.03667889296432,
+   "source_frame": 3300,
+   "phase": "ground",
+   "pair": [
+    98.5,
+    52.2,
+    269.6,
+    171.5
+   ]
+  },
+  {
+   "time_seconds": 114.0380126708903,
+   "source_frame": 3420,
+   "phase": "ground",
+   "pair": [
+    31.6,
+    28.2,
+    236.4,
+    162.6
+   ]
+  }
+ ]
+}

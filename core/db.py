@@ -1246,6 +1246,41 @@ def apply_checkout_event(
     return True
 
 
+def apply_subscription_change(event_id: str, event_type: str, change: dict) -> int | None:
+    """Apply one verified Stripe lifecycle event (core.payments.subscription_change).
+
+    Found by subscription id, else by customer id. Recorded in payment_events
+    first, so a redelivered event changes nothing. Returns the account id it
+    changed, or None when the event was a repeat or matches no account.
+    """
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        account = None
+        if change.get("subscription_id"):
+            account = con.execute("SELECT id FROM accounts WHERE stripe_subscription_id=?",
+                                  (str(change["subscription_id"]),)).fetchone()
+        if account is None and change.get("customer_id"):
+            account = con.execute("SELECT id FROM accounts WHERE stripe_customer_id=?",
+                                  (str(change["customer_id"]),)).fetchone()
+        if account is None:
+            return None
+        try:
+            con.execute("INSERT INTO payment_events(event_id,event_type,received_at) VALUES(?,?,?)",
+                        (event_id, event_type, now))
+        except sqlite3.IntegrityError:
+            return None
+        con.execute(
+            """UPDATE accounts SET plan=COALESCE(?,plan),
+               subscription_status=COALESCE(?,subscription_status),
+               subscription_period_end=COALESCE(?,subscription_period_end),
+               subscription_cancelled_at=CASE WHEN ?='free' THEN ? ELSE subscription_cancelled_at END
+               WHERE id=?""",
+            (change.get("plan"), change.get("status") or None, change.get("period_end"),
+             change.get("plan"), now, int(account["id"])))
+        return int(account["id"])
+
+
 def record_subscription_action(
     account_id: int,
     action_type: str,

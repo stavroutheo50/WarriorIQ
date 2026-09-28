@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 
 from core.config import SETTINGS
 
@@ -260,6 +261,81 @@ def verify_webhook(payload: bytes, signature: str):
     import stripe
 
     return stripe.Webhook.construct_event(payload, signature, secret)
+
+
+# Stripe events that change what an account already paid for. Checkout is
+# how a plan starts; these are how it continues, changes and ends. Without
+# them a cancelled, unpaid, refunded or disputed subscription kept its plan
+# for ever: the cancel button schedules the end at Stripe, and the event
+# that says it has ended was never read.
+SUBSCRIPTION_EVENTS = frozenset({
+    "customer.subscription.updated", "customer.subscription.deleted",
+    "invoice.paid", "invoice.payment_failed",
+    "charge.refunded", "charge.dispute.created",
+})
+# Stripe statuses that mean the customer is not paying and will not be.
+# past_due is not here: Stripe is still retrying the card, and the plan stays
+# until it gives up, which arrives as "unpaid" or "canceled".
+_ENDED_STATUSES = frozenset({"canceled", "unpaid", "incomplete_expired"})
+
+
+def _plan_for_price(price_id: str | None) -> str | None:
+    if not price_id:
+        return None
+    return next((key for key, plan in PLANS.items() if plan.get("stripe_price_id") == price_id), None)
+
+
+def _period_end(subscription: dict) -> str | None:
+    """current_period_end, on the subscription or (newer API) on its first item."""
+    stamp = subscription.get("current_period_end")
+    if stamp is None:
+        items = ((subscription.get("items") or {}).get("data") or [])
+        stamp = items[0].get("current_period_end") if items else None
+    if not stamp:
+        return None
+    return datetime.fromtimestamp(int(stamp), tz=timezone.utc).isoformat()
+
+
+def subscription_change(event: dict) -> dict | None:
+    """What a verified Stripe event does to the account it belongs to.
+
+    {"subscription_id", "customer_id", "status", "plan", "period_end",
+    "reason"}, where plan is the plan to set ("free" to end access, a paid
+    key when the price changed, None to keep it). None for events that change
+    nothing. Pure, so every case is tested without Stripe.
+    """
+    kind = event.get("type")
+    obj = (event.get("data") or {}).get("object") or {}
+    if kind not in SUBSCRIPTION_EVENTS:
+        return None
+    if kind.startswith("customer.subscription."):
+        status = str(obj.get("status") or "")
+        items = ((obj.get("items") or {}).get("data") or [])
+        price = ((items[0].get("price") or {}).get("id")) if items else None
+        change = {"subscription_id": obj.get("id"), "customer_id": obj.get("customer"),
+                  "period_end": _period_end(obj), "plan": None, "status": status, "reason": kind}
+        if kind == "customer.subscription.deleted" or status in _ENDED_STATUSES:
+            change.update(plan="free", status="cancelled")
+        else:
+            change["plan"] = _plan_for_price(price)
+            if obj.get("cancel_at_period_end") and status in {"active", "trialing"}:
+                change["status"] = "cancel_at_period_end"
+        return change
+    if kind in {"invoice.paid", "invoice.payment_failed"}:
+        lines = ((obj.get("lines") or {}).get("data") or [])
+        end = ((lines[0].get("period") or {}).get("end")) if lines else None
+        return {"subscription_id": obj.get("subscription"), "customer_id": obj.get("customer"),
+                "period_end": datetime.fromtimestamp(int(end), tz=timezone.utc).isoformat() if end else None,
+                "plan": None, "status": "active" if kind == "invoice.paid" else "past_due", "reason": kind}
+    if kind == "charge.refunded":
+        # A partial refund (a goodwill credit) leaves the plan; a full one ends it.
+        if int(obj.get("amount_refunded") or 0) < int(obj.get("amount") or 0):
+            return None
+        return {"subscription_id": None, "customer_id": obj.get("customer"), "period_end": None,
+                "plan": "free", "status": "refunded", "reason": kind}
+    # charge.dispute.created: the money is being clawed back through the bank.
+    return {"subscription_id": None, "customer_id": obj.get("customer"), "period_end": None,
+            "plan": "free", "status": "disputed", "reason": kind}
 
 
 def cancel_subscription_at_period_end(subscription_id: str) -> dict:
