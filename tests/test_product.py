@@ -1137,9 +1137,6 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(database.get_fight_review(job_id)["status"], "complete")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_a_fighter_can_say_whether_a_counted_strike_was_right(self):
         """One tap on a counted strike is stored as a family-level answer,
         kept out of training data, and shown back on the page."""
@@ -1221,6 +1218,65 @@ if __name__ == "__main__":
             self.assertEqual(bad.status_code, 400)
             unknown = self.client.post("/api/sport-check", json={"sport": "curling", "frames": [frame]})
             self.assertEqual(unknown.status_code, 400)
+
+    def test_the_owner_says_who_went_down_at_each_moment(self):
+        """The analysis lists moments someone went down but not who; the
+        owner's one-tap answer is saved, shown back, never overwrites a
+        strike answer at the same second and never becomes a training label."""
+        account = register("downs@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "downs@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        job_id = "downfight1"
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"video-placeholder")
+        feed = [{"kind": "strike", "fighter": "A", "family": "punch", "time_seconds": 12.0, "round_number": 1}]
+        report = {"setup": {"ruleset": "MMA"}, "scorecard": {"sport": "mma"}, "event_feed": feed,
+                  "went_down": {"moments": [{"seconds": 12.0, "round": 1, "down_seconds": 6, "last_seconds": 17.0}],
+                                "note": "Found automatically.", "attributed": False}}
+        report_path = job_dir / "report.json"
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        database.save_fight(job_id, account["profile_id"], "f.mp4", str(video_path), str(report_path),
+                            "competition", "MMA", "BOTH", {})
+
+        struck = self.client.post(f"/api/strike-check/{job_id}", json={
+            "seconds": 12.0, "fighter": "A", "family": "punch", "verdict": "right"})
+        self.assertEqual(struck.status_code, 200, struck.text)
+        said = self.client.post(f"/api/down-check/{job_id}", json={"seconds": 12.0, "verdict": "B"})
+        self.assertEqual(said.status_code, 200, said.text)
+        stored = database.get_annotations(job_id)
+        self.assertEqual(len(stored), 2, "the down answer must not overwrite the strike answer")
+        down = [item for item in stored if database.is_down_check(item)]
+        self.assertEqual(len(down), 1)
+        self.assertEqual(down[0]["corrected"]["went_down"], "B")
+        self.assertFalse(database.is_strike_check(down[0]))
+        self.assertEqual(webapp._down_checks(job_id), {12.0: "B"})
+        self.assertEqual(webapp._strike_checks(job_id), {("A", 12.0): "right"})
+
+        # Changing the answer replaces it.
+        self.client.post(f"/api/down-check/{job_id}", json={"seconds": 12.0, "verdict": "nobody"})
+        self.assertEqual(webapp._down_checks(job_id), {12.0: "nobody"})
+        self.assertEqual(len(database.get_annotations(job_id)), 2)
+
+        # Only listed moments, only known answers.
+        self.assertEqual(self.client.post(f"/api/down-check/{job_id}",
+                                          json={"seconds": 40.0, "verdict": "A"}).status_code, 404)
+        self.assertEqual(self.client.post(f"/api/down-check/{job_id}",
+                                          json={"seconds": 12.0, "verdict": "both"}).status_code, 400)
+
+        # Someone else's fight is refused.
+        self.client.post("/logout")
+        register("downs-other@example.com", "Strong-Local-Password")
+        self.client.post("/login", data={"email": "downs-other@example.com",
+                                         "password": "Strong-Local-Password", "accept_policies": "true"})
+        refused = self.client.post(f"/api/down-check/{job_id}", json={"seconds": 12.0, "verdict": "A"})
+        self.assertEqual(refused.status_code, 403)
+
+    def test_a_report_without_went_down_moments_lists_none(self):
+        """Reports analysed before this existed have no went_down key."""
+        self.assertEqual(webapp._went_down("nosuchjob", {"event_feed": []}), [])
+
 
 
 class UndecodableUploadTests(unittest.TestCase):
@@ -2188,3 +2244,7 @@ class AccountDeletionCoverageTests(unittest.TestCase):
         self.assertEqual(
             missed, set(),
             f"these tables hold account data and survive deletion: {sorted(missed)}")
+
+
+if __name__ == "__main__":
+    unittest.main()
