@@ -262,6 +262,68 @@
   {% endif %}
   {% endif %}
 
+  {#- Every plain number the analysis measured, side by side: seconds,
+      distances and counts (core/fight_numbers.py). Only on a fight whose
+      identity check held - each one is a claim about one fighter. -#}
+  {% set mp = (report.metrics[primary]|default({})).numbers|default(none) if not identity_failed else none %}
+  {% set mo = (report.metrics[opponent]|default({})).numbers|default(none) if not identity_failed else none %}
+  {% set op = p.output|default(none) if not identity_failed else none %}
+  {% set oo = o.output|default(none) if not identity_failed else none %}
+  {% if mp or op %}
+  {% macro secs(v) %}{% if v is none %}—{% elif v >= 60 %}{{ '%d:%02d'|format((v//60)|int, (v%60)|int) }}{% else %}{{ '%.0f'|format(v) }} s{% endif %}{% endmacro %}
+  {% macro row(label, a, b, note='') %}<div role="row"><span role="rowheader">{{ label }}{% if note %}<small>{{ note }}</small>{% endif %}</span><b role="cell" class="wiq-num">{{ a }}</b><b role="cell" class="wiq-num">{{ b }}</b></div>{% endmacro %}
+  <section class="fight-numbers" id="report-numbers" aria-labelledby="fightNumbersTitle">
+    <div class="numbers-section-heading"><div><span class="eyebrow">Every number</span><h2 id="fightNumbersTitle">How the fight went, in numbers</h2></div><span>Fighter {{ primary }} · Fighter {{ opponent }}</span></div>
+    {% if mp %}
+    <div class="fight-numbers-group" role="table" aria-label="Ring control">
+      <h3>Ring control</h3>
+      {{ row('Time in the middle', secs(mp.centre_seconds), secs(mo.centre_seconds if mo else none), 'of ' ~ secs(mp.seen_seconds) ~ ' seen') }}
+      {{ row('Moving forward', secs(mp.forward_seconds), secs(mo.forward_seconds if mo else none), 'towards the opponent') }}
+      {{ row('Backing up', secs(mp.backward_seconds), secs(mo.backward_seconds if mo else none)) }}
+      {{ row('Circling', secs(mp.circling_seconds), secs(mo.circling_seconds if mo else none)) }}
+      {{ row('Standing still', secs(mp.standing_seconds), secs(mo.standing_seconds if mo else none)) }}
+      {{ row('Distance covered', '%.0f'|format(mp.distance_body_lengths), ('%.0f'|format(mo.distance_body_lengths)) if mo else '—', 'body lengths') }}
+    </div>
+    <div class="fight-numbers-group" role="table" aria-label="Distance between the fighters">
+      <h3>Distance between you</h3>
+      {{ row('Close', secs(mp.range_seconds.close), secs(mo.range_seconds.close if mo else none), 'under 1 body length') }}
+      {{ row('Middle', secs(mp.range_seconds.middle), secs(mo.range_seconds.middle if mo else none), '1 to 2 body lengths') }}
+      {{ row('Long', secs(mp.range_seconds.long), secs(mo.range_seconds.long if mo else none), 'over 2 body lengths') }}
+    </div>
+    <div class="fight-numbers-group" role="table" aria-label="Defence">
+      <h3>Defence</h3>
+      {{ row('Hands up by the face', ('%.0f%%'|format(mp.hands_up_share*100)) if mp.hands_up_share is not none else '—', ('%.0f%%'|format(mo.hands_up_share*100)) if mo and mo.hands_up_share is not none else '—', 'of the time seen') }}
+      {{ row('Longest with hands down', secs(mp.longest_hands_down_seconds), secs(mo.longest_hands_down_seconds if mo else none)) }}
+      {{ row('Times off balance', mp.off_balance_count if mp.off_balance_count is not none else '—', mo.off_balance_count if mo and mo.off_balance_count is not none else '—') }}
+      {{ row('Defensive moves', (report.metrics[primary].defenses|default({})).values()|sum, (report.metrics[opponent].defenses|default({})).values()|sum, 'slips, blocks and evasions seen') }}
+    </div>
+    {% endif %}
+    {% if op and strike_counts_published %}
+    <div class="fight-numbers-group" role="table" aria-label="Output">
+      <h3>Output <small>estimates</small></h3>
+      {{ row('Strikes a minute', op.strikes_per_minute if op.strikes_per_minute is not none else '—', oo.strikes_per_minute if oo and oo.strikes_per_minute is not none else '—') }}
+      {{ row('Busiest 10 seconds', op.busiest_10s, oo.busiest_10s if oo else '—', 'strikes') }}
+      {{ row('Longest without throwing', secs(op.longest_pause_seconds), secs(oo.longest_pause_seconds if oo else none)) }}
+      {{ row('First strike', secs(op.first_strike_seconds), secs(oo.first_strike_seconds if oo else none), 'into the video') }}
+      {% for number, count in op.last_30s_by_round.items() %}{{ row('Last 30 s of round ' ~ number, count, (oo.last_30s_by_round.get(number, 0)) if oo else '—', 'strikes') }}{% endfor %}
+    </div>
+    {% endif %}
+    {% if mp and mp.pace_change_percent is not none %}
+    <div class="fight-numbers-group" role="table" aria-label="Pace">
+      <h3>Pace</h3>
+      {{ row('Speed, second half vs first', '%+d%%'|format(mp.pace_change_percent), ('%+d%%'|format(mo.pace_change_percent)) if mo and mo.pace_change_percent is not none else '—', 'minus means slower') }}
+    </div>
+    {% endif %}
+    {% if mp and mp.rounds and mp.rounds|length > 1 %}
+    <div class="fight-numbers-group" role="table" aria-label="Time in the middle by round">
+      <h3>Time in the middle, by round</h3>
+      {% for number, r in mp.rounds.items() %}{{ row('Round ' ~ number, secs(r.centre_seconds), secs((mo.rounds.get(number) or {}).get('centre_seconds') if mo else none)) }}{% endfor %}
+    </div>
+    {% endif %}
+    <p class="small muted">Measured from the two tracked bodies frame by frame: seconds are seconds the fighter was seen. "The middle" is the inner half of the area the two of you used.</p>
+  </section>
+  {% endif %}
+
   {% if stats_ready %}
   <div class="headline-numbers">
     <article><span>Accuracy</span><strong data-count-up>{{'%.0f'|format(p.accuracy*100) if p.accuracy is not none else '—'}}</strong><small>{% if p.accuracy is not none %}%{% else %}uncertain outcome{% endif %}</small></article>
