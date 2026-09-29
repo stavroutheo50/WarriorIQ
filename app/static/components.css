@@ -644,3 +644,18 @@
 .fight-numbers-group [role=cell]{text-align:right;font-size:17px}
 .fight-numbers-group [role=cell]+[role=cell]{color:#9aa8c2}
 @media (max-width:560px){.fight-numbers-group [role=row]{grid-template-columns:1fr 64px 64px}.fight-numbers-group{padding:10px 12px}}
+/* A share button that says why it cannot share (result.html). */
+.share-unavailable{position:relative}
+.share-unavailable summary{list-style:none;cursor:pointer}
+.share-unavailable summary::-webkit-details-marker{display:none}
+.share-unavailable p{position:absolute;z-index:5;right:0;top:calc(100% + 6px);width:min(320px,80vw);margin:0;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:#10192b;box-shadow:0 12px 30px rgba(0,0,0,.4)}
+@media (max-width:560px){.share-unavailable p{position:static;width:auto;margin-top:8px}}
+/* Phones: today's upload always one thumb away (camp.html). */
+.camp-sticky{display:none}
+@media (max-width:760px){
+  .camp-sticky{display:block;position:fixed;z-index:30;left:0;right:0;bottom:0;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:rgba(8,12,22,.94);border-top:1px solid rgba(255,255,255,.1);backdrop-filter:blur(8px)}
+  .camp-sticky .session-upload,.camp-sticky label{width:100%;justify-content:center}
+  .camp-sticky label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  body:has(.camp-sticky){padding-bottom:76px}
+}
+.camp-share-open{width:100%;justify-content:center}

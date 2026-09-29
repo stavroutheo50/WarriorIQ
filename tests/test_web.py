@@ -1884,7 +1884,7 @@ class PublicPageTests(unittest.TestCase):
 
     def test_progress_uses_supported_movement_metrics_when_actions_are_unvalidated(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(encoding="utf-8")
-        for label in ("Guard", "Balance", "Ring centre", "Pose evidence"):
+        for label in ("Guard", "Balance", "Ring centre", "How clearly we saw you"):
             self.assertIn(f'<span class="label">{label}</span>', template)
         self.assertIn("Movement progress is ready", template)
         self.assertIn("Not validated", template)

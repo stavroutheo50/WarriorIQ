@@ -4351,6 +4351,11 @@ def result_page(request: Request, job_id: str):
         # Stats-only story card for Instagram, TikTok, WhatsApp and the rest:
         # an image made in the browser, no link and no video, so every plan.
         "share_card": share_card(report) if _account(request) else None,
+        # Why there is no card, so the button can say so instead of vanishing.
+        "share_card_missing": (
+            "account" if not _account(request)
+            else "identity" if not identity_trusted
+            else "stats"),
         # The fight's live public links, one per fighter (story_page).
         "story_links": [
             {"side": link["side"], "name": link["name"], "url": f"{_public_base(request)}/f/{link['token']}"}
@@ -5331,6 +5336,11 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
             "camp": camp,
             "standing": camp_standing(points, sessions, today),
             "points_history": points_history(points),
+            # The stats-only Fight Camp story card (static/camp_share.js).
+            "camp_card": {
+                "improved": sum(1 for result in results.values() if result["improved"]),
+                "sessions": sum(counted.values()),
+            },
             # One card per mission at whatever stage it is, and the one thing
             # to do next at the top. See core/camp.py.
             "board": board,
