@@ -187,13 +187,7 @@ def identity_churned(tracking: dict) -> dict[str, bool]:
     panning handheld camera in a crowded hall - lands on spectators and the
     opponent while coverage stays high. Absent on older reports, which are
     judged as before. See SETTINGS.max_identity_handoffs_per_minute.
-
-    Unless the fight's owner looked: after seeing both boxes on the right
-    people across the fight (app.main identity check), being found again
-    often is a fact about the camera, not about who was followed.
     """
-    if (tracking or {}).get("identity_confirmed_by_owner"):
-        return {"A": False, "B": False}
     return {
         fighter: float(tracking.get(f"fighter_{fighter}_handoffs_per_minute") or 0.0)
         > SETTINGS.max_identity_handoffs_per_minute
@@ -225,7 +219,6 @@ IDENTITY_TRACKING_KEYS = (
     "fighter_A_seed_source", "fighter_B_seed_source", "initial_iou_A", "initial_iou_B",
     "fighter_A_coverage", "fighter_B_coverage", "fighters_separable", "fighter_pair_similarity",
     "identity_confusions", "fighter_A_handoffs_per_minute", "fighter_B_handoffs_per_minute",
-    "identity_confirmed_by_owner",
 )
 
 
