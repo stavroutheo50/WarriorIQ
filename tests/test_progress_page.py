@@ -145,7 +145,7 @@ class CoachPageTests(unittest.TestCase):
         self.assertEqual(summarize_fight(thin, {"job_id": "b"})["unusable_reason"], "coverage")
         page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(
             encoding="utf-8")
-        self.assertIn("identity check failed", page)
+        self.assertIn("couldn't tell who was who", page)
         self.assertIn("squad.unusable_identity", page)
 
     def test_the_coach_page_uses_the_current_name_for_centre(self):

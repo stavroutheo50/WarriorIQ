@@ -119,7 +119,7 @@ def build_progress(records: list[dict], fighter: str) -> dict:
     )
     trend_labels = {
         "guard": "Guard position", "balance": "Post-action balance",
-        "center": "Ring-center position", "coverage": "Pose evidence quality",
+        "center": "Ring-center position", "coverage": "How clearly you were seen",
     }
     return {
         "fighter": fighter,
