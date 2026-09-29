@@ -4138,12 +4138,39 @@ class ObservedSummaryTests(unittest.TestCase):
         self.assertEqual(seen["A"]["knees_withheld"], 3)
 
     def test_knees_reach_the_attempt_tier_at_all(self):
-        from pathlib import Path
+        from types import SimpleNamespace
 
-        source = Path("core/analyzer.py").read_text(encoding="utf-8")
-        start = source.index("def _live_attempt_reliable")
-        window = source[start:source.index("return (", start) + 900]
-        self.assertIn(chr(34) + "knee" + chr(34), window)
+        from core.analyzer import _attempt_drop_reason, _live_attempt_reliable
+
+        knee = SimpleNamespace(attempted=True, family="knee", peak_time=4.0, confidence=1.0,
+                               outcome="landed", metadata={})
+        self.assertTrue(_live_attempt_reliable(knee))
+        self.assertIsNone(_attempt_drop_reason(knee))
+
+    def test_every_dropped_strike_says_why(self):
+        from types import SimpleNamespace
+
+        from core.analyzer import _attempt_drop_reason, _live_event_diagnostics
+
+        def event(**changes):
+            base = dict(attempted=True, family="kick", peak_time=4.0, confidence=1.0,
+                        outcome="landed", metadata={})
+            base.update(changes)
+            return SimpleNamespace(**base)
+
+        cases = {
+            "not_a_strike": event(family="step"),
+            "too_faint": event(confidence=0.0),
+            "thrown_at_nothing": event(family="punch", outcome="missed"),
+            "unsure_who_was_who": event(metadata={"attacker_identity_confidence": 0.5}),
+        }
+        for reason, candidate in cases.items():
+            self.assertEqual(_attempt_drop_reason(candidate), reason)
+        # The scoring check beside it needs real events; it is not what is under test.
+        with unittest.mock.patch("core.analyzer._live_event_reliable", return_value=False):
+            diagnostics = _live_event_diagnostics(list(cases.values()) + [event()], "K1", False, [])
+        self.assertEqual(diagnostics["dropped"], {reason: 1 for reason in cases})
+        self.assertEqual(diagnostics["candidate_events_seen"], 5)
 
     # The withholding path, still reachable with the publish switch off.
     @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
