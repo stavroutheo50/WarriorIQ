@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 import numpy as np
 
 from core.config import SETTINGS
+from core.fight_numbers import movement_numbers
 from core.types import DefenseEvent, PersonObservation, StrikeEvent
 
 NOSE = 0
@@ -95,6 +96,11 @@ class MetricsAccumulator:
         # be judged separately on ring generalship and effective aggression.
         self.timed_positions: list[tuple[float, str, float, float]] = []
         self.timed_pressure: list[tuple[float, str, float]] = []
+        # Every reading of one frame together, for the plain numbers in
+        # core/fight_numbers.py: seconds in the middle, moving forward, at
+        # each distance, with the hands down.
+        self.timeline: dict[str, list[dict]] = {"A": [], "B": []}
+        self._rounds = None
 
     def rebucket_rounds(self, rounds) -> None:
         """Re-assign per-round pose evidence after the rounds are detected.
@@ -111,6 +117,7 @@ class MetricsAccumulator:
         """
         from core.video import round_at_time
 
+        self._rounds = list(rounds)
         self.round_frames = defaultdict(lambda: {"A": 0, "B": 0})
         self.round_visible = defaultdict(lambda: {"A": 0, "B": 0})
         for seconds, fighter, visible in self._presence:
@@ -137,14 +144,20 @@ class MetricsAccumulator:
         body = _body(obs)
         previous_center = self.last_center[fighter]
         previous_time = self.last_time[fighter]
+        sample = {"t": float(seconds), "x": float(center[0]), "y": float(center[1]), "body": float(body),
+                  "guard": None, "balance": None, "toward": None, "speed": None, "gap": None}
+        if opp_center is not None:
+            sample["gap"] = float(np.linalg.norm(opp_center - center)) / max(1.0, (body + _body(opponent)) / 2.0)
         if previous_center is not None and previous_time is not None and seconds > previous_time:
             delta = center - previous_center
             self.movement[fighter] += float(np.linalg.norm(delta)) / body
+            sample["speed"] = float(np.linalg.norm(delta)) / body / (float(seconds) - float(previous_time))
             if opp_center is not None:
                 to_opp = opp_center - previous_center
                 nd, nv = float(np.linalg.norm(to_opp)), float(np.linalg.norm(delta))
                 if nd > 1e-6 and nv > 1e-6:
                     toward = float(np.dot(delta / nv, to_opp / nd))
+                    sample["toward"] = toward
                     self.pressure_samples[fighter].append(toward)
                     # Same reading, kept with its timestamp so a round can be
                     # judged on it. See core/generalship.py.
@@ -162,6 +175,7 @@ class MetricsAccumulator:
                     distances.append(float(np.linalg.norm(wrist - nose)) / body)
             if distances:
                 value = 1.0 - min(1.0, min(distances) / 0.48)
+                sample["guard"] = value
                 self.guard_samples[fighter].append(value)
                 self.timed_guard[fighter].append((float(seconds), value))
 
@@ -173,9 +187,11 @@ class MetricsAccumulator:
             base_score = 1.0 - min(1.0, abs(base - 0.28) / 0.35)
             tilt_score = 1.0 - min(1.0, (shoulder_tilt + hip_tilt) / 0.35)
             value = 0.55 * tilt_score + 0.45 * base_score
+            sample["balance"] = value
             self.balance_samples[fighter].append(value)
             self.timed_balance[fighter].append((float(seconds), value))
 
+        self.timeline[fighter].append(sample)
         self.last_center[fighter] = center
         self.last_time[fighter] = seconds
 
@@ -251,6 +267,19 @@ class MetricsAccumulator:
         distances = np.linalg.norm(np.stack(mine) - middle, axis=1)
         # 1.0 is dead centre of the area used; 0.0 is at or beyond its edge.
         return float(np.mean(np.clip(1.0 - distances / radius, 0.0, 1.0)))
+
+    def _numbers(self, fighter: str) -> dict | None:
+        everyone = [point for side in ("A", "B") for point in (self.positions.get(side) or [])]
+        frame = ring_frame(np.stack(everyone)) if len(everyone) >= 10 else None
+        middle, radius = frame if frame is not None else (None, None)
+        round_of = None
+        if self._rounds:
+            from core.video import round_at_time
+
+            def round_of(seconds: float) -> int | None:
+                spec = round_at_time(self._rounds, seconds)
+                return spec.number if spec is not None and spec.selected else None
+        return movement_numbers(self.timeline[fighter], middle, radius, round_of)
 
     @staticmethod
     def _attack_stats(fighter: str, events: list[StrikeEvent]) -> dict:
@@ -396,6 +425,8 @@ class MetricsAccumulator:
                 "vulnerability_targets": dict(vulnerability_targets),
                 "vulnerability_techniques": dict(vulnerability_techniques),
                 "footwork_body_lengths_per_second": footwork,
+                # Seconds and distances in plain numbers. See core/fight_numbers.py.
+                "numbers": self._numbers(fighter) if enough else None,
                 "pressure_index": pressure,
                 "ring_center_control": ring_control,
                 "guard_index": guard,

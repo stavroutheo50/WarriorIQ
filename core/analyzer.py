@@ -32,6 +32,7 @@ from core.contact import (
 from core.db import save_fight
 from core.defense import DefenseEngine
 from core.evidence_trust import automated_evidence_trust
+from core.fight_numbers import output_numbers
 from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
 
@@ -1213,6 +1214,17 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     final_live_stats["diagnostics"] = _live_event_diagnostics(
         events, req.ruleset, live_action_trusted, all_final_live_events,
     )
+    # When each fighter threw, from the same counted strikes as the totals.
+    # See core/fight_numbers.py.
+    round_bounds = [
+        (spec.number, max(spec.start_seconds, req.start_seconds), min(spec.end_seconds, segment_end_seconds))
+        for spec in rounds
+        if spec.selected and min(spec.end_seconds, segment_end_seconds) > max(spec.start_seconds, req.start_seconds)
+    ] or [(1, req.start_seconds, segment_end_seconds)]
+    for side in ("A", "B"):
+        mine = [float(item["time_seconds"]) for item in all_final_live_events if item.get("fighter") == side]
+        theirs = [float(item["time_seconds"]) for item in all_final_live_events if item.get("fighter") not in (side, None)]
+        final_live_stats.setdefault("fighters", {}).setdefault(side, {})["output"] = output_numbers(mine, theirs, round_bounds)
     final_live_events = all_final_live_events[-160:]
     public_event_ids = {item["id"] for item in all_final_live_events}
     report_events = (
@@ -1223,6 +1235,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         if live_action_trusted else events
     )
     classifier["actions_discarded_out_of_range"] = out_of_range_actions
+    # Always against the final rounds (detected or scheduled), so the plain
+    # numbers can be given per round. Idempotent after a detection above.
+    metrics.rebucket_rounds(rounds)
     metric_data = metrics.finalize(report_events, defenses, segment_duration)
     signature_payload = {
         "video_segment": [start_frame, end_frame, round(info.fps, 6)],
