@@ -823,3 +823,28 @@ fieldset.needs-attention {
 @media (max-width: 650px) {
   .numbers-score > small { margin-left: 0; }
 }
+
+/* --- Phones: smooth scrolling --------------------------------------------
+   Frosted-glass blur on the sticky bar, the cookie notice and the toast is
+   redrawn over whatever scrolls beneath it, every frame, and on a phone that
+   is what made the long report page stutter. On touch screens they get a
+   solid background instead; they look the same at a glance. */
+@media (hover: none), (max-width: 760px) {
+  .nav, .mobile-menu, .cookie-notice, .app-toast, .live-video-status, .camp-sticky {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  .nav { background: #080d17 !important; }
+  .cookie-notice { background: #0c1629 !important; box-shadow: 0 8px 24px #0009 !important; }
+  .app-toast { background: #111b30 !important; }
+  .camp-sticky { background: #080c16 !important; }
+  .hero-copy:before { filter: none !important; }
+}
+/* The long report sections below the fold are laid out and painted only as
+   they come near the screen, instead of all at once on every scroll. */
+@media (max-width: 760px) {
+  .complete-report-section, .visual-report, .performance-card, .momentum-card, .fight-numbers-group {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 640px;
+  }
+}
