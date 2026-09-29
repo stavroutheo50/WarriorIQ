@@ -243,21 +243,7 @@ def _live_attempt_reliable(event) -> bool:
     target, technique side and scoring remain withheld until the release gate
     validates the complete action classifier.
     """
-    return (
-        bool(getattr(event, "attempted", True))
-        # Knees included. They were excluded here while knee_attempts was
-        # still computed downstream, so the report carried a knee column that
-        # could never be anything but zero while real knees were discarded -
-        # five of twelve events on one bout. At this tier the claim is only
-        # "a limb was thrown", and a knee is evidenced exactly as a punch is.
-        and getattr(event, "family", None) in {"punch", "kick", "knee"}
-        and math.isfinite(float(getattr(event, "peak_time", -1.0)))
-        and float(getattr(event, "peak_time", -1.0)) >= 0.0
-        and float(getattr(event, "confidence", 0.0)) >= ATTEMPT_CONFIDENCE
-        and not _punch_thrown_at_nothing(event)
-        and float(event.metadata.get("attacker_identity_confidence", 1.0)) >= 0.76
-        and float(event.metadata.get("opponent_identity_confidence", 1.0)) >= 0.76
-    )
+    return _attempt_drop_reason(event) is None
 
 
 def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | None = 160) -> list[dict]:
@@ -323,8 +309,44 @@ def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | 
     return payload if limit is None else payload[-max(1, int(limit)):]
 
 
+def _attempt_drop_reason(event) -> str | None:
+    """Why _live_attempt_reliable turned a candidate down, or None if it did not.
+
+    The same checks in the same order, named, so a fight that shows no strikes
+    can say what happened to the ones the detector proposed.
+    """
+    if not bool(getattr(event, "attempted", True)):
+        return "not_a_strike"
+    # Knees included. They were excluded here while knee_attempts was still
+    # computed downstream, so the report carried a knee column that could
+    # never be anything but zero while real knees were discarded - five of
+    # twelve events on one bout. At this tier the claim is only "a limb was
+    # thrown", and a knee is evidenced exactly as a punch is.
+    if getattr(event, "family", None) not in {"punch", "kick", "knee"}:
+        return "not_a_strike"
+    peak = float(getattr(event, "peak_time", -1.0))
+    if not math.isfinite(peak) or peak < 0.0:
+        return "not_a_strike"
+    if float(getattr(event, "confidence", 0.0)) < ATTEMPT_CONFIDENCE:
+        return "too_faint"
+    if _punch_thrown_at_nothing(event):
+        return "thrown_at_nothing"
+    if (float(event.metadata.get("attacker_identity_confidence", 1.0)) < 0.76
+            or float(event.metadata.get("opponent_identity_confidence", 1.0)) < 0.76):
+        return "unsure_who_was_who"
+    return None
+
+
 def _live_event_diagnostics(events: list, ruleset: str, trusted: bool, emitted: list[dict]) -> dict:
+    dropped: dict[str, int] = {}
+    for event in events:
+        reason = _attempt_drop_reason(event)
+        if reason is not None:
+            dropped[reason] = dropped.get(reason, 0) + 1
     return {
+        # What happened to every strike the detector proposed. See
+        # _attempt_drop_reason; the result page shows it when nothing counted.
+        "dropped": dropped,
         "candidate_events_seen": len(events),
         "identity_safe_attempts": sum(_live_attempt_reliable(event) for event in events),
         "verified_events": sum(_live_event_reliable(event, ruleset) for event in events),

@@ -262,6 +262,34 @@
   {% endif %}
   {% endif %}
 
+  {#- When no strike was counted, what happened to the ones the detector
+      proposed (core.analyzer._attempt_drop_reason), and how the video was
+      analysed. A bare "0" cannot be told apart from a broken analysis. -#}
+  {% set diag = stats.diagnostics|default({}, true) %}
+  {% set perf = report.performance|default({}, true) %}
+  {% set counted = (fighter_stats.get('A', {}).attempts|default(0, true)) + (fighter_stats.get('B', {}).attempts|default(0, true)) %}
+  {% if strike_counts_published and not identity_failed and counted == 0 and diag.candidate_events_seen is defined %}
+  {% set dropped = diag.dropped|default({}, true) %}
+  <section class="notice why-no-strikes" id="report-no-strikes" aria-labelledby="noStrikesTitle">
+    <h3 id="noStrikesTitle">Why no strikes were counted</h3>
+    {% if diag.candidate_events_seen %}
+    <p>WarriorIQ saw <b>{{ diag.candidate_events_seen }}</b> possible strike{{ '' if diag.candidate_events_seen == 1 else 's' }} and could not stand behind any of them{{ ':' if dropped else '.' }}</p>
+    {#- Reports analysed before the reasons were kept have only the total. -#}
+    <ul class="list-clean">
+      {% for key, label in [('unsure_who_was_who', 'not sure enough which fighter threw it'), ('too_faint', 'too faint to be sure it was a strike'), ('thrown_at_nothing', 'punches that never came near the opponent'), ('not_a_strike', 'movements that were not a strike')] %}{% if dropped.get(key) %}<li><b class="wiq-num">{{ dropped[key] }}</b> {{ label }}</li>{% endif %}{% endfor %}
+    </ul>
+    {% else %}
+    <p>WarriorIQ did not see a single movement it could call a strike.</p>
+    {% endif %}
+    {% if perf.final_analysis_fps %}<p class="small">Analysed at <b>{{ '%.0f'|format(perf.final_analysis_fps) }} frames a second</b>{% if perf.final_analysis_fps < 10 %}: a fast strike lasts a fraction of a second, so it was seen in only one or two frames{% endif %}.</p>{% endif %}
+  </section>
+  {% endif %}
+  {#- How the analysis ran: what makes a fight quick or slow to analyse. -#}
+  {% if perf.analysis_seconds and perf.segment_duration_seconds %}
+  {% set took = perf.analysis_seconds %}{% set length = perf.segment_duration_seconds %}
+  <p class="small muted analysis-run" id="report-analysis-run">Analysed at {{ '%.0f'|format(perf.final_analysis_fps or 0) }} frames a second on {{ 'the processor (no graphics card)' if (perf.gpu|default('CPU', true)) == 'CPU' else 'the graphics card (' ~ perf.gpu ~ ')' }} · took {{ '%d:%02d'|format((took//60)|int, (took%60)|int) }} for {{ '%d:%02d'|format((length//60)|int, (length%60)|int) }} of video.</p>
+  {% endif %}
+
   {#- Every plain number the analysis measured, side by side: seconds,
       distances and counts (core/fight_numbers.py). Only on a fight whose
       identity check held - each one is a claim about one fighter. -#}
