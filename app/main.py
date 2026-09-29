@@ -414,7 +414,7 @@ SPORT_IRRELEVANT_PREFIXES = ("/profile", "/settings", "/legal", "/privacy", "/te
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/dashboard", "/history",
-    "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/",
+    "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/", "/check/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
     "/auth/",
 )
@@ -4351,6 +4351,10 @@ def result_page(request: Request, job_id: str):
         # Stats-only story card for Instagram, TikTok, WhatsApp and the rest:
         # an image made in the browser, no link and no video, so every plan.
         "share_card": share_card(report) if _account(request) else None,
+        # A fight held back only because the camera kept losing the fighters
+        # can be cleared by its owner looking (/check/<job>).
+        "identity_check_available": _identity_check_clears(report),
+        "identity_checked_by_owner": bool((report.get("tracking") or {}).get("identity_confirmed_by_owner")),
         # Why there is no card, so the button can say so instead of vanishing.
         "share_card_missing": (
             "account" if not _account(request)
@@ -4940,6 +4944,134 @@ def media(request: Request, job_id: str):
     # Set here rather than in the middleware, which uses setdefault: this wins,
     # while a 404 on the same prefix still falls through to no-store.
     return FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
+
+
+# ---- Checking who is who ---------------------------------------------------
+#
+# A moving phone camera makes the tracker lose people and find them again,
+# and past a rate (SETTINGS.max_identity_handoffs_per_minute) the report stops
+# vouching for whose numbers are whose - on footage where that was measured,
+# the box had mostly wandered onto other people. But being found again often
+# does not prove the box wandered. The fight's owner can look: a few moments
+# across the fight with both boxes drawn, and if every one is on the right
+# fighter the report says so and stops holding the numbers back. Only that
+# one reason is ever cleared this way; fighters who look alike, or a first
+# lock that never held, still need "Show me who is who".
+
+IDENTITY_CHECK_MOMENTS = 6
+IDENTITY_CHECK_COLOURS = {"A": (255, 167, 85), "B": (75, 184, 241)}   # BGR, as the replay draws them
+
+
+def _identity_check_clears(report: dict) -> bool:
+    """True when the only reason the identity check failed is being found again too often."""
+    from core.report import identity_churned, identity_ready_by_fighter
+
+    tracking = dict(report.get("tracking") or {})
+    if tracking.get("identity_confirmed_by_owner") or not any(identity_churned(tracking).values()):
+        return False
+    tracking["identity_confirmed_by_owner"] = True
+    ready = identity_ready_by_fighter(tracking)
+    target = (report.get("video") or {}).get("analysis_target", "BOTH")
+    return all(ready.get(fighter, False) for fighter in (("A", "B") if target == "BOTH" else (target,)))
+
+
+def _identity_check_moments(job_id: str) -> list[dict]:
+    """Evenly spread moments where both fighters have a box."""
+    rows = []
+    try:
+        tracking = _require_completed_artifact(job_id, "tracking.jsonl")
+    except HTTPException:
+        return rows
+    with tracking.open(encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            boxes = {fighter: ((record.get(f"fighter_{fighter}") or {}).get("observation") or {}).get("box")
+                     for fighter in ("A", "B")}
+            if boxes["A"] and boxes["B"]:
+                rows.append({"frame": int(record["source_frame"]),
+                             "seconds": float(record.get("time_seconds") or 0.0), **boxes})
+    if len(rows) <= IDENTITY_CHECK_MOMENTS:
+        return rows
+    step = (len(rows) - 1) / (IDENTITY_CHECK_MOMENTS - 1)
+    return [rows[round(index * step)] for index in range(IDENTITY_CHECK_MOMENTS)]
+
+
+def _identity_check_video(job_id: str) -> Path | None:
+    job = get_job(job_id)
+    fight = None if job else get_fight(job_id)
+    source = (job or fight or {}).get("video_path")
+    path = Path(source) if source else None
+    return path if path is not None and path.exists() else None
+
+
+@app.get("/check/{job_id}", response_class=HTMLResponse)
+def identity_check_page(request: Request, job_id: str):
+    if not _authorized_job(request, job_id):
+        raise HTTPException(404)
+    report = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
+    confirmed = bool((report.get("tracking") or {}).get("identity_confirmed_by_owner"))
+    return templates.TemplateResponse(request=request, name="identity_check.html", context={
+        "request": request, "job_id": job_id, "confirmed": confirmed,
+        "can_clear": _identity_check_clears(report),
+        "has_video": _identity_check_video(job_id) is not None,
+        "moments": _identity_check_moments(job_id),
+    })
+
+
+@app.get("/check/{job_id}/moment/{index}.jpg")
+def identity_check_moment(request: Request, job_id: str, index: int):
+    if not _authorized_job(request, job_id):
+        raise HTTPException(404)
+    moments = _identity_check_moments(job_id)
+    video = _identity_check_video(job_id)
+    if not 0 <= index < len(moments) or video is None:
+        raise HTTPException(404)
+    moment = moments[index]
+    capture = cv2.VideoCapture(str(video))
+    try:
+        capture.set(cv2.CAP_PROP_POS_FRAMES, moment["frame"])
+        ok, frame = capture.read()
+    finally:
+        capture.release()
+    if not ok or frame is None:
+        raise HTTPException(404)
+    thickness = max(2, frame.shape[1] // 320)
+    for fighter in ("A", "B"):
+        x1, y1, x2, y2 = (int(round(value)) for value in moment[fighter])
+        colour = IDENTITY_CHECK_COLOURS[fighter]
+        cv2.rectangle(frame, (x1, y1), (x2, y2), colour, thickness, cv2.LINE_AA)
+        scale = max(0.6, frame.shape[1] / 900)
+        cv2.putText(frame, fighter, (x1, max(0, y1 - 6)), cv2.FONT_HERSHEY_DUPLEX, scale, colour,
+                    thickness, cv2.LINE_AA)
+    if frame.shape[1] > 720:
+        frame = cv2.resize(frame, (720, round(frame.shape[0] * 720 / frame.shape[1])), interpolation=cv2.INTER_AREA)
+    ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
+    if not ok:
+        raise HTTPException(500)
+    return Response(encoded.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.post("/check/{job_id}", dependencies=[Depends(require_csrf)])
+def confirm_identity_check(request: Request, job_id: str):
+    """The owner saw both boxes on the right fighters: record it in the report."""
+    if not _authorized_job(request, job_id):
+        raise HTTPException(404)
+    path = _require_completed_artifact(job_id, "report.json")
+    report = json.loads(path.read_text(encoding="utf-8"))
+    if not _identity_check_clears(report):
+        raise HTTPException(409, "This fight's identity check cannot be cleared by looking at it.")
+    moments = _identity_check_moments(job_id)
+    report.setdefault("tracking", {})["identity_confirmed_by_owner"] = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "moments_seconds": [round(moment["seconds"], 2) for moment in moments],
+    }
+    staging = path.with_name(path.name + ".checking")
+    staging.write_text(json.dumps(report), encoding="utf-8")
+    staging.replace(path)
+    return RedirectResponse(f"/result/{job_id}?checked=1", status_code=303)
 
 
 @app.get("/profile", response_class=HTMLResponse)
