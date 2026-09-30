@@ -68,6 +68,28 @@ class LabelledFightBenchmarkTests(unittest.TestCase):
         self.assertFalse(_punch_thrown_at_nothing(SimpleNamespace(family="kick", outcome="missed")))
         self.assertFalse(_punch_thrown_at_nothing(SimpleNamespace(family="punch", outcome="blocked")))
 
+    def test_a_missed_punch_that_reached_the_guard_was_thrown(self):
+        """A jab into the guard is scored "missed" but was a real punch.
+
+        Checked by eye on handheld phone sparring: within 0.42 body lengths of
+        the opponent's glove, 7 of 9 were real; beyond it, 14 of 15 were a
+        fighter standing in guard.
+        """
+        from types import SimpleNamespace
+
+        from core.analyzer import MISSED_PUNCH_REACHED_GUARD, _punch_thrown_at_nothing
+
+        def punch(guard):
+            return SimpleNamespace(family="punch", outcome="missed",
+                                   evidence={"defender_guard_distance": guard})
+
+        self.assertFalse(_punch_thrown_at_nothing(punch(0.16)))
+        self.assertFalse(_punch_thrown_at_nothing(punch(MISSED_PUNCH_REACHED_GUARD)))
+        self.assertTrue(_punch_thrown_at_nothing(punch(0.64)))
+        # No defender wrists seen: nothing says it came near, as before.
+        self.assertTrue(_punch_thrown_at_nothing(punch(999.0)))
+        self.assertTrue(_punch_thrown_at_nothing(SimpleNamespace(family="punch", outcome="missed")))
+
     def test_the_ambiguous_moment_is_decided_by_majority(self):
         moments = {(m["fighter"], m["time"]): m for m in bench.load_moments()}
         self.assertIsNone(moments[("A", 87.67)]["truth"])      # cross, none, wrong person, none

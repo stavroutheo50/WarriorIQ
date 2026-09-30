@@ -222,6 +222,23 @@ def _live_event_reliable(event, ruleset: str) -> bool:
     )
 
 
+# How close the punching fist must come to one of the opponent's gloves, in
+# body lengths, for a "missed" punch to count as thrown: it reached the guard.
+#
+# Measured 2026-09-30, every "missed" punch checked by eye:
+#
+#     phone sparring (V16, V17, VID)  within 0.42: 7 real, 1 real but filed
+#                                     under the other fighter, 1 unclear;
+#                                     beyond: 1 real at 0.45, the rest (14)
+#                                     a fighter standing in guard
+#     Kick Light (labelled)           within 0.42: the 1 real one (0.42);
+#                                     beyond: all 11 fakes, nearest 0.45
+#
+# A jab into the guard is scored "missed" because no clean contact was seen,
+# and on handheld phone sparring those were thrown out wholesale.
+MISSED_PUNCH_REACHED_GUARD = 0.42
+
+
 def _punch_thrown_at_nothing(event) -> bool:
     """A punch whose hand never came near the opponent.
 
@@ -229,10 +246,14 @@ def _punch_thrown_at_nothing(event) -> bool:
     called "missed" were proposed and not one was a real strike: they were a
     lead hand reaching out at distance, measuring or feinting, which is not a
     strike in any ruleset here. Missed kicks are left in - 3 of 5 were real.
-    The event itself is kept; it is only not counted as an attempt.
+    A missed punch whose fist reached the opponent's guard is kept: see
+    MISSED_PUNCH_REACHED_GUARD. The event itself is kept either way; it is
+    only not counted as an attempt.
     """
-    return (getattr(event, "family", None) == "punch"
-            and getattr(event, "outcome", None) == "missed")
+    if getattr(event, "family", None) != "punch" or getattr(event, "outcome", None) != "missed":
+        return False
+    guard = (getattr(event, "evidence", None) or {}).get("defender_guard_distance")
+    return not (guard is not None and float(guard) <= MISSED_PUNCH_REACHED_GUARD)
 
 
 def _live_attempt_reliable(event, ruleset: str | None = None) -> bool:
