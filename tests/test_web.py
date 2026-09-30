@@ -4056,7 +4056,10 @@ class CoachFilenameTests(unittest.TestCase):
                 / "camp.html").read_text(encoding="utf-8")
         # The squad table only: Fight Camp also carries the athlete's own
         # history table, which has always had a Ruleset column.
-        coach = page.split('id="squad"', 1)[1].split("</table>", 1)[0]
+        # The header lives in the table; each row is the squad_row macro,
+        # shared by the newest five and the folded older fights.
+        coach = (page.split('id="squad"', 1)[1].split("</table>", 1)[0]
+                 + page.split("{% macro squad_row(f) %}", 1)[1].split("{% endmacro %}", 1)[0])
         self.assertNotIn("f.name", coach)
         self.assertIn("{{f.label}}", coach)
         # The raw enum went with it: KICK_LIGHT is not a thing to show a coach.

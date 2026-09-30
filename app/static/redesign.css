@@ -857,3 +857,35 @@ fieldset.needs-attention {
     contain-intrinsic-size: auto 640px;
   }
 }
+
+/* Fight Camp on a phone: every tap target at least 44 px, the size of a
+   fingertip. Measured at 390 px wide, fifteen of them were 19-23 px tall -
+   the "Open" link on each squad row, "Open that fight", "Open library" and
+   the fold-out headings - easy to miss and easy to hit the wrong one. */
+@media (hover: none), (max-width: 760px) {
+  .camp-missions .section-title .text-link,
+  .recent-fights .section-title .text-link,
+  #squad td .text-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 8px;
+  }
+  .camp-rules > summary,
+  .camp-add > summary,
+  .camp-history > summary,
+  .camp-finished > summary,
+  .squad-more > summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    cursor: pointer;
+  }
+}
+.squad-more { margin-top: 12px; }
+.squad-more > summary { font-weight: 700; color: var(--wiq-text-secondary, #aebbd0); }
+/* On a phone each squad row is a stacked card, and a "—" line for every
+   value the fight has not got made each card twice the height it needs. */
+@media (max-width: 760px) {
+  #squad td.is-empty { display: none; }
+}
