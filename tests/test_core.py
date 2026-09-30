@@ -4172,6 +4172,22 @@ class ObservedSummaryTests(unittest.TestCase):
         self.assertEqual(diagnostics["dropped"], {reason: 1 for reason in cases})
         self.assertEqual(diagnostics["candidate_events_seen"], 5)
 
+    def test_no_frame_copies_for_a_sam2_rescue_that_cannot_run(self):
+        from core.analyzer import _fallback_buffer_needed
+
+        with unittest.mock.patch("core.analyzer.SETTINGS",
+                                 unittest.mock.Mock(sam_recovery_enabled=True)):
+            # No GPU: SAM2 failed to load, so a rescue can never run.
+            self.assertFalse(_fallback_buffer_needed({}, False))
+            # Continuous guidance ran: it is the recovery path already.
+            self.assertFalse(_fallback_buffer_needed({10: {"A": None}}, True))
+            # Loaded but produced nothing, or never tried: keep the buffer.
+            self.assertTrue(_fallback_buffer_needed({}, True))
+            self.assertTrue(_fallback_buffer_needed({}, None))
+        with unittest.mock.patch("core.analyzer.SETTINGS",
+                                 unittest.mock.Mock(sam_recovery_enabled=False)):
+            self.assertFalse(_fallback_buffer_needed({}, None))
+
     def test_boxing_has_no_kicks_or_knees_to_count(self):
         """On handheld boxing sparring every kick and knee proposed was footwork.
 
