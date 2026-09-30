@@ -4497,3 +4497,19 @@ class CookielessTrafficCountTests(unittest.TestCase):
         with mock.patch.object(database, "connection", side_effect=OSError("no database")):
             database._flush_page_views_at_exit()   # must not raise
         self.assertEqual(database.flush_page_views(), 1, "the counts were dropped")
+
+
+class LibraryMissingReportTests(unittest.TestCase):
+    """A saved fight whose report files are gone is not a link to a 404."""
+
+    def test_an_unknown_fight_has_no_report(self):
+        from app.main import _report_available
+        self.assertFalse(_report_available("0" * 12))
+
+    def test_the_card_has_no_report_link_when_the_report_is_gone(self):
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates"
+                / "history.html").read_text(encoding="utf-8")
+        self.assertIn("Report no longer available", page)
+        # Both report links sit behind the same check.
+        self.assertEqual(page.count('href="/result/{{f.job_id}}"'), 2)
+        self.assertIn("{% if live %}<a class=\"btn\" href=\"/result/{{f.job_id}}\">", page)

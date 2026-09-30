@@ -5169,10 +5169,27 @@ def _athlete_fighter_id(fights: list[dict]) -> int | None:
     return ids.most_common(1)[0][0] if ids else None
 
 
+def _report_available(job_id: str) -> bool:
+    """Whether /result/{job_id} would find a report to show.
+
+    The library listed every saved fight and linked each one, so a fight
+    whose report files were gone - a moved data folder, a lost disk - was a
+    link to "page not found". The card says so instead, and can still be
+    deleted. Never raises: a card is not worth an error page.
+    """
+    try:
+        directory = completed_artifact_directory(job_id)
+        return directory is not None and (directory / "report.json").is_file()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @app.get("/history", response_class=HTMLResponse)
 def history_page(request: Request):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
+    for fight in fights:
+        fight["report_available"] = _report_available(fight["job_id"])
     return templates.TemplateResponse(
         request=request, name="history.html",
         context={"request": request, "fights": fights, "signed_in": profile_id is not None},
