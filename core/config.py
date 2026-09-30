@@ -675,6 +675,27 @@ class Settings:
     min_switch_spread_body_lengths: float = float(
         os.getenv("WARRIORIQ_MIN_SWITCH_SPREAD", "0.5")
     )
+    # A person who clearly looks like the fighter picked at selection is not
+    # refused by the two gates above. The motionless check still applies, so
+    # somebody sitting perfectly still is refused whatever they wear.
+    #
+    # Travel and spread are measured in body lengths, and were calibrated on
+    # wide shots where a fighter is small. In a phone close-up of sparring
+    # the fighters fill the frame, so the same footwork is fewer body lengths:
+    # measured 2026-09-30, the real fighter refused as "too still" read 9.8 to
+    # 11.2 a minute against 12, while matching their selection at 0.75 to
+    # 0.93. On 4 handheld phone clips labelled by eye
+    # (dataset/regression/identity_phone), right frames 73 -> 93 of 104 and
+    # none swapped. On the two pankration bouts 37 -> 39 right. On the Kick
+    # Light reference 6 of 589 frames change: blue is found as B at 81.3 s
+    # where he was missing, and at 81.5 and 81.7 s the box that had been
+    # called A on the blue athlete becomes B - both corrections; at 83.0 s B
+    # lands on the pair with red in front, which is doubtful. Nobody at the
+    # mat edge is picked up at any threshold tried. 0.80 gained more on the
+    # phone clips and swapped more on pankration.
+    still_override_anchor_similarity: float = float(
+        os.getenv("WARRIORIQ_STILL_OVERRIDE_ANCHOR", "0.85")
+    )
     # The same measurement, but for *releasing* a fighter already held rather
     # than for letting a new track take the identity. It needs its own number
     # and much lower, and using the 0.5 above for both was the single largest
@@ -750,18 +771,20 @@ class Settings:
     # were followed correctly. Measured 2026-09-29, suspicious per minute
     # (plain count in brackets), boxes checked by eye:
     #
-    #     Kick Light, fixed camera            2.6 / 4.5    (6.4 / 7.0)    right
-    #     4 handheld phone sparring clips   1.1 to 7.8    (4.3 to 19.5)  right
+    #     Kick Light, fixed camera            2.6 / 5.1    (6.4 / 8.3)    right
+    #     4 handheld phone sparring clips   1.1 to 10.4   (4.3 to 19.5)  right
     #     Athens, handheld from the stands   15.0 / 21.7  (21.4 / 25.7)  wrong
-    #     2 pankration bouts, 320x240       18.7 to 39.9  (23.5 to 49.5) wrong
+    #     2 pankration bouts, 320x240       20.1 to 38.3  (24.6 to 47.9) wrong
     #
-    # One phone clip that was followed correctly (A right 7 times of 8) read
-    # 19.5 on the plain count and would have been held back. 10 sits between
-    # the highest right fight and the lowest wrong one. The phone clips are
+    # One phone clip that was followed correctly (A right 9 times of 11) read
+    # 19.5 on the plain count and would have been held back. 12 sits between
+    # the highest right fight and the lowest wrong one. (Measured with
+    # still_override_anchor_similarity in place; Athens was measured before
+    # it, from the video, and could not be replayed.) The phone clips are
     # public-domain sparring (archive.org item "boxingsparring"); their
     # labels are in dataset/regression/identity_phone/.
     max_suspicious_handoffs_per_minute: float = float(
-        os.getenv("WARRIORIQ_MAX_SUSPICIOUS_HANDOFFS_PER_MINUTE", "10")
+        os.getenv("WARRIORIQ_MAX_SUSPICIOUS_HANDOFFS_PER_MINUTE", "12")
     )
     # Putting A and B back the right way round after the tracker swapped them.
     #
