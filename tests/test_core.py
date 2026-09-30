@@ -4172,6 +4172,27 @@ class ObservedSummaryTests(unittest.TestCase):
         self.assertEqual(diagnostics["dropped"], {reason: 1 for reason in cases})
         self.assertEqual(diagnostics["candidate_events_seen"], 5)
 
+    def test_boxing_has_no_kicks_or_knees_to_count(self):
+        """On handheld boxing sparring every kick and knee proposed was footwork.
+
+        Knees that are only illegal (Kick Light) are still thrown, and counted.
+        """
+        from types import SimpleNamespace
+
+        from core.analyzer import _attempt_drop_reason, _live_attempt_reliable
+
+        def event(family):
+            return SimpleNamespace(attempted=True, family=family, peak_time=4.0, confidence=1.0,
+                                   outcome="landed", metadata={})
+
+        self.assertEqual(_attempt_drop_reason(event("kick"), "BOXING"), "not_in_this_sport")
+        self.assertEqual(_attempt_drop_reason(event("knee"), "BOXING"), "not_in_this_sport")
+        self.assertIsNone(_attempt_drop_reason(event("punch"), "BOXING"))
+        self.assertIsNone(_attempt_drop_reason(event("knee"), "KICK_LIGHT"))
+        self.assertIsNone(_attempt_drop_reason(event("kick"), "MUAY_THAI"))
+        # Without a sport named, nothing changes.
+        self.assertTrue(_live_attempt_reliable(event("kick")))
+
     # The withholding path, still reachable with the publish switch off.
     @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_it_agrees_with_the_statistics_the_rest_of_the_page_shows(self):
