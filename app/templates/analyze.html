@@ -10,25 +10,6 @@
     <div class="setup-title"><span class="sport-crest" aria-hidden="true">{{identity.mark}}</span>
       <h1>Set up your {{sport_label}} fight.</h1></div>
     <p class="setup-decided">{{identity.decided_by}}</p>
-    {#- What the report will show, not what the sport scores. It said "We
-        count punches, kicks and knees" on every sport while every report said
-        punches and knees are not counted - so a boxer uploaded a bout and got
-        no strike numbers at all without being told. -#}
-    {% if no_strike_counts %}
-    <p class="setup-coverage setup-warning" data-covered="no" role="note"><b>{{sport_label}} reports have no punch counts yet.</b>
-      Punch counting is not accurate enough, so your report will show movement, pressure, ring centre, guard and balance &mdash; not how many punches were thrown or landed. Upload only if that is useful to you.</p>
-    {% else %}
-    <p class="setup-coverage" data-covered="no"><b>Your report counts {{ reported_families }}.</b>{% if withheld_families %}
-      {{ withheld_families|capitalize }} are not counted yet &mdash; checked against video, the count was not accurate enough to show.{% endif %}{% if counts_are_estimates %}
-      {{ estimate_note }}{% endif %}</p>
-    {% endif %}
-    {#- "Not <thing>, which scores 2 to the body" reads as though the thing
-        excluded is what scores 2, and with six excluded items in MMA the
-        commas inside them merged into the list separators. A labelled list
-        separated by semicolons cannot be read either way round. -#}
-    {% if unobserved %}
-    <p class="setup-coverage" data-covered="no">Not read at all: {{ unobserved | join("; ") }}. Your report says so too.</p>
-    {% endif %}
   </header>
 
   <div class="setup-card" id="analyze" data-upload-state="empty">
@@ -57,25 +38,9 @@
       </div>
       {% endif %}</div>
 
-      {# Rounds and fight type used to be posted hidden, derived from the
-         video's duration as a single round spanning the whole file. That was
-         chosen because *guessing* two-minute rounds was worse - a 3:17 fight
-         came out as one 2:00 round - but it means a 3x2min bout is reported as
-         "1 x 71s" and the library's Sparring filter can never match anything,
-         because every upload was tagged a competition.
-
-         A guess and an answer are different things. The athlete knows the
-         format, so it is asked rather than inferred, with the sport's usual
-         format preselected and "whole video" kept as the honest fallback for
-         anyone who does not know or whose footage is a single clipped
-         exchange. #}
-      <div class="field">
-        <label for="fightType">Competition or sparring?</label>
-        <select id="fightType" name="fight_type">
-          <option value="competition" selected>Competition</option>
-          <option value="sparring">Sparring</option>
-        </select>
-      </div>
+      {#- "Competition or sparring?" was asked here. It changed nothing in the
+          analysis or the score - only a library filter - so it was removed;
+          the server keeps its "competition" default for the stored column. -#}
 
       {#- Rounds are not asked for. WarriorIQ analyses the whole video and
           finds the rounds itself (core/round_detect.py: a break is the two
@@ -461,7 +426,7 @@
     // iOS Safari leaves a video black until it has been played: it loads the
     // metadata and draws nothing. Asking for a moment just past the start
     // makes it decode and show that frame, so the fight is on screen at once.
-    localVideo.addEventListener('loadedmetadata',()=>{if(!(localVideo.duration>0)){pickerUnavailable('Your fight is uploading. You will choose the frame on the next screen.');return}
+    localVideo.addEventListener('loadedmetadata',()=>{if(!(localVideo.duration>0)||!(localVideo.videoWidth>0)){pickerUnavailable('Your fight is uploading. You will choose the frame on the next screen.');return}
       if(!(localVideo.currentTime>0)){try{localVideo.currentTime=Math.min(0.1,localVideo.duration/2)}catch{}}
       showPickedTime()},{once:true});
     localVideo.addEventListener('timeupdate',showPickedTime);

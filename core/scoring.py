@@ -56,6 +56,10 @@ class RuleProfile:
     # value per target rather than a multiplier. Empty means this ruleset does
     # not distinguish them, and the ordinary table applies.
     turning_kick_points: tuple[tuple[str, int], ...] = ()
+    # What a kick is worth when both feet left the floor, per target. WAKO's
+    # point-based disciplines pay a jump kick 2 to the body and 3 to the head;
+    # empty means this ruleset gives a jump no extra value.
+    jumping_kick_points: tuple[tuple[str, int], ...] = ()
     # How a ten-point-must federation turns a lead into a round score, as
     # (largest difference in scoring actions, points the loser gets). IFMA
     # publishes exactly this table for muaythai, so where a federation states
@@ -85,7 +89,11 @@ def _weights(profile: RuleProfile) -> dict[str, float]:
 # jab in Full Contact, Low Kick or K-1. That is the opposite of what was
 # encoded here, which scored those three on a 10-9 card with kicks weighted
 # 1.15 against punches. The weighting was plausible and invented.
-JUMP_BONUS = ("jumping-kick bonuses, which score 2 to the body and 3 to the head",)
+# WAKO's jump-kick values (Chapter 2 Article 8.3; Chapter 3 Article 6.3;
+# Chapter 5 Article 6): 2 to the body, 3 to the head. The jump itself is read
+# from the pose - see core.action._is_jumping - so it is scored, not declared
+# unobserved.
+JUMP_KICK_POINTS = (("body", 2), ("head", 3))
 
 RULESETS: dict[str, RuleProfile] = {
     # ---- Kickboxing (WAKO disciplines) -------------------------------------
@@ -141,7 +149,7 @@ RULESETS: dict[str, RuleProfile] = {
             ("kick", "body", 1), ("kick", "head", 2),
             ("kick", "leg", 1),          # foot sweeps score 1
         ),
-        unobserved=JUMP_BONUS,
+        jumping_kick_points=JUMP_KICK_POINTS,
     ),
     # Light Contact and Kick Light are scored by judges pressing a button, and
     # the rules say how many times: Chapter 3 Article 6.3 and Chapter 5
@@ -158,7 +166,7 @@ RULESETS: dict[str, RuleProfile] = {
             ("kick", "body", 1), ("kick", "head", 2),
             ("kick", "leg", 1),          # foot sweeps, as in point fighting
         ),
-        unobserved=JUMP_BONUS,
+        jumping_kick_points=JUMP_KICK_POINTS,
     ),
     # Kick Light is the one tatami discipline where the thigh is a legal
     # target ("Legs - Thigh, inside, outside and back"). The button rule does
@@ -172,7 +180,7 @@ RULESETS: dict[str, RuleProfile] = {
             ("kick", "body", 1), ("kick", "head", 2),
             ("kick", "leg", 1),          # inferred: not lifted above 1 by the button rule
         ),
-        unobserved=JUMP_BONUS,
+        jumping_kick_points=JUMP_KICK_POINTS,
     ),
 
     # ---- Boxing -------------------------------------------------------------
@@ -685,6 +693,12 @@ def _turned_into_it(event: StrikeEvent) -> bool:
     return bool((event.evidence or {}).get("spinning"))
 
 
+def _jumped_into_it(event: StrikeEvent) -> bool:
+    """Did both feet leave the floor for this kick? Read from the pose
+    evidence recorded at detection (core.action._is_jumping)."""
+    return bool((event.evidence or {}).get("jumping"))
+
+
 def _table_points(event: StrikeEvent, profile: RuleProfile) -> int | None:
     """The federation's own value for this technique and target, if it has one.
 
@@ -697,6 +711,10 @@ def _table_points(event: StrikeEvent, profile: RuleProfile) -> int | None:
         return 0
     if event.family == "kick" and profile.turning_kick_points and _turned_into_it(event):
         for target, points in profile.turning_kick_points:
+            if event.target == target:
+                return int(points)
+    if event.family == "kick" and profile.jumping_kick_points and _jumped_into_it(event):
+        for target, points in profile.jumping_kick_points:
             if event.target == target:
                 return int(points)
     for family, target, points in profile.point_table:

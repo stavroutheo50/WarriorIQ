@@ -359,36 +359,23 @@ class PublicPageTests(unittest.TestCase):
                 self.assertIn("empty-workspace", response.text)
 
     def test_every_sport_states_what_the_analysis_cannot_see(self):
-        """Coverage is disclosed at the point of choice, not after the upload.
+        """Coverage is disclosed on the sport chooser, before an upload.
 
-        The detector reads punches, kicks and knees. For boxing that is the
-        whole sport; for MMA it misses the ground entirely. The chooser badges
-        every sport so the five can be compared at a glance, and each sport's
-        setup page names what it will be silent about in full - before an hour
-        is spent on an upload, rather than in the finished report.
+        The chooser badges every sport so the five can be compared at a
+        glance. The setup page itself stays uncluttered: its paragraphs
+        repeating what is counted were removed at the owner's request, and
+        the finished report still names what it could not read.
         """
         from core.report import STRIKE_COUNTS_PRECISION_VALIDATED
-        from core.scoring import SPORTS, sport_unobserved
+        from core.scoring import SPORTS
 
         with self.signed_in():
             chooser = self.client.get("/analyze").text
         for sport in SPORTS:
             with self.subTest(sport=sport):
                 self.assertIn(f'data-sport="{sport}"', chooser)
-                missing = sport_unobserved(sport)
                 setup = self.client.get(f"/analyze/{sport}")
                 self.assertEqual(setup.status_code, 200)
-                # Each unobserved action is named, not summarised away.
-                for action in missing:
-                    self.assertIn(action, setup.text)
-                # While punch and knee counts are withheld no setup page may
-                # claim full coverage: it said "We count punches, kicks and
-                # knees" on every sport, and boxing reports then had no
-                # strike numbers at all.
-                if missing or not STRIKE_COUNTS_PRECISION_VALIDATED:
-                    self.assertIn('data-covered="no"', setup.text)
-                else:
-                    self.assertIn('data-covered="yes"', setup.text)
                 self.assertNotIn("We count punches, kicks and knees", setup.text)
         # A sport with gaps must not be presented as fully covered.
         self.assertIn('data-covered="no"', chooser)
@@ -397,20 +384,15 @@ class PublicPageTests(unittest.TestCase):
         else:
             self.assertNotIn("Full scoring coverage", chooser)
 
-    # The withholding path, still reachable with the publish switch off.
-    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
-    @unittest.mock.patch("app.main.STRIKE_COUNTS_PUBLISHED", False)
-    def test_boxing_is_warned_before_upload_that_it_gets_no_punch_counts(self):
-        from core.report import STRIKE_COUNTS_PRECISION_VALIDATED
-
-        if STRIKE_COUNTS_PRECISION_VALIDATED:
-            self.skipTest("punch counts are published")
+    def test_setup_page_has_no_coverage_paragraphs(self):
+        """Step 1 is upload only: no "Your report counts ..." or "Not read at
+        all ..." paragraphs above the upload card."""
         with self.signed_in():
-            boxing = self.client.get("/analyze/boxing").text
-            kickboxing = self.client.get("/analyze/kickboxing").text
-        self.assertIn("Boxing reports have no punch counts yet", boxing)
-        self.assertIn("Your report counts kicks.", kickboxing)
-        self.assertIn("Punches and knees are not counted yet", kickboxing)
+            for sport in ("boxing", "kickboxing", "mma"):
+                page = self.client.get(f"/analyze/{sport}").text
+                self.assertNotIn("Your report counts", page)
+                self.assertNotIn("Not read at all", page)
+                self.assertNotIn("setup-coverage", page)
 
     def test_choosing_a_sport_never_waits_on_an_animation(self):
         """The five cards are the page, so they may not fade in on scroll.
@@ -909,10 +891,9 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('type="hidden" name="round_count" value="1"', home)
         self.assertIn('type="hidden" name="round_duration_seconds" value="0"', home)
         self.assertNotIn('type="hidden" name="fight_type"', home)
-        # Sparring is a real choice, or the library's Sparring filter can never
-        # match anything - every upload was posted as a competition.
-        self.assertIn('<option value="sparring">', home)
-        self.assertIn('<option value="competition" selected>', home)
+        # "Competition or sparring?" changed nothing in the analysis, so it is
+        # not asked, and the library no longer filters on it.
+        self.assertNotIn('name="fight_type"', home)
         # The ruleset is the one thing WarriorIQ cannot infer, so it stays.
         self.assertIn('name="ruleset"', home)
         self.assertNotIn('id="fightSettings"', home)
@@ -1020,6 +1001,26 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('name="focusFighter" value="B"', selection)
         self.assertIn('id="start"', selection)
         self.assertNotIn('name="focusFighter" value="BOTH"', selection)
+
+    def test_frame_picker_falls_back_to_server_stills(self):
+        """An HEVC phone video in Chrome showed a black player behind a
+        crossed-out play icon, with no way to find a clear moment. When the
+        browser cannot draw the video the picker shows server-rendered stills
+        with a slider instead, and the chosen time is what gets saved."""
+        root = Path(__file__).resolve().parents[1]
+        frame = (root / "app" / "templates" / "frame.html").read_text(encoding="utf-8")
+        self.assertIn('id="stillPicker"', frame)
+        self.assertIn('id="stillSlider"', frame)
+        self.assertIn('id="stillSwitch"', frame)
+        # Both ways a video fails to draw: an error, or no picture at all.
+        self.assertIn("video.addEventListener('error',useStills)", frame)
+        self.assertIn("video.videoWidth>0", frame)
+        self.assertIn("seconds:stillMode?stillSeconds:video.currentTime", frame)
+        self.assertNotIn("Continue without choosing", frame)
+        analyze = (root / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
+        self.assertIn("!(localVideo.videoWidth>0)", analyze)
+        css = (root / "app" / "static" / "frame-picker.css").read_text(encoding="utf-8")
+        self.assertIn(".frame-player-panel video[hidden]{display:none}", css)
 
     def test_identity_canvas_reads_the_pixel_ratio_in_exactly_one_place(self):
         # The canvas backing store is sized in device pixels and everything else
@@ -1721,7 +1722,7 @@ class PublicPageTests(unittest.TestCase):
     def test_the_upload_page_promises_only_the_disclosure_that_exists(self):
         """Copy that overstates the product is a defect like any other."""
         setup = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
-        self.assertIn("Your report says so too", setup)
+        self.assertNotIn("Your report says so too", setup)
         self.assertNotIn("says so on every page", setup)
 
     def test_evidence_replay_starts_one_second_before_exact_timestamp(self):

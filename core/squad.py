@@ -98,7 +98,9 @@ def fight_choice_label(ruleset: str | None, created_at: str | None,
         (fighter_name or "").strip(),
         RULESET_LABELS.get(ruleset or "", (ruleset or "").replace("_", " ").title()).strip(),
         stamp,
-        (fight_type or "").replace("_", " ").strip(),
+        # fight_type is no longer asked at upload (it changed nothing in the
+        # analysis), so every new row says "competition"; showing it would
+        # label sparring as a competition. Kept as a parameter for callers.
     ]
     return " · ".join(part for part in parts if part) or "Fight analysis"
 
