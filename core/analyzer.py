@@ -1274,6 +1274,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # Per-round pose evidence was bucketed against the old schedule while
         # the loop ran, so rebuild it against the rounds that were found.
         metrics.rebucket_rounds(rounds)
+        # And the setup says what was found, not what the form posted: the
+        # upload page no longer asks for a format, so everything that reads
+        # setup.round_count (the fight library, the round-consistency metric)
+        # would otherwise say "1 round" for every fight.
+        req.round_count = len(rounds)
+        req.round_duration_seconds = round(
+            sum(spec.end_seconds - spec.start_seconds for spec in rounds) / len(rounds), 1)
 
     all_final_live_events = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
     final_live_stats = _provisional_stats(

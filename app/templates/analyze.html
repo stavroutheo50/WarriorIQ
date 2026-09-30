@@ -77,28 +77,13 @@
         </select>
       </div>
 
-      <div class="field">
-        <label for="roundCount">How many rounds?</label>
-        <select id="roundCount" name="round_count">
-          {% for n in range(1, 13) %}
-          <option value="{{n}}"{% if n == default_round_count %} selected{% endif %}>{{n}} round{{'' if n == 1 else 's'}}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      {# 0 means "the whole video, as one span". The browser fills that in from
-         the file's own duration below, so choosing it never truncates. #}
-      <div class="field">
-        <label for="roundSeconds">How long is a round?</label>
-        <select id="roundSeconds" name="round_duration_seconds">
-          <option value="90"{% if default_round_seconds == 90 %} selected{% endif %}>1 min 30</option>
-          <option value="120"{% if default_round_seconds == 120 %} selected{% endif %}>2 min</option>
-          <option value="180"{% if default_round_seconds == 180 %} selected{% endif %}>3 min</option>
-          <option value="300"{% if default_round_seconds == 300 %} selected{% endif %}>5 min</option>
-          <option value="0"{% if not default_round_seconds %} selected{% endif %}>Not sure &mdash; use the whole video</option>
-        </select>
-        <p class="small muted" id="roundFormatHint" aria-live="polite"></p>
-      </div>
+      {#- Rounds are not asked for. WarriorIQ analyses the whole video and
+          finds the rounds itself (core/round_detect.py: a break is the two
+          fighters staying apart for a sustained stretch), and the report's
+          format line describes the rounds it found. A typed-in format could
+          only ever be a guess about the footage; the footage is the answer. -#}
+      <input type="hidden" name="round_count" value="1">
+      <input type="hidden" name="round_duration_seconds" value="0">
       {% if only_ruleset %}
       <input type="hidden" name="ruleset" value="{{only_ruleset}}">
       {% else %}
@@ -418,57 +403,6 @@
         +(tone==='ok'?'.':'. You can upload it anyway.');
       showPreflight(tone,title,points,measured)}).catch(()=>{if(token===preflightToken)hidePreflight()})};
   const restore=(message)=>{if(typeof picker!=='undefined'&&picker){picker.hidden=true;pickerOpen=false;chosenSeconds=null;form.hidden=false;if(localUrl){URL.revokeObjectURL(localUrl);localUrl=null}}showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
-  // Rounds are no longer asked for, but they still decide where the round
-  // lines fall for per-round scoring, so they are derived rather than guessed.
-  // The browser already knows the video's duration; read it and fill the
-  // hidden fields. A wrong guess costs nothing now that build_round_schedule
-  // extends the last round to the end of the footage.
-  const roundCount=document.getElementById('roundCount'),roundSeconds=document.getElementById('roundSeconds');
-  const readDuration=file=>new Promise(resolve=>{
-    const el=document.createElement('video'),url=URL.createObjectURL(file);
-    let settled=false;
-    const done=value=>{if(settled)return;settled=true;URL.revokeObjectURL(url);resolve(value)};
-    el.preload='metadata';
-    el.onloadedmetadata=()=>done(Number.isFinite(el.duration)?el.duration:null);
-    el.onerror=()=>done(null);
-    setTimeout(()=>done(null),5000);   // never block the upload on a codec the browser cannot parse
-    el.src=url;
-  });
-  // The duration is now only used for "Not sure - use the whole video" and for
-  // the hint under the picker. It must NOT overwrite a format the athlete
-  // chose: they know whether they fought three twos, and the file's length
-  // cannot tell you that - a 3x2min bout with breaks and a walk-off is eight
-  // minutes of footage, not two.
-  let videoSeconds=0;
-  const describeFormat=()=>{
-    const hint=document.getElementById('roundFormatHint');
-    if(!hint)return;
-    const rounds=parseInt(roundCount.value,10)||1, per=parseInt(roundSeconds.value,10)||0;
-    if(!per){
-      hint.textContent=videoSeconds
-        ? `Analysed as one span of ${Math.round(videoSeconds)}s - the whole video.`
-        : 'Analysed as one span - the whole video.';
-      return;
-    }
-    const mins=Math.floor(per/60), secs=per%60;
-    const label=secs?`${mins}:${String(secs).padStart(2,'0')}`:`${mins} min`;
-    hint.textContent=`Reported as ${rounds} x ${label}.`;
-  };
-  const applyDuration=async file=>{
-    const seconds=await readDuration(file);
-    if(!seconds||seconds<=5){describeFormat();return}   // unreadable: leave the choice alone
-    videoSeconds=seconds;
-    // Only fill the whole-video option, and only because 0 has to become a real
-    // number before it is posted. Anything the athlete picked is left as is.
-    if(!parseInt(roundSeconds.value,10)){
-      const whole=roundSeconds.querySelector('option[value="0"]');
-      if(whole)whole.dataset.seconds=Math.ceil(seconds);
-    }
-    describeFormat();
-  };
-  roundCount.addEventListener('change',describeFormat);
-  roundSeconds.addEventListener('change',describeFormat);
-  describeFormat();
   const fighterPick=document.getElementById('fighterPick'),fighterName=document.getElementById('fighterName');
   if(fighterPick&&fighterName){
     const newFighterField=document.getElementById('newFighterField');
@@ -478,7 +412,7 @@
     const syncFighter=()=>{const adding=fighterPick.value==='';if(newFighterField)newFighterField.hidden=!adding;fighterName.required=adding;if(!adding)fighterName.value=''};
     fighterPick.addEventListener('change',syncFighter);syncFighter();
   }
-  videoInput.addEventListener('change',()=>{setReady();const file=videoInput.files[0];if(file)applyDuration(file)});
+  videoInput.addEventListener('change',setReady);
   // --- Choosing the frame while the bytes are still going ------------------
   //
   // The upload and the frame choice are independent, and either can finish
@@ -524,10 +458,17 @@
     // A browser that cannot play this container says so on the media element,
     // not here, so the listeners go on before the source does.
     localVideo.addEventListener('error',()=>pickerUnavailable('Your fight is uploading. You will choose the frame on the next screen.'),{once:true});
-    localVideo.addEventListener('loadedmetadata',()=>{if(!(localVideo.duration>0))pickerUnavailable('Your fight is uploading. You will choose the frame on the next screen.');else showPickedTime()},{once:true});
+    // iOS Safari leaves a video black until it has been played: it loads the
+    // metadata and draws nothing. Asking for a moment just past the start
+    // makes it decode and show that frame, so the fight is on screen at once.
+    localVideo.addEventListener('loadedmetadata',()=>{if(!(localVideo.duration>0)){pickerUnavailable('Your fight is uploading. You will choose the frame on the next screen.');return}
+      if(!(localVideo.currentTime>0)){try{localVideo.currentTime=Math.min(0.1,localVideo.duration/2)}catch{}}
+      showPickedTime()},{once:true});
     localVideo.addEventListener('timeupdate',showPickedTime);
     localVideo.addEventListener('seeked',showPickedTime);
-    try{localUrl=URL.createObjectURL(file);localVideo.src=localUrl}catch{return false}
+    // The #t fragment is the same request made in the URL, for the Safari
+    // versions that ignore a seek before the first play.
+    try{localUrl=URL.createObjectURL(file);localVideo.src=`${localUrl}#t=0.1`}catch{return false}
     form.hidden=true;picker.hidden=false;pickerOpen=true;
     return true;
   };

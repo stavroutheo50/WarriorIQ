@@ -16,7 +16,12 @@
   <div class="frame-workbench">
     <section class="frame-player-panel" aria-labelledby="frame-player-title">
       <div class="panel-heading"><div><span class="panel-kicker">Selection video</span><h2 id="frame-player-title">Pause on the clearest frame</h2></div><span class="live-indicator"><i></i> Ready</span></div>
-      <video id="sourceVideo" controls preload="metadata" src="/media/{{job_id}}"></video>
+      {#- A phone showed this as a black box: iOS Safari does not draw a frame
+          of a video that has not been played, and without playsinline it
+          takes over the whole screen when it is. The poster is the still
+          already saved at upload, so the fight is on screen from the start -
+          and stays there on a phone that cannot decode the file at all. -#}
+      <video id="sourceVideo" controls preload="metadata" playsinline poster="/selection-image/{{job_id}}" src="/media/{{job_id}}"></video>
       <div class="frame-action-row"><div class="frame-time" id="frameStatus" role="status" aria-live="polite"><span>Frame at</span><strong>{{'%.1f'|format(job.start_seconds)}}s</strong></div><button class="btn" id="useFrame" type="button" data-motion-primary>Use this frame <span aria-hidden="true">→</span></button></div>
     </section>
     <aside class="frame-guidance" aria-label="Frame selection guidance">
