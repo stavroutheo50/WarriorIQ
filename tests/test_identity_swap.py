@@ -116,13 +116,45 @@ class SuspiciousHandoffTests(unittest.TestCase):
         self.assertEqual(self.manager.suspicious_handoffs["A"], 1)
 
 
+class StillFighterTests(unittest.TestCase):
+    """A phone close-up makes real footwork read as standing still."""
+
+    def setUp(self):
+        self.manager = IdentityManager(_person(1, 100, 200, 1.0), _person(2, 400, 500, 0.0), 0)
+        # A new track that has barely covered ground on screen.
+        self.manager._recent_travel = lambda track_id, fps: 10.0
+        self.manager._recent_spread = lambda track_id, fps: 0.3
+        self.manager._is_motionless = lambda track_id, fps: False
+
+    def test_a_clear_match_for_the_fighter_is_not_refused_for_standing_still(self):
+        self.manager.a.last_refusal = None
+        score = self.manager._score(self.manager.a, _person(9, 110, 210, 1.0), keep_id_bonus=False)
+        self.assertGreater(score, -100)
+
+    def test_someone_who_only_half_matches_is_still_refused(self):
+        candidate = _person(9, 110, 210, 1.0)
+        candidate.appearance = _look(1.0) * 0.5 + np.random.default_rng(0).random(64).astype(np.float32) * 0.5
+        from core.identity import appearance_similarity
+        anchor = appearance_similarity(self.manager.a.anchor_appearance, candidate.appearance)
+        self.assertTrue(SETTINGS.min_anchor_appearance_similarity <= anchor
+                        < SETTINGS.still_override_anchor_similarity, anchor)
+        self.manager.a.last_refusal = None
+        self.assertLess(self.manager._score(self.manager.a, candidate, keep_id_bonus=False), -100)
+        self.assertEqual(self.manager.a.last_refusal, "too_still_travel")
+
+    def test_somebody_sitting_perfectly_still_is_refused_whatever_they_wear(self):
+        self.manager._is_motionless = lambda track_id, fps: True
+        score = self.manager._score(self.manager.a, _person(9, 110, 210, 1.0), keep_id_bonus=False)
+        self.assertLess(score, -100)
+
+
 class ChurnGateTests(unittest.TestCase):
     def test_suspicious_count_decides_when_present(self):
         # The phone clip followed correctly: many hand-offs, few suspicious.
         tracking = {"fighter_A_handoffs_per_minute": 19.5,
                     "fighter_A_suspicious_handoffs_per_minute": 7.8,
-                    "fighter_B_handoffs_per_minute": 7.8,
-                    "fighter_B_suspicious_handoffs_per_minute": 3.9}
+                    "fighter_B_handoffs_per_minute": 13.0,
+                    "fighter_B_suspicious_handoffs_per_minute": 10.4}
         self.assertEqual(identity_churned(tracking), {"A": False, "B": False})
         self.assertEqual(churn_rate(tracking, "A"), (7.8, False))
 

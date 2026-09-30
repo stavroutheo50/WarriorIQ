@@ -276,7 +276,7 @@
     <p>WarriorIQ saw <b>{{ diag.candidate_events_seen }}</b> possible strike{{ '' if diag.candidate_events_seen == 1 else 's' }} and could not stand behind any of them{{ ':' if dropped else '.' }}</p>
     {#- Reports analysed before the reasons were kept have only the total. -#}
     <ul class="list-clean">
-      {% for key, label in [('unsure_who_was_who', 'not sure enough which fighter threw it'), ('too_faint', 'too faint to be sure it was a strike'), ('thrown_at_nothing', 'punches that never came near the opponent'), ('not_a_strike', 'movements that were not a strike')] %}{% if dropped.get(key) %}<li><b class="wiq-num">{{ dropped[key] }}</b> {{ label }}</li>{% endif %}{% endfor %}
+      {% for key, label in [('unsure_who_was_who', 'not sure enough which fighter threw it'), ('too_faint', 'too faint to be sure it was a strike'), ('thrown_at_nothing', 'punches that never came near the opponent'), ('not_a_strike', 'movements that were not a strike'), ('not_in_this_sport', 'kicks or knees, which this sport does not have')] %}{% if dropped.get(key) %}<li><b class="wiq-num">{{ dropped[key] }}</b> {{ label }}</li>{% endif %}{% endfor %}
     </ul>
     {% else %}
     <p>WarriorIQ did not see a single movement it could call a strike.</p>

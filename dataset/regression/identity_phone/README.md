@@ -19,6 +19,7 @@ manager (frames scored against these labels, IoU >= 0.5):
 |---------------------|------:|--------:|------:|--------:|
 | before swap correction | 60 | 19 | 3 | 22 |
 | with swap correction   | 73 |  5 | 3 | 23 |
+| + colour match overrides the "too still" gates | 93 | 0 | 2 | 9 |
 
-See `SETTINGS.swap_correction_margin` and
+See `SETTINGS.swap_correction_margin`, `SETTINGS.still_override_anchor_similarity` and
 `SETTINGS.max_suspicious_handoffs_per_minute` in `core/config.py`.

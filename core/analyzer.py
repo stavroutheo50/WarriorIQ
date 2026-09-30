@@ -203,7 +203,7 @@ from core.rtm_pose import refine as refine_fighter_pose
 from core.edgetam_recovery import build_recovery
 from core.sam_recovery import nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
-from core.scoring import collapse_simultaneous_labels, is_legal_event, normalize_ruleset
+from core.scoring import RULESETS, collapse_simultaneous_labels, is_legal_event, normalize_ruleset
 from core.types import AnalysisProgress, AnalysisRequest, PersonObservation, PoseFrame, RoundSpec
 from core.video import SourceTimestampClock, build_round_schedule, get_video_info, requested_segment_end, round_at_time
 
@@ -235,7 +235,7 @@ def _punch_thrown_at_nothing(event) -> bool:
             and getattr(event, "outcome", None) == "missed")
 
 
-def _live_attempt_reliable(event) -> bool:
+def _live_attempt_reliable(event, ruleset: str | None = None) -> bool:
     """Return only identity-safe temporal attempts for the provisional live view.
 
     This is deliberately a lower information tier than verified fight evidence:
@@ -243,14 +243,14 @@ def _live_attempt_reliable(event) -> bool:
     target, technique side and scoring remain withheld until the release gate
     validates the complete action classifier.
     """
-    return _attempt_drop_reason(event) is None
+    return _attempt_drop_reason(event, ruleset) is None
 
 
 def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | None = 160) -> list[dict]:
     reliable = sorted(
         (
             event for event in events
-            if _live_attempt_reliable(event)
+            if _live_attempt_reliable(event, ruleset)
         ),
         key=lambda item: item.peak_time,
     )
@@ -309,7 +309,7 @@ def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | 
     return payload if limit is None else payload[-max(1, int(limit)):]
 
 
-def _attempt_drop_reason(event) -> str | None:
+def _attempt_drop_reason(event, ruleset: str | None = None) -> str | None:
     """Why _live_attempt_reliable turned a candidate down, or None if it did not.
 
     The same checks in the same order, named, so a fight that shows no strikes
@@ -322,8 +322,17 @@ def _attempt_drop_reason(event) -> str | None:
     # never be anything but zero while real knees were discarded - five of
     # twelve events on one bout. At this tier the claim is only "a limb was
     # thrown", and a knee is evidenced exactly as a punch is.
-    if getattr(event, "family", None) not in {"punch", "kick", "knee"}:
+    family = getattr(event, "family", None)
+    if family not in {"punch", "kick", "knee"}:
         return "not_a_strike"
+    # A sport with no kicks at all has no leg strikes to find: in boxing every
+    # kick or knee the detector proposes is footwork. On 30 s of handheld
+    # boxing sparring (dataset/regression/identity_phone, V16) 7 of the 9
+    # counted strikes were kicks and knees, and none of them were, checked by
+    # eye. Knees that are merely illegal - Kick Light, K1 variants - are still
+    # thrown and still counted; this is only for a sport without kicks.
+    if ruleset and family in {"kick", "knee"} and not RULESETS[normalize_ruleset(ruleset)].allow_kick:
+        return "not_in_this_sport"
     peak = float(getattr(event, "peak_time", -1.0))
     if not math.isfinite(peak) or peak < 0.0:
         return "not_a_strike"
@@ -340,7 +349,7 @@ def _attempt_drop_reason(event) -> str | None:
 def _live_event_diagnostics(events: list, ruleset: str, trusted: bool, emitted: list[dict]) -> dict:
     dropped: dict[str, int] = {}
     for event in events:
-        reason = _attempt_drop_reason(event)
+        reason = _attempt_drop_reason(event, ruleset)
         if reason is not None:
             dropped[reason] = dropped.get(reason, 0) + 1
     return {
@@ -348,7 +357,7 @@ def _live_event_diagnostics(events: list, ruleset: str, trusted: bool, emitted: 
         # _attempt_drop_reason; the result page shows it when nothing counted.
         "dropped": dropped,
         "candidate_events_seen": len(events),
-        "identity_safe_attempts": sum(_live_attempt_reliable(event) for event in events),
+        "identity_safe_attempts": sum(_live_attempt_reliable(event, ruleset) for event in events),
         "verified_events": sum(_live_event_reliable(event, ruleset) for event in events),
         "events_emitted": len(emitted),
         "event_mode": "validated_actions" if trusted else "observed_attempts",

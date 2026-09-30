@@ -570,12 +570,15 @@ class IdentityManager:
             # seconds the patient reading needs before it may speak.
             if self._is_motionless(candidate.track_id, self.source_fps):
                 return self._refuse(state, "motionless")
-            travel = self._recent_travel(candidate.track_id, self.source_fps)
-            if travel is not None and travel < SETTINGS.min_switch_travel_per_minute:
-                return self._refuse(state, "too_still_travel")
-            spread = self._recent_spread(candidate.track_id, self.source_fps)
-            if spread is not None and spread < SETTINGS.min_switch_spread_body_lengths:
-                return self._refuse(state, "too_still_spread")
+            # Unless they clearly look like the fighter picked at selection.
+            # See SETTINGS.still_override_anchor_similarity.
+            if anchor < SETTINGS.still_override_anchor_similarity:
+                travel = self._recent_travel(candidate.track_id, self.source_fps)
+                if travel is not None and travel < SETTINGS.min_switch_travel_per_minute:
+                    return self._refuse(state, "too_still_travel")
+                spread = self._recent_spread(candidate.track_id, self.source_fps)
+                if spread is not None and spread < SETTINGS.min_switch_spread_body_lengths:
+                    return self._refuse(state, "too_still_spread")
         if keep_id_bonus and candidate.track_id is not None and candidate.track_id == state.current_track_id:
             score += SETTINGS.track_id_bonus
         return float(score)
