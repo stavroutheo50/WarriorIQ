@@ -164,6 +164,18 @@ class InferenceSizeIsAFloorTests(unittest.TestCase):
         self.assertEqual(controller.base_imgsz, 960,
                          "the high-resolution case this exists to fix")
 
+    def test_big_fighters_in_a_small_video_keep_the_measured_size(self):
+        """A phone clip saved small: fighters 200-400 px, measured size 640.
+
+        On 229 frames labelled by eye, 640 found every fighter and 1600 missed
+        14, at 2.4x the cost.
+        """
+        from core.pose_tracker import QualityController, inference_size
+
+        self.assertEqual(inference_size(848, 480), 1600)
+        self.assertEqual(QualityController(30.0, 848, 480, measured_imgsz=640).base_imgsz, 640)
+        self.assertEqual(QualityController(60.0, 848, 480, measured_imgsz=864).base_imgsz, 864)
+
     def test_no_measurement_falls_back_to_the_rule(self):
         from core.pose_tracker import QualityController, inference_size
 

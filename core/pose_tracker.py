@@ -7,6 +7,7 @@ from threading import RLock
 import numpy as np
 import torch
 from core.config import SETTINGS
+from core.preflight import TARGET_SUBJECT_PX
 from ultralytics import YOLO
 from core.identity import appearance_hist, pose_signature
 from core.referee import referee_probabilities
@@ -41,6 +42,13 @@ LOGGER = logging.getLogger("warrioriq.pose")
 #
 # This would work on tightly-framed footage with a still crowd. It does not
 # work here.
+
+
+# The subject height, in source pixels, above which a measured inference size
+# is trusted outright rather than floored at the resolution rule. The fights
+# the floor was measured on had subjects of 60 to 79 px; handheld phone
+# sparring runs 200 to 400.
+MIN_TRUSTED_SUBJECT_PX = 120
 
 
 def inference_size(source_width: int, source_height: int) -> int:
@@ -96,8 +104,23 @@ class QualityController:
         # where the old rule under-served - which is the high-resolution case
         # it was written for - and can never take it away from the footage the
         # old rule already suited.
+        #
+        # **Except when the fighters are big.** The floor exists for small
+        # fighters in small video - fight 3's were 79 px. A phone clip saved
+        # small or sent through WhatsApp is also under low_resolution_edge,
+        # with fighters three to five times that, and the old rule blew it up
+        # to 1600 anyway. Measured 2026-09-30 on 4 handheld phone sparring
+        # clips (848x480, dataset/regression/identity_phone), the fighters
+        # found in 229 frames labelled by eye: 640 found 229, 960 found 226,
+        # 1600 found 215 - and 1600 cost 2.4x the time of 640. So when the
+        # measured size implies a subject of MIN_TRUSTED_SUBJECT_PX or more,
+        # the measurement is taken as it is.
         rule_imgsz = inference_size(source_width, source_height)
-        self.base_imgsz = self.imgsz = max(int(measured_imgsz or 0), rule_imgsz)
+        measured = int(measured_imgsz or 0)
+        long_edge = max(int(source_width or 0), int(source_height or 0))
+        subject_is_big = bool(measured and long_edge
+                              and measured * MIN_TRUSTED_SUBJECT_PX <= TARGET_SUBJECT_PX * long_edge)
+        self.base_imgsz = self.imgsz = measured if subject_is_big else max(measured, rule_imgsz)
         self.mode = "balanced"
         self.last_adjust = 0
         # Budget planning state. See plan_for_budget.

@@ -222,6 +222,23 @@ def _live_event_reliable(event, ruleset: str) -> bool:
     )
 
 
+# How close the punching fist must come to one of the opponent's gloves, in
+# body lengths, for a "missed" punch to count as thrown: it reached the guard.
+#
+# Measured 2026-09-30, every "missed" punch checked by eye:
+#
+#     phone sparring (V16, V17, VID)  within 0.42: 7 real, 1 real but filed
+#                                     under the other fighter, 1 unclear;
+#                                     beyond: 1 real at 0.45, the rest (14)
+#                                     a fighter standing in guard
+#     Kick Light (labelled)           within 0.42: the 1 real one (0.42);
+#                                     beyond: all 11 fakes, nearest 0.45
+#
+# A jab into the guard is scored "missed" because no clean contact was seen,
+# and on handheld phone sparring those were thrown out wholesale.
+MISSED_PUNCH_REACHED_GUARD = 0.42
+
+
 def _punch_thrown_at_nothing(event) -> bool:
     """A punch whose hand never came near the opponent.
 
@@ -229,10 +246,14 @@ def _punch_thrown_at_nothing(event) -> bool:
     called "missed" were proposed and not one was a real strike: they were a
     lead hand reaching out at distance, measuring or feinting, which is not a
     strike in any ruleset here. Missed kicks are left in - 3 of 5 were real.
-    The event itself is kept; it is only not counted as an attempt.
+    A missed punch whose fist reached the opponent's guard is kept: see
+    MISSED_PUNCH_REACHED_GUARD. The event itself is kept either way; it is
+    only not counted as an attempt.
     """
-    return (getattr(event, "family", None) == "punch"
-            and getattr(event, "outcome", None) == "missed")
+    if getattr(event, "family", None) != "punch" or getattr(event, "outcome", None) != "missed":
+        return False
+    guard = (getattr(event, "evidence", None) or {}).get("defender_guard_distance")
+    return not (guard is not None and float(guard) <= MISSED_PUNCH_REACHED_GUARD)
 
 
 def _live_attempt_reliable(event, ruleset: str | None = None) -> bool:
@@ -835,6 +856,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     identity_referee = OpenAIIdentityReferee(req.openai_identity_recovery, first_frame, canonical_a_box, canonical_b_box)
 
     progress("Following both fighters", 1.0, time.perf_counter() - wall_start, 0.0, manager, None, quality, stage="tracking")
+    sweep_start = time.perf_counter()
     sam_tracks = sam_recovery.track_segment(
         req.video_path,
         start_frame,
@@ -855,6 +877,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     )
     sam_was_available = sam_recovery.available
     sam_recovery.release()
+    sam_sweep_seconds = time.perf_counter() - sweep_start
     # The bar reserves 0-35% for SAM2. Without a GPU SAM2 is skipped at once,
     # and the bar used to sit at 1% until the first frame-pass update, then
     # jump past 50%. Mark the start of the frame pass as soon as it begins.
@@ -1214,6 +1237,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             torch.cuda.empty_cache()
 
     analysis_seconds = time.perf_counter() - wall_start
+    frame_pass_seconds = time.perf_counter() - pose_pass_start
     realtime_speed = segment_duration / analysis_seconds if analysis_seconds > 0 else 0.0
     within_budget = analysis_seconds <= segment_duration
 
@@ -1426,6 +1450,16 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "budget_met_expected": quality.budget_expected_met,
         "planned_stride": quality.planned_stride,
         "final_analysis_fps": quality.effective_fps,
+        # Where the time went. The frame rate above is set by what one frame
+        # costs, and without these a slow run could only be guessed at: the
+        # SAM2 sweep that follows both fighters before the frame pass, and the
+        # frame pass itself (detection, pose, identity, actions) per analysed
+        # frame. Loading models and building the report are the rest of
+        # analysis_seconds.
+        "sam_sweep_seconds": round(sam_sweep_seconds, 2),
+        "frame_pass_seconds": round(frame_pass_seconds, 2),
+        "frame_pass_seconds_per_frame": (round(frame_pass_seconds / analyzed_frames, 4)
+                                         if analyzed_frames else None),
         "final_imgsz": quality.imgsz,
         "quality_mode": quality.mode,
         "pose_model": pose_tracker.model_path,
