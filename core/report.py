@@ -187,12 +187,24 @@ def identity_churned(tracking: dict) -> dict[str, bool]:
     panning handheld camera in a crowded hall - lands on spectators and the
     opponent while coverage stays high. Absent on older reports, which are
     judged as before. See SETTINGS.max_identity_handoffs_per_minute.
+
+    Reports that also count the suspicious hand-offs - the ones where the
+    person picked up looks different or is somewhere else - are judged on
+    those alone: a handheld phone re-creates tracks constantly, and most of
+    them land back on the right fighter. See
+    SETTINGS.max_suspicious_handoffs_per_minute.
     """
-    return {
-        fighter: float(tracking.get(f"fighter_{fighter}_handoffs_per_minute") or 0.0)
-        > SETTINGS.max_identity_handoffs_per_minute
-        for fighter in ("A", "B")
-    }
+    return {fighter: churn_rate(tracking, fighter)[1] for fighter in ("A", "B")}
+
+
+def churn_rate(tracking: dict, fighter: str) -> tuple[float, bool]:
+    """(hand-offs a minute the gate reads, whether that is over its limit)."""
+    suspicious = tracking.get(f"fighter_{fighter}_suspicious_handoffs_per_minute")
+    if suspicious is not None:
+        rate = float(suspicious)
+        return rate, rate > SETTINGS.max_suspicious_handoffs_per_minute
+    rate = float(tracking.get(f"fighter_{fighter}_handoffs_per_minute") or 0.0)
+    return rate, rate > SETTINGS.max_identity_handoffs_per_minute
 
 
 def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
@@ -219,6 +231,7 @@ IDENTITY_TRACKING_KEYS = (
     "fighter_A_seed_source", "fighter_B_seed_source", "initial_iou_A", "initial_iou_B",
     "fighter_A_coverage", "fighter_B_coverage", "fighters_separable", "fighter_pair_similarity",
     "identity_confusions", "fighter_A_handoffs_per_minute", "fighter_B_handoffs_per_minute",
+    "fighter_A_suspicious_handoffs_per_minute", "fighter_B_suspicious_handoffs_per_minute",
 )
 
 
@@ -597,8 +610,7 @@ def refresh_identity_integrity(report: dict) -> dict:
         failed = ", ".join(f"Fighter {fighter}" for fighter in required if not identity_ready.get(fighter, False))
         churned_required = [fighter for fighter in required if churned[fighter]]
         lost_hold = " and ".join(f"Fighter {fighter}" for fighter in churned_required)
-        handoff_rate = max((float(tracking.get(f"fighter_{fighter}_handoffs_per_minute") or 0.0)
-                            for fighter in churned_required), default=0.0)
+        handoff_rate = max((churn_rate(tracking, fighter)[0] for fighter in churned_required), default=0.0)
         scorecard = report.setdefault("scorecard", {})
         scorecard.update({
             "available": False,

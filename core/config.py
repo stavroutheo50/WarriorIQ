@@ -739,6 +739,48 @@ class Settings:
     max_identity_handoffs_per_minute: float = float(
         os.getenv("WARRIORIQ_MAX_IDENTITY_HANDOFFS_PER_MINUTE", "15")
     )
+    # The same gate, counting only the hand-offs that look like a different
+    # person: the fighter before and after differ in colour (histogram
+    # similarity under 0.8) or the box jumped more than 0.8 body lengths.
+    # Used instead of the plain count above whenever a report carries it.
+    #
+    # A handheld phone makes the tracker drop and re-create people all the
+    # time, and most of those hand-offs land back on the same fighter. The
+    # plain count cannot tell those apart, and held back phone fights that
+    # were followed correctly. Measured 2026-09-29, suspicious per minute
+    # (plain count in brackets), boxes checked by eye:
+    #
+    #     Kick Light, fixed camera            2.6 / 4.5    (6.4 / 7.0)    right
+    #     4 handheld phone sparring clips   1.1 to 7.8    (4.3 to 19.5)  right
+    #     Athens, handheld from the stands   15.0 / 21.7  (21.4 / 25.7)  wrong
+    #     2 pankration bouts, 320x240       18.7 to 39.9  (23.5 to 49.5) wrong
+    #
+    # One phone clip that was followed correctly (A right 7 times of 8) read
+    # 19.5 on the plain count and would have been held back. 10 sits between
+    # the highest right fight and the lowest wrong one. The phone clips are
+    # public-domain sparring (archive.org item "boxingsparring"); their
+    # labels are in dataset/regression/identity_phone/.
+    max_suspicious_handoffs_per_minute: float = float(
+        os.getenv("WARRIORIQ_MAX_SUSPICIOUS_HANDOFFS_PER_MINUTE", "10")
+    )
+    # Putting A and B back the right way round after the tracker swapped them.
+    #
+    # When a fighter is lost for a moment - a clinch, the phone swinging past -
+    # the tracker can hand the track to the other fighter, and from then on
+    # every check that compares a person with how they looked a frame ago
+    # agrees with the swap. The colours picked at selection do not drift, so
+    # when A's box looks like B's selection AND B's box looks like A's, held
+    # over a second of frames, they are swapped back. Only runs when the two
+    # selected fighters are separable in colour (max_fighter_pair_similarity).
+    #
+    # Measured 2026-09-29 on 4 handheld phone clips labelled by eye: frames
+    # with the fighters swapped 19 -> 5, correct frames 60 -> 73, and no
+    # change on the three clips that never swapped. On the Kick Light
+    # reference it never fires (the signal peaks at -0.07), so that bout is
+    # unchanged.
+    swap_correction_margin: float = float(os.getenv("WARRIORIQ_SWAP_CORRECTION_MARGIN", "0.10"))
+    swap_correction_smoothing: float = 0.8
+    swap_correction_frames: int = 6
     # A second, much stricter reading of the same measurement over a much
     # shorter look. The 6 s guard above is calibrated to catch marginal cases
     # and so must wait; somebody who has not moved at all is decidable sooner.

@@ -202,6 +202,14 @@ class IdentityManager:
         # counted. See SETTINGS.max_identity_handoffs_per_minute.
         self.track_handoffs = {"A": 0, "B": 0}
         self._last_real_track: dict[str, int | None] = {"A": None, "B": None}
+        # The hand-offs above that look like a different person: colour
+        # changed or the box jumped. See SETTINGS.max_suspicious_handoffs_per_minute.
+        self.suspicious_handoffs = {"A": 0, "B": 0}
+        self._last_real_obs: dict[str, tuple | None] = {"A": None, "B": None}
+        # A and B put back the right way round. See _correct_swap.
+        self.swaps_corrected = 0
+        self._cross_match = 0.0
+        self._cross_match_frames = 0
         # Why identities were refused, not merely how often. A bare total
         # cannot tell an appearance gate rejecting the real fighter from a
         # motion gate correctly refusing a spectator, and those need
@@ -599,7 +607,13 @@ class IdentityManager:
             last = self._last_real_track.get(state.name)
             if last is not None and last != obs.track_id:
                 self.track_handoffs[state.name] = self.track_handoffs.get(state.name, 0) + 1
+                before = self._last_real_obs.get(state.name)
+                if before is not None and (
+                        appearance_similarity(before[0], obs.appearance) < 0.8
+                        or normalized_distance(before[1], obs.box) > 0.8):
+                    self.suspicious_handoffs[state.name] = self.suspicious_handoffs.get(state.name, 0) + 1
             self._last_real_track[state.name] = int(obs.track_id)
+            self._last_real_obs[state.name] = (obs.appearance, obs.box.copy())
         state.identity_confidence = float(max(0.0, min(1.0, score)))
         state.missing_frames = 0
         if (obs.reid is not None
@@ -791,6 +805,7 @@ class IdentityManager:
         furniture_b = self._release_if_furniture(self.b)
         a_obs = None if furniture_a else a_obs
         b_obs = None if furniture_b else b_obs
+        a_obs, b_obs = self._correct_swap(a_obs, b_obs)
 
         # Why *this fighter* is unassigned in *this frame*, judged against the
         # one person standing closest to where they were last seen. Counted
@@ -830,6 +845,50 @@ class IdentityManager:
             else:
                 self._blocked("lost_to_the_other_fighter", state.name)
         return a_obs, b_obs
+
+    # What A and B carry between frames. Everything that describes who they
+    # were chosen as (anchors, counts) stays put.
+    _FOLLOWED_FIELDS = ("current_track_id", "last_box", "prev_box", "velocity", "last_keypoints",
+                        "appearance", "pose_signature", "identity_confidence", "missing_frames",
+                        "last_seen_source_frame")
+
+    def _correct_swap(self, a_obs: PersonObservation | None,
+                      b_obs: PersonObservation | None) -> tuple[PersonObservation | None, PersonObservation | None]:
+        """Swap A and B back when each looks like the other's selection.
+
+        See SETTINGS.swap_correction_margin. Compared with the colours picked
+        at selection, which never drift, rather than with the last frame,
+        which follows a swap as readily as the right person.
+        """
+        if a_obs is None or b_obs is None:
+            return a_obs, b_obs
+        anchor_a, anchor_b = self.a.anchor_appearance, self.b.anchor_appearance
+        if anchor_a is None or anchor_b is None or a_obs.appearance is None or b_obs.appearance is None:
+            return a_obs, b_obs
+        if appearance_similarity(anchor_a, anchor_b) >= SETTINGS.max_fighter_pair_similarity:
+            return a_obs, b_obs
+        cross = (appearance_similarity(anchor_b, a_obs.appearance)
+                 + appearance_similarity(anchor_a, b_obs.appearance)
+                 - appearance_similarity(anchor_a, a_obs.appearance)
+                 - appearance_similarity(anchor_b, b_obs.appearance))
+        keep = SETTINGS.swap_correction_smoothing
+        self._cross_match = keep * self._cross_match + (1.0 - keep) * cross
+        if self._cross_match > SETTINGS.swap_correction_margin:
+            self._cross_match_frames += 1
+        else:
+            self._cross_match_frames = 0
+        if self._cross_match_frames < SETTINGS.swap_correction_frames:
+            return a_obs, b_obs
+        for name in self._FOLLOWED_FIELDS:
+            value_a, value_b = getattr(self.a, name), getattr(self.b, name)
+            setattr(self.a, name, value_b)
+            setattr(self.b, name, value_a)
+        for held in (self._last_real_track, self._last_real_obs):
+            held["A"], held["B"] = held["B"], held["A"]
+        self._cross_match = -self._cross_match
+        self._cross_match_frames = 0
+        self.swaps_corrected += 1
+        return b_obs, a_obs
 
     def _release_if_furniture(self, state: FighterState) -> bool:
         """Let go of a fighter that has turned out to be a seated spectator.

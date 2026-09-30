@@ -1312,6 +1312,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "fighter_B_track_handoffs": manager.track_handoffs["B"],
         "fighter_A_handoffs_per_minute": round(manager.track_handoffs["A"] / (segment_duration / 60.0), 2),
         "fighter_B_handoffs_per_minute": round(manager.track_handoffs["B"] / (segment_duration / 60.0), 2),
+        "fighter_A_suspicious_handoffs_per_minute": round(
+            manager.suspicious_handoffs["A"] / (segment_duration / 60.0), 2),
+        "fighter_B_suspicious_handoffs_per_minute": round(
+            manager.suspicious_handoffs["B"] / (segment_duration / 60.0), 2),
+        "identity_swaps_corrected": int(manager.swaps_corrected),
         "fighter_A_sam_recoveries": manager.a.sam_recovery_count,
         "fighter_B_sam_recoveries": manager.b.sam_recovery_count,
         "sam_continuous_enabled": SETTINGS.sam_continuous_enabled,
