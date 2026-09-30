@@ -729,11 +729,20 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
    from the start rather than after a press that already failed. */
 .social-auth-button[disabled] { opacity: .45; cursor: not-allowed; }
 .social-auth-button[disabled]:hover { transform: none; }
+/* Unanswered questions are named in the line above the upload button
+   ("2 things left: ..."). A yellow ring round each one as well read as an
+   error before anything had gone wrong, and looked loud on a phone. */
 .check.needs-attention,
 fieldset.needs-attention {
-  border-radius: 3px;
-  box-shadow: 0 0 0 2px var(--wiq-warning);
-  transition: box-shadow 160ms var(--wiq-motion-ease, ease);
+  box-shadow: none;
+}
+/* The under-18 question is a fieldset inside the consent box, and kept the
+   browser's grey groove frame on three sides. One divider line is enough. */
+.upload-consent .minor-permission {
+  border: 0;
+  border-top: 1px solid #263750;
+  margin: 0;
+  padding: 11px 0 0;
 }
 
 .social-auth-gate {

@@ -900,18 +900,15 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('name="minor_permission_status"', home)
         self.assertEqual(home.count('type="radio" name="minor_permission_status"'), 2)
         self.assertNotIn(">Choose one<", home)
-        # Rounds ARE asked for again, and as visible controls. Deriving them
-        # from the file's duration made every bout "1 x 71s" in the report: a
-        # 3x2min fight with breaks and a walk-off is eight minutes of footage,
-        # and no amount of reading the container tells you it was three twos.
-        # The sport's usual format is preselected so the common case is still
-        # one glance, and "use the whole video" stays for anyone unsure.
-        self.assertIn('id="roundCount"', home)
-        self.assertIn('id="roundSeconds"', home)
-        self.assertIn("readDuration", home)
-        for name in ("round_count", "round_duration_seconds", "fight_type"):
-            with self.subTest(field=name):
-                self.assertNotIn('type="hidden" name="%s"' % name, home)
+        # Rounds are not asked for. The whole video is analysed and the rounds
+        # are found in it (core/round_detect.py); the report's format line
+        # reads the rounds that were found, so a 3x2min bout no longer reads
+        # "1 x 71s" the way it did when the format was derived from the file.
+        self.assertNotIn('id="roundCount"', home)
+        self.assertNotIn('id="roundSeconds"', home)
+        self.assertIn('type="hidden" name="round_count" value="1"', home)
+        self.assertIn('type="hidden" name="round_duration_seconds" value="0"', home)
+        self.assertNotIn('type="hidden" name="fight_type"', home)
         # Sparring is a real choice, or the library's Sparring filter can never
         # match anything - every upload was posted as a competition.
         self.assertIn('<option value="sparring">', home)
