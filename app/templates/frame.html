@@ -22,6 +22,20 @@
           already saved at upload, so the fight is on screen from the start -
           and stays there on a phone that cannot decode the file at all. -#}
       <video id="sourceVideo" controls preload="metadata" playsinline poster="/selection-image/{{job_id}}" src="/media/{{job_id}}"></video>
+      {#- Stills from the server, for a video this browser cannot draw. Phones
+          film HEVC, which Chrome on many computers will not decode: the
+          player went black behind a crossed-out play icon and there was no
+          way to find a clear moment. The server decodes the file anyway, so
+          it renders the frame at the slider's time instead. -#}
+      <div class="still-picker" id="stillPicker" hidden>
+        <img id="stillFrame" src="/selection-image/{{job_id}}" alt="Frame from your fight at the chosen time">
+        <div class="still-controls">
+          <button class="btn secondary" type="button" data-step="-1" aria-label="One second back">&minus;1s</button>
+          <input id="stillSlider" type="range" min="0" max="{{'%.1f'|format(job.video_duration|default(0))}}" step="0.1" value="{{'%.1f'|format(job.start_seconds)}}" aria-label="Moment in the fight">
+          <button class="btn secondary" type="button" data-step="1" aria-label="One second forward">+1s</button>
+        </div>
+      </div>
+      <button class="text-link still-switch" id="stillSwitch" type="button">Video not showing? Choose from still frames</button>
       <div class="frame-action-row"><div class="frame-time" id="frameStatus" role="status" aria-live="polite"><span>Frame at</span><strong>{{'%.1f'|format(job.start_seconds)}}s</strong></div><button class="btn" id="useFrame" type="button" data-motion-primary>Use this frame <span aria-hidden="true">→</span></button></div>
     </section>
     <aside class="frame-guidance" aria-label="Frame selection guidance">
@@ -41,34 +55,40 @@ const jobId={{job_id|tojson}},video=document.getElementById('sourceVideo'),butto
 function setFrameStatus(label,value){const caption=document.createElement('span'),reading=document.createElement('strong');caption.textContent=label;reading.textContent=value;statusBox.replaceChildren(caption,reading)}
 function showFrameTime(){setFrameStatus('Frame at',`${video.currentTime.toFixed(1)}s`)}
 video.addEventListener('loadedmetadata',()=>{if({{job.start_seconds|tojson}}>0)video.currentTime={{job.start_seconds|tojson}};showFrameTime()});video.addEventListener('timeupdate',showFrameTime);video.addEventListener('seeked',showFrameTime);
-// A format this browser cannot decode leaves the player black with duration 0
-// and fires none of the three listeners above, so the readout sat at
-// "Selected moment 0.0s" and the button stayed live over a video that was
-// never going to show a frame. MediaError 3 and 4 are decode and
-// source-not-supported: the bytes arrived and will not play. Measured in
-// Chrome against a ProRes .mov - code 4, DEMUXER_ERROR_NO_SUPPORTED_STREAMS,
-// readyState 0, duration NaN.
-//
-// The button stays enabled on purpose. Frame extraction and the analysis both
-// run through ffmpeg on the server, which decodes what the browser will not,
-// so the upload is fine and only the preview is broken. Disabling the only
-// way forward would turn a preview problem into a dead end. It is relabelled
-// instead, because "Use this frame" is a promise about a frame nobody can see.
-let frameFailed=false;
-video.addEventListener('error',()=>{
-  if(frameFailed)return;frameFailed=true;
-  const code=video.error&&video.error.code;
-  statusBox.replaceChildren();
-  const said=document.createElement('span');
-  said.textContent=(code===4||code===3
-    ? 'This browser cannot play this video in the format it was uploaded in. WarriorIQ can still read it, so the analysis is unaffected \u2014 continue, and it starts from the beginning. To check the file yourself, '
-    : 'The video could not be loaded. Continue to analyse it from the beginning, or ');
-  const link=document.createElement('a');link.className='text-link';
-  link.href=`/media/${jobId}`;link.setAttribute('download','');
-  link.textContent='download the original video';
-  statusBox.append(said,link);
-  statusBox.dataset.tone='bad';
-  button.textContent='Continue without choosing';
-});
-button.onclick=async()=>{button.disabled=true;button.setAttribute('aria-busy','true');setFrameStatus('Frame at','Preparing…');try{const r=await fetch(`/api/selection-frame/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({seconds:video.currentTime})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Could not use this frame');location.href=`/select/${jobId}`}catch(e){setFrameStatus('Could not continue',e.message);button.disabled=false;button.removeAttribute('aria-busy')}};
+// A format this browser cannot decode leaves the player black: MediaError 3
+// or 4 (decode, source-not-supported), or - for an HEVC phone video in Chrome
+// on a computer without an HEVC decoder - no error at all, the audio loaded and
+// a picture 0 pixels wide. Either way the server can still decode the file, so
+// the picker switches to stills it renders, rather than asking anyone to
+// continue without choosing: a clear first frame is what keeps Fighter A and
+// Fighter B apart for the whole analysis.
+const stillPicker=document.getElementById('stillPicker'),stillFrame=document.getElementById('stillFrame'),
+      stillSlider=document.getElementById('stillSlider'),stillSwitch=document.getElementById('stillSwitch');
+let stillMode=false,stillSeconds=parseFloat(stillSlider.value)||0,stillRequest=0,stillTimer=null;
+async function showStill(seconds){
+  const max=parseFloat(stillSlider.max)||0;
+  stillSeconds=Math.max(0,Math.min(max,seconds));stillSlider.value=stillSeconds.toFixed(1);
+  setFrameStatus('Frame at',`${stillSeconds.toFixed(1)}s \u2014 loading\u2026`);
+  const mine=++stillRequest;
+  try{
+    const r=await fetch(`/api/selection-frame/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({seconds:stillSeconds})});
+    if(mine!==stillRequest)return;
+    const d=await r.json();if(!r.ok)throw new Error(d.detail||'Could not show this moment');
+    stillSeconds=d.seconds;stillFrame.src=`/selection-image/${jobId}?t=${Date.now()}`;
+    setFrameStatus('Frame at',`${stillSeconds.toFixed(1)}s`);
+  }catch(e){if(mine===stillRequest)setFrameStatus('Could not show this moment',e.message)}
+}
+function useStills(){
+  if(stillMode)return;stillMode=true;
+  try{video.pause()}catch{}
+  video.hidden=true;stillSwitch.hidden=true;stillPicker.hidden=false;
+  statusBox.dataset.tone='';button.textContent='Use this frame \u2192';
+  setFrameStatus('Frame at',`${stillSeconds.toFixed(1)}s`);
+}
+stillSlider.addEventListener('input',()=>{stillSeconds=parseFloat(stillSlider.value)||0;setFrameStatus('Frame at',`${stillSeconds.toFixed(1)}s`);clearTimeout(stillTimer);stillTimer=setTimeout(()=>showStill(stillSeconds),350)});
+stillPicker.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{clearTimeout(stillTimer);showStill(stillSeconds+parseFloat(b.dataset.step))}));
+stillSwitch.addEventListener('click',useStills);
+video.addEventListener('error',useStills);
+video.addEventListener('loadedmetadata',()=>{if(!(video.videoWidth>0))useStills()});
+button.onclick=async()=>{clearTimeout(stillTimer);stillRequest++;button.disabled=true;button.setAttribute('aria-busy','true');setFrameStatus('Frame at','Preparing…');try{const r=await fetch(`/api/selection-frame/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({seconds:stillMode?stillSeconds:video.currentTime})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Could not use this frame');location.href=`/select/${jobId}`}catch(e){setFrameStatus('Could not continue',e.message);button.disabled=false;button.removeAttribute('aria-busy')}};
 </script>{% endblock %}

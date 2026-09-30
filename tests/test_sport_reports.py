@@ -213,12 +213,12 @@ class KickboxingReportTests(unittest.TestCase):
         bonuses", which only the point-based rulesets award."""
         from core.scoring import coverage_note
 
-        for ruleset in ("K1", "LOW_KICK", "FULL_CONTACT"):
+        # Jump-kick bonuses are scored from the pose now (see
+        # test_wako_point_disciplines_pay_for_a_jumping_kick), so no
+        # kickboxing ruleset has anything left to declare unseen.
+        for ruleset in ("K1", "LOW_KICK", "FULL_CONTACT",
+                        "POINT_FIGHTING", "LIGHT_CONTACT", "KICK_LIGHT"):
             self.assertEqual(coverage_note(ruleset), "", ruleset)
-        for ruleset in ("POINT_FIGHTING", "LIGHT_CONTACT", "KICK_LIGHT"):
-            note = coverage_note(ruleset)
-            self.assertIn("jumping-kick bonuses", note)
-            self.assertNotIn("Kickboxing also scores", note)
 
     def test_the_note_never_claims_a_ruleset_scores_what_it_does_not(self):
         """ITF's list item is a bonus the ITF does not use; "ITF also scores"

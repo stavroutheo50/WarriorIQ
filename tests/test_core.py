@@ -1984,6 +1984,37 @@ def test_world_taekwondo_pays_more_for_a_turning_kick():
     assert _table_points(kick("head", True), k1) == _table_points(kick("head", False), k1)
 
 
+def test_wako_point_disciplines_pay_for_a_jumping_kick():
+    """WAKO: a jump kick scores 2 to the body and 3 to the head in Point
+    Fighting, Light Contact and Kick Light; a square kick keeps 1 and 2.
+    K-1 counts every technique as one point, jump or not."""
+    from core.scoring import RULESETS, _table_points, coverage_note
+    from core.types import StrikeEvent
+
+    def kick(target, jumping, outcome="clean"):
+        return StrikeEvent(
+            fighter="A", opponent="B", round_number=1,
+            start_frame=0, peak_frame=1, end_frame=2,
+            start_time=0.0, peak_time=0.1, end_time=0.2,
+            technique="right_round_kick", family="kick", limb="right_leg",
+            confidence=0.9, outcome=outcome, target=target,
+            evidence={"jumping": jumping},
+        )
+
+    for key in ("POINT_FIGHTING", "LIGHT_CONTACT", "KICK_LIGHT"):
+        profile = RULESETS[key]
+        assert _table_points(kick("body", False), profile) == 1, key
+        assert _table_points(kick("body", True), profile) == 2, key
+        assert _table_points(kick("head", False), profile) == 2, key
+        assert _table_points(kick("head", True), profile) == 3, key
+        # A jump that did not land still scores nothing.
+        assert _table_points(kick("head", True, outcome="missed"), profile) == 0, key
+        # The bonus is scored now, so it is no longer listed as unseen.
+        assert "jumping" not in coverage_note(key), key
+    k1 = RULESETS["K1"]
+    assert _table_points(kick("head", True), k1) == _table_points(kick("head", False), k1) == 1
+
+
 def test_airtime_is_not_claimed_on_a_distant_fighter():
     """Tournament footage is the case this has to get right.
 
@@ -5285,7 +5316,7 @@ class FightLabelTests(unittest.TestCase):
             fight_choice_label("K1", "2026-09-02T18:54:00+00:00", "competition"),
         ]
         self.assertEqual(len(set(same_day)), 3, same_day)
-        self.assertEqual(same_day[0], "Kick Light · 2 Sep, 18:54 · competition")
+        self.assertEqual(same_day[0], "Kick Light · 2 Sep, 18:54")
 
         # The fighter's name leads when the row has one. A coach with several
         # athletes cannot tell two of their fights apart by ruleset and clock
@@ -5295,7 +5326,7 @@ class FightLabelTests(unittest.TestCase):
             fight_choice_label("KICK_LIGHT", "2026-09-02T18:54:00+00:00", "competition", "Theodoulos"),
             fight_choice_label("KICK_LIGHT", "2026-09-02T18:54:00+00:00", "competition", "Maria"),
         ]
-        self.assertEqual(named[0], "Theodoulos · Kick Light · 2 Sep, 18:54 · competition")
+        self.assertEqual(named[0], "Theodoulos · Kick Light · 2 Sep, 18:54")
         self.assertEqual(len(set(named)), 2, named)
         # A fight with no fighter attached keeps the old label rather than
         # gaining a leading separator, and a name of only spaces counts as none.
