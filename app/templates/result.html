@@ -44,6 +44,7 @@
 </section>
 {% endif %}
 {% endif %}
+{% if analysed_span and analysed_span.note %}<p class="analysed-span-note" role="note">{{analysed_span.note}}</p>{% endif %}
 <section class="result-overview" aria-label="Fight summary" data-motion-sequence="result-summary">
   <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="Fighter A portrait" data-hide-on-error><span>{% if corners and corners.A %}<small>{{corners.A}}</small>{% endif %}<strong>Fighter A</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="Fighter B portrait" data-hide-on-error><span>{% if corners and corners.B %}<small>{{corners.B}}</small>{% endif %}<strong>Fighter B</strong></span></div></div>
   <div class="result-context"><div><span>Ruleset</span><strong>{{report.scorecard.ruleset_label}}</strong></div>{#- The rounds the analysis used: the ones it found in the footage
@@ -55,7 +56,7 @@
 <div><span>Format</span><strong>{{ found_rounds|length }} round{{ '' if found_rounds|length == 1 else 's' }} · {% if found_rounds|length > 1 %}about {% endif %}{{ '%d:%02d'|format(each // 60, each % 60) }}{% if found_rounds|length > 1 %} each{% endif %}</strong></div>
 {% else %}{% set fmt_secs = report.setup.round_duration_seconds|int %}
 <div><span>Format</span><strong>{{report.setup.round_count}} × {% if fmt_secs >= 60 and fmt_secs % 60 == 0 %}{{ (fmt_secs / 60)|int }} min{% else %}{{ fmt_secs }}s{% endif %}</strong></div>
-{% endif %}<div><span>Report focus</span><strong>Fighter {{report.video.focus_fighter|default(report.video.analysis_target, true)}}</strong></div></div>
+{% endif %}{% if analysed_span %}<div><span>Analysed</span><strong>{{analysed_span.label}}</strong></div>{% endif %}<div><span>Report focus</span><strong>Fighter {{report.video.focus_fighter|default(report.video.analysis_target, true)}}</strong></div></div>
   <div class="result-scoreline">{% if report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}Fighter {{report.scorecard.winner_estimate}} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
   {# When the score is withheld the page used to stop here. It knows more than
      nothing: what each fighter was seen doing, and over how much of the round.

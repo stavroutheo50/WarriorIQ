@@ -10,7 +10,7 @@
     <li><span>4</span><div><strong>Report</strong><small>Take it into training</small></div></li>
   </ol>
   <header class="workflow-heading">
-    <div><div class="eyebrow">Fighter selection</div><h1>Tell WarriorIQ who is who.</h1><p>WarriorIQ picks a clear moment and boxes the people in it. Tap Fighter A, then Fighter B. No box on someone? Drag one around them.</p></div>
+    <div><div class="eyebrow">Fighter selection</div><h1>Tell WarriorIQ who is who.</h1>{% if detection_enabled %}<p>WarriorIQ looks for a clear moment and boxes the people in it. Tap Fighter A, then Fighter B. No box on someone? Drag one around them.</p>{% else %}<p>Drag a box around each fighter: Fighter A first, then Fighter B. Keep each box tight around the whole body.</p>{% endif %}<p class="small muted">The whole video is analysed. This frame only tells WarriorIQ which fighter is which - pick one where both are fully visible and apart.</p></div>
     <a class="quiet-back" href="/frame/{{job_id}}">Pick a different moment</a>
   </header>
   <div class="fighter-lock-layout">

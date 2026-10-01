@@ -403,8 +403,10 @@ class DurableAnalysisStateTests(TestCase):
         # wording is now more specific than it was: checked against the video,
         # the kick count is right and the punch count is not, so punches are
         # shown in neither place.
-        self.assertIn("the kick count comes out right and the punch count does not", template)
-        self.assertIn("leg strikes only", template.lower())
+        # The live note comes from the one counting policy (core/sport_policy.py);
+        # it used to say "leg strikes only" above a feed listing punches.
+        self.assertIn("liveCountingNote", template)
+        self.assertNotIn("leg strikes only", template.lower())
         # And the live view must not show a punch number the report withholds -
         # a coach used to watch eleven accumulate and then get a report with
         # none.

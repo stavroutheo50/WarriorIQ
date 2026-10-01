@@ -10,6 +10,16 @@
     <div class="setup-title"><span class="sport-crest" aria-hidden="true">{{identity.mark}}</span>
       <h1>Set up your {{sport_label}} fight.</h1></div>
     <p class="setup-decided">{{identity.decided_by}}</p>
+    {#- What this sport's report will count, and how far to trust it. Every
+        sport gets the same box from the same policy (core/sport_policy.py):
+        it used to appear on three sports, say "punches, kicks and knees"
+        where the live page said "leg strikes only", and warn boxers about
+        kicks. -#}
+    {% set policy = counting_policy %}
+    <div class="setup-coverage" data-covered="{{ 'no' if (policy.withheld or not policy.counted or policy.not_analysed) else 'yes' }}" role="note" aria-label="What your report counts">
+      <p><b>{{ policy.setup_line }}</b>{% if policy.estimates %} {{ policy.estimate_note }}{% endif %}</p>
+      {% if policy.not_analysed_line %}<p>{{ policy.not_analysed_line }}</p>{% endif %}
+    </div>
   </header>
 
   <div class="setup-card" id="analyze" data-upload-state="empty">

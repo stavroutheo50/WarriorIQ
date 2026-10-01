@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import contextlib
+import html
 import json
 import time
 import os
@@ -384,15 +385,25 @@ class PublicPageTests(unittest.TestCase):
         else:
             self.assertNotIn("Full scoring coverage", chooser)
 
-    def test_setup_page_has_no_coverage_paragraphs(self):
-        """Step 1 is upload only: no "Your report counts ..." or "Not read at
-        all ..." paragraphs above the upload card."""
+    def test_every_setup_page_says_what_its_report_counts(self):
+        """QA 2026-09: three sports showed a "what your report counts" box and
+        two did not, and the boxing one warned about kicks. Every sport now
+        shows the same box, from core/sport_policy.py."""
+        from core.sport_policy import counting_policy
+
         with self.signed_in():
-            for sport in ("boxing", "kickboxing", "mma"):
+            for sport in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
                 page = self.client.get(f"/analyze/{sport}").text
-                self.assertNotIn("Your report counts", page)
-                self.assertNotIn("Not read at all", page)
-                self.assertNotIn("setup-coverage", page)
+                policy = counting_policy(sport)
+                self.assertIn("setup-coverage", page, sport)
+                self.assertIn(html.escape(policy.setup_line), page, sport)
+                if policy.estimates:
+                    self.assertIn(html.escape(policy.estimate_note), page, sport)
+            boxing = self.client.get("/analyze/boxing").text.lower()
+            box = boxing[boxing.index("setup-coverage"):boxing.index("setup-card")]
+            self.assertNotIn("kick", box)
+            mma = self.client.get("/analyze/mma").text
+            self.assertIn("Not analysed: takedowns, ground work, submissions and elbows.", mma)
 
     def test_choosing_a_sport_never_waits_on_an_animation(self):
         """The five cards are the page, so they may not fade in on scroll.

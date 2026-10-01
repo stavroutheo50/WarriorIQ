@@ -5,6 +5,7 @@ import hashlib
 import logging
 import math
 import time
+from dataclasses import replace
 from threading import Lock, RLock
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -36,6 +37,7 @@ from core.evidence_trust import automated_evidence_trust
 from core.fight_numbers import output_numbers
 from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
+from core import backtrack as _backtrack
 
 # How much of the confidence range an attempt must clear to be shown.
 #
@@ -204,7 +206,12 @@ from core.rtm_pose import refine as refine_fighter_pose
 from core.edgetam_recovery import build_recovery
 from core.sam_recovery import nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
-from core.scoring import RULESETS, collapse_simultaneous_labels, is_legal_event, normalize_ruleset
+from core.scoring import (
+    RULESETS, collapse_simultaneous_labels, is_legal_event, normalize_ruleset,
+    sport_counted_families, sport_of,
+)
+
+_PLURAL_FAMILY = {"punch": "punches", "kick": "kicks", "knee": "knees"}
 from core.types import AnalysisProgress, AnalysisRequest, PersonObservation, PoseFrame, RoundSpec
 from core.video import SourceTimestampClock, build_round_schedule, get_video_info, requested_segment_end, round_at_time
 
@@ -370,6 +377,12 @@ def _attempt_drop_reason(event, ruleset: str | None = None) -> str | None:
     # eye. Knees that are merely illegal - Kick Light, K1 variants - are still
     # thrown and still counted; this is only for a sport without kicks.
     if ruleset and family in {"kick", "knee"} and not RULESETS[normalize_ruleset(ruleset)].allow_kick:
+        return "not_in_this_sport"
+    # And more generally, only what the report for this sport counts
+    # (core/sport_policy.py): a knee in taekwondo was listed live as an attempt
+    # and then left out of every number in the report.
+    if ruleset and _PLURAL_FAMILY.get(family) not in sport_counted_families(
+            sport_of(normalize_ruleset(ruleset))):
         return "not_in_this_sport"
     peak = float(getattr(event, "peak_time", -1.0))
     if not math.isfinite(peak) or peak < 0.0:
@@ -623,16 +636,137 @@ def _frame_breakdown(steps: dict[str, float], total: float, frames: int) -> dict
     return named
 
 
+class SeedCheckFailed(RuntimeError):
+    """The forward pass reached the selection frame with A and B not where the
+    person drew them, so the identities carried back before it are wrong."""
+
+
+def _measure_footage(video_path: str, pose_tracker, start_seconds: float, end_seconds: float | None):
+    """Measure the recording before choosing how to look at it. Never fatal."""
+    try:
+        return probe_video(video_path, pose_tracker.model, start_seconds=start_seconds, end_seconds=end_seconds)
+    except Exception as error:  # noqa: BLE001 - a probe must never block a paid run
+        preflight = Preflight()
+        preflight.warnings.append("The video could not be measured before analysis: %s" % error)
+        return preflight
+
+
+def _analysed_span(info, start_seconds: float, end_seconds: float, seed_seconds: float,
+                   handoff: dict | None, reason: str | None) -> dict:
+    """What part of the video the report describes, stated in seconds."""
+    excluded_before = max(0.0, float(start_seconds))
+    return {
+        "start_seconds": round(float(start_seconds), 3),
+        "end_seconds": round(float(end_seconds), 3),
+        "video_duration_seconds": round(float(info.duration), 3),
+        "selection_seconds": round(float(seed_seconds), 3),
+        # Whole seconds, because that is the resolution the report prints at:
+        # a span that starts 0.4 s in still reads 0:00, and it is not called
+        # "the whole video" unless it really does start inside that first
+        # second and run to the end.
+        "whole_video": excluded_before < 1.0 and float(info.duration) - float(end_seconds) < 1.0,
+        "excluded_start_seconds": round(excluded_before, 3),
+        "excluded_reason": reason if excluded_before >= 1.0 else None,
+        "excluded_reason_text": (_backtrack.REASONS.get(reason) if reason and excluded_before >= 1.0 else None),
+        "backtrack": handoff,
+    }
+
+
 def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None) -> dict:
     # BoT-SORT state belongs to one run for its entire lifetime. Per-frame
     # locks would still let a second job reset identities between frames.
     with _ANALYSIS_LOCK:
+        return _analyze_from_seed(req, progress_callback)
+
+
+def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback | None) -> dict:
+    """Analyse from the requested start, seeding identity at the chosen frame.
+
+    The person draws the two boxes on one frame. Everything before that frame
+    is reached by following both fighters backwards from it (core/backtrack.py)
+    and the result is checked when the forward pass arrives back at it. Only if
+    that is impossible, or the check fails, does the analysis start at the
+    chosen frame - and the report then says which part was left out and why.
+    """
+    seed_seconds = req.selection_seconds
+    if seed_seconds is None:
         return _analyze(req, progress_callback)
+    info = get_video_info(req.video_path)
+    fps = float(info.fps) if info.fps > 0 else 30.0
+    requested_start = max(0.0, min(float(req.start_seconds), max(0.0, info.duration - 0.001)))
+    seed_seconds = max(requested_start, min(float(seed_seconds), max(0.0, info.duration - 0.001)))
+    seed_frame = int(round(seed_seconds * fps))
+    start_frame = int(round(requested_start * fps))
+    from_seed = replace(req, start_seconds=seed_seconds, selection_seconds=None)
+    if seed_frame - start_frame < _backtrack.MIN_BACKTRACK_SECONDS * fps:
+        return _analyze(replace(req, start_seconds=requested_start, selection_seconds=None),
+                        progress_callback, seed_seconds=seed_seconds)
+
+    def report_progress(fraction: float) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(AnalysisProgress(
+            percent=0.5 + 0.5 * max(0.0, min(1.0, fraction)),
+            message="Following both fighters back to the start of the video",
+            elapsed_seconds=0.0, processed_video_seconds=0.0, speed=0.0, eta_seconds=None,
+            stage="tracking", video_duration_seconds=float(info.duration),
+            analysed_from_seconds=requested_start,
+        ).to_dict())
+
+    report_progress(0.0)
+    pose_tracker = get_pose_tracker()
+    # The backward pass has to see people the way the forward pass will, so it
+    # uses the same measured inference size - and the forward pass reuses the
+    # measurement instead of taking it again.
+    measured = _measure_footage(req.video_path, pose_tracker, requested_start, None)
+    imgsz = QualityController(
+        info.fps, info.width, info.height,
+        measured_imgsz=measured.recommended_inference_size if measured.measured else None).imgsz
+    try:
+        handoff = _backtrack.backtrack(
+            req.video_path, pose_tracker, fps, start_frame, seed_frame,
+            req.fighter_a_box, req.fighter_b_box,
+            imgsz,
+            find_initial=find_initial_people,
+            workdir=Path(req.output_dir) if req.output_dir else None,
+            progress=report_progress,
+        )
+    except Exception as error:                                      # noqa: BLE001
+        # The backward pass is an addition; it must never cost the analysis
+        # of the part the person definitely asked about.
+        LOGGER.warning("backtrack_failed error=%s detail=%s", type(error).__name__, str(error)[:200])
+        handoff = _backtrack.Handoff(seed_frame=seed_frame, requested_start_frame=start_frame,
+                                     frame=seed_frame, reason="unavailable")
+    handoff_record = handoff.as_dict(fps)
+    if not handoff.moved:
+        return _analyze(from_seed, progress_callback, seed_seconds=seed_seconds,
+                        handoff=handoff_record, excluded_reason=handoff.reason or "fighter_lost",
+                        measured_footage=measured)
+    forward = replace(
+        req, start_seconds=handoff.frame / fps, selection_seconds=None,
+        fighter_a_box=list(handoff.a_box), fighter_b_box=list(handoff.b_box))
+    seed_check = {"frame": seed_frame, "a_box": list(req.fighter_a_box), "b_box": list(req.fighter_b_box),
+                  "window_frames": int(round(1.5 * fps))}
+    seed_pair = (handoff.seed_a, handoff.seed_b) if handoff.seed_a is not None and handoff.seed_b is not None else None
+    try:
+        return _analyze(forward, progress_callback, seed_seconds=seed_seconds,
+                        handoff=handoff_record, excluded_reason=handoff.reason, seed_check=seed_check,
+                        seed_pair=seed_pair, measured_footage=measured)
+    except SeedCheckFailed as failure:
+        LOGGER.warning("backtrack_rejected_at_seed seed_frame=%s verdict=%s", seed_frame, failure)
+        handoff_record = {**handoff_record, "rejected_at_seed": str(failure)}
+        return _analyze(from_seed, progress_callback, seed_seconds=seed_seconds,
+                        handoff=handoff_record, excluded_reason="unverified", measured_footage=measured)
 
 
-def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None) -> dict:
+def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None, *,
+             seed_seconds: float | None = None, handoff: dict | None = None,
+             excluded_reason: str | None = None, seed_check: dict | None = None,
+             seed_pair: tuple | None = None, measured_footage=None) -> dict:
     info = get_video_info(req.video_path)
     _validate_request(req, info.duration)
+    if seed_seconds is None:
+        seed_seconds = req.start_seconds
     rounds = build_round_schedule(req, info)
     segment_end_seconds = requested_segment_end(req, info, rounds)
     segment_duration = max(0.001, segment_end_seconds - req.start_seconds)
@@ -758,6 +892,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             quality_mode="balanced" if quality is None else quality.mode,
             stage=stage or ("complete" if bounded_percent >= 100 else "preparing"),
             video_duration_seconds=float(info.duration),
+            analysed_from_seconds=float(req.start_seconds),
             live_event_mode="validated_actions" if live_action_trusted else "observed_attempts",
             live_events=live_events_snapshot or [],
             provisional_stats=stats or {},
@@ -784,13 +919,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # sampling buys the inference size, and the same numbers tell the person who
     # filmed it what to do differently. Never fatal: if the probe cannot read
     # the file the analysis proceeds on the old resolution rule and says so.
-    try:
-        preflight = probe_video(
-            req.video_path, pose_tracker.model,
-            start_seconds=req.start_seconds, end_seconds=segment_end_seconds)
-    except Exception as error:  # noqa: BLE001 - a probe must never block a paid run
-        preflight = Preflight()
-        preflight.warnings.append("The video could not be measured before analysis: %s" % error)
+    preflight = measured_footage if measured_footage is not None else _measure_footage(
+        req.video_path, pose_tracker, req.start_seconds, segment_end_seconds)
     quality = QualityController(
         info.fps, info.width, info.height,
         measured_imgsz=preflight.recommended_inference_size if preflight.measured else None)
@@ -857,9 +987,20 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         first_frame,
     )
     manager = IdentityManager(initial_a, initial_b, start_frame, source_fps=info.fps)
+    if seed_pair is not None:
+        # Seeded earlier than the frame the person chose, after following the
+        # fighters back from it. The identity anchors are still taken from the
+        # chosen frame - "what the fighter looked like where the box was
+        # drawn" - because that is the frame picked to show them clearly, and
+        # anchoring on a clinch at the hand-off cost a real bout most of one
+        # fighter's coverage.
+        for state, seed in ((manager.a, seed_pair[0]), (manager.b, seed_pair[1])):
+            manager.adopt_anchor(state, seed)
     # Can these two be told apart in this video at all? Asked once, at the
     # start, because no amount of work downstream recovers from "no".
-    pair_similarity = fighter_pair_similarity(initial_a, initial_b)
+    # On the frame the person chose when the fighters were followed back from
+    # it: that is the frame they picked to show the two apart.
+    pair_similarity = fighter_pair_similarity(*(seed_pair or (initial_a, initial_b)))
     manager.prime_track_history(warm_samples)
     canonical_a_box = [float(value) for value in initial_a.box]
     canonical_b_box = [float(value) for value in initial_b.box]
@@ -1114,6 +1255,24 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 manager.a.identity_confidence = 1.0
                 manager.b.identity_confidence = 1.0
 
+            # Arriving back at the frame the person picked, after following the
+            # fighters from earlier in the video: A has to be on the box they
+            # drew for A, and B on B's. Anything else means the identities
+            # carried back before it are not the ones they chose.
+            if seed_check is not None and not seed_check.get("done") and source_frame >= seed_check["frame"]:
+                verdict = _backtrack.seed_verdict(
+                    fighter_a, fighter_b, seed_check["a_box"], seed_check["b_box"])
+                seed_check.setdefault("verdicts", []).append(verdict)
+                if verdict == "match":
+                    seed_check["done"] = True
+                elif verdict == "swapped":
+                    raise SeedCheckFailed("swapped")
+                elif source_frame - seed_check["frame"] >= seed_check["window_frames"]:
+                    if "partial" in seed_check["verdicts"]:
+                        seed_check["done"] = True
+                    else:
+                        raise SeedCheckFailed("unconfirmed")
+
             analyzed_frames += 1
             if fighter_a is not None:
                 found["A"] += 1
@@ -1272,6 +1431,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+    if seed_check is not None and not seed_check.get("done"):
+        if "partial" not in seed_check.get("verdicts", []):
+            raise SeedCheckFailed("never_reached")
+
     analysis_seconds = time.perf_counter() - wall_start
     frame_pass_seconds = time.perf_counter() - pose_pass_start
     realtime_speed = segment_duration / analysis_seconds if analysis_seconds > 0 else 0.0
@@ -1368,8 +1531,19 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # worth seeing before the metrics built on those joints start drifting.
         "pose_gate": None if joint_gate is None else joint_gate.summary(),
         "metric_definition": "Observation coverage: accepted fighter observations divided by analyzed frames. This is not ground-truth identity accuracy.",
+        # Where the forward pass was seeded. Equal to the frame the person
+        # picked unless the fighters were followed back from it, in which
+        # case identity_seed says where they picked and how far back it went.
         "selection_source_frame": start_frame,
         "selection_source_seconds": start_frame / info.fps,
+        "identity_seed": {
+            "selection_seconds": round(float(seed_seconds), 3),
+            "seed_check": None if seed_check is None else {
+                "verdicts": list(seed_check.get("verdicts", []))[:12],
+                "confirmed": bool(seed_check.get("done")),
+            },
+            "backtrack": handoff,
+        },
         "requested_fighter_A_box": [float(value) for value in req.fighter_a_box],
         "requested_fighter_B_box": [float(value) for value in req.fighter_b_box],
         "canonical_fighter_A_box": canonical_a_box,
@@ -1537,6 +1711,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         classifier=classifier,
     )
     report["detected_rounds"] = round_detector.summary() | {"applied": rounds_from_footage}
+    # Which part of the video this report describes. Every surface that states
+    # a duration reads it from here, so none of them can call a span "the
+    # fight" without saying what was left out.
+    report.setdefault("video", {})["analysed_span"] = _analysed_span(
+        info, req.start_seconds, segment_end_seconds, seed_seconds, handoff, excluded_reason)
 
     # A scorecard for the criteria movement can evidence. Kept separate from
     # report["scorecard"] on purpose: that one scores strikes and is withheld

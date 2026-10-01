@@ -93,7 +93,11 @@ def _request_from_job(job_id: str, job: dict) -> AnalysisRequest:
         focus_fighter=job.get("focus_fighter") or "A",
         fight_type=job["fight_type"],
         ruleset=job["ruleset"],
-        start_seconds=float(job.get("start_seconds", 0.0)),
+        # The whole video unless a later start was asked for; the fighter
+        # boxes belong to selection_seconds. An older server sends only
+        # start_seconds, which was the selection frame.
+        start_seconds=float(job.get("requested_start_seconds", 0.0) or 0.0),
+        selection_seconds=float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
         round_count=int(job.get("round_count", 1)),
         round_duration_seconds=float(job.get("round_duration_seconds", 120.0)),
         break_duration_seconds=float(job.get("break_duration_seconds", 60.0)),

@@ -49,6 +49,13 @@ class AnalysisRequest:
     fighter_id: int | None = None
     # Optional run staging directory; the orchestrator publishes it atomically.
     output_dir: str | None = None
+    # Where the person told WarriorIQ who is who (the fighter-selection frame),
+    # in seconds. The boxes above were drawn on this frame. None means the
+    # boxes belong to start_seconds, which is how every request was read before
+    # the two were separated - the selection frame used to *be* the start, so a
+    # frame picked at 0:30 threw away the first thirty seconds. See
+    # core/backtrack.py.
+    selection_seconds: float | None = None
 
 
 @dataclass
@@ -207,6 +214,10 @@ class AnalysisProgress:
     live_events: list[dict[str, Any]] = field(default_factory=list)
     provisional_stats: dict[str, Any] = field(default_factory=dict)
     latest_observation: dict[str, Any] | None = None
+    # Where in the video the analysed span begins. The live page places its
+    # frontier at this plus processed_video_seconds, so it has to be the start
+    # actually used rather than the one requested.
+    analysed_from_seconds: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -127,6 +127,7 @@ from core.retention import (
 )
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
+from core.sport_policy import counting_policy
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
 from core.squad import movement_value as squad_movement_value
@@ -1192,6 +1193,49 @@ def _reports_for_profile(profile_id: int) -> list[dict]:
     return records
 
 
+def _clock(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def _analysed_span_summary(report: dict) -> dict | None:
+    """Which part of the video the report describes, in words.
+
+    Silent truncation was the bug: a frame picked at 0:30 of a 1:56 video
+    produced a report of 1:26 that called itself the fight. Every report now
+    says what it covers. Reports made before the analysed span was recorded
+    still started at their selection frame, and say so from setup.start_seconds.
+    """
+    span = (report.get("video") or {}).get("analysed_span")
+    if span:
+        start = float(span.get("start_seconds") or 0.0)
+        end = float(span.get("end_seconds") or 0.0)
+        duration = float(span.get("video_duration_seconds") or end)
+        reason = span.get("excluded_reason_text")
+    else:
+        setup = report.get("setup") or {}
+        start = float(setup.get("start_seconds") or 0.0)
+        rounds = report.get("rounds") or []
+        end = max([float(r.get("end_seconds") or 0.0) for r in rounds] or [start])
+        duration = float((report.get("performance") or {}).get("segment_duration_seconds") or 0.0) + start
+        duration = max(duration, end)
+        reason = "older reports started at the frame chosen for fighter selection"
+    if duration <= 0 or end <= start:
+        return None
+    whole = start < 1.0 and duration - end < 1.0
+    label = (f"Whole video · {_clock(duration)}" if whole
+             else f"{_clock(start)}–{_clock(end)} of {_clock(duration)}")
+    note = None
+    if start >= 1.0:
+        note = (f"The first {_clock(start)} of the video is not in this report"
+                + (f": {reason}." if reason else ".")
+                + " Every number below describes " + f"{_clock(start)}–{_clock(end)} only.")
+    elif duration - end >= 1.0:
+        note = f"The last {_clock(duration - end)} of the video is not in this report."
+    return {"label": label, "note": note, "whole": whole,
+            "start_seconds": start, "end_seconds": end, "duration_seconds": duration}
+
+
 def _visual_focus(report: dict) -> str:
     """Whose round the visual sections are about.
 
@@ -2171,7 +2215,11 @@ def _analysis_request(job_id: str, job: dict, fighter_a_box: list[float], fighte
         focus_fighter=focus_fighter,
         fight_type=job["fight_type"],
         ruleset=job["ruleset"],
-        start_seconds=job["start_seconds"],
+        # The whole video unless a start was explicitly requested; the boxes
+        # belong to the selection frame. A job stored before the two were
+        # separated has only start_seconds, which was the selection frame.
+        start_seconds=float(job.get("requested_start_seconds", 0.0) or 0.0),
+        selection_seconds=float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
         round_count=job["round_count"],
         round_duration_seconds=job["round_duration_seconds"],
         break_duration_seconds=job["break_duration_seconds"],
@@ -2840,20 +2888,17 @@ def _reported_strike_families(sport: str) -> dict:
     shown, because the punch count was measured overstated and the knee bucket
     was measured to contain punches (core/report.py observed_summary).
     """
-    counted = sport_counted_families(sport)
-    # STRIKE_COUNTS_PUBLISHED: every family the sport scores is shown, as an
-    # estimate, with ESTIMATE_NOTE beside it.
-    if STRIKE_COUNTS_PRECISION_VALIDATED or STRIKE_COUNTS_PUBLISHED:
-        reported, withheld = counted, ()
-    else:
-        reported = tuple(family for family in counted if family == "kicks")
-        withheld = tuple(family for family in counted if family != "kicks")
+    # Every sentence about counting comes from core.sport_policy, so the upload
+    # page, live view, report, replay and share card cannot drift apart again.
+    policy = counting_policy(sport, published=STRIKE_COUNTS_PUBLISHED,
+                             validated=STRIKE_COUNTS_PRECISION_VALIDATED)
     return {
-        "reported_families": _prose_list(reported),
-        "withheld_families": _prose_list(withheld),
-        "no_strike_counts": not reported,
-        "counts_are_estimates": bool(reported) and not STRIKE_COUNTS_PRECISION_VALIDATED,
-        "estimate_note": ESTIMATE_NOTE,
+        "reported_families": _prose_list(policy.counted),
+        "withheld_families": _prose_list(policy.withheld),
+        "no_strike_counts": not policy.counted,
+        "counts_are_estimates": policy.estimates,
+        "estimate_note": policy.estimate_note,
+        "counting_policy": policy.as_dict(),
     }
 
 
@@ -2865,19 +2910,12 @@ def _sport_coverage_badge(sport: str) -> dict:
     what a report will count, not what the detector proposes.
     """
     reported = _reported_strike_families(sport)
-    if reported["no_strike_counts"]:
-        return {"covered": "no", "label": "No punch counts yet"}
-    if reported["withheld_families"]:
-        return {"covered": "no", "label": "Kick counts only"}
-    if sport == "mma":
-        # MMA is decided on the ground as much as on the feet, and none of
-        # takedowns, control or submissions is read yet.
-        return {"covered": "no", "label": "Strikes only, no grappling yet"}
-    if reported["counts_are_estimates"]:
-        return {"covered": "yes", "label": "Counts %s" % reported["reported_families"]}
-    if sport_unobserved(sport):
-        return {"covered": "no", "label": "Striking read only"}
-    return {"covered": "yes", "label": "Full scoring coverage"}
+    policy = reported["counting_policy"]
+    # MMA is decided on the ground as much as on the feet, and none of
+    # takedowns, control or submissions is read yet.
+    covered = "no" if (reported["no_strike_counts"] or reported["withheld_families"]
+                       or sport == "mma") else "yes"
+    return {"covered": covered, "label": policy["badge"]}
 
 
 def _prose_list(items) -> str:
@@ -3255,7 +3293,11 @@ async def upload(
     except Exception:
         video_path.unlink(missing_ok=True)
         raise
-    start = max(0.0, min(float(start_seconds), max(0.0, info.duration - 0.001)))
+    # Where the analysed span starts: the beginning of the video unless the
+    # caller explicitly asked for later. Not where the selection frame is -
+    # that frame only says who is who (core/backtrack.py).
+    requested_start = max(0.0, min(float(start_seconds), max(0.0, info.duration - 0.001)))
+    start = requested_start
     end = None if not end_seconds.strip() else max(start, min(float(end_seconds), info.duration))
     count = max(1, min(20, int(round_count)))
     # Frame 0 is where a round starts, which is where the referee stands
@@ -3345,7 +3387,12 @@ async def upload(
             "fight_type": fight_type.lower(),
             "analysis_target": analysis_target.upper(),
             "ruleset": normalize_ruleset(ruleset),
+            # The selection frame's time. Kept under its old name because
+            # the frame picker and older workers read it; the analysis start
+            # is requested_start_seconds.
             "start_seconds": start,
+            "selection_seconds": start,
+            "requested_start_seconds": requested_start,
             "end_seconds": end,
             "round_count": count,
             "round_duration_seconds": (
@@ -3463,6 +3510,7 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
         request=request, name="select.html",
         context={"request": request, "job_id": job_id, "job": job,
                  "default_focus": default_focus,
+                 "detection_enabled": SETTINGS.selection_detection_enabled,
                  "fighter_name": (fighter or {}).get("name"),
                  "default_corner": job.get("fighter_a_corner") or ""})
 
@@ -3516,8 +3564,9 @@ def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float
         raise HTTPException(500, "Could not save the selected fighter frame.")
     # A moment somebody chose (or the analysis asked for) is never replaced by
     # the automatic pick.
+    # Only who-is-who moves with it: the analysis still covers the whole video.
     update_job(job_id, {"selection_frame": frame_number, "start_seconds": seconds,
-                        "auto_frame_done": True})
+                        "selection_seconds": seconds, "auto_frame_done": True})
     return seconds, frame_number
 
 
@@ -3699,7 +3748,13 @@ def _remote_job_payload(job_id: str, job: dict) -> dict:
         "focus_fighter": job.get("focus_fighter") or "A",
         "fight_type": job["fight_type"],
         "ruleset": job["ruleset"],
-        "start_seconds": float(job.get("start_seconds", 0.0)),
+        # A worker that predates requested_start_seconds reads start_seconds as
+        # where to start, and so keeps analysing from the selection frame
+        # exactly as before; a current one analyses from requested_start and
+        # seeds identity at selection_seconds.
+        "start_seconds": float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
+        "selection_seconds": float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
+        "requested_start_seconds": float(job.get("requested_start_seconds", 0.0) or 0.0),
         "end_seconds": job.get("end_seconds"),
         "round_count": int(job.get("round_count", 1)),
         "round_duration_seconds": float(job.get("round_duration_seconds", 120.0)),
@@ -4134,6 +4189,9 @@ def progress_page(request: Request, job_id: str):
     _pin_sport_to_fight(request, _job_sport(job))
     return templates.TemplateResponse(request=request, name="progress.html", context={
         "request": request, "job_id": job_id, "initial_status": _public_job_status(job_id, job),
+        # The same counting policy as the upload page and the report, so the
+        # live view cannot claim "leg strikes only" above a feed of punches.
+        "live_counting_note": counting_policy(_job_sport(job)).live_note,
     })
 
 
@@ -4147,7 +4205,10 @@ def _public_job_status(job_id: str, job: dict) -> dict:
     payload = {key: value for key, value in job.items() if key in public_fields}
     payload.setdefault("job_id", job_id)
     payload.setdefault("video_duration_seconds", job.get("video_duration", 0.0))
-    start_seconds = float(job.get("start_seconds", 0.0) or 0.0)
+    # Where the analysed span actually starts: reported by the run once it
+    # knows (it can begin later than requested if the fighters could not be
+    # followed back that far), else the requested start.
+    start_seconds = float(job.get("analysed_from_seconds", job.get("requested_start_seconds", 0.0)) or 0.0)
     full_duration = float(job.get("video_duration", payload.get("video_duration_seconds", 0.0)) or 0.0)
     scheduled_duration = (
         float(job.get("round_count", 1) or 1) * float(job.get("round_duration_seconds", full_duration) or full_duration)
@@ -4595,6 +4656,12 @@ def result_page(request: Request, job_id: str):
     # reports analysed before this change say the same thing top and bottom.
     if score_withheld and score_withheld.get("disclaimer"):
         report["scorecard"]["disclaimer"] = score_withheld["disclaimer"]
+    # The sport panel's counting sentence was stored with the report, so
+    # reports written under an older policy kept saying "punches are not
+    # shown" beside punch counts. It is re-read from the one policy instead.
+    for coaching in (report.get("sport_coaching") or {}).values():
+        if isinstance(coaching, dict) and coaching.get("sport"):
+            coaching["report_frame"] = counting_policy(coaching["sport"]).report_frame
     # Written at analysis time too, and the stored copy blamed the whole sport
     # for a ruleset-only gap; see core.scoring.coverage_note.
     try:
@@ -4604,6 +4671,7 @@ def result_page(request: Request, job_id: str):
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
+        "analysed_span": _analysed_span_summary(report),
         "camera_lost": _identity_lost_to_camera(report),
         # "Punches and knees are not counted" on taekwondo, which awards no
         # knees - the note names only what this sport actually scores.
@@ -4649,7 +4717,8 @@ def result_page(request: Request, job_id: str):
             for link in (list_story_shares(job_id, _profile) if _profile is not None and _account(request) else [])
         ],
         "went_down_note": (report.get("went_down") or {}).get("note"),
-        "estimate_note": ESTIMATE_NOTE,
+        "estimate_note": counting_policy(
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job)).estimate_note,
         "families_shown": published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job)),
         # Only Full Contact has an obligatory kick count, so this is None for
@@ -5135,6 +5204,24 @@ def replay_page(
         family.lower() if family else None,
         outcome.lower() if outcome else None,
     )
+    sport = (report.get("scorecard") or {}).get("sport") or _job_sport(_authorized_job(request, job_id) or {})
+    policy = counting_policy(sport)
+    if replay_mode == "movement_chapters" and identity_safe and STRIKE_COUNTS_PUBLISHED:
+        # The report lists every counted strike ("Watch every counted strike")
+        # while this page said no action had passed. The same list is offered
+        # here, labelled as what it is: automatic counts, estimates.
+        counted = _counted_strikes(report, published_families(sport))
+        if fighter and fighter.upper() in {"A", "B"}:
+            counted = [row for row in counted if row["fighter"] == fighter.upper()]
+        if family and family.lower() in {"punch", "kick", "knee"}:
+            counted = [row for row in counted if row["family"] == family.lower()]
+        if counted:
+            replay_chapters = [{
+                "time": round(row["seconds"], 3), "lead_seconds": 1.0,
+                "label": f"{row['clock']} · Fighter {row['fighter']} · {row['family'].title()}",
+                "detail": "Counted automatically (estimate)", "kind": "counted_strike",
+            } for row in counted[:200]]
+            replay_mode = "counted_strikes"
     _pin_sport_to_fight(request, (report.get("scorecard") or {}).get("sport"))
     return templates.TemplateResponse(
         request=request,
@@ -5144,6 +5231,7 @@ def replay_page(
             "identity_safe": identity_safe,
             "replay_chapters": replay_chapters,
             "replay_mode": replay_mode,
+            "counting_policy": policy.as_dict(),
             "evidence_filter": " · ".join(
                 value.replace("_", " ").title()
                 for value in (fighter, family, outcome) if value

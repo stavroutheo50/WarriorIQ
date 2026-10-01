@@ -274,10 +274,13 @@ STRIKE_COUNTS_PRECISION_VALIDATED = False
 # Re-run it and update this note whenever the numbers move.
 STRIKE_COUNTS_PUBLISHED = True
 
+# The kickboxing sentence of core.sport_policy, kept here under its old name
+# for callers that predate the per-sport policy; a test holds them equal. Every
+# surface that knows the sport uses counting_policy(sport).estimate_note.
 ESTIMATE_NOTE = (
-    "Automatic counts, not checked by a person. On a fight we checked by hand, "
-    "about two in three of the strikes WarriorIQ counted were real, and it often "
-    "mixed up punches and kicks, so treat these as estimates."
+    "Automatic counts, not checked by a person. On a kickboxing fight we checked by "
+    "hand, about two in three of the strikes WarriorIQ counted were real, and it often "
+    "mixed up punches, kicks and knees, so treat these as estimates."
 )
 
 ESTIMATED_SCORE_NOTE = (
@@ -306,6 +309,12 @@ def published_families(sport: str | None) -> tuple[str, ...]:
 
 
 SHARE_CARD_NOTE = "Automatic estimate by WarriorIQ, not checked by a person."
+
+
+def _sport_estimate_note(sport: str | None) -> str:
+    from core.sport_policy import counting_policy
+
+    return counting_policy(sport).estimate_note or ESTIMATE_NOTE
 
 
 def share_card(report: dict) -> dict | None:
@@ -457,7 +466,7 @@ def observed_summary(report: dict) -> dict | None:
                   "leg strikes the analysis flagged while it had sight of that fighter"),
         "families_shown": list(shown),
         "punches_reported": "punch" in shown,
-        "estimate_note": ESTIMATE_NOTE,
+        "estimate_note": _sport_estimate_note((report.get("scorecard") or {}).get("sport")),
         # Precision has been measured once, by hand, on three fights: about a
         # third of displayed actions were real. That is too small a sample to
         # publish as a product claim and far too weak to call the count a
