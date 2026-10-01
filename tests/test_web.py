@@ -543,12 +543,13 @@ class PublicPageTests(unittest.TestCase):
         exact sizes, so the scale can be tuned without the test fighting it.
         """
         system = (Path(__file__).resolve().parents[1] / "app" / "static" / "system.css").read_text(encoding="utf-8")
-        self.assertIn("--wiq-text-micro: 11px", system)
-        # No rule in the system layer may set type below the 11px floor.
+        # The floor was raised to 12px after QA (2026-09) found 11px labels.
+        self.assertIn("--wiq-text-micro: 12px", system)
+        # No rule in the system layer may set type below the 12px floor.
         import re
 
         for size in re.findall(r"font-size:\s*([0-9.]+)px", system):
-            self.assertGreaterEqual(float(size), 9.5, f"{size}px is below the floor")
+            self.assertGreaterEqual(float(size), 12, f"{size}px is below the floor")
 
     def test_an_unknown_sport_is_not_invented(self):
         self.assertEqual(self.client.get("/analyze/sumo").status_code, 404)
@@ -866,6 +867,13 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('"@type":"WebSite"', home.text)
         self.assertIn("https://warrioriq.eu/", sitemap.text)
         self.assertIn("Sitemap: https://warrioriq.eu/sitemap.xml", robots.text)
+        # Private areas stay out of search without robots.txt naming the
+        # admin console, validation tooling or the payment webhook.
+        for hidden in ("/admin", "/validation", "/stripe/"):
+            self.assertNotIn(f"Disallow: {hidden}", robots.text)
+        self.assertIn("Disallow: /result/", robots.text)
+        self.assertEqual(self.client.get("/admin", follow_redirects=False).headers.get("x-robots-tag"),
+                         "noindex, nofollow")
         self.assertIn('name="robots" content="noindex,nofollow"', login.text)
         self.assertNotIn('<link rel="canonical"', login.text)
 

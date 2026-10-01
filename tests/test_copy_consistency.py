@@ -65,3 +65,34 @@ def test_a_camera_failure_rate_of_one_reads_as_english():
 def test_replay_and_report_do_not_give_two_counts_the_same_name():
     assert "analyzed frames`" not in _page("replay.html")
     assert "tracked frames" in _page("replay.html")
+
+
+# --- previous audit items (QA 2026-09 "also verify") ---------------------------
+
+STATIC = TEMPLATES.parent / "static"
+
+
+def test_no_stylesheet_sets_text_below_twelve_pixels():
+    import re
+
+    for sheet in STATIC.glob("*.css"):
+        text = sheet.read_text(encoding="utf-8")
+        sizes = [float(size) for size in re.findall(r"font(?:-size)?:[^;}]*?\b(\d+(?:\.\d+)?)px", text)]
+        assert all(size >= 12 for size in sizes), (sheet.name, sorted(set(s for s in sizes if s < 12)))
+
+
+def test_footer_links_are_44px_both_ways_on_a_phone():
+    a11y = (STATIC / "a11y.css").read_text(encoding="utf-8")
+    assert "min-height: 44px" in a11y and "min-width: 44px" in a11y
+
+
+def test_the_wordmark_is_one_word():
+    base = _page("base.html")
+    assert '<b class="brand-word">WARRIOR<span>IQ</span></b>' in base
+
+
+def test_revealed_content_cannot_stay_hidden_if_the_observer_fails():
+    motion = (STATIC / "motion.js").read_text(encoding="utf-8")
+    assert "catch(error){revealAll()}" in motion
+    # Hidden only under a class this same script adds.
+    assert "body.motion-enabled .wiq-reveal{opacity:0" in (STATIC / "motion.css").read_text(encoding="utf-8")

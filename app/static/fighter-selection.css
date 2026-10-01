@@ -33,7 +33,7 @@
   background: #0d192a;
   color: #9cadc2;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   cursor: pointer;
 }
@@ -68,7 +68,7 @@
 .selection-without-drawing .small{margin:0 0 10px}
 .pick-fighter{border:1px solid rgba(255,255,255,.10);border-radius:9px;
   padding:9px 12px 11px;margin:0 0 10px;min-width:0}
-.pick-fighter legend{padding:0 6px;font-size:11px;letter-spacing:1.3px;
+.pick-fighter legend{padding:0 6px;font-size:12px;letter-spacing:1.3px;
   text-transform:uppercase;font-weight:800;color:#98a2b3}
 .pick-fighter label{display:flex;align-items:center;gap:9px;padding:5px 2px;
   font-size:13.5px;cursor:pointer;line-height:1.4}
@@ -80,7 +80,7 @@
 /* Fighter A's corner. A is whoever was boxed first, so the colour is asked
    rather than assumed. */
 .corner-pick{border:1px solid rgba(255,255,255,.10);border-radius:9px;padding:9px 12px 11px;margin:14px 0 0;min-width:0}
-.corner-pick legend{padding:0 6px;font-size:11px;letter-spacing:1.3px;text-transform:uppercase;font-weight:800;color:#98a2b3}
+.corner-pick legend{padding:0 6px;font-size:12px;letter-spacing:1.3px;text-transform:uppercase;font-weight:800;color:#98a2b3}
 .corner-pick label{display:flex;align-items:center;gap:9px;padding:4px 2px;font-size:13.5px;cursor:pointer;line-height:1.4}
 .corner-pick label span{display:inline-flex;align-items:center;gap:7px}
 .corner-pick input{flex:none;width:16px;height:16px;accent-color:#8794ff}

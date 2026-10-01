@@ -427,6 +427,11 @@ PRIVATE_ROUTE_PREFIXES = (
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
     "/auth/",
 )
+# Private areas robots.txt does not name. Listing them there advertised the
+# admin console, validation tooling and payment webhook to anyone who reads the
+# file (QA, 2026-09); they are kept out of search by the X-Robots-Tag header
+# every private response carries instead (_apply_response_headers).
+UNADVERTISED_PRIVATE_PREFIXES = ("/admin", "/validation", "/stripe/")
 
 SEARCH_GUIDES = {
     "kickboxing-fight-analysis": {
@@ -441,7 +446,7 @@ SEARCH_GUIDES = {
             {"title": "Built for training, not official judging", "body": "The scorecard is an evidence-gated training estimate. It is designed to help athletes and coaches structure review; it does not replace licensed officials or the governing rules of an event."},
         ],
         "faqs": [
-            {"question": "Can WarriorIQ analyse sparring as well as competition footage?", "answer": "Yes. Choose the video type before upload so the report keeps the session context clear."},
+            {"question": "Can WarriorIQ analyse sparring as well as competition footage?", "answer": "Yes. Sparring and competition footage are analysed the same way."},
             {"question": "Does WarriorIQ analyse both fighters?", "answer": "Yes. Both fighters are tracked for identity and fight context, while the selected focus fighter receives the deeper coaching report and training plan."},
         ],
         "related": [("K-1 fight analysis", "/k1-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
@@ -1637,6 +1642,8 @@ def _apply_response_headers(request: Request, response) -> None:
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+    if request.url.path.startswith(PRIVATE_ROUTE_PREFIXES):
+        response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
     # The analytics tag is only rendered once a visitor accepts analytics
     # cookies, so the policy only names Google's hosts for those visitors.
     # Without this the browser blocks googletagmanager.com outright and no
@@ -6602,7 +6609,8 @@ def favicon():
 def robots_txt():
     if not SETTINGS.public_base_url:
         return PlainTextResponse("User-agent: *\nDisallow: /\n")
-    disallowed = "\n".join(f"Disallow: {prefix}" for prefix in PRIVATE_ROUTE_PREFIXES)
+    disallowed = "\n".join(f"Disallow: {prefix}" for prefix in PRIVATE_ROUTE_PREFIXES
+                            if prefix not in UNADVERTISED_PRIVATE_PREFIXES)
     return PlainTextResponse(
         f"User-agent: *\nAllow: /\n{disallowed}\nSitemap: {SETTINGS.public_base_url}/sitemap.xml\n"
     )

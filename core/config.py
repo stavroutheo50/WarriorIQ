@@ -1282,6 +1282,10 @@ class Settings:
     # is actually loaded.
     gtm_container_id: str = os.getenv("WARRIORIQ_GTM_ID", "").strip()
     email_provider: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER", "").strip()
+    # Who hosts the website, its database and the uploaded fights, named on
+    # /subprocessors. Render sets RENDER on its own services, so a Render
+    # deployment names itself; any other host is named here.
+    hosting_provider: str = os.getenv("WARRIORIQ_HOSTING_PROVIDER", "Render" if IS_RENDER else "").strip()
     require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 
 

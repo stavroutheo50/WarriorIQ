@@ -51,7 +51,7 @@ LEGAL_DOCUMENTS = {
             ("Accounts and security", "Provide accurate account information, protect your password, and tell support about suspected unauthorised access. A parent or legal guardian managing a child's workspace is responsible for its settings, uploads and sharing choices unless the law says otherwise."),
             ("Plans, billing and cancellation", "Paid plans renew for the period shown at checkout until cancelled. The price, taxes, analysis allowance, report depth and renewal terms must be presented before payment. Cancellation stops future renewal and does not erase legal refund or withdrawal rights. The Refund and Cancellation Policy forms part of these Terms."),
             ("Acceptable use", "Do not upload unlawful, stolen, abusive or secretly recorded content; identify or harass people; bypass access controls or allowances; scrape the service; reverse engineer protected components; distribute malware; or use the service to make high-impact decisions about another person. The Acceptable Use Policy gives more detail."),
-            ("Suspension and termination", "Access may be restricted when reasonably necessary to protect users, the service, legal rights or security. Where practical and lawful, the operator should explain the reason and give a route to appeal. Users may delete their account from the Athlete Profile."),
+            ("Suspension and termination", "Access may be restricted when reasonably necessary to protect users, the service, legal rights or security. Where practical and lawful, WarriorIQ explains the reason and gives a route to appeal. Users may delete their account from the Athlete Profile."),
             ("Intellectual property", "WarriorIQ branding, interface and original software are protected by applicable intellectual-property law. These Terms do not transfer them. User footage and lawful feedback remain subject to the rights described in these Terms and the Privacy Policy."),
             ("Disclaimers and liability", "The service is provided with the care required by applicable law, but uninterrupted operation and perfect analysis are not promised. Nothing in these Terms excludes rights or liability that cannot legally be excluded, including mandatory consumer protections."),
             ("Changes and contact", "Material changes require a new policy version and renewed acceptance when appropriate. The configured operator and governing jurisdiction appear in the Legal Notice. Questions can be sent to the configured support address."),
@@ -64,8 +64,8 @@ LEGAL_DOCUMENTS = {
         "sections": [
             ("Essential cookies", "warrioriq_session keeps a signed-in account authenticated for up to 30 days. warrioriq_guest separates a temporary guest job from other browser sessions for up to 24 hours. warrioriq_oauth is a signed, HttpOnly cookie used for up to 10 minutes to protect an optional social sign-in attempt and is removed when the browser session ends. These cookies use Secure on HTTPS; the social-sign-in cookie uses SameSite=None in production so Apple can safely return a form POST, while the others use SameSite=Lax."),
             ("Preference storage", "WarriorIQ stores a first-party preference cookie recording Accept All, Reject Non-Essential or a custom selection. Signed-in choices are also linked to the account. Essential security and session storage remains separate and cannot be disabled while using authenticated or temporary private functions."),
-            ("Analytics", "Google Analytics 4 is installed through a Google tag. The tag loads on every page so the installation stays verifiable to Google's own tag detection, but Google Consent Mode holds analytics storage denied until you choose Accept All or select analytics under Manage Preferences; no analytics cookie is written before that, and Reject Non-Essential leaves it denied. The operator must document the contracted Google entity, processing location, data-retention setting and transfer mechanism before production use."),
-            ("Advertising", "The same Google tag carries a Google Ads tag, which receives a page-view signal. Advertising storage, ad user data and ad personalisation are set to denied and are never granted by WarriorIQ, including under Accept All, so no advertising cookie is written and the signal is sent without personalisation. Fight footage and report contents are not sent to Google. The operator must document the contracted Google entity, processing location, data-retention setting and transfer mechanism before production use."),
+            ("Analytics", "Google Analytics 4 is installed through a Google tag. The tag loads on every page so the installation stays verifiable to Google's own tag detection, but Google Consent Mode holds analytics storage denied until you choose Accept All or select analytics under Manage Preferences; no analytics cookie is written before that, and Reject Non-Essential leaves it denied."),
+            ("Advertising", "The same Google tag carries a Google Ads tag, which receives a page-view signal. Advertising storage, ad user data and ad personalisation are set to denied and are never granted by WarriorIQ, including under Accept All, so no advertising cookie is written and the signal is sent without personalisation. Fight footage and report contents are not sent to Google."),
             ("Managing storage", "You can remove cookies and local storage in browser settings. Removing an essential cookie can sign you out or make a temporary guest analysis inaccessible. The service must not use a cookie wall for functions that do not require optional tracking."),
         ],
     },
@@ -144,7 +144,7 @@ LEGAL_DOCUMENTS = {
         "sections": [
             ("What the interface supports", "Pages use semantic headings, labelled fields, keyboard-operable controls, visible focus, text alternatives, responsive layouts and status messages that do not rely only on colour. Video evidence should retain native playback controls."),
             ("Known limits", "Complex canvas-based fighter selection and skeleton overlays may be difficult with some assistive technology. The selection workflow needs continued testing with keyboard, zoom, screen readers, reduced motion and mobile devices before a public accessibility claim is final."),
-            ("Feedback", "Report the page, device, browser, assistive technology and problem to the configured support email. The operator should acknowledge accessibility requests and offer a reasonable alternative when possible."),
+            ("Feedback", "Report the page, device, browser, assistive technology and problem to the configured support email. WarriorIQ acknowledges accessibility requests and offers a reasonable alternative where it can."),
         ],
     },
     "ai-transparency": {
@@ -163,24 +163,21 @@ LEGAL_DOCUMENTS = {
         "description": "WarriorIQ's current security controls and responsible disclosure route.",
         "intro": "Security details are stated narrowly so this page does not promise controls that are not implemented.",
         "sections": [
-            ("Current application controls", "Passwords are salted and hashed; session tokens are stored as digests; account data and report access are owner-scoped; guest identifiers separate temporary sessions; uploads use generated storage names, extension allowlists, byte limits and video decoding checks; sensitive responses disable caching; and security headers restrict framing, content types, browser permissions and content sources."),
+            ("Current application controls", "Passwords are salted and hashed; session tokens are stored as digests; account data and report access are owner-scoped; guest identifiers separate temporary sessions; uploads use generated storage names, extension allowlists, byte limits, file-signature checks and video decoding checks; sensitive responses disable caching; and security headers restrict framing, content types, browser permissions and content sources."),
+            ("Abuse protection", "Requests are rate-limited per network address, with a readable page saying how long to wait, and repeated sign-in attempts from one address are refused for a while. The API schema and administration pages are not public."),
             ("Payments", "Card details are handled by configured Stripe-hosted checkout rather than stored by WarriorIQ. Stripe webhook signatures are verified and event identifiers are processed idempotently."),
             ("Responsible disclosure", "Send a concise vulnerability report to the configured support address, including reproduction steps and impact. Do not access other users' data, disrupt service or publish exploitable details before the operator has had a reasonable opportunity to investigate."),
-            ("Production obligations", "A public operator still needs managed secrets, encrypted backups, access logging, patching, rate limits, malware scanning, incident response, vendor review, tested restoration and jurisdiction-appropriate breach procedures. Launch readiness does not claim those operational tasks are complete."),
         ],
     },
     "subprocessors": {
         "title": "Service Providers and Subprocessors",
         "description": "Which external providers may process WarriorIQ data and when.",
-        "intro": "This list describes integrations present in the current WarriorIQ code. The final operator must update it to match the actual hosting region, vendor contracts and production configuration.",
-        "sections": [
-            ("OpenAI", "Optional identity-recovery provider. Selected fight frames are sent only when the user enables the feature and an API key is configured. Purpose: resolving Fighter A/B continuity when local tracking is uncertain. The operator must document the contracted entity, processing location, retention controls and transfer mechanism before production use."),
-            ("Stripe", "Optional payment provider. When paid plans are enabled, Stripe receives checkout, account email and billing information and returns signed payment events. WarriorIQ does not store full card details. The contracted Stripe entity and region depend on the operator's account."),
-            ("Identity providers", "Google, Apple, Meta/Facebook and Microsoft are optional authentication providers. A provider receives data only when the user chooses its sign-in button and the operator has configured that integration. WarriorIQ receives a stable provider identifier and available email/display name for account authentication, and does not retain provider access tokens. The operator must publish the providers actually enabled and complete each provider's data-protection and transfer review."),
-            ("Google Analytics and Google Ads", "Google receives website usage data through a Google tag installed on every page: analytics events once the visitor accepts analytics storage, and a page-view signal to Google Ads sent without personalisation. Advertising storage and ad personalisation are refused at all times. Fight footage and report contents are not sent. The operator must document the contracted Google entity, processing location, data-retention setting and transfer mechanism before production use."),
-            ("Hosting and storage", "This build processes and stores files on the computer running it. No WarriorIQ cloud host is configured in the code. A public host, CDN, database, email or monitoring vendor must be added to this notice before it receives personal data."),
-            ("Change notice", "Material provider changes should be published before they take effect where required, with an updated policy date and a way for affected customers to raise data-protection concerns."),
-        ],
+        # Built per request from this deployment's configuration by
+        # subprocessor_sections(): the fixed list said "no WarriorIQ cloud host
+        # is configured" on a site hosted on Render with analysis on Modal, and
+        # carried "the operator must..." notes meant for whoever deployed it.
+        "intro": "The providers below receive personal data from WarriorIQ, each for the purpose stated. The list follows this website's current configuration, so a provider appears here once it is switched on.",
+        "sections": [],
     },
     "contact": {
         "title": "Contact and Complaints",
@@ -198,7 +195,7 @@ LEGAL_DOCUMENTS = {
             ("Product and account support", "Write to {support_email} for account access, billing, cancellation, accessibility help, analysis problems and general complaints. Include the analysis identifier when relevant, but do not send fight footage unless support specifically provides a secure channel."),
             ("Privacy rights", "Write to {privacy_email} for access, correction, deletion, restriction, objection, portability or consent-withdrawal requests. The operator may need proportionate information to verify the requester before disclosing personal data."),
             ("Copyright notices", "Write to {dmca_email} for infringement notices and counter-notices. The Copyright and DMCA Policy explains the information required and the limits of the published process."),
-            ("Complaint handling", "The operator should acknowledge complaints, investigate them fairly, explain the outcome where lawful, and identify any independent regulator, consumer-dispute route or appeal mechanism required in the user's jurisdiction."),
+            ("Complaint handling", "WarriorIQ acknowledges complaints, investigates them fairly and explains the outcome where it lawfully can. If you are in the EU or the UK you can also complain to your data-protection authority about how your personal data is handled."),
         ],
     },
 }
@@ -223,6 +220,69 @@ CONTACT_ADDRESS_FALLBACKS = {
 }
 
 
+def subprocessor_sections() -> list[tuple[str, str]]:
+    """Who receives personal data from this deployment, and for what.
+
+    Read from configuration rather than written out, so the page names the
+    host and analysis provider actually in use and nothing that is switched
+    off. Only providers that receive personal data are listed.
+    """
+    import os
+
+    sections: list[tuple[str, str]] = []
+    if SETTINGS.hosting_provider:
+        sections.append((f"{SETTINGS.hosting_provider} (website hosting and storage)", (
+            f"{SETTINGS.hosting_provider} hosts this website. Accounts, the database, uploaded fight videos and "
+            "finished reports are stored on its servers. Saved fight videos are deleted after "
+            f"{SETTINGS.saved_video_retention_days} days.")))
+    else:
+        sections.append(("Website hosting and storage", (
+            "Accounts, the database, uploaded fight videos and finished reports are stored on the server that "
+            f"runs this website. Saved fight videos are deleted after {SETTINGS.saved_video_retention_days} days.")))
+    if "modal.run" in SETTINGS.worker_wake_url.lower():
+        sections.append(("Modal (fight analysis)", (
+            "Modal provides the cloud graphics card that analyses each fight. For one analysis it receives the "
+            "fight video and the two fighter boxes you drew, returns the measurements to this website, and the "
+            "video and working files are deleted from it when the run ends.")))
+    elif SETTINGS.analysis_worker_mode == "remote":
+        sections.append(("Analysis computer", (
+            "Fights are analysed on a separate analysis computer run for WarriorIQ. For one analysis it downloads "
+            "the fight video and the two fighter boxes from this website and deletes them when the run ends.")))
+    if SETTINGS.analytics_measurement_id or SETTINGS.gtm_container_id:
+        sections.append(("Google (analytics and advertising measurement)", (
+            "Google receives website usage data through a Google tag: analytics events once you accept analytics "
+            "storage, and a page-view signal to Google Ads sent without personalisation. Advertising storage and "
+            "ad personalisation are refused at all times. Fight footage and report contents are never sent.")))
+    if SETTINGS.email_provider:
+        sections.append((f"{SETTINGS.email_provider} (email)", (
+            f"{SETTINGS.email_provider} delivers WarriorIQ's account emails, such as sign-in and verification "
+            "messages, and so receives your email address and the message.")))
+    sign_in = [name for name, configured in (
+        ("Google", SETTINGS.google_client_id and SETTINGS.google_client_secret),
+        ("Meta/Facebook", SETTINGS.facebook_client_id and SETTINGS.facebook_client_secret),
+        ("Microsoft", SETTINGS.microsoft_client_id and SETTINGS.microsoft_client_secret),
+        ("GitHub", SETTINGS.github_client_id and SETTINGS.github_client_secret),
+    ) if configured and SETTINGS.oauth_state_secret]
+    if sign_in:
+        names = sign_in[0] if len(sign_in) == 1 else ", ".join(sign_in[:-1]) + " and " + sign_in[-1]
+        sections.append(("Sign-in providers", (
+            f"{names} {'is' if len(sign_in) == 1 else 'are'} offered for signing in. A provider receives data only "
+            "when you choose its button; WarriorIQ receives a provider identifier and your email or display name, "
+            "and does not keep the provider's access tokens.")))
+    if SETTINGS.payments_enabled and os.getenv("STRIPE_SECRET_KEY", "").strip():
+        sections.append(("Stripe (payments)", (
+            "Stripe runs checkout for paid plans and receives your email and billing details. WarriorIQ never "
+            "sees or stores full card details.")))
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        sections.append(("OpenAI (optional identity recovery)", (
+            "Only if you switch on identity recovery for an upload, selected frames of that fight are sent to "
+            "OpenAI to help tell Fighter A from Fighter B when tracking is unsure.")))
+    sections.append(("Changes to this list", (
+        "A new provider is added to this page before it receives personal data, with an updated policy "
+        "version.")))
+    return sections
+
+
 def resolve_document(slug: str) -> dict | None:
     """A published legal document with its contact placeholders filled in.
 
@@ -240,8 +300,9 @@ def resolve_document(slug: str) -> dict | None:
     # Only text that actually carries a placeholder is formatted, so a stray
     # brace in ordinary prose can never raise on a legal page.
     fill = lambda text: text.format(**addresses) if "{" in text else text
+    sections = subprocessor_sections() if slug == "subprocessors" else document["sections"]
     return {
         **document,
         "intro": fill(document.get("intro", "")),
-        "sections": [(heading, fill(body)) for heading, body in document["sections"]],
+        "sections": [(heading, fill(body)) for heading, body in sections],
     }

@@ -70,6 +70,9 @@ label.check > span,
   footer a {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     min-height: 44px;
+    /* Short words ("Terms") were 35px wide: the target is 44px both ways. */
+    min-width: 44px;
   }
 }
