@@ -544,7 +544,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertGreater(pieces, 1, "the clip should have needed more than one piece")
         self.assertEqual(finished.status_code, 201, finished.text[:200])
         self.assertEqual(finished.json()["job_id"], job)
-        self.assertEqual(finished.json()["next_url"], "/frame/%s" % job)
+        self.assertEqual(finished.json()["next_url"], "/select/%s" % job)
         self.assertTrue(get_job(job), "the fight did not reach the job store")
         self.assertTrue((UPLOADS / ("%s.mp4" % job)).exists())
         # The working files are gone, not left to be swept later.

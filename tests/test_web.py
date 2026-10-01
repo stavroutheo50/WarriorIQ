@@ -1017,8 +1017,10 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("video.videoWidth>0", frame)
         self.assertIn("seconds:stillMode?stillSeconds:video.currentTime", frame)
         self.assertNotIn("Continue without choosing", frame)
+        # The upload page no longer plays the file at all: the clear moment is
+        # found on the server (tests/test_person_detect.py).
         analyze = (root / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
-        self.assertIn("!(localVideo.videoWidth>0)", analyze)
+        self.assertNotIn('id="localVideo"', analyze)
         css = (root / "app" / "static" / "frame-picker.css").read_text(encoding="utf-8")
         self.assertIn(".frame-player-panel video[hidden]{display:none}", css)
 

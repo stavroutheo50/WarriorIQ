@@ -93,3 +93,24 @@
 /* Raised as soon as both boxes are drawn, before the analysis starts. */
 .pair-warning{margin:14px 0 0;padding:11px 13px;border:1px solid #7a5a2a;border-radius:10px;background:#261d0f;color:#ffd99a;font-size:13px;line-height:1.5}
 .pair-warning[hidden],.selection-edit-button[hidden]{display:none}
+
+/* While WarriorIQ looks for the clearest moment, a light sweeps the frame so
+   the wait reads as work being done, not a page that stalled. */
+.fighter-stage-panel .select-stage[data-scanning="true"]::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(120, 170, 255, 0.2) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: wiq-frame-scan 1.4s linear infinite;
+  content: "";
+  pointer-events: none;
+}
+
+@keyframes wiq-frame-scan {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fighter-stage-panel .select-stage[data-scanning="true"]::after { animation: none; }
+}

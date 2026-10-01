@@ -125,6 +125,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
+from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
@@ -3193,7 +3194,9 @@ async def upload(
                       "minor_permission_status": minor_permission_status},
             **acceptance_owner,
         )
-    next_url = f"/frame/{job_id}"
+    # Straight to the fighters: the clear moment is found on that page
+    # (core/person_detect.py), not scrubbed for by hand.
+    next_url = f"/select/{job_id}"
     if "application/json" in request.headers.get("accept", ""):
         response = JSONResponse({"job_id": job_id, "next_url": next_url}, status_code=201)
     else:
@@ -3276,8 +3279,46 @@ def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float
     frame = read_frame(job["video_path"], frame_number)
     if frame is None or not cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), frame):
         raise HTTPException(500, "Could not save the selected fighter frame.")
-    update_job(job_id, {"selection_frame": frame_number, "start_seconds": seconds})
+    # A moment somebody chose (or the analysis asked for) is never replaced by
+    # the automatic pick.
+    update_job(job_id, {"selection_frame": frame_number, "start_seconds": seconds,
+                        "auto_frame_done": True})
     return seconds, frame_number
+
+
+_auto_frame_locks: dict[str, threading.Lock] = {}
+_auto_frame_locks_guard = threading.Lock()
+
+
+def _auto_pick_selection_frame(job_id: str) -> list[dict] | None:
+    """Move a fresh upload's selection frame to its clearest early moment.
+
+    Runs once per job, on the first candidate request from the selection page,
+    so the upload itself never waits on it. Returns the people found in the
+    chosen frame, or None when nothing was moved (no detector, no clear
+    moment, or already decided).
+    """
+    with _auto_frame_locks_guard:
+        lock = _auto_frame_locks.setdefault(job_id, threading.Lock())
+    with lock:
+        job = get_job(job_id)
+        if not job or job.get("auto_frame_done"):
+            return None
+        try:
+            moment = find_clear_moment(job["video_path"])
+        except Exception as exc:                                    # noqa: BLE001
+            LOGGER.warning("auto_frame_failed job=%s error=%s", job_id, type(exc).__name__)
+            moment = None
+        if moment is None:
+            update_job(job_id, {"auto_frame_done": True})
+            return None
+        try:
+            _seek_selection_frame(job_id, job, float(moment["seconds"]))
+        except Exception as exc:                                    # noqa: BLE001
+            LOGGER.warning("auto_frame_seek_failed job=%s error=%s", job_id, type(exc).__name__)
+            update_job(job_id, {"auto_frame_done": True})
+            return None
+        return moment["people"]
 
 
 @app.post("/api/selection-frame/{job_id}", dependencies=[Depends(require_csrf)])
@@ -3305,9 +3346,20 @@ def detect_people(request: Request, job_id: str):
             "people": [], "width": job["video_width"], "height": job["video_height"],
             "availability": "manual_only",
         }
+    moved = _auto_pick_selection_frame(job_id)
+    job = get_job(job_id) or job
     frame = cv2.imread(str(path))
     if frame is None:
         raise HTTPException(500, "Could not read selection image")
+    people = moved if moved is not None else detect_people_in_frame(frame)
+    if people is not None:
+        # Small figures are crowd, not fighters, and too small to tap.
+        tall = [p for p in people if p["box"][3] - p["box"][1] >= 0.10 * frame.shape[0]]
+        return {
+            "people": tall, "width": job["video_width"], "height": job["video_height"],
+            "availability": "candidates_ready", "frame_moved": moved is not None,
+            "seconds": float(job.get("start_seconds") or 0.0),
+        }
     try:
         tracker = _get_pose_tracker()
         results = tracker.predict_selection(frame)
