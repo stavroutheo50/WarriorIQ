@@ -179,3 +179,6 @@ body:has(#cookieNotice) main{padding-bottom:210px}.error-page{margin:45px 0;padd
 .wiq-confirm-cancel{border:1px solid var(--wiq-edge,#2b3d60);background:transparent;color:var(--wiq-text,#e8effb)}
 .wiq-confirm-delete{border:1px solid #7d3446;background:#5d2231;color:#ffd9e0}
 .wiq-confirm-delete:hover{background:#742b3d}
+
+/* Stills of the frame being analysed, for a video the browser cannot play. */
+.live-video-wrap video[hidden]{display:none}.live-video-wrap .live-still{display:block;width:100%;height:100%;object-fit:contain;background:#02050b}.live-video-wrap .live-still[hidden]{display:none}

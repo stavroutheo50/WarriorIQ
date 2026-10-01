@@ -35,6 +35,9 @@ if "core.config" in sys.modules:                                    # pragma: no
         "import inside the test that needs it."
     )
 
+# The setup page's person detector is fetched from the network on first use;
+# no test should do that. Tests that need it patch it in.
+os.environ["WARRIORIQ_PERSON_DETECTOR"] = "0"
 _RUNTIME = pathlib.Path(tempfile.mkdtemp(prefix="warrioriq-tests-"))
 (_RUNTIME / "uploads").mkdir(parents=True, exist_ok=True)
 (_RUNTIME / "outputs").mkdir(parents=True, exist_ok=True)

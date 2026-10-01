@@ -800,7 +800,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         payload = response.json()
         self.assertRegex(payload["job_id"], r"^[a-f0-9]{12}$")
-        self.assertEqual(payload["next_url"], f"/frame/{payload['job_id']}")
+        self.assertEqual(payload["next_url"], f"/select/{payload['job_id']}")
         self.assertTrue(response.cookies.get("warrioriq_active_analysis"))
 
     def test_failed_selection_frame_creation_removes_partial_upload(self):
