@@ -159,3 +159,17 @@ def test_cancelling_a_running_analysis_stops_the_worker(account):
     assert client.post(f"/pending/{job_id}/cancel", follow_redirects=False).status_code == 303
     # The worker's next progress report is refused, which is what ends its run.
     assert state.update_job_for_worker(job_id, "worker-1", run, {"percent": 50.0}) is False
+
+
+def test_the_library_does_not_label_every_fight_competition(account):
+    """QA 2026-09: the question is no longer asked, but every fight said "Competition"."""
+    created, client = account
+    profile_id = int(created["profile_id"])
+    stamp = "2999-01-01T00:00:00+00:00"
+    db.save_fight(f"labelcomp{uuid.uuid4().hex[:6]}", profile_id, "a.mp4", "", "", "competition",
+                  "K1", "A", {}, stamp)
+    db.save_fight(f"labelspar{uuid.uuid4().hex[:6]}", profile_id, "b.mp4", "", "", "sparring",
+                  "K1", "A", {}, stamp)
+    library = client.get("/history").text
+    assert "<span>Competition</span>" not in library
+    assert library.count("<span>Sparring</span>") == 1

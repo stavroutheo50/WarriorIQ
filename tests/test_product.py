@@ -1731,6 +1731,12 @@ class FighterRosterTests(unittest.TestCase):
         self.assertIn("Maria", page)
         self.assertIn('name="fighter_name"', page)
         self.assertIn("Add a new fighter", page)
+        # Nobody is preselected: the first name used to be, and fights were
+        # filed under whoever sorted first (QA, 2026-09).
+        self.assertIn('<option value="" selected disabled>Choose who this fight is about</option>', page)
+        self.assertRegex(page, r'<select id="fighterPick" name="fighter_id" required>')
+        for name in ("Theodoulos", "Maria"):
+            self.assertNotRegex(page, rf'<option value="\d+" selected>{name}')
 
         # On a one-seat plan the same page asks nothing and posts the fighter.
         single = self.client.get("/analyze/kickboxing").text

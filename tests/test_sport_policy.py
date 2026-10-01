@@ -115,3 +115,20 @@ def test_the_legacy_constant_is_the_kickboxing_sentence():
     from core.report import ESTIMATE_NOTE
 
     assert counting_policy("kickboxing", published=True, validated=False).estimate_note == ESTIMATE_NOTE
+
+
+def test_upload_forms_are_honest_about_mma_and_default_taekwondo_to_wt():
+    """QA 2026-09: the MMA page said "Most rounds turn on the ground" without
+    saying ground work is not analysed, and taekwondo defaulted to ITF."""
+    import re
+
+    import app.main as web
+    from browser_client import BrowserClient
+
+    with BrowserClient(web.app) as client:
+        mma = client.get("/analyze/mma").text
+        taekwondo = client.get("/analyze/taekwondo").text
+    assert "Most rounds turn on the ground" not in mma
+    assert "takedowns, ground work and submissions are not read" in mma
+    options = re.findall(r'<option value="(\w+_TAEKWONDO)"', taekwondo)
+    assert options[0] == "WT_TAEKWONDO"

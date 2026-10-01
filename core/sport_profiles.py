@@ -71,7 +71,10 @@ SPORT_IDENTITIES: dict[str, SportIdentity] = {
     ),
     "mma": SportIdentity(
         "mma", "MMA", "MM", "160 138 232", "196 180 244",
-        decided_by="Standing exchanges are one part of it. Most rounds turn on the ground.",
+        # QA, 2026-09: this said "Most rounds turn on the ground" above an
+        # analysis of standing exchanges only, without saying so.
+        decided_by="Standing exchanges are only part of it, and the only part WarriorIQ analyses: "
+                   "takedowns, ground work and submissions are not read.",
     ),
 }
 

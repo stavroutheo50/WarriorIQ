@@ -87,9 +87,14 @@
         {% else %}
         <div class="field">
           <label for="fighterPick">Which fighter?</label>
-          <select id="fighterPick" name="fighter_id">
+          {#- No fighter is preselected. The browser picked the first name, so a
+              coach's fights were filed under whoever sorted first unless they
+              noticed (QA, 2026-09). Choosing is one tap, and a wrong file
+              breaks that fighter's progress. -#}
+          <select id="fighterPick" name="fighter_id" {% if roster %}required{% endif %}>
+            {% if roster %}<option value="" selected disabled>Choose who this fight is about</option>{% endif %}
             {% for f in roster %}<option value="{{f.id}}">{{f.name}}</option>{% endfor %}
-            <option value="" {% if not roster %}selected{% endif %}>+ Add a new fighter</option>
+            <option value="new" {% if not roster %}selected{% endif %}>+ Add a new fighter</option>
           </select>
           {#- Label and input are wrapped so they hide together. A visible
               label that outlived its input would be worse than none. #}
@@ -236,6 +241,8 @@
   const outstanding=()=>{
     const missing=[];
     if(!videoInput.files[0])missing.push({text:'choose a fight video',field:videoInput});
+    const fighterChoice=document.getElementById('fighterPick');
+    if(fighterChoice&&!fighterChoice.value)missing.push({text:'choose which fighter this fight is about',field:fighterChoice});
     if(rightsBox&&!rightsBox.checked)missing.push({text:'confirm the footage is yours',field:rightsBox});
     if(peopleBox&&!peopleBox.checked)missing.push({text:'confirm the people in it agreed',field:peopleBox});
     if(minorRadios.length&&!minorRadios.some(r=>r.checked))
@@ -258,7 +265,7 @@
       if(holder)holder.classList.add('needs-attention')});
   };
   form.addEventListener('change',event=>{
-    if(['rights_confirmed','people_permissions_confirmed','minor_permission_status','openai_identity_recovery','external_ai_guardian_permission'].includes(event.target.name))syncSubmit()});
+    if(['fighter_id','rights_confirmed','people_permissions_confirmed','minor_permission_status','openai_identity_recovery','external_ai_guardian_permission'].includes(event.target.name))syncSubmit()});
   const setReady=()=>{const file=videoInput.files[0];
     if(file){const problem=fileProblem(file);if(problem){rejectFile(problem);return}}
     const ready=Boolean(file);
@@ -430,7 +437,7 @@
     // The wrapper hides, so the label goes with it. `required` still
     // toggles on the input itself: a required control inside a hidden
     // wrapper blocks submit with an error pointing at nothing.
-    const syncFighter=()=>{const adding=fighterPick.value==='';if(newFighterField)newFighterField.hidden=!adding;fighterName.required=adding;if(!adding)fighterName.value=''};
+    const syncFighter=()=>{const adding=fighterPick.value==='new';if(newFighterField)newFighterField.hidden=!adding;fighterName.required=adding;if(!adding)fighterName.value=''};
     fighterPick.addEventListener('change',syncFighter);syncFighter();
   }
   videoInput.addEventListener('change',()=>{hideUploadError();setReady()});

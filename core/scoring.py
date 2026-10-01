@@ -389,7 +389,10 @@ SPORTS: dict[str, tuple[str, ...]] = {
     "kickboxing": ("K1", "LOW_KICK", "FULL_CONTACT", "POINT_FIGHTING", "LIGHT_CONTACT", "KICK_LIGHT"),
     "boxing": ("BOXING",),
     "muay_thai": ("MUAY_THAI", "MUAY_THAI_NO_ELBOWS"),
-    "taekwondo": ("ITF_TAEKWONDO", "WT_TAEKWONDO"),
+    # WT first, so the upload form defaults to it: the Olympic ruleset, the one
+    # most taekwondo is fought under, and already what a bare "taekwondo" means
+    # to normalize_ruleset. The form used to default to ITF (QA, 2026-09).
+    "taekwondo": ("WT_TAEKWONDO", "ITF_TAEKWONDO"),
     "mma": ("MMA",),
 }
 
