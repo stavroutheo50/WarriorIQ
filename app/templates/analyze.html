@@ -192,7 +192,11 @@
   // the decoder minutes later. This is a courtesy, not a guard - the server
   // checks the container's magic bytes regardless - so it stays cheap and its
   // messages say what to do next.
-  const MIN_UPLOAD_BYTES=512*1024, MIN_FIGHT_SECONDS=10;
+  // A floor for files that cannot hold any video at all - not a quality bar.
+  // It was 512 KB, which refused real low-resolution footage (a 5 s 240p clip
+  // is 180 KB), and every real video must be accepted. A short clip is
+  // likewise analysed, with a word about what so little fight can show.
+  const MIN_UPLOAD_BYTES=16*1024, SHORT_FIGHT_SECONDS=10;
   const ACCEPTED_EXTENSIONS={{ fight_video_extensions|tojson }};
   // Built from the same list the server refuses on, via core.upload_security.
   const EMPTY_HINT={{fight_video_label|tojson}}+' — up to '+fmtMB(UPLOAD_LIMIT);
@@ -203,15 +207,15 @@
     // "audio/ogg" or "application/ogg", and .ogv was refused as "not a video".
     const ext=(f.name.match(/\.[^.]+$/)||[''])[0].toLowerCase();
     if(f.type&&!f.type.startsWith('video/')&&!ACCEPTED_EXTENSIONS.includes(ext))return 'That file is not a video. Pick the clip from your camera roll.';
-    if(f.size<MIN_UPLOAD_BYTES)return `That file is ${fmtMB(f.size)} — too small to be a fight. Pick the full clip.`;
+    if(f.size<MIN_UPLOAD_BYTES)return `That file is ${fmtMB(f.size)} — too small to hold a video. Pick the full clip.`;
     if(overLimit(f.size))return `That file is ${fmtMB(f.size)}. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps instead of 4K or 60 fps, or trim to a single round.`;
     return null};
   const rejectFile=(message)=>{hidePreflight();videoInput.value='';fileButtonText.textContent='Choose fight video';fileStatus.textContent=message;fileStatus.dataset.tone='bad';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');uploadCard.dataset.uploadState='empty';uploadSubmit.disabled=true;uploadSubmit.textContent='Choose a video to continue';window.wiqToast(message,'error')};
   // Duration needs the browser to read the header, which it will only do
-  // asynchronously - so the file is accepted first and withdrawn if it turns
-  // out to be too short to hold a round.
-  const checkDuration=(f)=>{const probe=document.createElement('video');probe.preload='metadata';const url=URL.createObjectURL(f);probe.onloadedmetadata=()=>{URL.revokeObjectURL(url);const seconds=probe.duration;if(!isFinite(seconds))return;if(seconds<MIN_FIGHT_SECONDS){rejectFile(`That clip is ${Math.round(seconds)} seconds. WarriorIQ needs at least ${MIN_FIGHT_SECONDS} seconds of fight to read anything.`);return}
+  // asynchronously, so it can only add to what the status line says.
+  const checkDuration=(f)=>{const probe=document.createElement('video');probe.preload='metadata';const url=URL.createObjectURL(f);probe.onloadedmetadata=()=>{URL.revokeObjectURL(url);const seconds=probe.duration;if(!isFinite(seconds))return;
       const mins=Math.floor(seconds/60),secs=String(Math.round(seconds%60)).padStart(2,'0');
+      if(seconds<SHORT_FIGHT_SECONDS){fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload. A clip this short gives only a few numbers; the report says how much fight it found.`;fileStatus.dataset.tone='warn';return}
       fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload`};
     probe.onerror=()=>{URL.revokeObjectURL(url)};probe.src=url};
 // What is still outstanding, named, above the button that refuses to work.
@@ -263,7 +267,7 @@
     if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;
     fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);
     uploadCard.dataset.uploadState=ready?'ready':'empty';
-    uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';
+    uploadSubmit.textContent=ready?'Upload video & select fighters →':'Choose a video to continue';
     if(!ready)hidePreflight();
     syncSubmit();
     if(ready){checkDuration(file);runPreflight(file);runSportCheck(file);window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video selected. Press upload to send it.','success')}};

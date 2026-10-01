@@ -127,7 +127,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment
+from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_policy import counting_policy
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
@@ -3492,6 +3492,12 @@ async def upload(
             # True when no frame could be decoded here; the frame picker then
             # takes it from the browser (selection_frame_image).
             "selection_pending": selection_pending,
+            # Who chose the selection frame: "auto" (picked here from motion,
+            # nobody has confirmed two fighters are in it), "requested" (the
+            # uploader asked for a start time), later "auto_pair", "chosen" or
+            # "recheck" (_seek_selection_frame). The selection page says which,
+            # so the frame-choice step is never skipped without a word.
+            "selection_source": "requested" if requested_start > 0 else "auto",
             "server_decodes": bool(server_decodes),
             "end_seconds": end,
             "round_count": count,
@@ -3584,7 +3590,7 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
     # somebody scrub for it - they are here because we already failed once.
     if seconds is not None:
         try:
-            _seek_selection_frame(job_id, job, float(seconds))
+            _seek_selection_frame(job_id, job, float(seconds), source="recheck")
         except Exception:                                           # noqa: BLE001
             LOGGER.warning("recheck_seek_failed job=%s seconds=%s", job_id, seconds)
     # Which fighter gets the detailed report is a per-fight choice, made on this
@@ -3614,7 +3620,8 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
         request=request, name="select.html",
         context={"request": request, "job_id": job_id, "job": job,
                  "default_focus": default_focus,
-                 "detection_enabled": SETTINGS.selection_detection_enabled,
+                 "frame_source": job.get("selection_source"),
+                 "frame_clock": _clock(float(job.get("selection_seconds", job.get("start_seconds")) or 0.0)),
                  "fighter_name": (fighter or {}).get("name"),
                  "default_corner": job.get("fighter_a_corner") or ""})
 
@@ -3658,8 +3665,13 @@ def live_frame(request: Request, job_id: str, t: float = 0.0):
                     headers={"Cache-Control": "private, max-age=3600"})
 
 
-def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float, int]:
-    """Point this job's selection frame at a moment in the video."""
+def _seek_selection_frame(job_id: str, job: dict, seconds: float, source: str = "chosen") -> tuple[float, int]:
+    """Point this job's selection frame at a moment in the video.
+
+    ``source`` records who chose it: "chosen" (the person, on the frame
+    picker), "recheck" (the analysis asked to be shown who is who there) or
+    "auto_pair" (the automatic pick found two whole people in it).
+    """
     seconds = max(0.0, min(seconds, max(0.0, float(job["video_duration"]) - 0.001)))
     info = get_video_info(job["video_path"])
     frame_number = int(round(seconds * info.fps))
@@ -3682,7 +3694,7 @@ def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float
     # Only who-is-who moves with it: the analysis still covers the whole video.
     update_job(job_id, {"selection_frame": frame_number, "start_seconds": seconds,
                         "selection_seconds": seconds, "auto_frame_done": True,
-                        "selection_pending": False})
+                        "selection_pending": False, "selection_source": source})
     return seconds, frame_number
 
 
@@ -3730,7 +3742,8 @@ async def selection_frame_image(request: Request, job_id: str, seconds: float = 
         raise HTTPException(500, "Could not save the selected fighter frame.")
     update_job(job_id, {"selection_frame": int(round(seconds * fps)), "start_seconds": seconds,
                         "selection_seconds": seconds, "auto_frame_done": True,
-                        "selection_pending": False, "selection_from_browser": True})
+                        "selection_pending": False, "selection_from_browser": True,
+                        "selection_source": "chosen"})
     return {"ok": True, "seconds": seconds}
 
 
@@ -3761,7 +3774,7 @@ def _auto_pick_selection_frame(job_id: str) -> list[dict] | None:
             update_job(job_id, {"auto_frame_done": True})
             return None
         try:
-            _seek_selection_frame(job_id, job, float(moment["seconds"]))
+            _seek_selection_frame(job_id, job, float(moment["seconds"]), source="auto_pair")
         except Exception as exc:                                    # noqa: BLE001
             LOGGER.warning("auto_frame_seek_failed job=%s error=%s", job_id, type(exc).__name__)
             update_job(job_id, {"auto_frame_done": True})
@@ -3789,24 +3802,37 @@ def detect_people(request: Request, job_id: str):
     path = OUTPUTS / job_id / "selection.jpg"
     if not job or not path.exists():
         raise HTTPException(404)
-    if not SETTINGS.selection_detection_enabled:
-        return {
-            "people": [], "width": job["video_width"], "height": job["video_height"],
-            "availability": "manual_only",
-        }
+    # The light detector (core/person_detect.py: 3.8 MB, OpenCV only) is the
+    # one built for the web host, so it always runs. WARRIORIQ_SELECTION_DETECTION
+    # governs only the pose-model fallback further down. It used to switch both
+    # off, and it is off on Render: no candidate box was ever drawn and no
+    # clear moment ever found there, while the page said WarriorIQ boxes the
+    # people for you (QA, 2026-09).
     moved = _auto_pick_selection_frame(job_id)
     job = get_job(job_id) or job
     frame = cv2.imread(str(path))
     if frame is None:
         raise HTTPException(500, "Could not read selection image")
+    # How this frame was chosen, for the page to say so: an automatic pick is
+    # only presented as a good one when two whole people were found in it.
+    about_frame = {
+        "frame_moved": moved is not None,
+        "seconds": float(job.get("selection_seconds", job.get("start_seconds")) or 0.0),
+        "frame_source": job.get("selection_source"),
+    }
     people = moved if moved is not None else detect_people_in_frame(frame)
     if people is not None:
         # Small figures are crowd, not fighters, and too small to tap.
         tall = [p for p in people if p["box"][3] - p["box"][1] >= 0.10 * frame.shape[0]]
         return {
             "people": tall, "width": job["video_width"], "height": job["video_height"],
-            "availability": "candidates_ready", "frame_moved": moved is not None,
-            "seconds": float(job.get("start_seconds") or 0.0),
+            "availability": "candidates_ready",
+            "pair_found": pair_score(tall, frame.shape[0])[1] is not None, **about_frame,
+        }
+    if not SETTINGS.selection_detection_enabled:
+        return {
+            "people": [], "width": job["video_width"], "height": job["video_height"],
+            "availability": "manual_only", "pair_found": False, **about_frame,
         }
     try:
         tracker = _get_pose_tracker()
@@ -3815,7 +3841,7 @@ def detect_people(request: Request, job_id: str):
         LOGGER.warning("Selection candidate detection unavailable: %s", type(exc).__name__)
         return {
             "people": [], "width": job["video_width"], "height": job["video_height"],
-            "availability": "manual_only",
+            "availability": "manual_only", "pair_found": False, **about_frame,
         }
     boxes = []
     result = results[0]
@@ -3832,6 +3858,7 @@ def detect_people(request: Request, job_id: str):
     return {
         "people": boxes, "width": job["video_width"], "height": job["video_height"],
         "availability": "candidates_ready",
+        "pair_found": pair_score(boxes, frame.shape[0])[1] is not None, **about_frame,
     }
 
 

@@ -10,7 +10,9 @@
     <li><span>4</span><div><strong>Report</strong><small>Take it into training</small></div></li>
   </ol>
   <header class="workflow-heading">
-    <div><div class="eyebrow">Fighter selection</div><h1>Tell WarriorIQ who is who.</h1>{% if detection_enabled %}<p>WarriorIQ looks for a clear moment and boxes the people in it. Tap Fighter A, then Fighter B. No box on someone? Drag one around them.</p>{% else %}<p>Drag a box around each fighter: Fighter A first, then Fighter B. Keep each box tight around the whole body.</p>{% endif %}<p class="small muted">The whole video is analysed. This frame only tells WarriorIQ which fighter is which - pick one where both are fully visible and apart.</p></div>
+    <div><div class="eyebrow">Fighter selection</div><h1>Tell WarriorIQ who is who.</h1>{#- Says "tap" only once boxes are actually drawn (loadDetectionCandidates).
+    It promised boxes on every page, and on the live host none ever came. -#}<p id="selectIntro">Drag a box around each fighter: Fighter A first, then Fighter B. Keep each box tight around the whole body.</p><p class="small muted">The whole video is analysed. This frame only tells WarriorIQ which fighter is which - pick one where both are fully visible and apart.</p>{#- A frame nobody chose is said to be one, so choosing a moment is never
+    skipped without a word. Refined once detection has looked at it. -#}{% if frame_source in ['auto', 'auto_pair'] %}<p class="frame-source-note" id="frameNote" data-source="{{frame_source}}">WarriorIQ chose this moment ({{frame_clock}}) for you. <a class="text-link" href="/frame/{{job_id}}">Pick a different moment</a></p>{% endif %}</div>
     <a class="quiet-back" href="/frame/{{job_id}}">Pick a different moment</a>
   </header>
   <div class="fighter-lock-layout">
@@ -24,6 +26,9 @@
     </section>
     <aside class="fighter-lock-guide" aria-label="Fighter selection instructions">
       <div class="selection-status" id="status" role="status" aria-live="polite">Finding the clearest moment in your fight…</div>
+      {#- Directly under the status line, which says "Read the warning below"
+          while it is shown. -#}
+      <p class="pair-warning" id="pairWarning" role="alert" hidden></p>
       <div class="fighter-key"><div class="fighter-key-item fighter-a"><span>A</span><div><strong>Fighter A</strong><small id="keyA">Draw this fighter first</small></div></div><div class="fighter-key-item fighter-b"><span>B</span><div><strong>Fighter B</strong><small id="keyB">Draw this fighter second</small></div></div></div>
       {#- Which corner Fighter A is in. A is simply whoever was boxed first, so
           the report cannot know the colour - it used to print "Red corner"
@@ -36,7 +41,6 @@
         <label><input type="radio" name="cornerA" value="" {% if default_corner not in ['red', 'blue'] %}checked{% endif %}><span>No corners / not sure</span></label>
         <small class="muted" id="cornerHelp">Fighter B gets the other corner. Shown on the report so the colours match your video.</small>
       </fieldset>
-      <p class="pair-warning" id="pairWarning" role="alert" hidden></p>
       <div class="selection-rules"><span class="panel-kicker">For the strongest lock</span><ul><li>Include the full body, head to feet.</li><li>Keep the referee outside both boxes.</li><li>Do not overlap Fighter A and Fighter B.</li></ul></div>
       <p class="selection-reassurance"><span aria-hidden="true">✓</span> WarriorIQ follows both identities after you start. No more manual work is needed in the report.</p>
       {#- Drawing a box is a pointer-only action, and fighter selection is not
@@ -131,12 +135,17 @@ const labelSlots=[];
 function drawBox(box,label,color){if(!box)return;const[x1,y1,x2,y2]=toDisplay(box);ctx.strokeStyle=color;ctx.lineWidth=4;ctx.strokeRect(x1,y1,x2-x1,y2-y1);drawTag(label,color,x1,y1,y2)}
 function drawTag(label,color,x1,y1,y2){
   ctx.save();ctx.font='700 13px sans-serif';
-  const padX=7,height=22,width=ctx.measureText(label).width+padX*2;
-  let x=Math.max(0,Math.min(x1-2,cssWidth-width)),y=y1-height-4;
-  if(y<0)y=Math.min(cssHeight-height,y2+4);
+  // Kept a margin inside the canvas: the stage's rounded, clipped corners
+  // cut off a tag drawn flush against its top edge (QA, 2026-09). Above the
+  // box where there is room, below it where there is, otherwise just inside
+  // its top.
+  const padX=7,height=22,width=ctx.measureText(label).width+padX*2,margin=6;
+  let x=Math.max(margin,Math.min(x1-2,cssWidth-width-margin)),y=y1-height-4;
+  if(y<margin)y=y2+4+height<=cssHeight-margin?y2+4:Math.max(margin,y1+4);
   // Nudge down past any tag already drawn this frame, so two fighters in a
   // clinch still show two readable labels.
   for(const slot of labelSlots){if(x<slot.x+slot.w&&x+width>slot.x&&y<slot.y+slot.h&&y+height>slot.y)y=slot.y+slot.h+3}
+  y=Math.min(y,cssHeight-height-margin);
   labelSlots.push({x,y,w:width,h:height});
   ctx.fillStyle=color;ctx.beginPath();if(ctx.roundRect)ctx.roundRect(x,y,width,height,5);else ctx.rect(x,y,width,height);ctx.fill();
   ctx.fillStyle='#08111d';ctx.textBaseline='middle';ctx.fillText(label,x+padX,y+height/2+1);ctx.restore();
@@ -174,7 +183,7 @@ function draw(){
   // both fighters already locked.
   keyA.textContent=boxA?'Locked':'Draw this fighter first';
   keyB.textContent=boxB?'Locked':boxA?'Draw this fighter now':'Draw this fighter second';
-  if(starting)statusBox.textContent='Starting analysis…';else if(scanning&&mode==='A_DRAW')statusBox.textContent='Finding the clearest moment in your fight…';else if(mode==='A_DRAW')statusBox.textContent=detections.length?'Tap Fighter A.':'Drag a tight full-body box around Fighter A.';else if(mode==='B_DRAW')statusBox.textContent=detections.length?'Fighter A locked. Now tap Fighter B.':'Fighter A locked. Now draw a tight full-body box around Fighter B.';else if(boxA&&boxB&&!valid)statusBox.textContent='The boxes cover too much of the same person. Redraw Fighter B separately.';else if(valid&&!pairWarning.hidden)statusBox.textContent='Both boxes are locked, but these two look alike. Read the warning below before starting.';else if(valid&&!detected)statusBox.textContent='Manual identity lock accepted. Check both labels, then start.';else statusBox.textContent=valid?'Both identities are locked. Verify A and B before starting.':'Choose both fighters manually.';
+  if(starting)statusBox.textContent='Starting analysis…';else if(scanning&&mode==='A_DRAW')statusBox.textContent='Finding the clearest moment in your fight…';else if(mode==='A_DRAW')statusBox.textContent=detections.length>=2?'Tap Fighter A.':'Drag a tight full-body box around Fighter A.';else if(mode==='B_DRAW')statusBox.textContent=detections.length>=2?'Fighter A locked. Now tap Fighter B.':'Fighter A locked. Now draw a tight full-body box around Fighter B.';else if(boxA&&boxB&&!valid)statusBox.textContent='The boxes cover too much of the same person. Redraw Fighter B separately.';else if(valid&&!pairWarning.hidden)statusBox.textContent='Both boxes are locked, but these two look alike. Read the warning below before starting.';else if(valid&&!detected)statusBox.textContent='Manual identity lock accepted. Check both labels, then start.';else statusBox.textContent=valid?'Both identities are locked. Verify A and B before starting.':'Choose both fighters manually.';
   stage.dataset.selectionState=valid?'ready':mode.endsWith('_DRAW')?'drawing':'warning';stage.dataset.scanning=scanning?'true':'false';statusBox.dataset.state=valid?'ready':boxA&&boxB?'warning':'drawing';
 }
 function pointFromEvent(event,clampToImage=false){const rect=canvas.getBoundingClientRect(),view=imageViewport();let x=event.clientX-rect.left,y=event.clientY-rect.top;const inside=x>=view.left&&x<=view.left+view.width&&y>=view.top&&y<=view.top+view.height;if(!inside&&!clampToImage)return null;x=Math.max(view.left,Math.min(view.left+view.width,x));y=Math.max(view.top,Math.min(view.top+view.height,y));return[x,y]}
@@ -210,9 +219,26 @@ async function loadDetectionCandidates(){
       await new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true});image.src=`/selection-image/${jobId}?t=${Date.now()}`});
       fit();
     }
-    detections=data.people||[];buildPickList();
+    detections=data.people||[];buildPickList();describeFrame(data);
   }catch(error){detections=[]}
   finally{scanning=false;draw()}
+}
+// Say what was found in this frame, and how it was chosen, in words that are
+// true for it: "tap" only with boxes on screen, and an automatic pick called a
+// good one only when two whole people close enough to fight were found in it.
+function clockOf(seconds){const whole=Math.max(0,Math.floor(seconds||0));return `${Math.floor(whole/60)}:${String(whole%60).padStart(2,'0')}`}
+function describeFrame(data){
+  const intro=document.getElementById('selectIntro'),note=document.getElementById('frameNote');
+  if(intro&&detections.length>=2)intro.textContent='WarriorIQ boxed the people it found in this frame. Tap Fighter A, then Fighter B. No box on someone? Drag one around them.';
+  if(!note)return;
+  if(!['auto','auto_pair'].includes(data.frame_source)){note.hidden=true;return}
+  const link=note.querySelector('a'),clock=clockOf(data.seconds);
+  let text;
+  if(data.pair_found)text=`WarriorIQ chose this moment (${clock}) because two people are in full view and close enough to be fighting. Not your fighters? `;
+  else if(data.availability==='candidates_ready')text=`WarriorIQ chose this moment (${clock}) for you, but could not find two fighters in full view in it. Choose a moment where both are visible head to toe, or draw both boxes here. `;
+  else text=`WarriorIQ chose this moment (${clock}) for you from movement in the picture, without checking who is in it. `;
+  note.dataset.found=data.pair_found?'pair':'none';
+  note.replaceChildren(document.createTextNode(text),link);
 }
 // Describe a detection in words, because this list has to work when nobody
 // can see the frame. Position is read off the box centre and size off the
