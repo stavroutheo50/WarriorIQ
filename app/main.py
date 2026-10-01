@@ -414,7 +414,7 @@ PUBLIC_INDEX_ROUTES = (
 SPORT_IRRELEVANT_PREFIXES = ("/profile", "/settings", "/legal", "/privacy", "/terms")
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
-    "/media/", "/fighter-portrait/", "/selection-image/", "/dashboard", "/history",
+    "/media/", "/fighter-portrait/", "/selection-image/", "/live-frame/", "/dashboard", "/history",
     "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
     "/auth/",
@@ -3269,6 +3269,35 @@ def selection_image(request: Request, job_id: str):
     if not path.exists():
         raise HTTPException(404)
     return FileResponse(path, media_type="image/jpeg")
+
+
+@app.get("/live-frame/{job_id}")
+def live_frame(request: Request, job_id: str, t: float = 0.0):
+    """One frame of the fight as a JPEG, for the live page on a browser that
+    cannot play the upload (HEVC phone footage in Chrome). The page asks for
+    the frame of the newest observation, so the skeletons drawn on it were
+    measured on this exact picture."""
+    # The page asks about once a second and a half while it is open.
+    _enforce_rate_limit(request, "live-frame", 300, 300)
+    job = _authorized_job(request, job_id)
+    if not job:
+        raise HTTPException(404)
+    path = Path(job["video_path"])
+    if not path.exists():
+        raise HTTPException(404)
+    info = get_video_info(str(path))
+    seconds = max(0.0, min(float(t), max(0.0, info.duration - 0.001)))
+    frame = read_frame(str(path), int(round(seconds * info.fps)))
+    if frame is None:
+        raise HTTPException(404)
+    height, width = frame.shape[:2]
+    if width > 960:
+        frame = cv2.resize(frame, (960, max(1, int(round(height * 960 / width)))))
+    ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        raise HTTPException(500, "Could not prepare this frame.")
+    return Response(encoded.tobytes(), media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600"})
 
 
 def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float, int]:

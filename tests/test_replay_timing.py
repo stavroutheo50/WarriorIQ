@@ -14,9 +14,9 @@ def test_browser_skeleton_timing_does_not_show_future_or_stale_poses():
     replay = (templates / "replay.html").read_text(encoding="utf-8")
     live = (templates / "progress.html").read_text(encoding="utf-8")
     functions = [line for line in replay.splitlines() if line.startswith(("function surrounding(", "function poseAt("))]
-    functions += [line for line in live.splitlines() if line.startswith("function freshObservation(")]
+    functions += [line for line in live.splitlines() if line.startswith(("function freshObservation(", "function mediaTime("))]
     script = "\n".join(functions) + """
-let frames=[],video={currentTime:0};
+let frames=[],video={currentTime:0},stillMode=false,stillTime=-99;
 const frame=(t,x)=>({time_seconds:t,fighter_A:{identity_confidence:.9,observation:{keypoints:[[x,x]]}}});
 frames=[frame(2,10),frame(2.1,30)];
 const before=poseAt('fighter_A',1), middle=poseAt('fighter_A',2.05), after=poseAt('fighter_A',3);

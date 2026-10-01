@@ -57,6 +57,18 @@ class PairScoreTests(unittest.TestCase):
         self.assertLess(cut, whole)
 
 
+class LivePageStillsTests(unittest.TestCase):
+    def test_live_page_switches_to_stills_when_the_video_cannot_play(self):
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
+        self.assertIn('id="liveStill"', page)
+        self.assertIn("video.addEventListener('error',useStills)", page)
+        self.assertIn("if(!(video.videoWidth>0))useStills()", page)
+        self.assertIn("/live-frame/${jobId}?t=", page)
+        self.assertNotIn("The video preview could not load", page)
+
+
 class DetectorSwitchTests(unittest.TestCase):
     def test_switched_off_detector_finds_nothing_and_says_so(self):
         """None, not an empty list: "unavailable" is not "nobody there"."""
@@ -143,6 +155,22 @@ class AutoFrameRouteTests(unittest.TestCase):
         job = get_job(self.job_id)
         self.assertTrue(job["auto_frame_done"])
         self.assertEqual(float(job["start_seconds"]), 0.0)
+
+    def test_live_frame_serves_the_moment_being_analysed(self):
+        """The live page's stills, for a browser that cannot play the upload."""
+        response = self.client.get(f"/live-frame/{self.job_id}?t=1.0")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
+        image = cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual(image.shape[:2], (48, 64))
+        # Frame 10 of the clip was written with value 80; JPEG keeps it close.
+        self.assertAlmostEqual(float(image.mean()), 80.0, delta=6.0)
+
+    def test_live_frame_is_private_to_the_fight_owner(self):
+        from fastapi.testclient import TestClient
+
+        stranger = TestClient(self.webapp.app)
+        self.assertEqual(stranger.get(f"/live-frame/{self.job_id}?t=1.0").status_code, 404)
 
     def _csrf(self):
         import re
