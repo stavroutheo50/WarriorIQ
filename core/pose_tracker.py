@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import logging
 from pathlib import Path
 from threading import RLock
@@ -352,6 +354,9 @@ class PoseTracker:
         self._focus_model = None
         self._focus_lock = RLock()
         self._warmed = False
+        # Seconds spent inside track(), split by step, for the report's
+        # breakdown of where a frame's time goes. The analyser resets it.
+        self.timing = {"pose_model": 0.0, "appearance": 0.0}
 
     def warmup(self, frame) -> None:
         if self._warmed:
@@ -450,6 +455,7 @@ class PoseTracker:
 
     def track(self, frame, imgsz: int | None = None) -> list[PersonObservation]:
         size = int(imgsz or SETTINGS.default_imgsz)
+        started = time.perf_counter()
         results = self.model.track(
             frame,
             persist=True,
@@ -461,6 +467,8 @@ class PoseTracker:
             verbose=False,
         )
         people = self.parse(results[0], frame)
+        appearance_started = time.perf_counter()
+        self.timing["pose_model"] += appearance_started - started
         # One batched pass for the whole frame, so the identity manager can
         # compare learned appearance instead of a colour histogram. See
         # core/reid.py for why the histogram is not enough here.
@@ -475,6 +483,7 @@ class PoseTracker:
             for person, vector, verdict in zip(people, vectors, verdicts, strict=True):
                 person.reid = vector
                 person.referee_prob = verdict
+        self.timing["appearance"] += time.perf_counter() - appearance_started
         return people
 
     def recover_from_guidance(

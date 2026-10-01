@@ -298,6 +298,8 @@
   {% if perf.frame_pass_seconds_per_frame is defined and perf.frame_pass_seconds_per_frame is not none %}
   <details class="small muted analysis-run-detail" id="report-analysis-detail"><summary>Technical details</summary>
     <p>Following both fighters (SAM2): {{ '%.0f'|format(perf.sam_sweep_seconds or 0) }} s · frame by frame: {{ '%.0f'|format(perf.frame_pass_seconds or 0) }} s at {{ '%.3f'|format(perf.frame_pass_seconds_per_frame) }} s a frame · processed at {{ perf.final_imgsz }} px · body-point model: {{ 'fast (TensorRT)' if (perf.pose_model|default('', true)).endswith('.engine') else 'standard (not TensorRT)' }}.</p>
+    {% if perf.frame_pass_breakdown_per_frame %}{% set steps = {'reading_video': 'reading video', 'pose_model': 'pose model', 'appearance': 'appearance check', 'missing_fighter_search': 'missing-fighter search', 'identity': 'identity', 'joint_refinement': 'joint refinement', 'other': 'everything else'} %}
+    <p id="report-frame-breakdown">Each frame: {% for key, label in steps.items() %}{% if perf.frame_pass_breakdown_per_frame[key] is defined %}{{ label }} {{ '%.3f'|format(perf.frame_pass_breakdown_per_frame[key]) }} s{% if not loop.last %} · {% endif %}{% endif %}{% endfor %}.</p>{% endif %}
   </details>
   {% endif %}
   {% endif %}

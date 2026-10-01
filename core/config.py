@@ -894,6 +894,10 @@ class Settings:
     evidence_pre_seconds: float = 1.0
     evidence_post_seconds: float = 1.0
     save_tracking_jsonl: bool = True
+    # Decode the next frames on a helper thread while the current one is
+    # analysed (core/frame_feed.py). Same frames, same results; off only to
+    # compare against the old inline decoding.
+    decode_ahead: bool = env_bool("WARRIORIQ_DECODE_AHEAD", True)
     save_debug_video: bool = False
 
     # ------------------------------------------------------------

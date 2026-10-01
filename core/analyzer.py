@@ -19,6 +19,7 @@ import torch
 from core.action import ActionEngine
 from core.config import OUTPUTS, SETTINGS
 from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
+from core.frame_feed import FrameFeed
 from core.generalship import judge_fight
 from core.ground import DownWatch
 from core.round_detect import RoundDetector
@@ -613,6 +614,15 @@ def _observed_fighter_mismatch(finder) -> dict | None:
     }
 
 
+def _frame_breakdown(steps: dict[str, float], total: float, frames: int) -> dict[str, float] | None:
+    """Seconds per analysed frame for each named step, plus what is left."""
+    if not frames:
+        return None
+    named = {name: round(seconds / frames, 4) for name, seconds in steps.items()}
+    named["other"] = round(max(0.0, total - sum(steps.values())) / frames, 4)
+    return named
+
+
 def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None) -> dict:
     # BoT-SORT state belongs to one run for its entire lifetime. Per-frame
     # locks would still let a second job reset identities between frames.
@@ -887,6 +897,12 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # after the already-consumed selection frame.
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame + 1)
     pose_pass_start = time.perf_counter()
+    # Where each analysed frame's time goes, so the next speed-up is chosen by
+    # measurement rather than guessed at. Pose model and appearance are timed
+    # inside PoseTracker.track; "other" is whatever the named steps leave.
+    pose_tracker.timing = {"pose_model": 0.0, "appearance": 0.0}
+    step_seconds = {"reading_video": 0.0, "missing_fighter_search": 0.0,
+                    "identity": 0.0, "joint_refinement": 0.0}
 
     fallback_buffer_enabled = _fallback_buffer_needed(sam_tracks, sam_was_available)
     frame_buffer: deque[tuple[int, np.ndarray]] = deque(maxlen=max(SETTINGS.sam_buffer_frames + 4, 24))
@@ -934,6 +950,12 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     down_watch = DownWatch()
     round_detector = RoundDetector()
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
+    # Decoding runs a step ahead on a helper thread; see core/frame_feed.py.
+    feed = FrameFeed(
+        cap, first_source_frame=start_frame + 1, next_inference_frame=next_inference_frame,
+        retrieve_all=fallback_buffer_enabled,
+        history_step=max(1, round(info.fps)) if identity_referee.enabled else None,
+        next_history_frame=next_ai_history_frame, ahead=SETTINGS.decode_ahead)
 
     try:
         while current_frame < end_frame:
@@ -959,10 +981,14 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 # So this is a high-resolution win and nearly nothing on the
                 # old broadcast captures, which is the right shape: the cost it
                 # removes is per pixel, and SD frames have few.
-                if not cap.grab():
+                read_started = time.perf_counter()
+                fed = feed.next()
+                if fed is None:
                     break
+                if fed.source_frame != source_frame:
+                    raise RuntimeError("frame feed out of step with the analysis loop")
                 current_frame = source_frame
-                pts_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC))
+                pts_ms = fed.pts_ms
                 decoded_seconds = source_clock.seconds(source_frame, pts_ms)
                 # Three things can want this frame, and the cheap check has to
                 # consider all of them or a feature silently stops being fed.
@@ -970,9 +996,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                     identity_referee.enabled and source_frame >= next_ai_history_frame)
                 wants_inference = source_frame >= next_inference_frame
                 if not (fallback_buffer_enabled or wants_history or wants_inference):
+                    step_seconds["reading_video"] += time.perf_counter() - read_started
                     continue
-                ok, frame = cap.retrieve()
-                if not ok or frame is None:
+                frame = fed.frame
+                step_seconds["reading_video"] += time.perf_counter() - read_started
+                if frame is None:
                     break
                 if fallback_buffer_enabled:
                     frame_buffer.append((source_frame, frame.copy()))
@@ -991,9 +1019,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 # 5 FPS without spending full action-analysis budget.
                 inference_stride = base_stride if active_selected_round else max(base_stride, round(info.fps / 5.0))
                 next_inference_frame = source_frame + max(1, inference_stride)
+                feed.allow_through(next_inference_frame)
 
                 people = pose_tracker.track(frame, current_imgsz)
                 guidance = nearest_guidance(sam_tracks, source_frame, sam_stride)
+                search_started = time.perf_counter()
                 focused = pose_tracker.recover_from_guidance(frame, guidance, people)
                 for observation in focused:
                     if observation.track_id == -1001:
@@ -1022,10 +1052,15 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                     elif observation.track_id == -1002:
                         expected_pose_recoveries["B"] += 1
                 people.extend(expected)
+                identity_started = time.perf_counter()
+                step_seconds["missing_fighter_search"] += identity_started - search_started
                 fighter_a, fighter_b = manager.update(people, source_frame, sam_guidance=guidance)
+                joints_started = time.perf_counter()
+                step_seconds["identity"] += joints_started - identity_started
                 # Joints only, and only for the two fighters, only after
                 # identity has already chosen them. See core/rtm_pose.py.
                 refine_fighter_pose(frame, [fighter_a, fighter_b])
+                step_seconds["joint_refinement"] += time.perf_counter() - joints_started
                 if guidance is not None:
                     if fighter_a is not None and guidance.get("A") is not None:
                         sam_guided["A"] += 1
@@ -1230,6 +1265,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 break
 
     finally:
+        feed.close()
         cap.release()
         if tracking_file is not None:
             tracking_file.close()
@@ -1467,6 +1503,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "frame_pass_seconds": round(frame_pass_seconds, 2),
         "frame_pass_seconds_per_frame": (round(frame_pass_seconds / analyzed_frames, 4)
                                          if analyzed_frames else None),
+        # The frame pass split by step, in seconds per analysed frame.
+        "frame_pass_breakdown_per_frame": _frame_breakdown(
+            {**pose_tracker.timing, **step_seconds}, frame_pass_seconds, analyzed_frames),
         "final_imgsz": quality.imgsz,
         "quality_mode": quality.mode,
         "pose_model": pose_tracker.model_path,
