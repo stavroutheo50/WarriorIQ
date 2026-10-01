@@ -193,12 +193,16 @@
   // checks the container's magic bytes regardless - so it stays cheap and its
   // messages say what to do next.
   const MIN_UPLOAD_BYTES=512*1024, MIN_FIGHT_SECONDS=10;
+  const ACCEPTED_EXTENSIONS={{ fight_video_extensions|tojson }};
   // Built from the same list the server refuses on, via core.upload_security.
   const EMPTY_HINT={{fight_video_label|tojson}}+' — up to '+fmtMB(UPLOAD_LIMIT);
   // The worker's own probe thresholds, from core/preflight_client.py.
   const PREFLIGHT_LIMITS={{preflight_limits|safe}};
   const fileProblem=(f)=>{
-    if(f.type&&!f.type.startsWith('video/'))return 'That file is not a video. Pick the clip from your camera roll.';
+    // The extension decides as well as the type: a browser labels an Ogg video
+    // "audio/ogg" or "application/ogg", and .ogv was refused as "not a video".
+    const ext=(f.name.match(/\.[^.]+$/)||[''])[0].toLowerCase();
+    if(f.type&&!f.type.startsWith('video/')&&!ACCEPTED_EXTENSIONS.includes(ext))return 'That file is not a video. Pick the clip from your camera roll.';
     if(f.size<MIN_UPLOAD_BYTES)return `That file is ${fmtMB(f.size)} — too small to be a fight. Pick the full clip.`;
     if(overLimit(f.size))return `That file is ${fmtMB(f.size)}. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps instead of 4K or 60 fps, or trim to a single round.`;
     return null};

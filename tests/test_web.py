@@ -2781,7 +2781,8 @@ class FightVideoFormatTests(unittest.TestCase):
     def test_the_displayed_copy_is_built_from_the_same_list(self):
         from core.upload_security import FIGHT_VIDEO_FORMATS, FIGHT_VIDEO_LABEL
 
-        self.assertEqual(FIGHT_VIDEO_LABEL, "MP4, MOV, MKV, AVI, M4V or WEBM")
+        # OGV/OGG added after QA found .ogv refused as "not a video".
+        self.assertEqual(FIGHT_VIDEO_LABEL, "MP4, MOV, MKV, AVI, M4V, WEBM, OGV or OGG")
         self.assertIn(FIGHT_VIDEO_LABEL, self.client.get("/analyze/kickboxing").text)
         # Naming a format in the sentence that the server does not take is the
         # drift this whole arrangement exists to prevent.
@@ -2800,6 +2801,7 @@ class FightVideoFormatTests(unittest.TestCase):
             ".m4v": b"\x00\x00\x00\x20ftypM4V ", ".mkv": b"\x1a\x45\xdf\xa3\x01\x00\x00\x00",
             ".webm": b"\x1a\x45\xdf\xa3\x01\x00\x00\x00",
             ".avi": b"RIFF\x00\x00\x00\x00AVI LIST",
+            ".ogv": b"OggS\x00\x02\x00\x00", ".ogg": b"OggS\x00\x02\x00\x00",
         }
         self.assertEqual(set(headers), set(FIGHT_VIDEO_EXTENSIONS))
         for suffix, header in headers.items():

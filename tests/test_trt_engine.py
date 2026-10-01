@@ -106,3 +106,32 @@ class EnsureEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EngineResolutionTests(unittest.TestCase):
+    """A stale WARRIORIQ_POSE_ENGINE must not cost the run its TensorRT engine."""
+
+    def test_the_configured_engine_wins_when_it_exists(self):
+        from core.pose_tracker import resolve_pose_engine
+
+        with tempfile.TemporaryDirectory() as tmp:
+            configured = Path(tmp) / "custom.engine"
+            configured.write_bytes(b"engine")
+            self.assertEqual(resolve_pose_engine(str(configured), "NVIDIA A10"), configured)
+
+    def test_a_missing_configured_path_falls_back_to_this_gpus_cached_engine(self):
+        from core.pose_tracker import resolve_pose_engine
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cached = trt_engine.engine_path_for(tmp, "NVIDIA A10")
+            cached.write_bytes(b"engine")
+            resolved = resolve_pose_engine(str(Path(tmp) / "absent.engine"), "NVIDIA A10")
+            self.assertEqual(resolved, cached)
+
+    def test_another_gpus_engine_is_never_picked_up(self):
+        from core.pose_tracker import resolve_pose_engine
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trt_engine.engine_path_for(tmp, "NVIDIA GeForce RTX 5060").write_bytes(b"engine")
+            missing = Path(tmp) / "absent.engine"
+            self.assertEqual(resolve_pose_engine(str(missing), "NVIDIA A10"), missing)

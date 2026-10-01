@@ -303,7 +303,7 @@
   {#- How the analysis ran: what makes a fight quick or slow to analyse. -#}
   {% if perf.analysis_seconds and perf.segment_duration_seconds %}
   {% set took = perf.analysis_seconds %}{% set length = perf.segment_duration_seconds %}
-  <p class="small muted analysis-run" id="report-analysis-run">Analysed at {{ '%.0f'|format(perf.final_analysis_fps or 0) }} frames a second on {{ 'the processor (no graphics card)' if (perf.gpu|default('CPU', true)) == 'CPU' else 'the graphics card (' ~ perf.gpu ~ ')' }} · took {{ '%d:%02d'|format((took//60)|int, (took%60)|int) }} for {{ '%d:%02d'|format((length//60)|int, (length%60)|int) }} of video.</p>
+  <p class="small muted analysis-run" id="report-analysis-run">Analysed at {{ '%.0f'|format(perf.final_analysis_fps or 0) }} frames a second on {{ 'the processor (no graphics card)' if (perf.gpu|default('CPU', true)) == 'CPU' else 'a graphics card' }} · took {{ '%d:%02d'|format((took//60)|int, (took%60)|int) }} for {{ '%d:%02d'|format((length//60)|int, (length%60)|int) }} of video.</p>
   {#- Where the time went, for whoever has to make it faster. Absent on
       reports from before these were recorded. -#}
   {% if perf.frame_pass_seconds_per_frame is defined and perf.frame_pass_seconds_per_frame is not none %}

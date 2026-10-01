@@ -26,6 +26,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 
 import cv2
+import numpy as np
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
                      Request, UploadFile)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
@@ -135,12 +136,16 @@ from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import (
-    detect_shot_changes, get_video_info, normalize_container, playback_file,
-    probe_upload,
-    read_frame, remove_derivative,
+    detect_shot_changes, ffmpeg_frame, get_video_info, normalize_container, opencv_decodes,
+    playback_file, probe_upload, read_frame, remove_derivative, selection_frame,
 )
 
-app = FastAPI(title="WarriorIQ")
+# No public API documentation. /openapi.json, /docs and /redoc were reachable
+# signed out and listed every route - /admin/*, /api/worker/claim, the dataset
+# and worker-job endpoints - which is a map for anyone probing the site and
+# documents nothing a visitor can use. An administrator can still read the
+# schema at /admin/openapi.json (see admin_openapi below).
+app = FastAPI(title="WarriorIQ", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 app.add_middleware(UploadBodyLimitMiddleware)
 _oauth_cookie_secure = SETTINGS.public_base_url.lower().startswith("https://")
@@ -275,6 +280,7 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 # core.upload_security, so neither can drift from what the server accepts.
 templates.env.globals["fight_video_accept"] = FIGHT_VIDEO_ACCEPT
 templates.env.globals["fight_video_label"] = FIGHT_VIDEO_LABEL
+templates.env.globals["fight_video_extensions"] = sorted(FIGHT_VIDEO_EXTENSIONS)
 # The pre-upload check compares footage against the same numbers the worker's
 # probe uses, rather than a second set copied into JavaScript.
 templates.env.globals["preflight_limits"] = json.dumps(client_thresholds())
@@ -652,6 +658,10 @@ def _public_analysis_error(exc: Exception) -> str:
     """Return a useful status without leaking model names or server paths."""
     if isinstance(exc, (FileNotFoundError, ImportError, ModuleNotFoundError)):
         return "The analysis engine is unavailable on this server. Your upload and fighter selections are preserved."
+    if type(exc).__name__ == "UnreadableVideo":
+        return ("The analysis machine could not decode this video's format, so nothing was analysed. "
+                "Your upload and fighter selections are preserved; exporting the video as MP4 "
+                "(H.264) and uploading that copy will work.")
     if isinstance(exc, MemoryError) or "out of memory" in str(exc).lower():
         return "This analysis exceeded the server's available memory. Your upload and fighter selections are preserved."
     # The upload finished and the video was decoded here well enough to cut a
@@ -665,6 +675,13 @@ def _public_analysis_error(exc: Exception) -> str:
             "The video did not reach the analysis machine in one piece, so nothing was analysed. "
             "Your upload and fighter selections are preserved - start the analysis again."
         )
+    return "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again."
+
+
+def _worker_failure_message(error_code: str | None) -> str:
+    """What a worker's failure means to the person waiting, by its cause."""
+    if str(error_code or "") == "UnreadableVideo":
+        return _public_analysis_error(type("UnreadableVideo", (RuntimeError,), {})())
     return "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again."
 
 
@@ -3276,7 +3293,7 @@ async def upload(
         raise HTTPException(
             400,
             "That file is not a video. The name ends in a video extension but the "
-            "contents are not MP4, MOV, MKV, WEBM or AVI. Pick the clip straight "
+            f"contents are not {FIGHT_VIDEO_LABEL}. Pick the clip straight "
             "from your camera roll.",
         )
 
@@ -3386,36 +3403,51 @@ async def upload(
     # "reported, not refused", and a crash while counting cuts is not a reason
     # to throw away somebody's fight.
     background.add_task(_record_shot_profile, job_id, video_path)
-    selection_frame = int(round(start * info.fps))
+    selection_frame_index = int(round(start * info.fps))
     if start <= 0.0:
-        selection_frame = probed_frame
-        start = selection_frame / info.fps if info.fps > 0 else 0.0
+        selection_frame_index = probed_frame
     job_dir = OUTPUTS / job_id
     selection_path = job_dir / "selection.jpg"
+    # A real fight is never refused for the frame it opens on. The picker frame
+    # is tried at several moments, with OpenCV and then ffmpeg, skipping black
+    # frames (core.video.selection_frame). If nothing decodes on this host -
+    # an AV1 WebM, which this build of OpenCV cannot read at all - the upload
+    # is still kept, and the frame picker lets the browser, which can play it,
+    # choose the frame. The analysis machine converts the file before reading.
+    server_decodes = await run_in_threadpool(opencv_decodes, video_path)
     try:
-        try:
-            frame = await run_in_threadpool(read_frame, video_path, selection_frame)
-        except Exception:
-            # Choosing a livelier frame is an optimisation, and an optimisation
-            # must never cost someone their upload. Somebody on a phone waited
-            # out the whole transfer before this raised, and the handler below
-            # then deleted the video and told them to try again - which would
-            # fail the same way every time. Frame 0 is the one frame that reads
-            # on any file OpenCV opened at all.
-            LOGGER.warning(
-                "selection_frame_unreadable job_id=%s frame=%s falling back to 0",
-                job_id, selection_frame,
-            )
-            selection_frame, start = 0, 0.0
-            frame = await run_in_threadpool(read_frame, video_path, 0)
-        job_dir.mkdir(parents=True, exist_ok=True)
-        if not await run_in_threadpool(cv2.imwrite, str(selection_path), frame):
-            raise OSError("OpenCV could not save the fighter-selection frame")
+        chosen_index, frame = await run_in_threadpool(selection_frame, video_path, info, selection_frame_index)
     except Exception as exc:
-        video_path.unlink(missing_ok=True)
-        shutil.rmtree(job_dir, ignore_errors=True)
-        LOGGER.warning("upload_selection_frame_failed job_id=%s error=%s", job_id, type(exc).__name__)
-        raise HTTPException(422, "WarriorIQ could not prepare this video's fighter-selection frame.") from exc
+        LOGGER.warning("upload_selection_frame_unreadable job_id=%s error=%s", job_id, type(exc).__name__)
+        chosen_index, frame = None, None
+    if frame is not None:
+        # Failing to *save* a frame that decoded is this server's disk, not the
+        # video, and the browser's frame would fail to save the same way.
+        try:
+            job_dir.mkdir(parents=True, exist_ok=True)
+            if not await run_in_threadpool(cv2.imwrite, str(selection_path), frame):
+                raise OSError("OpenCV could not save the fighter-selection frame")
+        except Exception as exc:
+            video_path.unlink(missing_ok=True)
+            shutil.rmtree(job_dir, ignore_errors=True)
+            LOGGER.warning("upload_selection_frame_failed job_id=%s error=%s", job_id, type(exc).__name__)
+            raise HTTPException(
+                422,
+                "WarriorIQ could not save this video's fighter-selection frame on the server, so the upload "
+                "was not kept. Nothing is wrong with your video - try the upload again in a minute.",
+            ) from exc
+    selection_pending = frame is None
+    if selection_pending:
+        LOGGER.info("upload_selection_frame_deferred_to_browser job_id=%s", job_id)
+        selection_frame_index = 0
+    else:
+        selection_frame_index = int(chosen_index)
+    selection_seconds = selection_frame_index / info.fps if info.fps > 0 else 0.0
+    if not server_decodes:
+        # Nothing this host could sample, so no brightness or sharpness verdict
+        # is honest. The analysis measures the footage after converting it.
+        quality = {"status": "unmeasured", "score": None, "notes": [
+            "This file's format is converted before analysis, so its picture quality is checked then."]}
 
     profile_id = int(account["profile_id"]) if account else 0
     # A guest has no workspace to hold a roster, so their fight simply has no
@@ -3454,9 +3486,13 @@ async def upload(
             # The selection frame's time. Kept under its old name because
             # the frame picker and older workers read it; the analysis start
             # is requested_start_seconds.
-            "start_seconds": start,
-            "selection_seconds": start,
+            "start_seconds": selection_seconds,
+            "selection_seconds": selection_seconds,
             "requested_start_seconds": requested_start,
+            # True when no frame could be decoded here; the frame picker then
+            # takes it from the browser (selection_frame_image).
+            "selection_pending": selection_pending,
+            "server_decodes": bool(server_decodes),
             "end_seconds": end,
             "round_count": count,
             "round_duration_seconds": (
@@ -3467,7 +3503,7 @@ async def upload(
             "video_width": info.width,
             "video_height": info.height,
             "video_duration": info.duration,
-            "selection_frame": selection_frame,
+            "selection_frame": selection_frame_index,
             "profile_id": profile_id,
             "account_id": int(account["id"]) if account else None,
             "usage_reserved": True,
@@ -3512,8 +3548,9 @@ async def upload(
             **acceptance_owner,
         )
     # Straight to the fighters: the clear moment is found on that page
-    # (core/person_detect.py), not scrubbed for by hand.
-    next_url = f"/select/{job_id}"
+    # (core/person_detect.py), not scrubbed for by hand - unless there is no
+    # frame yet, in which case the browser picks one first.
+    next_url = f"/frame/{job_id}" if selection_pending else f"/select/{job_id}"
     if "application/json" in request.headers.get("accept", ""):
         response = JSONResponse({"job_id": job_id, "next_url": next_url}, status_code=201)
     else:
@@ -3539,6 +3576,9 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
+    if job.get("selection_pending") and not (OUTPUTS / job_id / "selection.jpg").exists():
+        # No frame could be decoded on the server yet; the browser picks one.
+        return RedirectResponse(f"/frame/{job_id}", status_code=303)
     # Arriving with a timestamp means the analysis asked to be told who is who,
     # and named the moment it lost track. Land on that frame rather than making
     # somebody scrub for it - they are here because we already failed once.
@@ -3623,15 +3663,75 @@ def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float
     seconds = max(0.0, min(seconds, max(0.0, float(job["video_duration"]) - 0.001)))
     info = get_video_info(job["video_path"])
     frame_number = int(round(seconds * info.fps))
-    frame = read_frame(job["video_path"], frame_number)
-    if frame is None or not cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), frame):
+    try:
+        frame = read_frame(job["video_path"], frame_number)
+    except Exception:                                               # noqa: BLE001
+        frame = None
+    if frame is None:
+        # OpenCV cannot decode some formats at all (AV1 WebM); ffmpeg can.
+        frame = ffmpeg_frame(job["video_path"], seconds)
+    if frame is None:
+        # Nothing on this host decodes it. The frame picker answers this by
+        # capturing the frame in the browser (selection_frame_image).
+        raise HTTPException(422, "This moment cannot be decoded on the server; your browser will capture it instead.")
+    (OUTPUTS / job_id).mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), frame):
         raise HTTPException(500, "Could not save the selected fighter frame.")
     # A moment somebody chose (or the analysis asked for) is never replaced by
     # the automatic pick.
     # Only who-is-who moves with it: the analysis still covers the whole video.
     update_job(job_id, {"selection_frame": frame_number, "start_seconds": seconds,
-                        "selection_seconds": seconds, "auto_frame_done": True})
+                        "selection_seconds": seconds, "auto_frame_done": True,
+                        "selection_pending": False})
     return seconds, frame_number
+
+
+# A browser-captured frame is one picture: a 4K PNG is under 25 MB, a JPEG far
+# less. Anything bigger is not what the frame picker sends.
+MAX_SELECTION_IMAGE_BYTES = 25 * 1024 * 1024
+
+
+@app.post("/api/selection-frame/{job_id}/image", dependencies=[Depends(require_csrf)])
+async def selection_frame_image(request: Request, job_id: str, seconds: float = 0.0):
+    """Take the fighter-selection frame from the browser.
+
+    For a file nothing on the web host can decode - an AV1 WebM, which this
+    build of OpenCV cannot read and the host may have no ffmpeg for. The
+    browser that plays the video captures the paused frame and sends it here,
+    so the upload is kept instead of refused. The analysis machine converts
+    the video itself before reading it (core.analyzer).
+    """
+    _enforce_rate_limit(request, "selection-frame", 90, 300)
+    job = _authorized_job(request, job_id)
+    if not job or "video_path" not in job:
+        raise HTTPException(404)
+    declared = int(request.headers.get("content-length") or 0)
+    if declared > MAX_SELECTION_IMAGE_BYTES:
+        raise HTTPException(413, "That frame is larger than a single picture should be.")
+    body = await request.body()
+    if not body or len(body) > MAX_SELECTION_IMAGE_BYTES:
+        raise HTTPException(400, "No frame arrived. Pause the video on a clear moment and try again.")
+    image = await run_in_threadpool(cv2.imdecode, np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(400, "That is not a picture. Pause the video on a clear moment and try again.")
+    width, height = int(job.get("video_width") or 0), int(job.get("video_height") or 0)
+    got_height, got_width = image.shape[:2]
+    if width > 0 and height > 0 and (got_width, got_height) != (width, height):
+        # The browser reports the picture size it decoded; it must be this
+        # video's shape, or the fighter boxes would land on the wrong pixels.
+        if abs(got_width / max(1, got_height) - width / max(1, height)) > 0.02:
+            raise HTTPException(400, "That frame is not the shape of this video.")
+        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+    duration = float(job.get("video_duration") or 0.0)
+    seconds = max(0.0, min(float(seconds), max(0.0, duration - 0.001)))
+    fps = float(get_video_info(job["video_path"]).fps or 0.0) or 30.0
+    (OUTPUTS / job_id).mkdir(parents=True, exist_ok=True)
+    if not await run_in_threadpool(cv2.imwrite, str(OUTPUTS / job_id / "selection.jpg"), image):
+        raise HTTPException(500, "Could not save the selected fighter frame.")
+    update_job(job_id, {"selection_frame": int(round(seconds * fps)), "start_seconds": seconds,
+                        "selection_seconds": seconds, "auto_frame_done": True,
+                        "selection_pending": False, "selection_from_browser": True})
+    return {"ok": True, "seconds": seconds}
 
 
 _auto_frame_locks: dict[str, threading.Lock] = {}
@@ -4065,7 +4165,7 @@ def remote_worker_failed(request: Request, job_id: str, payload: WorkerFailurePa
         update_job(job_id, {"usage_reserved": False})
     if not update_job_for_worker(job_id, worker_id, payload.analysis_run_id, {
         "status": "error",
-        "message": "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again.",
+        "message": _worker_failure_message(payload.error_code),
         "worker_lease_expires_epoch": None,
         "worker_error_code": str(payload.error_code or "analysis_failed")[:80],
     }, renew_lease=False):
@@ -4821,13 +4921,37 @@ def download_report_json(request: Request, job_id: str):
     path = _require_completed_artifact(job_id, "report.json")
     if not path.exists():
         raise HTTPException(404, "Fight report not found")
-    return FileResponse(
-        path, media_type="application/json",
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise HTTPException(404, "Fight report not found") from None
+    return Response(
+        json.dumps(_without_hardware(report), indent=1), media_type="application/json",
         headers={
             "Content-Disposition": f'attachment; filename="warrioriq-{job_id}.json"',
             "Cache-Control": "no-store",
         },
     )
+
+
+def _without_hardware(report: dict) -> dict:
+    """The owner's report without the machine it ran on.
+
+    Which graphics card analysed a fight, and where its model files sit on
+    that machine, is operations detail: it stays in the worker's logs and the
+    stored report, and is not handed out. Only whether a graphics card was used
+    is kept, because that is what explains the speed.
+    """
+    performance = report.get("performance")
+    if isinstance(performance, dict):
+        gpu = performance.pop("gpu", None)
+        if gpu is not None:
+            performance["compute"] = "processor" if str(gpu).upper() == "CPU" else "graphics card"
+        model = performance.get("pose_model")
+        if isinstance(model, str):
+            performance["pose_model"] = Path(model).name
+        performance.pop("vram_free_at_start", None)
+    return report
 
 
 @app.post("/api/sport-check", dependencies=[Depends(require_csrf)])
@@ -6403,6 +6527,14 @@ def admin_delete_prohibited_video(request: Request, job_id: str = Form(...)):
         resource_type="fight", resource_id=job_id.strip(),
     )
     return RedirectResponse("/admin", status_code=303)
+
+
+@app.get("/admin/openapi.json", include_in_schema=False)
+def admin_openapi(request: Request):
+    """The API schema, for a signed-in administrator only."""
+    if not _is_admin(request):
+        raise HTTPException(404)
+    return JSONResponse(app.openapi())
 
 
 @app.get("/assets/{bundle}.css", include_in_schema=False)

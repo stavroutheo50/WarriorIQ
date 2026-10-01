@@ -150,7 +150,13 @@ def run_claimed_job(worker_id: str, job_id: str, job: dict) -> None:
         if still_owns_run:
             update_job(job_id, {
                 "status": "error",
-                "message": "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again.",
+                "message": (
+                    "The analysis machine could not decode this video's format, so nothing was analysed. "
+                    "Your upload and fighter selections are preserved; exporting the video as MP4 (H.264) "
+                    "and uploading that copy will work."
+                    if type(exc).__name__ == "UnreadableVideo" else
+                    "WarriorIQ could not finish this analysis. Your upload and fighter selections are "
+                    "preserved so you can try again."),
                 "worker_lease_expires_epoch": None,
             })
 

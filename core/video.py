@@ -281,6 +281,123 @@ def read_frame(path: str | Path, frame_index: int):
         cap.release()
 
 
+def _usable_picture(frame) -> bool:
+    """False for a black, blank or single-colour frame - a fade-in, a title
+    card, or a corrupt first keyframe - which is no frame to pick fighters on."""
+    if frame is None or getattr(frame, "size", 0) == 0:
+        return False
+    small = cv2.resize(frame, (64, 36), interpolation=cv2.INTER_AREA)
+    return float(small.mean()) > 8.0 and float(small.std()) > 4.0
+
+
+def ffmpeg_frame(path: str | Path, seconds: float):
+    """One frame decoded by ffmpeg, or None.
+
+    For the files OpenCV's bundled decoder cannot read at all - AV1 WebM being
+    the common one: the container opens and reports its frame count, so every
+    metadata check passes, and then not one frame decodes. One frame is cheap
+    to decode whatever the codec, so this is affordable on the web host.
+    """
+    ffmpeg = _ffmpeg_exe()
+    if ffmpeg is None:
+        return None
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{max(0.0, float(seconds)):.3f}",
+             "-i", str(path), "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"],
+            capture_output=True, timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 or not result.stdout:
+        return None
+    return cv2.imdecode(np.frombuffer(result.stdout, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+
+def selection_frame(path: str | Path, info: VideoInfo, preferred_frame: int):
+    """(frame_index, image) for the fighter picker, trying hard before giving up.
+
+    The upload used to read exactly one frame and, failing that, frame 0 - and
+    refuse the upload with "could not prepare this video's fighter-selection
+    frame" when both failed. A real fight was then rejected for a seek bug, a
+    black opening, or a codec this build of OpenCV cannot decode. This tries
+    the preferred moment, then a spread of moments a few seconds in, first with
+    OpenCV and then with ffmpeg, and skips blank frames. Returns (None, None)
+    only when nothing at all decodes here - and even then the upload is kept:
+    the browser picks the frame instead (app.main.selection_frame_image).
+    """
+    fps = info.fps if info.fps > 0 else 30.0
+    duration = max(0.0, float(info.duration))
+    preferred = max(0, int(preferred_frame))
+    candidates = [preferred]
+    for seconds in (2.0, 5.0, duration * 0.1, duration * 0.25, duration * 0.5, duration * 0.75,
+                    duration * 0.9, 0.0):
+        index = int(round(min(max(0.0, seconds), max(0.0, duration - 0.05)) * fps))
+        if index not in candidates:
+            candidates.append(index)
+    fallback = None
+    for index in candidates:
+        try:
+            frame = read_frame(path, index)
+        except Exception:                                           # noqa: BLE001
+            frame = None
+        if frame is not None and _usable_picture(frame):
+            return index, frame
+        fallback = fallback or ((index, frame) if frame is not None else None)
+    for index in candidates:
+        frame = ffmpeg_frame(path, index / fps)
+        if frame is not None and _usable_picture(frame):
+            return index, frame
+        fallback = fallback or ((index, frame) if frame is not None else None)
+    # Everything decodable was blank: still better than nothing to draw on.
+    return fallback if fallback is not None else (None, None)
+
+
+def opencv_decodes(path: str | Path) -> bool:
+    """Whether OpenCV can read frames from this file at all."""
+    capture = cv2.VideoCapture(str(path))
+    try:
+        if not capture.isOpened():
+            return False
+        for _ in range(5):
+            ok, frame = capture.read()
+            if ok and frame is not None:
+                return True
+        return False
+    finally:
+        capture.release()
+
+
+def decodable_copy(path: str | Path, destination: str | Path) -> Path | None:
+    """An H.264 copy the analysis can read, for a file OpenCV cannot decode.
+
+    Same resolution and the same frame timing (no frames dropped or
+    duplicated), so the fighter boxes and the selection time still point at
+    the same pixels and the same moment. Costs a re-encode, which is why it is
+    only made when the original genuinely cannot be read - the alternative is
+    no analysis at all.
+    """
+    ffmpeg = _ffmpeg_exe()
+    if ffmpeg is None:
+        return None
+    target = Path(destination)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(path),
+             "-map", "0:v:0", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+             "-pix_fmt", "yuv420p", "-fps_mode", "passthrough", "-an", str(target)],
+            capture_output=True, text=True, timeout=3600, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        LOGGER.warning("decodable_copy_failed path=%s error=%s", Path(path).name, type(exc).__name__)
+        return None
+    if result.returncode != 0 or not target.exists() or target.stat().st_size == 0:
+        LOGGER.warning("decodable_copy_failed path=%s rc=%s detail=%s",
+                       Path(path).name, result.returncode, (result.stderr or "")[-200:])
+        target.unlink(missing_ok=True)
+        return None
+    return target
+
+
 def build_round_schedule(req: AnalysisRequest, info: VideoInfo) -> list[RoundSpec]:
     """Build active round windows from user-entered fight format.
 
@@ -410,14 +527,16 @@ def remove_derivative(original: str | Path) -> None:
 
 
 def _ffmpeg_exe() -> str | None:
+    """imageio-ffmpeg's bundled binary when installed, else one on PATH."""
     try:
         import imageio_ffmpeg
-    except ImportError:
-        return None
-    try:
+
         return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:
-        return None
+    except Exception:                                               # noqa: BLE001
+        pass
+    import shutil
+
+    return shutil.which("ffmpeg")
 
 
 def _stream_codecs(ffmpeg: str, path: Path) -> tuple[str, str] | None:

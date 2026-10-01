@@ -4,6 +4,8 @@ import json
 import hashlib
 import logging
 import math
+import shutil
+import tempfile
 import time
 from dataclasses import replace
 from threading import Lock, RLock
@@ -215,7 +217,10 @@ from core.scoring import (
 
 _PLURAL_FAMILY = {"punch": "punches", "kick": "kicks", "knee": "knees"}
 from core.types import AnalysisProgress, AnalysisRequest, PersonObservation, PoseFrame, RoundSpec
-from core.video import SourceTimestampClock, build_round_schedule, get_video_info, requested_segment_end, round_at_time
+from core.video import (
+    SourceTimestampClock, build_round_schedule, decodable_copy, get_video_info, opencv_decodes,
+    requested_segment_end, round_at_time,
+)
 
 ProgressCallback = Callable[[dict], None]
 
@@ -702,11 +707,40 @@ def _analysed_span(info, start_seconds: float, end_seconds: float, seed_seconds:
     }
 
 
+class UnreadableVideo(RuntimeError):
+    """No decoder on the analysis machine can read this video's frames."""
+
+
 def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None) -> dict:
     # BoT-SORT state belongs to one run for its entire lifetime. Per-frame
     # locks would still let a second job reset identities between frames.
     with _ANALYSIS_LOCK:
-        return _analyze_from_seed(req, progress_callback)
+        if opencv_decodes(req.video_path):
+            return _analyze_from_seed(req, progress_callback)
+        # OpenCV cannot read this file at all - an AV1 WebM is the usual one:
+        # it opens, reports its frames and decodes none. Rather than fail a
+        # real fight, analyse an H.264 copy with the same frames and timing,
+        # made here and deleted afterwards.
+        if progress_callback is not None:
+            progress_callback(AnalysisProgress(
+                percent=0.2, message="Converting the video so it can be read",
+                elapsed_seconds=0.0, processed_video_seconds=0.0, speed=0.0, eta_seconds=None,
+                stage="preparing").to_dict())
+        scratch = Path(tempfile.mkdtemp(prefix=".decodable-", dir=str(Path(req.output_dir).parent)
+                                        if req.output_dir else None))
+        try:
+            copy = decodable_copy(req.video_path, scratch / "decodable.mp4")
+            if copy is None or not opencv_decodes(copy):
+                raise UnreadableVideo(
+                    "The analysis machine cannot decode this video's format, and no converter is "
+                    "installed on it.")
+            LOGGER.info("analysing_decodable_copy original=%s", Path(req.video_path).name)
+            return _analyze_from_seed(
+                replace(req, video_path=str(copy),
+                        original_name=req.original_name or Path(req.video_path).name),
+                progress_callback)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback | None) -> dict:
@@ -718,6 +752,7 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     that is impossible, or the check fails, does the analysis start at the
     chosen frame - and the report then says which part was left out and why.
     """
+    wrapper_started = time.perf_counter()
     seed_seconds = req.selection_seconds
     if seed_seconds is None:
         return _analyze(req, progress_callback)
@@ -772,7 +807,8 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     if not handoff.moved:
         return _analyze(from_seed, progress_callback, seed_seconds=seed_seconds,
                         handoff=handoff_record, excluded_reason=handoff.reason or "fighter_lost",
-                        measured_footage=measured, seed_kit=seed_kit)
+                        measured_footage=measured, seed_kit=seed_kit,
+                        budget_spent_before=time.perf_counter() - wrapper_started)
     forward = replace(
         req, start_seconds=handoff.frame / fps, selection_seconds=None,
         fighter_a_box=list(handoff.a_box), fighter_b_box=list(handoff.b_box))
@@ -782,20 +818,21 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     try:
         return _analyze(forward, progress_callback, seed_seconds=seed_seconds,
                         handoff=handoff_record, excluded_reason=handoff.reason, seed_check=seed_check,
-                        seed_pair=seed_pair, measured_footage=measured, seed_kit=seed_kit)
+                        seed_pair=seed_pair, measured_footage=measured, seed_kit=seed_kit,
+                        budget_spent_before=time.perf_counter() - wrapper_started)
     except SeedCheckFailed as failure:
         LOGGER.warning("backtrack_rejected_at_seed seed_frame=%s verdict=%s", seed_frame, failure)
         handoff_record = {**handoff_record, "rejected_at_seed": str(failure)}
         return _analyze(from_seed, progress_callback, seed_seconds=seed_seconds,
                         handoff=handoff_record, excluded_reason="unverified", measured_footage=measured,
-                        seed_kit=seed_kit)
+                        seed_kit=seed_kit, budget_spent_before=time.perf_counter() - wrapper_started)
 
 
 def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None, *,
              seed_seconds: float | None = None, handoff: dict | None = None,
              excluded_reason: str | None = None, seed_check: dict | None = None,
              seed_pair: tuple | None = None, measured_footage=None,
-             seed_kit: dict | None = None) -> dict:
+             seed_kit: dict | None = None, budget_spent_before: float = 0.0) -> dict:
     info = get_video_info(req.video_path)
     _validate_request(req, info.duration)
     if seed_seconds is None:
@@ -1435,7 +1472,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             if SETTINGS.hard_realtime_budget:
                 quality.plan_for_budget(
                     analyzed_frames, processed_seconds,
-                    time.perf_counter() - pose_pass_start, segment_duration)
+                    time.perf_counter() - pose_pass_start, segment_duration,
+                    overhead_seconds=(pose_pass_start - wall_start) + float(budget_spent_before))
             current_imgsz = quality.imgsz
 
             if (analyzed_frames - last_progress_emit >= SETTINGS.progress_interval_frames
@@ -1514,7 +1552,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # Rates are per minute of fight footage, not per minute of video.
     measured_duration = max(1.0, float(fight_footage["fight_seconds"])) if fight_footage["fight_seconds"] > 0 else segment_duration
 
-    analysis_seconds = time.perf_counter() - wall_start
+    # The whole wait, including the backward identity pass and any rerun.
+    analysis_seconds = time.perf_counter() - wall_start + float(budget_spent_before)
     frame_pass_seconds = time.perf_counter() - pose_pass_start
     realtime_speed = segment_duration / analysis_seconds if analysis_seconds > 0 else 0.0
     within_budget = analysis_seconds <= segment_duration
@@ -1876,7 +1915,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # The customer-facing duration includes report construction, not only the
     # pose pass. Keep the saved report, progress screen and history summary on
     # the same wall-clock definition.
-    analysis_seconds = time.perf_counter() - wall_start
+    # The whole wait, including the backward identity pass and any rerun.
+    analysis_seconds = time.perf_counter() - wall_start + float(budget_spent_before)
     realtime_speed = segment_duration / analysis_seconds if analysis_seconds > 0 else 0.0
     within_budget = analysis_seconds <= segment_duration
     report["performance"].update({

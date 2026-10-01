@@ -282,6 +282,11 @@ FIGHT_VIDEO_FORMATS: tuple[tuple[str, str], ...] = (
     (".avi", "video/x-msvideo"),
     (".m4v", "video/x-m4v"),
     (".webm", "video/webm"),
+    # Ogg Theora, as Wikimedia Commons and some screen recorders write it.
+    # Decoded by the same bundled FFmpeg as everything above; anything OpenCV
+    # cannot read is converted on the analysis machine (core.analyzer).
+    (".ogv", "video/ogg"),
+    (".ogg", "video/ogg"),
 )
 
 # What the upload route refuses on.
@@ -305,10 +310,14 @@ FIGHT_VIDEO_LABEL: str = ", ".join(_NAMES[:-1]) + f" or {_NAMES[-1]}"
 #   ISO base media (MP4, MOV, M4V): a box-size word, then the type "ftyp".
 #   EBML (MKV, WEBM):               the EBML magic at byte 0.
 #   RIFF (AVI):                     "RIFF", a size word, then "AVI ".
+#   Ogg (OGV, OGG):                 "OggS" at byte 0. An audio-only .ogg has
+#                                   the same magic; it fails at the decoder,
+#                                   which reports no video track.
 _VIDEO_SIGNATURES: tuple[tuple[tuple[int, bytes], ...], ...] = (
     ((4, b"ftyp"),),
     ((0, b"\x1a\x45\xdf\xa3"),),
     ((0, b"RIFF"), (8, b"AVI ")),
+    ((0, b"OggS"),),
 )
 
 # Enough to reach the furthest signature offset with room to spare.

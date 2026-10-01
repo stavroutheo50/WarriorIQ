@@ -12,6 +12,7 @@ disk, on the event loop. These tests pin the fixes.
 from __future__ import annotations
 
 import dataclasses
+import json
 from unittest.mock import patch
 
 import pytest
@@ -134,3 +135,22 @@ def test_route_limit_is_a_friendly_page_with_retry_after(client):
     # One security event per tripped window, not one per refused request.
     exceeded = [call for call in recorded.call_args_list if call.args and call.args[0] == "rate_limit_exceeded"]
     assert len(exceeded) == 1
+
+
+def test_api_documentation_is_not_public(client):
+    for path in ("/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"):
+        assert client.get(path).status_code == 404, path
+    assert client.get("/admin/openapi.json").status_code == 404
+
+
+def test_reports_do_not_name_the_graphics_card():
+    import app.main as web
+
+    report = {"performance": {"gpu": "NVIDIA GeForce RTX 5060", "pose_model": "C:/Users/x/models/yolo26m-pose.engine",
+                              "vram_free_at_start": {"free_gb": 6.1}}}
+    cleaned = web._without_hardware(report)
+    assert "RTX" not in json.dumps(cleaned)
+    assert cleaned["performance"]["compute"] == "graphics card"
+    assert cleaned["performance"]["pose_model"] == "yolo26m-pose.engine"
+    template = (web.ROOT / "app" / "templates" / "result.html").read_text(encoding="utf-8")
+    assert "'the graphics card (' ~ perf.gpu" not in template
