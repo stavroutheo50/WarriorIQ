@@ -49,12 +49,24 @@ class PairScoreTests(unittest.TestCase):
                                  _person(170, 110, 280, 420)], self.HEIGHT)
         self.assertLess(crossed, clear)
 
-    def test_cut_off_at_the_frame_edge_is_a_weaker_start(self):
+    def test_cut_off_at_the_frame_edge_is_not_a_clear_start(self):
+        """QA 2026-09: the pick must show two full-body people."""
         from core.person_detect import pair_score
 
         whole, _ = pair_score([_person(100, 100, 220, 420), _person(500, 110, 610, 420)], self.HEIGHT)
-        cut, _ = pair_score([_person(100, 100, 220, 480), _person(500, 110, 610, 420)], self.HEIGHT)
-        self.assertLess(cut, whole)
+        cut, pair = pair_score([_person(100, 100, 220, 480), _person(500, 110, 610, 420)], self.HEIGHT)
+        head_and_shoulders, other = pair_score([_person(100, 0, 220, 300), _person(500, 0, 610, 300)], self.HEIGHT)
+        self.assertGreater(whole, 0.0)
+        self.assertIsNone(pair)
+        self.assertIsNone(other)
+        self.assertEqual((cut, head_and_shoulders), (0.0, 0.0))
+
+    def test_two_people_too_far_apart_to_fight_are_not_a_clear_start(self):
+        """A singer and a guitarist at opposite ends of a stage are not a bout."""
+        from core.person_detect import pair_score
+
+        _, pair = pair_score([_person(20, 300, 60, 420), _person(1200, 300, 1240, 420)], self.HEIGHT)
+        self.assertIsNone(pair)
 
 
 class LivePageStillsTests(unittest.TestCase):
@@ -155,6 +167,46 @@ class AutoFrameRouteTests(unittest.TestCase):
         job = get_job(self.job_id)
         self.assertTrue(job["auto_frame_done"])
         self.assertEqual(float(job["start_seconds"]), 0.0)
+
+    def test_the_light_detector_runs_even_with_pose_detection_switched_off(self):
+        """On Render WARRIORIQ_SELECTION_DETECTION is off, and no box was ever drawn."""
+        import dataclasses
+
+        people = [_person(2, 4, 20, 46), _person(40, 4, 60, 46)]
+        settings = dataclasses.replace(self.webapp.SETTINGS, selection_detection_enabled=False)
+        with patch.object(self.webapp, "SETTINGS", settings), \
+                patch.object(self.webapp, "find_clear_moment", return_value=None), \
+                patch.object(self.webapp, "detect_people_in_frame", return_value=people):
+            answer = self.client.get(f"/api/detect/{self.job_id}").json()
+        self.assertEqual(answer["availability"], "candidates_ready")
+        self.assertEqual(len(answer["people"]), 2)
+        self.assertTrue(answer["pair_found"])
+        with patch.object(self.webapp, "SETTINGS", settings), \
+                patch.object(self.webapp, "detect_people_in_frame", return_value=None):
+            unavailable = self.client.get(f"/api/detect/{self.job_id}").json()
+        self.assertEqual(unavailable["availability"], "manual_only")
+        self.assertFalse(unavailable["pair_found"])
+
+    def test_the_page_says_when_the_frame_was_chosen_for_them(self):
+        from app.state import update_job
+
+        update_job(self.job_id, {"selection_source": "auto", "selection_seconds": 12.0})
+        page = self.client.get(f"/select/{self.job_id}").text
+        self.assertIn("WarriorIQ chose this moment (0:12) for you.", page)
+        self.assertIn(f'href="/frame/{self.job_id}">Pick a different moment', page)
+        # Until boxes are drawn, the copy asks for drawn boxes, not taps.
+        self.assertIn('<p id="selectIntro">Drag a box around each fighter', page)
+        self.client.post(f"/api/selection-frame/{self.job_id}", json={"seconds": 0.5}, headers=self._csrf())
+        self.assertNotIn('id="frameNote"', self.client.get(f"/select/{self.job_id}").text)
+
+    def test_moving_to_a_clear_moment_records_who_chose_it(self):
+        from app.state import get_job
+
+        with patch.object(self.webapp, "find_clear_moment", return_value=self._moment()):
+            answer = self.client.get(f"/api/detect/{self.job_id}").json()
+        self.assertEqual(answer["frame_source"], "auto_pair")
+        self.assertTrue(answer["pair_found"])
+        self.assertEqual(get_job(self.job_id)["selection_source"], "auto_pair")
 
     def test_live_frame_serves_the_moment_being_analysed(self):
         """The live page's stills, for a browser that cannot play the upload."""

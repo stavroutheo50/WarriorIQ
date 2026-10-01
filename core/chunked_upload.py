@@ -267,6 +267,74 @@ def extend_lease(job_id: str) -> None:
                     (expires, job_id))
 
 
+# How long a chunked session may sit with no new bytes before it counts as
+# abandoned. A chunk is 8 MiB, and the slowest connection measured against the
+# live host (183 KiB/s) moves one in 45 seconds, so five minutes of silence is
+# a closed tab or a dead phone - not a slow upload.
+IDLE_SESSION_SECONDS = 5 * 60
+# A session that never received a single byte. The page sends the first chunk
+# the moment `begin` answers, so a minute with nothing at all means the page
+# that opened it is gone.
+EMPTY_SESSION_SECONDS = 60
+
+
+def _last_activity(job_id: str) -> float | None:
+    """When this session last received bytes, or None if it has no files."""
+    stamps = []
+    for path in (part_path(job_id), meta_path(job_id)):
+        try:
+            stamps.append(path.stat().st_mtime)
+        except OSError:
+            continue
+    return max(stamps) if stamps else None
+
+
+def release_idle_sessions(account_id: int | None = None, *, idle_seconds: float = IDLE_SESSION_SECONDS,
+                          now: float | None = None) -> list[str]:
+    """Hand back everything an abandoned chunked upload is holding.
+
+    `begin` takes a storage lease and an analysis reservation that only
+    `finish` or `abort` gives back. A tab closed mid-upload did neither, so the
+    session held both until its lease expired thirty minutes later - and two
+    such sessions were enough to refuse every new upload with "finish your
+    pending fight selections", which nothing on screen could explain or clear.
+
+    Only sessions with chunked files are touched: a single-request upload's
+    lease belongs to a request that is still running, and its own `finally`
+    releases it.
+    """
+    from core.db import release_analysis
+
+    now = time.time() if now is None else now
+    released: list[str] = []
+    with connection() as con:
+        if account_id is None:
+            rows = con.execute("SELECT job_id, account_id FROM upload_leases").fetchall()
+        else:
+            rows = con.execute("SELECT job_id, account_id FROM upload_leases WHERE account_id=?",
+                               (int(account_id),)).fetchall()
+    for row in rows:
+        job_id = str(row["job_id"])
+        if not JOB_ID.match(job_id):
+            continue
+        last = _last_activity(job_id)
+        if last is None:
+            continue
+        try:
+            received = part_path(job_id).stat().st_size
+        except OSError:
+            received = 0
+        limit = min(idle_seconds, EMPTY_SESSION_SECONDS) if received == 0 else idle_seconds
+        if now - last < limit:
+            continue
+        discard(job_id)
+        release_analysis(int(row["account_id"]), job_id)
+        with connection() as con:
+            con.execute("DELETE FROM upload_leases WHERE job_id=?", (job_id,))
+        released.append(job_id)
+    return released
+
+
 class StoredUpload:
     """A file already on disk, offered where an UploadFile is expected.
 

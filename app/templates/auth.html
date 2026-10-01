@@ -17,7 +17,17 @@
       <input type="hidden" name="mode" value="{{mode}}">
       <input type="hidden" name="next_path" value="{{next_path}}">
       <div class="auth-required-choices">
-        {% if mode == 'signup' %}<label class="check legal-check"><input type="checkbox" name="age_confirmed" value="true" required><span>I confirm that I am at least {{request.state.minimum_account_age}} years old.</span></label>{% endif %}
+        {#- Any age may sign up. Under the minimum age a parent or guardian is
+            emailed to approve before any fight is uploaded (app.main /guardian). -#}
+        {% if mode == 'signup' %}<fieldset class="age-group"><legend>Your age</legend>
+          <label class="check legal-check"><input type="radio" name="age_group" value="adult" required><span>I am {{request.state.minimum_account_age}} or older</span></label>
+          <label class="check legal-check"><input type="radio" name="age_group" value="minor"><span>I am under {{request.state.minimum_account_age}}</span></label>
+        </fieldset>
+        <div class="guardian-fields" id="guardianFields" hidden>
+          <p class="small">Under {{request.state.minimum_account_age}}, a parent or guardian has to approve your account. WarriorIQ emails them a link; until they approve, you can look around but not upload a fight.</p>
+          <div class="field"><label for="guardianName">Parent or guardian's name</label><input id="guardianName" name="guardian_name" maxlength="80" autocomplete="off"></div>
+          <div class="field"><label for="guardianEmail">Parent or guardian's email</label><input id="guardianEmail" type="email" name="guardian_email" autocomplete="off"></div>
+        </div>{% endif %}
         {% if mode == 'signup' %}<label class="check legal-check"><input type="checkbox" name="accept_terms" value="true" required><span>I agree to the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms of Service</a>, <a class="text-link" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> and <a class="text-link" href="/acceptable-use" target="_blank" rel="noopener">Acceptable Use Policy</a>.</span></label>{% endif %}
         {% if mode == 'signup' %}<label class="check legal-check optional-choice"><input type="checkbox" name="marketing_consent" value="true"><span>Send product updates. <span class="muted">Optional and off by default.</span></span></label>{% endif %}
       </div>
@@ -42,7 +52,7 @@
           </button>
           {% endfor %}
         </div>
-        {% if mode == 'signup' %}<p class="social-auth-gate" id="socialGate">Accept the policies above to use these.</p>{% endif %}
+        {% if mode == 'signup' %}<p class="social-auth-gate" id="socialGate">Answer the age question and accept the policies above to use these.</p><p class="social-auth-gate" id="socialMinor" hidden>Under {{request.state.minimum_account_age}}? Use the email form below, so WarriorIQ can ask your parent or guardian.</p>{% endif %}
         {#- Sign-in only, and only for someone who already has one of these.
             GitHub is no longer offered as a way to create an account, but an
             account created through it has no password and may have no address
@@ -76,6 +86,17 @@
 (()=>{
   const form=document.querySelector('.auth-form');
   if(!form)return;
+  // The guardian's details are only asked of someone under the minimum age.
+  const guardian=document.getElementById('guardianFields');
+  const ageChoices=[...form.querySelectorAll('input[name="age_group"]')];
+  const minor=()=>ageChoices.some(choice=>choice.checked&&choice.value==='minor');
+  const syncGuardian=()=>{
+    if(!guardian)return;
+    guardian.hidden=!minor();
+    guardian.querySelectorAll('input').forEach(input=>{input.required=minor()});
+  };
+  ageChoices.forEach(choice=>choice.addEventListener('change',syncGuardian));
+  syncGuardian();
   const socials=[...form.querySelectorAll('.social-auth-button')];
   if(!socials.length)return;
   const gate=document.getElementById('socialGate');
@@ -90,15 +111,20 @@
   // the reader was told to "press again" before being told why. The reason is
   // now on screen from the start, which is what makes disabling honest rather
   // than mute.
+  const minorNote=document.getElementById('socialMinor');
   const syncSocialGate=()=>{
-    const ready=required.every(box=>box.checked);
+    // Social sign-up is for adults: the guardian is asked on the email form.
+    const answered=!ageChoices.length||ageChoices.some(choice=>choice.checked);
+    const ready=required.every(box=>box.checked)&&answered&&!minor();
     socials.forEach(button=>{
       button.disabled=!ready;
       button.setAttribute('aria-disabled',String(!ready));
     });
-    if(gate)gate.hidden=ready;
+    if(gate)gate.hidden=ready||minor();
+    if(minorNote)minorNote.hidden=!minor();
   };
   syncSocialGate();
   required.forEach(box=>box.addEventListener('change',syncSocialGate));
+  ageChoices.forEach(choice=>choice.addEventListener('change',syncSocialGate));
 })();
 </script>{% endblock %}

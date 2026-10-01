@@ -43,6 +43,9 @@ def test_cleanup_preserves_completed_report_waiting_for_history(monkeypatch, tmp
     os.utime(folder, (old, old))
     monkeypatch.setattr(web, "_last_guest_cleanup", 0)
     monkeypatch.setattr(web, "_last_saved_video_cleanup", 0)
+    # The sweep runs off the request path now; run it here, synchronously,
+    # exactly as the background thread would.
+    web._run_periodic_maintenance(now=time.monotonic() + 7200)
     with BrowserClient(web.app) as client:
         assert client.get("/health").status_code == 200
     assert video.is_file()

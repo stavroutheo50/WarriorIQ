@@ -29,15 +29,20 @@
     element.classList.add('wiq-reveal');
     if(!element.style.getPropertyValue('--wiq-reveal-order'))element.style.setProperty('--wiq-reveal-order',String(index%4));
   });
+  // Hidden content is only ever hidden by this script, and shown again if
+  // anything here fails: a page must never stay at opacity 0.
+  const revealAll=()=>revealTargets.forEach(element=>element.classList.add('is-visible'));
   if(reduced||!('IntersectionObserver'in window)){
-    revealTargets.forEach(element=>element.classList.add('is-visible'));
+    revealAll();
   }else{
-    const revealObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{
-      if(!entry.isIntersecting)return;
-      entry.target.classList.add('is-visible');
-      revealObserver.unobserve(entry.target);
-    }),{rootMargin:'0px 0px -6% 0px',threshold:.06});
-    revealTargets.forEach(element=>revealObserver.observe(element));
+    try{
+      const revealObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{
+        if(!entry.isIntersecting)return;
+        entry.target.classList.add('is-visible');
+        revealObserver.unobserve(entry.target);
+      }),{rootMargin:'0px 0px -6% 0px',threshold:.06});
+      revealTargets.forEach(element=>revealObserver.observe(element));
+    }catch(error){revealAll()}
   }
 
   const parseStat=element=>{

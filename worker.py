@@ -93,7 +93,11 @@ def _request_from_job(job_id: str, job: dict) -> AnalysisRequest:
         focus_fighter=job.get("focus_fighter") or "A",
         fight_type=job["fight_type"],
         ruleset=job["ruleset"],
-        start_seconds=float(job.get("start_seconds", 0.0)),
+        # The whole video unless a later start was asked for; the fighter
+        # boxes belong to selection_seconds. An older server sends only
+        # start_seconds, which was the selection frame.
+        start_seconds=float(job.get("requested_start_seconds", 0.0) or 0.0),
+        selection_seconds=float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
         round_count=int(job.get("round_count", 1)),
         round_duration_seconds=float(job.get("round_duration_seconds", 120.0)),
         break_duration_seconds=float(job.get("break_duration_seconds", 60.0)),
@@ -146,7 +150,13 @@ def run_claimed_job(worker_id: str, job_id: str, job: dict) -> None:
         if still_owns_run:
             update_job(job_id, {
                 "status": "error",
-                "message": "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again.",
+                "message": (
+                    "The analysis machine could not decode this video's format, so nothing was analysed. "
+                    "Your upload and fighter selections are preserved; exporting the video as MP4 (H.264) "
+                    "and uploading that copy will work."
+                    if type(exc).__name__ == "UnreadableVideo" else
+                    "WarriorIQ could not finish this analysis. Your upload and fighter selections are "
+                    "preserved so you can try again."),
                 "worker_lease_expires_epoch": None,
             })
 

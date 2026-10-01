@@ -94,6 +94,14 @@ class Settings:
     # "database is locked" before. Naming it makes it configurable and stops
     # the value being an accident of the driver's default.
     sqlite_busy_timeout_ms: int = int(os.getenv("WARRIORIQ_SQLITE_BUSY_TIMEOUT_MS", "5000"))
+    # A ceiling on requests per minute from one address, across every page and
+    # API route (static files, /health and /healthz are not counted). Answered
+    # with a 429 page that says how long to wait - never a dropped connection.
+    # Generous on purpose: a person browsing quickly makes 20-60 a minute and a
+    # live progress page about 110 (status poll plus stills); a gym's members
+    # can share one address. This exists for a runaway client, not them.
+    # 0 switches it off.
+    request_rate_limit_per_minute: int = max(0, int(os.getenv("WARRIORIQ_REQUEST_RATE_LIMIT_PER_MINUTE", "600")))
     default_imgsz: int = int(os.getenv("WARRIORIQ_IMGSZ", "640"))
     min_imgsz: int = int(os.getenv("WARRIORIQ_MIN_IMGSZ", "512"))
     # Fighters in a wide or low-resolution recording occupy very few pixels.
@@ -223,6 +231,19 @@ class Settings:
     # wrong fighter.
     max_fighter_pair_similarity: float = float(
         os.getenv("WARRIORIQ_MAX_PAIR_SIMILARITY", "0.78"))
+    # The kit comparison the selection warning and the report use (core/kit.py):
+    # per-region L*a*b* colour on the centre line of each fighter, compared by
+    # Delta E, 1.0 for identical. 0.75 is Delta E 10 in the most different
+    # region - two halves of one kit under one light differ by 2-8. The
+    # histogram threshold above stays where it was: it now only steers the
+    # identity manager's internal swap check.
+    max_kit_similarity: float = float(os.getenv("WARRIORIQ_MAX_KIT_SIMILARITY", "0.75"))
+    # For a pair in matching kit, how many moments a minute the identity
+    # manager may say "cannot tell which is which" (it drops the frame rather
+    # than guess) before the fight's identity is not trusted. Matching kit is
+    # handled by position and motion; this is the evidence that it worked.
+    max_lookalike_confusions_per_minute: float = float(
+        os.getenv("WARRIORIQ_MAX_LOOKALIKE_CONFUSIONS_PER_MINUTE", "2.0"))
     # A learned appearance space for the same gate. The histogram above cannot
     # separate a referee from a fighter - measured, their ranges overlap almost
     # completely - while an embedding puts the referee at 0.695-0.741 and the
@@ -1261,6 +1282,10 @@ class Settings:
     # is actually loaded.
     gtm_container_id: str = os.getenv("WARRIORIQ_GTM_ID", "").strip()
     email_provider: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER", "").strip()
+    # Who hosts the website, its database and the uploaded fights, named on
+    # /subprocessors. Render sets RENDER on its own services, so a Render
+    # deployment names itself; any other host is named here.
+    hosting_provider: str = os.getenv("WARRIORIQ_HOSTING_PROVIDER", "Render" if IS_RENDER else "").strip()
     require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 
 
@@ -1287,7 +1312,7 @@ RULESET_LABELS = {
     "BOXING": "Boxing",
     "MUAY_THAI": "Full rules (elbows allowed)",
     "MUAY_THAI_NO_ELBOWS": "No elbows",
-    "ITF_TAEKWONDO": "ITF · International Taekwon-Do Federation",
+    "ITF_TAEKWONDO": "ITF · International Taekwon-Do Federation (traditional)",
     "WT_TAEKWONDO": "WT · World Taekwondo (Olympic)",
     "MMA": "MMA (standing exchanges)",
 }

@@ -175,7 +175,8 @@ class QualityController:
         return snapped or measured_seconds
 
     def plan_for_budget(self, analyzed_frames: int, processed_seconds: float,
-                        elapsed_seconds: float, segment_duration: float) -> None:
+                        elapsed_seconds: float, segment_duration: float,
+                        overhead_seconds: float = 0.0) -> None:
         """Choose one sampling stride that finishes inside the video's length.
 
         The product's stated target is that analysis never takes longer than the
@@ -254,7 +255,13 @@ class QualityController:
         divergence = observed / max(1e-9, per_frame)
         cost_is_stale = self.budget_cost_source in {"configured", "profile"} and divergence > 1.5
         remaining_video = max(0.0, segment_duration - processed_seconds)
-        remaining_budget = segment_duration - elapsed_seconds
+        # The budget is the whole wait, not the frame pass: model loading, the
+        # SAM2 sweep and the backward identity pass have already spent part of
+        # it (overhead_seconds), and the report still has to be built after.
+        # Planning the frame pass against the full video length is how a 2:40
+        # fight took 2:54 while this said "on_track".
+        remaining_budget = (segment_duration - elapsed_seconds - max(0.0, overhead_seconds)
+                            - (REPORT_RESERVE_SECONDS if overhead_seconds > 0 else 0.0))
         if remaining_video <= 0:
             self.budget_reason = "already_finished"
             self.budget_expected_met = True
@@ -329,12 +336,48 @@ class QualityController:
         return self.stride, self.imgsz, self.mode
 
 
+# Kept back from the analysis budget for building and saving the report after
+# the last frame.
+REPORT_RESERVE_SECONDS = 2.0
+
+
+def resolve_pose_engine(configured: str | None = None, gpu_name: str | None = None) -> Path:
+    """The TensorRT engine to load: the configured path if it exists, else
+    this GPU's cached engine (core/trt_engine.py) beside it or in the models
+    directory.
+
+    The configured path alone was not enough. WARRIORIQ_POSE_ENGINE pointing at
+    a file that does not exist - the Modal worker once set it to
+    `absent.engine` on purpose, and a stale value can outlive that in a secret
+    or an environment - sent every run to the .pt checkpoint while the GPU's
+    own engine sat built and cached a directory away. Same model, same answers,
+    so falling back to it costs nothing but the minutes it saves.
+    """
+    from core.config import MODELS
+    from core.trt_engine import engine_path_for
+
+    primary = Path(configured or SETTINGS.pose_model_engine)
+    if primary.exists():
+        return primary
+    for folder in (primary.parent, MODELS):
+        try:
+            candidate = engine_path_for(folder, gpu_name)
+        except Exception:                                           # noqa: BLE001
+            continue
+        if candidate.exists():
+            LOGGER.warning(
+                "pose_engine_configured_missing path=%s using=%s - WARRIORIQ_POSE_ENGINE "
+                "points at a file that does not exist", primary, candidate)
+            return candidate
+    return primary
+
+
 class PoseTracker:
     def __init__(self):
         requested = str(SETTINGS.device).strip().lower()
         self.device = (0 if torch.cuda.is_available() else "cpu") if requested == "auto" else (int(requested) if requested.isdigit() else requested)
         self.uses_cuda = self.device != "cpu" and torch.cuda.is_available()
-        engine_path = Path(SETTINGS.pose_model_engine)
+        engine_path = resolve_pose_engine() if self.uses_cuda else Path(SETTINGS.pose_model_engine)
         model_path = str(engine_path) if self.uses_cuda and engine_path.exists() else SETTINGS.pose_model_pt
         self.model_path = model_path
         # Whether TensorRT is carrying this run is the difference between a

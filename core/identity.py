@@ -151,6 +151,27 @@ class IdentityManager:
     better than tracking the wrong human.
     """
 
+    def adopt_anchor(self, state: FighterState, observation: PersonObservation | None) -> None:
+        """Take a fighter's fixed identity anchor from another observation.
+
+        Used when the run starts before the frame the person drew the boxes
+        on: tracking begins where the fighters were followed back to, while
+        the anchor still describes them as they looked on the chosen frame.
+        Only fields the observation actually has are replaced.
+        """
+        if observation is None:
+            return
+        if observation.appearance is not None:
+            state.anchor_appearance = observation.appearance.copy()
+        if observation.reid is not None:
+            state.anchor_reid = np.asarray(observation.reid).copy()
+            state.anchor_reid_samples = [np.asarray(observation.reid, dtype=np.float32).ravel()]
+        signature = pose_signature(observation.keypoints, observation.box)
+        if signature is not None:
+            state.anchor_pose = signature
+        if observation.referee_prob is not None:
+            state.anchor_is_referee = bool(observation.referee_prob >= SETTINGS.min_referee_probability)
+
     def __init__(self, initial_a: PersonObservation, initial_b: PersonObservation, source_frame: int = 0, source_fps: float = 30.0):
         self.a = FighterState(
             name="A",

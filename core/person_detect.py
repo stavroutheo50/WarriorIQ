@@ -26,6 +26,7 @@ import cv2
 import numpy as np
 
 from core.config import MODELS
+from core.fight_presence import MAX_CLOSEST_SEPARATION
 
 LOGGER = logging.getLogger("warrioriq.person_detect")
 
@@ -185,12 +186,23 @@ def _shared(a: list[float], b: list[float]) -> float:
     return inter / max(1.0, smaller)
 
 
+def _whole_body(box: list[float], height: int) -> bool:
+    """Head to feet in the picture: neither end cut by the frame's edge."""
+    return box[1] > 0.01 * height and box[3] < 0.99 * height
+
+
 def pair_score(people: list[dict], height: int) -> tuple[float, tuple[int, int] | None]:
     """How clear a start this frame gives, and which two people make it.
 
-    A clear start is two whole people of similar size, apart from each other,
-    with nobody else standing across either of them - the same three things
-    the selection page asks a person to look for.
+    A clear start is two whole people of similar size, apart from each other
+    but close enough to be fighting, with nobody else standing across either
+    of them - the things the selection page asks a person to look for.
+
+    QA, 2026-09: an automatic pick landed on a singer on stage with no fighter
+    in view. Whole bodies and fighting distance are therefore requirements,
+    not preferences: a head-and-shoulders shot, or two people standing far
+    apart, is not offered as the moment to tell two fighters apart. Fighting
+    distance is the fight-presence check's (core/fight_presence.py).
     """
     best, best_pair = 0.0, None
     tall = [i for i, p in enumerate(people) if p["box"][3] - p["box"][1] >= 0.12 * height]
@@ -199,15 +211,16 @@ def pair_score(people: list[dict], height: int) -> tuple[float, tuple[int, int] 
             a, b = people[i]["box"], people[j]["box"]
             if _shared(a, b) > 0.10:
                 continue
+            if not (_whole_body(a, height) and _whole_body(b, height)):
+                continue
             ha, hb = a[3] - a[1], b[3] - b[1]
             similar = min(ha, hb) / max(ha, hb)
             if similar < 0.5:
                 continue
+            apart = abs((a[0] + a[2]) / 2 - (b[0] + b[2]) / 2) / ((ha + hb) / 2)
+            if apart > MAX_CLOSEST_SEPARATION:
+                continue
             score = min(people[i]["confidence"], people[j]["confidence"]) * similar
-            # Whole bodies: cut off at the frame edge is a weaker start.
-            for box in (a, b):
-                if box[1] <= 0.01 * height or box[3] >= 0.99 * height:
-                    score *= 0.7
             # Somebody else across either fighter (a referee stepping in).
             for k, other in enumerate(people):
                 if k not in (i, j) and other["confidence"] >= 0.4 and (

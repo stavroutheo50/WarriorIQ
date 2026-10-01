@@ -11,7 +11,6 @@
   </ol>
   <header class="workflow-heading">
     <div><div class="eyebrow">Frame selection</div><h1>Find one clear moment.</h1><p>Pause where both fighters are visible from head to toe. This gives the identity tracker the strongest possible start.</p></div>
-    <div class="workflow-step-count"><strong>02</strong><span>of 03</span></div>
   </header>
   <div class="frame-workbench">
     <section class="frame-player-panel" aria-labelledby="frame-player-title">
@@ -45,7 +44,7 @@
         <li><span>02</span><div><strong>Clear separation</strong><small>Avoid clinches and overlapping bodies.</small></div></li>
         <li><span>03</span><div><strong>Referee out of the way</strong><small>Choose a moment with a clean view.</small></div></li>
       </ul>
-      {% if job.quality %}<section class="capture-readout {{job.quality.status}}"><div><span>Video quality</span><strong>{{job.quality.score}}/100</strong></div><div class="capture-meta"><span>{{job.quality.measurements.resolution}}</span><span>{{job.quality.measurements.fps}} FPS</span></div>{% if job.quality.notes %}<p>{{job.quality.notes[0]}}</p>{% endif %}</section>{% endif %}
+      {% if job.quality and job.quality.score is not none %}<section class="capture-readout {{job.quality.status}}"><div><span>Video quality</span><strong>{{job.quality.score}}/100</strong></div><div class="capture-meta"><span>{{job.quality.measurements.resolution}}</span><span>{{job.quality.measurements.fps}} FPS</span></div>{% if job.quality.notes %}<p>{{job.quality.notes[0]}}</p>{% endif %}</section>{% endif %}
     </aside>
   </div>
 </section>
@@ -90,5 +89,19 @@ stillPicker.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click
 stillSwitch.addEventListener('click',useStills);
 video.addEventListener('error',useStills);
 video.addEventListener('loadedmetadata',()=>{if(!(video.videoWidth>0))useStills()});
-button.onclick=async()=>{clearTimeout(stillTimer);stillRequest++;button.disabled=true;button.setAttribute('aria-busy','true');setFrameStatus('Frame at','Preparing…');try{const r=await fetch(`/api/selection-frame/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({seconds:stillMode?stillSeconds:video.currentTime})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Could not use this frame');location.href=`/select/${jobId}`}catch(e){setFrameStatus('Could not continue',e.message);button.disabled=false;button.removeAttribute('aria-busy')}};
+// The browser's own copy of the paused frame, for a file the server cannot
+// decode (an AV1 WebM, which this browser plays and the server's video
+// library cannot read). Sent as a PNG so nothing is lost before the fighters
+// are boxed on it.
+async function sendBrowserFrame(seconds){
+  if(stillMode||!(video.videoWidth>0))return false;
+  const canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+  canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+  if(!blob)return false;
+  const r=await fetch(`/api/selection-frame/${jobId}/image?seconds=${encodeURIComponent(seconds.toFixed(3))}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'image/png'}),body:blob});
+  const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||'Could not use this frame');
+  return true;
+}
+button.onclick=async()=>{clearTimeout(stillTimer);stillRequest++;button.disabled=true;button.setAttribute('aria-busy','true');setFrameStatus('Frame at','Preparing…');const chosen=stillMode?stillSeconds:video.currentTime;try{const r=await fetch(`/api/selection-frame/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({seconds:stillMode?stillSeconds:video.currentTime})});const d=await r.json();if(!r.ok){if(r.status===422&&await sendBrowserFrame(chosen)){location.href=`/select/${jobId}`;return}throw new Error(d.detail||'Could not use this frame')}location.href=`/select/${jobId}`}catch(e){setFrameStatus('Could not continue',e.message);button.disabled=false;button.removeAttribute('aria-busy')}};
 </script>{% endblock %}

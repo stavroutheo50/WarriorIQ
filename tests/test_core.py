@@ -73,7 +73,7 @@ class ProductFoundationTests(unittest.TestCase):
         }
 
     def test_unvalidated_actions_still_produce_fighter_specific_pose_plan(self):
-        own_a = self._pose_metrics(.22, .81, .63)
+        own_a = self._pose_metrics(.05, .81, .63)
         own_b = self._pose_metrics(.58, .44, .76)
         coaching_a = build_pose_coaching("A", own_a)
         coaching_b = build_pose_coaching("B", own_b)
@@ -83,14 +83,15 @@ class ProductFoundationTests(unittest.TestCase):
         self.assertEqual(coaching_a["evidence_type"], "pose_only")
         # Labels are plainer now, and each fighter's weakest number is found by
         # ranking against the band these metrics sit in rather than comparing a
-        # guard percentage against a balance percentage.
-        self.assertIn("Guard 22%", coaching_a["improvements"][0]["title"])
+        # guard percentage against a balance percentage - and only named when it
+        # sits a whole spread below that band.
+        self.assertIn("Guard 5%", coaching_a["improvements"][0]["title"])
         self.assertIn("Balance 44%", coaching_b["improvements"][0]["title"])
         self.assertTrue(plan_a)
         self.assertTrue(plan_b)
         self.assertNotEqual(plan_a, plan_b)
-        self.assertIn("22.0%", plan_a[0]["goal"])
-        self.assertIn("30.0%", plan_a[0]["goal"])
+        self.assertIn("5.0%", plan_a[0]["goal"])
+        self.assertIn("13.0%", plan_a[0]["goal"])
 
     def test_legacy_low_overlap_referee_track_is_invalidated_despite_high_coverage(self):
         metric = self._pose_metrics(.4, .7, .6)
@@ -212,6 +213,10 @@ class ProductFoundationTests(unittest.TestCase):
         for typed, expected in (
             ("boxing", "BOXING"), ("Muay Thai", "MUAY_THAI"), ("thai", "MUAY_THAI"),
             ("wtf", "WT_TAEKWONDO"), ("WTF Taekwondo", "WT_TAEKWONDO"), ("tkd", "WT_TAEKWONDO"),
+            ("World Taekwondo", "WT_TAEKWONDO"), ("taekwondo", "WT_TAEKWONDO"),
+            # The ITF writes its name "Taekwon-Do": the traditional, non-Olympic rules.
+            ("Taekwon-Do", "ITF_TAEKWONDO"), ("ITF", "ITF_TAEKWONDO"),
+            ("International Taekwon-Do Federation", "ITF_TAEKWONDO"),
             ("mma", "MMA"), ("k-1", "K1"),
         ):
             self.assertEqual(normalize_ruleset(typed), expected, typed)
@@ -1123,7 +1128,7 @@ class EngagementRangeTests(unittest.TestCase):
         figure in a second format: "from 22.0% toward 30.0% ... Measured at 22%"."""
         from core.coaching import build_pose_coaching, build_training_plan
 
-        own = dict(guard_index=0.22, balance_index=0.81, ring_center_control=0.63)
+        own = dict(guard_index=0.05, balance_index=0.81, ring_center_control=0.63)
         plan = build_training_plan(build_pose_coaching("A", own), "A", own)
         self.assertTrue(plan)
         self.assertNotIn("Measured at", plan[0]["goal"])
@@ -3345,7 +3350,10 @@ class FighterSeparabilityTests(unittest.TestCase):
             "scorecard": {"available": False, "status": "fighters_not_separable"},
             "tracking": {"fighter_pair_similarity": 0.89, "identity_confusions": 4},
         })
-        self.assertIn("89%", explained["reason"])
+        # The 89% came from the old histogram check, which could not tell
+        # black from white; it is not repeated as a measurement.
+        self.assertNotIn("89%", explained["reason"])
+        self.assertIn("earlier kit check", explained["reason"])
         self.assertIn("4 times", explained["reason"])
         self.assertTrue(explained["fix"])
 

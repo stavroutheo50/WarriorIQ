@@ -10,6 +10,16 @@
     <div class="setup-title"><span class="sport-crest" aria-hidden="true">{{identity.mark}}</span>
       <h1>Set up your {{sport_label}} fight.</h1></div>
     <p class="setup-decided">{{identity.decided_by}}</p>
+    {#- What this sport's report will count, and how far to trust it. Every
+        sport gets the same box from the same policy (core/sport_policy.py):
+        it used to appear on three sports, say "punches, kicks and knees"
+        where the live page said "leg strikes only", and warn boxers about
+        kicks. -#}
+    {% set policy = counting_policy %}
+    <div class="setup-coverage" data-covered="{{ 'no' if (policy.withheld or not policy.counted or policy.not_analysed) else 'yes' }}" role="note" aria-label="What your report counts">
+      <p><b>{{ policy.setup_line }}</b>{% if policy.estimates %} {{ policy.estimate_note }}{% endif %}</p>
+      {% if policy.not_analysed_line %}<p>{{ policy.not_analysed_line }}</p>{% endif %}
+    </div>
   </header>
 
   <div class="setup-card" id="analyze" data-upload-state="empty">
@@ -77,9 +87,14 @@
         {% else %}
         <div class="field">
           <label for="fighterPick">Which fighter?</label>
-          <select id="fighterPick" name="fighter_id">
+          {#- No fighter is preselected. The browser picked the first name, so a
+              coach's fights were filed under whoever sorted first unless they
+              noticed (QA, 2026-09). Choosing is one tap, and a wrong file
+              breaks that fighter's progress. -#}
+          <select id="fighterPick" name="fighter_id" {% if roster %}required{% endif %}>
+            {% if roster %}<option value="" selected disabled>Choose who this fight is about</option>{% endif %}
             {% for f in roster %}<option value="{{f.id}}">{{f.name}}</option>{% endfor %}
-            <option value="" {% if not roster %}selected{% endif %}>+ Add a new fighter</option>
+            <option value="new" {% if not roster %}selected{% endif %}>+ Add a new fighter</option>
           </select>
           {#- Label and input are wrapped so they hide together. A visible
               label that outlived its input would be worse than none. #}
@@ -101,9 +116,21 @@
       </fieldset>
       {% endif %}
       <p class="upload-validation" id="uploadValidation" role="status" aria-live="polite" hidden></p>
+      {#- The server's own reason for refusing an upload, next to the button
+          that retries it, plus the step that follows from it. It used to
+          appear only in a strip pinned to the bottom of the window and a
+          three-second toast, so on a phone all anyone saw was the button
+          changing to "Try upload again". -#}
+      <div class="upload-error" id="uploadError" role="alert" aria-live="assertive" hidden>
+        <b id="uploadErrorTitle">The upload did not go through</b>
+        <p id="uploadErrorDetail"></p>
+        <p class="upload-error-action" id="uploadErrorAction"></p>
+        <a class="text-link" id="uploadErrorLink" href="#" hidden></a>
+      </div>
       <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Starting upload…" data-motion-primary disabled>Choose a video to continue</button>
       <div class="upload-progress" id="uploadProgress" role="status" aria-live="polite" hidden><span><i id="uploadProgressBar"></i></span><b id="uploadProgressText">Uploading fight video…</b><small id="uploadProgressHint">Keep this tab open — you can keep reading the page. WarriorIQ moves you on by itself.</small></div>
-      {% if request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Analysis needs a free account, so your fights stay private to you. <a class="text-link" href="/signup?next=/analyze/{{sport}}">Create one in a moment.</a></p>{% endif %}
+      {% if request.state.account and request.state.account.guardian_approval_status in ['pending_guardian', 'guardian_declined'] %}<p class="notice" role="status">{% if request.state.account.guardian_approval_status == 'guardian_declined' %}Your parent or guardian did not approve this account, so it cannot upload fight videos.{% else %}Your parent or guardian has not approved your account yet, so fight videos cannot be uploaded. <a class="text-link" href="/guardian">See the approval status</a>{% endif %}</p>
+      {% elif request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Analysis needs a free account, so your fights stay private to you. <a class="text-link" href="/signup?next=/analyze/{{sport}}">Create one in a moment.</a></p>{% endif %}
     </form>
   </div>
 </section>
@@ -171,22 +198,30 @@
   // the decoder minutes later. This is a courtesy, not a guard - the server
   // checks the container's magic bytes regardless - so it stays cheap and its
   // messages say what to do next.
-  const MIN_UPLOAD_BYTES=512*1024, MIN_FIGHT_SECONDS=10;
+  // A floor for files that cannot hold any video at all - not a quality bar.
+  // It was 512 KB, which refused real low-resolution footage (a 5 s 240p clip
+  // is 180 KB), and every real video must be accepted. A short clip is
+  // likewise analysed, with a word about what so little fight can show.
+  const MIN_UPLOAD_BYTES=16*1024, SHORT_FIGHT_SECONDS=10;
+  const ACCEPTED_EXTENSIONS={{ fight_video_extensions|tojson }};
   // Built from the same list the server refuses on, via core.upload_security.
   const EMPTY_HINT={{fight_video_label|tojson}}+' — up to '+fmtMB(UPLOAD_LIMIT);
   // The worker's own probe thresholds, from core/preflight_client.py.
   const PREFLIGHT_LIMITS={{preflight_limits|safe}};
   const fileProblem=(f)=>{
-    if(f.type&&!f.type.startsWith('video/'))return 'That file is not a video. Pick the clip from your camera roll.';
-    if(f.size<MIN_UPLOAD_BYTES)return `That file is ${fmtMB(f.size)} — too small to be a fight. Pick the full clip.`;
+    // The extension decides as well as the type: a browser labels an Ogg video
+    // "audio/ogg" or "application/ogg", and .ogv was refused as "not a video".
+    const ext=(f.name.match(/\.[^.]+$/)||[''])[0].toLowerCase();
+    if(f.type&&!f.type.startsWith('video/')&&!ACCEPTED_EXTENSIONS.includes(ext))return 'That file is not a video. Pick the clip from your camera roll.';
+    if(f.size<MIN_UPLOAD_BYTES)return `That file is ${fmtMB(f.size)} — too small to hold a video. Pick the full clip.`;
     if(overLimit(f.size))return `That file is ${fmtMB(f.size)}. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps instead of 4K or 60 fps, or trim to a single round.`;
     return null};
   const rejectFile=(message)=>{hidePreflight();videoInput.value='';fileButtonText.textContent='Choose fight video';fileStatus.textContent=message;fileStatus.dataset.tone='bad';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');uploadCard.dataset.uploadState='empty';uploadSubmit.disabled=true;uploadSubmit.textContent='Choose a video to continue';window.wiqToast(message,'error')};
   // Duration needs the browser to read the header, which it will only do
-  // asynchronously - so the file is accepted first and withdrawn if it turns
-  // out to be too short to hold a round.
-  const checkDuration=(f)=>{const probe=document.createElement('video');probe.preload='metadata';const url=URL.createObjectURL(f);probe.onloadedmetadata=()=>{URL.revokeObjectURL(url);const seconds=probe.duration;if(!isFinite(seconds))return;if(seconds<MIN_FIGHT_SECONDS){rejectFile(`That clip is ${Math.round(seconds)} seconds. WarriorIQ needs at least ${MIN_FIGHT_SECONDS} seconds of fight to read anything.`);return}
+  // asynchronously, so it can only add to what the status line says.
+  const checkDuration=(f)=>{const probe=document.createElement('video');probe.preload='metadata';const url=URL.createObjectURL(f);probe.onloadedmetadata=()=>{URL.revokeObjectURL(url);const seconds=probe.duration;if(!isFinite(seconds))return;
       const mins=Math.floor(seconds/60),secs=String(Math.round(seconds%60)).padStart(2,'0');
+      if(seconds<SHORT_FIGHT_SECONDS){fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload. A clip this short gives only a few numbers; the report says how much fight it found.`;fileStatus.dataset.tone='warn';return}
       fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload`};
     probe.onerror=()=>{URL.revokeObjectURL(url)};probe.src=url};
 // What is still outstanding, named, above the button that refuses to work.
@@ -207,6 +242,8 @@
   const outstanding=()=>{
     const missing=[];
     if(!videoInput.files[0])missing.push({text:'choose a fight video',field:videoInput});
+    const fighterChoice=document.getElementById('fighterPick');
+    if(fighterChoice&&!fighterChoice.value)missing.push({text:'choose which fighter this fight is about',field:fighterChoice});
     if(rightsBox&&!rightsBox.checked)missing.push({text:'confirm the footage is yours',field:rightsBox});
     if(peopleBox&&!peopleBox.checked)missing.push({text:'confirm the people in it agreed',field:peopleBox});
     if(minorRadios.length&&!minorRadios.some(r=>r.checked))
@@ -229,7 +266,7 @@
       if(holder)holder.classList.add('needs-attention')});
   };
   form.addEventListener('change',event=>{
-    if(['rights_confirmed','people_permissions_confirmed','minor_permission_status','openai_identity_recovery','external_ai_guardian_permission'].includes(event.target.name))syncSubmit()});
+    if(['fighter_id','rights_confirmed','people_permissions_confirmed','minor_permission_status','openai_identity_recovery','external_ai_guardian_permission'].includes(event.target.name))syncSubmit()});
   const setReady=()=>{const file=videoInput.files[0];
     if(file){const problem=fileProblem(file);if(problem){rejectFile(problem);return}}
     const ready=Boolean(file);
@@ -238,7 +275,7 @@
     if(ready)fileStatus.dataset.tone=sizeAdvice(file.size).tone;else delete fileStatus.dataset.tone;
     fileButton.classList.toggle('uploaded',ready);fileStatus.classList.toggle('uploaded',ready);
     uploadCard.dataset.uploadState=ready?'ready':'empty';
-    uploadSubmit.textContent=ready?'Upload video & choose frame →':'Choose a video to continue';
+    uploadSubmit.textContent=ready?'Upload video & select fighters →':'Choose a video to continue';
     if(!ready)hidePreflight();
     syncSubmit();
     if(ready){checkDuration(file);runPreflight(file);runSportCheck(file);window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video selected. Press upload to send it.','success')}};
@@ -324,7 +361,7 @@
       else{
         // Say what stopped the measurement rather than reporting a number
         // that was not measured.
-        const why={'camera moving':'The camera moves too much between frames to measure how big the fighters are. Resting the phone on something would fix both that and the measurement.',
+        const why={'camera moving':'The camera moves too much between frames to measure how big the fighters are, and a moving camera also makes the fighters harder to follow. Resting the phone on something steady helps the analysis and lets this check measure them.',
                    'nothing moving':'Almost nothing moves in the frames sampled, so the fighters could not be sized. If this clip is mostly a still mat or a break, trim it to the round.',
                    'undecodable':'','timeout':'','no dimensions':'','no frames decoded':''}[m.reason];
         if(why){tone=tone==='bad'?'bad':'warn';points.push(why)}}
@@ -345,17 +382,66 @@
         // "Anyway" only makes sense after a problem.
         +(tone==='ok'?'.':'. You can upload it anyway.');
       showPreflight(tone,title,points,measured)}).catch(()=>{if(token===preflightToken)hidePreflight()})};
-  const restore=(message)=>{form.hidden=false;showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.disabled=false;uploadSubmit.removeAttribute('aria-busy');uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected';window.wiqToast(message,'error')};
+  // The server explains its own refusals in payload.detail. Anything that is
+  // not our JSON came from in front of the application - the host rejecting
+  // the request body, a gateway timing out - and the status is then the only
+  // evidence there is, so it is turned into something the uploader can act on
+  // and quote. Shared by both upload paths (it used to live inside the legacy
+  // one, so the chunked path's fallback to it was a ReferenceError).
+  const uploadFailureFor=status=>{
+    if(status===413)return 'The server refused this video because the file is too large. A shorter clip, or the same fight at a lower resolution, will go through.';
+    if(status===429)return 'Too many uploads in a short time. Wait a few minutes and try again.';
+    if(status===502||status===503||status===504)return 'The server did not answer in time. Wait a moment and try again.';
+    if(!status)return 'The upload stopped before it reached WarriorIQ. Check your signal and try again.';
+    return `WarriorIQ could not prepare this video (error ${status}). Please try again, and tell support that number if it keeps happening.`;
+  };
+  // The step that follows from each refusal. The server's sentence is shown
+  // exactly as sent; this only adds what to do about it.
+  const nextStepFor=(status,detail)=>{
+    const text=String(detail||'').toLowerCase();
+    if(status===429&&text.includes('pending'))return {action:'Finish choosing the fighters for that video, or cancel it, then upload this one.',link:{href:'/history#pending',label:'Open your pending fights'}};
+    if(status===429&&text.includes('allowance'))return {action:'Your allowance resets on its own.',link:{href:'/pricing',label:'Compare plans for more analyses'}};
+    if(status===429)return {action:'Wait a moment, then press the button again. Your video stays selected.'};
+    if(status===403)return {action:'This page was open too long. Reload it, choose the video again and upload.',link:{href:location.pathname,label:'Reload this page'}};
+    if(status===413)return {action:'Trim the clip, or export it at 1080p and 30 fps, then choose it again.'};
+    if(status===400&&/not a video|format|decode|read this file|playing time/.test(text))return {action:'Choose a different file: the original MP4 or MOV from your phone or camera works best.',reselect:true};
+    if(status===400&&text.includes('confirm'))return {action:'Answer the questions above, then press the button again.'};
+    if(status===400&&text.includes('under 18'))return {action:'Answer the under-18 question above, then press the button again.'};
+    if(status===402)return {action:'',link:{href:'/pricing',label:'See plans with more fighter seats'}};
+    if(status===422)return {action:'Press the button to try again. If it fails twice, export the video as MP4 from your phone or editor and upload that copy.'};
+    if(status===503||status===507)return {action:'This is on WarriorIQ’s side. Try again in a few minutes; your video stays selected.'};
+    if(!status)return {action:'Check your connection, then press the button; the upload carries on from where it stopped.'};
+    return {action:`Press the button to try again. If it keeps happening, tell support the error number ${status}.`};
+  };
+  const uploadError=document.getElementById('uploadError'),uploadErrorDetail=document.getElementById('uploadErrorDetail'),uploadErrorAction=document.getElementById('uploadErrorAction'),uploadErrorLink=document.getElementById('uploadErrorLink');
+  const hideUploadError=()=>{if(uploadError)uploadError.hidden=true};
+  const showUploadError=(status,detail)=>{
+    if(!uploadError)return;
+    const step=nextStepFor(status,detail);
+    uploadErrorDetail.textContent=detail;
+    uploadErrorAction.textContent=step.action||'';uploadErrorAction.hidden=!step.action;
+    if(step.link){uploadErrorLink.href=step.link.href;uploadErrorLink.textContent=step.link.label;uploadErrorLink.hidden=false}
+    else uploadErrorLink.hidden=true;
+    uploadError.dataset.status=String(status||0);
+    uploadError.hidden=false;
+    uploadError.scrollIntoView({block:'center',behavior:'smooth'});
+    return step;
+  };
+  const restore=(message,status)=>{form.hidden=false;showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.removeAttribute('aria-busy');
+    const step=showUploadError(status,message)||{};
+    if(step.reselect){videoInput.value='';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');fileButtonText.textContent='Choose fight video';fileStatus.textContent='Choose a different video';fileStatus.dataset.tone='bad';uploadCard.dataset.uploadState='empty';uploadSubmit.textContent='Choose a video to continue';syncSubmit()}
+    else{uploadSubmit.disabled=false;uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected'}
+    window.wiqToast(message,'error')};
   const fighterPick=document.getElementById('fighterPick'),fighterName=document.getElementById('fighterName');
   if(fighterPick&&fighterName){
     const newFighterField=document.getElementById('newFighterField');
     // The wrapper hides, so the label goes with it. `required` still
     // toggles on the input itself: a required control inside a hidden
     // wrapper blocks submit with an error pointing at nothing.
-    const syncFighter=()=>{const adding=fighterPick.value==='';if(newFighterField)newFighterField.hidden=!adding;fighterName.required=adding;if(!adding)fighterName.value=''};
+    const syncFighter=()=>{const adding=fighterPick.value==='new';if(newFighterField)newFighterField.hidden=!adding;fighterName.required=adding;if(!adding)fighterName.value=''};
     fighterPick.addEventListener('change',syncFighter);syncFighter();
   }
-  videoInput.addEventListener('change',setReady);
+  videoInput.addEventListener('change',()=>{hideUploadError();setReady()});
   // The fighters' frame is found on the server (core/person_detect.py), so
   // the upload only has to finish: WarriorIQ moves on by itself.
   let ready=null,advancing=false;
@@ -372,7 +458,7 @@
     // request body partway and answers 500, which reaches the page as a
     // failure with nothing to act on and no file kept.
     if(overLimit(file.size)){
-      restore(`This video is ${fmtMB(file.size)} and the upload limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps rather than 4K or 60 fps, or upload one round at a time — either fits, and neither costs the analysis anything.`);
+      restore(`This video is ${fmtMB(file.size)} and the upload limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps rather than 4K or 60 fps, or upload one round at a time — either fits, and neither costs the analysis anything.`,413);
       return;
     }
     // The file goes up exactly as filmed, and it has to.
@@ -446,22 +532,9 @@
       // below navigates. Leaving the flag set meant the beforeunload guard
       // blocked WarriorIQ's own redirect with "Leave site?" the moment the
       // upload finished - the bar stopping at 99% and the fight never starting.
-      // The server explains its own refusals in payload.detail. Anything that
-      // is not our JSON came from in front of the application - the host
-      // rejecting the request body, a gateway timing out - and reporting all of
-      // those as "could not prepare this video" sent people back to re-export a
-      // file that was never the problem. The status is the only evidence there
-      // is, so it is turned into something the uploader can act on and quote.
-      const uploadFailureFor=status=>{
-        if(status===413)return 'The server refused this video because the file is too large. A shorter clip, or the same fight at a lower resolution, will go through.';
-        if(status===429)return 'Too many uploads in a short time. Wait a few minutes and try again.';
-        if(status===502||status===503||status===504)return 'The server did not answer in time. Wait a moment and try again.';
-        if(!status)return 'The upload stopped before it reached WarriorIQ. Check your signal and try again.';
-        return `WarriorIQ could not prepare this video (error ${status}). Please try again, and tell support that number if it keeps happening.`;
-      };
-      request.addEventListener('load',()=>{releasePage();let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';ready={jobId:payload.job_id,nextUrl:payload.next_url};advance();return}restore(payload.detail||uploadFailureFor(request.status))});
-      request.addEventListener('error',()=>restore('The upload connection stopped. Check your signal and try again.'));
-      request.addEventListener('abort',()=>restore('The upload was cancelled. Your video is still selected.'));
+      request.addEventListener('load',()=>{releasePage();let payload={};try{payload=JSON.parse(request.responseText||'{}')}catch{}if(request.status===401){progressText.textContent='Sign in to analyse this fight…';location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}if(request.status>=200&&request.status<300&&payload.next_url){progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';uploadSubmit.textContent='Video ready';ready={jobId:payload.job_id,nextUrl:payload.next_url};advance();return}restore(payload.detail||uploadFailureFor(request.status),request.status)});
+      request.addEventListener('error',()=>restore('The upload connection stopped. Check your signal and try again.',0));
+      request.addEventListener('abort',()=>restore('The upload was cancelled. Your video is still selected.',0));
       uploadInFlight=true;
       request.send(body);
     };
@@ -504,21 +577,24 @@
     if (opened.status === 404) throw FALLBACK;
     const session = await opened.json().catch(() => ({}));
     if (!opened.ok) {
-      const error = new Error(session.detail || 'Upload could not start.');
+      const error = new Error(session.detail || uploadFailureFor(opened.status));
       error.status = opened.status;
+      error.detail = session.detail || '';
       throw error;
     }
 
     const job = session.job_id;
+    // Anything that stops the upload from here on hands the server's
+    // reservation straight back. Left behind, an abandoned session used to
+    // count as a pending fight until it expired half an hour later.
+    const giveBack = () => fetch(`/api/upload/${job}/abort`, { method: 'POST', headers: wiqCsrfHeaders() })
+      .catch(() => {});
+    try {
     const size = Math.max(65536, Number(session.chunk_size) || 1048576);
     let offset = Number(session.offset) || 0;
     let attempts = 0;
     while (offset < file.size) {
       if (shouldStop && shouldStop()) {
-        // Hand the capacity straight back; max_pending_uploads is 2, so a
-        // lease left behind locks the account out until it expires.
-        fetch(`/api/upload/${job}/abort`, { method: 'POST', headers: wiqCsrfHeaders() })
-          .catch(() => {});
         const cancelled = new Error('The upload was cancelled. Your video is still selected.');
         cancelled.cancelled = true;
         throw cancelled;
@@ -535,7 +611,11 @@
         // A blip, not a refusal. Three tries with a widening gap, then give
         // up and say so - the bytes already accepted stay on the server, so
         // a later attempt resumes rather than restarting.
-        if (++attempts > 3) throw new Error('The upload connection stopped. Check your signal and try again.');
+        if (++attempts > 3) {
+          const stopped = new Error('The upload connection stopped. Check your signal and try again.');
+          stopped.status = 0;
+          throw stopped;
+        }
         await new Promise((r) => setTimeout(r, 400 * attempts));
         continue;
       }
@@ -547,8 +627,9 @@
       }
       if (!response.ok) {
         const refused = await response.json().catch(() => ({}));
-        const error = new Error(refused.detail || 'The upload was refused.');
+        const error = new Error(refused.detail || uploadFailureFor(response.status));
         error.status = response.status;
+        error.detail = refused.detail || '';
         throw error;
       }
       const progress = await response.json();
@@ -562,11 +643,16 @@
     });
     const payload = await finished.json().catch(() => ({}));
     if (!finished.ok || !payload.next_url) {
-      const error = new Error(payload.detail || 'WarriorIQ could not prepare this video.');
+      const error = new Error(payload.detail || uploadFailureFor(finished.status));
       error.status = finished.status;
+      error.detail = payload.detail || '';
       throw error;
     }
     return payload;
+    } catch (error) {
+      giveBack();
+      throw error;
+    }
   };
 
     // Progress is reported the same way either path sends, so the bar,
@@ -588,6 +674,7 @@
       uploadSubmit.textContent=`Uploading ${percent}%`;
     };
 
+    hideUploadError();
     showProgress('active');progressBar.style.width='2%';progressText.textContent='Uploading fight video…';
     uploadSubmit.disabled=true;uploadSubmit.setAttribute('aria-busy','true');uploadSubmit.textContent='Uploading 0%';
     uploadInFlight=true;
@@ -602,7 +689,11 @@
       releasePage();
       if(error&&error.status===401){progressText.textContent='Sign in to analyse this fight…';
         location.assign(`/signup?next=${encodeURIComponent('/analyze/'+sport)}`);return}
-      restore((error&&error.message)||uploadFailureFor(error&&error.status));
+      // A fetch that never reached the server throws a TypeError whose
+      // message is the browser's ("Failed to fetch"), not ours.
+      const status=error&&typeof error.status==='number'?error.status:0;
+      const message=(error&&(error.detail||(typeof error.status==='number'&&error.message)))||uploadFailureFor(status);
+      restore(message,status);
     });
   });
 })();

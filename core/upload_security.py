@@ -148,9 +148,20 @@ class UploadBodyLimitMiddleware:
                     status_code=408)(scope, receive, send)
 
 
+# Job states that are a real fight still waiting on its owner or on the
+# analysis machine. An upload that was begun and never finished is not one of
+# them: it is not a job at all, and counting it is what locked people out.
+PENDING_JOB_STATUSES = frozenset({"selecting", "queued", "running", "preparing"})
+
+
 def reserve_upload_storage(account_id: int, job_id: str, byte_limit: int) -> None:
     """Serialize admission across processes before receiving or copying a video."""
     now = time.time()
+    # Abandoned chunked sessions first, so what they hold is free before the
+    # account's storage is added up below.
+    from core.chunked_upload import release_idle_sessions
+
+    release_idle_sessions(account_id, now=now)
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
         for row in con.execute("SELECT job_id FROM upload_leases WHERE expires_epoch < ?", (now,)):
@@ -168,7 +179,7 @@ def reserve_upload_storage(account_id: int, job_id: str, byte_limit: int) -> Non
                 job = json.loads(session.read_text(encoding="utf-8"))
                 if job.get("account_id") != account_id:
                     continue
-                if job.get("status") in {"selecting", "queued", "running", "preparing"}:
+                if job.get("status") in PENDING_JOB_STATUSES:
                     pending.add(session.parent.name)
                 if job.get("video_path"):
                     paths.add(Path(job["video_path"]).resolve())
@@ -179,9 +190,16 @@ def reserve_upload_storage(account_id: int, job_id: str, byte_limit: int) -> Non
             (account_id,),
         ).fetchall()
         paths.update(Path(row["video_path"]).resolve() for row in rows if row["video_path"])
-        pending.update(row["job_id"] for row in own_leases)
+        # Leases are deliberately not counted here. A lease is an upload in
+        # flight, and one whose owner gave up is reclaimed above; counting them
+        # made a closed tab indistinguishable from a fight waiting for its
+        # fighters. Storage below still accounts for every lease.
         if len(pending) >= SETTINGS.max_pending_uploads:
-            raise UploadCapacityError(429, "Finish your pending fight selections or analyses before uploading another video.")
+            raise UploadCapacityError(
+                429,
+                f"You already have {len(pending)} fight{'s' if len(pending) != 1 else ''} waiting - "
+                "uploaded and waiting for you to pick the fighters, or being analysed. "
+                "Finish or cancel one in your fight library (Pending), then upload this video.")
         used = 0
         for path in paths:
             if path.parent != UPLOADS.resolve():
@@ -264,6 +282,11 @@ FIGHT_VIDEO_FORMATS: tuple[tuple[str, str], ...] = (
     (".avi", "video/x-msvideo"),
     (".m4v", "video/x-m4v"),
     (".webm", "video/webm"),
+    # Ogg Theora, as Wikimedia Commons and some screen recorders write it.
+    # Decoded by the same bundled FFmpeg as everything above; anything OpenCV
+    # cannot read is converted on the analysis machine (core.analyzer).
+    (".ogv", "video/ogg"),
+    (".ogg", "video/ogg"),
 )
 
 # What the upload route refuses on.
@@ -287,10 +310,14 @@ FIGHT_VIDEO_LABEL: str = ", ".join(_NAMES[:-1]) + f" or {_NAMES[-1]}"
 #   ISO base media (MP4, MOV, M4V): a box-size word, then the type "ftyp".
 #   EBML (MKV, WEBM):               the EBML magic at byte 0.
 #   RIFF (AVI):                     "RIFF", a size word, then "AVI ".
+#   Ogg (OGV, OGG):                 "OggS" at byte 0. An audio-only .ogg has
+#                                   the same magic; it fails at the decoder,
+#                                   which reports no video track.
 _VIDEO_SIGNATURES: tuple[tuple[tuple[int, bytes], ...], ...] = (
     ((4, b"ftyp"),),
     ((0, b"\x1a\x45\xdf\xa3"),),
     ((0, b"RIFF"), (8, b"AVI ")),
+    ((0, b"OggS"),),
 )
 
 # Enough to reach the furthest signature offset with room to spare.

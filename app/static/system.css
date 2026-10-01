@@ -18,7 +18,7 @@
   /* --- Type scale ---------------------------------------------------------
      One ratio, named steps, no in-between guesses. `micro` is the floor: it
      exists for uppercase eyebrow labels with tracking, never for sentences. */
-  --wiq-text-micro: 11px;   /* uppercase labels only, always with tracking */
+  --wiq-text-micro: 12px;   /* uppercase labels only, always with tracking; 12px is the floor for any text */
   --wiq-text-xs:    12px;   /* dense metadata, table headers */
   --wiq-text-sm:    13px;   /* secondary prose, captions */
   --wiq-text-base:  15px;   /* body */

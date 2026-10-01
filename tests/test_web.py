@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import contextlib
+import html
 import json
 import time
 import os
@@ -384,15 +385,25 @@ class PublicPageTests(unittest.TestCase):
         else:
             self.assertNotIn("Full scoring coverage", chooser)
 
-    def test_setup_page_has_no_coverage_paragraphs(self):
-        """Step 1 is upload only: no "Your report counts ..." or "Not read at
-        all ..." paragraphs above the upload card."""
+    def test_every_setup_page_says_what_its_report_counts(self):
+        """QA 2026-09: three sports showed a "what your report counts" box and
+        two did not, and the boxing one warned about kicks. Every sport now
+        shows the same box, from core/sport_policy.py."""
+        from core.sport_policy import counting_policy
+
         with self.signed_in():
-            for sport in ("boxing", "kickboxing", "mma"):
+            for sport in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
                 page = self.client.get(f"/analyze/{sport}").text
-                self.assertNotIn("Your report counts", page)
-                self.assertNotIn("Not read at all", page)
-                self.assertNotIn("setup-coverage", page)
+                policy = counting_policy(sport)
+                self.assertIn("setup-coverage", page, sport)
+                self.assertIn(html.escape(policy.setup_line), page, sport)
+                if policy.estimates:
+                    self.assertIn(html.escape(policy.estimate_note), page, sport)
+            boxing = self.client.get("/analyze/boxing").text.lower()
+            box = boxing[boxing.index("setup-coverage"):boxing.index("setup-card")]
+            self.assertNotIn("kick", box)
+            mma = self.client.get("/analyze/mma").text
+            self.assertIn("Not analysed: takedowns, ground work, submissions and elbows.", mma)
 
     def test_choosing_a_sport_never_waits_on_an_animation(self):
         """The five cards are the page, so they may not fade in on scroll.
@@ -532,12 +543,13 @@ class PublicPageTests(unittest.TestCase):
         exact sizes, so the scale can be tuned without the test fighting it.
         """
         system = (Path(__file__).resolve().parents[1] / "app" / "static" / "system.css").read_text(encoding="utf-8")
-        self.assertIn("--wiq-text-micro: 11px", system)
-        # No rule in the system layer may set type below the 11px floor.
+        # The floor was raised to 12px after QA (2026-09) found 11px labels.
+        self.assertIn("--wiq-text-micro: 12px", system)
+        # No rule in the system layer may set type below the 12px floor.
         import re
 
         for size in re.findall(r"font-size:\s*([0-9.]+)px", system):
-            self.assertGreaterEqual(float(size), 9.5, f"{size}px is below the floor")
+            self.assertGreaterEqual(float(size), 12, f"{size}px is below the floor")
 
     def test_an_unknown_sport_is_not_invented(self):
         self.assertEqual(self.client.get("/analyze/sumo").status_code, 404)
@@ -855,6 +867,13 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('"@type":"WebSite"', home.text)
         self.assertIn("https://warrioriq.eu/", sitemap.text)
         self.assertIn("Sitemap: https://warrioriq.eu/sitemap.xml", robots.text)
+        # Private areas stay out of search without robots.txt naming the
+        # admin console, validation tooling or the payment webhook.
+        for hidden in ("/admin", "/validation", "/stripe/"):
+            self.assertNotIn(f"Disallow: {hidden}", robots.text)
+        self.assertIn("Disallow: /result/", robots.text)
+        self.assertEqual(self.client.get("/admin", follow_redirects=False).headers.get("x-robots-tag"),
+                         "noindex, nofollow")
         self.assertIn('name="robots" content="noindex,nofollow"', login.text)
         self.assertNotIn('<link rel="canonical"', login.text)
 
@@ -904,7 +923,9 @@ class PublicPageTests(unittest.TestCase):
         # The age and guardian statements belong to the home page's explainer;
         # the form carries the consent controls themselves.
         explainer = self.client.get("/").text.lower()
-        self.assertIn("18 or older", explainer)
+        # Open to every age since 2026-10; under 18 a guardian approves first.
+        self.assertIn("open to every age", explainer)
+        self.assertIn("under 18", explainer)
         self.assertIn("parent or guardian", explainer)
         self.assertIn("parent or guardian", home.lower())
         self.assertIn("under 18", home.lower())
@@ -919,8 +940,9 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("Acceptable Use Policy", signup)
         self.assertIn("Terms of Service", signup)
         self.assertIn("Privacy Policy", signup)
-        self.assertIn('name="age_confirmed"', signup)
-        self.assertIn("at least 18", signup.lower())
+        # Every age may sign up; the form asks which side of 18 (test_all_ages.py).
+        self.assertIn('name="age_group" value="adult"', signup)
+        self.assertIn("18 or older", signup.lower())
         self.assertIn('name="marketing_consent"', signup)
 
     @staticmethod
@@ -2770,7 +2792,8 @@ class FightVideoFormatTests(unittest.TestCase):
     def test_the_displayed_copy_is_built_from_the_same_list(self):
         from core.upload_security import FIGHT_VIDEO_FORMATS, FIGHT_VIDEO_LABEL
 
-        self.assertEqual(FIGHT_VIDEO_LABEL, "MP4, MOV, MKV, AVI, M4V or WEBM")
+        # OGV/OGG added after QA found .ogv refused as "not a video".
+        self.assertEqual(FIGHT_VIDEO_LABEL, "MP4, MOV, MKV, AVI, M4V, WEBM, OGV or OGG")
         self.assertIn(FIGHT_VIDEO_LABEL, self.client.get("/analyze/kickboxing").text)
         # Naming a format in the sentence that the server does not take is the
         # drift this whole arrangement exists to prevent.
@@ -2789,6 +2812,7 @@ class FightVideoFormatTests(unittest.TestCase):
             ".m4v": b"\x00\x00\x00\x20ftypM4V ", ".mkv": b"\x1a\x45\xdf\xa3\x01\x00\x00\x00",
             ".webm": b"\x1a\x45\xdf\xa3\x01\x00\x00\x00",
             ".avi": b"RIFF\x00\x00\x00\x00AVI LIST",
+            ".ogv": b"OggS\x00\x02\x00\x00", ".ogg": b"OggS\x00\x02\x00\x00",
         }
         self.assertEqual(set(headers), set(FIGHT_VIDEO_EXTENSIONS))
         for suffix, header in headers.items():

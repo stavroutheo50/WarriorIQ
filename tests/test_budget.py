@@ -93,6 +93,24 @@ class BudgetPlanTests(unittest.TestCase):
         self.assertEqual(q.stride, before)
         self.assertFalse(q.planned)
 
+    def test_time_already_spent_before_the_frame_pass_counts_against_the_budget(self):
+        """Model loading and the SAM2 sweep are part of the wait.
+
+        The plan used to give the frame pass the whole video length, so a run
+        that spent 30 s loading and sweeping still said "on_track" and then
+        finished 30 s over - QA saw 2:54 for a 2:40 fight.
+        """
+        without = self._controller()
+        without.plan_for_budget(analyzed_frames=40, processed_seconds=10.0,
+                                elapsed_seconds=2.0, segment_duration=109.0)
+        self.assertEqual(without.budget_reason, "on_track")
+        with_overhead = self._controller()
+        with_overhead.plan_for_budget(analyzed_frames=40, processed_seconds=10.0,
+                                      elapsed_seconds=2.0, segment_duration=109.0,
+                                      overhead_seconds=80.0)
+        self.assertGreater(with_overhead.stride, without.stride)
+        self.assertEqual(with_overhead.mode, "deadline")
+
 
 if __name__ == "__main__":
     unittest.main()

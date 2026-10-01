@@ -1027,19 +1027,32 @@ def record_account_signup_acceptance(
     terms_version: str,
     privacy_version: str,
     marketing_consent: bool,
+    guardian_approval_status: str = "not_applicable",
 ) -> dict:
-    """Persist the account contract and optional marketing choice separately."""
+    """Persist the account contract and optional marketing choice separately.
+
+    ``guardian_approval_status`` is "not_applicable" for an adult and
+    "pending_guardian" for someone under the minimum age, until a parent or
+    guardian approves (set_guardian_approval_status).
+    """
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
         con.execute(
             """UPDATE accounts SET terms_version=?,privacy_version=?,policies_accepted_at=?,
-               age_confirmed_at=?,guardian_approval_status='not_applicable',
+               age_confirmed_at=?,guardian_approval_status=?,
                marketing_consent=?,marketing_consent_at=? WHERE id=?""",
             (
-                terms_version, privacy_version, now, now, int(marketing_consent),
-                now if marketing_consent else None, int(account_id),
+                terms_version, privacy_version, now, now, guardian_approval_status,
+                int(marketing_consent), now if marketing_consent else None, int(account_id),
             ),
         )
+    return get_account(account_id) or {}
+
+
+def set_guardian_approval_status(account_id: int, status: str) -> dict:
+    """Record a parent or guardian's answer for an account under the minimum age."""
+    with connection() as con:
+        con.execute("UPDATE accounts SET guardian_approval_status=? WHERE id=?", (status, int(account_id)))
     return get_account(account_id) or {}
 
 
@@ -1216,7 +1229,8 @@ def account_for_session(token_hash: str) -> dict | None:
                accounts.terms_version,accounts.privacy_version,accounts.policies_accepted_at,
                accounts.stripe_customer_id,accounts.stripe_subscription_id,accounts.subscription_status,
                accounts.subscription_period_end,accounts.subscription_cancelled_at,
-               accounts.email_verified_at,accounts.password_login_enabled
+               accounts.email_verified_at,accounts.password_login_enabled,
+               accounts.guardian_approval_status
                FROM sessions JOIN accounts ON accounts.id=sessions.account_id
                WHERE sessions.token_hash=? AND sessions.expires_at>? AND accounts.account_status='active'""",
             (token_hash, now),

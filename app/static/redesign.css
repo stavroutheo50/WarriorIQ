@@ -543,7 +543,7 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
   border-radius: 3px;
   background: var(--wiq-panel);
   color: var(--wiq-text);
-  font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 /* The candidate under the cursor is marked on the accent, not by a colour
@@ -679,8 +679,8 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
     max-height: 42vh;
     overflow-y: auto;
   }
-  .cookie-notice p { font-size: 11px; line-height: 1.4; }
-  .cookie-notice .btn { padding: 9px 4px; font-size: 11px; }
+  .cookie-notice p { font-size: 12px; line-height: 1.4; }
+  .cookie-notice .btn { padding: 9px 4px; font-size: 12px; }
   /* Reserve room underneath the page for the fixed notice. Without this the
      upload button - the one control the page exists to offer - sat behind the
      banner on a 375px screen and could not be reached at all.
@@ -826,7 +826,7 @@ fieldset.needs-attention {
 }
 
 .numbers-unavailable > div { flex: 0 0 auto; }
-.numbers-unavailable > div small { display: block; color: #98896d; font-size: 11px; }
+.numbers-unavailable > div small { display: block; color: #98896d; font-size: 12px; }
 .numbers-unavailable > p { flex: 1 1 280px; }
 
 @media (max-width: 650px) {

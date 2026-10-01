@@ -26,6 +26,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 
 import cv2
+import numpy as np
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
                      Request, UploadFile)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
@@ -42,13 +43,14 @@ from app.state import (
     AnalysisRunLost, AnalysisStateNotPersisted, claim_next_job, create_job, delete_job,
     analysis_run_directory, completed_artifact_directory, persist_completed_job,
     finalize_job_from_worker, get_job, list_jobs, prepare_job_run, record_worker_heartbeat,
-    start_job_run, update_job, update_job_for_worker, wake_status, worker_status,
+    start_job_run, state_generation, update_job, update_job_for_worker, wake_status, worker_status,
 )
 from core.auth import (
-    authenticate, end_session, hash_password, issue_session, register, resolve_session,
+    authenticate, end_session, hash_password, issue_session, normalize_email, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
 )
 from core.identity import fighter_pair_similarity
+from core.kit import alike_reason as kit_alike_reason, kit_similarity
 from core.csrf import (
     issue_token as issue_csrf_token, tokens_match as csrf_tokens_match,
     usable_token as usable_csrf_token,
@@ -77,6 +79,7 @@ from core.db import (
     revoke_report_shares, save_annotation,
     get_story_share, list_profile_story_shares, list_story_shares, revoke_story_shares, story_share,
     save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
+    set_guardian_approval_status,
     set_account_status, set_annotation_sequence,
     page_view_summary, plan_interest_counts, plans_wanted_by, policies_outdated,
     record_page_view, record_plan_interest, record_policy_reacceptance,
@@ -94,7 +97,7 @@ from core.metric_catalog import BY_KEY as METRIC_CATALOG, readings as metric_rea
 from core.chunked_upload import (
     ChunkedUploadError, StoredUpload, append as append_chunk, begin as begin_chunked,
     discard as discard_chunked, extend_lease, finalise as finalise_chunked,
-    load as load_chunked,
+    load as load_chunked, release_idle_sessions as release_idle_chunked_sessions,
 )
 from core.css_minify import minify as minify_css
 from core.preflight_client import client_thresholds
@@ -117,7 +120,7 @@ from core.camp import (
 from core.training_check import check_training_video
 from core.share_image import preview_png as story_preview_png
 from core.report import (
-    build_preliminary_scorecard, kick_minimum_check, observed_summary,
+    build_preliminary_scorecard, identity_failure, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
     refresh_identity_integrity, share_card, unattributed_kick_total,
 )
@@ -125,20 +128,25 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment
+from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
+from core.sport_policy import counting_policy
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
 from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import (
-    detect_shot_changes, get_video_info, normalize_container, playback_file,
-    probe_upload,
-    read_frame, remove_derivative,
+    detect_shot_changes, ffmpeg_frame, get_video_info, normalize_container, opencv_decodes,
+    playback_file, probe_upload, read_frame, remove_derivative, selection_frame,
 )
 
-app = FastAPI(title="WarriorIQ")
+# No public API documentation. /openapi.json, /docs and /redoc were reachable
+# signed out and listed every route - /admin/*, /api/worker/claim, the dataset
+# and worker-job endpoints - which is a map for anyone probing the site and
+# documents nothing a visitor can use. An administrator can still read the
+# schema at /admin/openapi.json (see admin_openapi below).
+app = FastAPI(title="WarriorIQ", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 app.add_middleware(UploadBodyLimitMiddleware)
 _oauth_cookie_secure = SETTINGS.public_base_url.lower().startswith("https://")
@@ -273,6 +281,7 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 # core.upload_security, so neither can drift from what the server accepts.
 templates.env.globals["fight_video_accept"] = FIGHT_VIDEO_ACCEPT
 templates.env.globals["fight_video_label"] = FIGHT_VIDEO_LABEL
+templates.env.globals["fight_video_extensions"] = sorted(FIGHT_VIDEO_EXTENSIONS)
 # The pre-upload check compares footage against the same numbers the worker's
 # probe uses, rather than a second set copied into JavaScript.
 templates.env.globals["preflight_limits"] = json.dumps(client_thresholds())
@@ -413,12 +422,17 @@ PUBLIC_INDEX_ROUTES = (
 # library and vanished on the three tabs beside them.
 SPORT_IRRELEVANT_PREFIXES = ("/profile", "/settings", "/legal", "/privacy", "/terms")
 PRIVATE_ROUTE_PREFIXES = (
-    "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
+    "/api/", "/frame/", "/select/", "/pending/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/live-frame/", "/dashboard", "/history",
     "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
-    "/auth/",
+    "/auth/", "/guardian",
 )
+# Private areas robots.txt does not name. Listing them there advertised the
+# admin console, validation tooling and payment webhook to anyone who reads the
+# file (QA, 2026-09); they are kept out of search by the X-Robots-Tag header
+# every private response carries instead (_apply_response_headers).
+UNADVERTISED_PRIVATE_PREFIXES = ("/admin", "/validation", "/stripe/")
 
 SEARCH_GUIDES = {
     "kickboxing-fight-analysis": {
@@ -433,7 +447,7 @@ SEARCH_GUIDES = {
             {"title": "Built for training, not official judging", "body": "The scorecard is an evidence-gated training estimate. It is designed to help athletes and coaches structure review; it does not replace licensed officials or the governing rules of an event."},
         ],
         "faqs": [
-            {"question": "Can WarriorIQ analyse sparring as well as competition footage?", "answer": "Yes. Choose the video type before upload so the report keeps the session context clear."},
+            {"question": "Can WarriorIQ analyse sparring as well as competition footage?", "answer": "Yes. Sparring and competition footage are analysed the same way."},
             {"question": "Does WarriorIQ analyse both fighters?", "answer": "Yes. Both fighters are tracked for identity and fight context, while the selected focus fighter receives the deeper coaching report and training plan."},
         ],
         "related": [("K-1 fight analysis", "/k1-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
@@ -650,6 +664,10 @@ def _public_analysis_error(exc: Exception) -> str:
     """Return a useful status without leaking model names or server paths."""
     if isinstance(exc, (FileNotFoundError, ImportError, ModuleNotFoundError)):
         return "The analysis engine is unavailable on this server. Your upload and fighter selections are preserved."
+    if type(exc).__name__ == "UnreadableVideo":
+        return ("The analysis machine could not decode this video's format, so nothing was analysed. "
+                "Your upload and fighter selections are preserved; exporting the video as MP4 "
+                "(H.264) and uploading that copy will work.")
     if isinstance(exc, MemoryError) or "out of memory" in str(exc).lower():
         return "This analysis exceeded the server's available memory. Your upload and fighter selections are preserved."
     # The upload finished and the video was decoded here well enough to cut a
@@ -663,6 +681,13 @@ def _public_analysis_error(exc: Exception) -> str:
             "The video did not reach the analysis machine in one piece, so nothing was analysed. "
             "Your upload and fighter selections are preserved - start the analysis again."
         )
+    return "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again."
+
+
+def _worker_failure_message(error_code: str | None) -> str:
+    """What a worker's failure means to the person waiting, by its cause."""
+    if str(error_code or "") == "UnreadableVideo":
+        return _public_analysis_error(type("UnreadableVideo", (RuntimeError,), {})())
     return "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again."
 
 
@@ -707,10 +732,43 @@ def _is_live_processing_job(job: dict) -> bool:
     return (time.time() - updated) <= _STALE_PROCESSING_SECONDS
 
 
+# How old the job listing behind the top-bar chip may be. Every request used
+# to call list_jobs(), which opens, file-locks and parses every session file
+# under outputs/ - hundreds on the live host, phantom jobs included - and it ran
+# for static files too. Measured with 300 stored jobs: 34 ms of pure scanning
+# per request against 5 ms without, before the shared host's 8-12x slowdown,
+# so one person opening pages quickly was enough to saturate the account.
+#
+# A write in this process invalidates the snapshot at once (state_generation),
+# so an upload or a start shows up on the very next page. Only changes made by
+# another process - an external worker moving a job on - can be up to this
+# many seconds late, and the chip's own poll reads the job directly.
+_NAVIGATION_SNAPSHOT_SECONDS = 5.0
+_navigation_snapshot: tuple[int, float, list[tuple[str, dict]]] | None = None
+_navigation_snapshot_lock = threading.Lock()
+
+
+def _navigation_jobs() -> list[tuple[str, dict]]:
+    """list_jobs(), reused for a few seconds unless this process changed a job."""
+    global _navigation_snapshot
+    with _navigation_snapshot_lock:
+        cached = _navigation_snapshot
+        now = time.monotonic()
+        if (cached is not None and cached[0] == state_generation()
+                and now - cached[1] < _NAVIGATION_SNAPSHOT_SECONDS):
+            return cached[2]
+        generation = state_generation()
+        jobs = list_jobs()
+        # Stamped with the generation from before the scan: a write that lands
+        # during it leaves the snapshot already stale, which is the safe side.
+        _navigation_snapshot = (generation, time.monotonic(), jobs)
+        return jobs
+
+
 def _active_job_for_owner(owner_key: str) -> dict | None:
     jobs = [
         {"job_id": job_id, **job}
-        for job_id, job in list_jobs()
+        for job_id, job in _navigation_jobs()
         if job.get("owner_key") == owner_key and _is_live_processing_job(job)
     ]
     if not jobs:
@@ -897,22 +955,73 @@ def _prune_rate_windows(now: float) -> None:
             _rate_windows.pop(key, None)
 
 
-def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int) -> None:
-    """Small single-process safety limit; production should add an edge/shared limiter too."""
+# When each bucket last wrote a rate_limit_exceeded event. One event per
+# window is the evidence; one per refused request turned a flood into a stream
+# of database writes on exactly the occasion the server could least afford them.
+_rate_limit_reported: dict[str, float] = {}
+
+
+class RateLimited(Exception):
+    """A request refused by a rate limit, with how long until it would pass."""
+
+    def __init__(self, retry_after: int, detail: str):
+        super().__init__(detail)
+        self.retry_after = max(1, int(retry_after))
+        self.detail = detail
+
+
+def _take_rate_slot(scope: str, client: str, limit: int, window_seconds: int) -> int | None:
+    """Count one request. Returns None if it may proceed, else seconds to wait."""
     now = time.monotonic()
-    client = _client_ip(request)
     key = f"{scope}:{client}"
     recent = [stamp for stamp in _rate_windows.get(key, []) if now - stamp < window_seconds]
     if len(recent) >= limit:
-        record_security_event(
-            "rate_limit_exceeded", severity="warning", resource_type="route", resource_id=scope,
-            metadata={"client": client},
-        )
-        raise HTTPException(429, "Too many requests. Wait a little and try again.")
+        _rate_windows[key] = recent
+        return math.ceil(window_seconds - (now - recent[0])) if recent else window_seconds
     recent.append(now)
     _rate_windows[key] = recent
     if len(_rate_windows) > MAX_RATE_WINDOWS:
         _prune_rate_windows(now)
+    return None
+
+
+def _report_rate_limit_once(scope: str, client: str, window_seconds: int) -> None:
+    key = f"{scope}:{client}"
+    now = time.monotonic()
+    if now - _rate_limit_reported.get(key, -1e9) < window_seconds:
+        return
+    _rate_limit_reported[key] = now
+    if len(_rate_limit_reported) > MAX_RATE_WINDOWS:
+        _rate_limit_reported.clear()
+    record_security_event(
+        "rate_limit_exceeded", severity="warning", resource_type="route", resource_id=scope,
+        metadata={"client": client},
+    )
+
+
+def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int) -> None:
+    """Small single-process safety limit; production should add an edge/shared limiter too.
+
+    Always answered as a 429 with Retry-After, never by dropping the request.
+    """
+    client = _client_ip(request)
+    wait = _take_rate_slot(scope, client, limit, window_seconds)
+    if wait is None:
+        return
+    _report_rate_limit_once(scope, client, window_seconds)
+    raise HTTPException(
+        429, _rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))},
+    )
+
+
+def _rate_limit_detail(wait_seconds: int) -> str:
+    wait_seconds = max(1, int(wait_seconds))
+    if wait_seconds < 60:
+        when = f"{wait_seconds} second{'s' if wait_seconds != 1 else ''}"
+    else:
+        minutes = math.ceil(wait_seconds / 60)
+        when = f"{minutes} minute{'s' if minutes != 1 else ''}"
+    return f"That was a lot of requests in a short time. Wait about {when} and try again - nothing you saved is lost."
 
 
 # Segments that are an identifier rather than a page: all digits, or hex long
@@ -1108,6 +1217,97 @@ def _reports_for_profile(profile_id: int) -> list[dict]:
     return records
 
 
+def _clock(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def _analysed_span_summary(report: dict) -> dict | None:
+    """Which part of the video the report describes, in words.
+
+    Silent truncation was the bug: a frame picked at 0:30 of a 1:56 video
+    produced a report of 1:26 that called itself the fight. Every report now
+    says what it covers. Reports made before the analysed span was recorded
+    still started at their selection frame, and say so from setup.start_seconds.
+    """
+    span = (report.get("video") or {}).get("analysed_span")
+    if span:
+        start = float(span.get("start_seconds") or 0.0)
+        end = float(span.get("end_seconds") or 0.0)
+        duration = float(span.get("video_duration_seconds") or end)
+        reason = span.get("excluded_reason_text")
+    else:
+        setup = report.get("setup") or {}
+        start = float(setup.get("start_seconds") or 0.0)
+        rounds = report.get("rounds") or []
+        end = max([float(r.get("end_seconds") or 0.0) for r in rounds] or [start])
+        duration = float((report.get("performance") or {}).get("segment_duration_seconds") or 0.0) + start
+        duration = max(duration, end)
+        reason = "older reports started at the frame chosen for fighter selection"
+    if duration <= 0 or end <= start:
+        return None
+    whole = start < 1.0 and duration - end < 1.0
+    label = (f"Whole video · {_clock(duration)}" if whole
+             else f"{_clock(start)}–{_clock(end)} of {_clock(duration)}")
+    note = None
+    if start >= 1.0:
+        note = (f"The first {_clock(start)} of the video is not in this report"
+                + (f": {reason}." if reason else ".")
+                + " Every number below describes " + f"{_clock(start)}–{_clock(end)} only.")
+    elif duration - end >= 1.0:
+        note = f"The last {_clock(duration - end)} of the video is not in this report."
+    return {"label": label, "note": note, "whole": whole,
+            "start_seconds": start, "end_seconds": end, "duration_seconds": duration}
+
+
+def _numbers_state(report: dict) -> dict:
+    """Whether the numbers on a report may be shown, and as what.
+
+    "ok": shown as the selected fighter's own. "unverified": the identity check
+    failed, so the numbers may include other people - shown greyed out, never
+    as "you", and nothing is shared or posted from them. "no_fight": too little
+    of the video was usable fight footage to measure anything, so no numbers
+    are shown at all, and the report says why.
+    """
+    footage = (report.get("video") or {}).get("fight_footage") or {}
+    integrity = report.get("integrity") or {}
+    if footage and (integrity.get("fight_footage_sufficient") is False or footage.get("sufficient") is False):
+        fight = float(footage.get("fight_seconds") or 0.0)
+        excluded = float(footage.get("excluded_seconds") or 0.0)
+        why = footage.get("main_exclusion_text")
+        if excluded >= 1.0 and why:
+            message = (f"Only {_clock(fight)} of this video could be used as fight footage; the other "
+                       f"{_clock(excluded)} was left out because {why}. That is too little to measure, "
+                       "so this report shows no numbers.")
+        else:
+            message = (f"Only {_clock(fight)} of footage was analysed, which is too little to measure, "
+                       "so this report shows no numbers.")
+        return {"state": "no_fight", "message": message,
+                "share_reason": "There are no numbers in this report, so there is nothing to put on a story card."}
+    if not integrity.get("identity_evidence_trusted", True):
+        return {"state": "unverified", "message": None,
+                "share_reason": ("WarriorIQ could not confirm who was who in this fight, so the numbers on "
+                                 "this page are unverified and may include other people. They cannot go on "
+                                 "a story card; a coach link shows your coach the report without them.")}
+    return {"state": "ok", "message": None, "share_reason": None}
+
+
+def _fight_footage_summary(report: dict) -> dict | None:
+    """"Fight footage analysed: X of Y", and what was left out and why."""
+    footage = (report.get("video") or {}).get("fight_footage")
+    if not footage:
+        return None
+    span = (report.get("video") or {}).get("analysed_span") or {}
+    duration = float(span.get("video_duration_seconds") or footage.get("analysed_seconds") or 0.0)
+    fight = float(footage.get("fight_seconds") or 0.0)
+    excluded = float(footage.get("excluded_seconds") or 0.0)
+    note = None
+    if excluded >= 1.0 and footage.get("main_exclusion_text"):
+        note = (f"{_clock(excluded)} of the analysed footage was left out of every number because "
+                f"{footage['main_exclusion_text']}.")
+    return {"label": f"{_clock(fight)} of {_clock(duration)}", "note": note}
+
+
 def _visual_focus(report: dict) -> str:
     """Whose round the visual sections are about.
 
@@ -1251,60 +1451,52 @@ def _resident_megabytes() -> float | None:
         return None
 
 
-@app.middleware("http")
-async def viewer_context(request: Request, call_next):
-    global _last_guest_cleanup, _last_saved_video_cleanup
-    rejected_host = next(
-        (
-            candidate for candidate in (
-                request.headers.get("host", ""),
-                _forwarded_header(request, "x-forwarded-host", "") if request.headers.get("x-forwarded-host") else None,
-            )
-            if candidate is not None and not _trusted_request_host(candidate)
-        ),
-        None,
+# Requests that never render a page, read an account or need the job list:
+# assets, probes and the two crawler files. They skip the per-visitor context
+# entirely - a stylesheet has no use for the visitor's session or analysis
+# chip, and paying for both on every asset multiplied the cost of a page view
+# by the number of files on it.
+_HEALTH_PATHS = frozenset({"/health", "/healthz"})
+_LIGHTWEIGHT_PATHS = _HEALTH_PATHS | {"/favicon.ico", "/robots.txt", "/sitemap.xml"}
+_LIGHTWEIGHT_PREFIXES = ("/static/", "/assets/")
+
+
+def _is_lightweight_request(path: str) -> bool:
+    return path in _LIGHTWEIGHT_PATHS or path.startswith(_LIGHTWEIGHT_PREFIXES)
+
+
+def _wants_json(request: Request) -> bool:
+    return request.url.path.startswith(("/api/", "/stripe/")) or "application/json" in request.headers.get("accept", "")
+
+
+def _rate_limited_response(request: Request, wait_seconds: int):
+    """The 429 for the site-wide limit, built without touching the database.
+
+    A standalone page rather than error.html: the limiter answers before the
+    session is read, precisely so a flood costs as little as possible, and the
+    full layout needs that session. It is still a page a person can read, with
+    the wait spelled out, and the connection is always answered.
+    """
+    detail = _rate_limit_detail(wait_seconds)
+    headers = {"Retry-After": str(max(1, int(wait_seconds))), "Cache-Control": "no-store"}
+    if _wants_json(request):
+        return JSONResponse({"detail": detail}, status_code=429, headers=headers)
+    return templates.TemplateResponse(
+        request=request, name="rate_limited.html",
+        context={"request": request, "detail": detail, "retry_after": max(1, int(wait_seconds))},
+        status_code=429, headers=headers,
     )
-    if rejected_host is not None:
-        # Name the host that was refused. Without this a deployment reached
-        # under a hostname nobody listed in WARRIORIQ_ALLOWED_HOSTS is a blank
-        # 400 with nothing to act on. Logged rather than recorded as a security
-        # event, so an unauthenticated request cannot drive a database write.
-        LOGGER.warning("untrusted_request_host host=%r path=%s", rejected_host[:120], request.url.path)
-        return JSONResponse({"detail": "Unrecognized website address."}, status_code=400)
-    request_started = time.perf_counter()
-    request_id = request.headers.get("x-request-id", "").strip()[:64] or uuid.uuid4().hex[:16]
-    request.state.request_id = request_id
-    forwarded_scheme = _external_scheme(request)
-    public_host = urlsplit(SETTINGS.public_base_url).netloc.lower()
-    forwarded_host = _forwarded_header(
-        request, "x-forwarded-host", request.headers.get("host", request.url.netloc)
-    ).lower()
-    if public_host and forwarded_host == f"www.{public_host}":
-        target = f"{SETTINGS.public_base_url}{request.url.path}"
-        if request.url.query:
-            target += f"?{request.url.query}"
-        return RedirectResponse(target, status_code=308)
-    # Render may call the health probe over its private HTTP network. Keep that
-    # endpoint directly reachable while redirecting public browser traffic.
-    if request.url.path != "/health" and SETTINGS.public_base_url.startswith("https://") and forwarded_scheme != "https":
-        target = f"{SETTINGS.public_base_url}{request.url.path}"
-        if request.url.query:
-            target += f"?{request.url.query}"
-        return RedirectResponse(target, status_code=308)
-    # One unpredictable value per response, carried by every <script> the
-    # templates emit, so the policy can name it instead of 'unsafe-inline'.
-    request.state.csp_nonce = secrets.token_urlsafe(18)
+
+
+def _load_viewer_state(request: Request) -> None:
+    """Who is asking and what they have running: the per-page context.
+
+    Reads the session from the database and the job listing from disk, so it
+    runs on a worker thread rather than on the event loop. Called inline from
+    the async middleware, it used to stall every other request this process
+    was serving for as long as one visitor's lookups took.
+    """
     request.state.account = resolve_session(request.cookies.get(SESSION_COOKIE))
-    guest_id = request.cookies.get(GUEST_COOKIE)
-    new_guest = not guest_id or len(guest_id) < 24 or len(guest_id) > 96
-    request.state.guest_id = session_token() if new_guest else guest_id
-    # The CSRF token is per visitor, not per form, and is issued to signed-out
-    # visitors too - the login and signup posts are exactly the ones that need
-    # it, and neither has an account yet. A cookie of the wrong shape counts as
-    # absent and is replaced, so a stale value cannot lock somebody out.
-    existing_csrf = usable_csrf_token(request.cookies.get(CSRF_COOKIE))
-    new_csrf = existing_csrf is None
-    request.state.csrf_token = issue_csrf_token() if new_csrf else existing_csrf
     request.state.analysis_navigation = _analysis_navigation_state(
         _owner_key(request),
         request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
@@ -1350,22 +1542,22 @@ async def viewer_context(request: Request, call_next):
     request.state.social_image_url = (
         f"{SETTINGS.public_base_url}/static/warrioriq-logo.png" if SETTINGS.public_base_url else ""
     )
-    oauth_callback = request.url.path.startswith("/auth/") and request.url.path.endswith("/callback")
-    if (
-        request.method in {"POST", "PUT", "PATCH", "DELETE"}
-        and request.url.path != "/stripe/webhook"
-        and not oauth_callback
-    ):
-        expected_origin = _external_origin(request)
-        source = request.headers.get("origin") or request.headers.get("referer")
-        if source:
-            parsed = urlsplit(source)
-            source_origin = f"{parsed.scheme}://{parsed.netloc}".lower()
-            if source_origin != expected_origin:
-                return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
-        if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
-            return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
-    now = time.monotonic()
+
+
+_maintenance_lock = threading.Lock()
+
+
+def _run_periodic_maintenance(now: float | None = None) -> None:
+    """Expire guest jobs, retained videos and abandoned processing files.
+
+    Used to run inline in the request middleware, on the event loop, in
+    whichever request happened to arrive after the timer ran out - deleting
+    directories while that visitor, and everyone queued behind them, waited.
+    It now runs on a background thread (see _schedule_maintenance); calling it
+    directly is still the way to run it synchronously, as the tests do.
+    """
+    global _last_guest_cleanup, _last_saved_video_cleanup
+    now = time.monotonic() if now is None else now
     if now - _last_guest_cleanup > 600:
         jobs_before_cleanup = dict(list_jobs())
         cutoff = time.time() - SETTINGS.failed_upload_retention_hours * 3600
@@ -1378,6 +1570,10 @@ async def viewer_context(request: Request, call_next):
         for job_id in cleanup_expired_guest_jobs(protected):
             delete_legal_acceptances_for_resource(job_id)
             delete_job(job_id)
+        # Chunked uploads whose page went away: give back their lease, their
+        # reserved analysis and their partial file without waiting for the
+        # same person to try again.
+        release_idle_chunked_sessions()
         _last_guest_cleanup = now
     if now - _last_saved_video_cleanup > 3600:
         for fight in list_expired_fight_videos():
@@ -1410,31 +1606,45 @@ async def viewer_context(request: Request, call_next):
                 "abandoned_processing_files_deleted", resource_type="fight", resource_id=abandoned_job_id,
             )
         _last_saved_video_cleanup = now
-    if is_fight_upload(request.scope):
-        response = await _admit_fight_upload(request, call_next)
-    else:
-        response = await call_next(request)
-    duration_ms = (time.perf_counter() - request_started) * 1000.0
-    response.headers.setdefault("X-Request-ID", request_id)
-    response.headers.setdefault("Server-Timing", f"app;dur={duration_ms:.1f}")
-    LOGGER.info(
-        "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
-        request_id, request.method, request.url.path, response.status_code, duration_ms,
-    )
-    if _is_counted_page_view(request, response):
+
+
+def _schedule_maintenance() -> None:
+    """Start the periodic sweep in the background when one is due.
+
+    Single-flight: if a sweep is already running, a request never starts a
+    second one and never waits for the first.
+    """
+    now = time.monotonic()
+    if now - _last_guest_cleanup <= 600 and now - _last_saved_video_cleanup <= 3600:
+        return
+    if not _maintenance_lock.acquire(blocking=False):
+        return
+
+    def sweep() -> None:
         try:
-            record_page_view(_counted_path(request.url.path))
-        except Exception:  # pragma: no cover - counting must never cost a page
-            # A visitor came for the page, not for the statistic. If the write
-            # fails the page still has to be served, so this swallows rather
-            # than raises, and says so in the log instead.
-            LOGGER.warning("page_view_not_counted path=%s", request.url.path)
+            _run_periodic_maintenance()
+        except Exception:                                           # noqa: BLE001
+            LOGGER.exception("periodic_maintenance_failed")
+        finally:
+            _maintenance_lock.release()
+
+    try:
+        threading.Thread(target=sweep, name="warrioriq-maintenance", daemon=True).start()
+    except Exception:                                               # noqa: BLE001
+        _maintenance_lock.release()
+        raise
+
+
+def _apply_response_headers(request: Request, response) -> None:
+    """Security and caching headers every response carries, page or asset."""
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+    if request.url.path.startswith(PRIVATE_ROUTE_PREFIXES):
+        response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
     # The analytics tag is only rendered once a visitor accepts analytics
     # cookies, so the policy only names Google's hosts for those visitors.
     # Without this the browser blocks googletagmanager.com outright and no
@@ -1487,6 +1697,112 @@ async def viewer_context(request: Request, call_next):
         response.headers.setdefault("Cache-Control", "public, max-age=604800")
     if _request_is_secure(request):
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+
+@app.middleware("http")
+async def viewer_context(request: Request, call_next):
+    rejected_host = next(
+        (
+            candidate for candidate in (
+                request.headers.get("host", ""),
+                _forwarded_header(request, "x-forwarded-host", "") if request.headers.get("x-forwarded-host") else None,
+            )
+            if candidate is not None and not _trusted_request_host(candidate)
+        ),
+        None,
+    )
+    if rejected_host is not None:
+        # Name the host that was refused. Without this a deployment reached
+        # under a hostname nobody listed in WARRIORIQ_ALLOWED_HOSTS is a blank
+        # 400 with nothing to act on. Logged rather than recorded as a security
+        # event, so an unauthenticated request cannot drive a database write.
+        LOGGER.warning("untrusted_request_host host=%r path=%s", rejected_host[:120], request.url.path)
+        return JSONResponse({"detail": "Unrecognized website address."}, status_code=400)
+    request_started = time.perf_counter()
+    request_id = request.headers.get("x-request-id", "").strip()[:64] or uuid.uuid4().hex[:16]
+    request.state.request_id = request_id
+    forwarded_scheme = _external_scheme(request)
+    public_host = urlsplit(SETTINGS.public_base_url).netloc.lower()
+    forwarded_host = _forwarded_header(
+        request, "x-forwarded-host", request.headers.get("host", request.url.netloc)
+    ).lower()
+    if public_host and forwarded_host == f"www.{public_host}":
+        target = f"{SETTINGS.public_base_url}{request.url.path}"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=308)
+    # Render may call the health probe over its private HTTP network. Keep that
+    # endpoint directly reachable while redirecting public browser traffic.
+    if request.url.path not in _HEALTH_PATHS and SETTINGS.public_base_url.startswith("https://") and forwarded_scheme != "https":
+        target = f"{SETTINGS.public_base_url}{request.url.path}"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=308)
+    # One unpredictable value per response, carried by every <script> the
+    # templates emit, so the policy can name it instead of 'unsafe-inline'.
+    request.state.csp_nonce = secrets.token_urlsafe(18)
+    if _is_lightweight_request(request.url.path):
+        response = await call_next(request)
+        response.headers.setdefault("X-Request-ID", request_id)
+        response.headers.setdefault(
+            "Server-Timing", f"app;dur={(time.perf_counter() - request_started) * 1000.0:.1f}")
+        _apply_response_headers(request, response)
+        return response
+    if SETTINGS.request_rate_limit_per_minute:
+        client = _client_ip(request)
+        wait = _take_rate_slot("site", client, SETTINGS.request_rate_limit_per_minute, 60)
+        if wait is not None:
+            LOGGER.warning("site_rate_limited path=%s retry_after=%s", request.url.path, wait)
+            response = _rate_limited_response(request, wait)
+            _apply_response_headers(request, response)
+            return response
+    guest_id = request.cookies.get(GUEST_COOKIE)
+    new_guest = not guest_id or len(guest_id) < 24 or len(guest_id) > 96
+    request.state.guest_id = session_token() if new_guest else guest_id
+    # The CSRF token is per visitor, not per form, and is issued to signed-out
+    # visitors too - the login and signup posts are exactly the ones that need
+    # it, and neither has an account yet. A cookie of the wrong shape counts as
+    # absent and is replaced, so a stale value cannot lock somebody out.
+    existing_csrf = usable_csrf_token(request.cookies.get(CSRF_COOKIE))
+    new_csrf = existing_csrf is None
+    request.state.csrf_token = issue_csrf_token() if new_csrf else existing_csrf
+    await run_in_threadpool(_load_viewer_state, request)
+    oauth_callback = request.url.path.startswith("/auth/") and request.url.path.endswith("/callback")
+    if (
+        request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.url.path != "/stripe/webhook"
+        and not oauth_callback
+    ):
+        expected_origin = _external_origin(request)
+        source = request.headers.get("origin") or request.headers.get("referer")
+        if source:
+            parsed = urlsplit(source)
+            source_origin = f"{parsed.scheme}://{parsed.netloc}".lower()
+            if source_origin != expected_origin:
+                return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+        if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+            return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+    _schedule_maintenance()
+    if is_fight_upload(request.scope):
+        response = await _admit_fight_upload(request, call_next)
+    else:
+        response = await call_next(request)
+    duration_ms = (time.perf_counter() - request_started) * 1000.0
+    response.headers.setdefault("X-Request-ID", request_id)
+    response.headers.setdefault("Server-Timing", f"app;dur={duration_ms:.1f}")
+    LOGGER.info(
+        "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
+        request_id, request.method, request.url.path, response.status_code, duration_ms,
+    )
+    if _is_counted_page_view(request, response):
+        try:
+            record_page_view(_counted_path(request.url.path))
+        except Exception:  # pragma: no cover - counting must never cost a page
+            # A visitor came for the page, not for the statistic. If the write
+            # fails the page still has to be served, so this swallows rather
+            # than raises, and says so in the log instead.
+            LOGGER.warning("page_view_not_counted path=%s", request.url.path)
+    _apply_response_headers(request, response)
     if new_guest:
         response.set_cookie(
             GUEST_COOKIE, request.state.guest_id, max_age=60 * 60 * 24,
@@ -1506,15 +1822,21 @@ async def viewer_context(request: Request, call_next):
 
 @app.exception_handler(StarletteHTTPException)
 async def http_error_page(request: Request, exc: StarletteHTTPException):
-    if request.url.path.startswith(("/api/", "/stripe/")) or "application/json" in request.headers.get("accept", ""):
+    if _wants_json(request):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+    if not hasattr(request.state, "account"):
+        # An asset or probe request: the page layout needs the visitor context
+        # those requests deliberately skip, so the refusal is plain text.
+        return PlainTextResponse(str(exc.detail or ""), status_code=exc.status_code, headers=exc.headers)
     title = {
         400: "That request needs attention",
         403: "This area is private",
         404: "That page left the ring",
         410: "This link has expired",
         413: "That file is too large",
-        429: "Analysis limit reached",
+        # Every 429 that reaches this page is a request-rate limit; the
+        # analysis allowance answers as JSON on the upload routes instead.
+        429: "Slow down for a moment",
         503: "This feature is not launch-ready",
         507: "Storage is temporarily full",
     }.get(exc.status_code, "WarriorIQ could not complete that request")
@@ -1531,8 +1853,10 @@ async def http_error_page(request: Request, exc: StarletteHTTPException):
 async def unexpected_error_page(request: Request, exc: Exception):
     LOGGER.exception("Unhandled request failure", exc_info=exc)
     detail = "WarriorIQ could not complete this request. Please try again."
-    if request.url.path.startswith(("/api/", "/stripe/")) or "application/json" in request.headers.get("accept", ""):
+    if _wants_json(request):
         return JSONResponse({"detail": detail}, status_code=500)
+    if not hasattr(request.state, "account"):
+        return PlainTextResponse(detail, status_code=500)
     return templates.TemplateResponse(
         request=request,
         name="error.html",
@@ -1965,7 +2289,11 @@ def _analysis_request(job_id: str, job: dict, fighter_a_box: list[float], fighte
         focus_fighter=focus_fighter,
         fight_type=job["fight_type"],
         ruleset=job["ruleset"],
-        start_seconds=job["start_seconds"],
+        # The whole video unless a start was explicitly requested; the boxes
+        # belong to the selection frame. A job stored before the two were
+        # separated has only start_seconds, which was the selection frame.
+        start_seconds=float(job.get("requested_start_seconds", 0.0) or 0.0),
+        selection_seconds=float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
         round_count=job["round_count"],
         round_duration_seconds=job["round_duration_seconds"],
         break_duration_seconds=job["break_duration_seconds"],
@@ -2102,18 +2430,33 @@ def _wake_analysis_worker(job_id: str) -> None:
     threading.Thread(target=run, name=f"wiq-wake-{job_id}", daemon=True).start()
 
 
-def _looks_alike_message(similarity: float) -> str:
-    return (
-        f"These two look {similarity:.0%} alike to us, where a bout we can read "
-        "is usually nearer 60%. We will still analyse it, but we may mix them up - "
-        "if the report says so, pick them again on a frame where their kit or "
-        "headguards differ most."
-    )
+def _looks_alike_message(similarity: float, kit: dict | None = None) -> str:
+    """The selection-page warning, naming the actual cause.
+
+    It used to say "look N% alike, where a bout we can read is usually nearer
+    60%" for every cause - a number from a histogram that could not tell black
+    from white - and on black-and-white footage that is simply what the film
+    is, not something a better frame changes.
+    """
+    reason = kit_alike_reason(kit)
+    if reason == "black_and_white":
+        return ("This footage has no colour, so WarriorIQ cannot use kit to tell these two apart. "
+                "It will still analyse the fight and follow each fighter by position and movement; "
+                "the report will say if it ever could not tell them apart.")
+    if reason == "small":
+        return ("The fighters are small in this picture, so their kit is only a few pixels and "
+                "cannot be compared. WarriorIQ will follow them by position and movement; filming "
+                "closer gives it more to work with.")
+    return (f"Their kit matches closely ({similarity:.0%} alike, comparing head, top and shorts). "
+            "WarriorIQ will still analyse the fight and follow each fighter by position and movement, "
+            "and the report will say if it ever could not tell them apart. If their kit differs "
+            "anywhere - headgear, gloves, shorts - pick a frame where that difference is visible.")
 
 
 def _analysis_started_response(request: Request, job_id: str, deferred: bool = False,
                               looks_alike: float | None = None,
-                              on_official: dict | None = None) -> JSONResponse:
+                              on_official: dict | None = None,
+                              kit: dict | None = None) -> JSONResponse:
     response = JSONResponse({
         "ok": True,
         "progress_url": f"/progress/{job_id}",
@@ -2121,7 +2464,7 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
         **({"notice": _deferred_analysis_message()} if deferred else {}),
         **({"fighters_look_alike": {
             "similarity": round(float(looks_alike), 3),
-            "message": _looks_alike_message(float(looks_alike)),
+            "message": _looks_alike_message(float(looks_alike), kit),
         }} if looks_alike is not None else {}),
         **({"seed_looks_like_official": on_official} if on_official else {}),
     })
@@ -2173,8 +2516,20 @@ async def social_auth_start(
     age_confirmed: bool = Form(False),
     accept_policies: bool = Form(False),
     marketing_consent: bool = Form(False),
+    age_group: str = Form(""),
 ):
     _enforce_rate_limit(request, "social-auth-start", 30, 300)
+    group = age_group.strip().lower() or ("adult" if age_confirmed else "")
+    if mode == "signup" and group == "minor":
+        # The guardian's details are asked on the email form, so that is the
+        # way in for someone under the minimum age.
+        return _auth_page(
+            request, "signup",
+            f"Under {SETTINGS.minimum_account_age}? Create your account with your email below, so WarriorIQ can "
+            "ask your parent or guardian to approve it.",
+            next_path,
+        )
+    age_confirmed = group == "adult"
     if _account(request):
         return RedirectResponse(_safe_next(next_path), status_code=303)
     if mode not in {"signup", "login"}:
@@ -2390,6 +2745,63 @@ def _send_verification_email(request: Request, account: dict) -> bool:
         return False
 
 
+# Accounts for people under the minimum age (SETTINGS.minimum_account_age).
+#
+# Sign-up used to be adults only. A fighter under 18 can now have an account,
+# with a parent or guardian's approval: sign-up asks for their name and email,
+# WarriorIQ emails them a link, and until they approve the account can look
+# around but not upload a fight - footage is the personal data that matters
+# here. The approval is a signed link (no new table): it names the account and
+# the guardian address it was sent to, and expires.
+GUARDIAN_PENDING = "pending_guardian"
+GUARDIAN_APPROVED = "guardian_approved"
+GUARDIAN_DECLINED = "guardian_declined"
+GUARDIAN_LINK_DAYS = 14
+
+
+def _guardian_signer():
+    from itsdangerous import URLSafeTimedSerializer
+
+    return URLSafeTimedSerializer(_session_secret(), salt="warrioriq-guardian-approval")
+
+
+def _guardian_hold(account: dict | None) -> str | None:
+    """Why this account may not upload yet, or None."""
+    status = str((account or {}).get("guardian_approval_status") or "not_applicable")
+    if status == GUARDIAN_PENDING:
+        return ("Your parent or guardian has not approved your account yet. Fight videos can be uploaded "
+                "once they open the link WarriorIQ emailed them. You can send it again from /guardian.")
+    if status == GUARDIAN_DECLINED:
+        return "Your parent or guardian did not approve this account, so it cannot upload fight videos."
+    return None
+
+
+def _guardian_request(account: dict) -> dict | None:
+    """The guardian named at sign-up, from the consent record."""
+    for record in list_legal_acceptances(profile_id=int(account["profile_id"])):
+        if record.get("kind") == "guardian_consent" and record["metadata"].get("guardian_email"):
+            return record["metadata"]
+    return None
+
+
+def _send_guardian_email(request: Request, account: dict, guardian_name: str, guardian_email: str) -> bool:
+    token = _guardian_signer().dumps({"a": int(account["id"]), "g": token_digest(guardian_email.lower())})
+    approve_url = f"{_public_base(request)}/guardian/approve/{token}"
+    body = (
+        f"Hello {guardian_name},\n\n"
+        f"Someone signing up to WarriorIQ as {account['email']} said they are under "
+        f"{SETTINGS.minimum_account_age} and named you as their parent or guardian.\n\n"
+        "WarriorIQ analyses fight videos for combat-sports training. Until you approve, the account cannot "
+        "upload any video. To read what it does with footage and approve or decline, open this link within "
+        f"{GUARDIAN_LINK_DAYS} days:\n\n{approve_url}\n\n"
+        "If you do not know this person, ignore this message and nothing will be uploaded."
+    )
+    try:
+        return send_transactional_email(guardian_email, "Approve a WarriorIQ account", body)
+    except Exception:                                                   # noqa: BLE001
+        return False
+
+
 @app.get("/signup", response_class=HTMLResponse)
 def signup_page(request: Request, next: str = "/dashboard"):
     if _account(request):
@@ -2406,12 +2818,29 @@ def signup(
     accept_terms: bool = Form(False),
     age_confirmed: bool = Form(False),
     marketing_consent: bool = Form(False),
+    # "adult" or "minor". age_confirmed=true (the old checkbox) still means adult.
+    age_group: str = Form(""),
+    guardian_name: str = Form(""),
+    guardian_email: str = Form(""),
 ):
     _enforce_rate_limit(request, "signup", 20, 300)
-    if not accept_terms or not age_confirmed:
+    group = age_group.strip().lower() or ("adult" if age_confirmed else "")
+    if not accept_terms or group not in {"adult", "minor"}:
         return _auth_page(
             request, "signup",
-            f"Confirm that you are at least {SETTINGS.minimum_account_age} and accept the Terms of Service and Privacy Policy.",
+            f"Say whether you are {SETTINGS.minimum_account_age} or older, and accept the Terms of Service and "
+            "Privacy Policy.",
+            next_path,
+        )
+    minor = group == "minor"
+    guardian_name = " ".join(guardian_name.split())[:80]
+    guardian_email = guardian_email.strip()
+    if minor and (not guardian_name or not valid_email(guardian_email)
+                  or normalize_email(guardian_email) == normalize_email(email)):
+        return _auth_page(
+            request, "signup",
+            f"Under {SETTINGS.minimum_account_age}, a parent or guardian has to approve your account. Enter their "
+            "name and their own email address - not yours.",
             next_path,
         )
     try:
@@ -2421,11 +2850,13 @@ def signup(
     record_account_signup_acceptance(
         int(account["id"]), terms_version=SETTINGS.policy_version,
         privacy_version=SETTINGS.policy_version, marketing_consent=bool(marketing_consent),
+        guardian_approval_status=GUARDIAN_PENDING if minor else "not_applicable",
     )
+    age_record = ("age_under_minimum_declared" if minor else "age_18_plus_confirmation", "accepted")
     for kind, status in (
         ("terms_acceptance", "accepted"),
         ("privacy_acknowledgement", "accepted"),
-        ("age_18_plus_confirmation", "accepted"),
+        age_record,
         ("marketing_consent", "accepted" if marketing_consent else "declined"),
     ):
         record_legal_acceptance(
@@ -2434,6 +2865,18 @@ def signup(
             current_status=status,
         )
     record_security_event("account_created", account_id=int(account["id"]), metadata={"policy_version": SETTINGS.policy_version})
+    if minor:
+        record_legal_acceptance(
+            "guardian_consent", SETTINGS.policy_version, profile_id=int(account["profile_id"]),
+            metadata={"guardian_name": guardian_name, "guardian_email": guardian_email},
+            current_status="requested",
+        )
+        delivered = _send_guardian_email(request, account, guardian_name, guardian_email)
+        record_security_event(
+            "guardian_approval_requested", account_id=int(account["id"]),
+            metadata={"email_delivery": "sent" if delivered else "unavailable"},
+        )
+        next_path = "/guardian"
     if SETTINGS.require_email_verification:
         delivered = _send_verification_email(request, account)
         record_security_event(
@@ -2448,6 +2891,109 @@ def signup(
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
+
+
+def _masked_email(address: str) -> str:
+    local, _, domain = address.partition("@")
+    return f"{local[:1]}{'*' * max(2, len(local) - 1)}@{domain}" if domain else address
+
+
+@app.get("/guardian", response_class=HTMLResponse)
+def guardian_status_page(request: Request, sent: str = ""):
+    """Where an account under the minimum age waits for its guardian."""
+    account = _account(request)
+    if account is None:
+        return RedirectResponse("/login?next=/guardian", status_code=303)
+    status = str(account.get("guardian_approval_status") or "not_applicable")
+    if status in {"not_applicable", GUARDIAN_APPROVED}:
+        return RedirectResponse("/dashboard", status_code=303)
+    named = _guardian_request(account) or {}
+    return templates.TemplateResponse(
+        request=request, name="guardian.html",
+        context={"request": request, "mode": "pending", "status": status, "sent": sent == "1",
+                 "guardian_email": _masked_email(str(named.get("guardian_email") or "")),
+                 "minimum_age": SETTINGS.minimum_account_age},
+    )
+
+
+@app.post("/guardian/resend", dependencies=[Depends(require_csrf)])
+def guardian_resend(request: Request):
+    _enforce_rate_limit(request, "guardian-resend", 5, 3600)
+    account = _account(request)
+    if account is None:
+        return RedirectResponse("/login?next=/guardian", status_code=303)
+    named = _guardian_request(account)
+    if str(account.get("guardian_approval_status")) == GUARDIAN_PENDING and named:
+        delivered = _send_guardian_email(request, account, str(named.get("guardian_name") or ""),
+                                         str(named["guardian_email"]))
+        record_security_event("guardian_approval_requested", account_id=int(account["id"]),
+                              metadata={"email_delivery": "sent" if delivered else "unavailable", "resend": True})
+    return RedirectResponse("/guardian?sent=1", status_code=303)
+
+
+def _guardian_link(token: str) -> tuple[dict | None, dict | None]:
+    """(account, guardian request) a still-valid approval link names."""
+    from itsdangerous import BadSignature
+
+    try:
+        payload = _guardian_signer().loads(token, max_age=GUARDIAN_LINK_DAYS * 86400)
+        account = get_account(int(payload["a"]))
+    except (BadSignature, KeyError, TypeError, ValueError):
+        return None, None
+    named = _guardian_request(account) if account else None
+    # The link only works for the address it was sent to: a guardian named
+    # later replaces the earlier one.
+    if not named or token_digest(str(named["guardian_email"]).lower()) != payload.get("g"):
+        return None, None
+    return account, named
+
+
+@app.get("/guardian/approve/{token}", response_class=HTMLResponse)
+def guardian_approve_page(request: Request, token: str):
+    account, named = _guardian_link(token)
+    if account is None:
+        raise HTTPException(404, "This approval link has expired or is not valid. Ask for a new one to be sent.")
+    return templates.TemplateResponse(
+        request=request, name="guardian.html",
+        context={"request": request, "mode": "approve", "token": token, "child_email": account["email"],
+                 "guardian_name": named.get("guardian_name") or "", "minimum_age": SETTINGS.minimum_account_age,
+                 "status": str(account.get("guardian_approval_status") or ""),
+                 "retention_days": SETTINGS.saved_video_retention_days},
+    )
+
+
+@app.post("/guardian/approve/{token}", response_class=HTMLResponse, dependencies=[Depends(require_csrf)])
+def guardian_approve(request: Request, token: str, decision: str = Form(""),
+                     guardian_confirmed: bool = Form(False)):
+    _enforce_rate_limit(request, "guardian-approve", 20, 3600)
+    account, named = _guardian_link(token)
+    if account is None:
+        raise HTTPException(404, "This approval link has expired or is not valid. Ask for a new one to be sent.")
+    approve = decision == "approve"
+    if approve and not guardian_confirmed:
+        return templates.TemplateResponse(
+            request=request, name="guardian.html", status_code=400,
+            context={"request": request, "mode": "approve", "token": token, "child_email": account["email"],
+                     "guardian_name": named.get("guardian_name") or "", "minimum_age": SETTINGS.minimum_account_age,
+                     "status": str(account.get("guardian_approval_status") or ""),
+                     "retention_days": SETTINGS.saved_video_retention_days,
+                     "error": "Tick the box to confirm you are their parent or guardian."},
+        )
+    status = GUARDIAN_APPROVED if approve else GUARDIAN_DECLINED
+    set_guardian_approval_status(int(account["id"]), status)
+    record_legal_acceptance(
+        "guardian_consent", SETTINGS.policy_version, profile_id=int(account["profile_id"]),
+        metadata={"guardian_name": named.get("guardian_name"), "guardian_email": named.get("guardian_email"),
+                  "decision": "approved" if approve else "declined"},
+        current_status="accepted" if approve else "declined",
+    )
+    record_security_event("guardian_approval_" + ("granted" if approve else "declined"),
+                          account_id=int(account["id"]))
+    return templates.TemplateResponse(
+        request=request, name="guardian.html",
+        context={"request": request, "mode": "done", "approved": approve, "child_email": account["email"],
+                 "minimum_age": SETTINGS.minimum_account_age},
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -2634,20 +3180,17 @@ def _reported_strike_families(sport: str) -> dict:
     shown, because the punch count was measured overstated and the knee bucket
     was measured to contain punches (core/report.py observed_summary).
     """
-    counted = sport_counted_families(sport)
-    # STRIKE_COUNTS_PUBLISHED: every family the sport scores is shown, as an
-    # estimate, with ESTIMATE_NOTE beside it.
-    if STRIKE_COUNTS_PRECISION_VALIDATED or STRIKE_COUNTS_PUBLISHED:
-        reported, withheld = counted, ()
-    else:
-        reported = tuple(family for family in counted if family == "kicks")
-        withheld = tuple(family for family in counted if family != "kicks")
+    # Every sentence about counting comes from core.sport_policy, so the upload
+    # page, live view, report, replay and share card cannot drift apart again.
+    policy = counting_policy(sport, published=STRIKE_COUNTS_PUBLISHED,
+                             validated=STRIKE_COUNTS_PRECISION_VALIDATED)
     return {
-        "reported_families": _prose_list(reported),
-        "withheld_families": _prose_list(withheld),
-        "no_strike_counts": not reported,
-        "counts_are_estimates": bool(reported) and not STRIKE_COUNTS_PRECISION_VALIDATED,
-        "estimate_note": ESTIMATE_NOTE,
+        "reported_families": _prose_list(policy.counted),
+        "withheld_families": _prose_list(policy.withheld),
+        "no_strike_counts": not policy.counted,
+        "counts_are_estimates": policy.estimates,
+        "estimate_note": policy.estimate_note,
+        "counting_policy": policy.as_dict(),
     }
 
 
@@ -2659,19 +3202,12 @@ def _sport_coverage_badge(sport: str) -> dict:
     what a report will count, not what the detector proposes.
     """
     reported = _reported_strike_families(sport)
-    if reported["no_strike_counts"]:
-        return {"covered": "no", "label": "No punch counts yet"}
-    if reported["withheld_families"]:
-        return {"covered": "no", "label": "Kick counts only"}
-    if sport == "mma":
-        # MMA is decided on the ground as much as on the feet, and none of
-        # takedowns, control or submissions is read yet.
-        return {"covered": "no", "label": "Strikes only, no grappling yet"}
-    if reported["counts_are_estimates"]:
-        return {"covered": "yes", "label": "Counts %s" % reported["reported_families"]}
-    if sport_unobserved(sport):
-        return {"covered": "no", "label": "Striking read only"}
-    return {"covered": "yes", "label": "Full scoring coverage"}
+    policy = reported["counting_policy"]
+    # MMA is decided on the ground as much as on the feet, and none of
+    # takedowns, control or submissions is read yet.
+    covered = "no" if (reported["no_strike_counts"] or reported["withheld_families"]
+                       or sport == "mma") else "yes"
+    return {"covered": covered, "label": policy["badge"]}
 
 
 def _prose_list(items) -> str:
@@ -2926,6 +3462,8 @@ async def upload(
         # anonymous browser session; the 401 lets the upload form send the
         # visitor to sign-in without losing what they filled in.
         raise HTTPException(401, "Create a free account or sign in to analyse a fight.")
+    if hold := _guardian_hold(account):
+        raise HTTPException(403, hold)
     if openai_identity_recovery and not request.state.external_ai_available:
         raise HTTPException(400, "Optional external identity recovery is unavailable.")
     if openai_identity_recovery and minor_permission_status == "guardian_authorized" and not external_ai_guardian_permission:
@@ -2968,7 +3506,7 @@ async def upload(
         raise HTTPException(
             400,
             "That file is not a video. The name ends in a video extension but the "
-            "contents are not MP4, MOV, MKV, WEBM or AVI. Pick the clip straight "
+            f"contents are not {FIGHT_VIDEO_LABEL}. Pick the clip straight "
             "from your camera roll.",
         )
 
@@ -3049,7 +3587,11 @@ async def upload(
     except Exception:
         video_path.unlink(missing_ok=True)
         raise
-    start = max(0.0, min(float(start_seconds), max(0.0, info.duration - 0.001)))
+    # Where the analysed span starts: the beginning of the video unless the
+    # caller explicitly asked for later. Not where the selection frame is -
+    # that frame only says who is who (core/backtrack.py).
+    requested_start = max(0.0, min(float(start_seconds), max(0.0, info.duration - 0.001)))
+    start = requested_start
     end = None if not end_seconds.strip() else max(start, min(float(end_seconds), info.duration))
     count = max(1, min(20, int(round_count)))
     # Frame 0 is where a round starts, which is where the referee stands
@@ -3074,36 +3616,51 @@ async def upload(
     # "reported, not refused", and a crash while counting cuts is not a reason
     # to throw away somebody's fight.
     background.add_task(_record_shot_profile, job_id, video_path)
-    selection_frame = int(round(start * info.fps))
+    selection_frame_index = int(round(start * info.fps))
     if start <= 0.0:
-        selection_frame = probed_frame
-        start = selection_frame / info.fps if info.fps > 0 else 0.0
+        selection_frame_index = probed_frame
     job_dir = OUTPUTS / job_id
     selection_path = job_dir / "selection.jpg"
+    # A real fight is never refused for the frame it opens on. The picker frame
+    # is tried at several moments, with OpenCV and then ffmpeg, skipping black
+    # frames (core.video.selection_frame). If nothing decodes on this host -
+    # an AV1 WebM, which this build of OpenCV cannot read at all - the upload
+    # is still kept, and the frame picker lets the browser, which can play it,
+    # choose the frame. The analysis machine converts the file before reading.
+    server_decodes = await run_in_threadpool(opencv_decodes, video_path)
     try:
-        try:
-            frame = await run_in_threadpool(read_frame, video_path, selection_frame)
-        except Exception:
-            # Choosing a livelier frame is an optimisation, and an optimisation
-            # must never cost someone their upload. Somebody on a phone waited
-            # out the whole transfer before this raised, and the handler below
-            # then deleted the video and told them to try again - which would
-            # fail the same way every time. Frame 0 is the one frame that reads
-            # on any file OpenCV opened at all.
-            LOGGER.warning(
-                "selection_frame_unreadable job_id=%s frame=%s falling back to 0",
-                job_id, selection_frame,
-            )
-            selection_frame, start = 0, 0.0
-            frame = await run_in_threadpool(read_frame, video_path, 0)
-        job_dir.mkdir(parents=True, exist_ok=True)
-        if not await run_in_threadpool(cv2.imwrite, str(selection_path), frame):
-            raise OSError("OpenCV could not save the fighter-selection frame")
+        chosen_index, frame = await run_in_threadpool(selection_frame, video_path, info, selection_frame_index)
     except Exception as exc:
-        video_path.unlink(missing_ok=True)
-        shutil.rmtree(job_dir, ignore_errors=True)
-        LOGGER.warning("upload_selection_frame_failed job_id=%s error=%s", job_id, type(exc).__name__)
-        raise HTTPException(422, "WarriorIQ could not prepare this video's fighter-selection frame.") from exc
+        LOGGER.warning("upload_selection_frame_unreadable job_id=%s error=%s", job_id, type(exc).__name__)
+        chosen_index, frame = None, None
+    if frame is not None:
+        # Failing to *save* a frame that decoded is this server's disk, not the
+        # video, and the browser's frame would fail to save the same way.
+        try:
+            job_dir.mkdir(parents=True, exist_ok=True)
+            if not await run_in_threadpool(cv2.imwrite, str(selection_path), frame):
+                raise OSError("OpenCV could not save the fighter-selection frame")
+        except Exception as exc:
+            video_path.unlink(missing_ok=True)
+            shutil.rmtree(job_dir, ignore_errors=True)
+            LOGGER.warning("upload_selection_frame_failed job_id=%s error=%s", job_id, type(exc).__name__)
+            raise HTTPException(
+                422,
+                "WarriorIQ could not save this video's fighter-selection frame on the server, so the upload "
+                "was not kept. Nothing is wrong with your video - try the upload again in a minute.",
+            ) from exc
+    selection_pending = frame is None
+    if selection_pending:
+        LOGGER.info("upload_selection_frame_deferred_to_browser job_id=%s", job_id)
+        selection_frame_index = 0
+    else:
+        selection_frame_index = int(chosen_index)
+    selection_seconds = selection_frame_index / info.fps if info.fps > 0 else 0.0
+    if not server_decodes:
+        # Nothing this host could sample, so no brightness or sharpness verdict
+        # is honest. The analysis measures the footage after converting it.
+        quality = {"status": "unmeasured", "score": None, "notes": [
+            "This file's format is converted before analysis, so its picture quality is checked then."]}
 
     profile_id = int(account["profile_id"]) if account else 0
     # A guest has no workspace to hold a roster, so their fight simply has no
@@ -3139,7 +3696,22 @@ async def upload(
             "fight_type": fight_type.lower(),
             "analysis_target": analysis_target.upper(),
             "ruleset": normalize_ruleset(ruleset),
-            "start_seconds": start,
+            # The selection frame's time. Kept under its old name because
+            # the frame picker and older workers read it; the analysis start
+            # is requested_start_seconds.
+            "start_seconds": selection_seconds,
+            "selection_seconds": selection_seconds,
+            "requested_start_seconds": requested_start,
+            # True when no frame could be decoded here; the frame picker then
+            # takes it from the browser (selection_frame_image).
+            "selection_pending": selection_pending,
+            # Who chose the selection frame: "auto" (picked here from motion,
+            # nobody has confirmed two fighters are in it), "requested" (the
+            # uploader asked for a start time), later "auto_pair", "chosen" or
+            # "recheck" (_seek_selection_frame). The selection page says which,
+            # so the frame-choice step is never skipped without a word.
+            "selection_source": "requested" if requested_start > 0 else "auto",
+            "server_decodes": bool(server_decodes),
             "end_seconds": end,
             "round_count": count,
             "round_duration_seconds": (
@@ -3150,7 +3722,7 @@ async def upload(
             "video_width": info.width,
             "video_height": info.height,
             "video_duration": info.duration,
-            "selection_frame": selection_frame,
+            "selection_frame": selection_frame_index,
             "profile_id": profile_id,
             "account_id": int(account["id"]) if account else None,
             "usage_reserved": True,
@@ -3195,8 +3767,9 @@ async def upload(
             **acceptance_owner,
         )
     # Straight to the fighters: the clear moment is found on that page
-    # (core/person_detect.py), not scrubbed for by hand.
-    next_url = f"/select/{job_id}"
+    # (core/person_detect.py), not scrubbed for by hand - unless there is no
+    # frame yet, in which case the browser picks one first.
+    next_url = f"/frame/{job_id}" if selection_pending else f"/select/{job_id}"
     if "application/json" in request.headers.get("accept", ""):
         response = JSONResponse({"job_id": job_id, "next_url": next_url}, status_code=201)
     else:
@@ -3222,12 +3795,15 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
+    if job.get("selection_pending") and not (OUTPUTS / job_id / "selection.jpg").exists():
+        # No frame could be decoded on the server yet; the browser picks one.
+        return RedirectResponse(f"/frame/{job_id}", status_code=303)
     # Arriving with a timestamp means the analysis asked to be told who is who,
     # and named the moment it lost track. Land on that frame rather than making
     # somebody scrub for it - they are here because we already failed once.
     if seconds is not None:
         try:
-            _seek_selection_frame(job_id, job, float(seconds))
+            _seek_selection_frame(job_id, job, float(seconds), source="recheck")
         except Exception:                                           # noqa: BLE001
             LOGGER.warning("recheck_seek_failed job=%s seconds=%s", job_id, seconds)
     # Which fighter gets the detailed report is a per-fight choice, made on this
@@ -3257,6 +3833,8 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
         request=request, name="select.html",
         context={"request": request, "job_id": job_id, "job": job,
                  "default_focus": default_focus,
+                 "frame_source": job.get("selection_source"),
+                 "frame_clock": _clock(float(job.get("selection_seconds", job.get("start_seconds")) or 0.0)),
                  "fighter_name": (fighter or {}).get("name"),
                  "default_corner": job.get("fighter_a_corner") or ""})
 
@@ -3300,19 +3878,86 @@ def live_frame(request: Request, job_id: str, t: float = 0.0):
                     headers={"Cache-Control": "private, max-age=3600"})
 
 
-def _seek_selection_frame(job_id: str, job: dict, seconds: float) -> tuple[float, int]:
-    """Point this job's selection frame at a moment in the video."""
+def _seek_selection_frame(job_id: str, job: dict, seconds: float, source: str = "chosen") -> tuple[float, int]:
+    """Point this job's selection frame at a moment in the video.
+
+    ``source`` records who chose it: "chosen" (the person, on the frame
+    picker), "recheck" (the analysis asked to be shown who is who there) or
+    "auto_pair" (the automatic pick found two whole people in it).
+    """
     seconds = max(0.0, min(seconds, max(0.0, float(job["video_duration"]) - 0.001)))
     info = get_video_info(job["video_path"])
     frame_number = int(round(seconds * info.fps))
-    frame = read_frame(job["video_path"], frame_number)
-    if frame is None or not cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), frame):
+    try:
+        frame = read_frame(job["video_path"], frame_number)
+    except Exception:                                               # noqa: BLE001
+        frame = None
+    if frame is None:
+        # OpenCV cannot decode some formats at all (AV1 WebM); ffmpeg can.
+        frame = ffmpeg_frame(job["video_path"], seconds)
+    if frame is None:
+        # Nothing on this host decodes it. The frame picker answers this by
+        # capturing the frame in the browser (selection_frame_image).
+        raise HTTPException(422, "This moment cannot be decoded on the server; your browser will capture it instead.")
+    (OUTPUTS / job_id).mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), frame):
         raise HTTPException(500, "Could not save the selected fighter frame.")
     # A moment somebody chose (or the analysis asked for) is never replaced by
     # the automatic pick.
+    # Only who-is-who moves with it: the analysis still covers the whole video.
     update_job(job_id, {"selection_frame": frame_number, "start_seconds": seconds,
-                        "auto_frame_done": True})
+                        "selection_seconds": seconds, "auto_frame_done": True,
+                        "selection_pending": False, "selection_source": source})
     return seconds, frame_number
+
+
+# A browser-captured frame is one picture: a 4K PNG is under 25 MB, a JPEG far
+# less. Anything bigger is not what the frame picker sends.
+MAX_SELECTION_IMAGE_BYTES = 25 * 1024 * 1024
+
+
+@app.post("/api/selection-frame/{job_id}/image", dependencies=[Depends(require_csrf)])
+async def selection_frame_image(request: Request, job_id: str, seconds: float = 0.0):
+    """Take the fighter-selection frame from the browser.
+
+    For a file nothing on the web host can decode - an AV1 WebM, which this
+    build of OpenCV cannot read and the host may have no ffmpeg for. The
+    browser that plays the video captures the paused frame and sends it here,
+    so the upload is kept instead of refused. The analysis machine converts
+    the video itself before reading it (core.analyzer).
+    """
+    _enforce_rate_limit(request, "selection-frame", 90, 300)
+    job = _authorized_job(request, job_id)
+    if not job or "video_path" not in job:
+        raise HTTPException(404)
+    declared = int(request.headers.get("content-length") or 0)
+    if declared > MAX_SELECTION_IMAGE_BYTES:
+        raise HTTPException(413, "That frame is larger than a single picture should be.")
+    body = await request.body()
+    if not body or len(body) > MAX_SELECTION_IMAGE_BYTES:
+        raise HTTPException(400, "No frame arrived. Pause the video on a clear moment and try again.")
+    image = await run_in_threadpool(cv2.imdecode, np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(400, "That is not a picture. Pause the video on a clear moment and try again.")
+    width, height = int(job.get("video_width") or 0), int(job.get("video_height") or 0)
+    got_height, got_width = image.shape[:2]
+    if width > 0 and height > 0 and (got_width, got_height) != (width, height):
+        # The browser reports the picture size it decoded; it must be this
+        # video's shape, or the fighter boxes would land on the wrong pixels.
+        if abs(got_width / max(1, got_height) - width / max(1, height)) > 0.02:
+            raise HTTPException(400, "That frame is not the shape of this video.")
+        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+    duration = float(job.get("video_duration") or 0.0)
+    seconds = max(0.0, min(float(seconds), max(0.0, duration - 0.001)))
+    fps = float(get_video_info(job["video_path"]).fps or 0.0) or 30.0
+    (OUTPUTS / job_id).mkdir(parents=True, exist_ok=True)
+    if not await run_in_threadpool(cv2.imwrite, str(OUTPUTS / job_id / "selection.jpg"), image):
+        raise HTTPException(500, "Could not save the selected fighter frame.")
+    update_job(job_id, {"selection_frame": int(round(seconds * fps)), "start_seconds": seconds,
+                        "selection_seconds": seconds, "auto_frame_done": True,
+                        "selection_pending": False, "selection_from_browser": True,
+                        "selection_source": "chosen"})
+    return {"ok": True, "seconds": seconds}
 
 
 _auto_frame_locks: dict[str, threading.Lock] = {}
@@ -3342,7 +3987,7 @@ def _auto_pick_selection_frame(job_id: str) -> list[dict] | None:
             update_job(job_id, {"auto_frame_done": True})
             return None
         try:
-            _seek_selection_frame(job_id, job, float(moment["seconds"]))
+            _seek_selection_frame(job_id, job, float(moment["seconds"]), source="auto_pair")
         except Exception as exc:                                    # noqa: BLE001
             LOGGER.warning("auto_frame_seek_failed job=%s error=%s", job_id, type(exc).__name__)
             update_job(job_id, {"auto_frame_done": True})
@@ -3370,24 +4015,37 @@ def detect_people(request: Request, job_id: str):
     path = OUTPUTS / job_id / "selection.jpg"
     if not job or not path.exists():
         raise HTTPException(404)
-    if not SETTINGS.selection_detection_enabled:
-        return {
-            "people": [], "width": job["video_width"], "height": job["video_height"],
-            "availability": "manual_only",
-        }
+    # The light detector (core/person_detect.py: 3.8 MB, OpenCV only) is the
+    # one built for the web host, so it always runs. WARRIORIQ_SELECTION_DETECTION
+    # governs only the pose-model fallback further down. It used to switch both
+    # off, and it is off on Render: no candidate box was ever drawn and no
+    # clear moment ever found there, while the page said WarriorIQ boxes the
+    # people for you (QA, 2026-09).
     moved = _auto_pick_selection_frame(job_id)
     job = get_job(job_id) or job
     frame = cv2.imread(str(path))
     if frame is None:
         raise HTTPException(500, "Could not read selection image")
+    # How this frame was chosen, for the page to say so: an automatic pick is
+    # only presented as a good one when two whole people were found in it.
+    about_frame = {
+        "frame_moved": moved is not None,
+        "seconds": float(job.get("selection_seconds", job.get("start_seconds")) or 0.0),
+        "frame_source": job.get("selection_source"),
+    }
     people = moved if moved is not None else detect_people_in_frame(frame)
     if people is not None:
         # Small figures are crowd, not fighters, and too small to tap.
         tall = [p for p in people if p["box"][3] - p["box"][1] >= 0.10 * frame.shape[0]]
         return {
             "people": tall, "width": job["video_width"], "height": job["video_height"],
-            "availability": "candidates_ready", "frame_moved": moved is not None,
-            "seconds": float(job.get("start_seconds") or 0.0),
+            "availability": "candidates_ready",
+            "pair_found": pair_score(tall, frame.shape[0])[1] is not None, **about_frame,
+        }
+    if not SETTINGS.selection_detection_enabled:
+        return {
+            "people": [], "width": job["video_width"], "height": job["video_height"],
+            "availability": "manual_only", "pair_found": False, **about_frame,
         }
     try:
         tracker = _get_pose_tracker()
@@ -3396,7 +4054,7 @@ def detect_people(request: Request, job_id: str):
         LOGGER.warning("Selection candidate detection unavailable: %s", type(exc).__name__)
         return {
             "people": [], "width": job["video_width"], "height": job["video_height"],
-            "availability": "manual_only",
+            "availability": "manual_only", "pair_found": False, **about_frame,
         }
     boxes = []
     result = results[0]
@@ -3413,6 +4071,7 @@ def detect_people(request: Request, job_id: str):
     return {
         "people": boxes, "width": job["video_width"], "height": job["video_height"],
         "availability": "candidates_ready",
+        "pair_found": pair_score(boxes, frame.shape[0])[1] is not None, **about_frame,
     }
 
 
@@ -3493,7 +4152,13 @@ def _remote_job_payload(job_id: str, job: dict) -> dict:
         "focus_fighter": job.get("focus_fighter") or "A",
         "fight_type": job["fight_type"],
         "ruleset": job["ruleset"],
-        "start_seconds": float(job.get("start_seconds", 0.0)),
+        # A worker that predates requested_start_seconds reads start_seconds as
+        # where to start, and so keeps analysing from the selection frame
+        # exactly as before; a current one analyses from requested_start and
+        # seeds identity at selection_seconds.
+        "start_seconds": float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
+        "selection_seconds": float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
+        "requested_start_seconds": float(job.get("requested_start_seconds", 0.0) or 0.0),
         "end_seconds": job.get("end_seconds"),
         "round_count": int(job.get("round_count", 1)),
         "round_duration_seconds": float(job.get("round_duration_seconds", 120.0)),
@@ -3740,7 +4405,7 @@ def remote_worker_failed(request: Request, job_id: str, payload: WorkerFailurePa
         update_job(job_id, {"usage_reserved": False})
     if not update_job_for_worker(job_id, worker_id, payload.analysis_run_id, {
         "status": "error",
-        "message": "WarriorIQ could not finish this analysis. Your upload and fighter selections are preserved so you can try again.",
+        "message": _worker_failure_message(payload.error_code),
         "worker_lease_expires_epoch": None,
         "worker_error_code": str(payload.error_code or "analysis_failed")[:80],
     }, renew_lease=False):
@@ -3769,18 +4434,17 @@ def pair_check(request: Request, job_id: str, payload: PairCheckPayload):
     height, width = chosen_frame.shape[:2]
     fighter_a_box = _validated_fighter_box(payload.fighter_a_box, width, height, "Fighter A")
     fighter_b_box = _validated_fighter_box(payload.fighter_b_box, width, height, "Fighter B")
-    alike = fighter_pair_similarity(
-        _appearance_observation(chosen_frame, fighter_a_box),
-        _appearance_observation(chosen_frame, fighter_b_box),
-    )
-    if alike is None:
+    kit = kit_similarity(chosen_frame, fighter_a_box, fighter_b_box)
+    if kit is None:
         return {"checked": False}
-    looks_alike = float(alike) >= SETTINGS.max_fighter_pair_similarity
+    alike = kit["similarity"]
+    looks_alike = float(alike) >= SETTINGS.max_kit_similarity
     return {
         "checked": True,
         "similarity": round(float(alike), 3),
         "looks_alike": looks_alike,
-        **({"message": _looks_alike_message(float(alike))} if looks_alike else {}),
+        "cause": kit_alike_reason(kit) if looks_alike else None,
+        **({"message": _looks_alike_message(float(alike), kit)} if looks_alike else {}),
     }
 
 
@@ -3818,16 +4482,14 @@ def start(request: Request, job_id: str, payload: StartPayload):
     # what can be believed, and because this is the last moment the person who
     # can actually answer it is still looking at the screen.
     chosen_frame = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
-    alike = fighter_pair_similarity(
-        _appearance_observation(chosen_frame, fighter_a_box),
-        _appearance_observation(chosen_frame, fighter_b_box),
-    )
+    kit = kit_similarity(chosen_frame, fighter_a_box, fighter_b_box)
+    alike = None if kit is None else kit["similarity"]
     # Warned, never refused. Most footage is not shot for us, and a user with a
     # phone video of two fighters in the same club kit still deserves an
     # analysis - they just deserve to be told which parts of it to trust. The
     # results carry the same finding through to the report.
     looks_alike = (
-        alike is not None and alike >= SETTINGS.max_fighter_pair_similarity
+        alike is not None and alike >= SETTINGS.max_kit_similarity
     )
     if looks_alike:
         LOGGER.info("fighters_look_alike job=%s similarity=%.3f", job_id, float(alike))
@@ -3879,7 +4541,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
         _wake_analysis_worker(job_id)
     return _analysis_started_response(request, job_id, capacity["deferred"],
                                       looks_alike=float(alike) if looks_alike else None,
-                                      on_official=on_official)
+                                      on_official=on_official, kit=kit)
 
 
 @app.post("/api/restart/{job_id}", dependencies=[Depends(require_csrf)])
@@ -3928,6 +4590,9 @@ def progress_page(request: Request, job_id: str):
     _pin_sport_to_fight(request, _job_sport(job))
     return templates.TemplateResponse(request=request, name="progress.html", context={
         "request": request, "job_id": job_id, "initial_status": _public_job_status(job_id, job),
+        # The same counting policy as the upload page and the report, so the
+        # live view cannot claim "leg strikes only" above a feed of punches.
+        "live_counting_note": counting_policy(_job_sport(job)).live_note,
     })
 
 
@@ -3941,7 +4606,10 @@ def _public_job_status(job_id: str, job: dict) -> dict:
     payload = {key: value for key, value in job.items() if key in public_fields}
     payload.setdefault("job_id", job_id)
     payload.setdefault("video_duration_seconds", job.get("video_duration", 0.0))
-    start_seconds = float(job.get("start_seconds", 0.0) or 0.0)
+    # Where the analysed span actually starts: reported by the run once it
+    # knows (it can begin later than requested if the fighters could not be
+    # followed back that far), else the requested start.
+    start_seconds = float(job.get("analysed_from_seconds", job.get("requested_start_seconds", 0.0)) or 0.0)
     full_duration = float(job.get("video_duration", payload.get("video_duration_seconds", 0.0)) or 0.0)
     scheduled_duration = (
         float(job.get("round_count", 1) or 1) * float(job.get("round_duration_seconds", full_duration) or full_duration)
@@ -4091,14 +4759,45 @@ def _appearance_observation(image, box):
 
 
 def _identity_lost_to_camera(report: dict) -> bool:
-    """The identity check failed because the fighters kept being found again.
+    """The identity check failed for a reason re-picking the fighters cannot fix.
 
-    Re-picking the fighters cannot help then, so every "pick them again" on
-    the page gives way to asking for a steadier recording.
+    The name is historical: it began as "the camera kept losing them". It now
+    covers every such cause (core.report.identity_failure), so every "pick
+    them again" on the page gives way to the one recommendation that applies.
     """
+    cause = _identity_failure(report)
+    if cause is not None:
+        return not cause["repick"]
     from core.report import identity_churned
 
     return any(identity_churned((report or {}).get("tracking") or {}).values())
+
+
+def _identity_failure(report: dict) -> dict | None:
+    """The one cause and recommendation for a failed identity check."""
+    tracking = (report or {}).get("tracking") or {}
+    target = ((report or {}).get("video") or {}).get("analysis_target", "BOTH")
+    required = ("A", "B") if target == "BOTH" else (target,)
+    return identity_failure(tracking, required)
+
+
+def _identity_withheld(report: dict, cause: dict, job_id: str | None) -> dict:
+    """The score box for a failed identity check, from the shared cause."""
+    tracking = report.get("tracking") or {}
+    withheld = {
+        "reason": f"{cause['headline']} Rather than guess, no strike is credited to either name.",
+        "fix": cause["advice"],
+    }
+    if cause["repick"] and job_id:
+        # Land them on the moment we lost track, when we know one; otherwise
+        # on the frame they picked.
+        recheck = f"/select/{job_id}"
+        moment = tracking.get("last_identity_confusion_frame")
+        fps = float((report.get("video") or {}).get("fps") or 0) or 30.0
+        if moment:
+            recheck += f"?seconds={max(0.0, float(moment) / fps):.2f}"
+        withheld["action"] = {"label": "Show me who is who", "url": recheck}
+    return withheld
 
 
 def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
@@ -4123,38 +4822,14 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
         except (TypeError, ValueError):
             return "an unknown share"
 
-    if status == "fighters_not_separable":
-        alike = tracking.get("fighter_pair_similarity")
-        alike_text = f"{float(alike):.0%}" if alike is not None else "very closely"
-        confusions = int(tracking.get("identity_confusions") or 0)
-        muddled = (
-            f" We lost track of which was which {confusions} times during the fight."
-            if confusions else ""
-        )
-        # Land them on the moment we lost track, when we know one; otherwise on
-        # the frame they picked. Either way the next click is the question we
-        # actually need answered, not a video to scrub through.
-        moment = tracking.get("last_identity_confusion_frame")
-        fps = float((report.get("video") or {}).get("fps") or 0) or 30.0
-        recheck = None
-        if job_id:
-            recheck = f"/select/{job_id}"
-            if moment:
-                recheck += f"?seconds={max(0.0, float(moment) / fps):.2f}"
-        return {
-            "reason": (
-                f"The two fighters look too alike in this video for us to tell them apart. "
-                f"Their kit matches {alike_text}, where a bout we can read is usually nearer 60%."
-                f"{muddled} Rather than guess, we have not credited strikes to either name."
-            ),
-            **({"action": {"label": "Show me who is who", "url": recheck}} if recheck else {}),
-            "fix": (
-                "Pick the two fighters again on a frame where their kit, headguards or corner "
-                "colours differ most - often just after a break, when they are apart and facing "
-                "the camera. If they genuinely wear the same colours, film from a side angle so "
-                "position tells them apart instead."
-            ),
-        }
+    if status in {"fighters_not_separable", "identity_integrity_failed"}:
+        if status == "fighters_not_separable" and "fighters_separable" not in tracking:
+            # The status is the record of the verdict; an older report may
+            # carry it without the field the resolver reads.
+            report = {**report, "tracking": {**tracking, "fighters_separable": False}}
+        cause = _identity_failure(report)
+        if cause is not None:
+            return _identity_withheld(report, cause, job_id)
     if status == "both_fighters_required":
         return {
             "reason": "You analysed one fighter, so there is no opponent to score against.",
@@ -4222,20 +4897,6 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
         return {
             "reason": f"Too few strikes could be counted with confidence. {seen}",
             "fix": "Footage shot closer, steadier or from the side usually reads far better.",
-        }
-    if status == "identity_integrity_failed":
-        if _identity_lost_to_camera(report):
-            # Re-picking cannot help when the camera is the cause.
-            return {
-                "reason": ("We kept losing the fighters and finding them again, so we cannot be sure "
-                           "the numbers belong to them. This happens when the camera moves a lot and "
-                           "the hall is busy."),
-                "fix": ("Film from one fixed spot - a tripod, or the phone held still against a rail - "
-                        "with the mat filling most of the picture, then upload again."),
-            }
-        return {
-            "reason": "We could not stay certain which fighter was which for the whole fight.",
-            "fix": "Pick both fighters again on a clearer frame, then re-run.",
         }
     return {
         "reason": "Tracking was not steady enough for a fair score.",
@@ -4378,6 +5039,11 @@ def result_page(request: Request, job_id: str):
     # kick-minimum table are not built at all, and one unattributed total is
     # given instead. See core.report.unattributed_kick_total.
     identity_trusted = bool((report.get("integrity") or {}).get("identity_evidence_trusted", True))
+    numbers = _numbers_state(report)
+    # A coach link is allowed whatever the numbers' state: the coach's page
+    # (shared.html) withholds unverified or absent numbers and says why, so the
+    # link carries the explanation with it. Only the public story card, which
+    # posts numbers as the fighter's own, stays off until they are verified.
     _pin_sport_to_fight(request, report.get("scorecard", {}).get("sport") or _job_sport(job))
     _estimate_score_withheld_for_punches(report)
     score_withheld = _score_withheld(report, job_id)
@@ -4389,6 +5055,12 @@ def result_page(request: Request, job_id: str):
     # reports analysed before this change say the same thing top and bottom.
     if score_withheld and score_withheld.get("disclaimer"):
         report["scorecard"]["disclaimer"] = score_withheld["disclaimer"]
+    # The sport panel's counting sentence was stored with the report, so
+    # reports written under an older policy kept saying "punches are not
+    # shown" beside punch counts. It is re-read from the one policy instead.
+    for coaching in (report.get("sport_coaching") or {}).values():
+        if isinstance(coaching, dict) and coaching.get("sport"):
+            coaching["report_frame"] = counting_policy(coaching["sport"]).report_frame
     # Written at analysis time too, and the stored copy blamed the whole sport
     # for a ruleset-only gap; see core.scoring.coverage_note.
     try:
@@ -4398,7 +5070,11 @@ def result_page(request: Request, job_id: str):
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
+        "analysed_span": _analysed_span_summary(report),
+        "fight_footage": _fight_footage_summary(report),
+        "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
+        "identity_failure": _identity_failure(report),
         # "Punches and knees are not counted" on taekwondo, which awards no
         # knees - the note names only what this sport actually scores.
         "withheld_families": _reported_strike_families(
@@ -4436,6 +5112,7 @@ def result_page(request: Request, job_id: str):
         "share_card_missing": (
             "account" if not _account(request)
             else "identity" if not identity_trusted
+            else "no_fight" if numbers["state"] == "no_fight"
             else "stats"),
         # The fight's live public links, one per fighter (story_page).
         "story_links": [
@@ -4443,7 +5120,8 @@ def result_page(request: Request, job_id: str):
             for link in (list_story_shares(job_id, _profile) if _profile is not None and _account(request) else [])
         ],
         "went_down_note": (report.get("went_down") or {}).get("note"),
-        "estimate_note": ESTIMATE_NOTE,
+        "estimate_note": counting_policy(
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job)).estimate_note,
         "families_shown": published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job)),
         # Only Full Contact has an obligatory kick count, so this is None for
@@ -4482,13 +5160,37 @@ def download_report_json(request: Request, job_id: str):
     path = _require_completed_artifact(job_id, "report.json")
     if not path.exists():
         raise HTTPException(404, "Fight report not found")
-    return FileResponse(
-        path, media_type="application/json",
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise HTTPException(404, "Fight report not found") from None
+    return Response(
+        json.dumps(_without_hardware(report), indent=1), media_type="application/json",
         headers={
             "Content-Disposition": f'attachment; filename="warrioriq-{job_id}.json"',
             "Cache-Control": "no-store",
         },
     )
+
+
+def _without_hardware(report: dict) -> dict:
+    """The owner's report without the machine it ran on.
+
+    Which graphics card analysed a fight, and where its model files sit on
+    that machine, is operations detail: it stays in the worker's logs and the
+    stored report, and is not handed out. Only whether a graphics card was used
+    is kept, because that is what explains the speed.
+    """
+    performance = report.get("performance")
+    if isinstance(performance, dict):
+        gpu = performance.pop("gpu", None)
+        if gpu is not None:
+            performance["compute"] = "processor" if str(gpu).upper() == "CPU" else "graphics card"
+        model = performance.get("pose_model")
+        if isinstance(model, str):
+            performance["pose_model"] = Path(model).name
+        performance.pop("vram_free_at_start", None)
+    return report
 
 
 @app.post("/api/sport-check", dependencies=[Depends(require_csrf)])
@@ -4929,6 +5631,24 @@ def replay_page(
         family.lower() if family else None,
         outcome.lower() if outcome else None,
     )
+    sport = (report.get("scorecard") or {}).get("sport") or _job_sport(_authorized_job(request, job_id) or {})
+    policy = counting_policy(sport)
+    if replay_mode == "movement_chapters" and identity_safe and STRIKE_COUNTS_PUBLISHED:
+        # The report lists every counted strike ("Watch every counted strike")
+        # while this page said no action had passed. The same list is offered
+        # here, labelled as what it is: automatic counts, estimates.
+        counted = _counted_strikes(report, published_families(sport))
+        if fighter and fighter.upper() in {"A", "B"}:
+            counted = [row for row in counted if row["fighter"] == fighter.upper()]
+        if family and family.lower() in {"punch", "kick", "knee"}:
+            counted = [row for row in counted if row["family"] == family.lower()]
+        if counted:
+            replay_chapters = [{
+                "time": round(row["seconds"], 3), "lead_seconds": 1.0,
+                "label": f"{row['clock']} · Fighter {row['fighter']} · {row['family'].title()}",
+                "detail": "Counted automatically (estimate)", "kind": "counted_strike",
+            } for row in counted[:200]]
+            replay_mode = "counted_strikes"
     _pin_sport_to_fight(request, (report.get("scorecard") or {}).get("sport"))
     return templates.TemplateResponse(
         request=request,
@@ -4938,6 +5658,7 @@ def replay_page(
             "identity_safe": identity_safe,
             "replay_chapters": replay_chapters,
             "replay_mode": replay_mode,
+            "counting_policy": policy.as_dict(),
             "evidence_filter": " · ".join(
                 value.replace("_", " ").title()
                 for value in (fighter, family, outcome) if value
@@ -5265,15 +5986,102 @@ def _report_available(job_id: str) -> bool:
         return False
 
 
+# What the fight library's "Pending" section lists: everything somebody has
+# uploaded that is not a finished report yet. Analyses in progress never
+# appeared in /history at all, and an upload waiting for its fighters could
+# only be found again through the top-bar chip - which shows one job - so the
+# "finish your pending fights" refusal pointed at things nobody could see.
+PENDING_LIBRARY_STATUSES = ("selecting", "queued", "running", "interrupted", "error")
+_PENDING_LABELS = {
+    "selecting": "Waiting for you to pick the fighters",
+    "queued": "Waiting for the analysis machine",
+    "running": "Being analysed",
+    "interrupted": "Paused - open it to restart",
+    "error": "Did not finish - open it for the reason",
+}
+
+
+def _pending_jobs_for_owner(owner_key: str) -> list[dict]:
+    """This person's unfinished fights, newest first. Saved fights are not
+    pending - they are already in the library below."""
+    pending = []
+    for job_id, job in list_jobs():
+        status = job.get("status")
+        if job.get("owner_key") != owner_key or status not in PENDING_LIBRARY_STATUSES:
+            continue
+        if get_fight(job_id):
+            continue
+        percent = max(0.0, min(99.0, float(job.get("percent") or 0.0)))
+        label = _PENDING_LABELS[status]
+        if status == "running" and percent > 0:
+            label = f"Being analysed - {int(percent)}%"
+        pending.append({
+            "job_id": job_id,
+            "status": status,
+            "label": label,
+            "continue_url": f"/select/{job_id}" if status == "selecting" else f"/progress/{job_id}",
+            "continue_label": "Pick the fighters" if status == "selecting" else "Open",
+            "original_name": str(job.get("original_name") or "Fight video")[:80],
+            "ruleset": job.get("ruleset"),
+            "created_at": datetime.fromtimestamp(
+                float(job.get("created_at_epoch") or job.get("updated_at_epoch") or time.time()),
+                tz=timezone.utc).isoformat(),
+            "sort_key": float(job.get("created_at_epoch") or 0.0),
+        })
+    pending.sort(key=lambda item: item["sort_key"], reverse=True)
+    return pending
+
+
+def _discard_pending_job(job_id: str, job: dict) -> None:
+    """Remove an unfinished fight and give back everything it held.
+
+    Deleting the session first is what stops an analysis in flight: a worker
+    claims and reports progress only against a session it can read, so its
+    next progress report is refused and it abandons the run.
+    """
+    delete_job(job_id)
+    if job.get("usage_reserved") and job.get("account_id"):
+        release_analysis(int(job["account_id"]), job_id)
+    video = Path(job.get("video_path") or "missing").resolve()
+    if video.parent == UPLOADS.resolve():
+        remove_derivative(video)
+        video.unlink(missing_ok=True)
+    job_dir = (OUTPUTS / job_id).resolve()
+    if job_dir.parent == OUTPUTS.resolve() and job_dir.exists():
+        shutil.rmtree(job_dir, ignore_errors=True)
+    delete_legal_acceptances_for_resource(job_id)
+
+
+@app.post("/pending/{job_id}/cancel", dependencies=[Depends(require_csrf)])
+def cancel_pending_job(request: Request, job_id: str):
+    """Cancel an upload waiting for its fighters, or an analysis not finished."""
+    owner = _owner_key(request)
+    job = get_job(job_id)
+    if (not job or job.get("owner_key") != owner
+            or job.get("status") not in PENDING_LIBRARY_STATUSES or get_fight(job_id)):
+        raise HTTPException(404)
+    _discard_pending_job(job_id, job)
+    account = _account(request)
+    record_security_event(
+        "pending_fight_cancelled", account_id=int(account["id"]) if account else None,
+        resource_type="fight", resource_id=job_id, metadata={"status": job.get("status")},
+    )
+    if "application/json" in request.headers.get("accept", ""):
+        return {"cancelled": True}
+    return RedirectResponse("/history#pending", status_code=303)
+
+
 @app.get("/history", response_class=HTMLResponse)
 def history_page(request: Request):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
     for fight in fights:
         fight["report_available"] = _report_available(fight["job_id"])
+    pending = _pending_jobs_for_owner(_owner_key(request)) if profile_id is not None else []
     return templates.TemplateResponse(
         request=request, name="history.html",
-        context={"request": request, "fights": fights, "signed_in": profile_id is not None},
+        context={"request": request, "fights": fights, "pending": pending,
+                 "signed_in": profile_id is not None},
     )
 
 
@@ -5960,6 +6768,14 @@ def admin_delete_prohibited_video(request: Request, job_id: str = Form(...)):
     return RedirectResponse("/admin", status_code=303)
 
 
+@app.get("/admin/openapi.json", include_in_schema=False)
+def admin_openapi(request: Request):
+    """The API schema, for a signed-in administrator only."""
+    if not _is_admin(request):
+        raise HTTPException(404)
+    return JSONResponse(app.openapi())
+
+
 @app.get("/assets/{bundle}.css", include_in_schema=False)
 def css_bundle(bundle: str):
     """Serve one concatenated stylesheet instead of several.
@@ -5998,7 +6814,8 @@ def favicon():
 def robots_txt():
     if not SETTINGS.public_base_url:
         return PlainTextResponse("User-agent: *\nDisallow: /\n")
-    disallowed = "\n".join(f"Disallow: {prefix}" for prefix in PRIVATE_ROUTE_PREFIXES)
+    disallowed = "\n".join(f"Disallow: {prefix}" for prefix in PRIVATE_ROUTE_PREFIXES
+                            if prefix not in UNADVERTISED_PRIVATE_PREFIXES)
     return PlainTextResponse(
         f"User-agent: *\nAllow: /\n{disallowed}\nSitemap: {SETTINGS.public_base_url}/sitemap.xml\n"
     )
@@ -6096,6 +6913,8 @@ async def chunked_upload_begin(request: Request):
         return JSONResponse(
             {"detail": "Create a free account or sign in to analyse a fight."},
             status_code=401)
+    if hold := _guardian_hold(account):
+        return JSONResponse({"detail": hold}, status_code=403)
     account_id = int(account["id"])
     try:
         payload = await request.json()
@@ -6113,11 +6932,21 @@ async def chunked_upload_begin(request: Request):
 
     job_id = uuid.uuid4().hex[:12]
     reserved = False
+    ceiling = min(MAX_FIGHT_BYTES, SETTINGS.max_chunked_upload_bytes)
+    try:
+        declared = int(payload.get("size") or 0)
+    except (TypeError, ValueError):
+        declared = 0
     try:
         _enforce_rate_limit(request, "fight-upload", 12, 600)
+        # Reserve what this file says it is, not the largest file allowed. The
+        # declared size is enforced chunk by chunk (append refuses anything
+        # past it), so it is a real bound; reserving the 512 MB ceiling three
+        # times over for a 40 MB clip made two unfinished uploads look like a
+        # full account.
         await run_in_threadpool(
             reserve_upload_storage, account_id, job_id,
-            min(MAX_FIGHT_BYTES, SETTINGS.max_chunked_upload_bytes))
+            min(declared, ceiling) if declared > 0 else ceiling)
         reserved = await run_in_threadpool(reserve_analysis, account_id, job_id)
         if not reserved:
             release_upload_storage(job_id)
@@ -6387,6 +7216,10 @@ def health_check(request: Request):
     copied its files without restarting the application.
     """
     payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT}
+    # The probe skips the per-visitor context (see _is_lightweight_request), so
+    # the session is read here, and only when there is one to read.
+    if not hasattr(request.state, "account") and request.cookies.get(SESSION_COOKIE):
+        request.state.account = resolve_session(request.cookies.get(SESSION_COOKIE))
     # How long THIS process has been alive, and how much memory it is holding.
     #
     # Added to answer a question nothing else could. Measured from outside, the
@@ -6417,6 +7250,20 @@ def health_check(request: Request):
         payload["deployed"] = on_disk
         payload["restart_required"] = True
     return payload
+
+
+@app.api_route("/healthz", methods=["GET", "HEAD"], include_in_schema=False)
+def healthz():
+    """The cheapest possible liveness answer, for an uptime monitor.
+
+    No database, no disk, no session, no template: if this does not answer,
+    the process is not serving at all, or something in front of it - the host,
+    its firewall, a bot-challenge layer - is not letting the request through.
+    /health adds the running commit; /ready checks the database, storage and
+    worker and is the one to alert on for "analyses will not run".
+    """
+    return Response('{"status":"ok"}', media_type="application/json",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.get("/ready", include_in_schema=False)
@@ -6576,7 +7423,11 @@ def shared_report(request: Request, token: str):
     return templates.TemplateResponse(
         request=request, name="shared.html",
         context={"request": request, "report": report, "expires_at": share["expires_at"],
-                 "expires_label": _friendly_date(share["expires_at"])},
+                 "expires_label": _friendly_date(share["expires_at"]),
+                 # The same verdicts the athlete's page shows, so a coach sees
+                 # no number the athlete was told not to trust.
+                 "numbers": _numbers_state(report),
+                 "identity_cause": identity_failure(report.get("tracking") or {})},
     )
 
 

@@ -1,0 +1,31 @@
+<!doctype html>
+{#- Standalone on purpose: the site-wide limiter answers before the visitor's
+    session is read, and base.html needs that session. Inline styles only, so
+    this page costs no further request against a limit already reached. -#}
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#081226">
+  <title>Slow down for a moment · WarriorIQ</title>
+  <style>
+    :root{color-scheme:dark}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#081226;color:#e6edf8;
+      font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px;box-sizing:border-box}
+    main{max-width:520px;width:100%;background:#0d1a33;border:1px solid #22355c;border-radius:16px;padding:28px 24px}
+    .code{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#8ea2c6}
+    h1{font-size:24px;line-height:1.25;margin:8px 0 12px}
+    p{margin:0 0 14px;color:#c4d0e4}
+    a{display:inline-flex;align-items:center;min-height:44px;padding:0 18px;border-radius:999px;
+      background:#6380ff;color:#fff;text-decoration:none;font-weight:600}
+  </style>
+</head>
+<body>
+  <main role="main" aria-live="polite">
+    <div class="code">429 · WarriorIQ</div>
+    <h1>Slow down for a moment</h1>
+    <p>{{ detail }}</p>
+    <p>This page answered on purpose rather than leaving the connection hanging. Reload after the wait and you will be back where you were.</p>
+    <a href="/">Back to WarriorIQ</a>
+  </main>
+</body>
+</html>
