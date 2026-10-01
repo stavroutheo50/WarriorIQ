@@ -213,6 +213,10 @@ class ProductFoundationTests(unittest.TestCase):
         for typed, expected in (
             ("boxing", "BOXING"), ("Muay Thai", "MUAY_THAI"), ("thai", "MUAY_THAI"),
             ("wtf", "WT_TAEKWONDO"), ("WTF Taekwondo", "WT_TAEKWONDO"), ("tkd", "WT_TAEKWONDO"),
+            ("World Taekwondo", "WT_TAEKWONDO"), ("taekwondo", "WT_TAEKWONDO"),
+            # The ITF writes its name "Taekwon-Do": the traditional, non-Olympic rules.
+            ("Taekwon-Do", "ITF_TAEKWONDO"), ("ITF", "ITF_TAEKWONDO"),
+            ("International Taekwon-Do Federation", "ITF_TAEKWONDO"),
             ("mma", "MMA"), ("k-1", "K1"),
         ):
             self.assertEqual(normalize_ruleset(typed), expected, typed)

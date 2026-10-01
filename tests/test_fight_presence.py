@@ -178,21 +178,28 @@ def test_too_little_fight_footage_shows_no_numbers(result_client):
     assert "Only 0:04 of this video could be used as fight footage" in page
     assert 'class="fight-vitals"' not in page
     assert "Your fight in numbers" not in page
-    assert 'action="/share/abcdef123456"' not in page
 
 
-def test_an_unverified_report_greys_out_its_numbers_and_shares_nothing(result_client):
+def test_an_unverified_report_greys_out_its_numbers_and_keeps_them_off_the_story_card(result_client):
     client, install = result_client
     install(_report(identity_evidence_trusted=False))
     page = client.get("/result/abcdef123456").text
     assert "Unverified &mdash; may include other people" in page or "Unverified — may include other people" in page
     assert 'data-unverified="true"' in page
     assert "how far you travel each second" not in page
-    assert 'action="/share/abcdef123456"' not in page
+    # No story card: it would post the numbers as the fighter's own.
+    assert "data-share-card-open" not in page
     assert 'aria-disabled="true"' in page
-    assert "Nothing is shared or posted from an unverified report." in page
-    refused = client.post("/share/abcdef123456", follow_redirects=False)
-    assert refused.status_code == 409
+    assert "They cannot go on a story card" in page
+    # A coach link is allowed: the coach's page withholds the numbers too.
+    assert 'action="/share/abcdef123456"' in page
+    created = client.post("/share/abcdef123456", follow_redirects=False)
+    assert created.status_code == 303
+    token = created.headers["location"].split("share=")[1]
+    coach = client.get(f"/s/{token}").text
+    assert "Identity check failed." in coach
+    assert "Performance summary" in coach and "Not shown: identity check failed." in coach
+    assert 'class="metric-grid"' not in coach
 
 
 def test_a_verified_report_reads_as_the_fighters_own(result_client):

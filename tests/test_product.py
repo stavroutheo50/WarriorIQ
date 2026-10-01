@@ -127,7 +127,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             data={"email": "athlete@example.com", "password": "Strong-Local-Password"},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("at least 18", response.text)
+        self.assertIn("18 or older", response.text)
         self.assertIn("Terms of Service and Privacy Policy", response.text)
         self.assertIsNone(database.get_account_by_email("athlete@example.com"))
 

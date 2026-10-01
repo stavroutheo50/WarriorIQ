@@ -46,7 +46,7 @@ from app.state import (
     start_job_run, state_generation, update_job, update_job_for_worker, wake_status, worker_status,
 )
 from core.auth import (
-    authenticate, end_session, hash_password, issue_session, register, resolve_session,
+    authenticate, end_session, hash_password, issue_session, normalize_email, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
 )
 from core.identity import fighter_pair_similarity
@@ -79,6 +79,7 @@ from core.db import (
     revoke_report_shares, save_annotation,
     get_story_share, list_profile_story_shares, list_story_shares, revoke_story_shares, story_share,
     save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
+    set_guardian_approval_status,
     set_account_status, set_annotation_sequence,
     page_view_summary, plan_interest_counts, plans_wanted_by, policies_outdated,
     record_page_view, record_plan_interest, record_policy_reacceptance,
@@ -425,7 +426,7 @@ PRIVATE_ROUTE_PREFIXES = (
     "/media/", "/fighter-portrait/", "/selection-image/", "/live-frame/", "/dashboard", "/history",
     "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
-    "/auth/",
+    "/auth/", "/guardian",
 )
 # Private areas robots.txt does not name. Listing them there advertised the
 # admin console, validation tooling and payment webhook to anyone who reads the
@@ -1282,12 +1283,12 @@ def _numbers_state(report: dict) -> dict:
             message = (f"Only {_clock(fight)} of footage was analysed, which is too little to measure, "
                        "so this report shows no numbers.")
         return {"state": "no_fight", "message": message,
-                "share_reason": "There are no numbers in this report, so there is nothing to share."}
+                "share_reason": "There are no numbers in this report, so there is nothing to put on a story card."}
     if not integrity.get("identity_evidence_trusted", True):
         return {"state": "unverified", "message": None,
                 "share_reason": ("WarriorIQ could not confirm who was who in this fight, so the numbers on "
-                                 "this page are unverified and may include other people. Nothing is shared "
-                                 "or posted from an unverified report.")}
+                                 "this page are unverified and may include other people. They cannot go on "
+                                 "a story card; a coach link shows your coach the report without them.")}
     return {"state": "ok", "message": None, "share_reason": None}
 
 
@@ -2515,8 +2516,20 @@ async def social_auth_start(
     age_confirmed: bool = Form(False),
     accept_policies: bool = Form(False),
     marketing_consent: bool = Form(False),
+    age_group: str = Form(""),
 ):
     _enforce_rate_limit(request, "social-auth-start", 30, 300)
+    group = age_group.strip().lower() or ("adult" if age_confirmed else "")
+    if mode == "signup" and group == "minor":
+        # The guardian's details are asked on the email form, so that is the
+        # way in for someone under the minimum age.
+        return _auth_page(
+            request, "signup",
+            f"Under {SETTINGS.minimum_account_age}? Create your account with your email below, so WarriorIQ can "
+            "ask your parent or guardian to approve it.",
+            next_path,
+        )
+    age_confirmed = group == "adult"
     if _account(request):
         return RedirectResponse(_safe_next(next_path), status_code=303)
     if mode not in {"signup", "login"}:
@@ -2732,6 +2745,63 @@ def _send_verification_email(request: Request, account: dict) -> bool:
         return False
 
 
+# Accounts for people under the minimum age (SETTINGS.minimum_account_age).
+#
+# Sign-up used to be adults only. A fighter under 18 can now have an account,
+# with a parent or guardian's approval: sign-up asks for their name and email,
+# WarriorIQ emails them a link, and until they approve the account can look
+# around but not upload a fight - footage is the personal data that matters
+# here. The approval is a signed link (no new table): it names the account and
+# the guardian address it was sent to, and expires.
+GUARDIAN_PENDING = "pending_guardian"
+GUARDIAN_APPROVED = "guardian_approved"
+GUARDIAN_DECLINED = "guardian_declined"
+GUARDIAN_LINK_DAYS = 14
+
+
+def _guardian_signer():
+    from itsdangerous import URLSafeTimedSerializer
+
+    return URLSafeTimedSerializer(_session_secret(), salt="warrioriq-guardian-approval")
+
+
+def _guardian_hold(account: dict | None) -> str | None:
+    """Why this account may not upload yet, or None."""
+    status = str((account or {}).get("guardian_approval_status") or "not_applicable")
+    if status == GUARDIAN_PENDING:
+        return ("Your parent or guardian has not approved your account yet. Fight videos can be uploaded "
+                "once they open the link WarriorIQ emailed them. You can send it again from /guardian.")
+    if status == GUARDIAN_DECLINED:
+        return "Your parent or guardian did not approve this account, so it cannot upload fight videos."
+    return None
+
+
+def _guardian_request(account: dict) -> dict | None:
+    """The guardian named at sign-up, from the consent record."""
+    for record in list_legal_acceptances(profile_id=int(account["profile_id"])):
+        if record.get("kind") == "guardian_consent" and record["metadata"].get("guardian_email"):
+            return record["metadata"]
+    return None
+
+
+def _send_guardian_email(request: Request, account: dict, guardian_name: str, guardian_email: str) -> bool:
+    token = _guardian_signer().dumps({"a": int(account["id"]), "g": token_digest(guardian_email.lower())})
+    approve_url = f"{_public_base(request)}/guardian/approve/{token}"
+    body = (
+        f"Hello {guardian_name},\n\n"
+        f"Someone signing up to WarriorIQ as {account['email']} said they are under "
+        f"{SETTINGS.minimum_account_age} and named you as their parent or guardian.\n\n"
+        "WarriorIQ analyses fight videos for combat-sports training. Until you approve, the account cannot "
+        "upload any video. To read what it does with footage and approve or decline, open this link within "
+        f"{GUARDIAN_LINK_DAYS} days:\n\n{approve_url}\n\n"
+        "If you do not know this person, ignore this message and nothing will be uploaded."
+    )
+    try:
+        return send_transactional_email(guardian_email, "Approve a WarriorIQ account", body)
+    except Exception:                                                   # noqa: BLE001
+        return False
+
+
 @app.get("/signup", response_class=HTMLResponse)
 def signup_page(request: Request, next: str = "/dashboard"):
     if _account(request):
@@ -2748,12 +2818,29 @@ def signup(
     accept_terms: bool = Form(False),
     age_confirmed: bool = Form(False),
     marketing_consent: bool = Form(False),
+    # "adult" or "minor". age_confirmed=true (the old checkbox) still means adult.
+    age_group: str = Form(""),
+    guardian_name: str = Form(""),
+    guardian_email: str = Form(""),
 ):
     _enforce_rate_limit(request, "signup", 20, 300)
-    if not accept_terms or not age_confirmed:
+    group = age_group.strip().lower() or ("adult" if age_confirmed else "")
+    if not accept_terms or group not in {"adult", "minor"}:
         return _auth_page(
             request, "signup",
-            f"Confirm that you are at least {SETTINGS.minimum_account_age} and accept the Terms of Service and Privacy Policy.",
+            f"Say whether you are {SETTINGS.minimum_account_age} or older, and accept the Terms of Service and "
+            "Privacy Policy.",
+            next_path,
+        )
+    minor = group == "minor"
+    guardian_name = " ".join(guardian_name.split())[:80]
+    guardian_email = guardian_email.strip()
+    if minor and (not guardian_name or not valid_email(guardian_email)
+                  or normalize_email(guardian_email) == normalize_email(email)):
+        return _auth_page(
+            request, "signup",
+            f"Under {SETTINGS.minimum_account_age}, a parent or guardian has to approve your account. Enter their "
+            "name and their own email address - not yours.",
             next_path,
         )
     try:
@@ -2763,11 +2850,13 @@ def signup(
     record_account_signup_acceptance(
         int(account["id"]), terms_version=SETTINGS.policy_version,
         privacy_version=SETTINGS.policy_version, marketing_consent=bool(marketing_consent),
+        guardian_approval_status=GUARDIAN_PENDING if minor else "not_applicable",
     )
+    age_record = ("age_under_minimum_declared" if minor else "age_18_plus_confirmation", "accepted")
     for kind, status in (
         ("terms_acceptance", "accepted"),
         ("privacy_acknowledgement", "accepted"),
-        ("age_18_plus_confirmation", "accepted"),
+        age_record,
         ("marketing_consent", "accepted" if marketing_consent else "declined"),
     ):
         record_legal_acceptance(
@@ -2776,6 +2865,18 @@ def signup(
             current_status=status,
         )
     record_security_event("account_created", account_id=int(account["id"]), metadata={"policy_version": SETTINGS.policy_version})
+    if minor:
+        record_legal_acceptance(
+            "guardian_consent", SETTINGS.policy_version, profile_id=int(account["profile_id"]),
+            metadata={"guardian_name": guardian_name, "guardian_email": guardian_email},
+            current_status="requested",
+        )
+        delivered = _send_guardian_email(request, account, guardian_name, guardian_email)
+        record_security_event(
+            "guardian_approval_requested", account_id=int(account["id"]),
+            metadata={"email_delivery": "sent" if delivered else "unavailable"},
+        )
+        next_path = "/guardian"
     if SETTINGS.require_email_verification:
         delivered = _send_verification_email(request, account)
         record_security_event(
@@ -2790,6 +2891,109 @@ def signup(
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
+
+
+def _masked_email(address: str) -> str:
+    local, _, domain = address.partition("@")
+    return f"{local[:1]}{'*' * max(2, len(local) - 1)}@{domain}" if domain else address
+
+
+@app.get("/guardian", response_class=HTMLResponse)
+def guardian_status_page(request: Request, sent: str = ""):
+    """Where an account under the minimum age waits for its guardian."""
+    account = _account(request)
+    if account is None:
+        return RedirectResponse("/login?next=/guardian", status_code=303)
+    status = str(account.get("guardian_approval_status") or "not_applicable")
+    if status in {"not_applicable", GUARDIAN_APPROVED}:
+        return RedirectResponse("/dashboard", status_code=303)
+    named = _guardian_request(account) or {}
+    return templates.TemplateResponse(
+        request=request, name="guardian.html",
+        context={"request": request, "mode": "pending", "status": status, "sent": sent == "1",
+                 "guardian_email": _masked_email(str(named.get("guardian_email") or "")),
+                 "minimum_age": SETTINGS.minimum_account_age},
+    )
+
+
+@app.post("/guardian/resend", dependencies=[Depends(require_csrf)])
+def guardian_resend(request: Request):
+    _enforce_rate_limit(request, "guardian-resend", 5, 3600)
+    account = _account(request)
+    if account is None:
+        return RedirectResponse("/login?next=/guardian", status_code=303)
+    named = _guardian_request(account)
+    if str(account.get("guardian_approval_status")) == GUARDIAN_PENDING and named:
+        delivered = _send_guardian_email(request, account, str(named.get("guardian_name") or ""),
+                                         str(named["guardian_email"]))
+        record_security_event("guardian_approval_requested", account_id=int(account["id"]),
+                              metadata={"email_delivery": "sent" if delivered else "unavailable", "resend": True})
+    return RedirectResponse("/guardian?sent=1", status_code=303)
+
+
+def _guardian_link(token: str) -> tuple[dict | None, dict | None]:
+    """(account, guardian request) a still-valid approval link names."""
+    from itsdangerous import BadSignature
+
+    try:
+        payload = _guardian_signer().loads(token, max_age=GUARDIAN_LINK_DAYS * 86400)
+        account = get_account(int(payload["a"]))
+    except (BadSignature, KeyError, TypeError, ValueError):
+        return None, None
+    named = _guardian_request(account) if account else None
+    # The link only works for the address it was sent to: a guardian named
+    # later replaces the earlier one.
+    if not named or token_digest(str(named["guardian_email"]).lower()) != payload.get("g"):
+        return None, None
+    return account, named
+
+
+@app.get("/guardian/approve/{token}", response_class=HTMLResponse)
+def guardian_approve_page(request: Request, token: str):
+    account, named = _guardian_link(token)
+    if account is None:
+        raise HTTPException(404, "This approval link has expired or is not valid. Ask for a new one to be sent.")
+    return templates.TemplateResponse(
+        request=request, name="guardian.html",
+        context={"request": request, "mode": "approve", "token": token, "child_email": account["email"],
+                 "guardian_name": named.get("guardian_name") or "", "minimum_age": SETTINGS.minimum_account_age,
+                 "status": str(account.get("guardian_approval_status") or ""),
+                 "retention_days": SETTINGS.saved_video_retention_days},
+    )
+
+
+@app.post("/guardian/approve/{token}", response_class=HTMLResponse, dependencies=[Depends(require_csrf)])
+def guardian_approve(request: Request, token: str, decision: str = Form(""),
+                     guardian_confirmed: bool = Form(False)):
+    _enforce_rate_limit(request, "guardian-approve", 20, 3600)
+    account, named = _guardian_link(token)
+    if account is None:
+        raise HTTPException(404, "This approval link has expired or is not valid. Ask for a new one to be sent.")
+    approve = decision == "approve"
+    if approve and not guardian_confirmed:
+        return templates.TemplateResponse(
+            request=request, name="guardian.html", status_code=400,
+            context={"request": request, "mode": "approve", "token": token, "child_email": account["email"],
+                     "guardian_name": named.get("guardian_name") or "", "minimum_age": SETTINGS.minimum_account_age,
+                     "status": str(account.get("guardian_approval_status") or ""),
+                     "retention_days": SETTINGS.saved_video_retention_days,
+                     "error": "Tick the box to confirm you are their parent or guardian."},
+        )
+    status = GUARDIAN_APPROVED if approve else GUARDIAN_DECLINED
+    set_guardian_approval_status(int(account["id"]), status)
+    record_legal_acceptance(
+        "guardian_consent", SETTINGS.policy_version, profile_id=int(account["profile_id"]),
+        metadata={"guardian_name": named.get("guardian_name"), "guardian_email": named.get("guardian_email"),
+                  "decision": "approved" if approve else "declined"},
+        current_status="accepted" if approve else "declined",
+    )
+    record_security_event("guardian_approval_" + ("granted" if approve else "declined"),
+                          account_id=int(account["id"]))
+    return templates.TemplateResponse(
+        request=request, name="guardian.html",
+        context={"request": request, "mode": "done", "approved": approve, "child_email": account["email"],
+                 "minimum_age": SETTINGS.minimum_account_age},
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -3258,6 +3462,8 @@ async def upload(
         # anonymous browser session; the 401 lets the upload form send the
         # visitor to sign-in without losing what they filled in.
         raise HTTPException(401, "Create a free account or sign in to analyse a fight.")
+    if hold := _guardian_hold(account):
+        raise HTTPException(403, hold)
     if openai_identity_recovery and not request.state.external_ai_available:
         raise HTTPException(400, "Optional external identity recovery is unavailable.")
     if openai_identity_recovery and minor_permission_status == "guardian_authorized" and not external_ai_guardian_permission:
@@ -4834,9 +5040,10 @@ def result_page(request: Request, job_id: str):
     # given instead. See core.report.unattributed_kick_total.
     identity_trusted = bool((report.get("integrity") or {}).get("identity_evidence_trusted", True))
     numbers = _numbers_state(report)
-    # A coach link to a report whose numbers are unverified or absent would
-    # carry them out of the page that explains why. Off until they are fixed.
-    can_share = can_share and numbers["state"] == "ok"
+    # A coach link is allowed whatever the numbers' state: the coach's page
+    # (shared.html) withholds unverified or absent numbers and says why, so the
+    # link carries the explanation with it. Only the public story card, which
+    # posts numbers as the fighter's own, stays off until they are verified.
     _pin_sport_to_fight(request, report.get("scorecard", {}).get("sport") or _job_sport(job))
     _estimate_score_withheld_for_punches(report)
     score_withheld = _score_withheld(report, job_id)
@@ -4907,8 +5114,6 @@ def result_page(request: Request, job_id: str):
             else "identity" if not identity_trusted
             else "no_fight" if numbers["state"] == "no_fight"
             else "stats"),
-        "coach_link_blocked": bool(_account(request) and report_access.get("can_share")
-                                   and numbers["state"] != "ok"),
         # The fight's live public links, one per fighter (story_page).
         "story_links": [
             {"side": link["side"], "name": link["name"], "url": f"{_public_base(request)}/f/{link['token']}"}
@@ -6708,6 +6913,8 @@ async def chunked_upload_begin(request: Request):
         return JSONResponse(
             {"detail": "Create a free account or sign in to analyse a fight."},
             status_code=401)
+    if hold := _guardian_hold(account):
+        return JSONResponse({"detail": hold}, status_code=403)
     account_id = int(account["id"])
     try:
         payload = await request.json()
@@ -7189,14 +7396,6 @@ def share_report(request: Request, job_id: str):
         raise HTTPException(403, "Private report sharing is available on Athlete, Pro, Coach and Gym plans.")
     if not fight or int(fight["profile_id"]) != profile_id:
         raise HTTPException(404)
-    try:
-        shared = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
-        refresh_identity_integrity(shared)
-    except (HTTPException, OSError, json.JSONDecodeError):
-        shared = None
-    state = _numbers_state(shared) if shared is not None else {"state": "ok"}
-    if state["state"] != "ok":
-        raise HTTPException(409, state["share_reason"])
     token = session_token()
     expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     save_report_share(job_id, profile_id, token_digest(token), expires)
@@ -7224,7 +7423,11 @@ def shared_report(request: Request, token: str):
     return templates.TemplateResponse(
         request=request, name="shared.html",
         context={"request": request, "report": report, "expires_at": share["expires_at"],
-                 "expires_label": _friendly_date(share["expires_at"])},
+                 "expires_label": _friendly_date(share["expires_at"]),
+                 # The same verdicts the athlete's page shows, so a coach sees
+                 # no number the athlete was told not to trust.
+                 "numbers": _numbers_state(report),
+                 "identity_cause": identity_failure(report.get("tracking") or {})},
     )
 
 

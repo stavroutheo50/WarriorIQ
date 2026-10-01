@@ -1312,7 +1312,7 @@ RULESET_LABELS = {
     "BOXING": "Boxing",
     "MUAY_THAI": "Full rules (elbows allowed)",
     "MUAY_THAI_NO_ELBOWS": "No elbows",
-    "ITF_TAEKWONDO": "ITF · International Taekwon-Do Federation",
+    "ITF_TAEKWONDO": "ITF · International Taekwon-Do Federation (traditional)",
     "WT_TAEKWONDO": "WT · World Taekwondo (Olympic)",
     "MMA": "MMA (standing exchanges)",
 }

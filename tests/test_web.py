@@ -923,7 +923,9 @@ class PublicPageTests(unittest.TestCase):
         # The age and guardian statements belong to the home page's explainer;
         # the form carries the consent controls themselves.
         explainer = self.client.get("/").text.lower()
-        self.assertIn("18 or older", explainer)
+        # Open to every age since 2026-10; under 18 a guardian approves first.
+        self.assertIn("open to every age", explainer)
+        self.assertIn("under 18", explainer)
         self.assertIn("parent or guardian", explainer)
         self.assertIn("parent or guardian", home.lower())
         self.assertIn("under 18", home.lower())
@@ -938,8 +940,9 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("Acceptable Use Policy", signup)
         self.assertIn("Terms of Service", signup)
         self.assertIn("Privacy Policy", signup)
-        self.assertIn('name="age_confirmed"', signup)
-        self.assertIn("at least 18", signup.lower())
+        # Every age may sign up; the form asks which side of 18 (test_all_ages.py).
+        self.assertIn('name="age_group" value="adult"', signup)
+        self.assertIn("18 or older", signup.lower())
         self.assertIn('name="marketing_consent"', signup)
 
     @staticmethod

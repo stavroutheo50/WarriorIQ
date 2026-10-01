@@ -277,7 +277,7 @@ RULESETS: dict[str, RuleProfile] = {
     # exist in some national bodies, which is why they are named below as
     # something this ruleset does not model rather than invented into the table.
     "ITF_TAEKWONDO": RuleProfile(
-        "ITF_TAEKWONDO", "ITF · International Taekwon-Do Federation", False, False, False, False, False, frozenset(),
+        "ITF_TAEKWONDO", "ITF · International Taekwon-Do Federation (traditional)", False, False, False, False, False, frozenset(),
         sport="taekwondo", sport_label="Taekwondo",
         allow_head_punch=True,
         family_value=(("punch", 1.0), ("kick", 2.0)),
@@ -480,8 +480,15 @@ def normalize_ruleset(value: str) -> str:
         "WTF": "WT_TAEKWONDO",
         "WTF_TAEKWONDO": "WT_TAEKWONDO",
         "TKD": "WT_TAEKWONDO",
+        "WORLD_TAEKWONDO": "WT_TAEKWONDO",
+        "OLYMPIC_TAEKWONDO": "WT_TAEKWONDO",
+        # "Taekwon-Do", hyphenated, is how the ITF writes its own name: the
+        # traditional, non-Olympic ruleset. "Taekwondo" stays WT, the Olympic one.
+        "TAEKWON_DO": "ITF_TAEKWONDO",
         "ITF": "ITF_TAEKWONDO",
         "ITF_TAEKWON_DO": "ITF_TAEKWONDO",
+        "INTERNATIONAL_TAEKWON_DO_FEDERATION": "ITF_TAEKWONDO",
+        "TRADITIONAL_TAEKWONDO": "ITF_TAEKWONDO",
         "MUAY_THAI_NO_ELBOW": "MUAY_THAI_NO_ELBOWS",
         "NO_ELBOWS": "MUAY_THAI_NO_ELBOWS",
     }
