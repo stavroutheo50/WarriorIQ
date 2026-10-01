@@ -231,6 +231,19 @@ class Settings:
     # wrong fighter.
     max_fighter_pair_similarity: float = float(
         os.getenv("WARRIORIQ_MAX_PAIR_SIMILARITY", "0.78"))
+    # The kit comparison the selection warning and the report use (core/kit.py):
+    # per-region L*a*b* colour on the centre line of each fighter, compared by
+    # Delta E, 1.0 for identical. 0.75 is Delta E 10 in the most different
+    # region - two halves of one kit under one light differ by 2-8. The
+    # histogram threshold above stays where it was: it now only steers the
+    # identity manager's internal swap check.
+    max_kit_similarity: float = float(os.getenv("WARRIORIQ_MAX_KIT_SIMILARITY", "0.75"))
+    # For a pair in matching kit, how many moments a minute the identity
+    # manager may say "cannot tell which is which" (it drops the frame rather
+    # than guess) before the fight's identity is not trusted. Matching kit is
+    # handled by position and motion; this is the evidence that it worked.
+    max_lookalike_confusions_per_minute: float = float(
+        os.getenv("WARRIORIQ_MAX_LOOKALIKE_CONFUSIONS_PER_MINUTE", "2.0"))
     # A learned appearance space for the same gate. The histogram above cannot
     # separate a referee from a fighter - measured, their ranges overlap almost
     # completely - while an embedding puts the referee at 0.695-0.741 and the

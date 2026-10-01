@@ -3345,7 +3345,10 @@ class FighterSeparabilityTests(unittest.TestCase):
             "scorecard": {"available": False, "status": "fighters_not_separable"},
             "tracking": {"fighter_pair_similarity": 0.89, "identity_confusions": 4},
         })
-        self.assertIn("89%", explained["reason"])
+        # The 89% came from the old histogram check, which could not tell
+        # black from white; it is not repeated as a measurement.
+        self.assertNotIn("89%", explained["reason"])
+        self.assertIn("earlier kit check", explained["reason"])
         self.assertIn("4 times", explained["reason"])
         self.assertTrue(explained["fix"])
 

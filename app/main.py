@@ -49,6 +49,7 @@ from core.auth import (
     session_token, token_digest, valid_email, valid_password,
 )
 from core.identity import fighter_pair_similarity
+from core.kit import alike_reason as kit_alike_reason, kit_similarity
 from core.csrf import (
     issue_token as issue_csrf_token, tokens_match as csrf_tokens_match,
     usable_token as usable_csrf_token,
@@ -117,7 +118,7 @@ from core.camp import (
 from core.training_check import check_training_video
 from core.share_image import preview_png as story_preview_png
 from core.report import (
-    build_preliminary_scorecard, kick_minimum_check, observed_summary,
+    build_preliminary_scorecard, identity_failure, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
     refresh_identity_integrity, share_card, unattributed_kick_total,
 )
@@ -2404,18 +2405,33 @@ def _wake_analysis_worker(job_id: str) -> None:
     threading.Thread(target=run, name=f"wiq-wake-{job_id}", daemon=True).start()
 
 
-def _looks_alike_message(similarity: float) -> str:
-    return (
-        f"These two look {similarity:.0%} alike to us, where a bout we can read "
-        "is usually nearer 60%. We will still analyse it, but we may mix them up - "
-        "if the report says so, pick them again on a frame where their kit or "
-        "headguards differ most."
-    )
+def _looks_alike_message(similarity: float, kit: dict | None = None) -> str:
+    """The selection-page warning, naming the actual cause.
+
+    It used to say "look N% alike, where a bout we can read is usually nearer
+    60%" for every cause - a number from a histogram that could not tell black
+    from white - and on black-and-white footage that is simply what the film
+    is, not something a better frame changes.
+    """
+    reason = kit_alike_reason(kit)
+    if reason == "black_and_white":
+        return ("This footage has no colour, so WarriorIQ cannot use kit to tell these two apart. "
+                "It will still analyse the fight and follow each fighter by position and movement; "
+                "the report will say if it ever could not tell them apart.")
+    if reason == "small":
+        return ("The fighters are small in this picture, so their kit is only a few pixels and "
+                "cannot be compared. WarriorIQ will follow them by position and movement; filming "
+                "closer gives it more to work with.")
+    return (f"Their kit matches closely ({similarity:.0%} alike, comparing head, top and shorts). "
+            "WarriorIQ will still analyse the fight and follow each fighter by position and movement, "
+            "and the report will say if it ever could not tell them apart. If their kit differs "
+            "anywhere - headgear, gloves, shorts - pick a frame where that difference is visible.")
 
 
 def _analysis_started_response(request: Request, job_id: str, deferred: bool = False,
                               looks_alike: float | None = None,
-                              on_official: dict | None = None) -> JSONResponse:
+                              on_official: dict | None = None,
+                              kit: dict | None = None) -> JSONResponse:
     response = JSONResponse({
         "ok": True,
         "progress_url": f"/progress/{job_id}",
@@ -2423,7 +2439,7 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
         **({"notice": _deferred_analysis_message()} if deferred else {}),
         **({"fighters_look_alike": {
             "similarity": round(float(looks_alike), 3),
-            "message": _looks_alike_message(float(looks_alike)),
+            "message": _looks_alike_message(float(looks_alike), kit),
         }} if looks_alike is not None else {}),
         **({"seed_looks_like_official": on_official} if on_official else {}),
     })
@@ -4078,18 +4094,17 @@ def pair_check(request: Request, job_id: str, payload: PairCheckPayload):
     height, width = chosen_frame.shape[:2]
     fighter_a_box = _validated_fighter_box(payload.fighter_a_box, width, height, "Fighter A")
     fighter_b_box = _validated_fighter_box(payload.fighter_b_box, width, height, "Fighter B")
-    alike = fighter_pair_similarity(
-        _appearance_observation(chosen_frame, fighter_a_box),
-        _appearance_observation(chosen_frame, fighter_b_box),
-    )
-    if alike is None:
+    kit = kit_similarity(chosen_frame, fighter_a_box, fighter_b_box)
+    if kit is None:
         return {"checked": False}
-    looks_alike = float(alike) >= SETTINGS.max_fighter_pair_similarity
+    alike = kit["similarity"]
+    looks_alike = float(alike) >= SETTINGS.max_kit_similarity
     return {
         "checked": True,
         "similarity": round(float(alike), 3),
         "looks_alike": looks_alike,
-        **({"message": _looks_alike_message(float(alike))} if looks_alike else {}),
+        "cause": kit_alike_reason(kit) if looks_alike else None,
+        **({"message": _looks_alike_message(float(alike), kit)} if looks_alike else {}),
     }
 
 
@@ -4127,16 +4142,14 @@ def start(request: Request, job_id: str, payload: StartPayload):
     # what can be believed, and because this is the last moment the person who
     # can actually answer it is still looking at the screen.
     chosen_frame = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
-    alike = fighter_pair_similarity(
-        _appearance_observation(chosen_frame, fighter_a_box),
-        _appearance_observation(chosen_frame, fighter_b_box),
-    )
+    kit = kit_similarity(chosen_frame, fighter_a_box, fighter_b_box)
+    alike = None if kit is None else kit["similarity"]
     # Warned, never refused. Most footage is not shot for us, and a user with a
     # phone video of two fighters in the same club kit still deserves an
     # analysis - they just deserve to be told which parts of it to trust. The
     # results carry the same finding through to the report.
     looks_alike = (
-        alike is not None and alike >= SETTINGS.max_fighter_pair_similarity
+        alike is not None and alike >= SETTINGS.max_kit_similarity
     )
     if looks_alike:
         LOGGER.info("fighters_look_alike job=%s similarity=%.3f", job_id, float(alike))
@@ -4188,7 +4201,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
         _wake_analysis_worker(job_id)
     return _analysis_started_response(request, job_id, capacity["deferred"],
                                       looks_alike=float(alike) if looks_alike else None,
-                                      on_official=on_official)
+                                      on_official=on_official, kit=kit)
 
 
 @app.post("/api/restart/{job_id}", dependencies=[Depends(require_csrf)])
@@ -4406,14 +4419,45 @@ def _appearance_observation(image, box):
 
 
 def _identity_lost_to_camera(report: dict) -> bool:
-    """The identity check failed because the fighters kept being found again.
+    """The identity check failed for a reason re-picking the fighters cannot fix.
 
-    Re-picking the fighters cannot help then, so every "pick them again" on
-    the page gives way to asking for a steadier recording.
+    The name is historical: it began as "the camera kept losing them". It now
+    covers every such cause (core.report.identity_failure), so every "pick
+    them again" on the page gives way to the one recommendation that applies.
     """
+    cause = _identity_failure(report)
+    if cause is not None:
+        return not cause["repick"]
     from core.report import identity_churned
 
     return any(identity_churned((report or {}).get("tracking") or {}).values())
+
+
+def _identity_failure(report: dict) -> dict | None:
+    """The one cause and recommendation for a failed identity check."""
+    tracking = (report or {}).get("tracking") or {}
+    target = ((report or {}).get("video") or {}).get("analysis_target", "BOTH")
+    required = ("A", "B") if target == "BOTH" else (target,)
+    return identity_failure(tracking, required)
+
+
+def _identity_withheld(report: dict, cause: dict, job_id: str | None) -> dict:
+    """The score box for a failed identity check, from the shared cause."""
+    tracking = report.get("tracking") or {}
+    withheld = {
+        "reason": f"{cause['headline']} Rather than guess, no strike is credited to either name.",
+        "fix": cause["advice"],
+    }
+    if cause["repick"] and job_id:
+        # Land them on the moment we lost track, when we know one; otherwise
+        # on the frame they picked.
+        recheck = f"/select/{job_id}"
+        moment = tracking.get("last_identity_confusion_frame")
+        fps = float((report.get("video") or {}).get("fps") or 0) or 30.0
+        if moment:
+            recheck += f"?seconds={max(0.0, float(moment) / fps):.2f}"
+        withheld["action"] = {"label": "Show me who is who", "url": recheck}
+    return withheld
 
 
 def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
@@ -4438,38 +4482,14 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
         except (TypeError, ValueError):
             return "an unknown share"
 
-    if status == "fighters_not_separable":
-        alike = tracking.get("fighter_pair_similarity")
-        alike_text = f"{float(alike):.0%}" if alike is not None else "very closely"
-        confusions = int(tracking.get("identity_confusions") or 0)
-        muddled = (
-            f" We lost track of which was which {confusions} times during the fight."
-            if confusions else ""
-        )
-        # Land them on the moment we lost track, when we know one; otherwise on
-        # the frame they picked. Either way the next click is the question we
-        # actually need answered, not a video to scrub through.
-        moment = tracking.get("last_identity_confusion_frame")
-        fps = float((report.get("video") or {}).get("fps") or 0) or 30.0
-        recheck = None
-        if job_id:
-            recheck = f"/select/{job_id}"
-            if moment:
-                recheck += f"?seconds={max(0.0, float(moment) / fps):.2f}"
-        return {
-            "reason": (
-                f"The two fighters look too alike in this video for us to tell them apart. "
-                f"Their kit matches {alike_text}, where a bout we can read is usually nearer 60%."
-                f"{muddled} Rather than guess, we have not credited strikes to either name."
-            ),
-            **({"action": {"label": "Show me who is who", "url": recheck}} if recheck else {}),
-            "fix": (
-                "Pick the two fighters again on a frame where their kit, headguards or corner "
-                "colours differ most - often just after a break, when they are apart and facing "
-                "the camera. If they genuinely wear the same colours, film from a side angle so "
-                "position tells them apart instead."
-            ),
-        }
+    if status in {"fighters_not_separable", "identity_integrity_failed"}:
+        if status == "fighters_not_separable" and "fighters_separable" not in tracking:
+            # The status is the record of the verdict; an older report may
+            # carry it without the field the resolver reads.
+            report = {**report, "tracking": {**tracking, "fighters_separable": False}}
+        cause = _identity_failure(report)
+        if cause is not None:
+            return _identity_withheld(report, cause, job_id)
     if status == "both_fighters_required":
         return {
             "reason": "You analysed one fighter, so there is no opponent to score against.",
@@ -4537,20 +4557,6 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
         return {
             "reason": f"Too few strikes could be counted with confidence. {seen}",
             "fix": "Footage shot closer, steadier or from the side usually reads far better.",
-        }
-    if status == "identity_integrity_failed":
-        if _identity_lost_to_camera(report):
-            # Re-picking cannot help when the camera is the cause.
-            return {
-                "reason": ("We kept losing the fighters and finding them again, so we cannot be sure "
-                           "the numbers belong to them. This happens when the camera moves a lot and "
-                           "the hall is busy."),
-                "fix": ("Film from one fixed spot - a tripod, or the phone held still against a rail - "
-                        "with the mat filling most of the picture, then upload again."),
-            }
-        return {
-            "reason": "We could not stay certain which fighter was which for the whole fight.",
-            "fix": "Pick both fighters again on a clearer frame, then re-run.",
         }
     return {
         "reason": "Tracking was not steady enough for a fair score.",
@@ -4727,6 +4733,7 @@ def result_page(request: Request, job_id: str):
         "fight_footage": _fight_footage_summary(report),
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
+        "identity_failure": _identity_failure(report),
         # "Punches and knees are not counted" on taekwondo, which awards no
         # knees - the note names only what this sport actually scores.
         "withheld_families": _reported_strike_families(

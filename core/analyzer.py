@@ -23,6 +23,7 @@ from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
 from core.frame_feed import FrameFeed
 from core.generalship import judge_fight
 from core.fight_presence import FightPresence
+from core.kit import kit_similarity
 from core.ground import DownWatch
 from core.round_detect import RoundDetector
 from core.contact import (
@@ -659,6 +660,17 @@ def _for_metrics(obs: PersonObservation | None) -> PersonObservation | None:
     )
 
 
+def _seed_frame_kit(video_path: str, frame_index: int, box_a, box_b) -> dict | None:
+    """Kit similarity on the frame the person chose, with their boxes."""
+    capture = cv2.VideoCapture(video_path)
+    try:
+        capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ok, frame = capture.read()
+    finally:
+        capture.release()
+    return kit_similarity(frame, box_a, box_b) if ok and frame is not None else None
+
+
 def _measure_footage(video_path: str, pose_tracker, start_seconds: float, end_seconds: float | None):
     """Measure the recording before choosing how to look at it. Never fatal."""
     try:
@@ -733,6 +745,7 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
 
     report_progress(0.0)
     pose_tracker = get_pose_tracker()
+    seed_kit = _seed_frame_kit(req.video_path, seed_frame, req.fighter_a_box, req.fighter_b_box)
     # The backward pass has to see people the way the forward pass will, so it
     # uses the same measured inference size - and the forward pass reuses the
     # measurement instead of taking it again.
@@ -759,7 +772,7 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     if not handoff.moved:
         return _analyze(from_seed, progress_callback, seed_seconds=seed_seconds,
                         handoff=handoff_record, excluded_reason=handoff.reason or "fighter_lost",
-                        measured_footage=measured)
+                        measured_footage=measured, seed_kit=seed_kit)
     forward = replace(
         req, start_seconds=handoff.frame / fps, selection_seconds=None,
         fighter_a_box=list(handoff.a_box), fighter_b_box=list(handoff.b_box))
@@ -769,18 +782,20 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     try:
         return _analyze(forward, progress_callback, seed_seconds=seed_seconds,
                         handoff=handoff_record, excluded_reason=handoff.reason, seed_check=seed_check,
-                        seed_pair=seed_pair, measured_footage=measured)
+                        seed_pair=seed_pair, measured_footage=measured, seed_kit=seed_kit)
     except SeedCheckFailed as failure:
         LOGGER.warning("backtrack_rejected_at_seed seed_frame=%s verdict=%s", seed_frame, failure)
         handoff_record = {**handoff_record, "rejected_at_seed": str(failure)}
         return _analyze(from_seed, progress_callback, seed_seconds=seed_seconds,
-                        handoff=handoff_record, excluded_reason="unverified", measured_footage=measured)
+                        handoff=handoff_record, excluded_reason="unverified", measured_footage=measured,
+                        seed_kit=seed_kit)
 
 
 def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None, *,
              seed_seconds: float | None = None, handoff: dict | None = None,
              excluded_reason: str | None = None, seed_check: dict | None = None,
-             seed_pair: tuple | None = None, measured_footage=None) -> dict:
+             seed_pair: tuple | None = None, measured_footage=None,
+             seed_kit: dict | None = None) -> dict:
     info = get_video_info(req.video_path)
     _validate_request(req, info.duration)
     if seed_seconds is None:
@@ -1018,7 +1033,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # start, because no amount of work downstream recovers from "no".
     # On the frame the person chose when the fighters were followed back from
     # it: that is the frame they picked to show the two apart.
-    pair_similarity = fighter_pair_similarity(*(seed_pair or (initial_a, initial_b)))
+    # The kit comparison is made on the frame the person chose, with the boxes
+    # they drew - the same frame and boxes the selection page warned about, so
+    # the report cannot disagree with the warning. See core/kit.py.
+    kit = seed_kit if seed_kit is not None else kit_similarity(
+        first_frame, req.fighter_a_box, req.fighter_b_box)
+    histogram_similarity = fighter_pair_similarity(*(seed_pair or (initial_a, initial_b)))
+    pair_similarity = kit["similarity"] if kit is not None else histogram_similarity
     manager.prime_track_history(warm_samples)
     canonical_a_box = [float(value) for value in initial_a.box]
     canonical_b_box = [float(value) for value in initial_b.box]
@@ -1682,9 +1703,19 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # could not tell which was which. Reported whether or not they cross
         # the line, because the number is the evidence for the verdict.
         "fighter_pair_similarity": None if pair_similarity is None else float(pair_similarity),
+        "pair_similarity_method": "kit_regions_lab_v1" if kit is not None else "torso_hs_histogram",
+        "kit_similarity": kit,
+        "fighter_pair_histogram_similarity": (
+            None if histogram_similarity is None else float(histogram_similarity)),
         "fighters_separable": (
             None if pair_similarity is None
-            else bool(pair_similarity < SETTINGS.max_fighter_pair_similarity)),
+            else bool(pair_similarity < (SETTINGS.max_kit_similarity if kit is not None
+                                         else SETTINGS.max_fighter_pair_similarity))),
+        # Moments the identity manager could not tell which was which, per
+        # minute. With look-alike kit this - not the kit itself - decides
+        # whether identity held (core/report.py identity_ready_by_fighter).
+        "identity_confusions_per_minute": round(
+            int(manager.confusions) / max(1e-6, segment_duration / 60.0), 2),
         "identity_confusions": int(manager.confusions),
         # Actions credited to the fighter who was being hit rather than the one
         # hitting, and removed. See core.contact.resolve_simultaneous_attribution.

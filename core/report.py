@@ -207,17 +207,125 @@ def churn_rate(tracking: dict, fighter: str) -> tuple[float, bool]:
     return rate, rate > SETTINGS.max_identity_handoffs_per_minute
 
 
+def lookalike_blocks_identity(tracking: dict) -> bool:
+    """Whether matching kit is what stops this fight's identity being trusted.
+
+    Kit used to decide it outright: two fighters "too alike" failed identity
+    however well they were followed, so a bout in identical kit could never be
+    scored - and the old histogram called a white-trunks/black-trunks pair 82%
+    alike, so plenty of bouts in different kit could not be either. Kit is now
+    measured properly (core/kit.py) and only says *how* identity must hold:
+    for a matching pair, by position and motion, which is judged by how often
+    the identity manager could not tell which was which. Reports from before
+    that measure are judged as they always were.
+    """
+    if tracking.get("fighters_separable") is not False:
+        return False
+    if tracking.get("pair_similarity_method") != "kit_regions_lab_v1":
+        return True
+    rate = tracking.get("identity_confusions_per_minute")
+    return rate is None or float(rate) > SETTINGS.max_lookalike_confusions_per_minute
+
+
+def times(count: int) -> str:
+    """"once", "twice", "3 times" - never "1 times"."""
+    count = int(count)
+    return "once" if count == 1 else "twice" if count == 2 else f"{count} times"
+
+
+def identity_failure(tracking: dict, required: tuple[str, ...] = ("A", "B")) -> dict | None:
+    """Why identity failed, as one cause with one recommendation.
+
+    A failed report used to give two at once - "picking the fighters again will
+    not change that, a steadier recording will" beside "pick the two fighters
+    again on a frame where their kit differs most... Show me who is who" -
+    because the notice, the score box and the stored disclaimer each read a
+    different signal. They all read this now, and the first cause that applies
+    wins: a bad seed, then a camera that kept losing them, then kit that
+    matches, then a fighter out of view. `repick` says whether picking the
+    fighters again can help, and nothing on the page offers it when it cannot.
+    """
+    ready = identity_ready_by_fighter(tracking)
+    failed = [fighter for fighter in required if not ready.get(fighter, False)]
+    if not failed:
+        return None
+    who = " and ".join(f"Fighter {fighter}" for fighter in failed)
+    seed_bad = [fighter for fighter in failed if not _identity_seed_safe(tracking, fighter)]
+    if seed_bad:
+        named = " and ".join(f"Fighter {fighter}" for fighter in seed_bad)
+        return {"cause": "seed", "failed": failed, "repick": True,
+                "headline": (f"WarriorIQ could not find {named} where the box was drawn, so it cannot be "
+                             "sure it followed the right person."),
+                "advice": "Pick the fighters again on a frame where both are fully visible and apart."}
+    churned = [fighter for fighter in failed if identity_churned(tracking).get(fighter)]
+    if churned:
+        named = " and ".join(f"Fighter {fighter}" for fighter in churned)
+        rate = max(churn_rate(tracking, fighter)[0] for fighter in churned)
+        return {"cause": "camera", "failed": failed, "repick": False,
+                "headline": (f"WarriorIQ kept losing {named}: it had to find them again {rate:.0f} times a "
+                             "minute, so it cannot be sure the numbers belong to them. That happens when "
+                             "the camera moves a lot or other people are close to the fighters."),
+                "advice": ("Picking the fighters again will not change that; a steadier recording will. "
+                           "Film from one fixed spot - a tripod, or the phone held still - with the fighters "
+                           "filling most of the picture.")}
+    if lookalike_blocks_identity(tracking):
+        kit = tracking.get("kit_similarity") or {}
+        confusions = int(tracking.get("identity_confusions") or 0)
+        lost = (f", and WarriorIQ could not tell which was which {times(confusions)}" if confusions else "")
+        if tracking.get("pair_similarity_method") != "kit_regions_lab_v1":
+            # Analysed before the kit check was replaced. Its percentage came
+            # from a histogram that could not tell black from white, so it is
+            # not repeated here as if it were a measurement.
+            return {"cause": "lookalike", "failed": failed, "repick": True,
+                    "headline": ("WarriorIQ's earlier kit check judged the two fighters too alike to tell "
+                                 f"apart{lost}. That check could not separate some different kits - black "
+                                 "from white, for one - so it may have been wrong about this fight."),
+                    "advice": ("Analyse the fight again to use the current check; if they still cannot be "
+                               "told apart, pick them on a frame where their kit differs most.")}
+        if kit.get("small"):
+            return {"cause": "small", "failed": failed, "repick": False,
+                    "headline": f"The fighters are too small in the picture to tell apart by their kit{lost}.",
+                    "advice": "Film closer, so the fighters fill more of the picture."}
+        if kit.get("achromatic"):
+            return {"cause": "black_and_white", "failed": failed, "repick": False,
+                    "headline": ("This footage has no colour, so the two fighters could only be told apart by "
+                                 f"position and movement{lost}."),
+                    "advice": ("Picking the fighters again will not add colour. Footage where the two cross "
+                               "each other less - a side angle - is what helps.")}
+        similarity = kit.get("similarity")
+        matched = f" ({float(similarity):.0%} alike across head, top and shorts)" if similarity is not None else ""
+        return {"cause": "kit", "failed": failed, "repick": True,
+                "headline": (f"The two fighters' kit matches{matched}, so they could only be told apart by "
+                             f"position and movement{lost}."),
+                "advice": ("If their kit differs anywhere - headgear, gloves, shorts - pick the fighters again "
+                           "on a frame where that difference is visible. If it is identical, a side angle "
+                           "where they cross each other less helps.")}
+    low = [fighter for fighter in failed if float(tracking.get(f"fighter_{fighter}_coverage", 0.0)) < 0.45]
+    if low:
+        named = " and ".join(
+            f"Fighter {fighter} ({float(tracking.get(f'fighter_{fighter}_coverage', 0.0)) * 100:.0f}%)"
+            for fighter in low)
+        return {"cause": "coverage", "failed": failed, "repick": True,
+                "headline": (f"WarriorIQ only followed {named} for part of the fight, too little to be sure "
+                             "it was always the same person."),
+                "advice": ("Footage where both fighters stay in the picture helps most; picking them again "
+                           "on a clearer frame helps if they were hard to see where you chose.")}
+    return {"cause": "unknown", "failed": failed, "repick": True,
+            "headline": f"WarriorIQ could not stay certain that it was following {who}.",
+            "advice": "Pick both fighters again on a clearer frame, then analyse it again."}
+
+
 def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
     """The identity gate, per fighter. The one definition build_report and
     refresh_identity_integrity both use: two copies drifted apart once, and
     the page then disowned a fight the saved report called trusted."""
     churned = identity_churned(tracking)
-    separable = tracking.get("fighters_separable")
+    alike_blocks = lookalike_blocks_identity(tracking)
     return {
         fighter: (
             _identity_seed_safe(tracking, fighter)
             and float(tracking.get(f"fighter_{fighter}_coverage", 0.0)) >= 0.45
-            and separable is not False
+            and not alike_blocks
             and not churned[fighter]
         )
         for fighter in ("A", "B")
@@ -230,6 +338,7 @@ def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
 IDENTITY_TRACKING_KEYS = (
     "fighter_A_seed_source", "fighter_B_seed_source", "initial_iou_A", "initial_iou_B",
     "fighter_A_coverage", "fighter_B_coverage", "fighters_separable", "fighter_pair_similarity",
+    "pair_similarity_method", "identity_confusions_per_minute",
     "identity_confusions", "fighter_A_handoffs_per_minute", "fighter_B_handoffs_per_minute",
     "fighter_A_suspicious_handoffs_per_minute", "fighter_B_suspicious_handoffs_per_minute",
 )
@@ -605,8 +714,6 @@ def refresh_identity_integrity(report: dict) -> dict:
     # well they were followed. Coverage answers "was somebody tracked", never
     # "was it the right somebody", and this is the one case where the analysis
     # can know the answer is no before it starts.
-    separable = tracking.get("fighters_separable")
-    churned = identity_churned(tracking)
     identity_ready = identity_ready_by_fighter(tracking)
     tracking["fighter_A_initial_lock_safe"] = identity_ready["A"]
     tracking["fighter_B_initial_lock_safe"] = identity_ready["B"]
@@ -621,37 +728,19 @@ def refresh_identity_integrity(report: dict) -> dict:
         integrity["action_metrics_trusted"] = False
         integrity["coaching_evidence_mode"] = "withheld_identity_failure"
         failed = ", ".join(f"Fighter {fighter}" for fighter in required if not identity_ready.get(fighter, False))
-        churned_required = [fighter for fighter in required if churned[fighter]]
-        lost_hold = " and ".join(f"Fighter {fighter}" for fighter in churned_required)
-        handoff_rate = max((churn_rate(tracking, fighter)[0] for fighter in churned_required), default=0.0)
+        # One cause, one recommendation, shared with the page.
+        cause = identity_failure(tracking, required)
         scorecard = report.setdefault("scorecard", {})
         scorecard.update({
             "available": False,
             "totals": {"A": None, "B": None},
             "rounds": [],
             "winner_estimate": None,
-            "status": ("fighters_not_separable" if separable is False
+            "status": ("fighters_not_separable" if lookalike_blocks_identity(tracking)
                        else "identity_integrity_failed"),
-            "disclaimer": (
-                (
-                    "Scorecard withheld because the two fighters look too alike in this "
-                    "video to tell apart reliably. "
-                    # An older report without the measurement read "matches at 0%",
-                    # which says the opposite of "too alike".
-                    + (f"Their kit matches at {float(tracking['fighter_pair_similarity']):.0%} where a "
-                       "readable bout is usually nearer 60%, so any"
-                       if tracking.get("fighter_pair_similarity") is not None else "Any")
-                    + " per-fighter total risks crediting the wrong athlete."
-                ) if separable is False else (
-                    f"Scorecard withheld because WarriorIQ could not keep hold of {lost_hold}: it had to "
-                    f"find them again {handoff_rate:.0f} times a minute, which on a moving camera in a busy "
-                    "hall means it was often following someone else. Re-picking the fighters will not fix "
-                    "this; a steadier recording will."
-                ) if lost_hold else (
-                    f"Scorecard withheld because {failed} did not pass the fighter-identity gate. "
-                    "Return to fighter selection and analyze again; person coverage alone cannot prove identity."
-                )
-            ),
+            "disclaimer": ("Scorecard withheld. " + (
+                f"{cause['headline']} {cause['advice']}" if cause
+                else f"{failed} did not pass the fighter-identity gate.")),
         })
         report["key_moments"] = []
         report["illegal_moves"] = []

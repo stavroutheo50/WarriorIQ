@@ -281,7 +281,10 @@ class SharedCoachLinkTests(unittest.TestCase):
         measured = refresh_identity_integrity({"tracking": {"fighters_separable": False,
                                                             "fighter_pair_similarity": .83},
                                                "video": {"analysis_target": "A"}})
-        self.assertIn("matches at 83%", measured["scorecard"]["disclaimer"])
+        # A pre-kit-check report's percentage came from a histogram that could
+        # not tell black from white, so it is no longer quoted as a measurement.
+        self.assertNotIn("83%", measured["scorecard"]["disclaimer"])
+        self.assertIn("earlier kit check", measured["scorecard"]["disclaimer"])
 
 
 class StyleIsNotAFaultTests(unittest.TestCase):
@@ -412,8 +415,7 @@ class HandheldCameraIdentityTests(unittest.TestCase):
         page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(
             encoding="utf-8")
         self.assertIn("{% if identity_failed and not camera_lost %}<a class=\"btn\" href=\"/select/", page)
-        for repick in ("Pick the fighters again and they will be yours alone.",
-                       "<a class=\"text-link\" href=\"/select/{{job_id}}\">Show me who is who</a>",
+        for repick in ("<a class=\"text-link\" href=\"/select/{{job_id}}\">Show me who is who</a>",
                        "Choose the fighters again at the top of this page"):
             before = page[:page.index(repick)]
             self.assertIn("{% if camera_lost %}", before[-700:], repick)
