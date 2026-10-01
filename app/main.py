@@ -42,7 +42,7 @@ from app.state import (
     AnalysisRunLost, AnalysisStateNotPersisted, claim_next_job, create_job, delete_job,
     analysis_run_directory, completed_artifact_directory, persist_completed_job,
     finalize_job_from_worker, get_job, list_jobs, prepare_job_run, record_worker_heartbeat,
-    start_job_run, update_job, update_job_for_worker, wake_status, worker_status,
+    start_job_run, state_generation, update_job, update_job_for_worker, wake_status, worker_status,
 )
 from core.auth import (
     authenticate, end_session, hash_password, issue_session, register, resolve_session,
@@ -94,7 +94,7 @@ from core.metric_catalog import BY_KEY as METRIC_CATALOG, readings as metric_rea
 from core.chunked_upload import (
     ChunkedUploadError, StoredUpload, append as append_chunk, begin as begin_chunked,
     discard as discard_chunked, extend_lease, finalise as finalise_chunked,
-    load as load_chunked,
+    load as load_chunked, release_idle_sessions as release_idle_chunked_sessions,
 )
 from core.css_minify import minify as minify_css
 from core.preflight_client import client_thresholds
@@ -413,7 +413,7 @@ PUBLIC_INDEX_ROUTES = (
 # library and vanished on the three tabs beside them.
 SPORT_IRRELEVANT_PREFIXES = ("/profile", "/settings", "/legal", "/privacy", "/terms")
 PRIVATE_ROUTE_PREFIXES = (
-    "/api/", "/frame/", "/select/", "/progress/", "/result/", "/replay/", "/review/",
+    "/api/", "/frame/", "/select/", "/pending/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/live-frame/", "/dashboard", "/history",
     "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
@@ -707,10 +707,43 @@ def _is_live_processing_job(job: dict) -> bool:
     return (time.time() - updated) <= _STALE_PROCESSING_SECONDS
 
 
+# How old the job listing behind the top-bar chip may be. Every request used
+# to call list_jobs(), which opens, file-locks and parses every session file
+# under outputs/ - hundreds on the live host, phantom jobs included - and it ran
+# for static files too. Measured with 300 stored jobs: 34 ms of pure scanning
+# per request against 5 ms without, before the shared host's 8-12x slowdown,
+# so one person opening pages quickly was enough to saturate the account.
+#
+# A write in this process invalidates the snapshot at once (state_generation),
+# so an upload or a start shows up on the very next page. Only changes made by
+# another process - an external worker moving a job on - can be up to this
+# many seconds late, and the chip's own poll reads the job directly.
+_NAVIGATION_SNAPSHOT_SECONDS = 5.0
+_navigation_snapshot: tuple[int, float, list[tuple[str, dict]]] | None = None
+_navigation_snapshot_lock = threading.Lock()
+
+
+def _navigation_jobs() -> list[tuple[str, dict]]:
+    """list_jobs(), reused for a few seconds unless this process changed a job."""
+    global _navigation_snapshot
+    with _navigation_snapshot_lock:
+        cached = _navigation_snapshot
+        now = time.monotonic()
+        if (cached is not None and cached[0] == state_generation()
+                and now - cached[1] < _NAVIGATION_SNAPSHOT_SECONDS):
+            return cached[2]
+        generation = state_generation()
+        jobs = list_jobs()
+        # Stamped with the generation from before the scan: a write that lands
+        # during it leaves the snapshot already stale, which is the safe side.
+        _navigation_snapshot = (generation, time.monotonic(), jobs)
+        return jobs
+
+
 def _active_job_for_owner(owner_key: str) -> dict | None:
     jobs = [
         {"job_id": job_id, **job}
-        for job_id, job in list_jobs()
+        for job_id, job in _navigation_jobs()
         if job.get("owner_key") == owner_key and _is_live_processing_job(job)
     ]
     if not jobs:
@@ -897,22 +930,73 @@ def _prune_rate_windows(now: float) -> None:
             _rate_windows.pop(key, None)
 
 
-def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int) -> None:
-    """Small single-process safety limit; production should add an edge/shared limiter too."""
+# When each bucket last wrote a rate_limit_exceeded event. One event per
+# window is the evidence; one per refused request turned a flood into a stream
+# of database writes on exactly the occasion the server could least afford them.
+_rate_limit_reported: dict[str, float] = {}
+
+
+class RateLimited(Exception):
+    """A request refused by a rate limit, with how long until it would pass."""
+
+    def __init__(self, retry_after: int, detail: str):
+        super().__init__(detail)
+        self.retry_after = max(1, int(retry_after))
+        self.detail = detail
+
+
+def _take_rate_slot(scope: str, client: str, limit: int, window_seconds: int) -> int | None:
+    """Count one request. Returns None if it may proceed, else seconds to wait."""
     now = time.monotonic()
-    client = _client_ip(request)
     key = f"{scope}:{client}"
     recent = [stamp for stamp in _rate_windows.get(key, []) if now - stamp < window_seconds]
     if len(recent) >= limit:
-        record_security_event(
-            "rate_limit_exceeded", severity="warning", resource_type="route", resource_id=scope,
-            metadata={"client": client},
-        )
-        raise HTTPException(429, "Too many requests. Wait a little and try again.")
+        _rate_windows[key] = recent
+        return math.ceil(window_seconds - (now - recent[0])) if recent else window_seconds
     recent.append(now)
     _rate_windows[key] = recent
     if len(_rate_windows) > MAX_RATE_WINDOWS:
         _prune_rate_windows(now)
+    return None
+
+
+def _report_rate_limit_once(scope: str, client: str, window_seconds: int) -> None:
+    key = f"{scope}:{client}"
+    now = time.monotonic()
+    if now - _rate_limit_reported.get(key, -1e9) < window_seconds:
+        return
+    _rate_limit_reported[key] = now
+    if len(_rate_limit_reported) > MAX_RATE_WINDOWS:
+        _rate_limit_reported.clear()
+    record_security_event(
+        "rate_limit_exceeded", severity="warning", resource_type="route", resource_id=scope,
+        metadata={"client": client},
+    )
+
+
+def _enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int) -> None:
+    """Small single-process safety limit; production should add an edge/shared limiter too.
+
+    Always answered as a 429 with Retry-After, never by dropping the request.
+    """
+    client = _client_ip(request)
+    wait = _take_rate_slot(scope, client, limit, window_seconds)
+    if wait is None:
+        return
+    _report_rate_limit_once(scope, client, window_seconds)
+    raise HTTPException(
+        429, _rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))},
+    )
+
+
+def _rate_limit_detail(wait_seconds: int) -> str:
+    wait_seconds = max(1, int(wait_seconds))
+    if wait_seconds < 60:
+        when = f"{wait_seconds} second{'s' if wait_seconds != 1 else ''}"
+    else:
+        minutes = math.ceil(wait_seconds / 60)
+        when = f"{minutes} minute{'s' if minutes != 1 else ''}"
+    return f"That was a lot of requests in a short time. Wait about {when} and try again - nothing you saved is lost."
 
 
 # Segments that are an identifier rather than a page: all digits, or hex long
@@ -1251,60 +1335,52 @@ def _resident_megabytes() -> float | None:
         return None
 
 
-@app.middleware("http")
-async def viewer_context(request: Request, call_next):
-    global _last_guest_cleanup, _last_saved_video_cleanup
-    rejected_host = next(
-        (
-            candidate for candidate in (
-                request.headers.get("host", ""),
-                _forwarded_header(request, "x-forwarded-host", "") if request.headers.get("x-forwarded-host") else None,
-            )
-            if candidate is not None and not _trusted_request_host(candidate)
-        ),
-        None,
+# Requests that never render a page, read an account or need the job list:
+# assets, probes and the two crawler files. They skip the per-visitor context
+# entirely - a stylesheet has no use for the visitor's session or analysis
+# chip, and paying for both on every asset multiplied the cost of a page view
+# by the number of files on it.
+_HEALTH_PATHS = frozenset({"/health", "/healthz"})
+_LIGHTWEIGHT_PATHS = _HEALTH_PATHS | {"/favicon.ico", "/robots.txt", "/sitemap.xml"}
+_LIGHTWEIGHT_PREFIXES = ("/static/", "/assets/")
+
+
+def _is_lightweight_request(path: str) -> bool:
+    return path in _LIGHTWEIGHT_PATHS or path.startswith(_LIGHTWEIGHT_PREFIXES)
+
+
+def _wants_json(request: Request) -> bool:
+    return request.url.path.startswith(("/api/", "/stripe/")) or "application/json" in request.headers.get("accept", "")
+
+
+def _rate_limited_response(request: Request, wait_seconds: int):
+    """The 429 for the site-wide limit, built without touching the database.
+
+    A standalone page rather than error.html: the limiter answers before the
+    session is read, precisely so a flood costs as little as possible, and the
+    full layout needs that session. It is still a page a person can read, with
+    the wait spelled out, and the connection is always answered.
+    """
+    detail = _rate_limit_detail(wait_seconds)
+    headers = {"Retry-After": str(max(1, int(wait_seconds))), "Cache-Control": "no-store"}
+    if _wants_json(request):
+        return JSONResponse({"detail": detail}, status_code=429, headers=headers)
+    return templates.TemplateResponse(
+        request=request, name="rate_limited.html",
+        context={"request": request, "detail": detail, "retry_after": max(1, int(wait_seconds))},
+        status_code=429, headers=headers,
     )
-    if rejected_host is not None:
-        # Name the host that was refused. Without this a deployment reached
-        # under a hostname nobody listed in WARRIORIQ_ALLOWED_HOSTS is a blank
-        # 400 with nothing to act on. Logged rather than recorded as a security
-        # event, so an unauthenticated request cannot drive a database write.
-        LOGGER.warning("untrusted_request_host host=%r path=%s", rejected_host[:120], request.url.path)
-        return JSONResponse({"detail": "Unrecognized website address."}, status_code=400)
-    request_started = time.perf_counter()
-    request_id = request.headers.get("x-request-id", "").strip()[:64] or uuid.uuid4().hex[:16]
-    request.state.request_id = request_id
-    forwarded_scheme = _external_scheme(request)
-    public_host = urlsplit(SETTINGS.public_base_url).netloc.lower()
-    forwarded_host = _forwarded_header(
-        request, "x-forwarded-host", request.headers.get("host", request.url.netloc)
-    ).lower()
-    if public_host and forwarded_host == f"www.{public_host}":
-        target = f"{SETTINGS.public_base_url}{request.url.path}"
-        if request.url.query:
-            target += f"?{request.url.query}"
-        return RedirectResponse(target, status_code=308)
-    # Render may call the health probe over its private HTTP network. Keep that
-    # endpoint directly reachable while redirecting public browser traffic.
-    if request.url.path != "/health" and SETTINGS.public_base_url.startswith("https://") and forwarded_scheme != "https":
-        target = f"{SETTINGS.public_base_url}{request.url.path}"
-        if request.url.query:
-            target += f"?{request.url.query}"
-        return RedirectResponse(target, status_code=308)
-    # One unpredictable value per response, carried by every <script> the
-    # templates emit, so the policy can name it instead of 'unsafe-inline'.
-    request.state.csp_nonce = secrets.token_urlsafe(18)
+
+
+def _load_viewer_state(request: Request) -> None:
+    """Who is asking and what they have running: the per-page context.
+
+    Reads the session from the database and the job listing from disk, so it
+    runs on a worker thread rather than on the event loop. Called inline from
+    the async middleware, it used to stall every other request this process
+    was serving for as long as one visitor's lookups took.
+    """
     request.state.account = resolve_session(request.cookies.get(SESSION_COOKIE))
-    guest_id = request.cookies.get(GUEST_COOKIE)
-    new_guest = not guest_id or len(guest_id) < 24 or len(guest_id) > 96
-    request.state.guest_id = session_token() if new_guest else guest_id
-    # The CSRF token is per visitor, not per form, and is issued to signed-out
-    # visitors too - the login and signup posts are exactly the ones that need
-    # it, and neither has an account yet. A cookie of the wrong shape counts as
-    # absent and is replaced, so a stale value cannot lock somebody out.
-    existing_csrf = usable_csrf_token(request.cookies.get(CSRF_COOKIE))
-    new_csrf = existing_csrf is None
-    request.state.csrf_token = issue_csrf_token() if new_csrf else existing_csrf
     request.state.analysis_navigation = _analysis_navigation_state(
         _owner_key(request),
         request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
@@ -1350,22 +1426,22 @@ async def viewer_context(request: Request, call_next):
     request.state.social_image_url = (
         f"{SETTINGS.public_base_url}/static/warrioriq-logo.png" if SETTINGS.public_base_url else ""
     )
-    oauth_callback = request.url.path.startswith("/auth/") and request.url.path.endswith("/callback")
-    if (
-        request.method in {"POST", "PUT", "PATCH", "DELETE"}
-        and request.url.path != "/stripe/webhook"
-        and not oauth_callback
-    ):
-        expected_origin = _external_origin(request)
-        source = request.headers.get("origin") or request.headers.get("referer")
-        if source:
-            parsed = urlsplit(source)
-            source_origin = f"{parsed.scheme}://{parsed.netloc}".lower()
-            if source_origin != expected_origin:
-                return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
-        if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
-            return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
-    now = time.monotonic()
+
+
+_maintenance_lock = threading.Lock()
+
+
+def _run_periodic_maintenance(now: float | None = None) -> None:
+    """Expire guest jobs, retained videos and abandoned processing files.
+
+    Used to run inline in the request middleware, on the event loop, in
+    whichever request happened to arrive after the timer ran out - deleting
+    directories while that visitor, and everyone queued behind them, waited.
+    It now runs on a background thread (see _schedule_maintenance); calling it
+    directly is still the way to run it synchronously, as the tests do.
+    """
+    global _last_guest_cleanup, _last_saved_video_cleanup
+    now = time.monotonic() if now is None else now
     if now - _last_guest_cleanup > 600:
         jobs_before_cleanup = dict(list_jobs())
         cutoff = time.time() - SETTINGS.failed_upload_retention_hours * 3600
@@ -1378,6 +1454,10 @@ async def viewer_context(request: Request, call_next):
         for job_id in cleanup_expired_guest_jobs(protected):
             delete_legal_acceptances_for_resource(job_id)
             delete_job(job_id)
+        # Chunked uploads whose page went away: give back their lease, their
+        # reserved analysis and their partial file without waiting for the
+        # same person to try again.
+        release_idle_chunked_sessions()
         _last_guest_cleanup = now
     if now - _last_saved_video_cleanup > 3600:
         for fight in list_expired_fight_videos():
@@ -1410,25 +1490,37 @@ async def viewer_context(request: Request, call_next):
                 "abandoned_processing_files_deleted", resource_type="fight", resource_id=abandoned_job_id,
             )
         _last_saved_video_cleanup = now
-    if is_fight_upload(request.scope):
-        response = await _admit_fight_upload(request, call_next)
-    else:
-        response = await call_next(request)
-    duration_ms = (time.perf_counter() - request_started) * 1000.0
-    response.headers.setdefault("X-Request-ID", request_id)
-    response.headers.setdefault("Server-Timing", f"app;dur={duration_ms:.1f}")
-    LOGGER.info(
-        "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
-        request_id, request.method, request.url.path, response.status_code, duration_ms,
-    )
-    if _is_counted_page_view(request, response):
+
+
+def _schedule_maintenance() -> None:
+    """Start the periodic sweep in the background when one is due.
+
+    Single-flight: if a sweep is already running, a request never starts a
+    second one and never waits for the first.
+    """
+    now = time.monotonic()
+    if now - _last_guest_cleanup <= 600 and now - _last_saved_video_cleanup <= 3600:
+        return
+    if not _maintenance_lock.acquire(blocking=False):
+        return
+
+    def sweep() -> None:
         try:
-            record_page_view(_counted_path(request.url.path))
-        except Exception:  # pragma: no cover - counting must never cost a page
-            # A visitor came for the page, not for the statistic. If the write
-            # fails the page still has to be served, so this swallows rather
-            # than raises, and says so in the log instead.
-            LOGGER.warning("page_view_not_counted path=%s", request.url.path)
+            _run_periodic_maintenance()
+        except Exception:                                           # noqa: BLE001
+            LOGGER.exception("periodic_maintenance_failed")
+        finally:
+            _maintenance_lock.release()
+
+    try:
+        threading.Thread(target=sweep, name="warrioriq-maintenance", daemon=True).start()
+    except Exception:                                               # noqa: BLE001
+        _maintenance_lock.release()
+        raise
+
+
+def _apply_response_headers(request: Request, response) -> None:
+    """Security and caching headers every response carries, page or asset."""
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
@@ -1487,6 +1579,112 @@ async def viewer_context(request: Request, call_next):
         response.headers.setdefault("Cache-Control", "public, max-age=604800")
     if _request_is_secure(request):
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+
+@app.middleware("http")
+async def viewer_context(request: Request, call_next):
+    rejected_host = next(
+        (
+            candidate for candidate in (
+                request.headers.get("host", ""),
+                _forwarded_header(request, "x-forwarded-host", "") if request.headers.get("x-forwarded-host") else None,
+            )
+            if candidate is not None and not _trusted_request_host(candidate)
+        ),
+        None,
+    )
+    if rejected_host is not None:
+        # Name the host that was refused. Without this a deployment reached
+        # under a hostname nobody listed in WARRIORIQ_ALLOWED_HOSTS is a blank
+        # 400 with nothing to act on. Logged rather than recorded as a security
+        # event, so an unauthenticated request cannot drive a database write.
+        LOGGER.warning("untrusted_request_host host=%r path=%s", rejected_host[:120], request.url.path)
+        return JSONResponse({"detail": "Unrecognized website address."}, status_code=400)
+    request_started = time.perf_counter()
+    request_id = request.headers.get("x-request-id", "").strip()[:64] or uuid.uuid4().hex[:16]
+    request.state.request_id = request_id
+    forwarded_scheme = _external_scheme(request)
+    public_host = urlsplit(SETTINGS.public_base_url).netloc.lower()
+    forwarded_host = _forwarded_header(
+        request, "x-forwarded-host", request.headers.get("host", request.url.netloc)
+    ).lower()
+    if public_host and forwarded_host == f"www.{public_host}":
+        target = f"{SETTINGS.public_base_url}{request.url.path}"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=308)
+    # Render may call the health probe over its private HTTP network. Keep that
+    # endpoint directly reachable while redirecting public browser traffic.
+    if request.url.path not in _HEALTH_PATHS and SETTINGS.public_base_url.startswith("https://") and forwarded_scheme != "https":
+        target = f"{SETTINGS.public_base_url}{request.url.path}"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=308)
+    # One unpredictable value per response, carried by every <script> the
+    # templates emit, so the policy can name it instead of 'unsafe-inline'.
+    request.state.csp_nonce = secrets.token_urlsafe(18)
+    if _is_lightweight_request(request.url.path):
+        response = await call_next(request)
+        response.headers.setdefault("X-Request-ID", request_id)
+        response.headers.setdefault(
+            "Server-Timing", f"app;dur={(time.perf_counter() - request_started) * 1000.0:.1f}")
+        _apply_response_headers(request, response)
+        return response
+    if SETTINGS.request_rate_limit_per_minute:
+        client = _client_ip(request)
+        wait = _take_rate_slot("site", client, SETTINGS.request_rate_limit_per_minute, 60)
+        if wait is not None:
+            LOGGER.warning("site_rate_limited path=%s retry_after=%s", request.url.path, wait)
+            response = _rate_limited_response(request, wait)
+            _apply_response_headers(request, response)
+            return response
+    guest_id = request.cookies.get(GUEST_COOKIE)
+    new_guest = not guest_id or len(guest_id) < 24 or len(guest_id) > 96
+    request.state.guest_id = session_token() if new_guest else guest_id
+    # The CSRF token is per visitor, not per form, and is issued to signed-out
+    # visitors too - the login and signup posts are exactly the ones that need
+    # it, and neither has an account yet. A cookie of the wrong shape counts as
+    # absent and is replaced, so a stale value cannot lock somebody out.
+    existing_csrf = usable_csrf_token(request.cookies.get(CSRF_COOKIE))
+    new_csrf = existing_csrf is None
+    request.state.csrf_token = issue_csrf_token() if new_csrf else existing_csrf
+    await run_in_threadpool(_load_viewer_state, request)
+    oauth_callback = request.url.path.startswith("/auth/") and request.url.path.endswith("/callback")
+    if (
+        request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.url.path != "/stripe/webhook"
+        and not oauth_callback
+    ):
+        expected_origin = _external_origin(request)
+        source = request.headers.get("origin") or request.headers.get("referer")
+        if source:
+            parsed = urlsplit(source)
+            source_origin = f"{parsed.scheme}://{parsed.netloc}".lower()
+            if source_origin != expected_origin:
+                return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+        if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+            return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+    _schedule_maintenance()
+    if is_fight_upload(request.scope):
+        response = await _admit_fight_upload(request, call_next)
+    else:
+        response = await call_next(request)
+    duration_ms = (time.perf_counter() - request_started) * 1000.0
+    response.headers.setdefault("X-Request-ID", request_id)
+    response.headers.setdefault("Server-Timing", f"app;dur={duration_ms:.1f}")
+    LOGGER.info(
+        "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
+        request_id, request.method, request.url.path, response.status_code, duration_ms,
+    )
+    if _is_counted_page_view(request, response):
+        try:
+            record_page_view(_counted_path(request.url.path))
+        except Exception:  # pragma: no cover - counting must never cost a page
+            # A visitor came for the page, not for the statistic. If the write
+            # fails the page still has to be served, so this swallows rather
+            # than raises, and says so in the log instead.
+            LOGGER.warning("page_view_not_counted path=%s", request.url.path)
+    _apply_response_headers(request, response)
     if new_guest:
         response.set_cookie(
             GUEST_COOKIE, request.state.guest_id, max_age=60 * 60 * 24,
@@ -1506,15 +1704,21 @@ async def viewer_context(request: Request, call_next):
 
 @app.exception_handler(StarletteHTTPException)
 async def http_error_page(request: Request, exc: StarletteHTTPException):
-    if request.url.path.startswith(("/api/", "/stripe/")) or "application/json" in request.headers.get("accept", ""):
+    if _wants_json(request):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+    if not hasattr(request.state, "account"):
+        # An asset or probe request: the page layout needs the visitor context
+        # those requests deliberately skip, so the refusal is plain text.
+        return PlainTextResponse(str(exc.detail or ""), status_code=exc.status_code, headers=exc.headers)
     title = {
         400: "That request needs attention",
         403: "This area is private",
         404: "That page left the ring",
         410: "This link has expired",
         413: "That file is too large",
-        429: "Analysis limit reached",
+        # Every 429 that reaches this page is a request-rate limit; the
+        # analysis allowance answers as JSON on the upload routes instead.
+        429: "Slow down for a moment",
         503: "This feature is not launch-ready",
         507: "Storage is temporarily full",
     }.get(exc.status_code, "WarriorIQ could not complete that request")
@@ -1531,8 +1735,10 @@ async def http_error_page(request: Request, exc: StarletteHTTPException):
 async def unexpected_error_page(request: Request, exc: Exception):
     LOGGER.exception("Unhandled request failure", exc_info=exc)
     detail = "WarriorIQ could not complete this request. Please try again."
-    if request.url.path.startswith(("/api/", "/stripe/")) or "application/json" in request.headers.get("accept", ""):
+    if _wants_json(request):
         return JSONResponse({"detail": detail}, status_code=500)
+    if not hasattr(request.state, "account"):
+        return PlainTextResponse(detail, status_code=500)
     return templates.TemplateResponse(
         request=request,
         name="error.html",
@@ -5265,15 +5471,102 @@ def _report_available(job_id: str) -> bool:
         return False
 
 
+# What the fight library's "Pending" section lists: everything somebody has
+# uploaded that is not a finished report yet. Analyses in progress never
+# appeared in /history at all, and an upload waiting for its fighters could
+# only be found again through the top-bar chip - which shows one job - so the
+# "finish your pending fights" refusal pointed at things nobody could see.
+PENDING_LIBRARY_STATUSES = ("selecting", "queued", "running", "interrupted", "error")
+_PENDING_LABELS = {
+    "selecting": "Waiting for you to pick the fighters",
+    "queued": "Waiting for the analysis machine",
+    "running": "Being analysed",
+    "interrupted": "Paused - open it to restart",
+    "error": "Did not finish - open it for the reason",
+}
+
+
+def _pending_jobs_for_owner(owner_key: str) -> list[dict]:
+    """This person's unfinished fights, newest first. Saved fights are not
+    pending - they are already in the library below."""
+    pending = []
+    for job_id, job in list_jobs():
+        status = job.get("status")
+        if job.get("owner_key") != owner_key or status not in PENDING_LIBRARY_STATUSES:
+            continue
+        if get_fight(job_id):
+            continue
+        percent = max(0.0, min(99.0, float(job.get("percent") or 0.0)))
+        label = _PENDING_LABELS[status]
+        if status == "running" and percent > 0:
+            label = f"Being analysed - {int(percent)}%"
+        pending.append({
+            "job_id": job_id,
+            "status": status,
+            "label": label,
+            "continue_url": f"/select/{job_id}" if status == "selecting" else f"/progress/{job_id}",
+            "continue_label": "Pick the fighters" if status == "selecting" else "Open",
+            "original_name": str(job.get("original_name") or "Fight video")[:80],
+            "ruleset": job.get("ruleset"),
+            "created_at": datetime.fromtimestamp(
+                float(job.get("created_at_epoch") or job.get("updated_at_epoch") or time.time()),
+                tz=timezone.utc).isoformat(),
+            "sort_key": float(job.get("created_at_epoch") or 0.0),
+        })
+    pending.sort(key=lambda item: item["sort_key"], reverse=True)
+    return pending
+
+
+def _discard_pending_job(job_id: str, job: dict) -> None:
+    """Remove an unfinished fight and give back everything it held.
+
+    Deleting the session first is what stops an analysis in flight: a worker
+    claims and reports progress only against a session it can read, so its
+    next progress report is refused and it abandons the run.
+    """
+    delete_job(job_id)
+    if job.get("usage_reserved") and job.get("account_id"):
+        release_analysis(int(job["account_id"]), job_id)
+    video = Path(job.get("video_path") or "missing").resolve()
+    if video.parent == UPLOADS.resolve():
+        remove_derivative(video)
+        video.unlink(missing_ok=True)
+    job_dir = (OUTPUTS / job_id).resolve()
+    if job_dir.parent == OUTPUTS.resolve() and job_dir.exists():
+        shutil.rmtree(job_dir, ignore_errors=True)
+    delete_legal_acceptances_for_resource(job_id)
+
+
+@app.post("/pending/{job_id}/cancel", dependencies=[Depends(require_csrf)])
+def cancel_pending_job(request: Request, job_id: str):
+    """Cancel an upload waiting for its fighters, or an analysis not finished."""
+    owner = _owner_key(request)
+    job = get_job(job_id)
+    if (not job or job.get("owner_key") != owner
+            or job.get("status") not in PENDING_LIBRARY_STATUSES or get_fight(job_id)):
+        raise HTTPException(404)
+    _discard_pending_job(job_id, job)
+    account = _account(request)
+    record_security_event(
+        "pending_fight_cancelled", account_id=int(account["id"]) if account else None,
+        resource_type="fight", resource_id=job_id, metadata={"status": job.get("status")},
+    )
+    if "application/json" in request.headers.get("accept", ""):
+        return {"cancelled": True}
+    return RedirectResponse("/history#pending", status_code=303)
+
+
 @app.get("/history", response_class=HTMLResponse)
 def history_page(request: Request):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
     for fight in fights:
         fight["report_available"] = _report_available(fight["job_id"])
+    pending = _pending_jobs_for_owner(_owner_key(request)) if profile_id is not None else []
     return templates.TemplateResponse(
         request=request, name="history.html",
-        context={"request": request, "fights": fights, "signed_in": profile_id is not None},
+        context={"request": request, "fights": fights, "pending": pending,
+                 "signed_in": profile_id is not None},
     )
 
 
@@ -6113,11 +6406,21 @@ async def chunked_upload_begin(request: Request):
 
     job_id = uuid.uuid4().hex[:12]
     reserved = False
+    ceiling = min(MAX_FIGHT_BYTES, SETTINGS.max_chunked_upload_bytes)
+    try:
+        declared = int(payload.get("size") or 0)
+    except (TypeError, ValueError):
+        declared = 0
     try:
         _enforce_rate_limit(request, "fight-upload", 12, 600)
+        # Reserve what this file says it is, not the largest file allowed. The
+        # declared size is enforced chunk by chunk (append refuses anything
+        # past it), so it is a real bound; reserving the 512 MB ceiling three
+        # times over for a 40 MB clip made two unfinished uploads look like a
+        # full account.
         await run_in_threadpool(
             reserve_upload_storage, account_id, job_id,
-            min(MAX_FIGHT_BYTES, SETTINGS.max_chunked_upload_bytes))
+            min(declared, ceiling) if declared > 0 else ceiling)
         reserved = await run_in_threadpool(reserve_analysis, account_id, job_id)
         if not reserved:
             release_upload_storage(job_id)
@@ -6387,6 +6690,10 @@ def health_check(request: Request):
     copied its files without restarting the application.
     """
     payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT}
+    # The probe skips the per-visitor context (see _is_lightweight_request), so
+    # the session is read here, and only when there is one to read.
+    if not hasattr(request.state, "account") and request.cookies.get(SESSION_COOKIE):
+        request.state.account = resolve_session(request.cookies.get(SESSION_COOKIE))
     # How long THIS process has been alive, and how much memory it is holding.
     #
     # Added to answer a question nothing else could. Measured from outside, the
@@ -6417,6 +6724,20 @@ def health_check(request: Request):
         payload["deployed"] = on_disk
         payload["restart_required"] = True
     return payload
+
+
+@app.api_route("/healthz", methods=["GET", "HEAD"], include_in_schema=False)
+def healthz():
+    """The cheapest possible liveness answer, for an uptime monitor.
+
+    No database, no disk, no session, no template: if this does not answer,
+    the process is not serving at all, or something in front of it - the host,
+    its firewall, a bot-challenge layer - is not letting the request through.
+    /health adds the running commit; /ready checks the database, storage and
+    worker and is the one to alert on for "analyses will not run".
+    """
+    return Response('{"status":"ok"}', media_type="application/json",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.get("/ready", include_in_schema=False)

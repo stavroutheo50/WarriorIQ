@@ -128,7 +128,13 @@ def test_failed_upload_releases_allowance_and_files(signed_in):
 
 def test_storage_admission_serializes_concurrent_requests(signed_in, settings):
     account, _ = signed_in
-    settings(max_pending_uploads=1)
+    # Room for exactly one reservation: the original and its derivative of a
+    # 64-byte file fit, a second lease on top of the first does not. Only
+    # serialized admission can make exactly one of two concurrent calls win.
+    # (Leases no longer count as pending fights - see
+    # test_unfinished_uploads_do_not_count_as_pending - so storage is the
+    # capacity that still applies to them.)
+    settings(account_storage_bytes=200)
     ids = [uuid.uuid4().hex[:12] for _ in range(2)]
 
     def reserve(job_id):

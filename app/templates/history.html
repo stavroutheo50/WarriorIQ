@@ -2,6 +2,22 @@
 {% block title %}History · WarriorIQ{% endblock %}
 {% block content %}
 <header class="archive-hero" data-reveal><div><div class="eyebrow">Private fight archive</div><h1>Your fight library.</h1><p>Every saved analysis, ready for the next review.</p></div>{% if signed_in %}<a class="btn" data-motion-primary href="/analyze">{% if fights %}Analyze another fight{% else %}Analyze a fight{% endif %} <span aria-hidden="true">→</span></a>{% endif %}</header>
+{% if signed_in and pending %}
+<section class="pending-fights" id="pending" aria-labelledby="pendingHeading" data-reveal>
+  <div class="eyebrow">Pending</div>
+  <h2 id="pendingHeading">Not finished yet</h2>
+  <p class="muted small">Uploads waiting for you to pick the fighters, and analyses still running. Each one counts towards how many fights can wait at once; cancel any you no longer need.</p>
+  <ul class="pending-list">
+  {% for item in pending %}
+    <li class="pending-item" data-status="{{item.status}}">
+      <div class="pending-main"><strong>{{item.label}}</strong><span class="muted small">{{item.original_name}}{% if item.ruleset %} · {{item.ruleset|ruleset_label}}{% endif %} · <time datetime="{{item.created_at}}" data-local="datetime">{{item.created_at|fight_moment}}</time></span></div>
+      <div class="pending-actions"><a class="btn secondary" href="{{item.continue_url}}">{{item.continue_label}}</a>
+        <form action="/pending/{{item.job_id}}/cancel" method="post" data-confirm="Cancel this fight? Its uploaded video is deleted and it stops counting as pending."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="record-delete" type="submit">Cancel</button></form></div>
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
 <section class="fight-archive" aria-label="Saved fight analyses">
 {% if not signed_in %}<div class="empty-workspace empty-state"><span class="empty-state-mark" aria-hidden="true">⌁</span><div><div class="eyebrow">Private by design</div><h2>Sign in to open your private fight library</h2><p>Every fight you analyse is saved here, and only you can open it.</p><div class="hero-actions"><a class="btn" href="/signup?next=/history">Create account</a><a class="btn secondary" href="/login?next=/history">Sign in</a></div></div></div>{% else %}
 {% if fights %}<div class="archive-tools" data-reveal><label class="archive-search" for="historySearch"><span aria-hidden="true">⌕</span><input id="historySearch" type="search" placeholder="Search by name, date, ruleset or type" autocomplete="off"></label><label class="archive-sort">Sort <select id="historySort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label></div>

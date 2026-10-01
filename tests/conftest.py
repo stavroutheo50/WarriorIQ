@@ -45,6 +45,10 @@ os.environ["WARRIORIQ_DB_PATH"] = str(_RUNTIME / "warrioriq.sqlite3")
 os.environ["WARRIORIQ_UPLOADS_DIR"] = str(_RUNTIME / "uploads")
 os.environ["WARRIORIQ_OUTPUTS_DIR"] = str(_RUNTIME / "outputs")
 os.environ["WARRIORIQ_ALLOWED_HOSTS"] = "testserver,warrioriq.eu,warrioriq.onrender.com"
+# Every test client shares one address, so a suite of a few thousand requests
+# would trip the site-wide per-address limit. The limiter has its own tests,
+# which switch it back on with a small ceiling (test_load_resilience.py).
+os.environ["WARRIORIQ_REQUEST_RATE_LIMIT_PER_MINUTE"] = "0"
 # The machine profile is written too, and by a path nobody expects: planning a
 # budget calls _frame_cost, which RECORDS the cost it measured when nothing is
 # stored yet. So merely running the budget tests wrote a frame cost into the

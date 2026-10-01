@@ -210,7 +210,33 @@ Bake the model weights into the container image or a persistent volume. Download
 
 When the GPU is on a different machine, set `WARRIORIQ_WORKER_MODE=remote` and a high-entropy `WARRIORIQ_WORKER_TOKEN` on the web server. On the GPU machine, install the full requirements and model assets, then set `WARRIORIQ_WORKER_REMOTE_URL=https://warrioriq.eu` plus the same token and run `python worker.py`. The worker downloads only its claimed video over authenticated HTTPS, streams genuine progress, and uploads a bounded report/tracking archive. Keep the token server-side, rotate it if exposed, and confirm `/ready` is healthy before accepting public analyses.
 
-`/health` answers only whether the web process is alive. Use `/ready` for deployment readiness. Before backups, choose a protected destination outside the public web root and run `python tools/backup_runtime.py <destination>`. The command uses SQLite's online backup API, runs an integrity check and writes a SHA-256 manifest; it intentionally excludes original videos.
+`/health` answers only whether the web process is alive. Use `/ready` for deployment readiness.
+
+### Uptime monitoring
+
+Three probes, from cheapest to most thorough:
+
+| Probe | What it touches | Use it for |
+|---|---|---|
+| `GET` or `HEAD /healthz` | nothing - no database, disk, session or template; answers `{"status":"ok"}` | the uptime monitor that pages you |
+| `GET /health` | the running commit (and, for an admin, uptime and memory) | confirming a deploy restarted the app |
+| `GET /ready` | database, private storage, queue and worker heartbeat; 503 when not ready | "analyses will not run" alerts |
+
+Set up an external monitor (UptimeRobot, Better Stack, Hetrix or similar - any HTTP keyword monitor works):
+
+1. Monitor `https://warrioriq.eu/healthz` every 1-5 minutes, method `HEAD` or `GET`, keyword `"ok"`, timeout 30 s, alert after 2 consecutive failures.
+2. Add a second monitor on `https://warrioriq.eu/ready` with a longer interval (10-15 min) and a separate alert, so a sleeping GPU worker does not look like the site being down.
+3. Run the monitor from a location that is **not** your own network, and ideally two regions. If your own browser times out while the monitor stays green, the site is up and your address is being blocked in front of it (see below).
+4. Add the monitor's source addresses to the host firewall's allow list (cPanel: Imunify360 or CSF whitelist), so a monitor is never itself the reason an address is blocked.
+
+**Reading an outage.** The application always answers: an overloaded app returns 429 (a page that says how long to wait, with `Retry-After`), 5xx, or 503 from Passenger's queue - never a silent drop. Chrome's `ERR_CONNECTION_TIMED_OUT` means the TCP connection itself was never accepted, which the application cannot cause; on a cPanel/CloudLinux host that is the firewall or bot-challenge layer (Imunify360 graylist/blocklist, CSF/LFD connection or 404-flood rules, ModSecurity) dropping your address, typically for 15-60 minutes. To confirm after the fact:
+
+- Run `curl -sS -o /dev/null -w "%{http_code} %{time_total}\n" https://warrioriq.eu/healthz` from a phone on mobile data while your own connection is timing out. A 200 there means the server was up and your IP was blocked.
+- In cPanel, open Imunify360 (or ask the host to run `imunify360-agent ip-list local list` / `csf -g <your IP>`) and look for your address with a reason such as "too many 4xx", "request flood" or a WebShield challenge.
+- In cPanel's Resource Usage page, check for LVE CPU, entry-process (EP) or memory faults at that time; those produce 503/508 responses, not timeouts.
+- `warrioriq.log` (beside the database) logs `request_complete ... duration_ms=` for every request and `site_rate_limited` whenever the application itself limited a client. No log lines during the outage plus a green `/healthz` from elsewhere is the firewall.
+
+Ask the host to whitelist your own office/home addresses and the monitor's, and to raise or disable the 4xx-count rule for this account if it fires on normal browsing. The application side was fixed so normal browsing is cheap: asset and probe requests no longer read the session or scan every stored job (that scan used to run on every request, a stylesheet included), the per-page context is loaded off the event loop, periodic cleanup runs on a background thread, and a site-wide per-address limit (`WARRIORIQ_REQUEST_RATE_LIMIT_PER_MINUTE`, default 600, `0` disables) answers a runaway client with a 429 page instead of letting it saturate the account. Before backups, choose a protected destination outside the public web root and run `python tools/backup_runtime.py <destination>`. The command uses SQLite's online backup API, runs an integrity check and writes a SHA-256 manifest; it intentionally excludes original videos.
 
 ## Performance requirement
 

@@ -118,6 +118,7 @@ body[data-page=home] .hero-card:before{left:0;right:auto;top:24px;width:2px;heig
 .assign-note{display:inline-flex;align-items:baseline;gap:6px;margin-left:8px;color:var(--wiq-text-tertiary);font-size:12px}
 .assign-note .text-link{border:0;background:none;padding:0;font-size:12px;cursor:pointer}
 .upload-validation{margin:0 0 10px;padding:10px 12px;border:1px solid var(--wiq-line);border-radius:var(--wiq-radius-sm);background:var(--wiq-canvas-raised);color:var(--wiq-text-secondary);font-size:13px}
+.upload-error{margin:0 0 10px;padding:12px 14px;border:1px solid #70404b;border-left:3px solid var(--wiq-danger);border-radius:var(--wiq-radius-sm);background:#1a0f17;color:#f3dbe1;font-size:14px}.upload-error[hidden]{display:none}.upload-error b{display:block;margin-bottom:4px;color:#ffd5de}.upload-error p{margin:0 0 6px}.upload-error p:last-child{margin:0}.upload-error .upload-error-action{color:#e6edf8}.upload-error a,.upload-error button{display:inline-flex;align-items:center;min-height:44px;margin-top:4px}.upload-error [hidden]{display:none}
 .empty-state{display:grid;grid-template-columns:90px minmax(0,1fr);gap:28px;align-items:start;max-width:780px;margin:45px 0;padding:34px;border:1px solid var(--wiq-line);border-radius:14px;background:#0c1421}.empty-state-mark{display:grid;place-items:center;width:72px;height:72px;border:1px solid #354b6a;border-radius:50%;color:#8fa9ef;font-size:29px}.empty-state h2{margin:8px 0}.empty-state p{color:var(--wiq-text-secondary)}
 
 /* Shared result and live-analysis polish */
@@ -346,3 +347,6 @@ table td{font-size:12px}
  */
 .plan-price-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:10px}
 .plan-early{padding:5px 9px;border:1px solid #2c5f4a;border-radius:99px;background:#16342a;color:#8fe3bd;font-size:11px;font-weight:850;letter-spacing:.6px;white-space:nowrap}
+
+/* Fight library: unfinished uploads and analyses (history.html #pending). */
+.pending-fights{margin:0 0 28px;padding:18px 20px;border:1px solid var(--wiq-line);border-radius:14px;background:#0c1421}.pending-fights h2{margin:4px 0 6px;font-size:20px}.pending-list{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:10px}.pending-item{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:12px 14px;border:1px solid var(--wiq-line-soft);border-radius:10px;background:var(--wiq-canvas-raised)}.pending-main{display:flex;flex-direction:column;gap:2px;min-width:0}.pending-main span{overflow-wrap:anywhere}.pending-actions{display:flex;align-items:center;gap:14px}.pending-actions form{margin:0}.pending-actions .btn{min-height:44px}.pending-actions .record-delete{min-height:44px}

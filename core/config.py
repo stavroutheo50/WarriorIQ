@@ -94,6 +94,14 @@ class Settings:
     # "database is locked" before. Naming it makes it configurable and stops
     # the value being an accident of the driver's default.
     sqlite_busy_timeout_ms: int = int(os.getenv("WARRIORIQ_SQLITE_BUSY_TIMEOUT_MS", "5000"))
+    # A ceiling on requests per minute from one address, across every page and
+    # API route (static files, /health and /healthz are not counted). Answered
+    # with a 429 page that says how long to wait - never a dropped connection.
+    # Generous on purpose: a person browsing quickly makes 20-60 a minute and a
+    # live progress page about 110 (status poll plus stills); a gym's members
+    # can share one address. This exists for a runaway client, not them.
+    # 0 switches it off.
+    request_rate_limit_per_minute: int = max(0, int(os.getenv("WARRIORIQ_REQUEST_RATE_LIMIT_PER_MINUTE", "600")))
     default_imgsz: int = int(os.getenv("WARRIORIQ_IMGSZ", "640"))
     min_imgsz: int = int(os.getenv("WARRIORIQ_MIN_IMGSZ", "512"))
     # Fighters in a wide or low-resolution recording occupy very few pixels.

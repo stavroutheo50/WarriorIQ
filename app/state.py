@@ -28,6 +28,15 @@ _CLAIM_DIRECTORY = ".claim"
 _TRANSIENT_KEYS = {"report"}
 LOGGER = logging.getLogger("warrioriq.state")
 _ARTIFACT_NAMES = {"report.json", "report.html", "tracking.jsonl", "events.json"}
+# Bumped by every session write and every forgotten job in this process, so a
+# caller holding a snapshot of list_jobs() can tell it is out of date without
+# re-reading every session file to find out. See app.main._navigation_jobs.
+_generation = 0
+
+
+def state_generation() -> int:
+    """A counter that moves whenever this process changes any job's state."""
+    return _generation
 
 
 class AnalysisRunLost(RuntimeError):
@@ -72,11 +81,13 @@ def _remember(job_id: str, job: dict) -> None:
 
 
 def _forget(job_id: str) -> None:
+    global _generation
     # The lock object itself is deliberately kept. Dropping it while another
     # thread waits on it would hand the two of them different guards, and both
     # would then try to take the same file lock on separate descriptors.
     with _lock:
         _jobs.pop(job_id, None)
+        _generation += 1
 
 
 def _hold_file_lock(handle, acquire: bool) -> None:
@@ -162,6 +173,9 @@ def completed_artifact_directory(job_id: str, job: dict | None = None) -> Path |
 
 
 def _write_session(job_id: str, job: dict) -> bool:
+    global _generation
+    with _lock:
+        _generation += 1
     path = _session_path(job_id)
     # Keep the staging name close to the final name. A long suffix pushed the
     # temporary file past the Windows 260-character path limit on deep project

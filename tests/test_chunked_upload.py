@@ -609,7 +609,8 @@ class ClientTests(unittest.TestCase):
         self.assertIn("/abort", self.page)
 
     def test_it_retries_a_dropped_chunk_before_giving_up(self):
-        self.assertIn("if (++attempts > 3) throw", self.page)
+        self.assertIn("if (++attempts > 3)", self.page)
+        self.assertIn("throw stopped", self.page)
 
     def test_every_call_carries_the_csrf_header(self):
         for call in ("/api/upload/begin", "/chunk?offset=", "/finish"):
