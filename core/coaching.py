@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 from core.metric_catalog import BY_KEY
@@ -94,9 +95,44 @@ def _measured_baseline_drills(fighter: str, own: dict) -> list[dict]:
 #
 # One source of truth on purpose. Two copies of a reference value drift, and
 # then the coaching text and the card disagree about what normal is.
-# Relative gap (mine - theirs) / (|mine| + |theirs|) under which two fighters
-# read as level. One constant for the wording and for what counts as behind.
-LEVEL_GAP = 0.02
+
+# A difference is only named - a strength, or a thing to work on - when it is
+# both big enough to matter and bigger than the measurement's own noise.
+#
+# QA, 2026-09: "Work on: Guard 7% - You 7%, them 8% - behind your opponent
+# here." One point is noise, not a weakness. So:
+#   * MIN_EFFECT is the smallest gap worth a coach's time: half the spread the
+#     measurement shows between fighters on real footage (POSE_DIMENSIONS) -
+#     five points of guard, four of balance. A coaching judgement, not a
+#     validated norm.
+#   * The gap must also clear 1.96 standard errors of the difference (a 95%
+#     interval excluding zero), with each side's error taken over two-second
+#     blocks of the fight (core/metrics.py _spread). Older reports carry no
+#     spread and are held to the effect size alone.
+#   * With no opponent, a number is only a strength or a weakness a whole
+#     spread away from where it usually sits (REFERENCE_SPREADS below).
+Z_95 = 1.96
+REFERENCE_SPREADS = 1.0
+
+# Measurements that are style, not quality, in a given sport. Taekwondo is
+# fought with the hands carried low and the legs doing the guarding, so a low
+# guard there is how the sport is fought - ranking it as a fault, as for a
+# boxer or a K-1 fighter, gave taekwondo players the wrong drill.
+STYLE_IN_SPORT = {"taekwondo": frozenset({"guard_index"})}
+
+
+def clear_difference(key: str, mine: float, theirs: float, own: dict | None = None,
+                     opponent: dict | None = None) -> bool:
+    """Whether one fighter is genuinely ahead of or behind the other on ``key``."""
+    gap = float(mine) - float(theirs)
+    if abs(gap) < MIN_EFFECT.get(key, 0.05) - 1e-9:
+        return False
+    errors = [(((side or {}).get("spread") or {}).get(key) or {}).get("standard_error")
+              for side in (own, opponent)]
+    if any(error is None for error in errors):
+        return True
+    combined = math.sqrt(sum(float(error) ** 2 for error in errors))
+    return combined <= 0.0 or abs(gap) / combined >= Z_95
 
 POSE_DIMENSIONS = [
     (
@@ -127,12 +163,19 @@ POSE_DIMENSIONS = [
 ]
 
 
-def _has_better_direction(key: str) -> bool:
+# Half of each measurement's spread between fighters (see clear_difference).
+MIN_EFFECT = {key: reference[1] / 2 for key, _label, reference, _drill, _prescription in POSE_DIMENSIONS}
+
+
+def _has_better_direction(key: str, sport: str | None = None) -> bool:
     metric = BY_KEY.get(key)
+    if key in STYLE_IN_SPORT.get(str(sport or ""), ()):
+        return False
     return metric is not None and metric.direction == "higher"
 
 
-def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -> dict:
+def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None,
+                        sport: str | None = None) -> dict:
     """Build useful coaching only from identity-safe pose measurements.
 
     This path deliberately ignores action attempts, contacts and technique
@@ -187,8 +230,14 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
     # core/metric_catalog.py: a counter-fighter gives ground on purpose, so
     # "Work on: Walking them down - behind your opponent" told them their
     # style was a fault. They stay in the baseline summary below.
-    ranked_items = [item for item in measured if _has_better_direction(item[2])]
+    ranked_items = [item for item in measured if _has_better_direction(item[2], sport)]
     comparable = [item for item in ranked_items if item[0] is not None]
+    # Which gaps are real (see MIN_EFFECT): only these are ever called ahead
+    # or behind, in the titles and in the wording alike.
+    clear = {
+        item[2]: clear_difference(item[2], item[1], float(opponent[item[2]]), own, opponent)
+        for item in comparable
+    }
     # Ranked on the comparison that exists: against the opponent when there is
     # one, against the reference band when there is not.
     ranked = sorted(ranked_items, key=lambda item: item[6], reverse=True)
@@ -199,17 +248,18 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
         # regardless told a fighter who led on nearly everything to work on a
         # number they were winning, which reads as though nobody looked.
         #
-        # And only by more than the margin the wording calls "level". It used
-        # to take any negative gap, so 77.0% against 77.1% became "Work on:
-        # Holding the middle - level with your opponent here" plus a drill.
-        behind = [item for item in ordered if item[0] <= -LEVEL_GAP]
+        # And only by a real margin. It used to take any negative gap, so
+        # 77.0% against 77.1% became "Work on: Holding the middle" plus a
+        # drill, and later 7% against 8% became "Work on: Guard".
+        behind = [item for item in ordered if item[0] < 0 and clear[item[2]]]
         weakest = behind[-2:][::-1]
     elif ranked:
-        # Only one fighter was analysed. Rank against the reference band. With
-        # just guard and balance ranked, the bottom two would include the
-        # strength itself.
+        # Only one fighter was analysed. Rank against the reference band, and
+        # only name what sits a whole spread outside it: the lowest of two
+        # ordinary numbers is not a weakness.
         strongest = ranked[0]
-        weakest = [item for item in ranked[::-1] if item is not strongest][:2]
+        weakest = [item for item in ranked[::-1]
+                   if item is not strongest and item[6] <= -REFERENCE_SPREADS][:2]
     else:
         strongest, weakest = None, []
 
@@ -233,7 +283,10 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
             theirs_shown = f"{float(theirs):.1f}"
         else:
             theirs_shown = f"{float(theirs) * 100:.0f}%"
-        side = "level with" if abs(gap) < LEVEL_GAP else ("better than" if gap > 0 else "behind")
+        if not clear.get(key, False):
+            side = "no clear difference from"
+        else:
+            side = "better than" if gap > 0 else "behind"
         return (
             f"{label} {shown}",
             f"You {shown}{unit}, them {theirs_shown} - {side} your opponent here.",
@@ -248,9 +301,9 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
     # numbers stay in the detail.
     if strongest is not None:
         gap, _mine, _key, label = strongest[0], strongest[1], strongest[2], strongest[3]
-        if gap is not None and gap >= LEVEL_GAP:
+        if gap is not None and gap > 0 and clear.get(_key, False):
             title = f"{label}: ahead of your opponent"
-        elif gap is None and strongest[6] > 0:
+        elif gap is None and strongest[6] >= REFERENCE_SPREADS:
             title = f"{label}: your best measured area"
         else:
             title = None
@@ -262,15 +315,28 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None) -
             })
     improvements = []
     drills = []
+    ranked_names = " and ".join(item[3].lower() for item in comparable or ranked_items)
+    unranked = "Pressure, centre and movement depend on how you fight, so they are not ranked."
+    if STYLE_IN_SPORT.get(str(sport or "")):
+        unranked = ("Guard, pressure, centre and movement depend on how you fight - in taekwondo "
+                    "the hands are carried low by design - so they are not ranked.")
     if comparable and not weakest:
         improvements.append({
             "title": "Nothing behind your opponent",
             "detail": (
-                "On guard and balance you matched or beat them. Pressure, "
-                "centre and movement depend on how you fight, so they are not "
-                "ranked. The next gain is in the striking, which WarriorIQ "
+                f"On {ranked_names} there was no clear gap in their favour. {unranked} "
+                "The next gain is in the striking, which WarriorIQ "
                 "can only estimate so far - watch your counted strikes on the "
                 "replay and judge them yourself."
+            ),
+            "evidence_times": [],
+        })
+    elif ranked_items and not comparable and not weakest:
+        improvements.append({
+            "title": "Nothing clearly below the usual range",
+            "detail": (
+                f"Your {ranked_names} sat within the range WarriorIQ usually measures on fight "
+                f"footage, so there is no movement fault to name from this video. {unranked}"
             ),
             "evidence_times": [],
         })

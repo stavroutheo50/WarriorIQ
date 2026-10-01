@@ -13,7 +13,7 @@ from core.config import SETTINGS
 from core.evidence_trust import automated_evidence_trust
 from core.scoring import (
     SAME_INSTANT_SECONDS, event_legality, is_legal_event, is_verified_scoring_event,
-    minimum_kicks_per_round, score_fight, sport_counted_families,
+    minimum_kicks_per_round, score_fight, sport_counted_families, sport_of,
 )
 from core.types import AnalysisRequest, DefenseEvent, RoundSpec, StrikeEvent
 
@@ -702,6 +702,18 @@ def kick_minimum_check(report: dict) -> dict | None:
     }
 
 
+def _report_sport(report: dict) -> str | None:
+    """The sport a stored report was analysed as, for sport-aware coaching."""
+    scorecard = report.get("scorecard") or {}
+    if scorecard.get("sport"):
+        return str(scorecard["sport"])
+    ruleset = scorecard.get("ruleset") or (report.get("request") or {}).get("ruleset")
+    try:
+        return sport_of(ruleset) if ruleset else None
+    except (KeyError, ValueError):
+        return None
+
+
 def refresh_identity_integrity(report: dict) -> dict:
     """Apply the current identity safety gate to new and legacy reports.
 
@@ -747,7 +759,8 @@ def refresh_identity_integrity(report: dict) -> dict:
         metrics = report.get("metrics", {})
         for fighter in ("A", "B"):
             if identity_ready[fighter] and fighter in metrics:
-                pose_coaching = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"))
+                pose_coaching = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"),
+                                                    _report_sport(report))
                 report.setdefault("coaching", {})[fighter] = pose_coaching
                 report.setdefault("training_plan", {})[fighter] = build_training_plan(
                     pose_coaching, fighter, metrics[fighter]
@@ -770,7 +783,8 @@ def refresh_identity_integrity(report: dict) -> dict:
         for fighter in required:
             if fighter not in metrics:
                 continue
-            pose_coaching = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"))
+            pose_coaching = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"),
+                                                _report_sport(report))
             report.setdefault("coaching", {})[fighter] = pose_coaching
             report.setdefault("training_plan", {})[fighter] = build_training_plan(
                 pose_coaching, fighter, metrics[fighter]
@@ -1005,7 +1019,8 @@ def build_report(
         if action_metrics_trusted and identity_ready[fighter]:
             coaching[fighter] = build_coaching(fighter, metrics, events)
         elif identity_ready[fighter]:
-            coaching[fighter] = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"))
+            coaching[fighter] = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"),
+                                                    sport_of(req.ruleset))
         else:
             coaching[fighter] = dict(insufficient_coaching)
             coaching[fighter]["note"] = "Coaching withheld because this fighter did not pass the identity-integrity gate."

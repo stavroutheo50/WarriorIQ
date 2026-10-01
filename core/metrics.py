@@ -244,6 +244,27 @@ class MetricsAccumulator:
             for key, values in sources.items()
         }
 
+    @staticmethod
+    def _spread(samples, block_seconds: float = 2.0) -> dict | None:
+        """How sure the average of one measurement is, for comparing fighters.
+
+        Frames a few hundredths of a second apart are the same moment measured
+        again, so a standard error over frames would claim far more certainty
+        than the footage holds. Readings are averaged in two-second blocks
+        first and the error is taken over the blocks. core/coaching.py only
+        calls one fighter ahead of the other when the gap clears this.
+        """
+        blocks: dict[int, list[float]] = {}
+        for seconds, value in samples:
+            blocks.setdefault(int(float(seconds) // block_seconds), []).append(float(value))
+        means = [float(np.mean(values)) for values in blocks.values()]
+        if len(means) < 2:
+            return None
+        return {
+            "blocks": len(means),
+            "standard_error": float(np.std(means, ddof=1) / np.sqrt(len(means))),
+        }
+
     def _center_control(self, fighter: str) -> float | None:
         """How much of the fight this fighter spent in the middle of it.
 
@@ -434,6 +455,11 @@ class MetricsAccumulator:
                 # Seconds a coach can click, at both ends of each measurement.
                 # Empty when there was not enough to average in the first place.
                 "moments": self._moments(fighter) if enough else {},
+                # The uncertainty of the two ranked averages (see _spread).
+                "spread": {
+                    "guard_index": self._spread(self.timed_guard[fighter]),
+                    "balance_index": self._spread(self.timed_balance[fighter]),
+                } if enough else {},
                 "dashboard": {
                     "technique_execution_confidence": technique_execution,
                     "defense_response_rate": defense_rate,
