@@ -262,7 +262,7 @@ def identity_failure(tracking: dict, required: tuple[str, ...] = ("A", "B")) -> 
         named = " and ".join(f"Fighter {fighter}" for fighter in churned)
         rate = max(churn_rate(tracking, fighter)[0] for fighter in churned)
         return {"cause": "camera", "failed": failed, "repick": False,
-                "headline": (f"WarriorIQ kept losing {named}: it had to find them again {rate:.0f} times a "
+                "headline": (f"WarriorIQ kept losing {named}: it had to find them again {times(round(rate))} a "
                              "minute, so it cannot be sure the numbers belong to them. That happens when "
                              "the camera moves a lot or other people are close to the fighters."),
                 "advice": ("Picking the fighters again will not change that; a steadier recording will. "

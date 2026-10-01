@@ -360,7 +360,7 @@
       else{
         // Say what stopped the measurement rather than reporting a number
         // that was not measured.
-        const why={'camera moving':'The camera moves too much between frames to measure how big the fighters are. Resting the phone on something would fix both that and the measurement.',
+        const why={'camera moving':'The camera moves too much between frames to measure how big the fighters are, and a moving camera also makes the fighters harder to follow. Resting the phone on something steady helps the analysis and lets this check measure them.',
                    'nothing moving':'Almost nothing moves in the frames sampled, so the fighters could not be sized. If this clip is mostly a still mat or a break, trim it to the round.',
                    'undecodable':'','timeout':'','no dimensions':'','no frames decoded':''}[m.reason];
         if(why){tone=tone==='bad'?'bad':'warn';points.push(why)}}

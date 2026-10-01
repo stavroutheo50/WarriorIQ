@@ -329,6 +329,7 @@ def start_job_run(job_id: str, worker_id: str, analysis_run_id: str) -> bool:
         now = time.time()
         job.update({
             "status": "running",
+            "stage": "preparing",
             "message": "Starting fight analysis",
             "worker_id": worker_id,
             "worker_started_at_epoch": now,
@@ -373,9 +374,13 @@ def claim_next_job(worker_id: str) -> tuple[str, dict] | None:
                 requested = job.get("wake_requested_at_epoch")
                 wake_latency = round(now - float(requested), 2) if requested else None
                 analysis_run_id = str(job.get("analysis_run_id") or uuid.uuid4().hex)
+                # Stage moves with status. It stayed "queued", so the live page
+                # showed QUEUED beside "GPU worker accepted the fight" (QA,
+                # 2026-09); and the hardware is nobody's business on that page.
                 job.update({
                     "status": "running",
-                    "message": "GPU worker accepted the fight",
+                    "stage": "preparing",
+                    "message": "The analysis machine has started on your fight",
                     "worker_id": worker_id,
                     "analysis_run_id": analysis_run_id,
                     "worker_started_at_epoch": now,

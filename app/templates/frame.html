@@ -11,7 +11,6 @@
   </ol>
   <header class="workflow-heading">
     <div><div class="eyebrow">Frame selection</div><h1>Find one clear moment.</h1><p>Pause where both fighters are visible from head to toe. This gives the identity tracker the strongest possible start.</p></div>
-    <div class="workflow-step-count"><strong>02</strong><span>of 03</span></div>
   </header>
   <div class="frame-workbench">
     <section class="frame-player-panel" aria-labelledby="frame-player-title">
@@ -45,7 +44,7 @@
         <li><span>02</span><div><strong>Clear separation</strong><small>Avoid clinches and overlapping bodies.</small></div></li>
         <li><span>03</span><div><strong>Referee out of the way</strong><small>Choose a moment with a clean view.</small></div></li>
       </ul>
-      {% if job.quality %}<section class="capture-readout {{job.quality.status}}"><div><span>Video quality</span><strong>{{job.quality.score}}/100</strong></div><div class="capture-meta"><span>{{job.quality.measurements.resolution}}</span><span>{{job.quality.measurements.fps}} FPS</span></div>{% if job.quality.notes %}<p>{{job.quality.notes[0]}}</p>{% endif %}</section>{% endif %}
+      {% if job.quality and job.quality.score is not none %}<section class="capture-readout {{job.quality.status}}"><div><span>Video quality</span><strong>{{job.quality.score}}/100</strong></div><div class="capture-meta"><span>{{job.quality.measurements.resolution}}</span><span>{{job.quality.measurements.fps}} FPS</span></div>{% if job.quality.notes %}<p>{{job.quality.notes[0]}}</p>{% endif %}</section>{% endif %}
     </aside>
   </div>
 </section>
