@@ -1236,6 +1236,54 @@ def _analysed_span_summary(report: dict) -> dict | None:
             "start_seconds": start, "end_seconds": end, "duration_seconds": duration}
 
 
+def _numbers_state(report: dict) -> dict:
+    """Whether the numbers on a report may be shown, and as what.
+
+    "ok": shown as the selected fighter's own. "unverified": the identity check
+    failed, so the numbers may include other people - shown greyed out, never
+    as "you", and nothing is shared or posted from them. "no_fight": too little
+    of the video was usable fight footage to measure anything, so no numbers
+    are shown at all, and the report says why.
+    """
+    footage = (report.get("video") or {}).get("fight_footage") or {}
+    integrity = report.get("integrity") or {}
+    if footage and (integrity.get("fight_footage_sufficient") is False or footage.get("sufficient") is False):
+        fight = float(footage.get("fight_seconds") or 0.0)
+        excluded = float(footage.get("excluded_seconds") or 0.0)
+        why = footage.get("main_exclusion_text")
+        if excluded >= 1.0 and why:
+            message = (f"Only {_clock(fight)} of this video could be used as fight footage; the other "
+                       f"{_clock(excluded)} was left out because {why}. That is too little to measure, "
+                       "so this report shows no numbers.")
+        else:
+            message = (f"Only {_clock(fight)} of footage was analysed, which is too little to measure, "
+                       "so this report shows no numbers.")
+        return {"state": "no_fight", "message": message,
+                "share_reason": "There are no numbers in this report, so there is nothing to share."}
+    if not integrity.get("identity_evidence_trusted", True):
+        return {"state": "unverified", "message": None,
+                "share_reason": ("WarriorIQ could not confirm who was who in this fight, so the numbers on "
+                                 "this page are unverified and may include other people. Nothing is shared "
+                                 "or posted from an unverified report.")}
+    return {"state": "ok", "message": None, "share_reason": None}
+
+
+def _fight_footage_summary(report: dict) -> dict | None:
+    """"Fight footage analysed: X of Y", and what was left out and why."""
+    footage = (report.get("video") or {}).get("fight_footage")
+    if not footage:
+        return None
+    span = (report.get("video") or {}).get("analysed_span") or {}
+    duration = float(span.get("video_duration_seconds") or footage.get("analysed_seconds") or 0.0)
+    fight = float(footage.get("fight_seconds") or 0.0)
+    excluded = float(footage.get("excluded_seconds") or 0.0)
+    note = None
+    if excluded >= 1.0 and footage.get("main_exclusion_text"):
+        note = (f"{_clock(excluded)} of the analysed footage was left out of every number because "
+                f"{footage['main_exclusion_text']}.")
+    return {"label": f"{_clock(fight)} of {_clock(duration)}", "note": note}
+
+
 def _visual_focus(report: dict) -> str:
     """Whose round the visual sections are about.
 
@@ -4645,6 +4693,10 @@ def result_page(request: Request, job_id: str):
     # kick-minimum table are not built at all, and one unattributed total is
     # given instead. See core.report.unattributed_kick_total.
     identity_trusted = bool((report.get("integrity") or {}).get("identity_evidence_trusted", True))
+    numbers = _numbers_state(report)
+    # A coach link to a report whose numbers are unverified or absent would
+    # carry them out of the page that explains why. Off until they are fixed.
+    can_share = can_share and numbers["state"] == "ok"
     _pin_sport_to_fight(request, report.get("scorecard", {}).get("sport") or _job_sport(job))
     _estimate_score_withheld_for_punches(report)
     score_withheld = _score_withheld(report, job_id)
@@ -4672,6 +4724,8 @@ def result_page(request: Request, job_id: str):
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
         "analysed_span": _analysed_span_summary(report),
+        "fight_footage": _fight_footage_summary(report),
+        "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
         # "Punches and knees are not counted" on taekwondo, which awards no
         # knees - the note names only what this sport actually scores.
@@ -4710,7 +4764,10 @@ def result_page(request: Request, job_id: str):
         "share_card_missing": (
             "account" if not _account(request)
             else "identity" if not identity_trusted
+            else "no_fight" if numbers["state"] == "no_fight"
             else "stats"),
+        "coach_link_blocked": bool(_account(request) and report_access.get("can_share")
+                                   and numbers["state"] != "ok"),
         # The fight's live public links, one per fighter (story_page).
         "story_links": [
             {"side": link["side"], "name": link["name"], "url": f"{_public_base(request)}/f/{link['token']}"}
@@ -6958,6 +7015,14 @@ def share_report(request: Request, job_id: str):
         raise HTTPException(403, "Private report sharing is available on Athlete, Pro, Coach and Gym plans.")
     if not fight or int(fight["profile_id"]) != profile_id:
         raise HTTPException(404)
+    try:
+        shared = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
+        refresh_identity_integrity(shared)
+    except (HTTPException, OSError, json.JSONDecodeError):
+        shared = None
+    state = _numbers_state(shared) if shared is not None else {"state": "ok"}
+    if state["state"] != "ok":
+        raise HTTPException(409, state["share_reason"])
     token = session_token()
     expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     save_report_share(job_id, profile_id, token_digest(token), expires)

@@ -331,6 +331,10 @@ def share_card(report: dict) -> dict | None:
     """
     if not (report.get("integrity") or {}).get("identity_evidence_trusted", True):
         return None
+    # Too little fight footage to measure: the page shows no numbers, so the
+    # card has none to post either.
+    if (report.get("integrity") or {}).get("fight_footage_sufficient") is False:
+        return None
     statistics = (report.get("statistics") or {}).get("fighters") or {}
     if not statistics:
         return None

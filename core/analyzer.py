@@ -22,6 +22,7 @@ from core.config import OUTPUTS, SETTINGS
 from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
 from core.frame_feed import FrameFeed
 from core.generalship import judge_fight
+from core.fight_presence import FightPresence
 from core.ground import DownWatch
 from core.round_detect import RoundDetector
 from core.contact import (
@@ -641,6 +642,23 @@ class SeedCheckFailed(RuntimeError):
     person drew them, so the identities carried back before it are wrong."""
 
 
+def _for_metrics(obs: PersonObservation | None) -> PersonObservation | None:
+    """What the metrics read from an observation, without the heavy parts.
+
+    Metrics are now measured after the fight is classified, so every analysed
+    frame's pair is kept until then; the appearance vectors are not needed and
+    would be most of the memory.
+    """
+    if obs is None:
+        return None
+    return PersonObservation(
+        track_id=obs.track_id, box=np.asarray(obs.box, dtype=np.float32).copy(),
+        confidence=float(obs.confidence),
+        keypoints=None if obs.keypoints is None else np.asarray(obs.keypoints, dtype=np.float32).copy(),
+        keypoint_conf=None if obs.keypoint_conf is None else np.asarray(obs.keypoint_conf, dtype=np.float32).copy(),
+    )
+
+
 def _measure_footage(video_path: str, pose_tracker, start_seconds: float, end_seconds: float | None):
     """Measure the recording before choosing how to look at it. Never fatal."""
     try:
@@ -1090,6 +1108,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     fighter_finder = FighterFinder()
     down_watch = DownWatch()
     round_detector = RoundDetector()
+    # Is this stretch two people fighting? Decided per window from the frames
+    # below; metrics and strike counts are then taken from fight footage only.
+    # See core/fight_presence.py.
+    presence = FightPresence(req.start_seconds, segment_end_seconds)
+    metric_frames: list[tuple[float, int | None, PersonObservation | None, PersonObservation | None]] = []
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
     # Decoding runs a step ahead on a helper thread; see core/frame_feed.py.
     feed = FrameFeed(
@@ -1300,10 +1323,12 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             defense_engine.update_pose("A", source_frame, seconds, fighter_a)
             defense_engine.update_pose("B", source_frame, seconds, fighter_b)
 
+            presence.observe(seconds, fighter_a, fighter_b, people)
             if active_selected_round:
                 active_analyzed_frames += 1
-                metrics.update("A", seconds, round_number, fighter_a, fighter_b)
-                metrics.update("B", seconds, round_number, fighter_b, fighter_a)
+                # Measured once the whole fight is classified, so footage that
+                # is not two people fighting never reaches a metric.
+                metric_frames.append((seconds, round_number, _for_metrics(fighter_a), _for_metrics(fighter_b)))
 
                 new_events = []
                 if req.analysis_target in {"A", "BOTH"}:
@@ -1398,13 +1423,22 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 last_progress_emit = analyzed_frames
                 last_progress_emit_at = time.perf_counter()
                 percent = ANALYSIS_PHASE_START + ANALYSIS_PHASE_SPAN * processed_seconds / segment_duration
-                all_live_event_data = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
+                # Only strikes from windows already judged to be fight footage:
+                # a strike shown live and then dropped from the report would be
+                # the live page contradicting the report again.
+                decided = presence.decided_until(seconds)
+                live_segments = presence.segments()
+                live_candidates = [
+                    event for event in events
+                    if float(event.peak_time) < decided
+                    and presence.is_fight(float(event.peak_time), live_segments)]
+                all_live_event_data = _live_event_payload(live_candidates, req.ruleset, live_action_trusted, limit=None)
                 live_event_data = all_live_event_data[-160:]
                 live_stats = _provisional_stats(
                     all_live_event_data, found, analyzed_frames, live_action_trusted, processed_seconds,
                 )
                 live_stats["diagnostics"] = _live_event_diagnostics(
-                    events, req.ruleset, live_action_trusted, all_live_event_data,
+                    live_candidates, req.ruleset, live_action_trusted, all_live_event_data,
                 )
                 progress(
                     "Analyzing fight",
@@ -1434,6 +1468,30 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     if seed_check is not None and not seed_check.get("done"):
         if "partial" not in seed_check.get("verdicts", []):
             raise SeedCheckFailed("never_reached")
+
+    # Fight footage only, from here on. Interviews, graphics and a selected
+    # pair that never engaged are left out of every measurement and count.
+    fight_footage = presence.summary()
+    fight_segments = [tuple(span) for span in fight_footage["segments"]]
+    previous_kept = None
+    for frame_seconds, frame_round, obs_a, obs_b in metric_frames:
+        if not presence.is_fight(frame_seconds, fight_segments):
+            previous_kept = None
+            continue
+        if previous_kept is None:
+            # A new stretch of fight footage: no movement across the gap.
+            for side in ("A", "B"):
+                metrics.last_center[side] = None
+                metrics.last_time[side] = None
+        metrics.update("A", frame_seconds, frame_round, obs_a, obs_b)
+        metrics.update("B", frame_seconds, frame_round, obs_b, obs_a)
+        previous_kept = frame_seconds
+    events_before = len(events)
+    events = [event for event in events if presence.is_fight(float(event.peak_time), fight_segments)]
+    defenses = [d for d in defenses if presence.is_fight(float(d.time_seconds), fight_segments)]
+    fight_footage["actions_left_out"] = events_before - len(events)
+    # Rates are per minute of fight footage, not per minute of video.
+    measured_duration = max(1.0, float(fight_footage["fight_seconds"])) if fight_footage["fight_seconds"] > 0 else segment_duration
 
     analysis_seconds = time.perf_counter() - wall_start
     frame_pass_seconds = time.perf_counter() - pose_pass_start
@@ -1483,7 +1541,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
 
     all_final_live_events = _live_event_payload(events, req.ruleset, live_action_trusted, limit=None)
     final_live_stats = _provisional_stats(
-        all_final_live_events, found, analyzed_frames, live_action_trusted, segment_duration,
+        all_final_live_events, found, analyzed_frames, live_action_trusted, measured_duration,
     )
     final_live_stats["diagnostics"] = _live_event_diagnostics(
         events, req.ruleset, live_action_trusted, all_final_live_events,
@@ -1512,7 +1570,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # Always against the final rounds (detected or scheduled), so the plain
     # numbers can be given per round. Idempotent after a detection above.
     metrics.rebucket_rounds(rounds)
-    metric_data = metrics.finalize(report_events, defenses, segment_duration)
+    metric_data = metrics.finalize(report_events, defenses, measured_duration)
     signature_payload = {
         "video_segment": [start_frame, end_frame, round(info.fps, 6)],
         "canonical_boxes": [canonical_a_box, canonical_b_box],
@@ -1716,6 +1774,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # fight" without saying what was left out.
     report.setdefault("video", {})["analysed_span"] = _analysed_span(
         info, req.start_seconds, segment_end_seconds, seed_seconds, handoff, excluded_reason)
+    report["video"]["fight_footage"] = fight_footage
+    report.setdefault("integrity", {})["fight_footage_sufficient"] = bool(fight_footage["sufficient"])
 
     # A scorecard for the criteria movement can evidence. Kept separate from
     # report["scorecard"] on purpose: that one scores strikes and is withheld
@@ -1780,7 +1840,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             dashboard["accuracy"] = public["accuracy"]
             dashboard["activity_attempts_per_minute"] = public["activity_rate"]
             dashboard["combinations_per_minute"] = (
-                float(public["combinations"]) / max(1e-6, segment_duration / 60.0)
+                float(public["combinations"]) / max(1e-6, measured_duration / 60.0)
             )
     # The customer-facing duration includes report construction, not only the
     # pose pass. Keep the saved report, progress screen and history summary on

@@ -10,8 +10,12 @@
 {% set identity_failed = not report.integrity.identity_evidence_trusted|default(true) %}
 <div class="section-title result-hero" data-reveal>
   <div><div class="eyebrow">{% if identity_failed and camera_lost %}Needs a steadier recording{% elif identity_failed %}Needs one quick step{% else %}Analysis complete{% endif %}</div>{#- The one page heading. "Your fight in numbers." further down was a second, larger h1 competing with this one. -#}<h1 class="result-title">Fight report</h1></div>
-  <div class="selection-tools">{% if identity_failed and not camera_lost %}<a class="btn" href="/select/{{job_id}}" data-motion-primary>Show me who is who</a>{% endif %}{% if share_card %}<button class="btn" type="button" data-share-card-open>Share to story</button>{% else %}<details class="share-unavailable"><summary class="btn secondary">Share to story</summary><p class="small">{% if share_card_missing == 'account' %}Sharing is for your own saved fights. <a class="text-link" href="/signup?next=/result/{{job_id}}">Create a free account</a> or <a class="text-link" href="/login?next=/result/{{job_id}}">sign in</a>, then analyse your fight while signed in.{% elif share_card_missing == 'identity' %}WarriorIQ could not tell who was who in this fight, so it has no numbers it can post for you. {% if camera_lost %}A steadier recording would fix that.{% else %}<a class="text-link" href="/select/{{job_id}}">Show me who is who</a> and it can.{% endif %}{% else %}This fight has no strike numbers to put on a card yet.{% endif %}</p></details>{% endif %}{% if can_share %}<form action="/share/{{job_id}}" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post" data-confirm="Revoke {{sharing.links|length}} coach link{{'' if sharing.links|length == 1 else 's'}}? {{'Any link' if sharing.links|length == 1 else 'Every link'}} already sent to a coach stops working immediately and cannot be restored. Creating a new link gives a new address, which you would have to send again."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
+  <div class="selection-tools">{% if identity_failed and not camera_lost %}<a class="btn" href="/select/{{job_id}}" data-motion-primary>Show me who is who</a>{% endif %}{% if share_card %}<button class="btn" type="button" data-share-card-open>Share to story</button>{% else %}{#- A real button, shown disabled, with the reason one tap away. It
+    was a <details> summary styled as a button, so it looked live, behaved
+    unlike every other control and said nothing to a screen reader about
+    being unavailable. -#}<button class="btn secondary" type="button" aria-disabled="true" aria-expanded="false" aria-controls="shareUnavailableReason" data-reveal-reason>Share to story</button>{% endif %}{% if coach_link_blocked %}<button class="btn secondary" type="button" aria-disabled="true" aria-expanded="false" aria-controls="shareUnavailableReason" data-reveal-reason>Create 7-day coach link</button>{% endif %}{% if can_share %}<form action="/share/{{job_id}}" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post" data-confirm="Revoke {{sharing.links|length}} coach link{{'' if sharing.links|length == 1 else 's'}}? {{'Any link' if sharing.links|length == 1 else 'Every link'}} already sent to a coach stops working immediately and cannot be restored. Creating a new link gives a new address, which you would have to send again."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
 </div>
+{% if not share_card or coach_link_blocked %}<p class="small share-unavailable-reason" id="shareUnavailableReason" role="note" hidden>{% if share_card_missing == 'account' %}Sharing is for your own saved fights. <a class="text-link" href="/signup?next=/result/{{job_id}}">Create a free account</a> or <a class="text-link" href="/login?next=/result/{{job_id}}">sign in</a>, then analyse your fight while signed in.{% elif numbers.share_reason %}{{ numbers.share_reason }}{% if numbers.state == 'unverified' %}{% if camera_lost %}{% else %} <a class="text-link" href="/select/{{job_id}}">Show me who is who</a> and it can be shared.{% endif %}{% endif %}{% else %}This fight has no strike numbers to put on a card yet.{% endif %}</p>{% endif %}
 {#- An MMA video analysed as a striking sport (app.main._wrong_sport). Said
     plainly, as the athlete asked: which sport it looks like, and why. -#}
 {% if wrong_sport %}
@@ -45,6 +49,8 @@
 {% endif %}
 {% endif %}
 {% if analysed_span and analysed_span.note %}<p class="analysed-span-note" role="note">{{analysed_span.note}}</p>{% endif %}
+{% if numbers.state == 'no_fight' %}<div class="notice bad" role="alert"><strong>Too little fight footage to measure.</strong> {{ numbers.message }} Upload a clip where the two fighters are in shot and fighting for most of it, and pick a frame where both are clearly visible.</div>
+{% elif fight_footage and fight_footage.note %}<p class="analysed-span-note" role="note">{{ fight_footage.note }}</p>{% endif %}
 <section class="result-overview" aria-label="Fight summary" data-motion-sequence="result-summary">
   <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="Fighter A portrait" data-hide-on-error><span>{% if corners and corners.A %}<small>{{corners.A}}</small>{% endif %}<strong>Fighter A</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="Fighter B portrait" data-hide-on-error><span>{% if corners and corners.B %}<small>{{corners.B}}</small>{% endif %}<strong>Fighter B</strong></span></div></div>
   <div class="result-context"><div><span>Ruleset</span><strong>{{report.scorecard.ruleset_label}}</strong></div>{#- The rounds the analysis used: the ones it found in the footage
@@ -56,7 +62,7 @@
 <div><span>Format</span><strong>{{ found_rounds|length }} round{{ '' if found_rounds|length == 1 else 's' }} · {% if found_rounds|length > 1 %}about {% endif %}{{ '%d:%02d'|format(each // 60, each % 60) }}{% if found_rounds|length > 1 %} each{% endif %}</strong></div>
 {% else %}{% set fmt_secs = report.setup.round_duration_seconds|int %}
 <div><span>Format</span><strong>{{report.setup.round_count}} × {% if fmt_secs >= 60 and fmt_secs % 60 == 0 %}{{ (fmt_secs / 60)|int }} min{% else %}{{ fmt_secs }}s{% endif %}</strong></div>
-{% endif %}{% if analysed_span %}<div><span>Analysed</span><strong>{{analysed_span.label}}</strong></div>{% endif %}<div><span>Report focus</span><strong>Fighter {{report.video.focus_fighter|default(report.video.analysis_target, true)}}</strong></div></div>
+{% endif %}{% if analysed_span %}<div><span>Analysed</span><strong>{{analysed_span.label}}</strong></div>{% endif %}{% if fight_footage %}<div><span>Fight footage analysed</span><strong>{{fight_footage.label}}</strong></div>{% endif %}<div><span>Report focus</span><strong>Fighter {{report.video.focus_fighter|default(report.video.analysis_target, true)}}</strong></div></div>
   <div class="result-scoreline">{% if report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}Fighter {{report.scorecard.winner_estimate}} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
   {# When the score is withheld the page used to stop here. It knows more than
      nothing: what each fighter was seen doing, and over how much of the round.
@@ -110,6 +116,9 @@
   </div>
   {% endif %}
 </section>
+{#- No numbers at all when too little of the video was fight footage
+    (core/fight_presence.py): the notice above says so instead. -#}
+{% if numbers.state != 'no_fight' %}
 {# The fighter's own numbers, first. These are measured from pose and survive
    the gate that hides strike counts, so they are the part of the report that
    is always true. They used to sit 1448px down - two screens on a phone,
@@ -118,8 +127,9 @@
 {% set vitals_focus = report.video.focus_fighter|default(report.video.analysis_target|default('A'), true) %}
 {% set vitals_primary = vitals_focus if vitals_focus in ['A','B'] else 'A' %}
 {% set m = report.metrics[vitals_primary] if report.metrics and vitals_primary in report.metrics else {} %}
-  <div class="fight-vitals">
-    <article><b class="wiq-num">{% if m.footwork_body_lengths_per_second is not none %}{{'%.1f'|format(m.footwork_body_lengths_per_second)}}{% else %}&mdash;{% endif %}</b><span>Movement <i class="vital-unit">body lengths / sec</i></span><small>how far you travel each second, in your own body lengths. A busy round is about 1.5</small></article><article><b class="wiq-num">{% if m.pressure_index is not none %}{{'%.0f'|format((m.pressure_index + 1) / 2 * 100)}}{% else %}&mdash;{% endif %}</b><span>Pressure <i class="vital-unit">0&ndash;100</i></span><small>above 50 you walked at them, below 50 you gave ground</small></article><article><b class="wiq-num">{% if m.ring_center_control is not none %}{{'%.0f'|format(m.ring_center_control*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Centre</span><small>share of the fight you spent in the middle rather than on the outside</small></article><article><b class="wiq-num">{% if m.guard_index is not none %}{{'%.0f'|format(m.guard_index*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Guard</span><small>share of the fight your hands were up near your head</small></article><article><b class="wiq-num">{% if m.balance_index is not none %}{{'%.0f'|format(m.balance_index*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Balance</span><small>share of the fight you stayed in a balanced stance</small></article><article><b class="wiq-num">{% if m.pose_coverage is not none %}{{'%.0f'|format(m.pose_coverage*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Seen</span><small>share of the video the camera could see you clearly. Under 70% and the rest is less reliable</small></article>
+  {% if numbers.state == 'unverified' %}<p class="vitals-unverified-label">Unverified &mdash; may include other people</p>{% endif %}
+  <div class="fight-vitals"{% if numbers.state == 'unverified' %} data-unverified="true" aria-label="Unverified measurements; they may include other people"{% endif %}>
+    <article><b class="wiq-num">{% if m.footwork_body_lengths_per_second is not none %}{{'%.1f'|format(m.footwork_body_lengths_per_second)}}{% else %}&mdash;{% endif %}</b><span>Movement <i class="vital-unit">body lengths / sec</i></span><small>{% if numbers.state == 'unverified' %}how far the tracked person moved each second, in body lengths{% else %}how far you travel each second, in your own body lengths. A busy round is about 1.5{% endif %}</small></article><article><b class="wiq-num">{% if m.pressure_index is not none %}{{'%.0f'|format((m.pressure_index + 1) / 2 * 100)}}{% else %}&mdash;{% endif %}</b><span>Pressure <i class="vital-unit">0&ndash;100</i></span><small>{% if numbers.state == 'unverified' %}above 50 the tracked person moved towards the other, below 50 away{% else %}above 50 you walked at them, below 50 you gave ground{% endif %}</small></article><article><b class="wiq-num">{% if m.ring_center_control is not none %}{{'%.0f'|format(m.ring_center_control*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Centre</span><small>{% if numbers.state == 'unverified' %}share of the time the tracked person was in the middle{% else %}share of the fight you spent in the middle rather than on the outside{% endif %}</small></article><article><b class="wiq-num">{% if m.guard_index is not none %}{{'%.0f'|format(m.guard_index*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Guard</span><small>{% if numbers.state == 'unverified' %}share of the time the tracked person&rsquo;s hands were up near the head{% else %}share of the fight your hands were up near your head{% endif %}</small></article><article><b class="wiq-num">{% if m.balance_index is not none %}{{'%.0f'|format(m.balance_index*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Balance</span><small>{% if numbers.state == 'unverified' %}share of the time the tracked person stood in a balanced stance{% else %}share of the fight you stayed in a balanced stance{% endif %}</small></article><article><b class="wiq-num">{% if m.pose_coverage is not none %}{{'%.0f'|format(m.pose_coverage*100)}}<em>%</em>{% else %}&mdash;{% endif %}</b><span>Seen</span><small>{% if numbers.state == 'unverified' %}share of the video the tracked person was seen clearly{% else %}share of the video the camera could see you clearly. Under 70% and the rest is less reliable{% endif %}</small></article>
   </div>
   {#- Every number above is an average, and the reader is owed the ground it
      stands on. These used to be withheld entirely below 60% coverage, so a
@@ -241,7 +251,7 @@
 {% endif %}
 
 <section class="numbers-first-report" aria-labelledby="numbersTitle" data-motion-sequence="report-numbers">
-  <header><div><span class="eyebrow">Performance report · Fighter {{primary}}</span><h2 id="numbersTitle">Your fight in numbers</h2></div><div class="numbers-score">{% if report.scorecard.available %}<span>Estimated score</span><strong>{{report.scorecard.totals.A}}–{{report.scorecard.totals.B}}</strong>{% else %}<span>Score</span><strong>—</strong><small>{% if score_withheld %}{{score_withheld.fix}}{% if score_withheld.action %} <a class="recheck-link" href="{{score_withheld.action.url}}">{{score_withheld.action.label}}</a>{% endif %}{% else %}Withheld{% endif %}</small>{% endif %}</div></header>
+  <header><div><span class="eyebrow">Performance report · Fighter {{primary}}</span><h2 id="numbersTitle">{% if numbers.state == 'unverified' %}Unverified numbers &mdash; may include other people{% else %}Your fight in numbers{% endif %}</h2></div><div class="numbers-score">{% if report.scorecard.available %}<span>Estimated score</span><strong>{{report.scorecard.totals.A}}–{{report.scorecard.totals.B}}</strong>{% else %}<span>Score</span><strong>—</strong><small>{% if score_withheld %}{{score_withheld.fix}}{% if score_withheld.action %} <a class="recheck-link" href="{{score_withheld.action.url}}">{{score_withheld.action.label}}</a>{% endif %}{% else %}Withheld{% endif %}</small>{% endif %}</div></header>
   {# Measured every fight, whatever the action model is doing. These come from
      pose geometry, so they survive the evidence gate that hides strike counts -
      which is why the report used to collapse to almost nothing. Big numbers,
@@ -260,11 +270,11 @@
   {% set strike_sport = report.scorecard.sport|default('kickboxing', true) %}
   {% if not stats_ready %}
   {% if strike_counts_published %}
-  <p class="vitals-note"><b>Strike counts are estimates.</b> {{ estimate_note }} Everything above is measured from your body.</p>
+  <p class="vitals-note"><b>Strike counts are estimates.</b> {{ estimate_note }} {% if numbers.state == 'unverified' %}Everything above is measured from the tracked person&rsquo;s body, which may not be this fighter{% else %}Everything above is measured from your body{% endif %}.</p>
   {% elif strike_sport == 'boxing' %}
-  <p class="vitals-note"><b>No punch counts in this report.</b> Punch counting is not accurate enough yet, so a boxing report shows movement, guard and balance only. Everything above is measured from your body and is real.</p>
+  <p class="vitals-note"><b>No punch counts in this report.</b> Punch counting is not accurate enough yet, so a boxing report shows movement, guard and balance only. {% if numbers.state == 'unverified' %}Everything above is measured from the tracked person&rsquo;s body, which may not be this fighter{% else %}Everything above is measured from your body{% endif %} and is real.</p>
   {% else %}
-  <p class="vitals-note"><b>Kicks only.</b> {{ (withheld_families or 'punches and knees')|capitalize }} are not counted yet &mdash; checked against video, the kick count came out right and the punch count was overstated. Everything above is measured from your body and is real.</p>
+  <p class="vitals-note"><b>Kicks only.</b> {{ (withheld_families or 'punches and knees')|capitalize }} are not counted yet &mdash; checked against video, the kick count came out right and the punch count was overstated. {% if numbers.state == 'unverified' %}Everything above is measured from the tracked person&rsquo;s body, which may not be this fighter{% else %}Everything above is measured from your body{% endif %} and is real.</p>
   {% endif %}
   {% endif %}
 
@@ -982,6 +992,8 @@
 {% endif %}{% endfor %}
 </div>{% else %}<section class="locked-report-card" id="report-training"><div><div class="eyebrow">Complete training plan</div><h2>Turn the report into your next session.</h2><p class="muted">Expanded and Complete reports include a fighter-specific training plan linked to the measured evidence.</p></div><a class="btn secondary" href="/pricing">See report options</a></section>{% endif %}
 
+{% endif %}{# numbers.state != 'no_fight' #}
+{% set focus = report.video.focus_fighter|default(report.video.analysis_target|default('BOTH'), true) %}
 <section class="card replay-callout">
   <div><div class="eyebrow">Fighter {{focus}} replay</div><h2>Watch the movement with skeletons</h2><p class="muted">Use the normal video controls. The overlay follows only the athlete selected for this detailed report, and any trusted key moments start one second before the action.</p></div>
   <a class="btn" href="/replay/{{job_id}}" data-motion-primary>Replay with skeletons</a>
@@ -1036,6 +1048,10 @@
 {% endblock %}
 {% block scripts %}
 <script nonce="{{ request.state.csp_nonce }}">
+/* Unavailable sharing controls stay real buttons, marked aria-disabled, and
+   say why when pressed instead of doing nothing. */
+document.querySelectorAll('[data-reveal-reason]').forEach(button=>button.addEventListener('click',()=>{const reason=document.getElementById(button.getAttribute('aria-controls'));if(!reason)return;const open=reason.hidden;reason.hidden=!open;document.querySelectorAll('[data-reveal-reason]').forEach(b=>b.setAttribute('aria-expanded',String(open)));}));
+
 (()=>{
   // wiqToast is defined in the base template's trailing script, so it is only
   // ever read inside the handler -- by click time it exists.

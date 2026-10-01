@@ -659,3 +659,10 @@
   body:has(.camp-sticky){padding-bottom:76px}
 }
 .camp-share-open{width:100%;justify-content:center}
+
+/* Disabled-but-explained controls (result page sharing). */
+.btn[aria-disabled="true"]{opacity:.55;cursor:not-allowed;filter:saturate(.4)}
+.share-unavailable-reason{margin:10px 0 0;padding:10px 12px;border:1px solid var(--wiq-line,#2b416b);border-radius:10px;background:#0c1421;color:#dbe6f7;max-width:640px}
+/* Numbers that could not be confirmed as this fighter's own. */
+.fight-vitals[data-unverified="true"]{opacity:.6;filter:grayscale(.8)}
+.vitals-unverified-label{display:inline-block;margin:0 0 8px;padding:4px 10px;border:1px dashed #7a6a3a;border-radius:999px;color:#f1e3bd;font-size:12px;font-weight:700;letter-spacing:.02em}
