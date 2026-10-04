@@ -13,7 +13,9 @@
     <div><div class="eyebrow">Fighter selection</div><h1>Tell WarriorIQ who is who.</h1>{#- Says "tap" only once boxes are actually drawn (loadDetectionCandidates).
     It promised boxes on every page, and on the live host none ever came. -#}<p id="selectIntro">Drag a box around each fighter: Fighter A first, then Fighter B. Keep each box tight around the whole body.</p>{% set orientation = job.orientation|default({}, true) %}{% if orientation.turned_clockwise %}<p class="frame-source-note" role="note">This video was filmed sideways, so WarriorIQ turned it upright before analysing it.</p>{% elif orientation.warning %}<p class="pair-warning" role="alert">{{ orientation.warning }}</p>{% endif %}<p class="small muted">The whole video is analysed. This frame only tells WarriorIQ which fighter is which - pick one where both are fully visible and apart.</p>{#- A frame nobody chose is said to be one, so choosing a moment is never
     skipped without a word. Refined once detection has looked at it. -#}{% if frame_source in ['auto', 'auto_pair'] %}<p class="frame-source-note" id="frameNote" data-source="{{frame_source}}">WarriorIQ chose this moment ({{frame_clock}}) for you. <a class="text-link" href="/frame/{{job_id}}">Pick a different moment</a></p>{% endif %}</div>
-    <a class="quiet-back" href="/frame/{{job_id}}">Pick a different moment</a>
+    {#- Only when the note above does not already carry the same link: both
+        showed on an automatically chosen frame (QA, 2026-10-04). -#}
+    <a class="quiet-back" id="pickMomentLink" href="/frame/{{job_id}}"{% if frame_source in ['auto', 'auto_pair'] %} hidden{% endif %}>Pick a different moment</a>
   </header>
   <div class="fighter-lock-layout">
     <section class="fighter-stage-panel" aria-labelledby="fighter-stage-title">
@@ -250,7 +252,7 @@ function describeFrame(data){
   const intro=document.getElementById('selectIntro'),note=document.getElementById('frameNote');
   if(intro&&detections.length>=2)intro.textContent='WarriorIQ boxed the people it found in this frame. Tap Fighter A, then Fighter B. No box on someone? Drag one around them.';
   if(!note)return;
-  if(!['auto','auto_pair'].includes(data.frame_source)){note.hidden=true;return}
+  if(!['auto','auto_pair'].includes(data.frame_source)){note.hidden=true;document.getElementById('pickMomentLink').hidden=false;return}
   const link=note.querySelector('a'),clock=clockOf(data.seconds);
   let text;
   if(data.pair_found)text=`WarriorIQ chose this moment (${clock}) because two people are in full view and close enough to be fighting. Not your fighters? `;
