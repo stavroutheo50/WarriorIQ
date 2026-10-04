@@ -134,7 +134,7 @@ class DurableAnalysisStateTests(TestCase):
                 raise KeyError("malformed payload")
             raise SystemExit(0)
 
-        with patch.object(worker_module, "retry_heartbeat", flaky), \
+        with patch.object(worker_module, "_claim_next", flaky), \
              patch.object(worker_module.time, "sleep", lambda seconds: None):
             with self.assertRaises(SystemExit):
                 worker_module.run_remote_worker("test-worker")

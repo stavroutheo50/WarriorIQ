@@ -985,7 +985,18 @@ class Settings:
     # or be claimed by a separate GPU worker in production.  External mode is
     # deliberately opt-in so existing local installs keep working unchanged.
     analysis_worker_mode: str = os.getenv("WARRIORIQ_WORKER_MODE", "inprocess").strip().lower()
-    worker_poll_seconds: float = max(0.2, float(os.getenv("WARRIORIQ_WORKER_POLL_SECONDS", "1.0")))
+    # How often an idle worker asks for work, and how far it backs off while
+    # the queue stays empty. It asked every second - two requests a second,
+    # all day - and OuiHeberg asked for 5-10 s or a backoff (2026-10): from
+    # the analysis PC's address that steady stream, added to the owner's own
+    # browsing, is what their firewall blocked.
+    worker_poll_seconds: float = max(0.2, float(os.getenv("WARRIORIQ_WORKER_POLL_SECONDS", "5.0")))
+    worker_idle_poll_max_seconds: float = max(
+        1.0, float(os.getenv("WARRIORIQ_WORKER_IDLE_POLL_MAX_SECONDS", "30.0")))
+    # At most one live-progress report per this many seconds during an
+    # analysis (a stage change is always sent at once). Each report is a full
+    # snapshot, so the ones skipped lose nothing.
+    worker_progress_seconds: float = max(0.0, float(os.getenv("WARRIORIQ_WORKER_PROGRESS_SECONDS", "5.0")))
     worker_lease_seconds: int = max(30, int(os.getenv("WARRIORIQ_WORKER_LEASE_SECONDS", "180")))
     worker_stale_seconds: int = max(60, int(os.getenv("WARRIORIQ_WORKER_STALE_SECONDS", "300")))
     # Remote mode lets a GPU machine claim jobs over HTTPS instead of requiring

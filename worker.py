@@ -77,7 +77,7 @@ from app.state import (
 from core.config import OUTPUTS, SETTINGS
 from core.db import record_analysis_failure, release_analysis
 from core.types import AnalysisRequest
-from core.worker_client import RemoteWorkerClient, RemoteWorkerError, retry_heartbeat
+from core.worker_client import RemoteWorkerClient, RemoteWorkerError
 
 
 LOGGER = logging.getLogger("warrioriq.worker")
@@ -288,10 +288,21 @@ def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
             if not output_dir.resolve().is_relative_to(OUTPUTS.resolve()):
                 raise RuntimeError("Unsafe worker output path")
 
+            sent = {"at": None, "stage": None}
+
             def progress(patch: dict) -> None:
                 if ownership_lost.is_set():
                     raise AnalysisRunLost(f"Analysis run {analysis_run_id} no longer owns {job_id}")
+                # Throttled for the web host (SETTINGS.worker_progress_seconds):
+                # each patch is a full snapshot, so skipping one loses nothing,
+                # and a new stage always goes out at once.
+                now = time.monotonic()
+                stage = patch.get("stage")
+                if (sent["at"] is not None and stage == sent["stage"]
+                        and now - sent["at"] < SETTINGS.worker_progress_seconds):
+                    return
                 client.progress(job_id, analysis_run_id, patch)
+                sent.update(at=now, stage=stage)
 
             analyze(_remote_request(job, video_path), progress)
             if ownership_lost.is_set():
@@ -510,10 +521,26 @@ def _worker_is_alive(pid: int) -> bool:
         return False
 
 
+def _claim_next(client: RemoteWorkerClient) -> dict | None:
+    """Ask for the next fight: one request per poll.
+
+    The claim also records this worker's heartbeat on the web host
+    (app.main.remote_worker_claim), so the separate heartbeat that used to go
+    out before every claim doubled the traffic for nothing.
+    """
+    return client.claim()
+
+
+def _next_idle_wait(current: float) -> float:
+    """Back off while the queue stays empty, up to the configured ceiling."""
+    return min(SETTINGS.worker_idle_poll_max_seconds, max(current, SETTINGS.worker_poll_seconds) * 1.5)
+
+
 def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
     client = RemoteWorkerClient(SETTINGS.worker_remote_url, SETTINGS.worker_token, worker_id)
     running_code = _source_fingerprint()
     LOGGER.info("Worker running analysis code %s", running_code)
+    idle_wait = SETTINGS.worker_poll_seconds
     while True:
         # Checked between jobs, never during one. Exiting hands the queue back
         # cleanly and whatever supervises this restarts it on the new code.
@@ -542,8 +569,7 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
             return EXIT_CODE_CHANGED
         refresh_worker_lock()
         try:
-            retry_heartbeat(client)
-            claimed = client.claim()
+            claimed = _claim_next(client)
         except RemoteWorkerError as exc:
             LOGGER.warning("Remote worker connection unavailable: %s", exc)
             if once:
@@ -564,12 +590,15 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
             continue
         try:
             if claimed:
+                # Straight back to the base interval: more work often follows.
+                idle_wait = SETTINGS.worker_poll_seconds
                 with _keep_machine_awake():
                     run_remote_claimed_job(client, claimed)
             elif once:
                 return 0
             else:
-                time.sleep(SETTINGS.worker_poll_seconds)
+                time.sleep(idle_wait)
+                idle_wait = _next_idle_wait(idle_wait)
         except AnalysisRunLost:
             # A newer run or a recovery already owns this fight.
             LOGGER.warning("Analysis run ownership lost; returning to the queue")
