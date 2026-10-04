@@ -115,10 +115,21 @@ class Handoff:
         }
 
 
-def sample_frames(start_frame: int, seed_frame: int, fps: float) -> list[int]:
-    """Frames to look at, seed first, descending to the requested start."""
+def sample_frames(start_frame: int, seed_frame: int, fps: float, step: int | None = None) -> list[int]:
+    """Frames to look at, seed first, descending to the requested start.
+
+    With ``step`` - the forward pass's own stride - every frame after the seed
+    sits on the forward pass's grid (start_frame + k * step), so the pose model
+    output computed here is the output the forward pass needs and is reused
+    instead of computed again (PoseTracker.prepare_detections).
+    """
     if seed_frame <= start_frame:
         return [seed_frame]
+    if step:
+        step = max(1, int(step))
+        on_grid = start_frame + ((seed_frame - start_frame) // step) * step
+        frames = [seed_frame] + [f for f in range(on_grid, start_frame - 1, -step) if f != seed_frame]
+        return frames
     step = max(1, int(round((fps if fps > 0 else 30.0) / BACKTRACK_FPS)))
     frames = list(range(seed_frame, start_frame - 1, -step))
     if frames[-1] != start_frame:
@@ -227,12 +238,16 @@ def _shot_signature(frame: np.ndarray) -> np.ndarray:
 
 
 def _buffer_samples(video_path: str, frames_wanted: list[int], workdir: Path,
-                    should_continue: Callable[[], bool]) -> tuple[dict[int, Path], set[int]]:
+                    should_continue: Callable[[], bool],
+                    on_frame: Callable[[int, np.ndarray], None] | None = None,
+                    ) -> tuple[dict[int, Path], set[int]]:
     """Decode the span once, forward, keeping only the sampled frames.
 
     Kept as JPEG on disk rather than in memory: a minute before the seed at ten
     samples a second is 600 frames, which is 3.7 GB of raw 1080p and about
-    150 MB as files. Also finds shot cuts between neighbouring samples.
+    150 MB as files. Also finds shot cuts between neighbouring samples, and
+    hands each decoded sample to ``on_frame`` while it is still the original
+    picture rather than its JPEG copy.
     """
     wanted = sorted(set(frames_wanted))
     first, last = wanted[0], wanted[-1]
@@ -254,6 +269,8 @@ def _buffer_samples(video_path: str, frames_wanted: list[int], workdir: Path,
                 if not ok or frame is None:
                     break
                 path = workdir / f"{index:08d}.jpg"
+                if on_frame is not None:
+                    on_frame(index, frame)
                 if cv2.imwrite(str(path), frame, [cv2.IMWRITE_JPEG_QUALITY, 92]):
                     stored[index] = path
                 signature = _shot_signature(frame)
@@ -283,14 +300,17 @@ def backtrack(
     find_initial: Callable,
     workdir: Path | None = None,
     progress: Callable[[float], None] | None = None,
+    step: int | None = None,
 ) -> Handoff:
     """Run the backward pass on a real video with the analysis's own tracker.
 
     The tracker's state is reset before and after, so nothing learned running
-    backwards leaks into the forward pass.
+    backwards leaks into the forward pass. The pose model output is not
+    tracker state: it is kept (PoseTracker.prepare_detections) for the forward
+    pass, which samples the same frames when ``step`` is its stride.
     """
     started = time.perf_counter()
-    frames = sample_frames(requested_start_frame, seed_frame, fps)
+    frames = sample_frames(requested_start_frame, seed_frame, fps, step)
     if len(frames) < 2 or (seed_frame - requested_start_frame) / max(fps, 1e-6) < MIN_BACKTRACK_SECONDS:
         return Handoff(seed_frame=seed_frame, requested_start_frame=requested_start_frame, frame=seed_frame)
     if workdir is not None:
@@ -299,12 +319,22 @@ def backtrack(
         Path(workdir).mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix=".backtrack-", dir=str(workdir) if workdir else None))
     try:
-        stored, cuts = _buffer_samples(video_path, frames, scratch, lambda: True)
+        total = len(frames)
+        prepared = 0
+
+        def prepare(index: int, image: np.ndarray) -> None:
+            # The model run is most of this pass's time, so progress follows it.
+            nonlocal prepared
+            pose_tracker.prepare_detections(image, index, imgsz)
+            prepared += 1
+            if progress is not None:
+                progress(0.9 * prepared / max(1, total))
+
+        stored, cuts = _buffer_samples(video_path, frames, scratch, lambda: True, on_frame=prepare)
         if seed_frame not in stored:
             return Handoff(seed_frame=seed_frame, requested_start_frame=requested_start_frame,
                            frame=seed_frame, reason="not_detected_at_seed")
         pose_tracker.reset_tracking()
-        total = len(frames)
 
         def sequence() -> Iterator[tuple[int, list]]:
             for done, index in enumerate(frames):
@@ -315,8 +345,8 @@ def backtrack(
                 if image is None:
                     return
                 if progress is not None:
-                    progress(done / max(1, total))
-                yield index, pose_tracker.track(image, imgsz)
+                    progress(0.9 + 0.1 * done / max(1, total))
+                yield index, pose_tracker.track(image, imgsz, frame_index=index)
 
         def initial(a_box, b_box, people):
             seed_image = cv2.imread(str(stored[seed_frame]))
