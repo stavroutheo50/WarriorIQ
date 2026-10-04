@@ -243,7 +243,9 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     # thing. Duration and frame size are knowable before any model runs, so
     # they are answered before any model runs.
     duration = report.frame_count / report.fps
-    if duration < MIN_USABLE_SECONDS:
+    # One frame of tolerance: containers round, and a clip filmed for two
+    # seconds often holds 59 frames at 30 fps.
+    if duration + 1.0 / report.fps < MIN_USABLE_SECONDS - 1e-6:
         report.blocking.append(
             f"This video is only {duration:.1f} seconds long. A round needs at "
             f"least {MIN_USABLE_SECONDS:.0f} seconds of continuous footage to "

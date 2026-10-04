@@ -803,6 +803,51 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["next_url"], f"/select/{payload['job_id']}")
         self.assertTrue(response.cookies.get("warrioriq_active_analysis"))
 
+    def test_a_valid_two_second_three_kilobyte_video_is_accepted(self):
+        """QA, 2026-10-04: a valid 2 s, 3 KB clip was rejected as "too small".
+        Videos are judged by decoding them, not by their size."""
+        import shutil
+        import subprocess
+
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            self.skipTest("needs ffmpeg to make a tiny real H.264 clip")
+        source = Path(self.temp.name) / "two-seconds.mp4"
+        subprocess.run([ffmpeg, "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                        "color=c=gray:s=320x240:r=30:d=2", "-c:v", "libx264", "-crf", "40",
+                        "-pix_fmt", "yuv420p", str(source)], check=True)
+        self.assertLess(source.stat().st_size, 16 * 1024)
+        self._sign_in("tiny@example.com")
+        with source.open("rb") as handle:
+            response = self.client.post(
+                "/upload", headers={"Accept": "application/json"},
+                data={"rights_confirmed": "true", "people_permissions_confirmed": "true",
+                      "minor_permission_status": "no_minors"},
+                files={"video": ("two-seconds.mp4", handle, "video/mp4")}, follow_redirects=False)
+        self.assertEqual(response.status_code, 201, response.text)
+
+    def test_the_upload_page_has_no_size_floor(self):
+        page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
+        self.assertNotIn("MIN_UPLOAD_BYTES", page)
+        self.assertIn("PREFLIGHT_LIMITS.min_usable_seconds", page)
+
+    def test_a_two_second_clip_with_59_frames_passes_the_length_rule(self):
+        from core import preflight
+
+        source = Path(self.temp.name) / "fifty-nine.mp4"
+        writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+        for index in range(59):
+            writer.write(np.full((240, 320, 3), 60 + index, dtype=np.uint8))
+        writer.release()
+
+        class NoPeople:
+            def predict(self, *args, **kwargs):
+                from types import SimpleNamespace
+                return [SimpleNamespace(boxes=None)]
+
+        report = preflight.probe(str(source), NoPeople())
+        self.assertFalse(any("seconds long" in line for line in report.blocking), report.blocking)
+
     def test_failed_selection_frame_creation_removes_partial_upload(self):
         self._sign_in("partial@example.com")
         source = Path(self.temp.name) / "selection-failure.mp4"
