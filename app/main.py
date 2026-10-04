@@ -129,6 +129,7 @@ from core.retention import (
     guest_job_valid,
 )
 from core.build_info import ANALYSIS_VERSION, result_check
+from core.orientation import needed_turn, tag_rotation
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_policy import counting_policy
@@ -141,6 +142,7 @@ from core.video import (
     detect_shot_changes, ffmpeg_frame, get_video_info, normalize_container, opencv_decodes,
     playback_file, probe_upload, read_frame, remove_derivative, selection_frame,
 )
+from core.video import _ffmpeg_exe
 
 # No public API documentation. /openapi.json, /docs and /redoc were reachable
 # signed out and listed every route - /admin/*, /api/worker/claim, the dataset
@@ -3658,6 +3660,26 @@ async def upload(
     except Exception as exc:
         LOGGER.warning("upload_selection_frame_unreadable job_id=%s error=%s", job_id, type(exc).__name__)
         chosen_index, frame = None, None
+    # Filmed sideways with no rotation tag: turn it upright before anything
+    # reads it, so the analysis, the replay and the "left / right" words on the
+    # selection page all see the people where they really are (core/orientation.py).
+    orientation = {"turned_clockwise": 0, "warning": None}
+    if frame is not None and server_decodes:
+        turn = await run_in_threadpool(needed_turn, frame, detect_people_in_frame)
+        if turn:
+            if await run_in_threadpool(tag_rotation, video_path, turn, _ffmpeg_exe()):
+                orientation["turned_clockwise"] = turn
+                info = await run_in_threadpool(get_video_info, video_path)
+                try:
+                    chosen_index, frame = await run_in_threadpool(
+                        selection_frame, video_path, info, selection_frame_index)
+                except Exception as exc:                                # noqa: BLE001
+                    LOGGER.warning("upload_rotated_frame_unreadable job_id=%s error=%s", job_id, type(exc).__name__)
+                    chosen_index, frame = None, None
+            else:
+                orientation["warning"] = (
+                    "This video looks like it was filmed sideways, and WarriorIQ could not turn it. "
+                    "Rotate it on your phone and upload it again for the best result.")
     if frame is not None:
         # Failing to *save* a frame that decoded is this server's disk, not the
         # video, and the browser's frame would fail to save the same way.
@@ -3746,6 +3768,9 @@ async def upload(
             "selected_rounds": _parse_rounds(selected_rounds, count),
             "video_width": info.width,
             "video_height": info.height,
+            # Quarter turns applied to a sideways upload, and the warning when
+            # one was needed but could not be applied.
+            "orientation": orientation,
             "video_duration": info.duration,
             "selection_frame": selection_frame_index,
             "profile_id": profile_id,
