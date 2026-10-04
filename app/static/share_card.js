@@ -206,7 +206,16 @@
       input.checked = input.value === side;
       input.addEventListener("change", function () { side = input.value; render(); if (link) link.sideChanged(); });
     });
-    open.addEventListener("click", function () { render(); dialog.showModal(); });
+    open.addEventListener("click", function () {
+      render();
+      dialog.showModal();
+      // showModal focuses the first control, which sits below the card, so
+      // the dialog opened scrolled ~400px down with its top cut off on a
+      // phone (QA, 2026-10-04). Start at the top, on the title.
+      var title = document.getElementById("shareCardTitle");
+      if (title) { title.setAttribute("tabindex", "-1"); title.focus({ preventScroll: true }); }
+      dialog.scrollTop = 0;
+    });
     dialog.querySelector("[data-share-card-close]").addEventListener("click", function () { dialog.close(); });
     dialog.querySelector("[data-share-card-send]").addEventListener("click", async function () {
       var blob = await blobOf(canvas);
