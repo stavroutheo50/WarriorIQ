@@ -38,6 +38,11 @@ if "core.config" in sys.modules:                                    # pragma: no
 # The setup page's person detector is fetched from the network on first use;
 # no test should do that. Tests that need it patch it in.
 os.environ["WARRIORIQ_PERSON_DETECTOR"] = "0"
+# Production ships with strike counts off (core.report.STRIKE_COUNTS_PUBLISHED).
+# Most report tests pin how counts read when they are on, so the suite runs
+# with them on; tests/test_strike_counts_off.py pins the default-off path by
+# switching the flag back off where it is read.
+os.environ["WARRIORIQ_PUBLISH_STRIKE_COUNTS"] = "1"
 _RUNTIME = pathlib.Path(tempfile.mkdtemp(prefix="warrioriq-tests-"))
 (_RUNTIME / "uploads").mkdir(parents=True, exist_ok=True)
 (_RUNTIME / "outputs").mkdir(parents=True, exist_ok=True)

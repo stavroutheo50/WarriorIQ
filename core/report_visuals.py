@@ -176,7 +176,12 @@ def build(report: dict, focus: str = "A", outcomes_counted: bool = True) -> dict
         })
 
     moments = (mine.get("moments") or {}).get("guard_index") or {}
-    guard_low = [round(float(t), 1) for t in (moments.get("low") or [])]
+    # Only marks that land on the timeline. A moment outside the drawn span
+    # was clipped off its end, and the block then showed a heading over an
+    # empty bar (QA, 2026-10-04).
+    guard_low = [round(float(t), 1) for t in (moments.get("low") or [])
+                 if span > 0 and 0.0 <= float(t) <= span]
+    timeline = [mark for mark in timeline if span > 0 and 0.0 <= mark["at"] <= span]
 
     defences = {k: int(v) for k, v in (mine.get("defenses") or {}).items() if v}
 

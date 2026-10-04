@@ -157,6 +157,14 @@
         :{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'};
       try{el.textContent=when.toLocaleString(undefined,opts).replace(',','')}catch{}
     });
+    // Labels that must stay plain text - a picker's options cannot hold a
+    // time element - carry the UTC part they were built with in data-local-stamp,
+    // and only that part is swapped for the reader's own date and time. The
+    // /compare picker showed UTC beside a Profile in local time (QA, 2026-10-04).
+    document.querySelectorAll('[data-local-at][data-local-stamp]').forEach(el=>{
+      const when=new Date(el.dataset.localAt),stamp=el.dataset.localStamp;if(!stamp||isNaN(when))return;
+      try{const local=when.toLocaleString(undefined,{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}).replace(',','');el.textContent=el.textContent.replace(stamp,local)}catch{}
+    });
     // The header chip was rendered once, from whatever the job said when the
     // page loaded, and never again: "Analyzing 0%" beside a page reading 35%,
     // and still "Analyzing 0%" after the run had finished. It now follows the

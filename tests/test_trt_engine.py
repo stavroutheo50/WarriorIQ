@@ -57,16 +57,45 @@ class EngineNamingTests(unittest.TestCase):
         self.assertEqual(slug, slug.lower())
         self.assertTrue(all(ch.isalnum() or ch == "-" for ch in slug), slug)
 
-    def test_one_engine_covers_both_inference_sizes(self):
-        """The engine is built at the largest size anything can ask for.
+    def test_one_engine_is_tuned_for_640_and_accepts_1280_and_low_resolution(self):
+        """Tuned for the size nearly every analysis runs at, and still able to
+        serve the larger ones (QA, 2026-10-04: handle imgsz 640 and 1280).
 
-        Both the default and the low-resolution path run through the same
-        engine, so building at the maximum means neither has to fall back.
+        It was optimised at 1600, the rare small-source size, with a ceiling of
+        6400 nobody uses.
         """
         from core.config import SETTINGS
-        self.assertEqual(
-            trt_engine.engine_size(),
-            max(SETTINGS.default_imgsz, SETTINGS.low_resolution_imgsz))
+        self.assertEqual(trt_engine.engine_size(), SETTINGS.default_imgsz)
+        self.assertGreaterEqual(trt_engine.engine_max_size(), 1280)
+        self.assertGreaterEqual(trt_engine.engine_max_size(), SETTINGS.low_resolution_imgsz)
+        self.assertLess(trt_engine.engine_max_size(), 4 * SETTINGS.default_imgsz)
+
+    def test_the_export_asks_for_that_ceiling(self):
+        """Ultralytics sets the profile maximum to size x max(2, workspace)."""
+        exported = {}
+
+        class FakeYOLO:
+            def __init__(self, path):
+                pass
+
+            def export(self, **kwargs):
+                exported.update(kwargs)
+                path = Path(tmp) / "out.engine"
+                path.write_bytes(b"engine")
+                return str(path)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("ultralytics.YOLO", FakeYOLO):
+            trt_engine.build_pose_engine(Path(tmp) / "pose.engine", device=0)
+        self.assertEqual(exported["imgsz"], trt_engine.engine_size())
+        self.assertTrue(exported["dynamic"])
+        self.assertEqual(exported["imgsz"] * max(2, exported["workspace"]), trt_engine.engine_max_size())
+
+    def test_an_engine_built_under_the_old_sizing_is_not_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            name = trt_engine.engine_path_for(tmp, "NVIDIA A10").name
+        self.assertNotEqual(name, "pose_engine_nvidia-a10_1600.engine")
+        self.assertIn("_max", name)
 
 
 class EnsureEngineTests(unittest.TestCase):

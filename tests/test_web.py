@@ -1234,6 +1234,7 @@ class PublicPageTests(unittest.TestCase):
         """
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader
 
+        from core.report import STRIKE_COUNTS_PUBLISHED
         from app.main import _analysis_quality_summary, sport_identity
 
         class Stub:
@@ -1267,13 +1268,15 @@ class PublicPageTests(unittest.TestCase):
             analysis_quality=_analysis_quality_summary(report), can_share=can_share,
             sharing=sharing, score_withheld=score_withheld, unavailable=[],
             kick_minimum=kick_minimum,
+            # As result_page passes it; the suite runs with counts published.
+            strike_counts_published=STRIKE_COUNTS_PUBLISHED,
         )
 
     def _render_identity(self, trusted):
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader
 
         from app.main import _analysis_quality_summary, sport_identity
-        from core.report import unattributed_kick_total
+        from core.report import STRIKE_COUNTS_PUBLISHED, unattributed_kick_total
 
         class Stub:
             def __init__(self, **kw): self.__dict__.update(kw)
@@ -1297,6 +1300,7 @@ class PublicPageTests(unittest.TestCase):
             sharing=None, score_withheld=None, unavailable=[], kick_minimum=None,
             # As result_page builds it: one unattributed total, only on failure.
             kick_total=None if trusted else unattributed_kick_total(report),
+            strike_counts_published=STRIKE_COUNTS_PUBLISHED,
         )
 
     def test_the_identity_fix_is_the_first_thing_on_a_failed_report(self):
@@ -1337,13 +1341,11 @@ class PublicPageTests(unittest.TestCase):
         # three different totals beside the failure notice.
         self.assertNotIn("Kicks we could count", page)
         self.assertNotIn("You got hit", page)
-        # The unattributed total survives, because it is still true - with
-        # attempts and landed labelled separately.
-        self.assertIn("Kicks thrown, both fighters", page)
-        self.assertIn("Kicks landed, both fighters", page)
+        # With strike counts switched off (the 2026-10-04 default) there is
+        # no unattributed total either: nothing is counted, split or not.
+        self.assertNotIn("thrown, both fighters", page)
+        self.assertNotIn("landed, both fighters", page)
 
-    # The kicks-only path, still reachable with the publish switch off.
-    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     def test_a_failed_report_gives_exactly_one_kick_total(self):
         """Three totals on one page - 31, 24 and 34 - for the same kicks.
 
@@ -1356,13 +1358,13 @@ class PublicPageTests(unittest.TestCase):
 
         page = self._render_identity(trusted=False)
         text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
-        self.assertEqual(text.count("Kicks thrown, both fighters"), 1)
+        self.assertEqual(text.count("Strikes thrown, both fighters"), 1)
         self.assertNotIn("Leg strikes seen", text)
 
     def test_a_healthy_report_keeps_the_numbers_it_can_stand_behind(self):
         page = self._render_identity(trusted=True)
-        self.assertIn("Fighter A kicks thrown", page)
-        self.assertNotIn("Kicks thrown, both fighters", page)
+        self.assertIn("Fighter A strikes thrown", page)
+        self.assertNotIn("thrown, both fighters", page)
 
     def test_one_message_about_strike_counting(self):
         """"Punch and kick counting is switched off" sat on the same page as
@@ -1437,7 +1439,10 @@ class PublicPageTests(unittest.TestCase):
                 job_id="abc", report=report, identity=sport_identity("boxing"),
                 report_access={"report_tier": "full", "report_label": "Full", "label": "Full"},
                 analysis_quality=_analysis_quality_summary(report), can_share=False,
-                sharing=None, score_withheld=None, unavailable=[], kick_minimum=None)
+                sharing=None, score_withheld=None, unavailable=[], kick_minimum=None,
+                # Fouls are a claim about classified strikes, so they follow
+                # the strike-count flag too; the route passes it.
+                strike_counts_published=True)
 
         for trusted, status in ((False, "identity_integrity_failed"),
                                 (False, "ok"), (True, "identity_integrity_failed")):
@@ -1685,7 +1690,7 @@ class PublicPageTests(unittest.TestCase):
 
     def test_training_plan_is_separate_from_coach_card(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
-        self.assertIn("Training plan · Fighter", template)
+        self.assertIn("Training plan · {{ names.get(fighter, 'Fighter ' ~ fighter) }}", template)
 
     def test_fighter_selection_is_manual_only(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "select.html").read_text(encoding="utf-8")
@@ -1788,7 +1793,9 @@ class PublicPageTests(unittest.TestCase):
 
     def test_focused_report_keeps_both_fighters_in_the_analysis_engine(self):
         app_source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
-        self.assertIn('analysis_target="BOTH"', app_source)
+        # Two fighters are always analysed together; only a solo session
+        # (one person, core/solo.py) targets A alone.
+        self.assertIn('analysis_target="A" if job.get("solo") else "BOTH"', app_source)
         self.assertIn("focus_fighter=focus_fighter", app_source)
 
     def test_profile_upload_buttons_are_themed(self):
@@ -1900,8 +1907,8 @@ class PublicPageTests(unittest.TestCase):
     def test_result_explains_analysis_quality_without_calling_coverage_accuracy(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
         self.assertIn('class="analysis-quality', template)
-        self.assertIn("Fighter A observed", template)
-        self.assertIn("Fighter B observed", template)
+        self.assertIn("{{ names.A }} observed", template)
+        self.assertIn("{{ names.B }} observed", template)
         self.assertIn("It is not ground-truth identity or action accuracy", template)
 
     def test_progress_uses_supported_movement_metrics_when_actions_are_unvalidated(self):
@@ -3639,16 +3646,16 @@ class NoPunchClaimLeaksTests(unittest.TestCase):
                 self.assertIsNone(found, "%s reached the page: %r" % (
                     what, text[max(0, found.start() - 40):found.end() + 20] if found else ""))
 
-    def test_the_leg_strike_count_does_reach_the_page(self):
-        """The withholding must not be so broad that nothing is reported.
+    def test_no_strike_count_reaches_the_page_and_it_says_so(self):
+        """With counts switched off, kicks go too (QA, 2026-10-04).
 
-        The sample report has a scorecard, so the "Kicks we could count"
-        panel - which appears only *instead* of a scorecard - is not on
-        this page. The leg-strike count still is, in the numbers row, and
-        that row used to print total attempts including punches.
+        The kicks-only mode this class used to pin is gone: a waist-up boxing
+        clip produced 33 kicks, so the leg count is no more trustworthy than
+        the punch count. The page says once that nothing is counted.
         """
         text = self._render(self._report())
-        self.assertIn("kicks thrown", text.lower())
+        self.assertNotIn("thrown", text.lower().replace("thrown_at_nothing", ""))
+        self.assertIn("No strike counts in this report.", text)
         self.assertNotIn("Fighter A attempts", text)
 
 
@@ -3790,7 +3797,7 @@ class NoUnsupportedClaimSurvivesTests(NoPunchClaimLeaksTests):
         no content left.
         """
         text = self._render(self._untrusted_report()).lower()
-        for shown in ("movement", "pressure", "centre", "guard", "balance", "kicks thrown"):
+        for shown in ("movement", "pressure", "centre", "guard", "balance"):
             with self.subTest(number=shown):
                 self.assertIn(shown, text)
 

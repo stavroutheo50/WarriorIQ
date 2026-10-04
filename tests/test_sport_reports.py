@@ -122,8 +122,8 @@ class VisualsWithoutCountedOutcomesTests(unittest.TestCase):
 
     def test_the_page_passes_whether_outcomes_were_counted(self):
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
-        self.assertIn('outcomes_counted=bool((report.get("statistics") or {}).get("action_labels_available"))',
-                      source)
+        self.assertIn('outcomes_counted=(bool((report.get("statistics") or {}).get("action_labels_available"))\n'
+                      '                              and STRIKE_COUNTS_PUBLISHED)', source)
 
 
 class TaekwondoWordingTests(unittest.TestCase):
@@ -138,7 +138,9 @@ class TaekwondoWordingTests(unittest.TestCase):
 
         if STRIKE_COUNTS_PRECISION_VALIDATED:
             self.skipTest("punch counts are published")
-        self.assertEqual(_reported_strike_families("taekwondo")["withheld_families"], "punches")
+        # With counts off nothing is counted, so taekwondo withholds both of
+        # the families it scores - and still never names knees.
+        self.assertEqual(_reported_strike_families("taekwondo")["withheld_families"], "punches and kicks")
 
     def test_the_striking_aside_only_sits_beside_a_score(self):
         page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(
@@ -243,6 +245,8 @@ class KickboxingReportTests(unittest.TestCase):
         start = page.index("{% if kick_minimum %}")
         block = page[start:page.index("{% endif %}\n</section>", start)] + "{% endif %}"
         env = Environment(undefined=ChainableUndefined)
+        from core.coaching import count_of
+        env.filters["count_of"] = count_of   # as app.main registers it
         for validated, expected, absent in (
                 (False, "does not confirm this rule yet", "can be\n      confirmed"),
                 (True, "can be\n      confirmed", "does not confirm this rule yet")):

@@ -1,0 +1,15 @@
+{
+  "_readme": "Clips for tools/predeploy_regression.py. Files are not in git: put them in this folder (or pass --clips). Boxes are [x1, y1, x2, y2] in video pixels on the frame at selection_seconds, as drawn on the selection page. Pick a selection frame part-way in, so the backward pass is exercised.",
+  "clips": [
+    {"id": "kickboxing", "kind": "fight", "path": "kickboxing.mp4", "ruleset": "K1", "selection_seconds": 0, "fighter_a_box": [], "fighter_b_box": []},
+    {"id": "boxing", "kind": "fight", "path": "boxing.mp4", "ruleset": "BOXING", "selection_seconds": 0, "fighter_a_box": [], "fighter_b_box": []},
+    {"id": "muay_thai", "kind": "fight", "path": "muay_thai.mp4", "ruleset": "MUAY_THAI", "selection_seconds": 0, "fighter_a_box": [], "fighter_b_box": []},
+    {"id": "taekwondo", "kind": "fight", "path": "taekwondo.mp4", "ruleset": "WT_TAEKWONDO", "selection_seconds": 0, "fighter_a_box": [], "fighter_b_box": []},
+    {"id": "mma", "kind": "fight", "path": "mma.mp4", "ruleset": "MMA", "selection_seconds": 0, "fighter_a_box": [], "fighter_b_box": []},
+    {"id": "solo", "kind": "solo", "path": "solo.mp4", "ruleset": "K1", "selection_seconds": 0, "fighter_a_box": []},
+    {"id": "waist_up", "kind": "waist_up", "path": "waist_up.mp4", "ruleset": "K1", "selection_seconds": 0, "fighter_a_box": [], "fighter_b_box": []},
+    {"id": "rotated", "kind": "rotated", "path": "rotated.mp4", "ruleset": "K1", "expected_turn": 90, "selection_seconds": 0, "fighter_a_box": [], "fighter_b_box": []},
+    {"id": "no_people", "kind": "no_people", "path": "no_people.mp4", "ruleset": "K1", "selection_seconds": 0, "fighter_a_box": [100, 100, 300, 600], "fighter_b_box": [700, 100, 900, 600]},
+    {"id": "corrupt", "kind": "corrupt", "path": "corrupt.mp4", "ruleset": "K1"}
+  ]
+}

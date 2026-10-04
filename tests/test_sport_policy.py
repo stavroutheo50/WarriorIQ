@@ -36,10 +36,20 @@ def test_boxing_counts_punches_and_never_talks_about_kicks():
     assert "mixed up punches and kicks" not in policy.estimate_note
 
 
-def test_only_kickboxing_claims_the_hand_checked_detail():
-    """The one measurement is a kickboxing bout; other sports say they are unchecked."""
-    for sport in ("boxing", "muay_thai", "taekwondo", "mma"):
-        assert "not been checked by hand" in counting_policy(sport, published=True).estimate_note
+def test_no_sport_quotes_a_precision_figure():
+    """QA, 2026-10-04: the copy said about two in three counted strikes were
+    real while the Accuracy Lab showed 10 real of 26. No figure is quoted for
+    any sport until /validation's release targets are met."""
+    import re
+
+    from core.report import ESTIMATE_NOTE, ESTIMATED_SCORE_NOTE
+
+    for sport in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
+        note = counting_policy(sport, published=True).estimate_note
+        assert "not yet shown that it counts strikes accurately" in note
+        assert not re.search(r"two in three|\d+ (of|in) \d+|\d+\s*%", note), note
+    for note in (ESTIMATE_NOTE, ESTIMATED_SCORE_NOTE):
+        assert "two in three" not in note
 
 
 def test_mma_discloses_what_it_does_not_analyse():
@@ -49,11 +59,13 @@ def test_mma_discloses_what_it_does_not_analyse():
 
 
 def test_unpublished_counts_say_so_everywhere():
+    # Switched off, nothing is counted - kicks included (QA, 2026-10-04).
     policy = counting_policy("kickboxing", published=False, validated=False)
-    assert policy.counted == ("kicks",)
-    assert "not counted yet" in policy.setup_line
-    assert "punches" not in policy.live_note
+    assert policy.counted == ()
+    assert "no strike counts yet" in policy.setup_line
+    assert "punches" not in policy.live_note and "kicks" not in policy.live_note
     assert counting_policy("boxing", published=False, validated=False).badge == "No punch counts yet"
+    assert policy.badge == "No strike counts yet"
 
 
 def _event(family, ruleset_ok=True):

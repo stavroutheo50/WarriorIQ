@@ -39,23 +39,20 @@ SPORT_LABELS = {
     "taekwondo": "Taekwondo", "mma": "MMA",
 }
 
-# The accuracy sentence, per sport. Kickboxing is the one sport with a hand
-# check; every other sport says so rather than borrowing that number as if it
-# were its own, and nothing here names a strike the sport does not have.
-_OTHER_SPORT_CHECK = ("Counting has been checked by hand on one bout of another sport so far, "
-                      "where about two in three counted strikes were real; ")
+# The accuracy sentence, per sport. No precision figure is quoted. "About two
+# in three counted strikes were real" came from one hand-checked kickboxing
+# bout, and on 2026-10-04 the Accuracy Lab's own labels said 10 real of 26.
+# A number that depends on which footage was checked is not a claim the site
+# can make about a fighter's fight, so none is made until /validation's
+# release targets are met. Nothing here names a strike the sport does not have.
+_UNCHECKED = ("WarriorIQ has not yet shown that it counts strikes accurately, so treat these "
+              "as rough estimates")
 _ACCURACY = {
-    "kickboxing": ("On a kickboxing fight we checked by hand, about two in three of the strikes "
-                   "WarriorIQ counted were real, and it often mixed up punches, kicks and knees, "
-                   "so treat these as estimates."),
-    "boxing": (_OTHER_SPORT_CHECK + "boxing footage has not been checked by hand yet, so treat "
-               "these as estimates. Only punches are counted; footwork never is."),
-    "muay_thai": (_OTHER_SPORT_CHECK + "Muay Thai footage has not been checked by hand yet, and "
-                  "the strike type is often wrong, so treat these as estimates."),
-    "taekwondo": (_OTHER_SPORT_CHECK + "taekwondo footage has not been checked by hand yet, and "
-                  "the strike type is often wrong, so treat these as estimates."),
-    "mma": (_OTHER_SPORT_CHECK + "MMA footage has not been checked by hand yet, so treat these "
-            "as estimates."),
+    "kickboxing": _UNCHECKED + " - it also often mixes up punches, kicks and knees.",
+    "boxing": _UNCHECKED + ". Only punches are counted; footwork never is.",
+    "muay_thai": _UNCHECKED + " - the strike type is often wrong.",
+    "taekwondo": _UNCHECKED + " - the strike type is often wrong.",
+    "mma": _UNCHECKED + ".",
 }
 
 # Whole areas of the sport a report never reads, in the reader's words. The
@@ -133,8 +130,9 @@ def counting_policy(sport: str | None, *, published: bool | None = None,
     if published or validated:
         counted, withheld = scored, ()
     else:
-        counted = tuple(f for f in scored if f == "kicks")
-        withheld = tuple(f for f in scored if f != "kicks")
+        # Switched off, nothing is counted - the same answer as
+        # core.report.published_families.
+        counted, withheld = (), scored
     estimates = bool(counted) and not validated
     not_analysed = _NOT_ANALYSED.get(sport, ()) if sport_unobserved(sport) else ()
 
@@ -159,7 +157,7 @@ def counting_policy(sport: str | None, *, published: bool | None = None,
                      "scoring are not shown here; the report adds them as estimates once the "
                      "whole fight is read.")
     else:
-        live_note = ("<strong>Live view:</strong> no strike counts for this sport yet. "
+        live_note = ("<strong>Live view:</strong> no strike counts yet. "
                      "Identity and movement are being measured.")
 
     if counted:

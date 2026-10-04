@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from html import escape
 from pathlib import Path
 
@@ -207,6 +208,17 @@ def churn_rate(tracking: dict, fighter: str) -> tuple[float, bool]:
     return rate, rate > SETTINGS.max_identity_handoffs_per_minute
 
 
+def _legacy_kit_check(tracking: dict) -> bool:
+    """Analysed before the current kit check existed (core/kit.py).
+
+    Only those reports used the old histogram on purpose. A current analysis
+    whose kit could not be measured also carries the histogram method, and is
+    not an "earlier" check.
+    """
+    return (tracking.get("pair_similarity_method") != "kit_regions_lab_v1"
+            and not tracking.get("kit_check_attempted"))
+
+
 def lookalike_blocks_identity(tracking: dict) -> bool:
     """Whether matching kit is what stops this fight's identity being trusted.
 
@@ -221,7 +233,7 @@ def lookalike_blocks_identity(tracking: dict) -> bool:
     """
     if tracking.get("fighters_separable") is not False:
         return False
-    if tracking.get("pair_similarity_method") != "kit_regions_lab_v1":
+    if _legacy_kit_check(tracking):
         return True
     rate = tracking.get("identity_confusions_per_minute")
     return rate is None or float(rate) > SETTINGS.max_lookalike_confusions_per_minute
@@ -272,7 +284,14 @@ def identity_failure(tracking: dict, required: tuple[str, ...] = ("A", "B")) -> 
         kit = tracking.get("kit_similarity") or {}
         confusions = int(tracking.get("identity_confusions") or 0)
         lost = (f", and WarriorIQ could not tell which was which {times(confusions)}" if confusions else "")
-        if tracking.get("pair_similarity_method") != "kit_regions_lab_v1":
+        if not kit and not _legacy_kit_check(tracking):
+            # The current check ran and could not compare the two kits at all.
+            return {"cause": "kit_unmeasured", "failed": failed, "repick": True,
+                    "headline": ("WarriorIQ could not compare the two fighters' kit in this video, so it could "
+                                 f"only tell them apart by position and movement{lost}."),
+                    "advice": ("Pick the fighters again on a frame where both are fully visible and apart, "
+                               "so their kit can be compared.")}
+        if _legacy_kit_check(tracking):
             # Analysed before the kit check was replaced. Its percentage came
             # from a histogram that could not tell black from white, so it is
             # not repeated here as if it were a measurement.
@@ -321,9 +340,15 @@ def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
     the page then disowned a fight the saved report called trusted."""
     churned = identity_churned(tracking)
     alike_blocks = lookalike_blocks_identity(tracking)
+    # The forward pass starts at the beginning of the video even when the
+    # fighters could not be followed back from the chosen frame; arriving there
+    # with A and B on the wrong boxes means the identities before it are not
+    # the ones the person picked. Absent (None) on reports without a check.
+    seed_unconfirmed = tracking.get("identity_seed_confirmed") is False
     return {
         fighter: (
-            _identity_seed_safe(tracking, fighter)
+            not seed_unconfirmed
+            and _identity_seed_safe(tracking, fighter)
             and float(tracking.get(f"fighter_{fighter}_coverage", 0.0)) >= 0.45
             and not alike_blocks
             and not churned[fighter]
@@ -338,9 +363,10 @@ def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
 IDENTITY_TRACKING_KEYS = (
     "fighter_A_seed_source", "fighter_B_seed_source", "initial_iou_A", "initial_iou_B",
     "fighter_A_coverage", "fighter_B_coverage", "fighters_separable", "fighter_pair_similarity",
-    "pair_similarity_method", "identity_confusions_per_minute",
+    "pair_similarity_method", "kit_check_attempted", "identity_confusions_per_minute",
     "identity_confusions", "fighter_A_handoffs_per_minute", "fighter_B_handoffs_per_minute",
     "fighter_A_suspicious_handoffs_per_minute", "fighter_B_suspicious_handoffs_per_minute",
+    "identity_seed_confirmed",
 )
 
 
@@ -381,22 +407,30 @@ STRIKE_COUNTS_PRECISION_VALIDATED = False
 # scored by tools/benchmark_labelled_fight.py. Of the 16 moments a report
 # counts on that fight, 11 were real strikes and 6 of those the right type.
 # Re-run it and update this note whenever the numbers move.
-STRIKE_COUNTS_PUBLISHED = True
+#
+# Switched off again on 2026-10-04, as an environment flag rather than a code
+# edit. QA on production found a waist-up boxing clip counted 33 kicks and 14
+# knees for one fighter, and the Accuracy Lab shows 10 real of 26 counted. Off,
+# no punch, kick or knee count appears on the report summary, the live
+# progress page, the replay chapter list or the story card; movement, guard,
+# balance, centre and pressure stay. Set WARRIORIQ_PUBLISH_STRIKE_COUNTS=1 to
+# show them again once strike classification meets the release targets on
+# /validation.
+STRIKE_COUNTS_PUBLISHED = os.getenv("WARRIORIQ_PUBLISH_STRIKE_COUNTS", "0").strip() == "1"
 
 # The kickboxing sentence of core.sport_policy, kept here under its old name
 # for callers that predate the per-sport policy; a test holds them equal. Every
 # surface that knows the sport uses counting_policy(sport).estimate_note.
 ESTIMATE_NOTE = (
-    "Automatic counts, not checked by a person. On a kickboxing fight we checked by "
-    "hand, about two in three of the strikes WarriorIQ counted were real, and it often "
-    "mixed up punches, kicks and knees, so treat these as estimates."
+    "Automatic counts, not checked by a person. WarriorIQ has not yet shown that it counts "
+    "strikes accurately, so treat these as rough estimates - it also often mixes up "
+    "punches, kicks and knees."
 )
 
 ESTIMATED_SCORE_NOTE = (
     "Estimated score, not an official judges' score. It is built from every strike "
-    "WarriorIQ marked as landed, counted automatically and not checked by a person. "
-    "On a fight we checked by hand, about two in three of those were real strikes, "
-    "and the strike type was often wrong."
+    "WarriorIQ marked as landed, counted automatically and not checked by a person, and "
+    "WarriorIQ has not yet shown that it counts strikes accurately."
 )
 
 _FAMILY_OF_PLURAL = {"punches": "punch", "kicks": "kick", "knees": "knee"}
@@ -406,7 +440,7 @@ def published_families(sport: str | None) -> tuple[str, ...]:
     """The strike families a report shows for this sport, singular.
 
     Only what the sport scores - a boxing report does not list kicks the
-    detector proposed - and only kicks while counts are not published.
+    detector proposed - and none at all while counts are not published.
     """
     try:
         scored = tuple(_FAMILY_OF_PLURAL[f] for f in sport_counted_families(sport or "kickboxing"))
@@ -414,7 +448,7 @@ def published_families(sport: str | None) -> tuple[str, ...]:
         scored = ("punch", "kick", "knee")
     if STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED:
         return scored
-    return tuple(f for f in scored if f == "kick")
+    return ()
 
 
 SHARE_CARD_NOTE = "Automatic estimate by WarriorIQ, not checked by a person."
@@ -452,6 +486,7 @@ def share_card(report: dict) -> dict | None:
     families = published_families(sport)
     totals = scorecard.get("totals") or {}
     scored = bool(scorecard.get("available")) and None not in (totals.get("A"), totals.get("B"))
+    metrics = report.get("metrics") or {}
     fighters = {}
     for fighter in ("A", "B"):
         item = statistics.get(fighter) or {}
@@ -466,17 +501,41 @@ def share_card(report: dict) -> dict | None:
         if weak is not None:
             working_on = str(weak.get("title") or "").removeprefix("Work on: ") or None
         fighters[fighter] = {
-            "strikes": strikes,
-            "total": sum(strikes.values()),
+            # None, not zero, while strike counts are switched off: the card
+            # then shows movement instead of "0 strikes thrown".
+            "strikes": strikes if families else None,
+            "total": sum(strikes.values()) if families else None,
+            "movement": _card_movement(metrics.get(fighter) or {}),
             "strength": strengths[0].get("title") if strengths else None,
             "working_on": working_on,
         }
     return {
         "sport": scorecard.get("sport_label") or (sport or "").replace("_", " ").title() or "Fight",
         "fighters": fighters,
-        "score": {"A": totals["A"], "B": totals["B"]} if scored else None,
+        # The estimated score is built from the strike counts, so it goes
+        # wherever they go.
+        "score": {"A": totals["A"], "B": totals["B"]} if scored and families else None,
         "note": SHARE_CARD_NOTE,
     }
+
+
+def _card_movement(metrics: dict) -> list[dict]:
+    """Guard, balance, centre and pressure as story-card rows, measured only.
+
+    Each is a 0-100 value in the units the report page prints: shares of the
+    round for the first three, and pressure "of 100" (core.squad.movement_value),
+    which maps the stored -1..1 reading onto 0..100.
+    """
+    rows = []
+    for key, label, unit in (("guard_index", "Guard up", "%"), ("balance_index", "Balanced", "%"),
+                             ("ring_center_control", "Held the centre", "%"),
+                             ("pressure_index", "Pressure", " of 100")):
+        value = metrics.get(key)
+        if not isinstance(value, (int, float)):
+            continue
+        share = (float(value) + 1.0) / 2.0 if key == "pressure_index" else float(value)
+        rows.append({"label": label, "value": int(round(max(0.0, min(1.0, share)) * 100)), "unit": unit})
+    return rows
 
 
 def observed_summary(report: dict) -> dict | None:
@@ -608,6 +667,9 @@ def unattributed_kick_total(report: dict) -> dict | None:
     # With counts published this is every family the sport scores; the
     # function keeps its name so callers and stored reports stay compatible.
     shown = published_families((report.get("scorecard") or {}).get("sport"))
+    if not shown:
+        # Strike counts are switched off: a total of none would read as zero.
+        return None
     landed_key = {"punch": "punches_landed", "kick": "kicks_landed", "knee": "knees_landed"}
     attempts = sum(int(row.get("%s_attempts" % family) or 0) for row in rows for family in shown)
     landed_values = [row.get(landed_key[family]) for row in rows for family in shown]
@@ -647,6 +709,9 @@ def kick_minimum_check(report: dict) -> dict | None:
     never allege a shortfall, so it costs nothing a fighter can be penalised
     for. Same measurement, same direction, as `observed_summary`.
     """
+    if not STRIKE_COUNTS_PUBLISHED and not STRIKE_COUNTS_PRECISION_VALIDATED:
+        # "N kicks seen" is a kick count, and strike counts are switched off.
+        return None
     ruleset = ((report.get("scorecard") or {}).get("ruleset")
                or (report.get("request") or {}).get("ruleset"))
     if not ruleset:
@@ -714,6 +779,40 @@ def _report_sport(report: dict) -> str | None:
         return None
 
 
+def identity_verdict(report: dict) -> dict:
+    """The one answer to "is this report about the people the user picked?".
+
+    QA, 2026-10-04: one report said "Not scored, we lost sight of a fighter"
+    in one section and "Good observation evidence / Identity stability:
+    Stable" in another, and still offered a training plan and a success
+    target. Each section had its own rule. Every section now reads this:
+    integrity.identity_evidence_trusted (written from it by
+    refresh_identity_integrity), the evidence-quality summary, the score
+    explanation and the coaching. When ``trusted`` is False no section
+    attributes anything to a fighter.
+
+    ``followed_enough_to_score`` is the coverage the score needs. It is not
+    part of identity: a fighter can be the right person and still be out of
+    sight too often to score. The quality label reads it too, so "good
+    evidence" never sits beside "we lost sight of a fighter".
+    """
+    tracking = report.get("tracking") or {}
+    ready = identity_ready_by_fighter(tracking)
+    target = (report.get("video") or {}).get("analysis_target", "BOTH")
+    required = ("A", "B") if target == "BOTH" else (target,)
+    trusted = all(ready.get(fighter, False) for fighter in required)
+    coverage = {fighter: max(0.0, min(1.0, float(tracking.get(f"fighter_{fighter}_coverage", 0.0) or 0.0)))
+                for fighter in ("A", "B")}
+    return {
+        "trusted": trusted,
+        "by_fighter": ready,
+        "required": required,
+        "coverage": coverage,
+        "followed_enough_to_score": min(coverage[f] for f in required) >= SETTINGS.min_tracking_coverage_for_score,
+        "cause": None if trusted else identity_failure(tracking, required),
+    }
+
+
 def refresh_identity_integrity(report: dict) -> dict:
     """Apply the current identity safety gate to new and legacy reports.
 
@@ -726,12 +825,12 @@ def refresh_identity_integrity(report: dict) -> dict:
     # well they were followed. Coverage answers "was somebody tracked", never
     # "was it the right somebody", and this is the one case where the analysis
     # can know the answer is no before it starts.
-    identity_ready = identity_ready_by_fighter(tracking)
+    verdict = identity_verdict(report)
+    identity_ready = verdict["by_fighter"]
     tracking["fighter_A_initial_lock_safe"] = identity_ready["A"]
     tracking["fighter_B_initial_lock_safe"] = identity_ready["B"]
-    target = report.get("video", {}).get("analysis_target", "BOTH")
-    required = ("A", "B") if target == "BOTH" else (target,)
-    identity_safe = all(identity_ready.get(fighter, False) for fighter in required)
+    required = verdict["required"]
+    identity_safe = verdict["trusted"]
     integrity = report.setdefault("integrity", {})
     integrity["identity_evidence_trusted"] = identity_safe
     integrity["fighter_identity_trusted"] = identity_ready
@@ -756,25 +855,18 @@ def refresh_identity_integrity(report: dict) -> dict:
         })
         report["key_moments"] = []
         report["illegal_moves"] = []
-        metrics = report.get("metrics", {})
+        # No coaching for either fighter. It used to be kept for whichever one
+        # passed on their own, so a report headed "identity check failed"
+        # still offered a training plan and a success target. Coaching
+        # compares a fighter with their opponent, so it cannot stand once the
+        # report cannot say who the opponent was.
         for fighter in ("A", "B"):
-            if identity_ready[fighter] and fighter in metrics:
-                pose_coaching = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"),
-                                                    _report_sport(report))
-                report.setdefault("coaching", {})[fighter] = pose_coaching
-                report.setdefault("training_plan", {})[fighter] = build_training_plan(
-                    pose_coaching, fighter, metrics[fighter]
-                )
-                report.setdefault("training_progression", {})[fighter] = build_training_progression(
-                    pose_coaching, fighter, metrics[fighter]
-                )
-            elif not identity_ready[fighter]:
-                report.setdefault("coaching", {})[fighter] = {
-                    "strengths": [], "improvements": [], "drills": [],
-                    "note": "Coaching withheld because this fighter did not pass the identity-integrity gate.",
-                }
-                report.setdefault("training_plan", {})[fighter] = []
-                report.setdefault("training_progression", {})[fighter] = []
+            report.setdefault("coaching", {})[fighter] = {
+                "strengths": [], "improvements": [], "drills": [],
+                "note": "Coaching withheld because WarriorIQ could not confirm who was who in this fight.",
+            }
+            report.setdefault("training_plan", {})[fighter] = []
+            report.setdefault("training_progression", {})[fighter] = []
         return report
 
     if not bool(integrity.get("action_metrics_trusted", False)):
@@ -1016,14 +1108,17 @@ def build_report(
     # work without presenting candidate strikes as facts.
     coaching: dict[str, dict] = {}
     for fighter in ("A", "B"):
-        if action_metrics_trusted and identity_ready[fighter]:
+        # Coaching for neither fighter unless the report as a whole is trusted
+        # (identity_verdict): one fighter passing on their own is not enough
+        # when the coaching compares them with an opponent nobody confirmed.
+        if action_metrics_trusted and identity_evidence_trusted and identity_ready[fighter]:
             coaching[fighter] = build_coaching(fighter, metrics, events)
-        elif identity_ready[fighter]:
+        elif identity_evidence_trusted and identity_ready[fighter]:
             coaching[fighter] = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"),
                                                     sport_of(req.ruleset))
         else:
             coaching[fighter] = dict(insufficient_coaching)
-            coaching[fighter]["note"] = "Coaching withheld because this fighter did not pass the identity-integrity gate."
+            coaching[fighter]["note"] = "Coaching withheld because WarriorIQ could not confirm who was who in this fight."
     coaching_a, coaching_b = coaching["A"], coaching["B"]
 
     # Reading a weapon mix against what the ruleset rewards needs the family

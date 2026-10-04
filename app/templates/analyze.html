@@ -202,7 +202,12 @@
   // It was 512 KB, which refused real low-resolution footage (a 5 s 240p clip
   // is 180 KB), and every real video must be accepted. A short clip is
   // likewise analysed, with a word about what so little fight can show.
-  const MIN_UPLOAD_BYTES=16*1024, SHORT_FIGHT_SECONDS=10;
+  // No size floor: a valid two-second clip can be 3 KB (QA, 2026-10-04). A
+  // file is judged by decoding it - here from its metadata, on the server by
+  // reading its frames - against the same minimum length the analysis uses.
+  const SHORT_FIGHT_SECONDS=10;
+  // "Camera roll" is a phone's word; a desktop has files (QA, 2026-10-04).
+  const PICK_FROM=(window.matchMedia&&matchMedia('(pointer: coarse)').matches)?'your camera roll':'your files';
   const ACCEPTED_EXTENSIONS={{ fight_video_extensions|tojson }};
   // Built from the same list the server refuses on, via core.upload_security.
   const EMPTY_HINT={{fight_video_label|tojson}}+' — up to '+fmtMB(UPLOAD_LIMIT);
@@ -212,14 +217,16 @@
     // The extension decides as well as the type: a browser labels an Ogg video
     // "audio/ogg" or "application/ogg", and .ogv was refused as "not a video".
     const ext=(f.name.match(/\.[^.]+$/)||[''])[0].toLowerCase();
-    if(f.type&&!f.type.startsWith('video/')&&!ACCEPTED_EXTENSIONS.includes(ext))return 'That file is not a video. Pick the clip from your camera roll.';
-    if(f.size<MIN_UPLOAD_BYTES)return `That file is ${fmtMB(f.size)} — too small to hold a video. Pick the full clip.`;
+    if(f.type&&!f.type.startsWith('video/')&&!ACCEPTED_EXTENSIONS.includes(ext))return `That file is not a video. Pick the clip from ${PICK_FROM}.`;
+    if(f.size===0)return 'That file is empty. Pick the full clip.';
     if(overLimit(f.size))return `That file is ${fmtMB(f.size)}. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps instead of 4K or 60 fps, or trim to a single round.`;
     return null};
   const rejectFile=(message)=>{hidePreflight();videoInput.value='';fileButtonText.textContent='Choose fight video';fileStatus.textContent=message;fileStatus.dataset.tone='bad';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');uploadCard.dataset.uploadState='empty';uploadSubmit.disabled=true;uploadSubmit.textContent='Choose a video to continue';window.wiqToast(message,'error')};
   // Duration needs the browser to read the header, which it will only do
   // asynchronously, so it can only add to what the status line says.
   const checkDuration=(f)=>{const probe=document.createElement('video');probe.preload='metadata';const url=URL.createObjectURL(f);probe.onloadedmetadata=()=>{URL.revokeObjectURL(url);const seconds=probe.duration;if(!isFinite(seconds))return;
+      // One frame of tolerance: a two-second clip often reports 1.97 s.
+      if(seconds<PREFLIGHT_LIMITS.min_usable_seconds-0.05){rejectFile(`This clip is ${seconds.toFixed(1)} seconds long. WarriorIQ needs at least ${PREFLIGHT_LIMITS.min_usable_seconds} seconds of video to measure anything.`);return}
       const mins=Math.floor(seconds/60),secs=String(Math.round(seconds%60)).padStart(2,'0');
       if(seconds<SHORT_FIGHT_SECONDS){fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload. A clip this short gives only a few numbers; the report says how much fight it found.`;fileStatus.dataset.tone='warn';return}
       fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload`};

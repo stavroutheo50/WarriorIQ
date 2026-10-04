@@ -120,7 +120,7 @@ from core.camp import (
 from core.training_check import check_training_video
 from core.share_image import preview_png as story_preview_png
 from core.report import (
-    build_preliminary_scorecard, identity_failure, kick_minimum_check, observed_summary,
+    build_preliminary_scorecard, identity_failure, identity_verdict, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
     refresh_identity_integrity, share_card, unattributed_kick_total,
 )
@@ -128,11 +128,14 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
+from core.build_info import ANALYSIS_VERSION, result_check
+from core.orientation import needed_turn, tag_rotation
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_policy import counting_policy
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
-from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
+from core.coaching import count_of
+from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label, fight_choice_stamp
 from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
@@ -140,6 +143,7 @@ from core.video import (
     detect_shot_changes, ffmpeg_frame, get_video_info, normalize_container, opencv_decodes,
     playback_file, probe_upload, read_frame, remove_derivative, selection_frame,
 )
+from core.video import _ffmpeg_exe
 
 # No public API documentation. /openapi.json, /docs and /redoc were reachable
 # signed out and listed every route - /admin/*, /api/worker/claim, the dataset
@@ -238,6 +242,8 @@ def _ruleset_label(value: str | None) -> str:
 
 
 templates.env.filters["fight_moment"] = _fight_moment
+# "1 attempt", never "1 attempts": {{ n|count_of('attempt') }}.
+templates.env.filters["count_of"] = count_of
 templates.env.filters["ruleset_label"] = _ruleset_label
 
 
@@ -508,7 +514,9 @@ SEARCH_GUIDES = {
 
 class StartPayload(BaseModel):
     fighter_a_box: list[float]
-    fighter_b_box: list[float]
+    # Not sent for a solo session, which follows one person (core/solo.py).
+    fighter_b_box: list[float] | None = None
+    solo: bool = False
     focus_fighter: str | None = None
     analysis_target: str | None = None
     # Which corner Fighter A is in, as the person drawing the boxes says it.
@@ -574,6 +582,9 @@ DOWN_CHECK_TIME_OFFSET = 0.0005
 
 class WorkerIdentityPayload(BaseModel):
     worker_id: str
+    # core/build_info.ANALYSIS_VERSION of the worker's code. Absent from
+    # workers built before it existed, which are older by definition.
+    analysis_version: int | None = None
 
 
 class WorkerProgressPayload(WorkerIdentityPayload):
@@ -1325,22 +1336,23 @@ def _analysis_quality_summary(report: dict) -> dict:
     focus = video.get("focus_fighter") or video.get("analysis_target", "BOTH")
     if focus not in {"A", "B"}:
         focus = "A"
-    tracking = report.get("tracking", {})
     metrics = report.get("metrics", {})
     integrity = report.get("integrity", {})
-    coverage = {
-        fighter: max(0.0, min(1.0, float(tracking.get(f"fighter_{fighter}_coverage", 0.0) or 0.0)))
-        for fighter in ("A", "B")
-    }
+    # The same verdict the score, the numbers and the coaching read
+    # (core.report.identity_verdict), so this box cannot call the evidence
+    # good or the identity stable beside a section that says otherwise.
+    verdict = identity_verdict(report)
+    coverage = verdict["coverage"]
     pose = max(0.0, min(1.0, float(metrics.get(focus, {}).get("pose_coverage", 0.0) or 0.0)))
-    identities = integrity.get("fighter_identity_trusted", {})
-    stable = all(bool(identities.get(fighter, tracking.get(f"fighter_{fighter}_initial_lock_safe", False))) for fighter in ("A", "B"))
-    minimum_coverage = min(coverage.values())
+    stable = verdict["trusted"]
     if not stable:
         label, tone = "Needs another fighter selection", "bad"
-    elif minimum_coverage >= .85 and pose >= .80:
+    elif not verdict["followed_enough_to_score"]:
+        # The score section says "we lost sight of a fighter too often".
+        label, tone = "Partial observation evidence", "review"
+    elif pose >= .80:
         label, tone = "Strong observation evidence", "strong"
-    elif minimum_coverage >= .65 and pose >= .55:
+    elif pose >= .55:
         label, tone = "Good observation evidence", "good"
     else:
         label, tone = "Partial observation evidence", "review"
@@ -2082,6 +2094,23 @@ def _estimate_score_withheld_for_punches(report: dict) -> None:
     )
 
 
+def _withhold_score_while_counts_are_off(report: dict) -> None:
+    """No estimated score while strike counts are switched off.
+
+    The estimated score is built from the same automatic strike counts the
+    flag withholds (core.report.STRIKE_COUNTS_PUBLISHED), so a report stored
+    while counts were on loses its score on read too. Never written back.
+    """
+    if STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED:
+        return
+    scorecard = report.get("scorecard") or {}
+    if scorecard.get("available") or scorecard.get("status") == "punch_counting_unavailable":
+        report["scorecard"] = {
+            **scorecard, "available": False, "totals": {"A": None, "B": None}, "rounds": [],
+            "winner_estimate": None, "status": "strike_counts_off",
+        }
+
+
 def _withhold_unverified_action_report(report: dict, reason: str) -> None:
     ruleset = report.get("setup", {}).get("ruleset", "K1")
     round_numbers = [int(item["number"]) for item in report.get("rounds", []) if item.get("selected", True)]
@@ -2283,9 +2312,10 @@ def _analysis_request(job_id: str, job: dict, fighter_a_box: list[float], fighte
     return AnalysisRequest(
         video_path=job["video_path"],
         fighter_a_box=fighter_a_box,
-        fighter_b_box=fighter_b_box,
+        fighter_b_box=list(fighter_b_box or []),
         original_name=job.get("original_name"),
-        analysis_target="BOTH",
+        analysis_target="A" if job.get("solo") else "BOTH",
+        solo=bool(job.get("solo")),
         focus_fighter=focus_fighter,
         fight_type=job["fight_type"],
         ruleset=job["ruleset"],
@@ -3633,6 +3663,26 @@ async def upload(
     except Exception as exc:
         LOGGER.warning("upload_selection_frame_unreadable job_id=%s error=%s", job_id, type(exc).__name__)
         chosen_index, frame = None, None
+    # Filmed sideways with no rotation tag: turn it upright before anything
+    # reads it, so the analysis, the replay and the "left / right" words on the
+    # selection page all see the people where they really are (core/orientation.py).
+    orientation = {"turned_clockwise": 0, "warning": None}
+    if frame is not None and server_decodes:
+        turn = await run_in_threadpool(needed_turn, frame, detect_people_in_frame)
+        if turn:
+            if await run_in_threadpool(tag_rotation, video_path, turn, _ffmpeg_exe()):
+                orientation["turned_clockwise"] = turn
+                info = await run_in_threadpool(get_video_info, video_path)
+                try:
+                    chosen_index, frame = await run_in_threadpool(
+                        selection_frame, video_path, info, selection_frame_index)
+                except Exception as exc:                                # noqa: BLE001
+                    LOGGER.warning("upload_rotated_frame_unreadable job_id=%s error=%s", job_id, type(exc).__name__)
+                    chosen_index, frame = None, None
+            else:
+                orientation["warning"] = (
+                    "This video looks like it was filmed sideways, and WarriorIQ could not turn it. "
+                    "Rotate it on your phone and upload it again for the best result.")
     if frame is not None:
         # Failing to *save* a frame that decoded is this server's disk, not the
         # video, and the browser's frame would fail to save the same way.
@@ -3721,6 +3771,9 @@ async def upload(
             "selected_rounds": _parse_rounds(selected_rounds, count),
             "video_width": info.width,
             "video_height": info.height,
+            # Quarter turns applied to a sideways upload, and the warning when
+            # one was needed but could not be applied.
+            "orientation": orientation,
             "video_duration": info.duration,
             "selection_frame": selection_frame_index,
             "profile_id": profile_id,
@@ -4098,6 +4151,47 @@ def _validated_fighter_box(box: list[float], width: float, height: float, label:
     return [x1, y1, x2, y2]
 
 
+def _person_inside(person: list[float], drawn: list[float]) -> bool:
+    """Whether a detected person is what a drawn box is around.
+
+    Most of the person has to be inside the box, and they have to fill a fair
+    part of it: a box drawn around a punch bag beside its holder, or around a
+    blank title card with a small figure in a corner, is not a box around a
+    fighter.
+    """
+    inter = (max(0.0, min(person[2], drawn[2]) - max(person[0], drawn[0]))
+             * max(0.0, min(person[3], drawn[3]) - max(person[1], drawn[1])))
+    person_area = max(1.0, (person[2] - person[0]) * (person[3] - person[1]))
+    drawn_area = max(1.0, (drawn[2] - drawn[0]) * (drawn[3] - drawn[1]))
+    return inter / person_area >= 0.5 and inter / drawn_area >= 0.2
+
+
+def _boxes_without_a_person(frame, boxes: dict[str, list[float]], width: float, height: float) -> list[str]:
+    """The labels of drawn boxes that hold no detected person.
+
+    QA, 2026-10-04: a punch bag and a blank title card were both accepted as
+    fighters. Checked on the selection frame with the same light detector the
+    page uses to offer candidates (core/person_detect.py). When that detector
+    cannot run, nothing can be checked here and nothing is refused; the
+    analysis's own seed check still stops a box with nobody in it from being
+    followed as a fighter.
+    """
+    if frame is None:
+        return []
+    people = detect_people_in_frame(frame)
+    if people is None:
+        LOGGER.info("selection_person_check_unavailable")
+        return []
+    scale_x = frame.shape[1] / max(1.0, float(width))
+    scale_y = frame.shape[0] / max(1.0, float(height))
+    missing = []
+    for label, box in boxes.items():
+        scaled = [box[0] * scale_x, box[1] * scale_y, box[2] * scale_x, box[3] * scale_y]
+        if not any(_person_inside(person["box"], scaled) for person in people):
+            missing.append(label)
+    return missing
+
+
 _WORKER_PROGRESS_FIELDS = {
     "percent", "message", "stage", "elapsed_seconds", "eta_seconds",
     "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
@@ -4147,15 +4241,17 @@ def _remote_job_payload(job_id: str, job: dict) -> dict:
         "analysis_run_id": str(job.get("analysis_run_id") or ""),
         "video_extension": Path(str(job.get("video_path") or "fight.mp4")).suffix.lower() or ".mp4",
         "fighter_a_box": list(job["fighter_a_box"]),
-        "fighter_b_box": list(job["fighter_b_box"]),
-        "analysis_target": "BOTH",
+        "fighter_b_box": list(job.get("fighter_b_box") or []),
+        "solo": bool(job.get("solo")),
+        "analysis_target": "A" if job.get("solo") else "BOTH",
         "focus_fighter": job.get("focus_fighter") or "A",
         "fight_type": job["fight_type"],
         "ruleset": job["ruleset"],
         # A worker that predates requested_start_seconds reads start_seconds as
-        # where to start, and so keeps analysing from the selection frame
-        # exactly as before; a current one analyses from requested_start and
-        # seeds identity at selection_seconds.
+        # where to start; such a worker is now refused at claim time (see
+        # remote_worker_claim), so this only keeps the payload readable. A
+        # current one analyses from requested_start and seeds identity at
+        # selection_seconds.
         "start_seconds": float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
         "selection_seconds": float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
         "requested_start_seconds": float(job.get("requested_start_seconds", 0.0) or 0.0),
@@ -4215,6 +4311,17 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
     _require_remote_worker(request)
     worker_id = _validated_worker_id(payload.worker_id)
     record_worker_heartbeat(worker_id)
+    if payload.analysis_version is None or payload.analysis_version < ANALYSIS_VERSION:
+        # QA, 2026-10-04: a GPU worker deployed from an older checkout kept
+        # analysing from the fighter-selection frame for days after the web
+        # app had the fix, and its reports said "Analysis complete". A worker
+        # older than this server gets no work; the fight stays queued for one
+        # that is current, and the log says exactly what to redeploy.
+        LOGGER.error(
+            "worker_outdated worker_id=%s analysis_version=%s required=%s - redeploy the worker "
+            "(modal deploy deploy/modal_worker.py, or restart a local worker on the current code)",
+            worker_id, payload.analysis_version, ANALYSIS_VERSION)
+        return {"job": None, "refused": "worker_outdated", "required_analysis_version": ANALYSIS_VERSION}
     claimed = claim_next_job(worker_id)
     if not claimed:
         return {"job": None}
@@ -4377,6 +4484,15 @@ async def remote_worker_complete(
             )
         except (OSError, ValueError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
             raise HTTPException(400, str(exc) or "Invalid worker artifact archive.") from exc
+        build = result_check(report)
+        if build["outdated"]:
+            # Claimed before this server was deployed, by a worker that has not
+            # been. Its report may cover less of the video than this code
+            # promises, so it is not stored; the run's lease lapses and a
+            # current worker analyses the fight again.
+            LOGGER.error("worker_result_outdated job_id=%s worker_id=%s analysis_version=%s required=%s",
+                         job_id, worker_id, build["analysis_version"], ANALYSIS_VERSION)
+            raise HTTPException(409, "This result came from an outdated analysis worker and was not stored.")
         if not finalize_job_from_worker(job_id, worker_id, analysis_run_id, report, staged):
             for path in staged.values():
                 path.unlink(missing_ok=True)
@@ -4465,6 +4581,10 @@ def start(request: Request, job_id: str, payload: StartPayload):
             raise HTTPException(409, "The selected frame is unavailable. Choose another frame.")
         video_height, video_width = selection.shape[:2]
     fighter_a_box = _validated_fighter_box(payload.fighter_a_box, video_width, video_height, "Fighter A")
+    if payload.solo:
+        return _start_solo(request, job_id, job, fighter_a_box, video_width, video_height, capacity)
+    if payload.fighter_b_box is None:
+        raise HTTPException(400, "Draw a box around Fighter B too, or choose a solo session for a video of one person.")
     fighter_b_box = _validated_fighter_box(payload.fighter_b_box, video_width, video_height, "Fighter B")
     shared = (
         max(0.0, min(fighter_a_box[2], fighter_b_box[2]) - max(fighter_a_box[0], fighter_b_box[0]))
@@ -4482,6 +4602,13 @@ def start(request: Request, job_id: str, payload: StartPayload):
     # what can be believed, and because this is the last moment the person who
     # can actually answer it is still looking at the screen.
     chosen_frame = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
+    empty = _boxes_without_a_person(
+        chosen_frame, {"Fighter A": fighter_a_box, "Fighter B": fighter_b_box}, video_width, video_height)
+    if empty:
+        raise HTTPException(400, (
+            f"No person was found inside the {' or the '.join(empty)} box. Draw each box around a "
+            "fighter's whole body - WarriorIQ cannot follow a punch bag, a title card or an empty "
+            "part of the frame. If the fighters are hard to see here, pick a clearer moment."))
     kit = kit_similarity(chosen_frame, fighter_a_box, fighter_b_box)
     alike = None if kit is None else kit["similarity"]
     # Warned, never refused. Most footage is not shot for us, and a user with a
@@ -4544,6 +4671,43 @@ def start(request: Request, job_id: str, payload: StartPayload):
                                       on_official=on_official, kit=kit)
 
 
+def _start_solo(request: Request, job_id: str, job: dict, fighter_a_box: list[float],
+                video_width: float, video_height: float, capacity: dict):
+    """Queue a solo session: one person, movement and guard only, no scoring."""
+    chosen_frame = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
+    if _boxes_without_a_person(chosen_frame, {"person": fighter_a_box}, video_width, video_height):
+        raise HTTPException(400, (
+            "No person was found inside the box. Draw it around the whole body of the person "
+            "training - WarriorIQ cannot follow a punch bag, a title card or an empty part of "
+            "the frame."))
+    _save_fighter_portrait(job_id, "A", fighter_a_box)
+    req = _analysis_request(job_id, {**job, "solo": True}, fighter_a_box, [], "A")
+    if job.get("account_id") and not job.get("usage_reserved"):
+        if not reserve_analysis(int(job["account_id"]), job_id):
+            plan = _request_plan(request)
+            raise HTTPException(429, f"Your {plan['label']} plan includes {plan['limit_label'].lower()}. Your allowance will reset automatically.")
+        update_job(job_id, {"usage_reserved": True})
+    try:
+        analysis_run_id = prepare_job_run(job_id, {
+            "analysis_target": "A", "focus_fighter": "A", "solo": True,
+            "fighter_a_box": fighter_a_box, "fighter_b_box": None, "fighter_a_corner": None,
+            **({"message": _deferred_analysis_message()} if capacity["deferred"] else {}),
+        })
+    except AnalysisStateNotPersisted as exc:
+        if job.get("account_id") and get_job(job_id).get("usage_reserved"):
+            release_analysis(int(job["account_id"]), job_id)
+            update_job(job_id, {"usage_reserved": False})
+        LOGGER.error("analysis_queue_not_persisted job_id=%s", job_id, exc_info=exc)
+        raise HTTPException(
+            503, "WarriorIQ could not queue this analysis. Your video and selection are preserved.",
+        ) from exc
+    if SETTINGS.analysis_worker_mode == "inprocess":
+        executor.submit(_run_job, job_id, req, analysis_run_id)
+    else:
+        _wake_analysis_worker(job_id)
+    return _analysis_started_response(request, job_id, capacity["deferred"])
+
+
 @app.post("/api/restart/{job_id}", dependencies=[Depends(require_csrf)])
 def restart_interrupted_analysis(request: Request, job_id: str):
     # Restarting queues GPU work. Without a cap one account can fill the
@@ -4561,7 +4725,8 @@ def restart_interrupted_analysis(request: Request, job_id: str):
     fighter_a_box = job.get("fighter_a_box")
     fighter_b_box = job.get("fighter_b_box")
     focus_fighter = job.get("focus_fighter") or "A"
-    if not isinstance(fighter_a_box, list) or len(fighter_a_box) != 4 or not isinstance(fighter_b_box, list) or len(fighter_b_box) != 4:
+    b_box_ok = bool(job.get("solo")) or (isinstance(fighter_b_box, list) and len(fighter_b_box) == 4)
+    if not isinstance(fighter_a_box, list) or len(fighter_a_box) != 4 or not b_box_ok:
         raise HTTPException(409, "The saved session predates resumable analysis. Return to fighter selection once; your video is still available.")
     req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, focus_fighter)
     try:
@@ -4593,6 +4758,12 @@ def progress_page(request: Request, job_id: str):
         # The same counting policy as the upload page and the report, so the
         # live view cannot claim "leg strikes only" above a feed of punches.
         "live_counting_note": counting_policy(_job_sport(job)).live_note,
+        "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
+        # The families this sport's report counts, so the boxing live page
+        # does not list kick statistics.
+        "live_families": published_families(_job_sport(job)),
+        # A solo session follows one person; Fighter B's panel is hidden.
+        "solo": bool(job.get("solo")),
     })
 
 
@@ -4604,6 +4775,20 @@ def _public_job_status(job_id: str, job: dict) -> dict:
         "live_events", "provisional_stats", "latest_observation", "focus_fighter", "analysis_run_id",
     }
     payload = {key: value for key, value in job.items() if key in public_fields}
+    if not STRIKE_COUNTS_PUBLISHED:
+        # No strike counts on the live page while they are switched off: no
+        # event feed, and of the provisional statistics only how much of each
+        # fighter was observed. Done here, not in the page, so the numbers are
+        # not sent at all.
+        payload["live_events"] = []
+        stats = payload.get("provisional_stats") or {}
+        payload["provisional_stats"] = {
+            "attempt_counts_available": False, "action_labels_available": False,
+            "fighters": {
+                fighter: {"observation_coverage": (item or {}).get("observation_coverage")}
+                for fighter, item in (stats.get("fighters") or {}).items()
+            },
+        }
     payload.setdefault("job_id", job_id)
     payload.setdefault("video_duration_seconds", job.get("video_duration", 0.0))
     # Where the analysed span actually starts: reported by the run once it
@@ -4840,6 +5025,15 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
     # coverage, and a taekwondo report said "None were clear enough" above a
     # panel counting 28 kicks - both sending the athlete to redo a selection
     # or refilm a bout that was fine.
+    if status == "strike_counts_off":
+        return {
+            "reason": ("A score is built from counted strikes, and WarriorIQ does not count strikes "
+                       "until its counting is accurate enough."),
+            "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+            "disclaimer": ("No score is shown. A score is built from counted strikes, and automatic "
+                           "strike counting is switched off until it is accurate enough. Movement, "
+                           "guard, balance, centre and pressure below are unaffected."),
+        }
     if status == "punch_counting_unavailable":
         return {
             "reason": (
@@ -4921,6 +5115,61 @@ def _job_sport(job: dict) -> str | None:
         return sport_of(str(job.get("ruleset") or ""))
     except (KeyError, ValueError):
         return None
+
+
+def _fighter_names(request: Request, job: dict, report: dict) -> dict:
+    """What the report calls each side.
+
+    The fighter the upload was filed under (the roster entry chosen on the
+    setup page) is the report's focus: the selection page asks "which one is
+    <name>?" and that answer is the focus fighter. So that side carries the
+    name, and the other side is the opponent. The report said "Fighter A /
+    Fighter B" while the library already showed the name (QA, 2026-10-04).
+    Without a filed fighter, the letters stay.
+    """
+    names = {"A": "Fighter A", "B": "Fighter B"}
+    profile_id = _profile_id(request)
+    if profile_id is None or not str(job.get("fighter_id") or "").isdigit():
+        return names
+    fighter = get_fighter(profile_id, int(job["fighter_id"]))
+    name = " ".join(str((fighter or {}).get("name") or "").split())
+    if not name:
+        return names
+    video = report.get("video") or {}
+    focus = str(job.get("focus_fighter") or video.get("focus_fighter") or "A")
+    if focus not in names:
+        return names
+    names[focus] = name
+    names["B" if focus == "A" else "A"] = "Opponent"
+    return names
+
+
+def _name_the_fighters(report: dict, names: dict) -> None:
+    """Put the names into the coaching text, which was written as "Fighter A".
+
+    core/coaching.py writes its sentences at analysis time with the letters;
+    the page swaps them for what _fighter_names calls each side. Only the
+    coaching and training text - nothing that is matched or stored - and never
+    written back.
+    """
+    swaps = {f"Fighter {side}": name for side, name in names.items() if name != f"Fighter {side}"}
+    if not swaps:
+        return
+
+    def rename(value):
+        if isinstance(value, str):
+            for letter, name in swaps.items():
+                value = value.replace(letter, name)
+            return value
+        if isinstance(value, list):
+            return [rename(item) for item in value]
+        if isinstance(value, dict):
+            return {key: rename(item) for key, item in value.items()}
+        return value
+
+    for key in ("coaching", "training_plan", "training_progression"):
+        if key in report:
+            report[key] = rename(report[key])
 
 
 def _corner_labels(job: dict) -> dict:
@@ -5012,6 +5261,16 @@ def result_page(request: Request, job_id: str):
     if not path.exists():
         raise HTTPException(404)
     report = json.loads(path.read_text(encoding="utf-8"))
+    if report.get("mode") == "solo":
+        # One person, no opponent and no strikes (core/solo.py): its own page,
+        # since every section of the fight report is about two fighters.
+        solo_name = _fighter_names(request, job, report)["A"]
+        return templates.TemplateResponse(request=request, name="solo_result.html", context={
+            "request": request, "job_id": job_id, "report": report,
+            "analysed_span": _analysed_span_summary(report),
+            "analysis_build": result_check(report),
+            "subject_name": None if solo_name == "Fighter A" else solo_name,
+        })
     if "key_moments" not in report:
         report["key_moments"] = [e for e in report.get("events", []) if e.get("outcome") in {"clean", "likely_landed"} and float(e.get("confidence", 0)) >= .72 and float(e.get("contact_confidence", 0)) >= .62][:18]
     _score_and_identity_as_shown(report)
@@ -5046,6 +5305,9 @@ def result_page(request: Request, job_id: str):
     # posts numbers as the fighter's own, stays off until they are verified.
     _pin_sport_to_fight(request, report.get("scorecard", {}).get("sport") or _job_sport(job))
     _estimate_score_withheld_for_punches(report)
+    _withhold_score_while_counts_are_off(report)
+    names = _fighter_names(request, job, report)
+    _name_the_fighters(report, names)
     score_withheld = _score_withheld(report, job_id)
     # The scorecard box prints the disclaimer stored when the fight was
     # analysed. For a score withheld because strike counting is not validated,
@@ -5070,7 +5332,9 @@ def result_page(request: Request, job_id: str):
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
+        "names": names,
         "analysed_span": _analysed_span_summary(report),
+        "analysis_build": result_check(report),
         "fight_footage": _fight_footage_summary(report),
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
@@ -5088,7 +5352,8 @@ def result_page(request: Request, job_id: str):
         # analysis already on disk gains these sections without being re-run.
         "visuals": (report_visuals(
             report, _visual_focus(report),
-            outcomes_counted=bool((report.get("statistics") or {}).get("action_labels_available")),
+            outcomes_counted=(bool((report.get("statistics") or {}).get("action_labels_available"))
+                              and STRIKE_COUNTS_PUBLISHED),
         ) if identity_trusted else None),
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
@@ -5492,7 +5757,7 @@ def complete_evidence_review(
                           if not is_down_check(item)]
         remaining = [item for item in candidates if not any(abs(float(item["peak_time"]) - value) <= .02 for value in reviewed_times)]
         if remaining:
-            raise HTTPException(409, f"Review the remaining {len(remaining)} candidates before completing the fight.")
+            raise HTTPException(409, f"Review the remaining {count_of(len(remaining), 'candidate')} before completing the fight.")
     current_status = get_fight_review(job_id).get("status", "in_progress")
     if not complete:
         next_status = "in_progress"
@@ -6071,6 +6336,13 @@ def cancel_pending_job(request: Request, job_id: str):
     return RedirectResponse("/history#pending", status_code=303)
 
 
+def _is_solo_fight(fight: dict) -> bool:
+    """Whether a saved analysis was a solo session (one person, core/solo.py)."""
+    summary = fight.get("summary") or {}
+    setup = (summary.get("progress_report") or {}).get("setup") or {}
+    return setup.get("mode") == "solo"
+
+
 @app.get("/history", response_class=HTMLResponse)
 def history_page(request: Request):
     profile_id = _profile_id(request)
@@ -6133,13 +6405,17 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     # they had not chosen. It also makes the "two fights required" gate above
     # count what it is actually gating on.
     fights = [f for f in fights if completed_artifact_directory(f["job_id"]) is not None
-              and (completed_artifact_directory(f["job_id"]) / "report.json").is_file()]
+              and (completed_artifact_directory(f["job_id"]) / "report.json").is_file()
+              # A solo session (core/solo.py) has no opponent and no Fighter
+              # B, so set against a fight it read as "tracked at 0% coverage".
+              and not _is_solo_fight(f)]
     for fight in fights:
         # Every option read "Fight analysis · <date>", so a reader with six
         # fights on one day was choosing between six identical lines.
         fight["choice_label"] = fight_choice_label(
             fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
             fight.get("fighter_name"))
+        fight["choice_stamp"] = fight_choice_stamp(fight.get("created_at"))
     allowed = {fight["job_id"] for fight in fights}
     reports = []
     for job_id in (a, b):

@@ -53,12 +53,15 @@ avoid.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
 
 from core.config import SETTINGS
+
+LOGGER = logging.getLogger("warrioriq.preflight")
 
 # Where the detector becomes reliable, from the table above. 214 px measured
 # 15.0 people and 0.85 confidence; 171 measured 9.3 and 0.81. 200 sits in that
@@ -69,6 +72,15 @@ TARGET_SUBJECT_PX = 200
 # The probe must not fall into the hole it exists to detect, so it looks at a
 # size that works on the smallest footage on record and, failing that, larger.
 PROBE_SIZES = (1600, 2048)
+# ...but most footage is not that footage. Eight frames at 1600 cost as much as
+# fifty at 640, and that was the largest fixed cost of a short analysis:
+# measured 2026-10-04 on a 4-second clip, 9.2 s of a 22.6 s run (CPU), paid
+# before the first frame of the fight. So the probe looks at the default size
+# first and only climbs when what it found there says it has to - nobody found,
+# or subjects small enough that the recommended size is above the default.
+# When the subjects are already big at 640 the recommendation is the 640 floor
+# whichever size measured them, so nothing about the decision changes.
+FIRST_PROBE_SIZE = 640
 
 # Below this the subject cannot be brought up to target even at the largest
 # inference size we are willing to run, so the shortfall is reported rather
@@ -231,7 +243,9 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     # thing. Duration and frame size are knowable before any model runs, so
     # they are answered before any model runs.
     duration = report.frame_count / report.fps
-    if duration < MIN_USABLE_SECONDS:
+    # One frame of tolerance: containers round, and a clip filmed for two
+    # seconds often holds 59 frames at 30 fps.
+    if duration + 1.0 / report.fps < MIN_USABLE_SECONDS - 1e-6:
         report.blocking.append(
             f"This video is only {duration:.1f} seconds long. A round needs at "
             f"least {MIN_USABLE_SECONDS:.0f} seconds of continuous footage to "
@@ -270,23 +284,35 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     report.camera_shift_percent = float(np.median(shifts)) if shifts else 0.0
 
     heights, counts, ankles = [], [], []
-    for size in PROBE_SIZES:
+    for size in (FIRST_PROBE_SIZE, *PROBE_SIZES):
         heights, counts, ankles = [], [], []
-        for frame in frames:
-            result = model.predict(frame, imgsz=size, conf=SETTINGS.detection_conf,
-                                   classes=[0], verbose=False)[0]
-            if result.boxes is None or not len(result.boxes):
-                counts.append(0)
-                continue
-            boxes = result.boxes.xyxy.cpu().numpy()
-            counts.append(len(boxes))
-            # The tallest few, not the average: the subject of a fight video is
-            # nearer the camera than the room behind them, and the median over
-            # everybody in a busy hall describes the hall.
-            tall = np.sort(boxes[:, 3] - boxes[:, 1])[-3:]
-            heights.extend(float(h) for h in tall)
-            ankles.extend(_ankles_seen(result, boxes))
-        if heights:
+        try:
+            for frame in frames:
+                result = model.predict(frame, imgsz=size, conf=SETTINGS.detection_conf,
+                                       classes=[0], verbose=False)[0]
+                if result.boxes is None or not len(result.boxes):
+                    counts.append(0)
+                    continue
+                boxes = result.boxes.xyxy.cpu().numpy()
+                counts.append(len(boxes))
+                # The tallest few, not the average: the subject of a fight video is
+                # nearer the camera than the room behind them, and the median over
+                # everybody in a busy hall describes the hall.
+                tall = np.sort(boxes[:, 3] - boxes[:, 1])[-3:]
+                heights.extend(float(h) for h in tall)
+                ankles.extend(_ankles_seen(result, boxes))
+        except Exception as exc:                                    # noqa: BLE001
+            # A size the loaded backend cannot serve (a TensorRT engine has a
+            # largest input) is a size this probe cannot use, not a reason to
+            # lose the measurement already taken at a smaller one.
+            LOGGER.info("preflight_probe_size_unavailable size=%s error=%s", size, type(exc).__name__)
+            break
+        # At the first size, both fighters have to have been found as well: a
+        # close spectator can be tall at 640 while two small fighters behind
+        # them are missed, and only the larger size would show it.
+        if heights and (size != FIRST_PROBE_SIZE or (
+                float(np.median(counts)) >= 2
+                and inference_size_for_subject(long_edge, float(np.median(heights))) <= FIRST_PROBE_SIZE)):
             break
 
     if not heights:

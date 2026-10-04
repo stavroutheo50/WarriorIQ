@@ -87,7 +87,9 @@ def _request_from_job(job_id: str, job: dict) -> AnalysisRequest:
     return AnalysisRequest(
         video_path=job["video_path"],
         fighter_a_box=list(job["fighter_a_box"]),
-        fighter_b_box=list(job["fighter_b_box"]),
+        # Empty for a solo session, which follows one person.
+        fighter_b_box=list(job.get("fighter_b_box") or []),
+        solo=bool(job.get("solo")),
         original_name=job.get("original_name"),
         analysis_target="BOTH",
         focus_fighter=job.get("focus_fighter") or "A",

@@ -56,6 +56,9 @@ class AnalysisRequest:
     # frame picked at 0:30 threw away the first thirty seconds. See
     # core/backtrack.py.
     selection_seconds: float | None = None
+    # One person - shadowboxing, bag or pad work (core/solo.py). Only
+    # fighter_a_box is used; fighter_b_box may be empty.
+    solo: bool = False
 
 
 @dataclass

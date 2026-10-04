@@ -176,23 +176,47 @@ def test_a_successful_hand_off_analyses_from_the_start_and_checks_the_seed():
     assert kwargs["seed_seconds"] == 30.0
 
 
-def test_a_failed_seed_check_reruns_from_the_seed_and_says_why():
+def test_a_failed_seed_check_never_reruns_from_the_seed():
+    # QA, 2026-10-04: a failed check used to restart the analysis at the
+    # chosen frame and drop everything before it. The check is now recorded
+    # inside the one forward pass, which keeps the whole video.
     handoff = backtrack.Handoff(seed_frame=900, requested_start_frame=0, frame=0,
                                 a_box=[90, 80, 190, 310], b_box=[410, 80, 510, 310])
-    calls = _run(handoff, analyze_side_effect=analyzer.SeedCheckFailed("swapped"))
-    assert len(calls) == 2
-    rerun, kwargs = calls[1]
-    assert rerun.start_seconds == 30.0
-    assert rerun.fighter_a_box == A_BOX
-    assert kwargs["excluded_reason"] == "unverified"
-    assert "seed_check" not in kwargs
-
-
-def test_no_hand_off_starts_at_the_seed_and_records_the_reason():
-    handoff = backtrack.Handoff(seed_frame=900, requested_start_frame=0, frame=900, reason="camera_cut")
     (req, kwargs), = _run(handoff)
-    assert req.start_seconds == 30.0
-    assert kwargs["excluded_reason"] == "camera_cut"
+    assert req.start_seconds == 0.0
+    assert kwargs["seed_check"]["frame"] == 900
+
+
+@pytest.mark.parametrize("reason", ["camera_cut", "fighter_lost", "not_detected_at_seed", "unavailable"])
+def test_no_hand_off_still_analyses_from_the_start(reason):
+    # 0:18 of 0:30, 0:08 of 0:10 and 0:05 of 0:08 were analysed only from the
+    # chosen frame on. The forward pass now starts at 0:00 whatever the
+    # backward pass managed, and the chosen frame checks who is who.
+    handoff = backtrack.Handoff(seed_frame=900, requested_start_frame=0, frame=900, reason=reason)
+    (req, kwargs), = _run(handoff)
+    assert req.start_seconds == 0.0
+    assert req.fighter_a_box == A_BOX and req.fighter_b_box == B_BOX
+    assert kwargs["seed_check"]["frame"] == 900
+    assert kwargs.get("excluded_reason") is None
+
+
+def test_a_hand_off_that_stopped_short_still_starts_at_the_beginning():
+    handoff = backtrack.Handoff(seed_frame=900, requested_start_frame=0, frame=450,
+                                a_box=[95, 80, 195, 310], b_box=[405, 80, 505, 310], reason="fighter_lost")
+    (req, kwargs), = _run(handoff)
+    assert req.start_seconds == 0.0
+    # The earliest boxes both fighters were followed to are the best guess.
+    assert req.fighter_a_box == [95, 80, 195, 310]
+    assert kwargs["seed_check"]["a_box"] == A_BOX
+
+
+def test_an_unconfirmed_seed_makes_the_identity_untrusted():
+    from core.report import identity_ready_by_fighter
+
+    tracking = {"fighter_A_coverage": 0.9, "fighter_B_coverage": 0.9}
+    assert identity_ready_by_fighter(tracking) == {"A": True, "B": True}
+    assert identity_ready_by_fighter({**tracking, "identity_seed_confirmed": True}) == {"A": True, "B": True}
+    assert identity_ready_by_fighter({**tracking, "identity_seed_confirmed": False}) == {"A": False, "B": False}
 
 
 def test_analysed_span_is_stated_plainly():

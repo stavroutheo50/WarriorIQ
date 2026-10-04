@@ -11,9 +11,11 @@
   </ol>
   <header class="workflow-heading">
     <div><div class="eyebrow">Fighter selection</div><h1>Tell WarriorIQ who is who.</h1>{#- Says "tap" only once boxes are actually drawn (loadDetectionCandidates).
-    It promised boxes on every page, and on the live host none ever came. -#}<p id="selectIntro">Drag a box around each fighter: Fighter A first, then Fighter B. Keep each box tight around the whole body.</p><p class="small muted">The whole video is analysed. This frame only tells WarriorIQ which fighter is which - pick one where both are fully visible and apart.</p>{#- A frame nobody chose is said to be one, so choosing a moment is never
+    It promised boxes on every page, and on the live host none ever came. -#}<p id="selectIntro">Drag a box around each fighter: Fighter A first, then Fighter B. Keep each box tight around the whole body.</p>{% set orientation = job.orientation|default({}, true) %}{% if orientation.turned_clockwise %}<p class="frame-source-note" role="note">This video was filmed sideways, so WarriorIQ turned it upright before analysing it.</p>{% elif orientation.warning %}<p class="pair-warning" role="alert">{{ orientation.warning }}</p>{% endif %}<p class="small muted">The whole video is analysed. This frame only tells WarriorIQ which fighter is which - pick one where both are fully visible and apart.</p>{#- A frame nobody chose is said to be one, so choosing a moment is never
     skipped without a word. Refined once detection has looked at it. -#}{% if frame_source in ['auto', 'auto_pair'] %}<p class="frame-source-note" id="frameNote" data-source="{{frame_source}}">WarriorIQ chose this moment ({{frame_clock}}) for you. <a class="text-link" href="/frame/{{job_id}}">Pick a different moment</a></p>{% endif %}</div>
-    <a class="quiet-back" href="/frame/{{job_id}}">Pick a different moment</a>
+    {#- Only when the note above does not already carry the same link: both
+        showed on an automatically chosen frame (QA, 2026-10-04). -#}
+    <a class="quiet-back" id="pickMomentLink" href="/frame/{{job_id}}"{% if frame_source in ['auto', 'auto_pair'] %} hidden{% endif %}>Pick a different moment</a>
   </header>
   <div class="fighter-lock-layout">
     <section class="fighter-stage-panel" aria-labelledby="fighter-stage-title">
@@ -23,24 +25,11 @@
         <button class="selection-edit-button" id="redrawA" type="button">Start over</button>
         <button class="selection-edit-button" id="redrawB" type="button" hidden>Redraw Fighter B</button>
       </div>
-    </section>
-    <aside class="fighter-lock-guide" aria-label="Fighter selection instructions">
-      <div class="selection-status" id="status" role="status" aria-live="polite">Finding the clearest moment in your fight…</div>
-      {#- Directly under the status line, which says "Read the warning below"
-          while it is shown. -#}
-      <p class="pair-warning" id="pairWarning" role="alert" hidden></p>
-      <div class="fighter-key"><div class="fighter-key-item fighter-a"><span>A</span><div><strong>Fighter A</strong><small id="keyA">Draw this fighter first</small></div></div><div class="fighter-key-item fighter-b"><span>B</span><div><strong>Fighter B</strong><small id="keyB">Draw this fighter second</small></div></div></div>
-      {#- Which corner Fighter A is in. A is simply whoever was boxed first, so
-          the report cannot know the colour - it used to print "Red corner"
-          over A on every fight, which was wrong whenever the blue fighter was
-          drawn first. B takes the other corner. -#}
-      <fieldset class="corner-pick" id="cornerPick">
-        <legend>Fighter A's corner</legend>
-        <label><input type="radio" name="cornerA" value="red" {% if default_corner == 'red' %}checked{% endif %}><span><i class="corner-dot red" aria-hidden="true"></i>Red</span></label>
-        <label><input type="radio" name="cornerA" value="blue" {% if default_corner == 'blue' %}checked{% endif %}><span><i class="corner-dot blue" aria-hidden="true"></i>Blue</span></label>
-        <label><input type="radio" name="cornerA" value="" {% if default_corner not in ['red', 'blue'] %}checked{% endif %}><span>No corners / not sure</span></label>
-        <small class="muted" id="cornerHelp">Fighter B gets the other corner. Shown on the report so the colours match your video.</small>
-      </fieldset>
+      {#- Under the canvas rather than at the bottom of the sidebar: the canvas
+          column ended at the picture while the sidebar ran on, leaving a large
+          empty area under it (QA, 2026-10-04). Choosing a person from the list
+          also belongs next to the picture of them. -#}
+      <div class="stage-extras">
       <div class="selection-rules"><span class="panel-kicker">For the strongest lock</span><ul><li>Include the full body, head to feet.</li><li>Keep the referee outside both boxes.</li><li>Do not overlap Fighter A and Fighter B.</li></ul></div>
       <p class="selection-reassurance"><span aria-hidden="true">✓</span> WarriorIQ follows both identities after you start. No more manual work is needed in the report.</p>
       {#- Drawing a box is a pointer-only action, and fighter selection is not
@@ -61,11 +50,35 @@
           <legend>Fighter B</legend>
         </fieldset>
       </div>
+      </div>
+    </section>
+    <aside class="fighter-lock-guide" aria-label="Fighter selection instructions">
+      <div class="selection-status" id="status" role="status" aria-live="polite">Finding the clearest moment in your fight…</div>
+      {#- Directly under the status line, which says "Read the warning below"
+          while it is shown. -#}
+      <p class="pair-warning" id="pairWarning" role="alert" hidden></p>
+      {#- One person in the video: shadowboxing, bag or pad work. Without this a
+          one-person video was a dead end - the same person cannot be both A and
+          B (QA, 2026-10-04). See core/solo.py for what a solo session measures. -#}
+      <label class="solo-toggle"><input type="checkbox" id="soloMode"><span><strong>Solo session</strong> &mdash; one person training: shadowboxing, bag or pad work. Box only that person. You get movement, guard and balance; no opponent numbers and no score.</span></label>
+      <div class="fighter-key"><div class="fighter-key-item fighter-a"><span>A</span><div><strong>Fighter A</strong><small id="keyA">Draw this fighter first</small></div></div><div class="fighter-key-item fighter-b" id="keyItemB"><span>B</span><div><strong>Fighter B</strong><small id="keyB">Draw this fighter second</small></div></div></div>
+      {#- Which corner Fighter A is in. A is simply whoever was boxed first, so
+          the report cannot know the colour - it used to print "Red corner"
+          over A on every fight, which was wrong whenever the blue fighter was
+          drawn first. B takes the other corner. -#}
+      <fieldset class="corner-pick" id="cornerPick">
+        <legend>Fighter A's corner</legend>
+        <label><input type="radio" name="cornerA" value="red" {% if default_corner == 'red' %}checked{% endif %}><span><i class="corner-dot red" aria-hidden="true"></i>Red</span></label>
+        <label><input type="radio" name="cornerA" value="blue" {% if default_corner == 'blue' %}checked{% endif %}><span><i class="corner-dot blue" aria-hidden="true"></i>Blue</span></label>
+        <label><input type="radio" name="cornerA" value="" {% if default_corner not in ['red', 'blue'] %}checked{% endif %}><span>No corners / not sure</span></label>
+        <small class="muted" id="cornerHelp">Fighter B gets the other corner. Shown on the report so the colours match your video.</small>
+      </fieldset>
     </aside>
   </div>
   <section class="analysis-choice">
     <div class="analysis-choice-copy"><div class="eyebrow">Detailed report</div>{% if fighter_name %}<h2>Which one is {{fighter_name}}?</h2><p>You filed this fight under {{fighter_name}}. Pick the box that is {{fighter_name}} &mdash; they get the full report, coach insights, replay and training plan. Both fighters are still tracked for context and scoring.</p>{% else %}<h2>Who are you training?</h2><p>Both fighters are tracked for context and scoring. Your chosen athlete receives the full report, coach insights, replay, and personal training plan.</p>{% endif %}</div>
-    <div class="analysis-choice-actions"><div class="target-options" role="radiogroup" aria-label="Choose the athlete for the detailed report"><label><input type="radio" name="focusFighter" value="A" {% if default_focus != 'B' %}checked{% endif %}><span><i>A</i> Fighter A{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label><label><input type="radio" name="focusFighter" value="B" {% if default_focus == 'B' %}checked{% endif %}><span><i>B</i> Fighter B{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label></div><button class="btn" id="start" type="button" data-motion-primary disabled>Start WarriorIQ analysis <span aria-hidden="true">→</span></button></div>
+    <div class="analysis-choice-actions"><div class="target-options" id="targetOptions" role="radiogroup" aria-label="Choose the athlete for the detailed report"><label><input type="radio" name="focusFighter" value="A" {% if default_focus != 'B' %}checked{% endif %}><span><i>A</i> Fighter A{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label><label><input type="radio" name="focusFighter" value="B" {% if default_focus == 'B' %}checked{% endif %}><span><i>B</i> Fighter B{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label></div><div class="start-wrap"><button class="btn" id="start" type="button" data-motion-primary disabled aria-describedby="startReason">Start WarriorIQ analysis <span aria-hidden="true">→</span></button>{#- Why Start is disabled, right under the button: the reason was only in the
+        status line at the top of the sidebar (QA, 2026-10-04). -#}<p class="start-reason" id="startReason" role="status" aria-live="polite">Box Fighter A to start.</p></div></div>
     <p class="start-feedback" id="startFeedback" role="alert" hidden></p>
   </section>
 </section>
@@ -74,8 +87,9 @@
 const jobId={{job_id|tojson}},videoWidth={{job.video_width}},videoHeight={{job.video_height}};
 const image=document.getElementById('frame'),stage=document.getElementById('stage'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
 const keyA=document.getElementById('keyA'),keyB=document.getElementById('keyB'),pairWarning=document.getElementById('pairWarning');
-const statusBox=document.getElementById('status'),startBtn=document.getElementById('start'),redrawA=document.getElementById('redrawA'),redrawB=document.getElementById('redrawB'),startFeedback=document.getElementById('startFeedback');
-let detections=[],boxA=null,boxB=null,mode='A_DRAW',dragStart=null,tempBox=null,pointerPosition=null,initialized=false,starting=false,scanning=true;
+const statusBox=document.getElementById('status'),startBtn=document.getElementById('start'),redrawA=document.getElementById('redrawA'),redrawB=document.getElementById('redrawB'),startFeedback=document.getElementById('startFeedback'),startReason=document.getElementById('startReason');
+const soloInput=document.getElementById('soloMode');
+let solo=false,detections=[],boxA=null,boxB=null,mode='A_DRAW',dragStart=null,tempBox=null,pointerPosition=null,initialized=false,starting=false,scanning=true;
 // The canvas backing store is sized in device pixels, but every coordinate in
 // this file - pointer events, the image viewport, the boxes - is in CSS pixels.
 // fit() scales the context once so the two can never disagree; see the comment
@@ -153,7 +167,7 @@ function drawTag(label,color,x1,y1,y2){
 function drawLockCorners(box,color){if(!box)return;const[x1,y1,x2,y2]=toDisplay(box),length=15;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=3;ctx.lineCap='round';for(const[x,y,sx,sy]of[[x1,y1,1,1],[x2,y1,-1,1],[x1,y2,1,-1],[x2,y2,-1,-1]]){ctx.beginPath();ctx.moveTo(x+sx*length,y);ctx.lineTo(x,y);ctx.lineTo(x,y+sy*length);ctx.stroke()}ctx.restore()}
 function drawReticle(){if(!pointerPosition||!mode.endsWith('_DRAW'))return;const[x,y]=pointerPosition,gap=7,length=21;ctx.save();ctx.strokeStyle='rgba(235,244,255,.86)';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x-length,y);ctx.lineTo(x-gap,y);ctx.moveTo(x+gap,y);ctx.lineTo(x+length,y);ctx.moveTo(x,y-length);ctx.lineTo(x,y-gap);ctx.moveTo(x,y+gap);ctx.lineTo(x,y+length);ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.stroke();ctx.restore()}
 function overlap(a,b){if(!a||!b)return 0;return Math.max(0,Math.min(a[2],b[2])-Math.max(a[0],b[0]))*Math.max(0,Math.min(a[3],b[3])-Math.max(a[1],b[1]))}
-function selectionIsValid(){if(!boxA||!boxB)return false;const shared=overlap(boxA,boxB),smallest=Math.min((boxA[2]-boxA[0])*(boxA[3]-boxA[1]),(boxB[2]-boxB[0])*(boxB[3]-boxB[1]));return shared/Math.max(1,smallest)<.28}
+function selectionIsValid(){if(solo)return Boolean(boxA);if(!boxA||!boxB)return false;const shared=overlap(boxA,boxB),smallest=Math.min((boxA[2]-boxA[0])*(boxA[3]-boxA[1]),(boxB[2]-boxB[0])*(boxB[3]-boxB[1]));return shared/Math.max(1,smallest)<.28}
 function detectorMatch(box){if(detections.length<2)return true;return detections.some(item=>{const candidate=item.box,shared=overlap(box,candidate),smallest=Math.min((box[2]-box[0])*(box[3]-box[1]),(candidate[2]-candidate[0])*(candidate[3]-candidate[1]));return shared/Math.max(1,smallest)>.18})}
 // The people WarriorIQ found are drawn as dashed outlines while a fighter is
 // still to be chosen, so choosing is a tap on a person rather than a drag.
@@ -171,24 +185,31 @@ function candidateAt(point){
   return hits[0]||null;
 }
 function lockBox(box){
-  if(mode==='A_DRAW'){boxA=box;boxB=null;mode='B_DRAW';clearPicked('A');clearPicked('B')}else{boxB=box;mode='READY';clearPicked('B')}
+  if(mode==='A_DRAW'){boxA=box;boxB=null;mode=solo?'READY':'B_DRAW';clearPicked('A');clearPicked('B')}else{boxB=box;mode='READY';clearPicked('B')}
   flashLock();void checkPair();window.WarriorIQMotion?.impact(stage);draw();
+}
+function startReasonText(valid){
+  if(starting)return 'Starting the analysis…';
+  if(valid)return '';
+  if(!boxA)return solo?'Box the person training to start.':'Box Fighter A to start.';
+  if(!boxB)return 'Now box Fighter B to start.';
+  return 'The two boxes cover the same person. Redraw Fighter B on its own to start.';
 }
 function draw(){
   // CSS pixels, not canvas.width/height - the context is scaled in fit().
   ctx.clearRect(0,0,cssWidth,cssHeight);labelSlots.length=0;drawCandidates();drawBox(boxA,'Fighter A','#55a7ff');drawBox(boxB,'Fighter B','#f1b84b');
   if(boxA&&mode!=='A_DRAW')drawLockCorners(boxA,'#9ad1ff');if(boxB&&mode==='READY')drawLockCorners(boxB,'#ffd987');if(tempBox)drawBox(toVideo(tempBox),mode==='A_DRAW'?'Drawing A':'Drawing B','#ffffff');drawReticle();
-  const valid=selectionIsValid(),detected=valid&&detectorMatch(boxA)&&detectorMatch(boxB);startBtn.disabled=starting||!valid;redrawB.hidden=!boxA;redrawA.hidden=!boxA&&!tempBox;
+  const valid=selectionIsValid(),detected=valid&&detectorMatch(boxA)&&(solo||detectorMatch(boxB));startBtn.disabled=starting||!valid;startReason.textContent=startReasonText(valid);startReason.hidden=!startReason.textContent;redrawB.hidden=!boxA||solo;redrawA.hidden=!boxA&&!tempBox;
   // The side cards follow the boxes. They said "Draw this fighter first" with
   // both fighters already locked.
-  keyA.textContent=boxA?'Locked':'Draw this fighter first';
+  keyA.textContent=boxA?'Locked':solo?'Box the person training':'Draw this fighter first';
   keyB.textContent=boxB?'Locked':boxA?'Draw this fighter now':'Draw this fighter second';
-  if(starting)statusBox.textContent='Starting analysis…';else if(scanning&&mode==='A_DRAW')statusBox.textContent='Finding the clearest moment in your fight…';else if(mode==='A_DRAW')statusBox.textContent=detections.length>=2?'Tap Fighter A.':'Drag a tight full-body box around Fighter A.';else if(mode==='B_DRAW')statusBox.textContent=detections.length>=2?'Fighter A locked. Now tap Fighter B.':'Fighter A locked. Now draw a tight full-body box around Fighter B.';else if(boxA&&boxB&&!valid)statusBox.textContent='The boxes cover too much of the same person. Redraw Fighter B separately.';else if(valid&&!pairWarning.hidden)statusBox.textContent='Both boxes are locked, but these two look alike. Read the warning below before starting.';else if(valid&&!detected)statusBox.textContent='Manual identity lock accepted. Check both labels, then start.';else statusBox.textContent=valid?'Both identities are locked. Verify A and B before starting.':'Choose both fighters manually.';
+  if(starting)statusBox.textContent='Starting analysis…';else if(solo&&!scanning)statusBox.textContent=boxA?'Person locked. Start when ready.':detections.length?'Tap the person training, or drag a box around them.':'Drag a tight full-body box around the person training.';else if(scanning&&mode==='A_DRAW')statusBox.textContent='Finding the clearest moment in your fight…';else if(mode==='A_DRAW')statusBox.textContent=detections.length>=2?'Tap Fighter A.':'Drag a tight full-body box around Fighter A.';else if(mode==='B_DRAW')statusBox.textContent=detections.length>=2?'Fighter A locked. Now tap Fighter B.':'Fighter A locked. Now draw a tight full-body box around Fighter B.';else if(boxA&&boxB&&!valid)statusBox.textContent='The boxes cover too much of the same person. Redraw Fighter B separately.';else if(valid&&!pairWarning.hidden)statusBox.textContent='Both boxes are locked, but these two look alike. Read the warning below before starting.';else if(valid&&!detected)statusBox.textContent='Manual identity lock accepted. Check both labels, then start.';else statusBox.textContent=valid?'Both identities are locked. Verify A and B before starting.':'Choose both fighters manually.';
   stage.dataset.selectionState=valid?'ready':mode.endsWith('_DRAW')?'drawing':'warning';stage.dataset.scanning=scanning?'true':'false';statusBox.dataset.state=valid?'ready':boxA&&boxB?'warning':'drawing';
 }
 function pointFromEvent(event,clampToImage=false){const rect=canvas.getBoundingClientRect(),view=imageViewport();let x=event.clientX-rect.left,y=event.clientY-rect.top;const inside=x>=view.left&&x<=view.left+view.width&&y>=view.top&&y<=view.top+view.height;if(!inside&&!clampToImage)return null;x=Math.max(view.left,Math.min(view.left+view.width,x));y=Math.max(view.top,Math.min(view.top+view.height,y));return[x,y]}
 function flashLock(){stage.classList.remove('selection-lock-flash');requestAnimationFrame(()=>stage.classList.add('selection-lock-flash'))}
-function finishSelection(event){if(!dragStart||!tempBox)return;const selected=toVideo(tempBox),minWidth=Math.max(16,videoWidth*.025),minHeight=Math.max(32,videoHeight*.1);const tapped=selected[2]-selected[0]<minWidth&&selected[3]-selected[1]<minHeight?candidateAt(toVideo([...dragStart,...dragStart])):null;if(tapped){dragStart=tempBox=null;lockBox(tapped);return}if(selected[2]-selected[0]>=minWidth&&selected[3]-selected[1]>=minHeight){if(mode==='A_DRAW'){boxA=selected;boxB=null;mode='B_DRAW';clearPicked('A');clearPicked('B')}else{boxB=selected;mode='READY';clearPicked('B')}flashLock();void checkPair();window.WarriorIQMotion?.impact(stage)}dragStart=tempBox=null;pointerPosition=event?pointFromEvent(event,true):pointerPosition;draw()}
+function finishSelection(event){if(!dragStart||!tempBox)return;const selected=toVideo(tempBox),minWidth=Math.max(16,videoWidth*.025),minHeight=Math.max(32,videoHeight*.1);const tapped=selected[2]-selected[0]<minWidth&&selected[3]-selected[1]<minHeight?candidateAt(toVideo([...dragStart,...dragStart])):null;if(tapped){dragStart=tempBox=null;lockBox(tapped);return}if(selected[2]-selected[0]>=minWidth&&selected[3]-selected[1]>=minHeight){if(mode==='A_DRAW'){boxA=selected;boxB=null;mode=solo?'READY':'B_DRAW';clearPicked('A');clearPicked('B')}else{boxB=selected;mode='READY';clearPicked('B')}flashLock();void checkPair();window.WarriorIQMotion?.impact(stage)}dragStart=tempBox=null;pointerPosition=event?pointFromEvent(event,true):pointerPosition;draw()}
 canvas.onpointerdown=event=>{if(!mode.endsWith('_DRAW'))return;const point=pointFromEvent(event);if(!point)return;event.preventDefault();canvas.setPointerCapture?.(event.pointerId);dragStart=point;pointerPosition=point;tempBox=[...point,...point];draw()};
 canvas.onpointermove=event=>{const point=pointFromEvent(event,Boolean(dragStart));pointerPosition=point;if(dragStart&&point)tempBox=[Math.min(dragStart[0],point[0]),Math.min(dragStart[1],point[1]),Math.max(dragStart[0],point[0]),Math.max(dragStart[1],point[1])];draw()};
 canvas.onpointerup=finishSelection;canvas.onpointercancel=()=>{dragStart=tempBox=null;pointerPosition=null;draw()};canvas.onpointerleave=()=>{if(!dragStart){pointerPosition=null;draw()}};
@@ -200,7 +221,7 @@ redrawA.onclick=()=>{boxA=boxB=null;dragStart=tempBox=pointerPosition=null;mode=
 let pairCheckToken=0;
 async function checkPair(){
   const token=++pairCheckToken;if(!pairWarning.hidden){pairWarning.hidden=true;draw()}
-  if(!selectionIsValid())return;
+  if(solo||!selectionIsValid())return;
   try{
     const response=await fetch(`/api/pair-check/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({fighter_a_box:boxA,fighter_b_box:boxB})});
     if(!response.ok||token!==pairCheckToken)return;
@@ -231,7 +252,7 @@ function describeFrame(data){
   const intro=document.getElementById('selectIntro'),note=document.getElementById('frameNote');
   if(intro&&detections.length>=2)intro.textContent='WarriorIQ boxed the people it found in this frame. Tap Fighter A, then Fighter B. No box on someone? Drag one around them.';
   if(!note)return;
-  if(!['auto','auto_pair'].includes(data.frame_source)){note.hidden=true;return}
+  if(!['auto','auto_pair'].includes(data.frame_source)){note.hidden=true;document.getElementById('pickMomentLink').hidden=false;return}
   const link=note.querySelector('a'),clock=clockOf(data.seconds);
   let text;
   if(data.pair_found)text=`WarriorIQ chose this moment (${clock}) because two people are in full view and close enough to be fighting. Not your fighters? `;
@@ -270,7 +291,7 @@ function buildPickList(){
       input.type='radio';input.name=`pick${side}`;input.value=String(index);
       input.onchange=()=>{
         if(side==='A'){boxA=[...box]}else{boxB=[...box]}
-        mode=boxA&&boxB?'READY':boxA?'B_DRAW':'A_DRAW';
+        mode=boxA&&(boxB||solo)?'READY':boxA?'B_DRAW':'A_DRAW';
         draw();void checkPair();
       };
       const text=document.createElement('span');
@@ -281,8 +302,16 @@ function buildPickList(){
   }
   wrap.hidden=false;
 }
-async function startAnalysis(){if(!selectionIsValid()||starting)return;starting=true;startFeedback.hidden=true;draw();try{const focusFighter=document.querySelector('input[name="focusFighter"]:checked').value,response=await fetch(`/api/start/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({fighter_a_box:boxA,fighter_b_box:boxB,focus_fighter:focusFighter,fighter_a_corner:document.querySelector('input[name="cornerA"]:checked')?.value||null})});let data={};try{data=await response.json()}catch(error){}if(!response.ok)throw new Error(data.detail||'Could not start the analysis.');if(data.deferred&&data.notice)window.wiqToast?.(data.notice,'info');location.href=data.progress_url}catch(error){starting=false;const message=error.message||'Could not start the analysis.';statusBox.textContent=message;statusBox.dataset.state='warning';startBtn.disabled=false;startFeedback.textContent=message;startFeedback.hidden=false;window.wiqToast?.(message,'error')}}
+async function startAnalysis(){if(!selectionIsValid()||starting)return;starting=true;startFeedback.hidden=true;draw();try{const focusFighter=document.querySelector('input[name="focusFighter"]:checked').value,response=await fetch(`/api/start/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify(solo?{fighter_a_box:boxA,solo:true}:{fighter_a_box:boxA,fighter_b_box:boxB,focus_fighter:focusFighter,fighter_a_corner:document.querySelector('input[name="cornerA"]:checked')?.value||null})});let data={};try{data=await response.json()}catch(error){}if(!response.ok)throw new Error(data.detail||'Could not start the analysis.');if(data.deferred&&data.notice)window.wiqToast?.(data.notice,'info');location.href=data.progress_url}catch(error){starting=false;const message=error.message||'Could not start the analysis.';statusBox.textContent=message;statusBox.dataset.state='warning';startBtn.disabled=false;startFeedback.textContent=message;startFeedback.hidden=false;window.wiqToast?.(message,'error')}}
 startBtn.onclick=startAnalysis;
+// Solo: one box, no Fighter B, no corner and no report-focus choice.
+function applySolo(){
+  solo=soloInput.checked;
+  if(solo){boxB=null;if(boxA)mode='READY';clearPicked('B')}else if(boxA&&!boxB)mode='B_DRAW';
+  for(const id of ['keyItemB','cornerPick','targetOptions','pickB'])document.getElementById(id).hidden=solo;
+  void checkPair();draw();
+}
+soloInput.onchange=applySolo;
 function initializeSelection(){if(initialized)return;initialized=true;fit();draw();void loadDetectionCandidates()}
 image.addEventListener('load',initializeSelection,{once:true});image.addEventListener('error',()=>{statusBox.textContent='The selected frame could not be loaded. Choose another frame.'},{once:true});if(image.complete&&image.naturalWidth)initializeSelection();
 if('ResizeObserver'in window)new ResizeObserver(fit).observe(stage);else window.addEventListener('resize',fit);
