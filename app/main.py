@@ -6333,6 +6333,13 @@ def cancel_pending_job(request: Request, job_id: str):
     return RedirectResponse("/history#pending", status_code=303)
 
 
+def _is_solo_fight(fight: dict) -> bool:
+    """Whether a saved analysis was a solo session (one person, core/solo.py)."""
+    summary = fight.get("summary") or {}
+    setup = (summary.get("progress_report") or {}).get("setup") or {}
+    return setup.get("mode") == "solo"
+
+
 @app.get("/history", response_class=HTMLResponse)
 def history_page(request: Request):
     profile_id = _profile_id(request)
@@ -6395,7 +6402,10 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     # they had not chosen. It also makes the "two fights required" gate above
     # count what it is actually gating on.
     fights = [f for f in fights if completed_artifact_directory(f["job_id"]) is not None
-              and (completed_artifact_directory(f["job_id"]) / "report.json").is_file()]
+              and (completed_artifact_directory(f["job_id"]) / "report.json").is_file()
+              # A solo session (core/solo.py) has no opponent and no Fighter
+              # B, so set against a fight it read as "tracked at 0% coverage".
+              and not _is_solo_fight(f)]
     for fight in fights:
         # Every option read "Fight analysis · <date>", so a reader with six
         # fights on one day was choosing between six identical lines.

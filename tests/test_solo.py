@@ -164,3 +164,13 @@ def test_the_solo_page_renders_movement_and_no_strikes():
     assert "61%" in html and "80%" in html and "Whole video" in html
     for claim in ("strikes thrown", "Estimated score", "Fighter B", "opponent's"):
         assert claim not in html
+
+
+def test_a_solo_session_is_not_offered_for_comparison():
+    import app.main as web
+
+    solo_fight = {"summary": {"progress_report": {"setup": {"mode": "solo"}}}}
+    fight = {"summary": {"progress_report": {"setup": {"ruleset": "K1"}}}}
+    assert web._is_solo_fight(solo_fight) and not web._is_solo_fight(fight)
+    source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+    assert "and not _is_solo_fight(f)]" in source
