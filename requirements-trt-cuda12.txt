@@ -1,0 +1,15 @@
+# TensorRT for the GPU worker image (deploy/modal_worker.py), so the pose model
+# runs as an engine rather than the .pt checkpoint.
+#
+# It was missing until 2026-10-04. Without it Ultralytics tries to pip-install
+# TensorRT at runtime, or fails. On a scale-to-zero container that meant every
+# cold start exported ONNX and then gave up before the first frame, and every
+# fight ran on the slower checkpoint.
+#
+# 10.x rather than 11: TensorRT 11 dropped the fp16 builder flag. fp16 there
+# needs NVIDIA ModelOpt baked into the ONNX graph (see core/trt_engine.py),
+# and 10.13 builds fp16 engines for the A10 directly.
+tensorrt-cu12==10.13.3.9
+# Ultralytics simplifies the ONNX graph before the engine build and installs
+# this at runtime if it is absent.
+onnxslim==0.1.97

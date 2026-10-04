@@ -496,8 +496,28 @@ class PoseTracker:
                 conf=SETTINGS.detection_conf, classes=[0], verbose=False,
             )
 
+    def _servable(self, size: int) -> int:
+        """The size this backend can actually run.
+
+        A TensorRT engine has a largest input (core/trt_engine.py); asked for
+        more it fails the frame. The preflight can recommend up to 2048 for very
+        small subjects, so on an engine that is capped at its ceiling - the
+        closest it can come - and said once.
+        """
+        if not str(self.model_path).endswith(".engine"):
+            return size
+        from core.trt_engine import engine_max_size
+
+        ceiling = engine_max_size()
+        if size > ceiling:
+            if not getattr(self, "_capped_logged", False):
+                LOGGER.info("pose_imgsz_capped requested=%s engine_max=%s", size, ceiling)
+                self._capped_logged = True
+            return ceiling
+        return size
+
     def track(self, frame, imgsz: int | None = None) -> list[PersonObservation]:
-        size = int(imgsz or SETTINGS.default_imgsz)
+        size = self._servable(int(imgsz or SETTINGS.default_imgsz))
         started = time.perf_counter()
         results = self.model.track(
             frame,

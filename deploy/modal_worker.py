@@ -12,7 +12,19 @@ fight is queued, drains the queue, and exits, so no GPU is billed while idle.
 Deploying prints the web endpoint URL. Put it in WARRIORIQ_WORKER_WAKE_URL on
 the web server and every queued fight will start a GPU run.
 
-NOT YET DEPLOYED, but no longer unchecked. On 2026-09-20 this module was
+DEPLOY ORDER (since 2026-10-04). The web app refuses work to a worker whose
+core/build_info.ANALYSIS_VERSION is older than its own, and refuses that
+worker's results. Deploy this worker from the same commit as the web app, and
+deploy it first. Until it is deployed, fights stay queued instead of being
+analysed by old code. QA found new reports starting at the selection frame
+because this image had been built from a checkout older than the web app.
+Every report now carries the commit it was built from (WARRIORIQ_BUILD_COMMIT
+below), and the report footer shows it.
+
+    modal run deploy/modal_worker.py::build_engines   # once per GPU type
+    modal deploy deploy/modal_worker.py
+
+History: before its first deploy, on 2026-09-20, this module was
 executed against the installed client (modal 1.5.5) and builds its App cleanly:
 both functions register and `wake` is recognised as a web endpoint. Every API
 name here was confirmed current against Modal 1.x - `max_containers` (renamed
@@ -28,9 +40,13 @@ the deploy or the first request rather than degraded quietly:
     registration, so this raises NameError before serving anything.
   * an ignore list that shipped ~1 GB it did not need, including fights/.
 
-What still needs a real account: the image build (torch + sam2 + onnxruntime-gpu
-resolving together on debian_slim), the first TensorRT engine build on an A10,
-and one end-to-end fight. Nothing below that line has been run.
+Not verified from the repository, because it needs the Modal account:
+- that TensorRT 10.13 (requirements-trt-cuda12.txt) resolves alongside torch
+  2.11 in this image
+- the first engine build on an A10
+- the startup timings drain_queue now prints
+Check the "WarriorIQ pose backend:" line after deploying: it must say
+tensorrt.
 """
 
 from __future__ import annotations
@@ -84,6 +100,11 @@ image = (
     # OpenCV needs the GL/glib runtime libraries; ffmpeg decodes the fight video.
     .apt_install("libgl1", "libglib2.0-0", "ffmpeg")
     .pip_install_from_requirements("requirements.txt")
+    # TensorRT, so the pose model runs as an engine. It was missing, and
+    # Ultralytics then tried to pip-install it at run time on every cold start
+    # or failed: the engine was never built, and every fight ran on the .pt
+    # checkpoint after paying for an ONNX export first.
+    .pip_install_from_requirements("requirements-trt-cuda12.txt")
     # Optional RTMPose refinement, added so a remote run measures the same
     # joints as a local one. requirements.txt deliberately selects no ONNX
     # Runtime or RTMLib backend (see README "Optional RTMPose refinement"),
@@ -170,6 +191,10 @@ def _prepare_runtime() -> None:
         "WARRIORIQ_WORKER_MODE": "remote",
         "HF_HOME": f"{DATA_DIR}/.huggingface",
         "YOLO_CONFIG_DIR": f"{DATA_DIR}/.ultralytics",
+        # Everything the worker needs is in the image. A package Ultralytics
+        # finds missing at run time is a deploy fault, and installing it then
+        # would cost a fighter minutes on every cold start, so it fails fast.
+        "YOLO_AUTOINSTALL": "false",
     })
 
 
@@ -219,7 +244,10 @@ def _prepare_engine() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     log = logging.getLogger("warrioriq.modal")
 
-    engine = ensure_pose_engine(f"{DATA_DIR}/models")
+    # A build that failed is not retried for a day: on a scale-to-zero
+    # container every start is a cold start, and a failing build still pays
+    # for an ONNX export before it fails.
+    engine = ensure_pose_engine(f"{DATA_DIR}/models", retry_failed_after_seconds=24 * 3600)
     if engine is None:
         log.warning("engine_unavailable - this run uses the .pt checkpoint")
         return
@@ -282,12 +310,24 @@ def _report_backend() -> str:
 def drain_queue() -> int:
     """Claim and analyse every queued fight, then exit so billing stops."""
     import sys
+    import time
 
+    # The fixed start-up cost, phase by phase, so the next cut is chosen by
+    # measurement (QA, 2026-10-04: 0:10 for a 0:01 clip).
+    started = time.perf_counter()
+    phases = {}
     sys.path.insert(0, "/app")
     os.chdir("/app")
     _prepare_runtime()
+    phases["runtime"] = time.perf_counter() - started
+    mark = time.perf_counter()
     _prepare_engine()
+    phases["engine"] = time.perf_counter() - mark
+    mark = time.perf_counter()
     print("WarriorIQ pose backend:", _report_backend())
+    phases["model_load"] = time.perf_counter() - mark
+    print("WarriorIQ startup seconds:", {k: round(v, 2) for k, v in phases.items()},
+          "total", round(time.perf_counter() - started, 2))
 
     from worker import run_worker
 
@@ -296,6 +336,29 @@ def drain_queue() -> int:
     result = run_worker(once=True)
     weights.commit()
     return result
+
+
+@app.function(gpu="A10", volumes={DATA_DIR: weights}, timeout=1800)
+def build_engines() -> str:
+    """Build this GPU type's TensorRT engine onto the Volume ahead of time.
+
+    `modal run deploy/modal_worker.py::build_engines` once per GPU type, so no
+    fighter's first analysis pays for the build. The engine is tuned for 640
+    and accepts up to 1920, which covers 1280 and the 1600 low-resolution size
+    (core/trt_engine.py). A recorded failure is retried here unconditionally.
+    """
+    import sys
+
+    sys.path.insert(0, "/app")
+    os.chdir("/app")
+    _prepare_runtime()
+    from core.trt_engine import _failure_marker, engine_path_for
+
+    _failure_marker(engine_path_for(f"{DATA_DIR}/models")).unlink(missing_ok=True)
+    _prepare_engine()
+    backend = _report_backend()
+    weights.commit()
+    return backend
 
 
 @app.function(secrets=[modal.Secret.from_name("warrioriq")])
