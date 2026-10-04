@@ -24,7 +24,10 @@
     the paid cards say billing has not opened, and the banner says how to ask
     for one - that promise had no visible way to keep it for a signed-out
     visitor, whose cards only said "Create account first". -#}
-{% if not payments_enabled %}<div class="notice"><strong>Paid plans are not open yet.</strong> Everyone is on Starter, free, while WarriorIQ is in early access — no card is ever asked for. The prices below are what each plan will cost when billing opens. {% if account %}To tell us which one you want, press <b>Tell us you want &hellip;</b> on that plan's card.{% else %}To tell us which one you want, create a free account, then press <b>Tell us you want &hellip;</b> on that plan's card.{% endif %}</div>{% endif %}
+{#- "Everyone is on Starter" sat above "Your current plan: Gym" for an account
+    holding a granted plan (QA, 2026-10-04). The sentence now names the plan
+    this account is actually on, from the same resolver as the strip below. -#}
+{% if not payments_enabled %}<div class="notice"><strong>Paid plans are not open yet.</strong> {% if current_plan_key and current_plan_key != 'free' %}Your account is on {{ plans[current_plan_key].label if current_plan_key in plans else 'a paid plan' }} without charge{% else %}New accounts are on Starter, free,{% endif %} while WarriorIQ is in early access — no card is ever asked for. The prices below are what each plan will cost when billing opens. {% if account %}To tell us which one you want, press <b>Tell us you want &hellip;</b> on that plan's card.{% else %}To tell us which one you want, create a free account, then press <b>Tell us you want &hellip;</b> on that plan's card.{% endif %}</div>{% endif %}
 
 {% if allowance %}
 <section class="allowance-strip">
@@ -161,5 +164,6 @@
   </div>
 </section>
 
-<section class="trust-panel pricing-trust"><div><div class="eyebrow">Honest billing foundation</div><h2>No charge before checkout is ready</h2><p>Nobody can be billed while paid subscriptions are switched off, and no card details are collected anywhere on this site. Your analysis allowance is counted per account, and an analysis that fails gives its use back rather than spending it.</p></div><div class="trust-checks"><span>✓ Secure hosted checkout</span><span>✓ Signed webhook verification</span><span>✓ Account-linked allowances</span><span>✓ Failed analyses are returned</span></div></section>
+<section class="trust-panel pricing-trust"><div><div class="eyebrow">Honest billing foundation</div><h2>No charge before checkout is ready</h2><p>Nobody can be billed while paid subscriptions are switched off, and no card details are collected anywhere on this site. Your analysis allowance is counted per account, and an analysis that fails gives its use back rather than spending it.</p></div><div class="trust-checks">{#- Checkout and webhook badges only once billing is open: while it is
+    closed there is no checkout to be secure and no webhook to verify (QA, 2026-10-04). -#}{% if payments_enabled %}<span>✓ Secure hosted checkout</span><span>✓ Signed webhook verification</span>{% endif %}<span>✓ Account-linked allowances</span><span>✓ Failed analyses are returned</span></div></section>
 {% endblock %}

@@ -208,6 +208,17 @@ def churn_rate(tracking: dict, fighter: str) -> tuple[float, bool]:
     return rate, rate > SETTINGS.max_identity_handoffs_per_minute
 
 
+def _legacy_kit_check(tracking: dict) -> bool:
+    """Analysed before the current kit check existed (core/kit.py).
+
+    Only those reports used the old histogram on purpose. A current analysis
+    whose kit could not be measured also carries the histogram method, and is
+    not an "earlier" check.
+    """
+    return (tracking.get("pair_similarity_method") != "kit_regions_lab_v1"
+            and not tracking.get("kit_check_attempted"))
+
+
 def lookalike_blocks_identity(tracking: dict) -> bool:
     """Whether matching kit is what stops this fight's identity being trusted.
 
@@ -222,7 +233,7 @@ def lookalike_blocks_identity(tracking: dict) -> bool:
     """
     if tracking.get("fighters_separable") is not False:
         return False
-    if tracking.get("pair_similarity_method") != "kit_regions_lab_v1":
+    if _legacy_kit_check(tracking):
         return True
     rate = tracking.get("identity_confusions_per_minute")
     return rate is None or float(rate) > SETTINGS.max_lookalike_confusions_per_minute
@@ -273,7 +284,14 @@ def identity_failure(tracking: dict, required: tuple[str, ...] = ("A", "B")) -> 
         kit = tracking.get("kit_similarity") or {}
         confusions = int(tracking.get("identity_confusions") or 0)
         lost = (f", and WarriorIQ could not tell which was which {times(confusions)}" if confusions else "")
-        if tracking.get("pair_similarity_method") != "kit_regions_lab_v1":
+        if not kit and not _legacy_kit_check(tracking):
+            # The current check ran and could not compare the two kits at all.
+            return {"cause": "kit_unmeasured", "failed": failed, "repick": True,
+                    "headline": ("WarriorIQ could not compare the two fighters' kit in this video, so it could "
+                                 f"only tell them apart by position and movement{lost}."),
+                    "advice": ("Pick the fighters again on a frame where both are fully visible and apart, "
+                               "so their kit can be compared.")}
+        if _legacy_kit_check(tracking):
             # Analysed before the kit check was replaced. Its percentage came
             # from a histogram that could not tell black from white, so it is
             # not repeated here as if it were a measurement.
@@ -345,7 +363,7 @@ def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
 IDENTITY_TRACKING_KEYS = (
     "fighter_A_seed_source", "fighter_B_seed_source", "initial_iou_A", "initial_iou_B",
     "fighter_A_coverage", "fighter_B_coverage", "fighters_separable", "fighter_pair_similarity",
-    "pair_similarity_method", "identity_confusions_per_minute",
+    "pair_similarity_method", "kit_check_attempted", "identity_confusions_per_minute",
     "identity_confusions", "fighter_A_handoffs_per_minute", "fighter_B_handoffs_per_minute",
     "fighter_A_suspicious_handoffs_per_minute", "fighter_B_suspicious_handoffs_per_minute",
     "identity_seed_confirmed",
@@ -404,16 +422,15 @@ STRIKE_COUNTS_PUBLISHED = os.getenv("WARRIORIQ_PUBLISH_STRIKE_COUNTS", "0").stri
 # for callers that predate the per-sport policy; a test holds them equal. Every
 # surface that knows the sport uses counting_policy(sport).estimate_note.
 ESTIMATE_NOTE = (
-    "Automatic counts, not checked by a person. On a kickboxing fight we checked by "
-    "hand, about two in three of the strikes WarriorIQ counted were real, and it often "
-    "mixed up punches, kicks and knees, so treat these as estimates."
+    "Automatic counts, not checked by a person. WarriorIQ has not yet shown that it counts "
+    "strikes accurately, so treat these as rough estimates - it also often mixes up "
+    "punches, kicks and knees."
 )
 
 ESTIMATED_SCORE_NOTE = (
     "Estimated score, not an official judges' score. It is built from every strike "
-    "WarriorIQ marked as landed, counted automatically and not checked by a person. "
-    "On a fight we checked by hand, about two in three of those were real strikes, "
-    "and the strike type was often wrong."
+    "WarriorIQ marked as landed, counted automatically and not checked by a person, and "
+    "WarriorIQ has not yet shown that it counts strikes accurately."
 )
 
 _FAMILY_OF_PLURAL = {"punches": "punch", "kicks": "kick", "knees": "knee"}

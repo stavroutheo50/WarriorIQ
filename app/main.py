@@ -4731,6 +4731,9 @@ def progress_page(request: Request, job_id: str):
         # live view cannot claim "leg strikes only" above a feed of punches.
         "live_counting_note": counting_policy(_job_sport(job)).live_note,
         "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
+        # The families this sport's report counts, so the boxing live page
+        # does not list kick statistics.
+        "live_families": published_families(_job_sport(job)),
         # A solo session follows one person; Fighter B's panel is hidden.
         "solo": bool(job.get("solo")),
     })

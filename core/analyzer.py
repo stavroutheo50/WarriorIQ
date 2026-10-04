@@ -1770,6 +1770,12 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # the line, because the number is the evidence for the verdict.
         "fighter_pair_similarity": None if pair_similarity is None else float(pair_similarity),
         "pair_similarity_method": "kit_regions_lab_v1" if kit is not None else "torso_hs_histogram",
+        # This analysis ran the current kit check, whether or not it could
+        # measure anything. Without it a fight whose kit could not be compared
+        # was read as one analysed before the check existed, and a brand-new
+        # report said "WarriorIQ's earlier kit check... analyse again to use
+        # the current check" (QA, 2026-10-04).
+        "kit_check_attempted": True,
         "kit_similarity": kit,
         "fighter_pair_histogram_similarity": (
             None if histogram_similarity is None else float(histogram_similarity)),

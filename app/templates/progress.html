@@ -66,6 +66,9 @@
             the rows stay in the page for the script but are hidden, and the
             server sends no counts to fill them. -#}
         {% set strike_row = '' if strike_counts_published else ' hidden' %}
+        {#- Kick rows only for a sport that scores kicks: the boxing live page
+            listed kick statistics (QA, 2026-10-04). -#}
+        {% set kick_row = strike_row if 'kick' in live_families|default(('punch', 'kick', 'knee')) else ' hidden' %}
         <div class="live-stat-grid">
           {#- No punch row. It used to show a live "Punch attempts" number that
              the final report then withholds, so a coach watched eleven punches
@@ -73,7 +76,7 @@
              video across three bouts, the punch count was overstated by eleven
              in two of them; the kick count was right in all three. Showing the
              number here and not there was the worst of both. -#}
-          <div{{ strike_row }}><span>Kick attempts</span><b id="kickAttempts{{fighter}}">—</b></div><div{{ strike_row }}><span>Kicks landed</span><b id="kickLanded{{fighter}}">—</b></div><div{{ strike_row }}><span>Kicks missed</span><b id="kickMissed{{fighter}}">—</b></div><div{{ strike_row }}><span>Kicks blocked</span><b id="kickBlocked{{fighter}}">—</b></div><div{{ strike_row }}><span>Kicks evaded</span><b id="kickEvaded{{fighter}}">—</b></div><div{{ strike_row }}><span>Kick accuracy</span><b id="kickAccuracy{{fighter}}">—</b></div>
+          <div{{ kick_row }}><span>Kick attempts</span><b id="kickAttempts{{fighter}}">—</b></div><div{{ kick_row }}><span>Kicks landed</span><b id="kickLanded{{fighter}}">—</b></div><div{{ kick_row }}><span>Kicks missed</span><b id="kickMissed{{fighter}}">—</b></div><div{{ kick_row }}><span>Kicks blocked</span><b id="kickBlocked{{fighter}}">—</b></div><div{{ kick_row }}><span>Kicks evaded</span><b id="kickEvaded{{fighter}}">—</b></div><div{{ kick_row }}><span>Kick accuracy</span><b id="kickAccuracy{{fighter}}">—</b></div>
           <div{{ strike_row }}><span>Total attempts</span><b id="totalStrikes{{fighter}}">—</b></div><div{{ strike_row }}><span>Total landed</span><b id="totalLanded{{fighter}}">—</b></div><div{{ strike_row }}><span>Total defended</span><b id="totalDefended{{fighter}}">—</b></div><div{{ strike_row }}><span>Uncertain</span><b id="uncertain{{fighter}}">—</b></div><div{{ strike_row }}><span>Accuracy</span><b id="accuracy{{fighter}}">—</b></div><div{{ strike_row }}><span>Activity / min</span><b id="activityRate{{fighter}}">—</b></div><div{{ strike_row }}><span>Combinations</span><b id="combinations{{fighter}}">—</b></div><div><span>Identity lock</span><b id="identity{{fighter}}">—</b></div>
         </div>
       </article>{% endfor %}
