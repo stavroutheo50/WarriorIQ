@@ -359,3 +359,9 @@ table td{font-size:12px}
 .archive-pager .btn{min-height:44px}
 .archive-pager .btn:disabled{opacity:.45;cursor:default}
 .archive-pager span{color:#a7b4c8;font-size:14px}
+
+/* Homepage rhythm. Each section added its own top margin (64px) to its
+   neighbour's bottom padding (76-92px) and its own top padding (72px): blank
+   bands of about 220px between sections (QA, 2026-10-04). One gap now. */
+body[data-page=home] main > .product-section,body[data-page=home] main > .trust-panel{margin-top:0;padding-top:clamp(44px,6vh,64px);padding-bottom:clamp(44px,6vh,64px)}
+body[data-page=home] main > .hero{padding-bottom:clamp(32px,5vh,56px)}

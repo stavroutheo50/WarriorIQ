@@ -23,6 +23,32 @@
         <button class="selection-edit-button" id="redrawA" type="button">Start over</button>
         <button class="selection-edit-button" id="redrawB" type="button" hidden>Redraw Fighter B</button>
       </div>
+      {#- Under the canvas rather than at the bottom of the sidebar: the canvas
+          column ended at the picture while the sidebar ran on, leaving a large
+          empty area under it (QA, 2026-10-04). Choosing a person from the list
+          also belongs next to the picture of them. -#}
+      <div class="stage-extras">
+      <div class="selection-rules"><span class="panel-kicker">For the strongest lock</span><ul><li>Include the full body, head to feet.</li><li>Keep the referee outside both boxes.</li><li>Do not overlap Fighter A and Fighter B.</li></ul></div>
+      <p class="selection-reassurance"><span aria-hidden="true">✓</span> WarriorIQ follows both identities after you start. No more manual work is needed in the report.</p>
+      {#- Drawing a box is a pointer-only action, and fighter selection is not
+          an optional flourish - nothing in the product works until it is done.
+          So there has to be a way through without a mouse. WarriorIQ already
+          detects the people in this frame to check drawn boxes against, and
+          those detections are the natural alternative: choose a person rather
+          than draw one. Each is described by where it stands and how much of
+          the frame it fills, so the list is usable read aloud, without seeing
+          the picture. Both paths set the same two boxes. -#}
+      <div class="selection-without-drawing" id="pickFromList" hidden>
+        <span class="panel-kicker">Or choose without drawing</span>
+        <p class="small muted" id="pickFromListHelp">WarriorIQ found these people in the frame. Pick one for each fighter instead of drawing a box.</p>
+        <fieldset class="pick-fighter" id="pickA" aria-describedby="pickFromListHelp">
+          <legend>Fighter A</legend>
+        </fieldset>
+        <fieldset class="pick-fighter" id="pickB" aria-describedby="pickFromListHelp">
+          <legend>Fighter B</legend>
+        </fieldset>
+      </div>
+      </div>
     </section>
     <aside class="fighter-lock-guide" aria-label="Fighter selection instructions">
       <div class="selection-status" id="status" role="status" aria-live="polite">Finding the clearest moment in your fight…</div>
@@ -45,26 +71,6 @@
         <label><input type="radio" name="cornerA" value="" {% if default_corner not in ['red', 'blue'] %}checked{% endif %}><span>No corners / not sure</span></label>
         <small class="muted" id="cornerHelp">Fighter B gets the other corner. Shown on the report so the colours match your video.</small>
       </fieldset>
-      <div class="selection-rules"><span class="panel-kicker">For the strongest lock</span><ul><li>Include the full body, head to feet.</li><li>Keep the referee outside both boxes.</li><li>Do not overlap Fighter A and Fighter B.</li></ul></div>
-      <p class="selection-reassurance"><span aria-hidden="true">✓</span> WarriorIQ follows both identities after you start. No more manual work is needed in the report.</p>
-      {#- Drawing a box is a pointer-only action, and fighter selection is not
-          an optional flourish - nothing in the product works until it is done.
-          So there has to be a way through without a mouse. WarriorIQ already
-          detects the people in this frame to check drawn boxes against, and
-          those detections are the natural alternative: choose a person rather
-          than draw one. Each is described by where it stands and how much of
-          the frame it fills, so the list is usable read aloud, without seeing
-          the picture. Both paths set the same two boxes. -#}
-      <div class="selection-without-drawing" id="pickFromList" hidden>
-        <span class="panel-kicker">Or choose without drawing</span>
-        <p class="small muted" id="pickFromListHelp">WarriorIQ found these people in the frame. Pick one for each fighter instead of drawing a box.</p>
-        <fieldset class="pick-fighter" id="pickA" aria-describedby="pickFromListHelp">
-          <legend>Fighter A</legend>
-        </fieldset>
-        <fieldset class="pick-fighter" id="pickB" aria-describedby="pickFromListHelp">
-          <legend>Fighter B</legend>
-        </fieldset>
-      </div>
     </aside>
   </div>
   <section class="analysis-choice">

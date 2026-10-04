@@ -120,3 +120,7 @@
 @media (prefers-reduced-motion: reduce) {
   .fighter-stage-panel .select-stage[data-scanning="true"]::after { animation: none; }
 }
+
+/* Lock rules and the pick list sit under the canvas (select.html). */
+.stage-extras{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px 28px;margin-top:22px;align-items:start}
+.stage-extras .selection-without-drawing{grid-column:1/-1}
