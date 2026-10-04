@@ -371,3 +371,8 @@ body[data-page=home] main > .hero{padding-bottom:clamp(32px,5vh,56px)}
    (QA, 2026-10-04). Equal side columns keep the links where they are. */
 .nav{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center}.nav>.brand{justify-self:start}.nav>.account-nav{justify-self:end}
 @media(max-width:900px){.nav{display:flex}}
+
+/* Upload problems read as problems: the file line under the picker had no
+   colour for a rejected file (QA, 2026-10-04). */
+.file-status[data-tone=bad]{color:var(--wiq-danger,#ff8c8c);font-weight:700}
+.file-status[data-tone=warn]{color:var(--wiq-warning,#e8b45a)}
