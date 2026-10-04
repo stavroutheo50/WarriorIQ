@@ -354,7 +354,7 @@ def assess_selection(
     result["looks_like_a_fight"] = False
     result["verdict"] = "selection_probably_wrong"
     result["warning"] = (
-        f"Nothing landed in {total} actions, and these two stayed about "
+        f"Nothing landed in {total} action{'' if total == 1 else 's'}, and these two stayed about "
         f"{median:.1f} body lengths apart the whole video. One of them is "
         "probably not a fighter - the referee and the coaches stand close to "
         "the action and are easy to pick by mistake."

@@ -245,6 +245,8 @@ class KickboxingReportTests(unittest.TestCase):
         start = page.index("{% if kick_minimum %}")
         block = page[start:page.index("{% endif %}\n</section>", start)] + "{% endif %}"
         env = Environment(undefined=ChainableUndefined)
+        from core.coaching import count_of
+        env.filters["count_of"] = count_of   # as app.main registers it
         for validated, expected, absent in (
                 (False, "does not confirm this rule yet", "can be\n      confirmed"),
                 (True, "can be\n      confirmed", "does not confirm this rule yet")):

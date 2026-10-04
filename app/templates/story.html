@@ -8,7 +8,7 @@
 {#- me.strikes is none while strike counts are switched off
     (core.report.STRIKE_COUNTS_PUBLISHED): the card is then movement only. -#}
 {% set counted = me.strikes is not none %}
-{% set headline %}{% if counted %}{{ me.total }} strikes thrown{% if card.score %} · estimated score {{ card.score[side] }}–{{ card.score[other] }}{% endif %}{% else %}{% for row in me.movement|default([]) %}{{ row.label }} {{ row.value }}{{ row.unit }}{% if not loop.last %} · {% endif %}{% else %}Fight analysis{% endfor %}{% endif %}{% endset %}
+{% set headline %}{% if counted %}{{ me.total|count_of('strike') }} thrown{% if card.score %} · estimated score {{ card.score[side] }}–{{ card.score[other] }}{% endif %}{% else %}{% for row in me.movement|default([]) %}{{ row.label }} {{ row.value }}{{ row.unit }}{% if not loop.last %} · {% endif %}{% else %}Fight analysis{% endfor %}{% endif %}{% endset %}
 {% block title %}{{ who }} · {{ card.sport }} fight analysis · WarriorIQ{% endblock %}
 {% block description %}{{ headline }}. Automatic fight analysis by WarriorIQ.{% endblock %}
 {% block social %}

@@ -134,6 +134,7 @@ from core.person_detect import detect_people as detect_people_in_frame, find_cle
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_policy import counting_policy
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
+from core.coaching import count_of
 from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label, fight_choice_stamp
 from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
@@ -241,6 +242,8 @@ def _ruleset_label(value: str | None) -> str:
 
 
 templates.env.filters["fight_moment"] = _fight_moment
+# "1 attempt", never "1 attempts": {{ n|count_of('attempt') }}.
+templates.env.filters["count_of"] = count_of
 templates.env.filters["ruleset_label"] = _ruleset_label
 
 
@@ -5754,7 +5757,7 @@ def complete_evidence_review(
                           if not is_down_check(item)]
         remaining = [item for item in candidates if not any(abs(float(item["peak_time"]) - value) <= .02 for value in reviewed_times)]
         if remaining:
-            raise HTTPException(409, f"Review the remaining {len(remaining)} candidates before completing the fight.")
+            raise HTTPException(409, f"Review the remaining {count_of(len(remaining), 'candidate')} before completing the fight.")
     current_status = get_fight_review(job_id).get("status", "in_progress")
     if not complete:
         next_status = "in_progress"

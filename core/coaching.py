@@ -7,6 +7,15 @@ from core.metric_catalog import BY_KEY
 from core.types import StrikeEvent
 
 
+
+def count_of(count, word: str, plural: str | None = None) -> str:
+    """"1 attempt", "2 attempts" - never "1 attempts" (QA, 2026-10-04)."""
+    try:
+        n = int(count)
+    except (TypeError, ValueError):
+        n = 0
+    return f"{n} {word if n == 1 else (plural or word + 's')}"
+
 def _pct(value):
     return None if value is None else round(float(value) * 100, 1)
 
@@ -65,7 +74,7 @@ def _measured_baseline_drills(fighter: str, own: dict) -> list[dict]:
         (
             1.0 / (1.0 + combinations),
             "Combination-density rounds",
-            f"5 x 1 min: Fighter {fighter} must link every first attack to a second legal technique and exceed the detected baseline of {combinations} combinations.",
+            f"5 x 1 min: Fighter {fighter} must link every first attack to a second legal technique and exceed the detected baseline of {count_of(combinations, 'combination')}.",
             "Targets the fighter's measured combination volume.",
         ),
         (
@@ -452,7 +461,7 @@ def build_coaching(fighter: str, metrics: dict, events: list[StrikeEvent]) -> di
     if total_defenses >= 3:
         best_defense = max(defense_counts, key=defense_counts.get)
         strengths.append({
-            "title": f"Active defense · {total_defenses} actions",
+            "title": f"Active defense · {count_of(total_defenses, 'action')}",
             "detail": f"Detected {total_defenses} evidence-supported defensive actions; {best_defense} was the most common.",
             "evidence_times": [],
         })
@@ -500,8 +509,8 @@ def build_coaching(fighter: str, metrics: dict, events: list[StrikeEvent]) -> di
 
     if not strengths:
         strengths.append({
-            "title": f"Measured activity · {attacks.get('attempts', 0)} attempts",
-            "detail": f"WarriorIQ tracked {attacks.get('attempts', 0)} attack attempts and {own.get('combinations', {}).get('count', 0)} combinations in the usable evidence window.",
+            "title": f"Measured activity · {count_of(attacks.get('attempts', 0), 'attempt')}",
+            "detail": f"WarriorIQ tracked {count_of(attacks.get('attempts', 0), 'attack attempt')} and {count_of(own.get('combinations', {}).get('count', 0), 'combination')} in the usable evidence window.",
             "evidence_times": _event_times(events, fighter, lambda e: True),
         })
     if not improvements:
@@ -615,7 +624,7 @@ def build_training_plan(coaching: dict, fighter: str, own: dict) -> list[dict]:
         attempts = int(own.get("attacks", {}).get("attempts", 0))
         combinations = int(own.get("combinations", {}).get("count", 0))
         accuracy = own.get("attacks", {}).get("accuracy")
-        baseline = f"{attempts} attempts, {combinations} combinations"
+        baseline = f"{count_of(attempts, 'attempt')}, {count_of(combinations, 'combination')}"
         if accuracy is not None:
             baseline += f", {_pct(accuracy)}% conversion"
     def measured_goal(drill: dict) -> str:
@@ -630,8 +639,8 @@ def build_training_plan(coaching: dict, fighter: str, own: dict) -> list[dict]:
         theirs = drill.get("opponent")
         if key is None or current is None:
             return (
-                f"Improve on Fighter {fighter}'s measured baseline ({baseline}) "
-                "without sacrificing the strongest measured area."
+                f"Beat what Fighter {fighter} did in this fight ({baseline}) "
+                "without giving up what already went well."
             )
         current = float(current)
         target, show = _metric_progress(key, current)
