@@ -69,7 +69,8 @@
   </div>
   <section class="analysis-choice">
     <div class="analysis-choice-copy"><div class="eyebrow">Detailed report</div>{% if fighter_name %}<h2>Which one is {{fighter_name}}?</h2><p>You filed this fight under {{fighter_name}}. Pick the box that is {{fighter_name}} &mdash; they get the full report, coach insights, replay and training plan. Both fighters are still tracked for context and scoring.</p>{% else %}<h2>Who are you training?</h2><p>Both fighters are tracked for context and scoring. Your chosen athlete receives the full report, coach insights, replay, and personal training plan.</p>{% endif %}</div>
-    <div class="analysis-choice-actions"><div class="target-options" id="targetOptions" role="radiogroup" aria-label="Choose the athlete for the detailed report"><label><input type="radio" name="focusFighter" value="A" {% if default_focus != 'B' %}checked{% endif %}><span><i>A</i> Fighter A{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label><label><input type="radio" name="focusFighter" value="B" {% if default_focus == 'B' %}checked{% endif %}><span><i>B</i> Fighter B{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label></div><button class="btn" id="start" type="button" data-motion-primary disabled>Start WarriorIQ analysis <span aria-hidden="true">→</span></button></div>
+    <div class="analysis-choice-actions"><div class="target-options" id="targetOptions" role="radiogroup" aria-label="Choose the athlete for the detailed report"><label><input type="radio" name="focusFighter" value="A" {% if default_focus != 'B' %}checked{% endif %}><span><i>A</i> Fighter A{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label><label><input type="radio" name="focusFighter" value="B" {% if default_focus == 'B' %}checked{% endif %}><span><i>B</i> Fighter B{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label></div><div class="start-wrap"><button class="btn" id="start" type="button" data-motion-primary disabled aria-describedby="startReason">Start WarriorIQ analysis <span aria-hidden="true">→</span></button>{#- Why Start is disabled, right under the button: the reason was only in the
+        status line at the top of the sidebar (QA, 2026-10-04). -#}<p class="start-reason" id="startReason" role="status" aria-live="polite">Box Fighter A to start.</p></div></div>
     <p class="start-feedback" id="startFeedback" role="alert" hidden></p>
   </section>
 </section>
@@ -78,7 +79,7 @@
 const jobId={{job_id|tojson}},videoWidth={{job.video_width}},videoHeight={{job.video_height}};
 const image=document.getElementById('frame'),stage=document.getElementById('stage'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
 const keyA=document.getElementById('keyA'),keyB=document.getElementById('keyB'),pairWarning=document.getElementById('pairWarning');
-const statusBox=document.getElementById('status'),startBtn=document.getElementById('start'),redrawA=document.getElementById('redrawA'),redrawB=document.getElementById('redrawB'),startFeedback=document.getElementById('startFeedback');
+const statusBox=document.getElementById('status'),startBtn=document.getElementById('start'),redrawA=document.getElementById('redrawA'),redrawB=document.getElementById('redrawB'),startFeedback=document.getElementById('startFeedback'),startReason=document.getElementById('startReason');
 const soloInput=document.getElementById('soloMode');
 let solo=false,detections=[],boxA=null,boxB=null,mode='A_DRAW',dragStart=null,tempBox=null,pointerPosition=null,initialized=false,starting=false,scanning=true;
 // The canvas backing store is sized in device pixels, but every coordinate in
@@ -179,11 +180,18 @@ function lockBox(box){
   if(mode==='A_DRAW'){boxA=box;boxB=null;mode=solo?'READY':'B_DRAW';clearPicked('A');clearPicked('B')}else{boxB=box;mode='READY';clearPicked('B')}
   flashLock();void checkPair();window.WarriorIQMotion?.impact(stage);draw();
 }
+function startReasonText(valid){
+  if(starting)return 'Starting the analysis…';
+  if(valid)return '';
+  if(!boxA)return solo?'Box the person training to start.':'Box Fighter A to start.';
+  if(!boxB)return 'Now box Fighter B to start.';
+  return 'The two boxes cover the same person. Redraw Fighter B on its own to start.';
+}
 function draw(){
   // CSS pixels, not canvas.width/height - the context is scaled in fit().
   ctx.clearRect(0,0,cssWidth,cssHeight);labelSlots.length=0;drawCandidates();drawBox(boxA,'Fighter A','#55a7ff');drawBox(boxB,'Fighter B','#f1b84b');
   if(boxA&&mode!=='A_DRAW')drawLockCorners(boxA,'#9ad1ff');if(boxB&&mode==='READY')drawLockCorners(boxB,'#ffd987');if(tempBox)drawBox(toVideo(tempBox),mode==='A_DRAW'?'Drawing A':'Drawing B','#ffffff');drawReticle();
-  const valid=selectionIsValid(),detected=valid&&detectorMatch(boxA)&&detectorMatch(boxB);startBtn.disabled=starting||!valid;redrawB.hidden=!boxA||solo;redrawA.hidden=!boxA&&!tempBox;
+  const valid=selectionIsValid(),detected=valid&&detectorMatch(boxA)&&(solo||detectorMatch(boxB));startBtn.disabled=starting||!valid;startReason.textContent=startReasonText(valid);startReason.hidden=!startReason.textContent;redrawB.hidden=!boxA||solo;redrawA.hidden=!boxA&&!tempBox;
   // The side cards follow the boxes. They said "Draw this fighter first" with
   // both fighters already locked.
   keyA.textContent=boxA?'Locked':solo?'Box the person training':'Draw this fighter first';
