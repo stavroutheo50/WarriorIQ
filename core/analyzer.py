@@ -42,6 +42,7 @@ from core.fight_numbers import output_numbers
 from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
 from core import backtrack as _backtrack
+from core.build_info import stamp as build_stamp
 
 # How much of the confidence range an attempt must clear to be shown.
 #
@@ -748,9 +749,16 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
 
     The person draws the two boxes on one frame. Everything before that frame
     is reached by following both fighters backwards from it (core/backtrack.py)
-    and the result is checked when the forward pass arrives back at it. Only if
-    that is impossible, or the check fails, does the analysis start at the
-    chosen frame - and the report then says which part was left out and why.
+    and the result is checked when the forward pass arrives back at it.
+
+    The analysis always starts at the requested start (0:00 unless a later one
+    was asked for). It used to restart at the chosen frame whenever the
+    backward pass stopped short or the check failed, which silently cut the
+    opening off the report (QA, 2026-10-04: 0:08 of a 0:10 clip analysed as
+    "Analysis complete"). Now, when the fighters cannot be followed all the
+    way back, the forward pass still starts at the beginning and the check at
+    the chosen frame decides whether its identities can be trusted; if not,
+    the report says so rather than leaving footage out.
     """
     wrapper_started = time.perf_counter()
     seed_seconds = req.selection_seconds
@@ -762,7 +770,6 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     seed_seconds = max(requested_start, min(float(seed_seconds), max(0.0, info.duration - 0.001)))
     seed_frame = int(round(seed_seconds * fps))
     start_frame = int(round(requested_start * fps))
-    from_seed = replace(req, start_seconds=seed_seconds, selection_seconds=None)
     if seed_frame - start_frame < _backtrack.MIN_BACKTRACK_SECONDS * fps:
         return _analyze(replace(req, start_seconds=requested_start, selection_seconds=None),
                         progress_callback, seed_seconds=seed_seconds)
@@ -798,34 +805,33 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
             progress=report_progress,
         )
     except Exception as error:                                      # noqa: BLE001
-        # The backward pass is an addition; it must never cost the analysis
-        # of the part the person definitely asked about.
+        # The backward pass is an addition; it must never cost the analysis.
         LOGGER.warning("backtrack_failed error=%s detail=%s", type(error).__name__, str(error)[:200])
         handoff = _backtrack.Handoff(seed_frame=seed_frame, requested_start_frame=start_frame,
                                      frame=seed_frame, reason="unavailable")
     handoff_record = handoff.as_dict(fps)
-    if not handoff.moved:
-        return _analyze(from_seed, progress_callback, seed_seconds=seed_seconds,
-                        handoff=handoff_record, excluded_reason=handoff.reason or "fighter_lost",
-                        measured_footage=measured, seed_kit=seed_kit,
-                        budget_spent_before=time.perf_counter() - wrapper_started)
+    if handoff.moved:
+        # Seeded where the backward pass got to. That is the requested start
+        # whenever it succeeded; when it stopped short the forward pass still
+        # begins there, at the start, with the boxes from the earliest frame
+        # both fighters were followed to as its best guess.
+        start_boxes = (list(handoff.a_box), list(handoff.b_box))
+        forward_start = handoff.frame / fps if handoff.reason is None else requested_start
+    else:
+        start_boxes = (list(req.fighter_a_box), list(req.fighter_b_box))
+        forward_start = requested_start
     forward = replace(
-        req, start_seconds=handoff.frame / fps, selection_seconds=None,
-        fighter_a_box=list(handoff.a_box), fighter_b_box=list(handoff.b_box))
+        req, start_seconds=forward_start, selection_seconds=None,
+        fighter_a_box=start_boxes[0], fighter_b_box=start_boxes[1])
     seed_check = {"frame": seed_frame, "a_box": list(req.fighter_a_box), "b_box": list(req.fighter_b_box),
                   "window_frames": int(round(1.5 * fps))}
     seed_pair = (handoff.seed_a, handoff.seed_b) if handoff.seed_a is not None and handoff.seed_b is not None else None
-    try:
-        return _analyze(forward, progress_callback, seed_seconds=seed_seconds,
-                        handoff=handoff_record, excluded_reason=handoff.reason, seed_check=seed_check,
-                        seed_pair=seed_pair, measured_footage=measured, seed_kit=seed_kit,
-                        budget_spent_before=time.perf_counter() - wrapper_started)
-    except SeedCheckFailed as failure:
-        LOGGER.warning("backtrack_rejected_at_seed seed_frame=%s verdict=%s", seed_frame, failure)
-        handoff_record = {**handoff_record, "rejected_at_seed": str(failure)}
-        return _analyze(from_seed, progress_callback, seed_seconds=seed_seconds,
-                        handoff=handoff_record, excluded_reason="unverified", measured_footage=measured,
-                        seed_kit=seed_kit, budget_spent_before=time.perf_counter() - wrapper_started)
+    # The reason is kept for the record only: no footage is excluded any more,
+    # so it is not passed on as an exclusion.
+    return _analyze(forward, progress_callback, seed_seconds=seed_seconds,
+                    handoff=handoff_record, seed_check=seed_check,
+                    seed_pair=seed_pair, measured_footage=measured, seed_kit=seed_kit,
+                    budget_spent_before=time.perf_counter() - wrapper_started)
 
 
 def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = None, *,
@@ -1344,15 +1350,19 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 verdict = _backtrack.seed_verdict(
                     fighter_a, fighter_b, seed_check["a_box"], seed_check["b_box"])
                 seed_check.setdefault("verdicts", []).append(verdict)
+                # Recorded, never a reason to stop: the footage before the
+                # chosen frame stays in the report, and a failed check marks
+                # its identities as unconfirmed instead (see
+                # identity_seed_confirmed below).
                 if verdict == "match":
                     seed_check["done"] = True
                 elif verdict == "swapped":
-                    raise SeedCheckFailed("swapped")
+                    seed_check["done"] = True
+                    seed_check["failed"] = "swapped"
                 elif source_frame - seed_check["frame"] >= seed_check["window_frames"]:
-                    if "partial" in seed_check["verdicts"]:
-                        seed_check["done"] = True
-                    else:
-                        raise SeedCheckFailed("unconfirmed")
+                    seed_check["done"] = True
+                    if "partial" not in seed_check["verdicts"]:
+                        seed_check["failed"] = "unconfirmed"
 
             analyzed_frames += 1
             if fighter_a is not None:
@@ -1526,7 +1536,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
 
     if seed_check is not None and not seed_check.get("done"):
         if "partial" not in seed_check.get("verdicts", []):
-            raise SeedCheckFailed("never_reached")
+            seed_check["failed"] = "never_reached"
 
     # Fight footage only, from here on. Interviews, graphics and a selected
     # pair that never engaged are left out of every measurement and count.
@@ -1658,10 +1668,16 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             "selection_seconds": round(float(seed_seconds), 3),
             "seed_check": None if seed_check is None else {
                 "verdicts": list(seed_check.get("verdicts", []))[:12],
-                "confirmed": bool(seed_check.get("done")),
+                "confirmed": not seed_check.get("failed"),
+                "failed": seed_check.get("failed"),
             },
             "backtrack": handoff,
         },
+        # False when the forward pass reached the frame the person picked with
+        # A and B not on the boxes they drew. The identity gate reads it
+        # (core/report.py identity_ready_by_fighter), so such a report is
+        # shown as unverified rather than as the chosen fighter's numbers.
+        "identity_seed_confirmed": None if seed_check is None else not seed_check.get("failed"),
         "requested_fighter_A_box": [float(value) for value in req.fighter_a_box],
         "requested_fighter_B_box": [float(value) for value in req.fighter_b_box],
         "canonical_fighter_A_box": canonical_a_box,
@@ -1844,6 +1860,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # fight" without saying what was left out.
     report.setdefault("video", {})["analysed_span"] = _analysed_span(
         info, req.start_seconds, segment_end_seconds, seed_seconds, handoff, excluded_reason)
+    # Which analysis code made this, so a result from an out-of-date worker
+    # can be recognised and refused by the web app (core/build_info.py).
+    report["analysis_build"] = build_stamp()
     report["video"]["fight_footage"] = fight_footage
     report.setdefault("integrity", {})["fight_footage_sufficient"] = bool(fight_footage["sufficient"])
 

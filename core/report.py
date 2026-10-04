@@ -321,9 +321,15 @@ def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
     the page then disowned a fight the saved report called trusted."""
     churned = identity_churned(tracking)
     alike_blocks = lookalike_blocks_identity(tracking)
+    # The forward pass starts at the beginning of the video even when the
+    # fighters could not be followed back from the chosen frame; arriving there
+    # with A and B on the wrong boxes means the identities before it are not
+    # the ones the person picked. Absent (None) on reports without a check.
+    seed_unconfirmed = tracking.get("identity_seed_confirmed") is False
     return {
         fighter: (
-            _identity_seed_safe(tracking, fighter)
+            not seed_unconfirmed
+            and _identity_seed_safe(tracking, fighter)
             and float(tracking.get(f"fighter_{fighter}_coverage", 0.0)) >= 0.45
             and not alike_blocks
             and not churned[fighter]
@@ -341,6 +347,7 @@ IDENTITY_TRACKING_KEYS = (
     "pair_similarity_method", "identity_confusions_per_minute",
     "identity_confusions", "fighter_A_handoffs_per_minute", "fighter_B_handoffs_per_minute",
     "fighter_A_suspicious_handoffs_per_minute", "fighter_B_suspicious_handoffs_per_minute",
+    "identity_seed_confirmed",
 )
 
 

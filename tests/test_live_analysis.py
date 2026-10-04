@@ -277,8 +277,11 @@ class DurableAnalysisStateTests(TestCase):
 
                     unauthorized = client.post("/api/worker/claim", json={"worker_id": "gpu-test"})
                     self.assertEqual(unauthorized.status_code, 401)
+                    from core.build_info import ANALYSIS_VERSION, stamp
+
                     claimed = client.post(
-                        "/api/worker/claim", headers=headers, json={"worker_id": "gpu-test"},
+                        "/api/worker/claim", headers=headers,
+                        json={"worker_id": "gpu-test", "analysis_version": ANALYSIS_VERSION},
                     )
                     self.assertEqual(claimed.status_code, 200)
                     job = claimed.json()["job"]
@@ -303,6 +306,7 @@ class DurableAnalysisStateTests(TestCase):
 
                     report = {key: {} for key in webapp._WORKER_REPORT_KEYS}
                     report["scorecard"] = {"totals": {"A": None, "B": None}}
+                    report["analysis_build"] = stamp()
                     archive = io.BytesIO()
                     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
                         bundle.writestr("report.json", json.dumps(report))

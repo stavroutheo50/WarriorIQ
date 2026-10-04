@@ -56,6 +56,29 @@ TRACKER_SOURCE = "/app/models/warrioriq_botsort.yaml"
 
 DATA_DIR = "/data"
 
+
+def _deploy_commit() -> str:
+    """The commit being deployed, baked into the image as WARRIORIQ_BUILD_COMMIT.
+
+    The image ships without .git, so core/build_info.py cannot ask git from
+    inside the container. Evaluated on the deploying machine; inside the
+    container the variable is already set, so the image definition comes out
+    the same there. "-dirty" marks a deploy made with uncommitted changes.
+    """
+    import subprocess
+
+    baked = os.environ.get("WARRIORIQ_BUILD_COMMIT", "").strip()
+    if baked:
+        return baked
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short=12", "HEAD"],
+                                capture_output=True, text=True, timeout=5, check=False).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True, timeout=5, check=False).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return (commit + ("-dirty" if dirty else "")) if commit else "unknown"
+
 image = (
     modal.Image.debian_slim(python_version="3.11")
     # OpenCV needs the GL/glib runtime libraries; ffmpeg decodes the fight video.
@@ -79,6 +102,10 @@ image = (
     # image. Dropping them gives a working worker with unrefined joints.
     .pip_install_from_requirements("requirements-rtm-cuda12.txt")
     .run_commands("pip install --no-deps rtmlib==0.0.16")
+    # Every report this worker writes carries this commit and the analysis
+    # version (core/build_info.py); the web app refuses a worker older than
+    # itself, so a stale deploy shows up as refused claims, not short reports.
+    .env({"WARRIORIQ_BUILD_COMMIT": _deploy_commit()})
     .add_local_dir(
         ".",
         "/app",

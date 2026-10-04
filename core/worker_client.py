@@ -73,7 +73,18 @@ class RemoteWorkerClient:
         self._request("POST", "/api/worker/heartbeat", {"worker_id": self.worker_id})
 
     def claim(self) -> dict | None:
-        response = self._request("POST", "/api/worker/claim", {"worker_id": self.worker_id})
+        from core.build_info import ANALYSIS_VERSION
+
+        response = self._request("POST", "/api/worker/claim", {
+            "worker_id": self.worker_id, "analysis_version": ANALYSIS_VERSION})
+        if response.get("refused"):
+            # The server is newer than this code. Saying so is the only useful
+            # thing a stale worker can do; analysing would produce a report
+            # the server will not accept.
+            raise RemoteWorkerError(
+                f"The web app refused this worker ({response['refused']}): it needs analysis "
+                f"version {response.get('required_analysis_version')}, this worker is "
+                f"{ANALYSIS_VERSION}. Redeploy the worker from the current code.")
         return response.get("job")
 
     def progress(self, job_id: str, analysis_run_id: str, patch: dict) -> None:

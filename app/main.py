@@ -128,6 +128,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
+from core.build_info import ANALYSIS_VERSION, result_check
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_policy import counting_policy
@@ -574,6 +575,9 @@ DOWN_CHECK_TIME_OFFSET = 0.0005
 
 class WorkerIdentityPayload(BaseModel):
     worker_id: str
+    # core/build_info.ANALYSIS_VERSION of the worker's code. Absent from
+    # workers built before it existed, which are older by definition.
+    analysis_version: int | None = None
 
 
 class WorkerProgressPayload(WorkerIdentityPayload):
@@ -4153,9 +4157,10 @@ def _remote_job_payload(job_id: str, job: dict) -> dict:
         "fight_type": job["fight_type"],
         "ruleset": job["ruleset"],
         # A worker that predates requested_start_seconds reads start_seconds as
-        # where to start, and so keeps analysing from the selection frame
-        # exactly as before; a current one analyses from requested_start and
-        # seeds identity at selection_seconds.
+        # where to start; such a worker is now refused at claim time (see
+        # remote_worker_claim), so this only keeps the payload readable. A
+        # current one analyses from requested_start and seeds identity at
+        # selection_seconds.
         "start_seconds": float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
         "selection_seconds": float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0),
         "requested_start_seconds": float(job.get("requested_start_seconds", 0.0) or 0.0),
@@ -4215,6 +4220,17 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
     _require_remote_worker(request)
     worker_id = _validated_worker_id(payload.worker_id)
     record_worker_heartbeat(worker_id)
+    if payload.analysis_version is None or payload.analysis_version < ANALYSIS_VERSION:
+        # QA, 2026-10-04: a GPU worker deployed from an older checkout kept
+        # analysing from the fighter-selection frame for days after the web
+        # app had the fix, and its reports said "Analysis complete". A worker
+        # older than this server gets no work; the fight stays queued for one
+        # that is current, and the log says exactly what to redeploy.
+        LOGGER.error(
+            "worker_outdated worker_id=%s analysis_version=%s required=%s - redeploy the worker "
+            "(modal deploy deploy/modal_worker.py, or restart a local worker on the current code)",
+            worker_id, payload.analysis_version, ANALYSIS_VERSION)
+        return {"job": None, "refused": "worker_outdated", "required_analysis_version": ANALYSIS_VERSION}
     claimed = claim_next_job(worker_id)
     if not claimed:
         return {"job": None}
@@ -4377,6 +4393,15 @@ async def remote_worker_complete(
             )
         except (OSError, ValueError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
             raise HTTPException(400, str(exc) or "Invalid worker artifact archive.") from exc
+        build = result_check(report)
+        if build["outdated"]:
+            # Claimed before this server was deployed, by a worker that has not
+            # been. Its report may cover less of the video than this code
+            # promises, so it is not stored; the run's lease lapses and a
+            # current worker analyses the fight again.
+            LOGGER.error("worker_result_outdated job_id=%s worker_id=%s analysis_version=%s required=%s",
+                         job_id, worker_id, build["analysis_version"], ANALYSIS_VERSION)
+            raise HTTPException(409, "This result came from an outdated analysis worker and was not stored.")
         if not finalize_job_from_worker(job_id, worker_id, analysis_run_id, report, staged):
             for path in staged.values():
                 path.unlink(missing_ok=True)
@@ -5071,6 +5096,7 @@ def result_page(request: Request, job_id: str):
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
         "analysed_span": _analysed_span_summary(report),
+        "analysis_build": result_check(report),
         "fight_footage": _fight_footage_summary(report),
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),

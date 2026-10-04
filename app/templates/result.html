@@ -1045,6 +1045,7 @@
 </div></details>{% endif %}
 </div></details>
 <aside class="notice ai-report-notice"><strong>AI-Assisted Analysis.</strong> WarriorIQ uses computer vision and AI; detection mistakes are possible. Statistics and scores are estimates, not guaranteed facts or an official judging decision. Use this report as training and performance guidance—not medical advice. Camera angle, resolution, obstruction and poor lighting can reduce analysis quality. <a class="text-link" href="/ai-transparency">How WarriorIQ AI works</a> · <a class="text-link" href="/sports-medical-disclaimer">Sports &amp; medical safety</a></aside>
+<p class="small muted analysis-build" data-analysis-build>Analysis engine {% if analysis_build.analysis_version %}v{{analysis_build.analysis_version}}{% else %}version not recorded{% endif %} · build {{analysis_build.commit}}{% if analysis_build.outdated %} · <strong>made by an older analysis engine than the current one (v{{analysis_build.current_version}}); analyse again for a report from the current one.</strong>{% endif %}</p>
 {% endblock %}
 {% block scripts %}
 <script nonce="{{ request.state.csp_nonce }}">
