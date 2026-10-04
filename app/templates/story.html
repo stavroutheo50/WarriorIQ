@@ -5,7 +5,10 @@
 {% set me = card.fighters[side] %}{% set them = card.fighters[other] %}
 {% set corner_label = (corner|title ~ ' corner') if corner else ('Fighter ' ~ side) %}
 {% set who = name or corner_label %}
-{% set headline %}{{ me.total }} strikes thrown{% if card.score %} · estimated score {{ card.score[side] }}–{{ card.score[other] }}{% endif %}{% endset %}
+{#- me.strikes is none while strike counts are switched off
+    (core.report.STRIKE_COUNTS_PUBLISHED): the card is then movement only. -#}
+{% set counted = me.strikes is not none %}
+{% set headline %}{% if counted %}{{ me.total }} strikes thrown{% if card.score %} · estimated score {{ card.score[side] }}–{{ card.score[other] }}{% endif %}{% else %}{% for row in me.movement|default([]) %}{{ row.label }} {{ row.value }}{{ row.unit }}{% if not loop.last %} · {% endif %}{% else %}Fight analysis{% endfor %}{% endif %}{% endset %}
 {% block title %}{{ who }} · {{ card.sport }} fight analysis · WarriorIQ{% endblock %}
 {% block description %}{{ headline }}. Automatic fight analysis by WarriorIQ.{% endblock %}
 {% block social %}
@@ -29,6 +32,7 @@
     <span class="story-corner{% if corner %} corner-{{ corner }}{% endif %}">{{ corner_label }}</span>
   </header>
 
+  {% if counted %}
   <section class="story-hero card">
     <div class="story-total"><strong class="wiq-num">{{ me.total }}</strong><span>strikes thrown</span></div>
     {% if card.score %}
@@ -49,6 +53,21 @@
     </div>
     {% endfor %}
   </section>
+  {% elif me.movement %}
+  <section class="card story-compare" aria-label="Movement, fighter and opponent">
+    <div class="story-compare-head"><span>{{ who }}</span><span>Opponent</span></div>
+    {% for row in me.movement %}
+    {% set theirs = (them.movement|default([])|selectattr('label', 'equalto', row.label)|map(attribute='value')|first)|default(none) %}
+    <div class="story-row">
+      <b class="wiq-num">{{ row.value }}{{ row.unit|trim }}</b>
+      <div class="story-bars"><span class="story-label">{{ row.label }}</span>
+        <span class="story-bar mine"><i style="width:{{ row.value }}%"></i></span>
+        {% if theirs is not none %}<span class="story-bar theirs"><i style="width:{{ theirs }}%"></i></span>{% endif %}</div>
+      <b class="wiq-num">{% if theirs is not none %}{{ theirs }}{{ row.unit|trim }}{% else %}&mdash;{% endif %}</b>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
 
   {% if me.strength or me.working_on %}
   <section class="story-notes">
@@ -57,7 +76,7 @@
   </section>
   {% endif %}
 
-  <p class="small muted story-disclaimer">{{ card.note }} Counts are attempts WarriorIQ saw on the video; the score is an estimate, not an official result.</p>
+  <p class="small muted story-disclaimer">{{ card.note }}{% if counted %} Counts are attempts WarriorIQ saw on the video; the score is an estimate, not an official result.{% else %} Measured from how each fighter moved on the video.{% endif %}</p>
 
   <section class="card story-cta">
     <div><div class="eyebrow">WarriorIQ</div><h2>Get this for your own fights</h2>

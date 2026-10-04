@@ -49,11 +49,13 @@ def test_mma_discloses_what_it_does_not_analyse():
 
 
 def test_unpublished_counts_say_so_everywhere():
+    # Switched off, nothing is counted - kicks included (QA, 2026-10-04).
     policy = counting_policy("kickboxing", published=False, validated=False)
-    assert policy.counted == ("kicks",)
-    assert "not counted yet" in policy.setup_line
-    assert "punches" not in policy.live_note
+    assert policy.counted == ()
+    assert "no strike counts yet" in policy.setup_line
+    assert "punches" not in policy.live_note and "kicks" not in policy.live_note
     assert counting_policy("boxing", published=False, validated=False).badge == "No punch counts yet"
+    assert policy.badge == "No strike counts yet"
 
 
 def _event(family, ruleset_ok=True):

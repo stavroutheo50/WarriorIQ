@@ -91,6 +91,36 @@ def _point(kp: np.ndarray | None, idx: int) -> np.ndarray | None:
     return p[:2]
 
 
+def _joint_seen(sample: "Sample", idx: int) -> bool:
+    """Whether the pose model was confident it saw this joint.
+
+    A joint with no confidence recorded is not counted as seen: the legs are
+    the joints the model guesses most when they are out of the picture.
+    """
+    if _point(sample.keypoints, idx) is None or sample.conf is None or len(sample.conf) <= idx:
+        return False
+    return float(sample.conf[idx]) >= SETTINGS.min_leg_keypoint_confidence
+
+
+def legs_visible(samples: list["Sample"], side: str | None = None) -> bool:
+    """Were a knee and its ankle confidently seen across this window?
+
+    ``side`` names the leg ("left"/"right"); None accepts either leg. Required
+    on SETTINGS.min_leg_visible_share of the samples, so one confident frame in
+    a waist-up shot is not enough to call a kick.
+    """
+    if not samples:
+        return False
+    legs = {"left": (L_KNEE, L_ANKLE), "right": (R_KNEE, R_ANKLE)}
+    sides = [side] if side in legs else list(legs)
+    for name in sides:
+        knee, ankle = legs[name]
+        seen = sum(1 for sample in samples if _joint_seen(sample, knee) and _joint_seen(sample, ankle))
+        if seen / len(samples) >= SETTINGS.min_leg_visible_share:
+            return True
+    return False
+
+
 def _body_length(kp: np.ndarray | None, box: np.ndarray | None) -> float:
     if kp is not None:
         ls, rs, lh, rh = (_point(kp, i) for i in (L_SHOULDER, R_SHOULDER, L_HIP, R_HIP))
@@ -378,6 +408,8 @@ class FighterActionState:
         self.active: dict[str, ActiveLimb] = {}
         self.last_event_time: dict[str, float] = {}
         self.last_family_event_time: dict[str, float] = {}
+        # Kick and knee candidates dropped because the leg was not visible.
+        self.legs_hidden_discards = 0
 
 
 class ActionEngine:
@@ -574,8 +606,13 @@ class ActionEngine:
                         if start_sample.frame <= item.frame <= sample.frame
                     ]
 
+                    leg_joints = {L_KNEE, R_KNEE, L_ANKLE, R_ANKLE}
+
                     def _travel(index: int) -> float:
-                        points = [_point(item.keypoints, index) for item in action_samples]
+                        # A leg joint the model only guessed at moves as much
+                        # as its guesses jitter; it is no evidence a leg moved.
+                        points = [_point(item.keypoints, index) for item in action_samples
+                                  if index not in leg_joints or _joint_seen(item, index)]
                         points = [q for q in points if q is not None]
                         if len(points) < 2:
                             return 0.0
@@ -621,6 +658,14 @@ class ActionEngine:
                         if max(left_travel, right_travel) > 1.25 * max(1.0, min(left_travel, right_travel)):
                             side = "left" if left_travel > right_travel else "right"
                             event_limb = f"{side}_{'knee' if family == 'knee' else 'leg'}"
+
+                    if family in {"kick", "knee"} and not legs_visible(
+                            action_samples, "left" if event_limb.startswith("left") else "right"):
+                        # No visible leg, no kick or knee - see
+                        # SETTINGS.min_leg_visible_share.
+                        state.legs_hidden_discards += 1
+                        state.active.pop(active_key, None)
+                        continue
 
                     if family == "punch":
                         technique = _classify_punch(start_sample, peak_sample, event_limb)

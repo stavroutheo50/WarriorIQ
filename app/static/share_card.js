@@ -38,7 +38,7 @@
   }
 
   function draw(canvas, card, side) {
-    var ctx = canvas.getContext("2d"), me = card.fighters[side] || { strikes: {}, total: 0 };
+    var ctx = canvas.getContext("2d"), me = card.fighters[side] || { strikes: null, total: null, movement: [] };
     var other = side === "A" ? "B" : "A";
     ctx.fillStyle = "#070a16"; ctx.fillRect(0, 0, W, H);
     var glow = ctx.createRadialGradient(160, 220, 0, 160, 220, 900);
@@ -58,22 +58,36 @@
     ctx.font = font(600, 36); ctx.fillStyle = MUTED;
     ctx.fillText(String(card.sport || "Fight").toUpperCase() + "  ·  FIGHT ANALYSIS", x, y);
 
-    y += 330;
-    ctx.fillStyle = INK; ctx.font = font(800, 300); ctx.fillText(String(me.total), x - 12, y);
-    y += 80;
-    ctx.font = font(600, 48); ctx.fillStyle = MUTED; ctx.fillText("strikes thrown", x, y);
+    if (me.total !== null && me.total !== undefined && me.strikes) {
+      y += 330;
+      ctx.fillStyle = INK; ctx.font = font(800, 300); ctx.fillText(String(me.total), x - 12, y);
+      y += 80;
+      ctx.font = font(600, 48); ctx.fillStyle = MUTED; ctx.fillText("strikes thrown", x, y);
 
-    y += 110;
-    var families = ["punch", "kick", "knee"].filter(function (f) { return f in (me.strikes || {}); }), top = 1;
-    families.forEach(function (f) { top = Math.max(top, me.strikes[f]); });
-    families.forEach(function (f) {
-      ctx.font = font(700, 44); ctx.fillStyle = INK; ctx.fillText(PLURAL[f] || f, x, y);
-      ctx.textAlign = "right"; ctx.fillText(String(me.strikes[f]), W - x, y); ctx.textAlign = "left";
-      roundRect(ctx, x, y + 26, W - 2 * x, 18, 9); ctx.fillStyle = LINE; ctx.fill();
-      roundRect(ctx, x, y + 26, Math.max(18, (W - 2 * x) * me.strikes[f] / top), 18, 9);
-      ctx.fillStyle = CYAN; ctx.fill();
-      y += 128;
-    });
+      y += 110;
+      var families = ["punch", "kick", "knee"].filter(function (f) { return f in me.strikes; }), top = 1;
+      families.forEach(function (f) { top = Math.max(top, me.strikes[f]); });
+      families.forEach(function (f) {
+        ctx.font = font(700, 44); ctx.fillStyle = INK; ctx.fillText(PLURAL[f] || f, x, y);
+        ctx.textAlign = "right"; ctx.fillText(String(me.strikes[f]), W - x, y); ctx.textAlign = "left";
+        roundRect(ctx, x, y + 26, W - 2 * x, 18, 9); ctx.fillStyle = LINE; ctx.fill();
+        roundRect(ctx, x, y + 26, Math.max(18, (W - 2 * x) * me.strikes[f] / top), 18, 9);
+        ctx.fillStyle = CYAN; ctx.fill();
+        y += 128;
+      });
+    } else {
+      // Strike counts are switched off: the card carries what was measured
+      // from movement instead, each row on its own 0-100 scale.
+      y += 140;
+      (me.movement || []).forEach(function (row) {
+        ctx.font = font(700, 44); ctx.fillStyle = INK; ctx.fillText(row.label, x, y);
+        ctx.textAlign = "right"; ctx.fillText(String(row.value) + (row.unit || ""), W - x, y); ctx.textAlign = "left";
+        roundRect(ctx, x, y + 26, W - 2 * x, 18, 9); ctx.fillStyle = LINE; ctx.fill();
+        roundRect(ctx, x, y + 26, Math.max(18, (W - 2 * x) * row.value / 100), 18, 9);
+        ctx.fillStyle = CYAN; ctx.fill();
+        y += 128;
+      });
+    }
 
     if (card.score) {
       y += 10;

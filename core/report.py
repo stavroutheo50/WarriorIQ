@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from html import escape
 from pathlib import Path
 
@@ -388,7 +389,16 @@ STRIKE_COUNTS_PRECISION_VALIDATED = False
 # scored by tools/benchmark_labelled_fight.py. Of the 16 moments a report
 # counts on that fight, 11 were real strikes and 6 of those the right type.
 # Re-run it and update this note whenever the numbers move.
-STRIKE_COUNTS_PUBLISHED = True
+#
+# Switched off again on 2026-10-04, as an environment flag rather than a code
+# edit. QA on production found a waist-up boxing clip counted 33 kicks and 14
+# knees for one fighter, and the Accuracy Lab shows 10 real of 26 counted. Off,
+# no punch, kick or knee count appears on the report summary, the live
+# progress page, the replay chapter list or the story card; movement, guard,
+# balance, centre and pressure stay. Set WARRIORIQ_PUBLISH_STRIKE_COUNTS=1 to
+# show them again once strike classification meets the release targets on
+# /validation.
+STRIKE_COUNTS_PUBLISHED = os.getenv("WARRIORIQ_PUBLISH_STRIKE_COUNTS", "0").strip() == "1"
 
 # The kickboxing sentence of core.sport_policy, kept here under its old name
 # for callers that predate the per-sport policy; a test holds them equal. Every
@@ -413,7 +423,7 @@ def published_families(sport: str | None) -> tuple[str, ...]:
     """The strike families a report shows for this sport, singular.
 
     Only what the sport scores - a boxing report does not list kicks the
-    detector proposed - and only kicks while counts are not published.
+    detector proposed - and none at all while counts are not published.
     """
     try:
         scored = tuple(_FAMILY_OF_PLURAL[f] for f in sport_counted_families(sport or "kickboxing"))
@@ -421,7 +431,7 @@ def published_families(sport: str | None) -> tuple[str, ...]:
         scored = ("punch", "kick", "knee")
     if STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED:
         return scored
-    return tuple(f for f in scored if f == "kick")
+    return ()
 
 
 SHARE_CARD_NOTE = "Automatic estimate by WarriorIQ, not checked by a person."
@@ -459,6 +469,7 @@ def share_card(report: dict) -> dict | None:
     families = published_families(sport)
     totals = scorecard.get("totals") or {}
     scored = bool(scorecard.get("available")) and None not in (totals.get("A"), totals.get("B"))
+    metrics = report.get("metrics") or {}
     fighters = {}
     for fighter in ("A", "B"):
         item = statistics.get(fighter) or {}
@@ -473,17 +484,41 @@ def share_card(report: dict) -> dict | None:
         if weak is not None:
             working_on = str(weak.get("title") or "").removeprefix("Work on: ") or None
         fighters[fighter] = {
-            "strikes": strikes,
-            "total": sum(strikes.values()),
+            # None, not zero, while strike counts are switched off: the card
+            # then shows movement instead of "0 strikes thrown".
+            "strikes": strikes if families else None,
+            "total": sum(strikes.values()) if families else None,
+            "movement": _card_movement(metrics.get(fighter) or {}),
             "strength": strengths[0].get("title") if strengths else None,
             "working_on": working_on,
         }
     return {
         "sport": scorecard.get("sport_label") or (sport or "").replace("_", " ").title() or "Fight",
         "fighters": fighters,
-        "score": {"A": totals["A"], "B": totals["B"]} if scored else None,
+        # The estimated score is built from the strike counts, so it goes
+        # wherever they go.
+        "score": {"A": totals["A"], "B": totals["B"]} if scored and families else None,
         "note": SHARE_CARD_NOTE,
     }
+
+
+def _card_movement(metrics: dict) -> list[dict]:
+    """Guard, balance, centre and pressure as story-card rows, measured only.
+
+    Each is a 0-100 value in the units the report page prints: shares of the
+    round for the first three, and pressure "of 100" (core.squad.movement_value),
+    which maps the stored -1..1 reading onto 0..100.
+    """
+    rows = []
+    for key, label, unit in (("guard_index", "Guard up", "%"), ("balance_index", "Balanced", "%"),
+                             ("ring_center_control", "Held the centre", "%"),
+                             ("pressure_index", "Pressure", " of 100")):
+        value = metrics.get(key)
+        if not isinstance(value, (int, float)):
+            continue
+        share = (float(value) + 1.0) / 2.0 if key == "pressure_index" else float(value)
+        rows.append({"label": label, "value": int(round(max(0.0, min(1.0, share)) * 100)), "unit": unit})
+    return rows
 
 
 def observed_summary(report: dict) -> dict | None:
@@ -615,6 +650,9 @@ def unattributed_kick_total(report: dict) -> dict | None:
     # With counts published this is every family the sport scores; the
     # function keeps its name so callers and stored reports stay compatible.
     shown = published_families((report.get("scorecard") or {}).get("sport"))
+    if not shown:
+        # Strike counts are switched off: a total of none would read as zero.
+        return None
     landed_key = {"punch": "punches_landed", "kick": "kicks_landed", "knee": "knees_landed"}
     attempts = sum(int(row.get("%s_attempts" % family) or 0) for row in rows for family in shown)
     landed_values = [row.get(landed_key[family]) for row in rows for family in shown]
@@ -654,6 +692,9 @@ def kick_minimum_check(report: dict) -> dict | None:
     never allege a shortfall, so it costs nothing a fighter can be penalised
     for. Same measurement, same direction, as `observed_summary`.
     """
+    if not STRIKE_COUNTS_PUBLISHED and not STRIKE_COUNTS_PRECISION_VALIDATED:
+        # "N kicks seen" is a kick count, and strike counts are switched off.
+        return None
     ruleset = ((report.get("scorecard") or {}).get("ruleset")
                or (report.get("request") or {}).get("ruleset"))
     if not ruleset:

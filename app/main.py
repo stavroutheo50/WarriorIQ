@@ -2086,6 +2086,23 @@ def _estimate_score_withheld_for_punches(report: dict) -> None:
     )
 
 
+def _withhold_score_while_counts_are_off(report: dict) -> None:
+    """No estimated score while strike counts are switched off.
+
+    The estimated score is built from the same automatic strike counts the
+    flag withholds (core.report.STRIKE_COUNTS_PUBLISHED), so a report stored
+    while counts were on loses its score on read too. Never written back.
+    """
+    if STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED:
+        return
+    scorecard = report.get("scorecard") or {}
+    if scorecard.get("available") or scorecard.get("status") == "punch_counting_unavailable":
+        report["scorecard"] = {
+            **scorecard, "available": False, "totals": {"A": None, "B": None}, "rounds": [],
+            "winner_estimate": None, "status": "strike_counts_off",
+        }
+
+
 def _withhold_unverified_action_report(report: dict, reason: str) -> None:
     ruleset = report.get("setup", {}).get("ruleset", "K1")
     round_numbers = [int(item["number"]) for item in report.get("rounds", []) if item.get("selected", True)]
@@ -4618,6 +4635,7 @@ def progress_page(request: Request, job_id: str):
         # The same counting policy as the upload page and the report, so the
         # live view cannot claim "leg strikes only" above a feed of punches.
         "live_counting_note": counting_policy(_job_sport(job)).live_note,
+        "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
     })
 
 
@@ -4629,6 +4647,20 @@ def _public_job_status(job_id: str, job: dict) -> dict:
         "live_events", "provisional_stats", "latest_observation", "focus_fighter", "analysis_run_id",
     }
     payload = {key: value for key, value in job.items() if key in public_fields}
+    if not STRIKE_COUNTS_PUBLISHED:
+        # No strike counts on the live page while they are switched off: no
+        # event feed, and of the provisional statistics only how much of each
+        # fighter was observed. Done here, not in the page, so the numbers are
+        # not sent at all.
+        payload["live_events"] = []
+        stats = payload.get("provisional_stats") or {}
+        payload["provisional_stats"] = {
+            "attempt_counts_available": False, "action_labels_available": False,
+            "fighters": {
+                fighter: {"observation_coverage": (item or {}).get("observation_coverage")}
+                for fighter, item in (stats.get("fighters") or {}).items()
+            },
+        }
     payload.setdefault("job_id", job_id)
     payload.setdefault("video_duration_seconds", job.get("video_duration", 0.0))
     # Where the analysed span actually starts: reported by the run once it
@@ -4865,6 +4897,15 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
     # coverage, and a taekwondo report said "None were clear enough" above a
     # panel counting 28 kicks - both sending the athlete to redo a selection
     # or refilm a bout that was fine.
+    if status == "strike_counts_off":
+        return {
+            "reason": ("A score is built from counted strikes, and WarriorIQ does not count strikes "
+                       "until its counting is accurate enough."),
+            "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+            "disclaimer": ("No score is shown. A score is built from counted strikes, and automatic "
+                           "strike counting is switched off until it is accurate enough. Movement, "
+                           "guard, balance, centre and pressure below are unaffected."),
+        }
     if status == "punch_counting_unavailable":
         return {
             "reason": (
@@ -5071,6 +5112,7 @@ def result_page(request: Request, job_id: str):
     # posts numbers as the fighter's own, stays off until they are verified.
     _pin_sport_to_fight(request, report.get("scorecard", {}).get("sport") or _job_sport(job))
     _estimate_score_withheld_for_punches(report)
+    _withhold_score_while_counts_are_off(report)
     score_withheld = _score_withheld(report, job_id)
     # The scorecard box prints the disclaimer stored when the fight was
     # analysed. For a score withheld because strike counting is not validated,
@@ -5114,7 +5156,8 @@ def result_page(request: Request, job_id: str):
         # analysis already on disk gains these sections without being re-run.
         "visuals": (report_visuals(
             report, _visual_focus(report),
-            outcomes_counted=bool((report.get("statistics") or {}).get("action_labels_available")),
+            outcomes_counted=(bool((report.get("statistics") or {}).get("action_labels_available"))
+                              and STRIKE_COUNTS_PUBLISHED),
         ) if identity_trusted else None),
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,

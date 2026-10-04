@@ -4117,64 +4117,15 @@ class ObservedSummaryTests(unittest.TestCase):
                     "total_strikes": sum(counts)}
         return {"statistics": {"fighters": {"A": fighter(cov_a, a), "B": fighter(cov_b, b)}}}
 
-    # The withholding path, still reachable with the publish switch off.
+    # The kicks-only path these tests pinned is gone: with counts switched
+    # off nothing is counted (QA, 2026-10-04 - a waist-up boxing clip gave
+    # 33 kicks). The reasoning about knees and punches still holds for the
+    # published path and is recorded in core/report.py observed_summary.
     @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
-    def test_it_reports_kicks_and_withholds_punches(self):
-        """Punches are counted internally and deliberately not shown.
-
-        Every proposed strike in three fights was checked against the video:
-
-            fight 1   punches reported 11, actually thrown  0
-            fight 2   punches reported  3, actually thrown  2
-            fight 3   punches reported 14, actually thrown  3
-            fight 1   kicks   reported  7, actually thrown  7
-            fight 2   kicks   reported  4, actually thrown  4
-            fight 3   kicks   reported  9, actually thrown  8
-
-        The kick count is right in all three and the punch count is inflated
-        by eleven in two. Individual kick events are only 27% precise, but the
-        errors cancel - false kicks offset missed ones - so the count survives
-        where the events do not. Punches have no such luck.
-        """
+    def test_with_counts_off_there_is_no_summary(self):
         from core.report import observed_summary
 
-        seen = observed_summary(self._report())["fighters"]
-        self.assertEqual(seen["A"]["families"], {"kick": 1})
-        self.assertNotIn("punch", seen["A"]["families"])
-        self.assertEqual(seen["A"]["actions_evidenced"], 1)
-        # The withheld number is carried so the page can say the omission is
-        # deliberate rather than leaving a coach thinking their boxer threw
-        # nothing with the hands.
-        self.assertEqual(seen["A"]["punches_withheld"], 1)
-
-    # The withholding path, still reachable with the publish switch off.
-    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
-    def test_a_knee_is_not_counted_as_a_leg_strike(self):
-        """It used to be, and the reason was sound until it was measured.
-
-        A knee and a round kick are both a leg arriving, so a misnamed knee
-        was still a leg and the count survived the confusion. Labelling the
-        HD bout at family level found the confusion does not stop at the leg:
-        of five proposed knees, **none was a knee** - three were kicks and two
-        were punches.
-
-        Punches are the family this report withholds on purpose. A bucket
-        that is 40% punches republishes them under another name, so the bucket
-        goes. The cost is three real kicks per five proposals, an under-count,
-        which is the direction everything on this page already errs in.
-        """
-        from core.report import observed_summary
-
-        # A fighter whose only evidenced actions are knees now has nothing to
-        # report, rather than a kick count built from misnamed punches.
-        self.assertIsNone(observed_summary(self._report(a=(0, 0, 0), b=(0, 0, 1))))
-
-        seen = observed_summary(self._report(a=(0, 2, 3)))["fighters"]
-        self.assertEqual(seen["A"]["families"], {"kick": 2})
-        self.assertEqual(seen["A"]["actions_evidenced"], 2)
-        # And the omission is stated rather than silent, the same way the
-        # withheld punches are.
-        self.assertEqual(seen["A"]["knees_withheld"], 3)
+        self.assertIsNone(observed_summary(self._report(a=(3, 2, 1), b=(1, 4, 2))))
 
     def test_knees_reach_the_attempt_tier_at_all(self):
         from types import SimpleNamespace
@@ -4248,23 +4199,6 @@ class ObservedSummaryTests(unittest.TestCase):
         # Without a sport named, nothing changes.
         self.assertTrue(_live_attempt_reliable(event("kick")))
 
-    # The withholding path, still reachable with the publish switch off.
-    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
-    def test_it_agrees_with_the_statistics_the_rest_of_the_page_shows(self):
-        """Two honest numbers for one thing is worse than either alone.
-
-        The counts are read from the same statistics block rather than
-        recounted from the raw event list, which has not been through the
-        confidence bar the statistics apply.
-        """
-        from core.report import observed_summary
-
-        report = self._report(a=(3, 2, 1))
-        stats = report["statistics"]["fighters"]["A"]
-        seen = observed_summary(report)["fighters"]["A"]
-        # Kicks, from the same statistics block - not the punch total, not
-        # the knee total, and not a recount of the raw event list.
-        self.assertEqual(seen["actions_evidenced"], stats["kick_attempts"])
 
     def test_the_share_of_the_round_travels_with_the_count(self):
         from core.report import observed_summary
@@ -4329,8 +4263,7 @@ class ObservedSummaryTests(unittest.TestCase):
         rendered = re.sub(r"\{#.*?#\}", "", page, flags=re.S)
         self.assertNotIn("at least {{seen.actions_evidenced}}", rendered)
         self.assertNotIn("the real numbers are higher", rendered)
-        self.assertIn("Kicks only.", rendered)
-        self.assertIn("punch count was overstated", rendered)
+        self.assertIn("No strike counts in this report.", rendered)
 
     def test_the_page_shows_it_only_when_the_score_is_withheld(self):
         """Built only instead of a scorecard, and never when identity failed:

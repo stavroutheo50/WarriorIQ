@@ -1637,6 +1637,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         if live_action_trusted else events
     )
     classifier["actions_discarded_out_of_range"] = out_of_range_actions
+    # Kicks and knees not emitted because the leg that would have thrown them
+    # was not visible (waist-up framing, legs out of shot).
+    classifier["leg_actions_discarded_legs_not_visible"] = {
+        fighter: int(state.legs_hidden_discards) for fighter, state in action_engine.states.items()}
     # Always against the final rounds (detected or scheduled), so the plain
     # numbers can be given per round. Idempotent after a detection above.
     metrics.rebucket_rounds(rounds)

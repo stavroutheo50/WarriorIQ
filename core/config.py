@@ -603,6 +603,15 @@ class Settings:
     )
     min_extension_gain: float = 0.07
     temporal_probability_threshold: float = 0.60
+    # A kick or knee needs the leg that threw it to be seen. QA, 2026-10-04: a
+    # waist-up boxing clip produced 33 kicks and 14 knees for one fighter,
+    # because the pose model still returns knee and ankle positions for legs
+    # outside the picture - guesses, at low confidence, that jitter like
+    # strikes. A leg joint counts as seen at this confidence or above, and the
+    # knee and ankle of the leg must both be seen on this share of an action's
+    # samples, or no kick or knee is emitted for it.
+    min_leg_keypoint_confidence: float = float(os.getenv("WARRIORIQ_MIN_LEG_KEYPOINT_CONF", "0.5"))
+    min_leg_visible_share: float = 0.8
 
     # ------------------------------------------------------------
     # Contact / outcome

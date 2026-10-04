@@ -133,8 +133,9 @@ def counting_policy(sport: str | None, *, published: bool | None = None,
     if published or validated:
         counted, withheld = scored, ()
     else:
-        counted = tuple(f for f in scored if f == "kicks")
-        withheld = tuple(f for f in scored if f != "kicks")
+        # Switched off, nothing is counted - the same answer as
+        # core.report.published_families.
+        counted, withheld = (), scored
     estimates = bool(counted) and not validated
     not_analysed = _NOT_ANALYSED.get(sport, ()) if sport_unobserved(sport) else ()
 
@@ -159,7 +160,7 @@ def counting_policy(sport: str | None, *, published: bool | None = None,
                      "scoring are not shown here; the report adds them as estimates once the "
                      "whole fight is read.")
     else:
-        live_note = ("<strong>Live view:</strong> no strike counts for this sport yet. "
+        live_note = ("<strong>Live view:</strong> no strike counts yet. "
                      "Identity and movement are being measured.")
 
     if counted:

@@ -14,19 +14,26 @@ import unittest.mock
 import numpy as np
 
 
-# The kicks-only path, still reachable with the publish switch off.
-@unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
 class UnattributedKickTotalTests(unittest.TestCase):
-    """Identity failed, and the page printed 31, 24 and 34 for the same kicks."""
+    """Identity failed, and the page printed 31, 24 and 34 for the same kicks.
+
+    One combined total, from the statistics block, of every family the report
+    publishes - and none at all while strike counts are switched off (the
+    kicks-only mode this class used to pin was removed on 2026-10-04).
+    """
 
     @staticmethod
-    def _report(a=(9, None), b=(22, None), knees=(1, 2)):
-        return {"statistics": {"fighters": {
-            "A": {"kick_attempts": a[0], "kicks_landed": a[1], "knee_attempts": knees[0]},
-            "B": {"kick_attempts": b[0], "kicks_landed": b[1], "knee_attempts": knees[1]},
+    def _report(a=(9, None), b=(22, None), knees=(1, 2), sport="taekwondo"):
+        # Taekwondo scores punches and kicks; punches are left at zero so the
+        # kick numbers are the total.
+        return {"scorecard": {"sport": sport}, "statistics": {"fighters": {
+            "A": {"punch_attempts": 0, "punches_landed": 0 if a[1] is not None else None,
+                  "kick_attempts": a[0], "kicks_landed": a[1], "knee_attempts": knees[0]},
+            "B": {"punch_attempts": 0, "punches_landed": 0 if b[1] is not None else None,
+                  "kick_attempts": b[0], "kicks_landed": b[1], "knee_attempts": knees[1]},
         }}}
 
-    def test_one_total_of_kick_attempts_without_knees(self):
+    def test_one_total_without_knees_where_the_sport_scores_none(self):
         from core.report import unattributed_kick_total
 
         total = unattributed_kick_total(self._report())
@@ -37,6 +44,12 @@ class UnattributedKickTotalTests(unittest.TestCase):
 
         self.assertIsNone(unattributed_kick_total(self._report(a=(9, 3)))["landed"])
         self.assertEqual(unattributed_kick_total(self._report(a=(9, 3), b=(22, 5)))["landed"], 8)
+
+    @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
+    def test_no_total_while_counts_are_off(self):
+        from core.report import unattributed_kick_total
+
+        self.assertIsNone(unattributed_kick_total(self._report()))
 
     def test_no_statistics_means_no_total(self):
         from core.report import unattributed_kick_total
@@ -191,18 +204,18 @@ class ReportedFamiliesTests(unittest.TestCase):
         self.assertTrue(_reported_strike_families("boxing")["no_strike_counts"])
         self.assertEqual(_sport_coverage_badge("boxing")["label"], "No punch counts yet")
 
-    # The withholding path, still reachable with the publish switch off.
+    # With the publish switch off nothing is counted, kicks included.
     @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
     @unittest.mock.patch("app.main.STRIKE_COUNTS_PUBLISHED", False)
-    def test_kickboxing_says_kicks_only(self):
+    def test_kickboxing_says_no_strike_counts(self):
         from app.main import _reported_strike_families
         from core.report import STRIKE_COUNTS_PRECISION_VALIDATED
 
         if STRIKE_COUNTS_PRECISION_VALIDATED:
             self.skipTest("punch counts are published")
         families = _reported_strike_families("kickboxing")
-        self.assertEqual(families["reported_families"], "kicks")
-        self.assertIn("punches", families["withheld_families"])
+        self.assertTrue(families["no_strike_counts"])
+        self.assertIn("kicks", families["withheld_families"])
 
 
 class AnkleVisibilityTests(unittest.TestCase):

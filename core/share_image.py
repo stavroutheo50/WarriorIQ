@@ -81,17 +81,23 @@ def preview_png(card: dict, side: str, corner: str | None) -> bytes:
     cv2.rectangle(canvas, (right - size[0] - 36, 58), (right, 108), colour, 2, cv2.LINE_AA)
     _text(canvas, label, right - 18, 93, 0.8, colour, 2, right=True)
 
-    # The total, big, then what it is made of.
-    _text(canvas, str(int(me["total"])), x - 6, 380, 6.0, INK, 14)
-    _text(canvas, "strikes thrown", x, 440, 1.0, MUTED, 2)
-
-    families = [family for family in ("punch", "kick", "knee") if family in me["strikes"]]
-    top = max([1] + [int(me["strikes"][family]) for family in families])
     left, bar_right, y = 560, W - 64, 230
-    for family in families:
-        value = int(me["strikes"][family])
-        _text(canvas, FAMILY_LABELS[family], left, y, 1.0, INK, 2)
-        _text(canvas, str(value), bar_right, y, 1.0, INK, 2, right=True)
+    if me.get("strikes") is not None:
+        # The total, big, then what it is made of.
+        _text(canvas, str(int(me["total"])), x - 6, 380, 6.0, INK, 14)
+        _text(canvas, "strikes thrown", x, 440, 1.0, MUTED, 2)
+        families = [family for family in ("punch", "kick", "knee") if family in me["strikes"]]
+        rows = [(FAMILY_LABELS[family], int(me["strikes"][family]), str(int(me["strikes"][family])))
+                for family in families]
+        top = max([1] + [value for _, value, _ in rows])
+    else:
+        # Strike counts switched off: movement only, each on a 0-100 scale.
+        rows = [(_ascii(row["label"]), int(row["value"]), f"{int(row['value'])}{_ascii(row.get('unit') or '')}")
+                for row in me.get("movement") or []]
+        top = 100
+    for label, value, shown in rows:
+        _text(canvas, label, left, y, 1.0, INK, 2)
+        _text(canvas, shown, bar_right, y, 1.0, INK, 2, right=True)
         cv2.rectangle(canvas, (left, y + 18), (bar_right, y + 30), TRACK, -1, cv2.LINE_AA)
         filled = left + max(12, int((bar_right - left) * value / top))
         cv2.rectangle(canvas, (left, y + 18), (filled, y + 30), CYAN, -1, cv2.LINE_AA)
@@ -103,7 +109,8 @@ def preview_png(card: dict, side: str, corner: str | None) -> bytes:
         _text(canvas, score, bar_right, 510, 1.6, INK, 3, right=True)
 
     _text(canvas, "warrioriq.eu", x, 580, 1.1, INK, 2)
-    _text(canvas, "Automatic estimate, not checked by a person", W - 64, 578, 0.6, MUTED, 1, right=True)
+    _text(canvas, "Automatic estimate, not checked by a person" if me.get("strikes") is not None
+          else "Measured automatically from movement", W - 64, 578, 0.6, MUTED, 1, right=True)
     ok, encoded = cv2.imencode(".png", canvas)
     if not ok:
         raise RuntimeError("could not encode the preview image")
