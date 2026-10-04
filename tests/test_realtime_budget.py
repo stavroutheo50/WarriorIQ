@@ -169,3 +169,26 @@ def test_the_reference_clip_is_analysed_within_its_own_length(tmp_path):
     wall = time.perf_counter() - started
     assert report["video"]["analysed_span"]["whole_video"] is True
     assert wall <= seconds, f"took {wall:.1f}s for {seconds:.0f}s of video"
+
+
+def test_nobody_anywhere_costs_three_frames_per_larger_size(tmp_path):
+    from core import preflight
+
+    # Measured: 50 s on CPU for a 0:06 clip with nobody in it, eight frames at
+    # each of 640, 1600 and 2048. Still climbs - distant fighters are found
+    # only at the larger sizes - but looks before paying for every frame.
+    model = _FakeModel(lambda size: [])
+    report = preflight.probe(str(_video(tmp_path / "v.mp4")), model)
+    assert not report.measured
+    assert model.sizes == [640] * 8 + [1600] * 3 + [2048] * 3
+
+
+def test_distant_fighters_found_at_a_larger_size_are_measured_on_every_frame(tmp_path):
+    from core import preflight
+
+    small = [[100, 300, 130, 380], [700, 300, 730, 380]]
+    model = _FakeModel(lambda size: small if size >= 1600 else [])
+    report = preflight.probe(str(_video(tmp_path / "v.mp4")), model)
+    assert report.measured
+    assert model.sizes.count(1600) == 8
+    assert report.people_in_frame == 2

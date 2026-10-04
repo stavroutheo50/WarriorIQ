@@ -81,6 +81,9 @@ PROBE_SIZES = (1600, 2048)
 # When the subjects are already big at 640 the recommendation is the 640 floor
 # whichever size measured them, so nothing about the decision changes.
 FIRST_PROBE_SIZE = 640
+# Where in the sample (as a share of it: first, middle, last) the larger sizes
+# look first when the smaller one found nobody at all.
+NOBODY_CHECK_FRAMES = (0.0, 0.5, 1.0)
 
 # Below this the subject cannot be brought up to target even at the largest
 # inference size we are willing to run, so the shortfall is reported rather
@@ -285,10 +288,22 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
 
     heights, counts, ankles = [], [], []
     for size in (FIRST_PROBE_SIZE, *PROBE_SIZES):
+        # Nobody at all at the smaller size: look at a few frames at this one
+        # before paying for all of them. Measured on a 0:06 clip with nobody in
+        # it, the full climb was 24 model runs at up to 2048 - 50 s on CPU -
+        # to conclude "no people". If none of these finds anyone the size is
+        # done; if one does, the rest are measured exactly as before.
+        order = range(len(frames))
+        quick = size != FIRST_PROBE_SIZE and not any(counts) and len(frames) > len(NOBODY_CHECK_FRAMES)
+        if quick:
+            first_look = sorted({int(round(f * (len(frames) - 1))) for f in NOBODY_CHECK_FRAMES})
+            order = first_look + [i for i in range(len(frames)) if i not in first_look]
         heights, counts, ankles = [], [], []
         try:
-            for frame in frames:
-                result = model.predict(frame, imgsz=size, conf=SETTINGS.detection_conf,
+            for position, index in enumerate(order):
+                if quick and position == len(first_look) and not any(counts):
+                    break
+                result = model.predict(frames[index], imgsz=size, conf=SETTINGS.detection_conf,
                                        classes=[0], verbose=False)[0]
                 if result.boxes is None or not len(result.boxes):
                     counts.append(0)
