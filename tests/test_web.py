@@ -1690,7 +1690,7 @@ class PublicPageTests(unittest.TestCase):
 
     def test_training_plan_is_separate_from_coach_card(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
-        self.assertIn("Training plan · Fighter", template)
+        self.assertIn("Training plan · {{ names.get(fighter, 'Fighter ' ~ fighter) }}", template)
 
     def test_fighter_selection_is_manual_only(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "select.html").read_text(encoding="utf-8")
@@ -1907,8 +1907,8 @@ class PublicPageTests(unittest.TestCase):
     def test_result_explains_analysis_quality_without_calling_coverage_accuracy(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
         self.assertIn('class="analysis-quality', template)
-        self.assertIn("Fighter A observed", template)
-        self.assertIn("Fighter B observed", template)
+        self.assertIn("{{ names.A }} observed", template)
+        self.assertIn("{{ names.B }} observed", template)
         self.assertIn("It is not ground-truth identity or action accuracy", template)
 
     def test_progress_uses_supported_movement_metrics_when_actions_are_unvalidated(self):

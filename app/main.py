@@ -5089,6 +5089,61 @@ def _job_sport(job: dict) -> str | None:
         return None
 
 
+def _fighter_names(request: Request, job: dict, report: dict) -> dict:
+    """What the report calls each side.
+
+    The fighter the upload was filed under (the roster entry chosen on the
+    setup page) is the report's focus: the selection page asks "which one is
+    <name>?" and that answer is the focus fighter. So that side carries the
+    name, and the other side is the opponent. The report said "Fighter A /
+    Fighter B" while the library already showed the name (QA, 2026-10-04).
+    Without a filed fighter, the letters stay.
+    """
+    names = {"A": "Fighter A", "B": "Fighter B"}
+    profile_id = _profile_id(request)
+    if profile_id is None or not str(job.get("fighter_id") or "").isdigit():
+        return names
+    fighter = get_fighter(profile_id, int(job["fighter_id"]))
+    name = " ".join(str((fighter or {}).get("name") or "").split())
+    if not name:
+        return names
+    video = report.get("video") or {}
+    focus = str(job.get("focus_fighter") or video.get("focus_fighter") or "A")
+    if focus not in names:
+        return names
+    names[focus] = name
+    names["B" if focus == "A" else "A"] = "Opponent"
+    return names
+
+
+def _name_the_fighters(report: dict, names: dict) -> None:
+    """Put the names into the coaching text, which was written as "Fighter A".
+
+    core/coaching.py writes its sentences at analysis time with the letters;
+    the page swaps them for what _fighter_names calls each side. Only the
+    coaching and training text - nothing that is matched or stored - and never
+    written back.
+    """
+    swaps = {f"Fighter {side}": name for side, name in names.items() if name != f"Fighter {side}"}
+    if not swaps:
+        return
+
+    def rename(value):
+        if isinstance(value, str):
+            for letter, name in swaps.items():
+                value = value.replace(letter, name)
+            return value
+        if isinstance(value, list):
+            return [rename(item) for item in value]
+        if isinstance(value, dict):
+            return {key: rename(item) for key, item in value.items()}
+        return value
+
+    for key in ("coaching", "training_plan", "training_progression"):
+        if key in report:
+            report[key] = rename(report[key])
+
+
 def _corner_labels(job: dict) -> dict:
     """The corner each fighter was in, as the person who drew the boxes said.
 
@@ -5181,10 +5236,12 @@ def result_page(request: Request, job_id: str):
     if report.get("mode") == "solo":
         # One person, no opponent and no strikes (core/solo.py): its own page,
         # since every section of the fight report is about two fighters.
+        solo_name = _fighter_names(request, job, report)["A"]
         return templates.TemplateResponse(request=request, name="solo_result.html", context={
             "request": request, "job_id": job_id, "report": report,
             "analysed_span": _analysed_span_summary(report),
             "analysis_build": result_check(report),
+            "subject_name": None if solo_name == "Fighter A" else solo_name,
         })
     if "key_moments" not in report:
         report["key_moments"] = [e for e in report.get("events", []) if e.get("outcome") in {"clean", "likely_landed"} and float(e.get("confidence", 0)) >= .72 and float(e.get("contact_confidence", 0)) >= .62][:18]
@@ -5221,6 +5278,8 @@ def result_page(request: Request, job_id: str):
     _pin_sport_to_fight(request, report.get("scorecard", {}).get("sport") or _job_sport(job))
     _estimate_score_withheld_for_punches(report)
     _withhold_score_while_counts_are_off(report)
+    names = _fighter_names(request, job, report)
+    _name_the_fighters(report, names)
     score_withheld = _score_withheld(report, job_id)
     # The scorecard box prints the disclaimer stored when the fight was
     # analysed. For a score withheld because strike counting is not validated,
@@ -5245,6 +5304,7 @@ def result_page(request: Request, job_id: str):
     response = templates.TemplateResponse(request=request, name="result.html", context={
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
+        "names": names,
         "analysed_span": _analysed_span_summary(report),
         "analysis_build": result_check(report),
         "fight_footage": _fight_footage_summary(report),

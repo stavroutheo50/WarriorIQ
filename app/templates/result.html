@@ -2,6 +2,10 @@
 {% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
 {% block title %}Fight Report · WarriorIQ{% endblock %}
 {% block content %}
+{#- What each side is called: the filed fighter's name for their side, from the
+    roster, where the report used to say "Fighter A / Fighter B" while the
+    library already showed the name (QA, 2026-10-04). app.main._fighter_names. -#}
+{% set names = names|default({'A': 'Fighter A', 'B': 'Fighter B'}, true) %}
 <a class="quiet-back" href="/history">← Fight library</a>
 {# Whether the one thing that blocks everything else went wrong. When identity
    fails there is no score, no per-fighter number and no scorecard - so calling
@@ -52,7 +56,7 @@
 {% if numbers.state == 'no_fight' %}<div class="notice bad" role="alert"><strong>Too little fight footage to measure.</strong> {{ numbers.message }} Upload a clip where the two fighters are in shot and fighting for most of it, and pick a frame where both are clearly visible.</div>
 {% elif fight_footage and fight_footage.note %}<p class="analysed-span-note" role="note">{{ fight_footage.note }}</p>{% endif %}
 <section class="result-overview" aria-label="Fight summary" data-motion-sequence="result-summary">
-  <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="Fighter A portrait" data-hide-on-error><span>{% if corners and corners.A %}<small>{{corners.A}}</small>{% endif %}<strong>Fighter A</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="Fighter B portrait" data-hide-on-error><span>{% if corners and corners.B %}<small>{{corners.B}}</small>{% endif %}<strong>Fighter B</strong></span></div></div>
+  <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="{{ names.A }} portrait" data-hide-on-error><span>{% if corners and corners.A %}<small>{{corners.A}}</small>{% endif %}<strong>{{ names.A }}</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="{{ names.B }} portrait" data-hide-on-error><span>{% if corners and corners.B %}<small>{{corners.B}}</small>{% endif %}<strong>{{ names.B }}</strong></span></div></div>
   <div class="result-context"><div><span>Ruleset</span><strong>{{report.scorecard.ruleset_label}}</strong></div>{#- The rounds the analysis used: the ones it found in the footage
     (core/round_detect.py), or the whole video as one when it found no break.
     Nothing here is typed in any more. Older reports without a round list
@@ -62,8 +66,8 @@
 <div><span>Format</span><strong>{{ found_rounds|length }} round{{ '' if found_rounds|length == 1 else 's' }} · {% if found_rounds|length > 1 %}about {% endif %}{{ '%d:%02d'|format(each // 60, each % 60) }}{% if found_rounds|length > 1 %} each{% endif %}</strong></div>
 {% else %}{% set fmt_secs = report.setup.round_duration_seconds|int %}
 <div><span>Format</span><strong>{{report.setup.round_count}} × {% if fmt_secs >= 60 and fmt_secs % 60 == 0 %}{{ (fmt_secs / 60)|int }} min{% else %}{{ fmt_secs }}s{% endif %}</strong></div>
-{% endif %}{% if analysed_span %}<div><span>Analysed</span><strong>{{analysed_span.label}}</strong></div>{% endif %}{% if fight_footage %}<div><span>Fight footage analysed</span><strong>{{fight_footage.label}}</strong></div>{% endif %}<div><span>Report focus</span><strong>Fighter {{report.video.focus_fighter|default(report.video.analysis_target, true)}}</strong></div></div>
-  <div class="result-scoreline">{% if report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}Fighter {{report.scorecard.winner_estimate}} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
+{% endif %}{% if analysed_span %}<div><span>Analysed</span><strong>{{analysed_span.label}}</strong></div>{% endif %}{% if fight_footage %}<div><span>Fight footage analysed</span><strong>{{fight_footage.label}}</strong></div>{% endif %}<div><span>Report focus</span><strong>{% set rf = report.video.focus_fighter|default(report.video.analysis_target, true) %}{{ names.get(rf, 'Fighter ' ~ rf) }}</strong></div></div>
+  <div class="result-scoreline">{% if report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}{{ names.get(report.scorecard.winner_estimate, 'Fighter ' ~ report.scorecard.winner_estimate) }} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
   {# When the score is withheld the page used to stop here. It knows more than
      nothing: what each fighter was seen doing, and over how much of the round.
      Every number below is a floor with its denominator attached, and none of
@@ -92,7 +96,7 @@
       shortfall by the fighter. The kicks seen are shown so you can check them against the video.
       {% endif %}</p>
     <table class="kick-minimum-table">
-      <thead><tr><th>Round</th><th>Fighter A</th><th>Fighter B</th></tr></thead>
+      <thead><tr><th>Round</th><th>{{ names.A }}</th><th>{{ names.B }}</th></tr></thead>
       <tbody>
         {% for item in kick_minimum.rounds %}
         <tr>
@@ -160,8 +164,8 @@
   </div>
   {% if movement.available %}
   <div class="grid">
-    <div><div class="score">{{movement.totals.A}}</div><div class="muted">Fighter A{% if movement.leader == 'A' %} · ahead{% endif %}</div></div>
-    <div><div class="score">{{movement.totals.B}}</div><div class="muted">Fighter B{% if movement.leader == 'B' %} · ahead{% endif %}</div></div>
+    <div><div class="score">{{movement.totals.A}}</div><div class="muted">{{ names.A }}{% if movement.leader == 'A' %} · ahead{% endif %}</div></div>
+    <div><div class="score">{{movement.totals.B}}</div><div class="muted">{{ names.B }}{% if movement.leader == 'B' %} · ahead{% endif %}</div></div>
   </div>
   <p class="small">Scored on <b>{{movement.criteria_scored|join(', ')}}</b>.
      Not scored: <b>{{movement.criteria_excluded|join(', ')}}</b>.</p>
@@ -217,7 +221,7 @@
   {% if strike_counts_published %}
   {% if not sc.insufficient_evidence and sc.reward_shares %}
   <div class="weapon-mix">
-    <p class="weapon-mix-caption">Share of scoring value the ruleset places on each family, against the share of Fighter {{primary}}'s {{sc.attempts_read}} detected attempts.</p>
+    <p class="weapon-mix-caption">Share of scoring value the ruleset places on each family, against the share of {{ names.get(primary, 'Fighter ' ~ primary) }}'s {{sc.attempts_read}} detected attempts.</p>
     {% for family, reward in sc.reward_shares.items() %}
     {% set thrown = ((sc.observed_shares.get(family, 0)) * 100) | round | int %}
     {% set pays = (reward * 100) | round | int %}
@@ -225,7 +229,7 @@
       <b>{{sc.family_labels[family]}}</b>
       <div class="weapon-bars">
         <span class="weapon-bar reward" style="--w:{{pays}}%"><small>Ruleset pays</small><i></i><b>{{pays}}%</b></span>
-        <span class="weapon-bar thrown" style="--w:{{thrown}}%"><small>Fighter {{primary}} threw</small><i></i><b>{{thrown}}%</b></span>
+        <span class="weapon-bar thrown" style="--w:{{thrown}}%"><small>{{ names.get(primary, 'Fighter ' ~ primary) }} threw</small><i></i><b>{{thrown}}%</b></span>
       </div>
     </div>
     {% endfor %}
@@ -254,7 +258,7 @@
 {% endif %}
 
 <section class="numbers-first-report" aria-labelledby="numbersTitle" data-motion-sequence="report-numbers">
-  <header><div><span class="eyebrow">Performance report · Fighter {{primary}}</span><h2 id="numbersTitle">{% if numbers.state == 'unverified' %}Unverified numbers &mdash; may include other people{% else %}Your fight in numbers{% endif %}</h2></div><div class="numbers-score">{% if report.scorecard.available %}<span>Estimated score</span><strong>{{report.scorecard.totals.A}}–{{report.scorecard.totals.B}}</strong>{% else %}<span>Score</span><strong>—</strong><small>{% if score_withheld %}{{score_withheld.fix}}{% if score_withheld.action %} <a class="recheck-link" href="{{score_withheld.action.url}}">{{score_withheld.action.label}}</a>{% endif %}{% else %}Withheld{% endif %}</small>{% endif %}</div></header>
+  <header><div><span class="eyebrow">Performance report · {{ names.get(primary, 'Fighter ' ~ primary) }}</span><h2 id="numbersTitle">{% if numbers.state == 'unverified' %}Unverified numbers &mdash; may include other people{% else %}Your fight in numbers{% endif %}</h2></div><div class="numbers-score">{% if report.scorecard.available %}<span>Estimated score</span><strong>{{report.scorecard.totals.A}}–{{report.scorecard.totals.B}}</strong>{% else %}<span>Score</span><strong>—</strong><small>{% if score_withheld %}{{score_withheld.fix}}{% if score_withheld.action %} <a class="recheck-link" href="{{score_withheld.action.url}}">{{score_withheld.action.label}}</a>{% endif %}{% else %}Withheld{% endif %}</small>{% endif %}</div></header>
   {# Measured every fight, whatever the action model is doing. These come from
      pose geometry, so they survive the evidence gate that hides strike counts -
      which is why the report used to collapse to almost nothing. Big numbers,
@@ -329,7 +333,7 @@
   {% macro secs(v) %}{% if v is none %}—{% elif v >= 60 %}{{ '%d:%02d'|format((v//60)|int, (v%60)|int) }}{% else %}{{ '%.0f'|format(v) }} s{% endif %}{% endmacro %}
   {% macro row(label, a, b, note='') %}<div role="row"><span role="rowheader">{{ label }}{% if note %}<small>{{ note }}</small>{% endif %}</span><b role="cell" class="wiq-num">{{ a }}</b><b role="cell" class="wiq-num">{{ b }}</b></div>{% endmacro %}
   <section class="fight-numbers" id="report-numbers" aria-labelledby="fightNumbersTitle">
-    <div class="numbers-section-heading"><div><span class="eyebrow">Every number</span><h2 id="fightNumbersTitle">How the fight went, in numbers</h2></div><span>Fighter {{ primary }} · Fighter {{ opponent }}</span></div>
+    <div class="numbers-section-heading"><div><span class="eyebrow">Every number</span><h2 id="fightNumbersTitle">How the fight went, in numbers</h2></div><span>{{ names.get(primary, 'Fighter ' ~ primary) }} · {{ names.get(opponent, 'Fighter ' ~ opponent) }}</span></div>
     {% if mp %}
     <div class="fight-numbers-group" role="table" aria-label="Ring control">
       <h3>Ring control</h3>
@@ -391,7 +395,7 @@
   </div>
   <div class="weapon-problem-row">
     <article><span>Best weapon</span>{% if p.best_weapon %}<strong>{{p.best_weapon.technique|replace('_',' ')|title}}</strong><small>{{p.best_weapon.landed}} landed</small>{% else %}<strong>—</strong><small>No verified landing</small>{% endif %}</article>
-    <article><span>Biggest problem</span><strong>{% if o.landed|default(0) %}Defense{% else %}—{% endif %}</strong><small>{% if o.landed|default(0) %}{{o.landed}} strikes landed against Fighter {{primary}}{% else %}No verified landing against{% endif %}</small></article>
+    <article><span>Biggest problem</span><strong>{% if o.landed|default(0) %}Defense{% else %}—{% endif %}</strong><small>{% if o.landed|default(0) %}{{o.landed}} strikes landed against {{ names.get(primary, 'Fighter ' ~ primary) }}{% else %}No verified landing against{% endif %}</small></article>
   </div>
   <section class="fighter-comparison" aria-labelledby="comparisonTitle"><div class="numbers-section-heading"><div><span class="eyebrow">Fighter comparison</span><h2 id="comparisonTitle">{{primary}} vs {{opponent}}</h2></div><span>Higher offensive value is highlighted</span></div><div class="comparison-table" role="table" aria-label="Fighter comparison">
     {% for label,key,format in [('Attempts','attempts','number'),('Landed','landed','number'),('Accuracy','accuracy','percent'),('Punches landed','punches_landed','number'),('Kicks landed','kicks_landed','number'),('Knees landed','knees_landed','number'),('Combinations','combinations','number')] %}{% set av=p.get(key) %}{% set bv=o.get(key) %}<div role="row"><span role="rowheader">{{label}}</span><strong role="cell" data-count-up class="{% if av is not none and bv is not none and av > bv %}is-better{% endif %}">{% if av is none %}—{% elif format == 'percent' %}{{'%.0f'|format(av*100)}}%{% else %}{{av}}{% endif %}</strong><strong role="cell" data-count-up class="{% if av is not none and bv is not none and bv > av %}is-better{% endif %}">{% if bv is none %}—{% elif format == 'percent' %}{{'%.0f'|format(bv*100)}}%{% else %}{{bv}}{% endif %}</strong></div>{% endfor %}
@@ -405,7 +409,7 @@
       {% if denial_rate is not none %}<article><span>Defensive denial</span><strong data-count-up>{{'%.0f'|format(denial_rate*100)}}%</strong><small>opponent attempts blocked or evaded</small></article>{% endif %}
       {% if exposure_rate is not none %}<article><span>Clean exposure</span><strong data-count-up>{{'%.0f'|format(exposure_rate*100)}}%</strong><small>opponent attempts that landed</small></article>{% endif %}
     </div>
-    {% if p.attempts|default(0, true) > 0 and attack_mix %}<div class="attack-mix" aria-label="Fighter {{primary}} attack mix">{% set punch_mix=attack_mix.get('punch') %}{% set kick_mix=attack_mix.get('kick') %}{% set knee_mix=attack_mix.get('knee') %}<div><span>Punches</span><strong data-count-up>{% if punch_mix is not none %}{{'%.0f'|format(punch_mix*100)}}%{% else %}—{% endif %}</strong><i><b style="--mix-value:{{'%.1f'|format(punch_mix*100) if punch_mix is not none else 0}}%"></b></i></div><div><span>Kicks</span><strong data-count-up>{% if kick_mix is not none %}{{'%.0f'|format(kick_mix*100)}}%{% else %}—{% endif %}</strong><i><b style="--mix-value:{{'%.1f'|format(kick_mix*100) if kick_mix is not none else 0}}%"></b></i></div>{% if p.knee_attempts|default(0, true) > 0 and knee_mix is not none %}<div><span>Knees</span><strong data-count-up>{{'%.0f'|format(knee_mix*100)}}%</strong><i><b style="--mix-value:{{'%.1f'|format(knee_mix*100)}}%"></b></i></div>{% endif %}</div>{% endif %}
+    {% if p.attempts|default(0, true) > 0 and attack_mix %}<div class="attack-mix" aria-label="{{ names.get(primary, 'Fighter ' ~ primary) }} attack mix">{% set punch_mix=attack_mix.get('punch') %}{% set kick_mix=attack_mix.get('kick') %}{% set knee_mix=attack_mix.get('knee') %}<div><span>Punches</span><strong data-count-up>{% if punch_mix is not none %}{{'%.0f'|format(punch_mix*100)}}%{% else %}—{% endif %}</strong><i><b style="--mix-value:{{'%.1f'|format(punch_mix*100) if punch_mix is not none else 0}}%"></b></i></div><div><span>Kicks</span><strong data-count-up>{% if kick_mix is not none %}{{'%.0f'|format(kick_mix*100)}}%{% else %}—{% endif %}</strong><i><b style="--mix-value:{{'%.1f'|format(kick_mix*100) if kick_mix is not none else 0}}%"></b></i></div>{% if p.knee_attempts|default(0, true) > 0 and knee_mix is not none %}<div><span>Knees</span><strong data-count-up>{{'%.0f'|format(knee_mix*100)}}%</strong><i><b style="--mix-value:{{'%.1f'|format(knee_mix*100)}}%"></b></i></div>{% endif %}</div>{% endif %}
     {% if peak_round is not none %}<div class="round-performance-note"><strong>Most productive round: {{peak_round}}</strong><span>{{profile.get('peak_round_landed', 0)}} supported landing{{'' if profile.get('peak_round_landed') == 1 else 's'}}.</span>{% if profile.get('attempt_change') is not none %}<span>{% if profile.get('attempt_change') > 0 %}Round {{profile.get('closing_round')}} had {{profile.get('attempt_change')}} more attempts than round {{profile.get('opening_round')}}.{% elif profile.get('attempt_change') < 0 %}Round {{profile.get('closing_round')}} had {{profile.get('attempt_change')|abs}} fewer attempts than round {{profile.get('opening_round')}}.{% else %}Rounds {{profile.get('opening_round')}} and {{profile.get('closing_round')}} had the same attempt total.{% endif %}</span>{% endif %}</div>{% endif %}
     <p class="small muted">Defensive denial uses the opponent’s blocked and evaded attempts. Clean exposure uses the opponent’s landed attempts. Both are withheld when any opponent outcome is unresolved.</p>
   </section>
@@ -417,7 +421,7 @@
 
   {% if report_access.report_tier == 'full' %}
   <section class="card complete-report-section" id="report-strikes">
-    <div class="numbers-section-heading"><div><span class="eyebrow">Complete strike report</span><h2>Punches, kicks, and every supported outcome</h2></div><span>Fighter {{primary}}</span></div>
+    <div class="numbers-section-heading"><div><span class="eyebrow">Complete strike report</span><h2>Punches, kicks, and every supported outcome</h2></div><span>{{ names.get(primary, 'Fighter ' ~ primary) }}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Category</th><th>Attempts</th><th>Landed</th><th>Missed</th><th>Blocked</th><th>Evaded</th><th>Uncertain</th><th>Accuracy</th></tr></thead><tbody>
       {% set families=p.families|default({}) %}{% for label,item in [('All strikes',p),('Punches',families.get('punch',{})),('Kicks',families.get('kick',{})),('Knees',families.get('knee',{}))] %}{% if item.attempts|default(0, true) > 0 or label == 'All strikes' %}<tr><td>{{label}}</td><td>{{item.attempts}}</td><td>{{item.landed}}</td><td>{{item.missed}}</td><td>{{item.blocked}}</td><td>{{item.evaded}}</td><td>{{item.uncertain}}</td><td>{{'%.1f'|format(item.accuracy*100) if item.accuracy is not none else '—'}}</td></tr>{% endif %}{% endfor %}
     </tbody></table></div>
@@ -435,7 +439,7 @@
 
   <section class="card complete-report-section" id="report-key-moments">
     <div class="numbers-section-heading"><div><span class="eyebrow">Key moments</span><h2>Replay the most important supported actions</h2></div><span>Replay begins one second early</span></div>
-    {% set moments=namespace(count=0) %}{% for moment in report.key_moments|default([]) %}{% if focus == 'BOTH' or moment.fighter == primary %}{% set moments.count=moments.count+1 %}<a class="event" href="/replay/{{job_id}}?t={{moment.peak_time}}"><div>R{{moment.round_number or '—'}}</div><div class="time">{{'%.2f'|format(moment.peak_time)}}s</div><div><strong>Fighter {{moment.fighter}}</strong> · {{moment.technique|replace('_',' ')|title}}</div><div>{{moment.outcome|replace('_',' ')|title}}</div><div class="small muted">{{moment.target|default('Target not classified',true)|title}}</div></a>{% endif %}{% endfor %}{% if moments.count == 0 %}<p class="muted">No single moment was read clearly enough to feature here. Use the full skeleton replay instead.</p>{% endif %}
+    {% set moments=namespace(count=0) %}{% for moment in report.key_moments|default([]) %}{% if focus == 'BOTH' or moment.fighter == primary %}{% set moments.count=moments.count+1 %}<a class="event" href="/replay/{{job_id}}?t={{moment.peak_time}}"><div>R{{moment.round_number or '—'}}</div><div class="time">{{'%.2f'|format(moment.peak_time)}}s</div><div><strong>{{ names.get(moment.fighter, 'Fighter ' ~ moment.fighter) }}</strong> · {{moment.technique|replace('_',' ')|title}}</div><div>{{moment.outcome|replace('_',' ')|title}}</div><div class="small muted">{{moment.target|default('Target not classified',true)|title}}</div></a>{% endif %}{% endfor %}{% if moments.count == 0 %}<p class="muted">No single moment was read clearly enough to feature here. Use the full skeleton replay instead.</p>{% endif %}
   </section>
   {% endif %}
   {% else %}
@@ -470,7 +474,7 @@
     <div class="observed-grid">
       {% for who, seen in observed.fighters.items() %}
       <div class="observed-card">
-        <span class="observed-who">Fighter {{who}}</span>
+        <span class="observed-who">{{ names.get(who, 'Fighter ' ~ who) }}</span>
         <strong>{{seen.actions_evidenced}}</strong>
         {% if seen.families|length > 1 or 'kick' not in seen.families %}
         <span class="observed-basis">strike{{ '' if seen.actions_evidenced == 1 else 's' }} thrown
@@ -494,7 +498,7 @@
   {% else %}
   {% if strike_counts_published %}
   {% macro strikes(who) %}{% set st = fighter_stats.get(who, {}) %}{% set total = namespace(n=0) %}{% for family in families_shown %}{% set total.n = total.n + (st.get(family ~ '_attempts')|default(0, true)) %}{% endfor %}{{ total.n }}{% endmacro %}
-  <div class="numbers-unavailable"><div><span>Fighter A strikes thrown</span><strong>{{strikes('A')}}</strong><small>attempts</small></div><div><span>Fighter B strikes thrown</span><strong>{{strikes('B')}}</strong><small>attempts</small></div><p>Attempts only, estimated. {{ estimate_note }}</p></div>
+  <div class="numbers-unavailable"><div><span>{{ names.A }} strikes thrown</span><strong>{{strikes('A')}}</strong><small>attempts</small></div><div><span>{{ names.B }} strikes thrown</span><strong>{{strikes('B')}}</strong><small>attempts</small></div><p>Attempts only, estimated. {{ estimate_note }}</p></div>
   {% endif %}
   {% endif %}
   {% endif %}
@@ -509,7 +513,7 @@
     <ol class="counted-strike-list">
       {% for s in counted_strikes %}
       <li data-seconds="{{ '%.3f'|format(s.seconds) }}" data-fighter="{{ s.fighter }}" data-family="{{ s.family }}">
-        <a href="/replay/{{job_id}}?t={{ '%.2f'|format(s.seconds) }}"><span class="cs-time">{{ s.clock }}</span><span class="cs-who">Fighter {{ s.fighter }}</span><span class="cs-what">{{ s.family }}</span></a>
+        <a href="/replay/{{job_id}}?t={{ '%.2f'|format(s.seconds) }}"><span class="cs-time">{{ s.clock }}</span><span class="cs-who">{{ names.get(s.fighter, 'Fighter ' ~ s.fighter) }}</span><span class="cs-what">{{ s.family }}</span></a>
         {% if can_check_strikes %}
         <div class="cs-check" role="group" aria-label="Was this right?">
           {% set labels = {'right': 'Right', 'not_a_strike': 'Not a strike', 'wrong_fighter': 'Other fighter', 'punch': 'It was a punch', 'kick': 'It was a kick', 'knee': 'It was a knee'} %}
@@ -551,10 +555,10 @@
         <a href="/replay/{{job_id}}?t={{ '%.2f'|format(m.seconds) }}"><span class="cs-time">{{ m.clock }}</span>{% if m.round %}<span class="cs-who">Round {{ m.round }}</span>{% endif %}<span class="cs-what">down about {{ m.down_seconds }}s</span></a>
         {% if can_check_strikes %}
         <div class="cs-check" role="group" aria-label="Who went down?">
-          {% set labels = {'A': 'Fighter A went down', 'B': 'Fighter B went down', 'nobody': 'Nobody went down'} %}
+          {% set labels = {'A': names.A ~ ' went down', 'B': names.B ~ ' went down', 'nobody': 'Nobody went down'} %}
           <span class="cs-said" {% if not m.check %}hidden{% endif %}>You said: <b>{{ labels.get(m.check, '') }}</b></span>
-          <button type="button" data-verdict="A">Fighter A</button>
-          <button type="button" data-verdict="B">Fighter B</button>
+          <button type="button" data-verdict="A">{{ names.A }}</button>
+          <button type="button" data-verdict="B">{{ names.B }}</button>
           <button type="button" data-verdict="nobody">Nobody went down</button>
         </div>
         {% endif %}
@@ -564,7 +568,7 @@
   </details>
   {% if can_check_strikes %}
   <script nonce="{{ request.state.csp_nonce }}">
-  (()=>{const labels={A:'Fighter A went down',B:'Fighter B went down',nobody:'Nobody went down'};
+  (()=>{const labels={A:{{ (names.A ~ ' went down')|tojson }},B:{{ (names.B ~ ' went down')|tojson }},nobody:'Nobody went down'};
   document.querySelectorAll('.went-down-list li').forEach(li=>li.querySelectorAll('.cs-check button').forEach(b=>b.addEventListener('click',async()=>{
     const body={seconds:Number(li.dataset.seconds),verdict:b.dataset.verdict};
     li.querySelectorAll('.cs-check button').forEach(x=>x.disabled=true);
@@ -587,8 +591,8 @@
     <p class="muted">Stats only: no names and no video. Your opponent is not on it.</p>
     {% if focus == 'BOTH' %}
     <fieldset class="share-card-side"><legend>Which fighter were you?</legend>
-      <label><input type="radio" name="shareSide" value="A"> Fighter A{% if corners.A %} ({{ corners.A }}){% endif %}</label>
-      <label><input type="radio" name="shareSide" value="B"> Fighter B{% if corners.B %} ({{ corners.B }}){% endif %}</label>
+      <label><input type="radio" name="shareSide" value="A"> {{ names.A }}{% if corners.A %} ({{ corners.A }}){% endif %}</label>
+      <label><input type="radio" name="shareSide" value="B"> {{ names.B }}{% if corners.B %} ({{ corners.B }}){% endif %}</label>
     </fieldset>
     {% endif %}
     <canvas width="1080" height="1920" aria-label="Preview of the story image"></canvas>
@@ -622,7 +626,7 @@
       failed" (QA, 2026-10-04). -#}
   {% if not identity_failed %}
   <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'Keep the measured baseline'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Build the next clean sample'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% endif %}</article></div>
-  {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary"><div class="eyebrow">Final coaching summary · Fighter {{primary}}</div><h2>What this fight says to work on next</h2><div class="performance-insights">{% set worked = keep[1] if keep|length > 1 else (keep[0] if keep else None) %}<article><span>What worked</span><strong>{{worked.title if worked else 'No supported strength yet'}}</strong><p>{{worked.detail if worked else 'The report needs more evidence before naming a strength.'}}</p></article><article><span>What hurt performance</span><strong>{{fix[0].title if fix else 'No supported weakness yet'}}</strong><p>{{fix[0].detail if fix else 'The report does not invent a weakness without evidence.'}}</p></article>{% set plan=report.training_plan[primary]|default([]) %}<article><span>Next training priority</span><strong>{{plan[0].focus if plan else 'Collect a cleaner sample'}}</strong><p>{{plan[0].work if plan else 'Use a clear full-body camera angle and keep both fighters visible.'}}</p></article><article><span>Success target</span><strong>{{plan[0].goal if plan else 'Improve usable evidence'}}</strong>{% if plan %}<p>This target comes from Fighter {{primary}}’s measured report, not a generic template.</p>{% else %}<p>No measured target yet: this fight did not give enough evidence to set one.</p>{% endif %}</article></div></section>{% endif %}
+  {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary"><div class="eyebrow">Final coaching summary · {{ names.get(primary, 'Fighter ' ~ primary) }}</div><h2>What this fight says to work on next</h2><div class="performance-insights">{% set worked = keep[1] if keep|length > 1 else (keep[0] if keep else None) %}<article><span>What worked</span><strong>{{worked.title if worked else 'No supported strength yet'}}</strong><p>{{worked.detail if worked else 'The report needs more evidence before naming a strength.'}}</p></article><article><span>What hurt performance</span><strong>{{fix[0].title if fix else 'No supported weakness yet'}}</strong><p>{{fix[0].detail if fix else 'The report does not invent a weakness without evidence.'}}</p></article>{% set plan=report.training_plan[primary]|default([]) %}<article><span>Next training priority</span><strong>{{plan[0].focus if plan else 'Collect a cleaner sample'}}</strong><p>{{plan[0].work if plan else 'Use a clear full-body camera angle and keep both fighters visible.'}}</p></article><article><span>Success target</span><strong>{{plan[0].goal if plan else 'Improve usable evidence'}}</strong>{% if plan %}<p>This target comes from {{ names.get(primary, 'Fighter ' ~ primary) }}’s measured report, not a generic template.</p>{% else %}<p>No measured target yet: this fight did not give enough evidence to set one.</p>{% endif %}</article></div></section>{% endif %}
   {% endif %}
 </section>
 {#- Read without reading.
@@ -642,7 +646,7 @@
   <div class="analysis-quality-heading">
     <div><span class="eyebrow">Your round at a glance</span>
       <h2>You vs your opponent</h2></div>
-    <span class="quality-focus">Fighter {{visuals.focus}}</span>
+    <span class="quality-focus">{{ names.get(visuals.focus, 'Fighter ' ~ visuals.focus) }}</span>
   </div>
   <p class="small muted vs-hint">Longer bar wins. {{visuals.counts}}</p>
 
@@ -770,13 +774,13 @@
   ('report-training', 'Training plan', true),
   ('report-summary', 'Summary', full_report),
 ] %}
-<nav class="report-path" aria-label="Fight report sections" data-reveal><div><span class="eyebrow">Fighter {{focus}} report</span><strong>Complete evidence path</strong></div>{% for anchor, label, available in report_chips %}{% if available %}<a href="#{{anchor}}">{{label}}</a>{% else %}<span class="report-path-absent">{{label}} — {% if not full_report %}in the complete report{% else %}hidden until strike counting is verified{% endif %}</span>{% endif %}{% endfor %}</nav>
+<nav class="report-path" aria-label="Fight report sections" data-reveal><div><span class="eyebrow">{{ names.get(focus, 'Fighter ' ~ focus) }} report</span><strong>Complete evidence path</strong></div>{% for anchor, label, available in report_chips %}{% if available %}<a href="#{{anchor}}">{{label}}</a>{% else %}<span class="report-path-absent">{{label}} — {% if not full_report %}in the complete report{% else %}hidden until strike counting is verified{% endif %}</span>{% endif %}{% endfor %}</nav>
 <section class="analysis-quality {{analysis_quality.tone}}" aria-label="Analysis quality summary">
-  <div class="analysis-quality-heading"><div><span class="eyebrow">How well did WarriorIQ observe this fight?</span><h2>{{analysis_quality.label}}</h2></div><span class="quality-focus">Detailed report · Fighter {{analysis_quality.focus}}</span></div>
+  <div class="analysis-quality-heading"><div><span class="eyebrow">How well did WarriorIQ observe this fight?</span><h2>{{analysis_quality.label}}</h2></div><span class="quality-focus">Detailed report · {{ names.get(analysis_quality.focus, 'Fighter ' ~ analysis_quality.focus) }}</span></div>
   <div class="analysis-quality-grid">
-    <div><span>Fighter A observed</span><strong>{{'%.0f'|format(analysis_quality.coverage.A*100)}}%</strong></div>
-    <div><span>Fighter B observed</span><strong>{{'%.0f'|format(analysis_quality.coverage.B*100)}}%</strong></div>
-    <div><span>Fighter {{analysis_quality.focus}} pose evidence</span><strong>{{'%.0f'|format(analysis_quality.pose_coverage*100)}}%</strong></div>
+    <div><span>{{ names.A }} observed</span><strong>{{'%.0f'|format(analysis_quality.coverage.A*100)}}%</strong></div>
+    <div><span>{{ names.B }} observed</span><strong>{{'%.0f'|format(analysis_quality.coverage.B*100)}}%</strong></div>
+    <div><span>{{ names.get(analysis_quality.focus, 'Fighter ' ~ analysis_quality.focus) }} pose evidence</span><strong>{{'%.0f'|format(analysis_quality.pose_coverage*100)}}%</strong></div>
     <div><span>Identity stability</span><strong>{{'Stable' if analysis_quality.identity_stable else 'Needs attention'}}</strong></div>
     <div><span>Action evidence</span><strong>{{'Validated' if analysis_quality.action_trusted else 'Still calibrating'}}</strong></div>
   </div>
@@ -788,15 +792,15 @@
 {% set m=report.metrics[fighter] %}
 <section class="card performance-card fighter-{{fighter|lower}}">
   <div style="display:flex;gap:16px;align-items:center">
-    <img src="/fighter-portrait/{{job_id}}/{{fighter}}" alt="Fighter {{fighter}}" style="width:84px;height:84px;object-fit:cover;border-radius:16px;border:1px solid var(--border)" data-hide-on-error>
-    <div><div class="eyebrow">Fighter {{fighter}}</div><h2 style="margin:4px 0">Performance</h2></div>
+    <img src="/fighter-portrait/{{job_id}}/{{fighter}}" alt="{{ names.get(fighter, 'Fighter ' ~ fighter) }}" style="width:84px;height:84px;object-fit:cover;border-radius:16px;border:1px solid var(--border)" data-hide-on-error>
+    <div><div class="eyebrow">{{ names.get(fighter, 'Fighter ' ~ fighter) }}</div><h2 style="margin:4px 0">Performance</h2></div>
   </div>
-  <div class="performance-rail" tabindex="0" aria-label="Fighter {{fighter}} performance measurements; scroll horizontally for more">
-    <article class="performance-stat"><span>Seen</span><strong>{{'%.0f'|format(m.pose_coverage*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} pose evidence" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.pose_coverage*100)}}"><i style="--meter-value:{{'%.1f'|format(m.pose_coverage*100)}}%"></i></div><small>Usable fighter observations</small></article>
-    {% if m.guard_index is not none %}<article class="performance-stat"><span>Guard</span><strong>{{'%.0f'|format(m.guard_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} guard-position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.guard_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.guard_index*100)}}%"></i></div><small>Hands near defensive position</small></article>{% endif %}
-    {% if m.balance_index is not none %}<article class="performance-stat"><span>Balance</span><strong>{{'%.0f'|format(m.balance_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} post-action balance baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.balance_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.balance_index*100)}}%"></i></div><small>Stable movement frames</small></article>{% endif %}
-    {% if m.ring_center_control is not none %}<article class="performance-stat"><span>Centre</span><strong>{{'%.0f'|format(m.ring_center_control*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} ring-center position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.ring_center_control*100)}}"><i style="--meter-value:{{'%.1f'|format(m.ring_center_control*100)}}%"></i></div><small>Time near the ring center</small></article>{% endif %}
-    {% if action_ready and m.attacks.accuracy is not none %}<article class="performance-stat"><span>Action conversion</span><strong>{{'%.0f'|format(m.attacks.accuracy*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="Fighter {{fighter}} verified action conversion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.attacks.accuracy*100)}}"><i style="--meter-value:{{'%.1f'|format(m.attacks.accuracy*100)}}%"></i></div><small>Evidence-supported actions</small></article>{% endif %}
+  <div class="performance-rail" tabindex="0" aria-label="{{ names.get(fighter, 'Fighter ' ~ fighter) }} performance measurements; scroll horizontally for more">
+    <article class="performance-stat"><span>Seen</span><strong>{{'%.0f'|format(m.pose_coverage*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="{{ names.get(fighter, 'Fighter ' ~ fighter) }} pose evidence" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.pose_coverage*100)}}"><i style="--meter-value:{{'%.1f'|format(m.pose_coverage*100)}}%"></i></div><small>Usable fighter observations</small></article>
+    {% if m.guard_index is not none %}<article class="performance-stat"><span>Guard</span><strong>{{'%.0f'|format(m.guard_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="{{ names.get(fighter, 'Fighter ' ~ fighter) }} guard-position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.guard_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.guard_index*100)}}%"></i></div><small>Hands near defensive position</small></article>{% endif %}
+    {% if m.balance_index is not none %}<article class="performance-stat"><span>Balance</span><strong>{{'%.0f'|format(m.balance_index*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="{{ names.get(fighter, 'Fighter ' ~ fighter) }} post-action balance baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.balance_index*100)}}"><i style="--meter-value:{{'%.1f'|format(m.balance_index*100)}}%"></i></div><small>Stable movement frames</small></article>{% endif %}
+    {% if m.ring_center_control is not none %}<article class="performance-stat"><span>Centre</span><strong>{{'%.0f'|format(m.ring_center_control*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="{{ names.get(fighter, 'Fighter ' ~ fighter) }} ring-center position baseline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.ring_center_control*100)}}"><i style="--meter-value:{{'%.1f'|format(m.ring_center_control*100)}}%"></i></div><small>Time near the ring center</small></article>{% endif %}
+    {% if action_ready and m.attacks.accuracy is not none %}<article class="performance-stat"><span>Action conversion</span><strong>{{'%.0f'|format(m.attacks.accuracy*100)}}%</strong><div class="performance-meter" role="progressbar" aria-label="{{ names.get(fighter, 'Fighter ' ~ fighter) }} verified action conversion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{'%.0f'|format(m.attacks.accuracy*100)}}"><i style="--meter-value:{{'%.1f'|format(m.attacks.accuracy*100)}}%"></i></div><small>Evidence-supported actions</small></article>{% endif %}
   </div>
   {% if action_ready %}<div class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:16px">
     <div class="metric"><div class="value">{{m.attacks.landed}}</div><div class="label">Landed</div></div>
@@ -841,7 +845,7 @@
     <tr><td>Footwork</td><td>{% if m.footwork_body_lengths_per_second is not none %}{{'%.2f'|format(m.footwork_body_lengths_per_second)}} body-lengths/s{% else %}{{m.availability.movement.reason}}{% endif %}</td></tr>
     {% endif %}
   </table></div>
-  {% if report_access.report_tier == 'full' and report.metrics.round_pose_coverage %}<h3>Fighter {{fighter}} round-by-round evidence</h3><div class="table-wrap"><table><thead><tr><th>Round</th><th>Usable pose evidence</th></tr></thead><tbody>{% for round,coverage in report.metrics.round_pose_coverage.items() %}<tr><td>{{round}}</td><td>{{'%.1f'|format(coverage[fighter]*100)}}%</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+  {% if report_access.report_tier == 'full' and report.metrics.round_pose_coverage %}<h3>{{ names.get(fighter, 'Fighter ' ~ fighter) }} round-by-round evidence</h3><div class="table-wrap"><table><thead><tr><th>Round</th><th>Usable pose evidence</th></tr></thead><tbody>{% for round,coverage in report.metrics.round_pose_coverage.items() %}<tr><td>{{round}}</td><td>{{'%.1f'|format(coverage[fighter]*100)}}%</td></tr>{% endfor %}</tbody></table></div>{% endif %}
 
   {% if action_ready and report_access.report_tier in ['expanded','full'] %}
   <h3>Performance dashboard</h3>
@@ -899,14 +903,14 @@
     {% set ashare = (av / total * 100) | round | int %}
     <li data-winner="{{r.winner}}">
       <span class="momentum-round">R{{r.round}}</span>
-      <span class="momentum-bar" role="img" aria-label="Round {{r.round}}: Fighter A {{ashare}} percent of measured scoring pressure">
+      <span class="momentum-bar" role="img" aria-label="Round {{r.round}}: {{ names.A }} {{ashare}} percent of measured scoring pressure">
         <i class="momentum-a" style="--share:{{ashare}}%"></i><i class="momentum-b" style="--share:{{100 - ashare}}%"></i>
       </span>
       <span class="momentum-score wiq-num">{{r.fighter_A}}<em>-</em>{{r.fighter_B}}</span>
       <span class="momentum-flags">
         {% if r.knockdowns_A %}<b class="kd">KD A x{{r.knockdowns_A}}</b>{% endif %}
         {% if r.knockdowns_B %}<b class="kd">KD B x{{r.knockdowns_B}}</b>{% endif %}
-        {% if r.winner == 'EVEN' %}<b class="even">Even</b>{% else %}<b>Fighter {{r.winner}}</b>{% endif %}
+        {% if r.winner == 'EVEN' %}<b class="even">Even</b>{% else %}<b>{{ names.get(r.winner, 'Fighter ' ~ r.winner) }}</b>{% endif %}
       </span>
     </li>
     {% endfor %}
@@ -952,8 +956,8 @@
 <section class="card" id="report-scorecard">
   <div class="section-title" style="margin-top:0"><h2>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary automatic scorecard{% else %}Automatic estimated scorecard{% endif %}</h2><span class="pill">{{report.scorecard.ruleset_label}}</span></div>
   {% if report.scorecard.available %}<div class="grid">
-    <div><div class="score">{{report.scorecard.totals.A}}</div><div class="muted">Fighter A</div></div>
-    <div><div class="score">{{report.scorecard.totals.B}}</div><div class="muted">Fighter B</div></div>
+    <div><div class="score">{{report.scorecard.totals.A}}</div><div class="muted">{{ names.A }}</div></div>
+    <div><div class="score">{{report.scorecard.totals.B}}</div><div class="muted">{{ names.B }}</div></div>
   </div>{% else %}<div class="notice">{{report.scorecard.disclaimer}}</div>{% endif %}
   {#- Printed once. The unscored branch above already carries it. -#}
   {% if report.scorecard.available %}<p class="small muted">{{report.scorecard.disclaimer}}</p>{% endif %}
@@ -965,7 +969,7 @@
 <div class="grid{% if focus != 'BOTH' %} single{% endif %}" id="report-coaching">
 {% for fighter in ['A','B'] %}
 {% if focus == 'BOTH' or focus == fighter %}
-<section class="card"><div class="eyebrow">Coach report · Fighter {{fighter}}</div>{% if report.coaching[fighter].evidence_type|default('') == 'pose_only' %}<p class="muted">Built from this fighter's identity-safe pose measurements. Strike-specific advice remains hidden until action labels are validated.</p>{% elif not action_ready %}<p class="muted">Coach advice is withheld because this fighter did not pass the identity check.</p>{% endif %}
+<section class="card"><div class="eyebrow">Coach report · {{ names.get(fighter, 'Fighter ' ~ fighter) }}</div>{% if report.coaching[fighter].evidence_type|default('') == 'pose_only' %}<p class="muted">Built from this fighter's identity-safe pose measurements. Strike-specific advice remains hidden until action labels are validated.</p>{% elif not action_ready %}<p class="muted">Coach advice is withheld because this fighter did not pass the identity check.</p>{% endif %}
   {% if report_access.report_tier != 'compact' %}{% set strengths = report.coaching[fighter].strengths if report_access.report_tier == 'full' else report.coaching[fighter].strengths[:report_access.coaching_items] %}<h3>Strengths</h3><ul class="list-clean">{% for x in strengths %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span>{% if x.evidence_times %}<div class="small muted">Watch it</div><div class="timeline">{% for t in x.evidence_times %}<a class="evidence-jump" href="/replay/{{job_id}}?t={{t}}">{{'%d:%02d'|format((t//60)|int, (t%60)|int)}}</a>{% endfor %}</div>{% endif %}</li>{% else %}<li class="muted">No evidence-backed strength item available yet.</li>{% endfor %}</ul>{% endif %}
   {% set improvements = report.coaching[fighter].improvements if report_access.report_tier == 'full' else report.coaching[fighter].improvements[:report_access.coaching_items] %}<h3>{% if report_access.report_tier == 'compact' %}Top coaching priority{% else %}Improvements{% endif %}</h3><ul class="list-clean">{% for x in improvements %}<li><strong>{{x.title}}</strong><br><span class="muted">{{x.detail}}</span>{% if x.evidence_times %}<div class="small muted">Watch it</div><div class="timeline">{% for t in x.evidence_times %}<a class="evidence-jump" href="/replay/{{job_id}}?t={{t}}">{{'%d:%02d'|format((t//60)|int, (t%60)|int)}}</a>{% endfor %}</div>{% endif %}</li>{% else %}<li class="muted">No evidence-backed improvement item available yet.</li>{% endfor %}</ul>
 </section>
@@ -975,7 +979,7 @@
 
 {% if report_access.training_items != 0 %}<div class="grid{% if focus != 'BOTH' %} single{% endif %}" id="report-training">
 {% for fighter in ['A','B'] %}{% if focus == 'BOTH' or focus == fighter %}
-{% set training = report.training_plan[fighter] if report_access.report_tier == 'full' else report.training_plan[fighter][:report_access.training_items] %}<section class="card"><div class="eyebrow">Training plan · Fighter {{fighter}}</div><h2>Next-session plan</h2><ul class="list-clean">{% for x in training %}<li><strong>{{x.focus}}</strong><br><span class="muted">{{x.work}}</span><div class="small">Goal: {{x.goal}}</div></li>{% else %}<li class="muted">No safe plan could be generated from this analysis.</li>{% endfor %}</ul>
+{% set training = report.training_plan[fighter] if report_access.report_tier == 'full' else report.training_plan[fighter][:report_access.training_items] %}<section class="card"><div class="eyebrow">Training plan · {{ names.get(fighter, 'Fighter ' ~ fighter) }}</div><h2>Next-session plan</h2><ul class="list-clean">{% for x in training %}<li><strong>{{x.focus}}</strong><br><span class="muted">{{x.work}}</span><div class="small">Goal: {{x.goal}}</div></li>{% else %}<li class="muted">No safe plan could be generated from this analysis.</li>{% endfor %}</ul>
 {% set progression = report.training_progression[fighter] if report.training_progression and fighter in report.training_progression else [] %}
 {% if progression and report_access.report_tier == 'full' %}
 <div class="training-progression">
@@ -1001,7 +1005,7 @@
 {% endif %}{# numbers.state != 'no_fight' #}
 {% set focus = report.video.focus_fighter|default(report.video.analysis_target|default('BOTH'), true) %}
 <section class="card replay-callout">
-  <div><div class="eyebrow">Fighter {{focus}} replay</div><h2>Watch the movement with skeletons</h2><p class="muted">Use the normal video controls. The overlay follows only the athlete selected for this detailed report, and any trusted key moments start one second before the action.</p></div>
+  <div><div class="eyebrow">{{ names.get(focus, 'Fighter ' ~ focus) }} replay</div><h2>Watch the movement with skeletons</h2><p class="muted">Use the normal video controls. The overlay follows only the athlete selected for this detailed report, and any trusted key moments start one second before the action.</p></div>
   <a class="btn" href="/replay/{{job_id}}" data-motion-primary>Replay with skeletons</a>
 </section>
 
@@ -1018,7 +1022,7 @@
   {% if not action_ready or report.scorecard.status == 'identity_integrity_failed' %}
   <p class="muted">Illegal-move flags are switched off for this fight. {% if report.scorecard.status == 'identity_integrity_failed' %}WarriorIQ could not tell the two fighters apart well enough, so putting a foul on one of them would be a guess.{% else %}WarriorIQ cannot read strikes accurately enough yet to call a foul on anyone, so it does not.{% endif %}</p>
   {% else %}
-  {% for e in report.illegal_moves|default([]) %}{% if focus == 'BOTH' or focus == e.fighter %}<div class="event"><div>R{{e.round_number or '-'}}</div><div class="time">{{'%.2f'|format(e.peak_time)}}s</div><div><strong>Fighter {{e.fighter}}</strong> · {{e.technique.replace('_',' ')|title}}</div><div class="bad">Illegal</div><div class="small muted">{{e.legality_reason}}</div></div>{% endif %}{% else %}<p class="muted">Nothing was read clearly enough to flag as illegal for Fighter {{focus}} under this ruleset.</p>{% endfor %}
+  {% for e in report.illegal_moves|default([]) %}{% if focus == 'BOTH' or focus == e.fighter %}<div class="event"><div>R{{e.round_number or '-'}}</div><div class="time">{{'%.2f'|format(e.peak_time)}}s</div><div><strong>{{ names.get(e.fighter, 'Fighter ' ~ e.fighter) }}</strong> · {{e.technique.replace('_',' ')|title}}</div><div class="bad">Illegal</div><div class="small muted">{{e.legality_reason}}</div></div>{% endif %}{% else %}<p class="muted">Nothing was read clearly enough to flag as illegal for {{ names.get(focus, 'Fighter ' ~ focus) }} under this ruleset.</p>{% endfor %}
   {% endif %}
   {#- The stored reference names WAKO and K-1, which is only right for
       kickboxing; it printed on Muay Thai and MMA reports too. -#}
@@ -1044,7 +1048,7 @@
   <tr><td>Fighter B focused pose recoveries</td><td>{{report.tracking.fighter_B_guided_pose_recoveries|default(0)}}</td></tr>
   <tr><td>OpenAI ambiguity referee</td><td>{% if report.tracking.openai_identity_enabled %}Enabled · {{report.tracking.openai_identity_attempts}} reviews · {{report.tracking.openai_identity_recoveries}} recoveries{% else %}Not enabled for this analysis{% endif %}</td></tr>
 </table></div>
-{% if report.metrics.round_pose_coverage %}<h3>Round-by-round pose evidence</h3><div class="table-wrap"><table><thead><tr><th>Round</th><th>Fighter A</th><th>Fighter B</th></tr></thead><tbody>{% for round,coverage in report.metrics.round_pose_coverage.items() %}<tr><td>{{round}}</td><td>{{'%.1f'|format(coverage.A*100)}}%</td><td>{{'%.1f'|format(coverage.B*100)}}%</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+{% if report.metrics.round_pose_coverage %}<h3>Round-by-round pose evidence</h3><div class="table-wrap"><table><thead><tr><th>Round</th><th>{{ names.A }}</th><th>{{ names.B }}</th></tr></thead><tbody>{% for round,coverage in report.metrics.round_pose_coverage.items() %}<tr><td>{{round}}</td><td>{{'%.1f'|format(coverage.A*100)}}%</td><td>{{'%.1f'|format(coverage.B*100)}}%</td></tr>{% endfor %}</tbody></table></div>{% endif %}
 <p class="small muted">Observation coverage means a fighter observation was available; it is not presented as identity accuracy. First-frame identity and propagated-mask agreement are checked separately.</p>
 <p class="small muted">Classifier: {{report.classifier.action_classifier}} · {{report.integrity.uncertainty_policy}}</p>
 <p class="small muted">Speed budget: {% if report.performance.within_video_length_budget %}passed{% else %}not yet passed{% endif %}. Quality mode: {{report.performance.quality_mode}}.</p>
