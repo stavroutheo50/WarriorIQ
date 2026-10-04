@@ -353,3 +353,9 @@ table td{font-size:12px}
 .analysed-span-note{margin:0 0 14px;padding:10px 14px;border:1px solid #6d5a2c;border-left:3px solid var(--wiq-warning);border-radius:var(--wiq-radius-sm);background:#1b1708;color:#f1e3bd;font-size:14px}
 /* Sign-up age question and the parent/guardian fields it reveals. */
 .age-group{display:grid;gap:4px;margin:0;padding:0;border:0}.age-group legend{margin-bottom:4px;color:#c9d4e5;font-size:13px;font-weight:750}.guardian-fields{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--wiq-line-soft);border-radius:10px}.guardian-fields[hidden]{display:none}.guardian-fields p{margin:0 0 6px}
+
+/* Fight library pager (history.html). */
+.archive-pager{display:flex;align-items:center;justify-content:center;gap:14px;margin:22px 0 4px;flex-wrap:wrap}
+.archive-pager .btn{min-height:44px}
+.archive-pager .btn:disabled{opacity:.45;cursor:default}
+.archive-pager span{color:#a7b4c8;font-size:14px}
