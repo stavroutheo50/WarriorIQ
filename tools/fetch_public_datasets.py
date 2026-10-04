@@ -16,6 +16,9 @@ Searched 2026-10-04. What exists, and what it is good for:
     fight_judge       MMA             5,106 UFC frames, fighter boxes + pose   CC BY-NC-SA 4.0
     olympic_boxing    boxing          2,278 clips: head/body/block/miss per    non-commercial
                                       hand (needs a Kaggle token)
+    ufc_stats         MMA             official per-round strike, knockdown and  public statistics
+                                      takedown counts for every UFC bout - the
+                                      answer key for compare_official_stats.py
 
 Nothing public was found with complete strike labels for full kickboxing,
 Muay Thai or MMA fights, nor for elbows, spinning or jumping kicks, takedowns,
@@ -73,6 +76,11 @@ SOURCES = (
     Source("fight_judge", "mma", "fighter boxes and 17 keypoints on UFC frames",
            "CC BY-NC-SA 4.0 (data), MIT (code)", "no", "https://github.com/hasanfaesal/fight-judge",
            "git", "https://github.com/hasanfaesal/fight-judge"),
+    Source("ufc_stats", "mma", "official per-round statistics for every UFC bout: strikes landed of "
+           "attempted by head/body/leg and distance/clinch/ground, knockdowns, takedowns (ufcstats.com). "
+           "The answer key for tools/compare_official_stats.py; no video",
+           "public statistics; export code GPL-3.0", "yes", "https://github.com/Greco1899/scrape_ufc_stats",
+           "git", "https://github.com/Greco1899/scrape_ufc_stats"),
     Source("olympic_boxing", "boxing", "head / body / block / miss for each hand, by licensed referees",
            "non-commercial", "no",
            "https://www.kaggle.com/datasets/piotrstefaskiue/olympic-boxing-punch-classification-video-dataset",
