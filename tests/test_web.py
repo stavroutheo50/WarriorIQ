@@ -1793,7 +1793,9 @@ class PublicPageTests(unittest.TestCase):
 
     def test_focused_report_keeps_both_fighters_in_the_analysis_engine(self):
         app_source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
-        self.assertIn('analysis_target="BOTH"', app_source)
+        # Two fighters are always analysed together; only a solo session
+        # (one person, core/solo.py) targets A alone.
+        self.assertIn('analysis_target="A" if job.get("solo") else "BOTH"', app_source)
         self.assertIn("focus_fighter=focus_fighter", app_source)
 
     def test_profile_upload_buttons_are_themed(self):

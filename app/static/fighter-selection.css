@@ -86,6 +86,9 @@
 .corner-pick input{flex:none;width:16px;height:16px;accent-color:#8794ff}
 .corner-pick input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}
 .corner-pick small{display:block;margin-top:6px;font-size:12px;line-height:1.45}
+.solo-toggle{display:flex;align-items:flex-start;gap:10px;margin:14px 0 0;padding:10px 12px;min-height:44px;border:1px solid rgba(255,255,255,.10);border-radius:9px;font-size:13.5px;line-height:1.45;cursor:pointer}
+.solo-toggle input{flex:none;width:18px;height:18px;margin-top:2px;accent-color:#8794ff}
+.solo-toggle input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}
 .corner-dot{display:inline-block;width:11px;height:11px;border-radius:50%}
 .corner-dot.red{background:#d9545e}
 .corner-dot.blue{background:#5b8ff0}

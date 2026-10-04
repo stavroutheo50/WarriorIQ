@@ -716,8 +716,15 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
     # BoT-SORT state belongs to one run for its entire lifetime. Per-frame
     # locks would still let a second job reset identities between frames.
     with _ANALYSIS_LOCK:
+        if req.solo:
+            # One person, followed through the whole video; see core/solo.py.
+            from core.solo import analyze_solo
+
+            run = analyze_solo
+        else:
+            run = _analyze_from_seed
         if opencv_decodes(req.video_path):
-            return _analyze_from_seed(req, progress_callback)
+            return run(req, progress_callback)
         # OpenCV cannot read this file at all - an AV1 WebM is the usual one:
         # it opens, reports its frames and decodes none. Rather than fail a
         # real fight, analyse an H.264 copy with the same frames and timing,
@@ -736,7 +743,7 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                     "The analysis machine cannot decode this video's format, and no converter is "
                     "installed on it.")
             LOGGER.info("analysing_decodable_copy original=%s", Path(req.video_path).name)
-            return _analyze_from_seed(
+            return run(
                 replace(req, video_path=str(copy),
                         original_name=req.original_name or Path(req.video_path).name),
                 progress_callback)

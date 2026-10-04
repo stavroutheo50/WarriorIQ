@@ -60,7 +60,7 @@
   <section class="live-stats" aria-labelledby="statsTitle">
     <div class="live-section-heading"><div><div class="eyebrow" id="statsStateLabel">Live · provisional statistics</div><h2 id="statsTitle">Statistics update as footage is processed</h2></div><p>Final values are calculated once the full selected footage has been analyzed.</p></div>
     <div class="live-fighter-stats">
-      {% for fighter in ('A', 'B') %}<article class="fighter-stat-panel" data-fighter="{{fighter}}">
+      {% for fighter in ('A', 'B') %}<article class="fighter-stat-panel" data-fighter="{{fighter}}"{% if solo and fighter == 'B' %} hidden{% endif %}>
         <header><span class="fighter-letter">{{fighter}}</span><div><strong>Fighter {{fighter}}</strong><small id="coverage{{fighter}}">0% observed</small></div></header>
         {#- While strike counts are switched off (core.report.STRIKE_COUNTS_PUBLISHED)
             the rows stay in the page for the script but are hidden, and the

@@ -509,7 +509,9 @@ SEARCH_GUIDES = {
 
 class StartPayload(BaseModel):
     fighter_a_box: list[float]
-    fighter_b_box: list[float]
+    # Not sent for a solo session, which follows one person (core/solo.py).
+    fighter_b_box: list[float] | None = None
+    solo: bool = False
     focus_fighter: str | None = None
     analysis_target: str | None = None
     # Which corner Fighter A is in, as the person drawing the boxes says it.
@@ -2304,9 +2306,10 @@ def _analysis_request(job_id: str, job: dict, fighter_a_box: list[float], fighte
     return AnalysisRequest(
         video_path=job["video_path"],
         fighter_a_box=fighter_a_box,
-        fighter_b_box=fighter_b_box,
+        fighter_b_box=list(fighter_b_box or []),
         original_name=job.get("original_name"),
-        analysis_target="BOTH",
+        analysis_target="A" if job.get("solo") else "BOTH",
+        solo=bool(job.get("solo")),
         focus_fighter=focus_fighter,
         fight_type=job["fight_type"],
         ruleset=job["ruleset"],
@@ -4119,6 +4122,47 @@ def _validated_fighter_box(box: list[float], width: float, height: float, label:
     return [x1, y1, x2, y2]
 
 
+def _person_inside(person: list[float], drawn: list[float]) -> bool:
+    """Whether a detected person is what a drawn box is around.
+
+    Most of the person has to be inside the box, and they have to fill a fair
+    part of it: a box drawn around a punch bag beside its holder, or around a
+    blank title card with a small figure in a corner, is not a box around a
+    fighter.
+    """
+    inter = (max(0.0, min(person[2], drawn[2]) - max(person[0], drawn[0]))
+             * max(0.0, min(person[3], drawn[3]) - max(person[1], drawn[1])))
+    person_area = max(1.0, (person[2] - person[0]) * (person[3] - person[1]))
+    drawn_area = max(1.0, (drawn[2] - drawn[0]) * (drawn[3] - drawn[1]))
+    return inter / person_area >= 0.5 and inter / drawn_area >= 0.2
+
+
+def _boxes_without_a_person(frame, boxes: dict[str, list[float]], width: float, height: float) -> list[str]:
+    """The labels of drawn boxes that hold no detected person.
+
+    QA, 2026-10-04: a punch bag and a blank title card were both accepted as
+    fighters. Checked on the selection frame with the same light detector the
+    page uses to offer candidates (core/person_detect.py). When that detector
+    cannot run, nothing can be checked here and nothing is refused; the
+    analysis's own seed check still stops a box with nobody in it from being
+    followed as a fighter.
+    """
+    if frame is None:
+        return []
+    people = detect_people_in_frame(frame)
+    if people is None:
+        LOGGER.info("selection_person_check_unavailable")
+        return []
+    scale_x = frame.shape[1] / max(1.0, float(width))
+    scale_y = frame.shape[0] / max(1.0, float(height))
+    missing = []
+    for label, box in boxes.items():
+        scaled = [box[0] * scale_x, box[1] * scale_y, box[2] * scale_x, box[3] * scale_y]
+        if not any(_person_inside(person["box"], scaled) for person in people):
+            missing.append(label)
+    return missing
+
+
 _WORKER_PROGRESS_FIELDS = {
     "percent", "message", "stage", "elapsed_seconds", "eta_seconds",
     "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
@@ -4168,8 +4212,9 @@ def _remote_job_payload(job_id: str, job: dict) -> dict:
         "analysis_run_id": str(job.get("analysis_run_id") or ""),
         "video_extension": Path(str(job.get("video_path") or "fight.mp4")).suffix.lower() or ".mp4",
         "fighter_a_box": list(job["fighter_a_box"]),
-        "fighter_b_box": list(job["fighter_b_box"]),
-        "analysis_target": "BOTH",
+        "fighter_b_box": list(job.get("fighter_b_box") or []),
+        "solo": bool(job.get("solo")),
+        "analysis_target": "A" if job.get("solo") else "BOTH",
         "focus_fighter": job.get("focus_fighter") or "A",
         "fight_type": job["fight_type"],
         "ruleset": job["ruleset"],
@@ -4507,6 +4552,10 @@ def start(request: Request, job_id: str, payload: StartPayload):
             raise HTTPException(409, "The selected frame is unavailable. Choose another frame.")
         video_height, video_width = selection.shape[:2]
     fighter_a_box = _validated_fighter_box(payload.fighter_a_box, video_width, video_height, "Fighter A")
+    if payload.solo:
+        return _start_solo(request, job_id, job, fighter_a_box, video_width, video_height, capacity)
+    if payload.fighter_b_box is None:
+        raise HTTPException(400, "Draw a box around Fighter B too, or choose a solo session for a video of one person.")
     fighter_b_box = _validated_fighter_box(payload.fighter_b_box, video_width, video_height, "Fighter B")
     shared = (
         max(0.0, min(fighter_a_box[2], fighter_b_box[2]) - max(fighter_a_box[0], fighter_b_box[0]))
@@ -4524,6 +4573,13 @@ def start(request: Request, job_id: str, payload: StartPayload):
     # what can be believed, and because this is the last moment the person who
     # can actually answer it is still looking at the screen.
     chosen_frame = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
+    empty = _boxes_without_a_person(
+        chosen_frame, {"Fighter A": fighter_a_box, "Fighter B": fighter_b_box}, video_width, video_height)
+    if empty:
+        raise HTTPException(400, (
+            f"No person was found inside the {' or the '.join(empty)} box. Draw each box around a "
+            "fighter's whole body - WarriorIQ cannot follow a punch bag, a title card or an empty "
+            "part of the frame. If the fighters are hard to see here, pick a clearer moment."))
     kit = kit_similarity(chosen_frame, fighter_a_box, fighter_b_box)
     alike = None if kit is None else kit["similarity"]
     # Warned, never refused. Most footage is not shot for us, and a user with a
@@ -4586,6 +4642,43 @@ def start(request: Request, job_id: str, payload: StartPayload):
                                       on_official=on_official, kit=kit)
 
 
+def _start_solo(request: Request, job_id: str, job: dict, fighter_a_box: list[float],
+                video_width: float, video_height: float, capacity: dict):
+    """Queue a solo session: one person, movement and guard only, no scoring."""
+    chosen_frame = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
+    if _boxes_without_a_person(chosen_frame, {"person": fighter_a_box}, video_width, video_height):
+        raise HTTPException(400, (
+            "No person was found inside the box. Draw it around the whole body of the person "
+            "training - WarriorIQ cannot follow a punch bag, a title card or an empty part of "
+            "the frame."))
+    _save_fighter_portrait(job_id, "A", fighter_a_box)
+    req = _analysis_request(job_id, {**job, "solo": True}, fighter_a_box, [], "A")
+    if job.get("account_id") and not job.get("usage_reserved"):
+        if not reserve_analysis(int(job["account_id"]), job_id):
+            plan = _request_plan(request)
+            raise HTTPException(429, f"Your {plan['label']} plan includes {plan['limit_label'].lower()}. Your allowance will reset automatically.")
+        update_job(job_id, {"usage_reserved": True})
+    try:
+        analysis_run_id = prepare_job_run(job_id, {
+            "analysis_target": "A", "focus_fighter": "A", "solo": True,
+            "fighter_a_box": fighter_a_box, "fighter_b_box": None, "fighter_a_corner": None,
+            **({"message": _deferred_analysis_message()} if capacity["deferred"] else {}),
+        })
+    except AnalysisStateNotPersisted as exc:
+        if job.get("account_id") and get_job(job_id).get("usage_reserved"):
+            release_analysis(int(job["account_id"]), job_id)
+            update_job(job_id, {"usage_reserved": False})
+        LOGGER.error("analysis_queue_not_persisted job_id=%s", job_id, exc_info=exc)
+        raise HTTPException(
+            503, "WarriorIQ could not queue this analysis. Your video and selection are preserved.",
+        ) from exc
+    if SETTINGS.analysis_worker_mode == "inprocess":
+        executor.submit(_run_job, job_id, req, analysis_run_id)
+    else:
+        _wake_analysis_worker(job_id)
+    return _analysis_started_response(request, job_id, capacity["deferred"])
+
+
 @app.post("/api/restart/{job_id}", dependencies=[Depends(require_csrf)])
 def restart_interrupted_analysis(request: Request, job_id: str):
     # Restarting queues GPU work. Without a cap one account can fill the
@@ -4603,7 +4696,8 @@ def restart_interrupted_analysis(request: Request, job_id: str):
     fighter_a_box = job.get("fighter_a_box")
     fighter_b_box = job.get("fighter_b_box")
     focus_fighter = job.get("focus_fighter") or "A"
-    if not isinstance(fighter_a_box, list) or len(fighter_a_box) != 4 or not isinstance(fighter_b_box, list) or len(fighter_b_box) != 4:
+    b_box_ok = bool(job.get("solo")) or (isinstance(fighter_b_box, list) and len(fighter_b_box) == 4)
+    if not isinstance(fighter_a_box, list) or len(fighter_a_box) != 4 or not b_box_ok:
         raise HTTPException(409, "The saved session predates resumable analysis. Return to fighter selection once; your video is still available.")
     req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, focus_fighter)
     try:
@@ -4636,6 +4730,8 @@ def progress_page(request: Request, job_id: str):
         # live view cannot claim "leg strikes only" above a feed of punches.
         "live_counting_note": counting_policy(_job_sport(job)).live_note,
         "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
+        # A solo session follows one person; Fighter B's panel is hidden.
+        "solo": bool(job.get("solo")),
     })
 
 
@@ -5078,6 +5174,14 @@ def result_page(request: Request, job_id: str):
     if not path.exists():
         raise HTTPException(404)
     report = json.loads(path.read_text(encoding="utf-8"))
+    if report.get("mode") == "solo":
+        # One person, no opponent and no strikes (core/solo.py): its own page,
+        # since every section of the fight report is about two fighters.
+        return templates.TemplateResponse(request=request, name="solo_result.html", context={
+            "request": request, "job_id": job_id, "report": report,
+            "analysed_span": _analysed_span_summary(report),
+            "analysis_build": result_check(report),
+        })
     if "key_moments" not in report:
         report["key_moments"] = [e for e in report.get("events", []) if e.get("outcome") in {"clean", "likely_landed"} and float(e.get("confidence", 0)) >= .72 and float(e.get("contact_confidence", 0)) >= .62][:18]
     _score_and_identity_as_shown(report)

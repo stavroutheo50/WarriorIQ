@@ -990,6 +990,127 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         finally:
             delete_job(job_id)
 
+    def _selection_job(self, job_id):
+        self.client.get("/")
+        guest_id = self.client.cookies.get(GUEST_COOKIE)
+        job_dir = webapp.OUTPUTS / job_id
+        job_dir.mkdir()
+        cv2.imwrite(str(job_dir / "selection.jpg"), np.full((360, 640, 3), 90, dtype=np.uint8))
+        video_path = webapp.UPLOADS / f"{job_id}.mp4"
+        video_path.write_bytes(b"video-placeholder")
+        create_job(job_id, {
+            "owner_key": f"guest:{guest_id}", "status": "selection",
+            "video_path": str(video_path), "original_name": "hidden.mp4",
+            "video_width": 640, "video_height": 360,
+            "fight_type": "competition", "ruleset": "K1", "start_seconds": 0.0,
+            "round_count": 1, "round_duration_seconds": 120.0,
+            "break_duration_seconds": 60.0, "selected_rounds": [1], "end_seconds": None,
+            "profile_id": 0, "persist_result": False, "openai_identity_recovery": False,
+        })
+        self.addCleanup(delete_job, job_id)
+
+    def test_start_rejects_a_box_with_no_person_in_it(self):
+        """QA, 2026-10-04: a punch bag and a blank title card were accepted."""
+        self._selection_job("emptybox1")
+        boxes = {"fighter_a_box": [80, 40, 250, 340], "fighter_b_box": [390, 40, 560, 340],
+                 "focus_fighter": "A"}
+        # Only Fighter A's box holds a person; B's is around the bag.
+        people = [{"box": [95, 50, 235, 335], "confidence": 0.9}]
+        with patch.object(webapp, "detect_people_in_frame", return_value=people), \
+                patch.object(webapp.executor, "submit") as submit:
+            response = self.client.post("/api/start/emptybox1", json=boxes)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("No person was found inside the Fighter B box", response.json()["detail"])
+        submit.assert_not_called()
+
+        # A blank card: nobody anywhere.
+        with patch.object(webapp, "detect_people_in_frame", return_value=[]):
+            response = self.client.post("/api/start/emptybox1", json=boxes)
+        self.assertIn("Fighter A or the Fighter B box", response.json()["detail"])
+
+        # A person standing beside the box, not in it, does not count.
+        beside = [{"box": [95, 50, 235, 335], "confidence": 0.9},
+                  {"box": [530, 40, 640, 340], "confidence": 0.9}]
+        with patch.object(webapp, "detect_people_in_frame", return_value=beside):
+            response = self.client.post("/api/start/emptybox1", json=boxes)
+        self.assertEqual(response.status_code, 400)
+
+        both = [{"box": [95, 50, 235, 335], "confidence": 0.9},
+                {"box": [400, 45, 550, 338], "confidence": 0.9}]
+        with patch.object(webapp, "detect_people_in_frame", return_value=both), \
+                patch.object(webapp.executor, "submit") as submit:
+            response = self.client.post("/api/start/emptybox1", json=boxes)
+        self.assertEqual(response.status_code, 200, response.text)
+        submit.assert_called_once()
+
+    def test_start_is_not_refused_when_the_person_detector_cannot_run(self):
+        self._selection_job("nodetector1")
+        with patch.object(webapp, "detect_people_in_frame", return_value=None), \
+                patch.object(webapp.executor, "submit") as submit:
+            response = self.client.post("/api/start/nodetector1", json={
+                "fighter_a_box": [80, 40, 250, 340], "fighter_b_box": [390, 40, 560, 340],
+                "focus_fighter": "A"})
+        self.assertEqual(response.status_code, 200, response.text)
+        submit.assert_called_once()
+
+    def test_a_solo_session_starts_with_one_box(self):
+        """QA, 2026-10-04: a one-person video was a dead end."""
+        self._selection_job("solo1")
+        person = [{"box": [95, 50, 235, 335], "confidence": 0.9}]
+        with patch.object(webapp, "detect_people_in_frame", return_value=person), \
+                patch.object(webapp.executor, "submit") as submit:
+            response = self.client.post("/api/start/solo1", json={
+                "fighter_a_box": [80, 40, 250, 340], "solo": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        request = submit.call_args.args[2]
+        self.assertTrue(request.solo)
+        self.assertEqual(request.analysis_target, "A")
+        self.assertEqual(request.fighter_b_box, [])
+        saved = webapp.get_job("solo1")
+        self.assertTrue(saved["solo"])
+        self.assertIsNone(saved["fighter_b_box"])
+        # The GPU worker gets the same request.
+        import worker
+
+        payload = webapp._remote_job_payload("solo1", saved)
+        self.assertTrue(payload["solo"])
+        self.assertEqual(payload["fighter_b_box"], [])
+        remote = worker._request_from_job("solo1", {**payload, "video_path": "v.mp4"})
+        self.assertTrue(remote.solo)
+
+    def test_a_solo_box_around_nobody_is_refused(self):
+        self._selection_job("solo2")
+        with patch.object(webapp, "detect_people_in_frame", return_value=[]), \
+                patch.object(webapp.executor, "submit") as submit:
+            response = self.client.post("/api/start/solo2", json={
+                "fighter_a_box": [80, 40, 250, 340], "solo": True})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("No person was found", response.json()["detail"])
+        submit.assert_not_called()
+
+    def test_two_fighters_still_need_two_boxes(self):
+        self._selection_job("solo3")
+        response = self.client.post("/api/start/solo3", json={"fighter_a_box": [80, 40, 250, 340]})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("solo session", response.json()["detail"])
+
+    def test_a_solo_report_gets_its_own_page(self):
+        self._selection_job("solo4")
+        report = webapp.OUTPUTS / "solo4" / "report.json"
+        report.write_text(json.dumps({
+            "mode": "solo", "integrity": {"identity_evidence_trusted": True},
+            "video": {"analysed_span": {"start_seconds": 0.0, "end_seconds": 30.0,
+                                        "video_duration_seconds": 30.0}},
+            "metrics": {"A": {"pose_coverage": 0.9, "guard_index": 0.5, "balance_index": 0.7,
+                              "footwork_body_lengths_per_second": 0.3}},
+            "analysis_build": {"analysis_version": 3, "commit": "abc"}}), encoding="utf-8")
+        with patch.object(webapp, "_require_completed_artifact", return_value=report):
+            response = self.client.get("/result/solo4")
+        self.assertEqual(response.status_code, 200, response.text[:500])
+        self.assertIn("Solo session", response.text)
+        self.assertIn("Whole video", response.text)
+        self.assertNotIn("Fighter B", response.text)
+
     def test_missing_selection_model_keeps_manual_fighter_selection_available(self):
         self.client.get("/")
         guest_id = self.client.cookies.get(GUEST_COOKIE)

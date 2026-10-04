@@ -21,7 +21,9 @@ from pathlib import Path
 
 # 2: the whole video is analysed from 0:00; the selection frame only seeds
 #    identity (core/analyzer.py _analyze_from_seed).
-ANALYSIS_VERSION = 2
+# 3: solo sessions (core/solo.py). An older worker would read a solo job as a
+#    two-fighter one with no Fighter B.
+ANALYSIS_VERSION = 3
 
 ROOT = Path(__file__).resolve().parents[1]
 
