@@ -121,7 +121,10 @@ class ProductFoundationTests(unittest.TestCase):
         self.assertEqual(report["scorecard"]["status"], "identity_integrity_failed")
         self.assertEqual(report["key_moments"], [])
         self.assertEqual(report["coaching"]["A"]["improvements"], [])
-        self.assertEqual(report["coaching"]["B"]["evidence_type"], "pose_only")
+        # B passed on its own, but the report as a whole did not: no coaching
+        # for either fighter (one verdict per report, QA 2026-10-04).
+        self.assertEqual(report["coaching"]["B"]["improvements"], [])
+        self.assertEqual(report["training_plan"]["B"], [])
 
     def test_annotation_sample_preserves_both_identity_confidences(self):
         observation = {"box": [10, 20, 50, 100], "keypoints": _body_keypoints(), "keypoint_conf": [1.0] * 17}

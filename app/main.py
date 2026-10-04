@@ -120,7 +120,7 @@ from core.camp import (
 from core.training_check import check_training_video
 from core.share_image import preview_png as story_preview_png
 from core.report import (
-    build_preliminary_scorecard, identity_failure, kick_minimum_check, observed_summary,
+    build_preliminary_scorecard, identity_failure, identity_verdict, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
     refresh_identity_integrity, share_card, unattributed_kick_total,
 )
@@ -1331,22 +1331,23 @@ def _analysis_quality_summary(report: dict) -> dict:
     focus = video.get("focus_fighter") or video.get("analysis_target", "BOTH")
     if focus not in {"A", "B"}:
         focus = "A"
-    tracking = report.get("tracking", {})
     metrics = report.get("metrics", {})
     integrity = report.get("integrity", {})
-    coverage = {
-        fighter: max(0.0, min(1.0, float(tracking.get(f"fighter_{fighter}_coverage", 0.0) or 0.0)))
-        for fighter in ("A", "B")
-    }
+    # The same verdict the score, the numbers and the coaching read
+    # (core.report.identity_verdict), so this box cannot call the evidence
+    # good or the identity stable beside a section that says otherwise.
+    verdict = identity_verdict(report)
+    coverage = verdict["coverage"]
     pose = max(0.0, min(1.0, float(metrics.get(focus, {}).get("pose_coverage", 0.0) or 0.0)))
-    identities = integrity.get("fighter_identity_trusted", {})
-    stable = all(bool(identities.get(fighter, tracking.get(f"fighter_{fighter}_initial_lock_safe", False))) for fighter in ("A", "B"))
-    minimum_coverage = min(coverage.values())
+    stable = verdict["trusted"]
     if not stable:
         label, tone = "Needs another fighter selection", "bad"
-    elif minimum_coverage >= .85 and pose >= .80:
+    elif not verdict["followed_enough_to_score"]:
+        # The score section says "we lost sight of a fighter too often".
+        label, tone = "Partial observation evidence", "review"
+    elif pose >= .80:
         label, tone = "Strong observation evidence", "strong"
-    elif minimum_coverage >= .65 and pose >= .55:
+    elif pose >= .55:
         label, tone = "Good observation evidence", "good"
     else:
         label, tone = "Partial observation evidence", "review"

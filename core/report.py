@@ -762,6 +762,40 @@ def _report_sport(report: dict) -> str | None:
         return None
 
 
+def identity_verdict(report: dict) -> dict:
+    """The one answer to "is this report about the people the user picked?".
+
+    QA, 2026-10-04: one report said "Not scored, we lost sight of a fighter"
+    in one section and "Good observation evidence / Identity stability:
+    Stable" in another, and still offered a training plan and a success
+    target. Each section had its own rule. Every section now reads this:
+    integrity.identity_evidence_trusted (written from it by
+    refresh_identity_integrity), the evidence-quality summary, the score
+    explanation and the coaching. When ``trusted`` is False no section
+    attributes anything to a fighter.
+
+    ``followed_enough_to_score`` is the coverage the score needs. It is not
+    part of identity: a fighter can be the right person and still be out of
+    sight too often to score. The quality label reads it too, so "good
+    evidence" never sits beside "we lost sight of a fighter".
+    """
+    tracking = report.get("tracking") or {}
+    ready = identity_ready_by_fighter(tracking)
+    target = (report.get("video") or {}).get("analysis_target", "BOTH")
+    required = ("A", "B") if target == "BOTH" else (target,)
+    trusted = all(ready.get(fighter, False) for fighter in required)
+    coverage = {fighter: max(0.0, min(1.0, float(tracking.get(f"fighter_{fighter}_coverage", 0.0) or 0.0)))
+                for fighter in ("A", "B")}
+    return {
+        "trusted": trusted,
+        "by_fighter": ready,
+        "required": required,
+        "coverage": coverage,
+        "followed_enough_to_score": min(coverage[f] for f in required) >= SETTINGS.min_tracking_coverage_for_score,
+        "cause": None if trusted else identity_failure(tracking, required),
+    }
+
+
 def refresh_identity_integrity(report: dict) -> dict:
     """Apply the current identity safety gate to new and legacy reports.
 
@@ -774,12 +808,12 @@ def refresh_identity_integrity(report: dict) -> dict:
     # well they were followed. Coverage answers "was somebody tracked", never
     # "was it the right somebody", and this is the one case where the analysis
     # can know the answer is no before it starts.
-    identity_ready = identity_ready_by_fighter(tracking)
+    verdict = identity_verdict(report)
+    identity_ready = verdict["by_fighter"]
     tracking["fighter_A_initial_lock_safe"] = identity_ready["A"]
     tracking["fighter_B_initial_lock_safe"] = identity_ready["B"]
-    target = report.get("video", {}).get("analysis_target", "BOTH")
-    required = ("A", "B") if target == "BOTH" else (target,)
-    identity_safe = all(identity_ready.get(fighter, False) for fighter in required)
+    required = verdict["required"]
+    identity_safe = verdict["trusted"]
     integrity = report.setdefault("integrity", {})
     integrity["identity_evidence_trusted"] = identity_safe
     integrity["fighter_identity_trusted"] = identity_ready
@@ -804,25 +838,18 @@ def refresh_identity_integrity(report: dict) -> dict:
         })
         report["key_moments"] = []
         report["illegal_moves"] = []
-        metrics = report.get("metrics", {})
+        # No coaching for either fighter. It used to be kept for whichever one
+        # passed on their own, so a report headed "identity check failed"
+        # still offered a training plan and a success target. Coaching
+        # compares a fighter with their opponent, so it cannot stand once the
+        # report cannot say who the opponent was.
         for fighter in ("A", "B"):
-            if identity_ready[fighter] and fighter in metrics:
-                pose_coaching = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"),
-                                                    _report_sport(report))
-                report.setdefault("coaching", {})[fighter] = pose_coaching
-                report.setdefault("training_plan", {})[fighter] = build_training_plan(
-                    pose_coaching, fighter, metrics[fighter]
-                )
-                report.setdefault("training_progression", {})[fighter] = build_training_progression(
-                    pose_coaching, fighter, metrics[fighter]
-                )
-            elif not identity_ready[fighter]:
-                report.setdefault("coaching", {})[fighter] = {
-                    "strengths": [], "improvements": [], "drills": [],
-                    "note": "Coaching withheld because this fighter did not pass the identity-integrity gate.",
-                }
-                report.setdefault("training_plan", {})[fighter] = []
-                report.setdefault("training_progression", {})[fighter] = []
+            report.setdefault("coaching", {})[fighter] = {
+                "strengths": [], "improvements": [], "drills": [],
+                "note": "Coaching withheld because WarriorIQ could not confirm who was who in this fight.",
+            }
+            report.setdefault("training_plan", {})[fighter] = []
+            report.setdefault("training_progression", {})[fighter] = []
         return report
 
     if not bool(integrity.get("action_metrics_trusted", False)):
@@ -1064,14 +1091,17 @@ def build_report(
     # work without presenting candidate strikes as facts.
     coaching: dict[str, dict] = {}
     for fighter in ("A", "B"):
-        if action_metrics_trusted and identity_ready[fighter]:
+        # Coaching for neither fighter unless the report as a whole is trusted
+        # (identity_verdict): one fighter passing on their own is not enough
+        # when the coaching compares them with an opponent nobody confirmed.
+        if action_metrics_trusted and identity_evidence_trusted and identity_ready[fighter]:
             coaching[fighter] = build_coaching(fighter, metrics, events)
-        elif identity_ready[fighter]:
+        elif identity_evidence_trusted and identity_ready[fighter]:
             coaching[fighter] = build_pose_coaching(fighter, metrics[fighter], metrics.get("B" if fighter == "A" else "A"),
                                                     sport_of(req.ruleset))
         else:
             coaching[fighter] = dict(insufficient_coaching)
-            coaching[fighter]["note"] = "Coaching withheld because this fighter did not pass the identity-integrity gate."
+            coaching[fighter]["note"] = "Coaching withheld because WarriorIQ could not confirm who was who in this fight."
     coaching_a, coaching_b = coaching["A"], coaching["B"]
 
     # Reading a weapon mix against what the ruleset rewards needs the family
