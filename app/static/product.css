@@ -376,3 +376,22 @@ body[data-page=home] main > .hero{padding-bottom:clamp(32px,5vh,56px)}
    colour for a rejected file (QA, 2026-10-04). */
 .file-status[data-tone=bad]{color:var(--wiq-danger,#ff8c8c);font-weight:700}
 .file-status[data-tone=warn]{color:var(--wiq-warning,#e8b45a)}
+
+/* Phone tap targets: 44px minimum for everything tappable (QA, 2026-10-04).
+   Audited at 390px on every page: the brand link (32px), the menu button
+   (42px), legal-page and camp tab links (35-40px), FAQ questions (23px), form
+   fields (31px), radio and checkbox rows (30px), the plan names in the pricing
+   comparison (15px) and stand-alone text links (15-19px). Links inside running
+   text are left alone, as WCAG 2.5.8 allows. */
+@media(max-width:620px){
+  .nav .brand{min-height:44px;display:inline-flex;align-items:center}
+  .mobile-menu-button{min-width:44px;min-height:44px}
+  .btn,button,select,textarea,input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=range]):not([type=file]){min-height:44px}
+  summary{min-height:44px;box-sizing:border-box}
+  label:has(> input[type=radio]),label:has(> input[type=checkbox]){min-height:44px;align-items:center}
+  aside a,nav a,.tab-row a,[role=tablist] a{min-height:44px;box-sizing:border-box}
+  .text-link:not(p .text-link):not(li .text-link):not(small .text-link),.quiet-back,th a,.analysis-exit{display:inline-flex;align-items:center;min-height:44px}
+  th a,.record-delete{min-width:44px;justify-content:center}
+  .record-delete{min-height:44px}
+  .archive-sort select,.fight-record-actions .btn{min-height:44px}
+}
