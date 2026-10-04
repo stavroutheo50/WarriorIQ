@@ -65,6 +65,21 @@ def fight_label(sport_label: str | None, ruleset: str | None, created_at: str | 
     return " · ".join(part for part in parts if part) or "Fight analysis"
 
 
+def fight_choice_stamp(created_at: str | None) -> str:
+    """The date-and-time part of a fight's label, in UTC as stored.
+
+    The page swaps exactly this text for the reader's local time (base.html,
+    data-local-stamp), so it is kept separate from the rest of the label.
+    """
+    if not created_at:
+        return ""
+    try:
+        moment = datetime.fromisoformat(str(created_at))
+        return f"{_short_date(created_at)}, {moment:%H:%M}"
+    except (TypeError, ValueError):
+        return str(created_at)[:10]
+
+
 def fight_choice_label(ruleset: str | None, created_at: str | None,
                        fight_type: str | None, fighter_name: str | None = None) -> str:
     """What to call a fight in a dropdown, built from what differs between them.
@@ -87,13 +102,7 @@ def fight_choice_label(ruleset: str | None, created_at: str | None,
     it would have to keep the keyboard behaviour and the required-field gate
     that the plain control gives for free.
     """
-    stamp = ""
-    if created_at:
-        try:
-            moment = datetime.fromisoformat(str(created_at))
-            stamp = f"{_short_date(created_at)}, {moment:%H:%M}"
-        except (TypeError, ValueError):
-            stamp = str(created_at)[:10]
+    stamp = fight_choice_stamp(created_at)
     parts = [
         (fighter_name or "").strip(),
         RULESET_LABELS.get(ruleset or "", (ruleset or "").replace("_", " ").title()).strip(),

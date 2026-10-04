@@ -134,7 +134,7 @@ from core.person_detect import detect_people as detect_people_in_frame, find_cle
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_policy import counting_policy
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
-from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label
+from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label, fight_choice_stamp
 from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
@@ -6402,6 +6402,7 @@ def compare_page(request: Request, a: str = "", b: str = ""):
         fight["choice_label"] = fight_choice_label(
             fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
             fight.get("fighter_name"))
+        fight["choice_stamp"] = fight_choice_stamp(fight.get("created_at"))
     allowed = {fight["job_id"] for fight in fights}
     reports = []
     for job_id in (a, b):

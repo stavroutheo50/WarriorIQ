@@ -33,7 +33,7 @@
 {% if sharing.new_link %}
 <section class="card share-panel share-panel-new" aria-label="Coach link created" data-reveal>
   <div class="eyebrow">Coach link created</div>
-  <p class="muted">Send this to your coach. It opens the report summary without the original video, works for anyone holding it, and stops working on {{sharing.new_link_expires}}.</p>
+  <p class="muted">Send this to your coach. It opens the report summary without the original video, works for anyone holding it, and stops working on {% if sharing.links %}<time datetime="{{ sharing.links[-1].expires_at }}" data-local="date">{{sharing.new_link_expires}}</time>{% else %}{{sharing.new_link_expires}}{% endif %}.</p>
   <div class="share-copy-row">
     <input class="share-link-field" type="text" readonly value="{{sharing.new_link}}" aria-label="Coach link address" data-select-on-focus>
     <button class="btn tiny" type="button" data-copy-link="{{sharing.new_link}}">Copy</button>
@@ -48,7 +48,7 @@
 {% elif sharing.links %}
 <section class="card share-panel" aria-label="Active coach links" data-reveal>
   <div class="eyebrow">Coach links</div>
-  <p class="muted">{{sharing.links|length}} live link{{'' if sharing.links|length == 1 else 's'}} for this fight. {{'It expires' if sharing.links|length == 1 else 'The next one expires'}} on {{sharing.links[0].expires_label}}.</p>
+  <p class="muted">{{sharing.links|length}} live link{{'' if sharing.links|length == 1 else 's'}} for this fight. {{'It expires' if sharing.links|length == 1 else 'The next one expires'}} on <time datetime="{{ sharing.links[0].expires_at }}" data-local="date">{{sharing.links[0].expires_label}}</time>.</p>
 </section>
 {% endif %}
 {% endif %}
