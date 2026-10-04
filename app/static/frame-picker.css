@@ -7,3 +7,5 @@
    "Which one is ...?": below this the choice stacks rather than squeezing the
    question into one word per line (QA, 2026-10-04). */
 @media(max-width:1120px){.analysis-choice{grid-template-columns:1fr}.analysis-choice-actions{justify-content:space-between}}
+.start-wrap{display:flex;flex-direction:column;gap:6px;min-width:0}
+.start-reason{margin:0;max-width:260px;color:#c9d3e3;font-size:13px;line-height:1.4}
