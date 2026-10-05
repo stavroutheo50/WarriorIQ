@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Iterable
 
+from core import count_plausibility
+
 
 OUTCOMES = ("landed", "missed", "blocked", "evaded", "uncertain")
 COMBINATION_GAP_SECONDS = 1.20
@@ -321,9 +323,13 @@ def summarize_fight_events(
         ),
     }
 
+    # Counts no real fight could produce are withheld everywhere, with the
+    # reason. See core/count_plausibility.py.
+    plausibility = count_plausibility.check(fighters, processed_seconds)
     return {
-        "action_labels_available": bool(trusted),
-        "attempt_counts_available": True,
+        "action_labels_available": bool(trusted) and not plausibility["implausible"],
+        "attempt_counts_available": not plausibility["implausible"],
+        "plausibility": plausibility,
         "event_mode": "validated_actions" if trusted else "observed_attempts",
         "outcome_invariant": "attempts = landed + missed + blocked + evaded + uncertain",
         "accuracy_definition": "landed / attempts; withheld when attempts are zero or any outcome is uncertain",

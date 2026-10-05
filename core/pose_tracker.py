@@ -11,6 +11,7 @@ import torch
 from core.config import SETTINGS
 from core.preflight import TARGET_SUBJECT_PX
 from ultralytics import YOLO
+from ultralytics.engine.results import Results
 from core.identity import appearance_hist, pose_signature
 from core.referee import referee_probabilities
 from core.reid import embed
@@ -400,6 +401,12 @@ class PoseTracker:
         # Seconds spent inside track(), split by step, for the report's
         # breakdown of where a frame's time goes. The analyser resets it.
         self.timing = {"pose_model": 0.0, "appearance": 0.0}
+        # Pose-model output computed ahead of tracking, keyed by
+        # (source frame index, inference size). See prepare_detections.
+        self._prepared: dict[tuple[int, int], tuple] = {}
+        # Model seconds spent earlier on prepared frames that the analysis has
+        # since tracked. The analyser counts them back into the frame pass.
+        self.prepared_seconds_used = 0.0
 
     def warmup(self, frame) -> None:
         if self._warmed:
@@ -516,20 +523,92 @@ class PoseTracker:
             return ceiling
         return size
 
-    def track(self, frame, imgsz: int | None = None) -> list[PersonObservation]:
+    # ------------------------------------------------------------------
+    # Pose-model output prepared ahead of tracking
+    # ------------------------------------------------------------------
+    # The backward identity pass (core/backtrack.py) runs the pose model on the
+    # frames before the one the person picked, and the forward pass then ran
+    # it again on the same frames: measured on a 0:06 clip picked at 0:03, 31
+    # of its 92 model runs were repeats, 8.1 s of 29.1 s. What the model sees
+    # in a frame does not depend on which way the tracker is walking, so the
+    # backward pass keeps it here and the forward pass tracks from it. Only
+    # the tracker's association, which does depend on direction, runs twice.
+
+    def _track_kwargs(self, size: int) -> dict:
+        return {"device": self.device, "imgsz": size, "conf": SETTINGS.detection_conf,
+                "classes": [0], "verbose": False}
+
+    def prepare_detections(self, frame, frame_index: int, imgsz: int | None = None) -> None:
+        """Run the pose model on ``frame`` now and keep the result for track()."""
         size = self._servable(int(imgsz or SETTINGS.default_imgsz))
         started = time.perf_counter()
-        results = self.model.track(
-            frame,
-            persist=True,
-            tracker=SETTINGS.tracker,
-            device=self.device,
-            imgsz=size,
-            conf=SETTINGS.detection_conf,
-            classes=[0],
-            verbose=False,
-        )
-        people = self.parse(results[0], frame)
+        callbacks = getattr(self.model, "callbacks", {})
+        # The model's callbacks would hand these detections to the live
+        # tracker as though this frame had been tracked. Take the tracking
+        # callbacks out for this one call, and put them back whatever happens.
+        held = {}
+        for event in ("on_predict_start", "on_predict_postprocess_end"):
+            current = callbacks.get(event)
+            if current:
+                held[event] = list(current)
+                current[:] = [cb for cb in current if not _is_tracking_callback(cb)]
+        try:
+            # The same arguments model.track passes, so the boxes are the ones
+            # tracking this frame would have been given.
+            result = self.model.predict(frame, mode="track", batch=1, **self._track_kwargs(size))[0]
+        finally:
+            for event, saved in held.items():
+                callbacks[event][:] = saved
+        boxes = result.boxes.data.detach().cpu().numpy() if result.boxes is not None else None
+        keypoints = result.keypoints.data.detach().cpu().numpy() if result.keypoints is not None else None
+        self._prepared[(int(frame_index), size)] = (
+            boxes, keypoints, result.path, result.names, time.perf_counter() - started)
+
+    def forget_prepared(self) -> None:
+        self._prepared.clear()
+        self.prepared_seconds_used = 0.0
+
+    def _prepared_tracker(self):
+        """The live tracker, when it can be fed prepared detections exactly as
+        Ultralytics' own callback would feed it; otherwise None."""
+        trackers = getattr(getattr(self.model, "predictor", None), "trackers", None)
+        if not trackers:
+            return None
+        tracker = trackers[0]
+        args = getattr(tracker, "args", None)
+        # Appearance features and per-frame extras come from inside the model
+        # run, which a prepared frame does not repeat.
+        if hasattr(type(tracker), "compute_frame_extras") or getattr(args, "with_reid", False):
+            return None
+        return tracker
+
+    @staticmethod
+    def _track_prepared(tracker, prepared, frame):
+        """What ultralytics.trackers.track.on_predict_postprocess_end does."""
+        boxes, keypoints, path, names, _ = prepared
+        result = Results(
+            frame, path=path, names=names,
+            boxes=None if boxes is None else torch.from_numpy(boxes),
+            keypoints=None if keypoints is None else torch.from_numpy(keypoints))
+        tracks = tracker.update(result.boxes.cpu().numpy(), frame, feats=None)
+        if len(tracks) == 0:
+            return result
+        result = result[tracks[:, -1].astype(int)]
+        result.update(boxes=torch.as_tensor(tracks[:, :-1]))
+        return result
+
+    def track(self, frame, imgsz: int | None = None, frame_index: int | None = None) -> list[PersonObservation]:
+        size = self._servable(int(imgsz or SETTINGS.default_imgsz))
+        started = time.perf_counter()
+        prepared = self._prepared.get((int(frame_index), size)) if frame_index is not None else None
+        tracker = self._prepared_tracker() if prepared is not None else None
+        if tracker is not None:
+            result = self._track_prepared(tracker, prepared, frame)
+            self.prepared_seconds_used += prepared[-1]
+        else:
+            result = self.model.track(frame, persist=True, tracker=SETTINGS.tracker,
+                                      **self._track_kwargs(size))[0]
+        people = self.parse(result, frame)
         appearance_started = time.perf_counter()
         self.timing["pose_model"] += appearance_started - started
         # One batched pass for the whole frame, so the identity manager can
@@ -663,6 +742,13 @@ class PoseTracker:
             obs.pose_signature = pose_signature(kp, obs.box)
             people.append(obs)
         return people
+
+
+def _is_tracking_callback(callback) -> bool:
+    from ultralytics.trackers import track as ultralytics_track
+
+    return getattr(callback, "func", None) in (
+        ultralytics_track.on_predict_start, ultralytics_track.on_predict_postprocess_end)
 
 
 def find_initial_people(manual_a, manual_b, people: list[PersonObservation], frame=None):

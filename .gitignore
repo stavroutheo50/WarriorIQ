@@ -107,3 +107,6 @@ data/
 *.log
 *.log.[0-9]
 logs/
+# Public datasets fetched by tools/fetch_public_datasets.py: used privately for
+# training and measurement, never committed or served.
+dataset/public/

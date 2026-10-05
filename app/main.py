@@ -119,6 +119,7 @@ from core.camp import (
 )
 from core.training_check import check_training_video
 from core.share_image import preview_png as story_preview_png
+from core.count_plausibility import counts_implausible
 from core.report import (
     build_preliminary_scorecard, identity_failure, identity_verdict, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
@@ -2101,13 +2102,17 @@ def _withhold_score_while_counts_are_off(report: dict) -> None:
     flag withholds (core.report.STRIKE_COUNTS_PUBLISHED), so a report stored
     while counts were on loses its score on read too. Never written back.
     """
-    if STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED:
+    implausible = counts_implausible(report)
+    if (STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED) and not implausible:
         return
     scorecard = report.get("scorecard") or {}
     if scorecard.get("available") or scorecard.get("status") == "punch_counting_unavailable":
+        # A score built from counts no real fight could produce is withheld
+        # too (core/count_plausibility.py).
         report["scorecard"] = {
             **scorecard, "available": False, "totals": {"A": None, "B": None}, "rounds": [],
-            "winner_estimate": None, "status": "strike_counts_off",
+            "winner_estimate": None,
+            "status": "strike_counts_implausible" if implausible else "strike_counts_off",
         }
 
 
@@ -5034,6 +5039,15 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
                            "strike counting is switched off until it is accurate enough. Movement, "
                            "guard, balance, centre and pressure below are unaffected."),
         }
+    if status == "strike_counts_implausible":
+        return {
+            "reason": ("The strike counts for this fight came out impossible for a real fight, "
+                       "so neither they nor a score built from them are shown."),
+            "fix": ("Usually the fighters were mixed up or lost for part of the video. A steadier, "
+                    "wider shot with both fighters in frame helps."),
+            "disclaimer": ("No score is shown: the strike counts failed a check against real fight "
+                           "statistics. Movement, guard, balance, centre and pressure below are unaffected."),
+        }
     if status == "punch_counting_unavailable":
         return {
             "reason": (
@@ -5365,7 +5379,7 @@ def result_page(request: Request, job_id: str):
         "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
         # Attributions, like the per-fighter cards, so only when identity held.
         "counted_strikes": (_with_checks(job_id, _counted_strikes(report, published_families(
-            (report.get("scorecard") or {}).get("sport") or _job_sport(job))))
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)))
             if identity_trusted and STRIKE_COUNTS_PUBLISHED else []),
         "can_check_strikes": bool(_account(request)),
         "went_down": _went_down(job_id, report),
@@ -5388,7 +5402,7 @@ def result_page(request: Request, job_id: str):
         "estimate_note": counting_policy(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job)).estimate_note,
         "families_shown": published_families(
-            (report.get("scorecard") or {}).get("sport") or _job_sport(job)),
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job), report),
         # Only Full Contact has an obligatory kick count, so this is None for
         # every other discipline and the block simply does not render.
         "kick_minimum": kick_minimum_check(report) if identity_trusted else None,
@@ -5902,7 +5916,7 @@ def replay_page(
         # The report lists every counted strike ("Watch every counted strike")
         # while this page said no action had passed. The same list is offered
         # here, labelled as what it is: automatic counts, estimates.
-        counted = _counted_strikes(report, published_families(sport))
+        counted = _counted_strikes(report, published_families(sport, report))
         if fighter and fighter.upper() in {"A", "B"}:
             counted = [row for row in counted if row["fighter"] == fighter.upper()]
         if family and family.lower() in {"punch", "kick", "knee"}:

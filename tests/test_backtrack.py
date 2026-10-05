@@ -158,7 +158,7 @@ def _run(handoff, analyze_side_effect=None):
         return {"ok": True}
 
     with patch.object(analyzer, "get_video_info", return_value=INFO), \
-         patch.object(analyzer, "get_pose_tracker", return_value=object()), \
+         patch.object(analyzer, "get_pose_tracker", return_value=SimpleNamespace(forget_prepared=lambda: None)), \
          patch.object(analyzer._backtrack, "backtrack", return_value=handoff), \
          patch.object(analyzer, "_analyze", side_effect=fake_analyze):
         analyzer._analyze_from_seed(_request(), None)

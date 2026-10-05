@@ -799,9 +799,52 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     # uses the same measured inference size - and the forward pass reuses the
     # measurement instead of taking it again.
     measured = _measure_footage(req.video_path, pose_tracker, requested_start, None)
-    imgsz = QualityController(
+    planned = QualityController(
         info.fps, info.width, info.height,
-        measured_imgsz=measured.recommended_inference_size if measured.measured else None).imgsz
+        measured_imgsz=measured.recommended_inference_size if measured.measured else None)
+    imgsz = planned.imgsz
+    # The backward pass samples the forward pass's own frames, and the pose
+    # model output it computes is kept for the forward pass to track from
+    # rather than computed a second time (PoseTracker.prepare_detections).
+    pose_tracker.forget_prepared()
+    try:
+        return _analyze_with_backtrack(
+            req, progress_callback, info=info, fps=fps, requested_start=requested_start,
+            seed_seconds=seed_seconds, seed_frame=seed_frame, start_frame=start_frame,
+            pose_tracker=pose_tracker, seed_kit=seed_kit, measured=measured, imgsz=imgsz,
+            stride=planned.stride, report_progress=report_progress, wrapper_started=wrapper_started)
+    finally:
+        pose_tracker.forget_prepared()
+
+
+def _fighters_in_range(fighter_a, fighter_b) -> bool:
+    """Are both fighters seen, with centres within striking range?"""
+    if fighter_a is None or fighter_b is None:
+        return False
+    a, b = np.asarray(fighter_a.box, dtype=np.float32), np.asarray(fighter_b.box, dtype=np.float32)
+    height = max(1.0, float((a[3] - a[1]) + (b[3] - b[1])) / 2.0)
+    gap = float(np.hypot((a[0] + a[2] - b[0] - b[2]) / 2.0, (a[1] + a[3] - b[1] - b[3]) / 2.0))
+    return gap / height <= SETTINGS.dense_exchange_body_lengths
+
+
+def _exchange_stride(stride: int, in_exchange: bool) -> int:
+    """Half the stride during an exchange, when dense exchange sampling is on."""
+    if not SETTINGS.dense_exchange_sampling or not in_exchange:
+        return stride
+    return max(1, int(stride) // 2)
+
+
+def _frame_pass_clock(*, pass_seconds: float, overhead_seconds: float,
+                      reused_seconds: float) -> tuple[float, float]:
+    """Move the model time of reused frames from the overhead to the frame pass."""
+    return pass_seconds + reused_seconds, overhead_seconds - reused_seconds
+
+
+def _analyze_with_backtrack(req: AnalysisRequest, progress_callback: ProgressCallback | None, *,
+                            info, fps: float, requested_start: float, seed_seconds: float,
+                            seed_frame: int, start_frame: int, pose_tracker, seed_kit,
+                            measured, imgsz: int, stride: int, report_progress,
+                            wrapper_started: float) -> dict:
     try:
         handoff = _backtrack.backtrack(
             req.video_path, pose_tracker, fps, start_frame, seed_frame,
@@ -810,6 +853,7 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
             find_initial=find_initial_people,
             workdir=Path(req.output_dir) if req.output_dir else None,
             progress=report_progress,
+            step=stride,
         )
     except Exception as error:                                      # noqa: BLE001
         # The backward pass is an addition; it must never cost the analysis.
@@ -1051,7 +1095,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             if not warm_ok or warm_frame is None:
                 break
             if (warm_index - warm_start) % max(1, quality.stride) == 0:
-                warm_samples.append((warm_index, pose_tracker.track(warm_frame, quality.imgsz)))
+                warm_samples.append((warm_index, pose_tracker.track(warm_frame, quality.imgsz, frame_index=warm_index)))
             warm_index += 1
         # Back to the frame the user actually selected on.
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
@@ -1062,7 +1106,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         first_frame = rewound
 
     # Start BoT-SORT on exactly the same frame the user used for A/B selection.
-    first_people = pose_tracker.track(first_frame, quality.imgsz)
+    first_people = pose_tracker.track(first_frame, quality.imgsz, frame_index=start_frame)
     initial_a, initial_b, iou_a, iou_b = find_initial_people(
         np.asarray(req.fighter_a_box, dtype=np.float32),
         np.asarray(req.fighter_b_box, dtype=np.float32),
@@ -1131,6 +1175,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # measurement rather than guessed at. Pose model and appearance are timed
     # inside PoseTracker.track; "other" is whatever the named steps leave.
     pose_tracker.timing = {"pose_model": 0.0, "appearance": 0.0}
+    pose_tracker.prepared_seconds_used = 0.0
     step_seconds = {"reading_video": 0.0, "missing_fighter_search": 0.0,
                     "identity": 0.0, "joint_refinement": 0.0}
 
@@ -1166,6 +1211,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # inference at the adaptive tracking stride instead of analyzing the very
     # next source frame again.
     next_inference_frame = start_frame + max(1, quality.stride)
+    # Whether the last analysed frame had the fighters within striking range;
+    # see SETTINGS.dense_exchange_sampling.
+    in_exchange = False
     current_imgsz = quality.imgsz
     decoded_seconds = first_seconds
 
@@ -1253,10 +1301,12 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 # Preserve identity through breaks/non-selected rounds at about
                 # 5 FPS without spending full action-analysis budget.
                 inference_stride = base_stride if active_selected_round else max(base_stride, round(info.fps / 5.0))
+                if active_selected_round:
+                    inference_stride = _exchange_stride(inference_stride, in_exchange)
                 next_inference_frame = source_frame + max(1, inference_stride)
                 feed.allow_through(next_inference_frame)
 
-                people = pose_tracker.track(frame, current_imgsz)
+                people = pose_tracker.track(frame, current_imgsz, frame_index=source_frame)
                 guidance = nearest_guidance(sam_tracks, source_frame, sam_stride)
                 search_started = time.perf_counter()
                 focused = pose_tracker.recover_from_guidance(frame, guidance, people)
@@ -1290,6 +1340,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 identity_started = time.perf_counter()
                 step_seconds["missing_fighter_search"] += identity_started - search_started
                 fighter_a, fighter_b = manager.update(people, source_frame, sam_guidance=guidance)
+                in_exchange = _fighters_in_range(fighter_a, fighter_b)
                 joints_started = time.perf_counter()
                 step_seconds["identity"] += joints_started - identity_started
                 # Joints only, and only for the two fighters, only after
@@ -1487,10 +1538,19 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             # by default because continuous adaptation makes identical fights
             # follow different frame paths.
             if SETTINGS.hard_realtime_budget:
+                # Frames tracked from pose-model output the backward pass
+                # computed cost their model time back then, inside
+                # budget_spent_before. Count it where it belongs, in the frame
+                # pass: otherwise those frames look nearly free, and the
+                # per-frame cost the plan measures - and on a first run stores
+                # for this machine - would be too low.
+                pass_seconds, overhead_seconds = _frame_pass_clock(
+                    pass_seconds=time.perf_counter() - pose_pass_start,
+                    overhead_seconds=(pose_pass_start - wall_start) + float(budget_spent_before),
+                    reused_seconds=float(pose_tracker.prepared_seconds_used))
                 quality.plan_for_budget(
-                    analyzed_frames, processed_seconds,
-                    time.perf_counter() - pose_pass_start, segment_duration,
-                    overhead_seconds=(pose_pass_start - wall_start) + float(budget_spent_before))
+                    analyzed_frames, processed_seconds, pass_seconds, segment_duration,
+                    overhead_seconds=overhead_seconds)
             current_imgsz = quality.imgsz
 
             if (analyzed_frames - last_progress_emit >= SETTINGS.progress_interval_frames
