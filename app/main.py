@@ -86,7 +86,8 @@ from core.db import (
     set_fight_review_status, toggle_assignment, update_cookie_preferences,
     update_marketing_consent, update_password_hash, update_profile,
 )
-from core.evidence_trust import report_evidence_trust
+from core.evidence_trust import accepted_model_event, report_evidence_trust
+from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.coaching import build_coaching, build_training_plan
 from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
@@ -2095,6 +2096,20 @@ def _estimate_score_withheld_for_punches(report: dict) -> None:
     )
 
 
+def _keep_plausibility_verdict(statistics: dict, previous: dict) -> dict:
+    """A rebuilt statistics block keeps an earlier "impossible counts" verdict.
+
+    Rebuilds here have no analysed duration to judge a rate against, so they
+    cannot repeat the check (core/count_plausibility.py) - and must not undo it.
+    """
+    earlier = (previous or {}).get("plausibility") or {}
+    if earlier.get("implausible"):
+        statistics["plausibility"] = earlier
+        statistics["attempt_counts_available"] = False
+        statistics["action_labels_available"] = False
+    return statistics
+
+
 def _withhold_score_while_counts_are_off(report: dict) -> None:
     """No estimated score while strike counts are switched off.
 
@@ -2129,7 +2144,9 @@ def _withhold_unverified_action_report(report: dict, reason: str) -> None:
     )
     empty = {"strengths": [], "improvements": [], "drills": [], "note": reason}
     report["coaching"] = {"A": dict(empty), "B": dict(empty)}
+    report["sport_coaching"] = {"A": None, "B": None}
     report["training_plan"] = {"A": [], "B": []}
+    report["training_progression"] = {"A": [], "B": []}
     for fighter in ("A", "B"):
         own = report.get("metrics", {}).get(fighter)
         if not own:
@@ -2187,7 +2204,9 @@ def _apply_report_annotations(
 ) -> None:
     """Expose only validated-model or human-confirmed actions as fight evidence."""
     trust = report_evidence_trust(report)
-    automated_trusted = bool(trust["automated_evidence_trusted"])
+    automated_trusted = bool(trust["automated_evidence_trusted"]) and all(
+        accepted_model_event(event) for event in report.get("events", [])
+    )
     integrity = report.setdefault("integrity", {})
     integrity.update(trust)
     status = review_status or ("complete" if human_review_complete else "in_progress")
@@ -2202,6 +2221,8 @@ def _apply_report_annotations(
         for source in (report.get("key_moments", []), report.get("illegal_moves", [])):
             for event in source:
                 key = f"{float(event.get('peak_time', 0)):.3f}"
+                if not accepted_model_event(event):
+                    continue
                 item = dict(event)
                 item["original_prediction"] = _event_prediction(event)
                 item["evidence_source"] = "validated_model"
@@ -2261,13 +2282,43 @@ def _apply_report_annotations(
         return
 
     reason = trust["action_evidence_reason"]
+    if trust["automated_evidence_trusted"]:
+        reason = "Some action candidates lacked an accepted model decision; action facts were withheld."
     integrity["action_metrics_trusted"] = False
     _withhold_unverified_action_report(report, reason)
+    feed = report.get("event_feed") or []
+    previous_stats = report.get("statistics") or {}
+    if feed or previous_stats:
+        if previous_stats.get("action_labels_available") or any(
+            item.get("verification") != "observed" for item in feed
+        ):
+            statistics = summarize_fight_events(feed, None, 0, False)
+            for fighter in ("A", "B"):
+                previous = (previous_stats.get("fighters") or {}).get(fighter) or {}
+                statistics["fighters"][fighter]["observation_coverage"] = previous.get("observation_coverage", 0.0)
+            report["statistics"] = _keep_plausibility_verdict(statistics, previous_stats)
+        for item in feed:
+            item.update({"verification": "observed", "technique": None, "limb": None,
+                         "target": None, "outcome": "unclassified"})
     confirmed_events = [_strike_from_dict(item) for item in displayed.values() if item.get("human_verified")]
     if scorecard_review_complete:
         _apply_human_scorecard(report, confirmed_events)
     if not full_review_complete:
         return
+
+    confirmed_feed = [{
+        "fighter": event.fighter, "family": event.family, "limb": event.limb,
+        "technique": event.technique, "target": event.target,
+        "outcome": normalize_outcome(event.outcome), "round_number": event.round_number,
+        "time_seconds": event.peak_time, "confidence": 1.0, "verification": "verified",
+    } for event in confirmed_events]
+    report["event_feed"] = confirmed_feed
+    previous_stats = report.get("statistics") or {}
+    statistics = summarize_fight_events(confirmed_feed, None, 0, True)
+    for fighter in ("A", "B"):
+        previous = (previous_stats.get("fighters") or {}).get(fighter) or {}
+        statistics["fighters"][fighter]["observation_coverage"] = previous.get("observation_coverage", 0.0)
+    report["statistics"] = _keep_plausibility_verdict(statistics, previous_stats)
 
     report["metrics"] = _confirmed_metrics(report, confirmed_events)
     report["coaching"] = {
