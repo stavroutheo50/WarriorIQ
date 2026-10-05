@@ -817,6 +817,23 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
         pose_tracker.forget_prepared()
 
 
+def _fighters_in_range(fighter_a, fighter_b) -> bool:
+    """Are both fighters seen, with centres within striking range?"""
+    if fighter_a is None or fighter_b is None:
+        return False
+    a, b = np.asarray(fighter_a.box, dtype=np.float32), np.asarray(fighter_b.box, dtype=np.float32)
+    height = max(1.0, float((a[3] - a[1]) + (b[3] - b[1])) / 2.0)
+    gap = float(np.hypot((a[0] + a[2] - b[0] - b[2]) / 2.0, (a[1] + a[3] - b[1] - b[3]) / 2.0))
+    return gap / height <= SETTINGS.dense_exchange_body_lengths
+
+
+def _exchange_stride(stride: int, in_exchange: bool) -> int:
+    """Half the stride during an exchange, when dense exchange sampling is on."""
+    if not SETTINGS.dense_exchange_sampling or not in_exchange:
+        return stride
+    return max(1, int(stride) // 2)
+
+
 def _frame_pass_clock(*, pass_seconds: float, overhead_seconds: float,
                       reused_seconds: float) -> tuple[float, float]:
     """Move the model time of reused frames from the overhead to the frame pass."""
@@ -1194,6 +1211,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # inference at the adaptive tracking stride instead of analyzing the very
     # next source frame again.
     next_inference_frame = start_frame + max(1, quality.stride)
+    # Whether the last analysed frame had the fighters within striking range;
+    # see SETTINGS.dense_exchange_sampling.
+    in_exchange = False
     current_imgsz = quality.imgsz
     decoded_seconds = first_seconds
 
@@ -1281,6 +1301,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 # Preserve identity through breaks/non-selected rounds at about
                 # 5 FPS without spending full action-analysis budget.
                 inference_stride = base_stride if active_selected_round else max(base_stride, round(info.fps / 5.0))
+                if active_selected_round:
+                    inference_stride = _exchange_stride(inference_stride, in_exchange)
                 next_inference_frame = source_frame + max(1, inference_stride)
                 feed.allow_through(next_inference_frame)
 
@@ -1318,6 +1340,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 identity_started = time.perf_counter()
                 step_seconds["missing_fighter_search"] += identity_started - search_started
                 fighter_a, fighter_b = manager.update(people, source_frame, sam_guidance=guidance)
+                in_exchange = _fighters_in_range(fighter_a, fighter_b)
                 joints_started = time.perf_counter()
                 step_seconds["identity"] += joints_started - identity_started
                 # Joints only, and only for the two fighters, only after

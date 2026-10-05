@@ -623,6 +623,17 @@ class Settings:
     # counted "attempts" were thrown at nobody and dragged every accuracy figure
     # down with them. A kick reaches roughly 1.5-2 body lengths; 2.5 is generous.
     max_engagement_body_lengths: float = float(os.getenv("WARRIORIQ_MAX_ENGAGEMENT", "2.5"))
+    # Analyse twice as many frames while the two fighters are within striking
+    # range. A punch lasts 0.1-0.3 s, so at the usual 6-15 analysed frames a
+    # second it is seen in one to four of them. OFF by default and not yet
+    # measured: core/action.py counts some of its limits in frames (an action
+    # times out after max(6, action_window) samples), so doubling the sampling
+    # changes what it detects as well as how much it sees. Turn on, compare
+    # with tools/compare_official_stats.py or a labelled fight, and keep only
+    # if the counts get closer.
+    dense_exchange_sampling: bool = env_bool("WARRIORIQ_DENSE_EXCHANGES", False)
+    # Centres closer than this many body heights count as an exchange.
+    dense_exchange_body_lengths: float = float(os.getenv("WARRIORIQ_DENSE_EXCHANGE_BODY_LENGTHS", "1.5"))
     # The fighters being close is not the same as the strike reaching. Measured
     # on real footage: strikes labelled kick-to-leg finished a median 2.46 body
     # lengths from any target, and punches with no target at all made up a
