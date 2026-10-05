@@ -2565,6 +2565,101 @@ class RtmPoseRefinementTests(unittest.TestCase):
         self.assertTrue(rtm_pose._unavailable, "it gives up rather than retrying every frame")
         self.assertTrue((person.keypoints == 0).all())
 
+    def test_idle_warmup_runs_one_inference_without_fight_data(self):
+        import dataclasses
+
+        from core import rtm_pose
+
+        calls = []
+
+        def infer(frame, boxes):
+            calls.append((frame.shape, boxes.shape))
+            return [], []
+
+        on = dataclasses.replace(rtm_pose.SETTINGS, rtm_pose_enabled=True)
+        with mock.patch.object(rtm_pose, "SETTINGS", on), mock.patch.object(rtm_pose, "_get", return_value=infer):
+            self.assertTrue(rtm_pose.warmup())
+        self.assertEqual(calls, [((256, 192, 3), (1, 4))])
+
+    def test_idle_warmup_is_optional_and_cannot_stop_the_worker(self):
+        import dataclasses
+
+        from core import rtm_pose
+
+        off = dataclasses.replace(rtm_pose.SETTINGS, rtm_pose_enabled=False)
+        with mock.patch.object(rtm_pose, "SETTINGS", off), mock.patch.object(rtm_pose, "_get") as load:
+            self.assertFalse(rtm_pose.warmup())
+            load.assert_not_called()
+        on = dataclasses.replace(rtm_pose.SETTINGS, rtm_pose_enabled=True)
+        with mock.patch.object(rtm_pose, "SETTINGS", on), mock.patch.object(
+            rtm_pose, "_get", return_value=mock.Mock(side_effect=RuntimeError("warmup failed"))
+        ):
+            self.assertFalse(rtm_pose.warmup())
+
+    def test_resident_worker_warms_after_an_empty_poll_but_one_shot_does_not(self):
+        import worker
+
+        settings = mock.Mock(worker_remote_url="", worker_poll_seconds=0)
+        warming = mock.Mock()
+        warming.is_alive.side_effect = [True, False]
+        with mock.patch.object(worker, "SETTINGS", settings), mock.patch.object(
+            worker, "_start_idle_pose_warmup", return_value=warming
+        ) as warm, mock.patch.object(worker, "refresh_worker_lock"), mock.patch.object(
+            worker, "record_worker_heartbeat"
+        ), mock.patch.object(worker, "claim_next_job", side_effect=[None, SystemExit(0)]) as claim, mock.patch.object(
+            worker.time, "sleep"
+        ):
+            with self.assertRaises(SystemExit):
+                worker.run_worker()
+            warm.assert_called_once_with()
+            self.assertEqual(claim.call_count, 2)
+            warm.reset_mock()
+            claim.side_effect = [None]
+            self.assertEqual(worker.run_worker(once=True), 0)
+            warm.assert_not_called()
+
+    def test_remote_worker_heartbeats_and_checks_queue_before_idle_warmup(self):
+        import worker
+
+        settings = mock.Mock(worker_remote_url="https://example.invalid", worker_token="test-token",
+                             worker_poll_seconds=0)
+        client = mock.Mock()
+        client.claim.side_effect = [None, SystemExit(0)]
+        order = []
+        warming = mock.Mock()
+        warming.is_alive.side_effect = [True, False]
+
+        def heartbeat(_client):
+            order.append("heartbeat")
+
+        def begin_warmup():
+            order.append("warmup_started")
+            return warming
+
+        with mock.patch.object(worker, "SETTINGS", settings), mock.patch.object(
+            worker, "RemoteWorkerClient", return_value=client
+        ), mock.patch.object(worker, "_source_fingerprint", return_value="unchanged"), mock.patch.object(
+            worker, "_code_changed_since", return_value=False
+        ), mock.patch.object(worker, "refresh_worker_lock"), mock.patch.object(
+            worker, "retry_heartbeat", side_effect=heartbeat
+        ), mock.patch.object(worker, "_start_idle_pose_warmup", side_effect=begin_warmup), mock.patch.object(
+            worker.time, "sleep"
+        ):
+            with self.assertRaises(SystemExit):
+                worker.run_remote_worker("test-worker")
+        self.assertEqual(order, ["heartbeat", "warmup_started", "heartbeat", "heartbeat"])
+        self.assertEqual(client.claim.call_count, 2)
+
+    def test_idle_warmup_thread_calls_the_model_without_blocking_the_worker(self):
+        import worker
+        from core import rtm_pose
+
+        with mock.patch.object(rtm_pose, "warmup", return_value=True) as warm:
+            thread = worker._start_idle_pose_warmup()
+            thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+        warm.assert_called_once_with()
+
 
 class RejectionReasonTests(unittest.TestCase):
     """A refusal count with no reason cannot be acted on."""
@@ -4678,20 +4773,13 @@ class StandaloneReportHonestyTests(unittest.TestCase):
         for absent in ("not classified", "<th>Outcome</th>", "<th>Target</th>"):
             with self.subTest(absent=absent):
                 self.assertNotIn(absent, untrusted)
-        trusted = self._write(trusted=True)
-        for present in ("<th>Outcome</th>", "<th>Target</th>"):
-            with self.subTest(present=present):
-                self.assertIn(present, trusted)
+        stale_flag = self._write(trusted=True)
+        for absent in ("<th>Outcome</th>", "<th>Target</th>"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, stale_flag)
 
-    def test_the_timeline_shows_only_the_strikes_that_arrived(self):
-        """Hand-checking every event of athens_hd against the video priced each
-        of the analyser's own outcomes: `likely_landed` and `blocked` are 100%
-        real, `clean` 80%, `missed` 42% and `uncertain` 12%. `missed` is also
-        exactly the set whose limb never entered the opponent's box, 0 of 19.
-        The evidence list was being filled with the two categories the analyser
-        is worst at; on that fight the kick timeline was 27 rows at 63% correct
-        and is now 10 rows at 100%.
-        """
+    def test_the_timeline_withholds_unverified_strikes(self):
+        """A contact estimate alone cannot establish that an action happened."""
         def three_kicks(report):
             report["events"] = [
                 {"round_number": 1, "peak_time": 11.25, "fighter": "A", "family": "kick",
@@ -4703,12 +4791,11 @@ class StandaloneReportHonestyTests(unittest.TestCase):
             ]
 
         html = self._write(trusted=False, mutate=three_kicks)
-        self.assertIn("11.25", html)
-        for withheld in ("22.50", "33.75"):
+        self.assertIn("unverified", html)
+        for withheld in ("11.25", "22.50", "33.75"):
             with self.subTest(withheld=withheld):
                 self.assertNotIn(withheld, html)
-        # Withheld, not silently dropped: the reader is told how many.
-        self.assertIn("2 more were seen", html)
+        self.assertIn("No verified action moments", html)
 
     def test_the_recording_advice_reaches_the_reader(self):
         """The preflight probe measures the recording on every analysis and
@@ -4739,12 +4826,8 @@ class StandaloneReportHonestyTests(unittest.TestCase):
 
         self.assertNotIn("Your recording", self._write(trusted=False, mutate=unmeasured))
 
-    def test_the_headline_counts_what_the_table_lists(self):
-        """They disagreed: the card counted every flagged kick while the table
-        listed only the ones that arrived, so a reader saw a big number above a
-        short list and had to do arithmetic to learn nothing was broken. Worse,
-        the largest number on the page was the least reliable one - flagged
-        kicks are 63% real on the hand-checked fight, arrived ones 100%."""
+    def test_candidate_headline_is_not_a_verified_timeline(self):
+        """Candidate counts remain visibly separate from confirmed moments."""
         def kicks(report):
             report["events"] = [
                 {"round_number": 1, "peak_time": 11.25, "fighter": "A", "family": "kick",
@@ -4759,13 +4842,10 @@ class StandaloneReportHonestyTests(unittest.TestCase):
 
         html = self._write(trusted=False, mutate=kicks)
         rows = html.split("Evidence timeline")[1].split("</section>")[0].count("<tr>") - 1
-        self.assertEqual(rows, 2, "the table should list the two that arrived")
-        self.assertIn("kicks that reached, of 3 flagged", html)
-        self.assertIn("kicks that reached, of 1 flagged", html)
-        # A threw two that arrived, B none: the headlines are 2 and 0, and they
-        # add up to the rows in the table.
-        self.assertIn("<div class='big'>2</div>", html)
-        self.assertIn("<div class='big'>0</div>", html)
+        self.assertEqual(rows, 0, "unverified actions are not evidence timeline rows")
+        self.assertIn("unverified action candidates", html)
+        self.assertIn("<div class='big'>3</div>", html)
+        self.assertIn("<div class='big'>1</div>", html)
 
     def _fight_with(self, subject_px, events):
         def setup(report):
@@ -4785,46 +4865,36 @@ class StandaloneReportHonestyTests(unittest.TestCase):
                 "family": family, "technique": "jab" if family == "punch" else "right_low_kick",
                 "outcome": outcome, "target": "head"}
 
-    def test_punches_are_counted_when_the_fighters_are_big_enough(self):
-        """Punches were withheld outright on evidence from three messenger
-        copies where a fighter reaches the network about 86-101px tall. On the
-        iPhone original at 201px, hand-checking says punches that arrived are
-        85% real. Withholding them there threw away eleven real punches to
-        avoid two false ones."""
+    def test_larger_fighters_do_not_make_candidates_verified(self):
+        """Image resolution improves readability, not the model's release status."""
         events = [self._event(11.25, "A", "kick", "clean"),
                   self._event(22.50, "A", "punch", "blocked"),
                   self._event(33.75, "B", "punch", "likely_landed")]
         html = self._write(trusted=False, mutate=self._fight_with(201.0, events))
         rows = html.split("Evidence timeline")[1].split("</section>")[0].count("<tr>") - 1
-        self.assertEqual(rows, 3, "the kick and both punches should be listed")
-        self.assertIn("strikes that reached", html)
+        self.assertEqual(rows, 0, "candidate strikes are not verified moments")
+        self.assertIn("unverified action candidates", html)
         self.assertNotIn("Punches are left out", html)
 
-    def test_punches_are_withheld_when_the_fighters_are_too_small(self):
-        """The same three bouts that produced 'punches reported 11, actually
-        thrown 0' are exactly the ones below this line."""
+    def test_small_fighters_keep_the_punch_limit_explanation(self):
+        """Unverified footage still explains why hands were withheld."""
         events = [self._event(11.25, "A", "kick", "clean"),
                   self._event(22.50, "A", "punch", "blocked")]
         html = self._write(trusted=False, mutate=self._fight_with(95.0, events))
         rows = html.split("Evidence timeline")[1].split("</section>")[0].count("<tr>") - 1
-        self.assertEqual(rows, 1, "only the kick")
-        self.assertIn("Punches are left out", html)
+        self.assertEqual(rows, 0, "the kick is also unverified")
         self.assertIn("too small in the picture", html)
 
-    def test_a_clean_punch_is_not_good_enough_to_publish(self):
-        """Hand-checked on the fight with labels: blocked and likely_landed
-        punches are 100% real, clean ones 60%. Published with clean included,
-        BOTH wrong rows in the evidence list were clean punches - one on a
-        fighter standing apart, one crediting B for a kick A threw."""
+    def test_contact_labels_alone_do_not_publish_actions(self):
+        """Clean, blocked and likely-landed candidates all need action proof."""
         events = [self._event(11.25, "A", "punch", "blocked"),
                   self._event(22.50, "A", "punch", "clean"),
                   self._event(33.75, "B", "kick", "clean")]
         html = self._write(trusted=False, mutate=self._fight_with(201.0, events))
-        self.assertIn("11.25", html)
+        self.assertNotIn("11.25", html)
         self.assertNotIn("22.50", html)
-        # A clean KICK is still published: all three of its outcomes measured
-        # 100% real, which is what makes punches the exception and not the rule.
-        self.assertIn("33.75", html)
+        # A clean kick is still a candidate until its action is independently accepted.
+        self.assertNotIn("33.75", html)
 
     def test_the_scoring_note_is_not_printed_twice(self):
         """integrity.scoring_status is a copy of the scorecard disclaimer.
@@ -4857,10 +4927,10 @@ class StandaloneReportHonestyTests(unittest.TestCase):
                     self.assertIn(shown, html)
 
     def test_a_trusted_analysis_may_still_show_outcomes(self):
-        """The gate is what decides, not a blanket ban."""
+        """A stored trust flag alone cannot make action outcomes true."""
         html = self._write(trusted=True)
-        self.assertIn("Landed / attempts", html)
-        self.assertIn("Strongest weapon", html)
+        self.assertNotIn("Landed / attempts", html)
+        self.assertNotIn("Strongest weapon", html)
 
     def test_punches_are_never_counted_even_when_trusted(self):
         """Kicks survived checking; punches did not, at any confidence."""

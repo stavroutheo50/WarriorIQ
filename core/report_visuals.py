@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+from core.evidence_trust import report_actions_trusted
 from core.report import ARRIVED_OUTCOMES
 
 # The families that may be counted. Punches are excluded deliberately, and
@@ -138,16 +139,21 @@ def build(report: dict, focus: str = "A", outcomes_counted: bool = True) -> dict
         return None
     other = "B" if focus == "A" else "A"
     sport = str((report.get("scorecard") or {}).get("sport") or "")
-    strikes_shown = outcomes_counted and sport != "boxing"
-    events = [e for e in (report.get("events") or []) if _countable(e)] if strikes_shown else []
+    action_ready = outcomes_counted and (
+        report_actions_trusted(report) if "integrity" in report else True
+    )
+    strikes_shown = action_ready and sport != "boxing"
+    source = report.get("key_moments") if (report.get("integrity") or {}).get("human_review_complete") else report.get("events")
+    events = [e for e in (source or []) if _countable(e)] if strikes_shown else []
+    landed_events = [e for e in events if str(e.get("outcome") or "") in {"clean", "likely_landed", "landed"}]
 
     landed_by = {
-        side: len([e for e in events if str(e.get("fighter")) == side])
+        side: len([e for e in landed_events if str(e.get("fighter")) == side])
         for side in (focus, other)
     }
     mine = metrics.get(focus) or {}
 
-    combinations = mine.get("combinations") or {}
+    combinations = (mine.get("combinations") or {}) if action_ready else {}
     # Each combination's evidence is the list of times its strikes happened,
     # so its length is the chain length. Longest first: the best chain is the
     # one worth looking at.
@@ -159,7 +165,7 @@ def build(report: dict, focus: str = "A", outcomes_counted: bool = True) -> dict
     span = max((float(r.get("end_seconds") or 0) for r in rounds), default=0.0)
 
     timeline = []
-    for event in (report.get("events") or []):
+    for event in (source or []):
         if not _countable(event) and str(event.get("outcome") or "") in ARRIVED_OUTCOMES:
             # A punch that arrived is deliberately absent rather than drawn as
             # "unknown" - an outline on the timeline is still a claim that
@@ -172,24 +178,25 @@ def build(report: dict, focus: str = "A", outcomes_counted: bool = True) -> dict
         timeline.append({
             "at": round(float(event.get("peak_time") or 0.0), 2),
             "mine": str(event.get("fighter")) == focus,
-            "arrived": True,
+            "arrived": str(event.get("outcome") or "") in {"clean", "likely_landed", "landed"},
         })
 
     moments = (mine.get("moments") or {}).get("guard_index") or {}
     guard_low = [round(float(t), 1) for t in (moments.get("low") or [])]
 
-    defences = {k: int(v) for k, v in (mine.get("defenses") or {}).items() if v}
+    defences = {k: int(v) for k, v in (mine.get("defenses") or {}).items() if v} if action_ready else {}
 
     rows = head_to_head(metrics, focus, other, landed_by)
     if not strikes_shown:
         rows = [row for row in rows if row["key"] != "landed"]
     return {
         "focus": focus,
+        "action_ready": action_ready,
         "opponent": other,
         "strikes_shown": strikes_shown,
         "head_to_head": rows,
-        "landed": _zones([e for e in events if str(e.get("fighter")) == focus]),
-        "taken": _zones([e for e in events if str(e.get("fighter")) == other]),
+        "landed": _zones([e for e in landed_events if str(e.get("fighter")) == focus]) if action_ready else None,
+        "taken": _zones([e for e in landed_events if str(e.get("fighter")) == other]) if action_ready else None,
         "defences": dict(sorted(defences.items(), key=lambda kv: -kv[1])),
         "defence_total": sum(defences.values()),
         "defence_max": max(defences.values()) if defences else 0,

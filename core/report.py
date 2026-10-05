@@ -10,7 +10,7 @@ from core.coaching import (
 )
 from core.sport_profiles import build_sport_coaching
 from core.config import SETTINGS
-from core.evidence_trust import automated_evidence_trust
+from core.evidence_trust import accepted_model_event, automated_evidence_trust, report_actions_trusted
 from core.scoring import (
     event_legality, is_legal_event, is_verified_scoring_event,
     minimum_kicks_per_round, score_fight,
@@ -658,7 +658,10 @@ def build_report(
     tracking["fighter_B_initial_lock_safe"] = identity_ready["B"]
     required_fighters = ("A", "B") if req.analysis_target == "BOTH" else (req.analysis_target,)
     identity_evidence_trusted = all(identity_ready[fighter] for fighter in required_fighters)
-    action_metrics_trusted = automated_evidence_trusted and identity_evidence_trusted
+    action_metrics_trusted = (
+        automated_evidence_trusted and identity_evidence_trusted
+        and all(accepted_model_event(event) for event in events)
+    )
     round_numbers = [r.number for r in rounds if r.selected]
     minimum_coverage = min(float(tracking.get("fighter_A_coverage", 0)), float(tracking.get("fighter_B_coverage", 0)))
     scoring_reliable = action_metrics_trusted and minimum_coverage >= SETTINGS.min_tracking_coverage_for_score
@@ -841,14 +844,9 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     # standing in another - the scorecard against the live feed, then the
     # report against the live view - and a stale copy of a retracted number is
     # exactly how a wrong figure gets quoted back later.
-    trusted = bool((report.get("integrity") or {}).get("action_metrics_trusted", False))
+    trusted = report_actions_trusted(report)
 
-    # One source for the headline and for the table under it. They disagreed
-    # once: the card counted every flagged kick while the timeline listed only
-    # the ones that arrived, so a reader saw "15" above a list of six and had
-    # to do arithmetic to find out nothing was broken. Worse, the largest
-    # number on the page was the least reliable one - flagged kicks are 63%
-    # real on the fight that was hand-checked, the arrived ones 100%.
+    # Keep unverified candidate counts separate from the evidence timeline.
     # Which families can be counted on THIS video. Kicks always; punches only
     # where the fighters are big enough in the network's input for a hand to be
     # readable - see PUNCHES_NEED_THIS_MANY_PIXELS.
@@ -859,14 +857,6 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
 
     kick_events = [e for e in (report.get("events") or [])
                    if (e.get("family") or "") in countable_families]
-    def _arrived(event: dict) -> bool:
-        outcome = event.get("outcome") or ""
-        if (event.get("family") or "") == "punch":
-            return outcome in PUNCH_OUTCOMES
-        return outcome in ARRIVED_OUTCOMES
-
-    arrived_kicks = [e for e in kick_events if _arrived(e)]
-
     def _per_fighter(items: list) -> dict:
         counts = {"A": 0, "B": 0}
         for item in items:
@@ -876,7 +866,6 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         return counts
 
     flagged_kicks = _per_fighter(kick_events)
-    reached_kicks = _per_fighter(arrived_kicks)
 
     def fighter_card(name: str) -> str:
         m = report["metrics"][name]
@@ -918,27 +907,22 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         # wording named an "identity and action integrity gate", which tells a
         # customer nothing except that something failed. What they need to know
         # is which numbers they can rely on and which are missing, and why.
-        measured = ("Strikes that reached, movement and coverage above are measured."
-                    if punches_are_readable else
-                    "Kicks, knees, movement and coverage above are measured.")
-        withheld = ("Named techniques and accuracy are not shown - WarriorIQ can see "
-                    "that a strike arrived but cannot yet tell you reliably which "
-                    "punch or kick it was, so it does not guess."
+        measured = "Movement and pose coverage above are measured."
+        withheld = ("Named techniques, contact outcomes and accuracy are not shown "
+                    "because these action candidates have not been verified."
                     if punches_are_readable else
                     "Punch counts, accuracy and named techniques are not shown for this "
                     "fight - the fighters are too small in the picture for WarriorIQ to "
                     "count hands reliably.")
         note = "" if trusted else (
-            "<div class='muted'>%s %s</div>" % (measured, withheld))
-        # On a trusted run the timeline lists every key moment, so the flagged
-        # count is what the table shows and the two already agree.
+            "<div class='muted'>%s Action counts are unverified candidates, not confirmed fight facts. %s</div>"
+            % (measured, withheld))
+        # On an untrusted run the headline is explicitly a candidate count.
         if trusted:
             headline, caption = kicks, "leg strikes flagged (kicks and knees)"
         else:
-            headline = reached_kicks.get(name, 0)
-            caption = "%s that reached, of %d flagged" % (
-                "strikes" if punches_are_readable else "kicks",
-                flagged_kicks.get(name, 0))
+            headline = flagged_kicks.get(name, 0)
+            caption = "unverified action candidates"
         return f"""
         <section class='card'>
           <h2>Fighter {name}</h2>
@@ -949,23 +933,11 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
         </section>
         """
 
-    # Named techniques and outcomes only where the analysis earned them. A
-    # "jab" on footage that cannot resolve an arm is a guess with a confident
-    # label on it.
-    # `key_moments` is filtered on outcome, and outcomes are only classified
-    # when the analysis is trusted - so on an untrusted run the table rendered
-    # its headers over nothing at all. That is the worst of both: it withholds
-    # the punch counts it does not trust AND the leg strikes it does, leaving a
-    # reader with an empty table under a card that says 15.
-    #
-    # So when nothing is trusted, fall back to the leg strikes, which is
-    # exactly what the card counts and what the scorecard note says came out
-    # right when checked against video. Technique names stay withheld.
+    # A saved candidate must not become a timed fight fact just because the
+    # HTML report was written before the model-level gate was introduced.
     moments = report.get("key_moments") or []
-    withheld_candidates = 0
     if not trusted:
-        moments = arrived_kicks
-        withheld_candidates = len(kick_events) - len(arrived_kicks)
+        moments = []
     # Outcome and Target are only ever filled on a trusted run, so on every
     # other run they were two columns of "not classified" and "-" - two thirds
     # of the table saying nothing, which reads as broken rather than careful.
@@ -984,18 +956,9 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
             f"<tr><td>{e['round_number'] or '-'}</td><td>{e['peak_time']:.2f}</td><td>{escape(e['fighter'])}</td>"
             f"<td>{escape(e.get('family') or 'action')}</td></tr>"
             for e in moments)
-    extra = ("" if not withheld_candidates else
-             " %d more were seen but not shown, because the strike never "
-             "reached the opponent and those are the ones WarriorIQ gets wrong "
-             "most often." % withheld_candidates)
-    punch_note = ("" if punches_are_readable else
-                  " Punches are left out of this video - the fighters are too "
-                  "small in the picture for WarriorIQ to count hands reliably. "
-                  "The advice at the bottom of this page is how to change that.")
     timeline_note = "" if trusted else (
-        "<div class='muted'>%s that reached the other fighter, with the second "
-        "each one happened, so you can find it on the video.%s%s</div>"
-        % ("Strikes" if punches_are_readable else "Kicks and knees", extra, punch_note))
+        "<div class='muted'>No verified action moments are available. "
+        "Unverified candidates are not presented as fight facts.</div>")
 
     coaching_html = ""
     for fighter in ("A", "B"):

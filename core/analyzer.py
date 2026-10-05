@@ -30,7 +30,7 @@ from core.contact import (
 )
 from core.db import save_fight
 from core.defense import DefenseEngine
-from core.evidence_trust import automated_evidence_trust
+from core.evidence_trust import accepted_model_event, automated_evidence_trust
 from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.action import CONFIDENCE_CEILING, CONFIDENCE_FLOOR
 
@@ -268,7 +268,8 @@ def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | 
             deduplicated[duplicate_index] = event
     payload = []
     for event in deduplicated:
-        outcome_reliable = trusted and _live_event_reliable(event, ruleset)
+        action_accepted = trusted and accepted_model_event(event)
+        outcome_reliable = action_accepted and _live_event_reliable(event, ruleset)
         outcome = "uncertain"
         if outcome_reliable:
             outcome = normalize_outcome(event.outcome)
@@ -280,22 +281,22 @@ def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | 
                 elif defense == "parry":
                     outcome = "blocked"
         payload.append({
-            "id": f"{event.fighter}-{event.peak_frame}-{event.technique if trusted else event.family}",
+            "id": f"{event.fighter}-{event.peak_frame}-{event.technique if action_accepted else event.family}",
             "kind": "strike",
             "fighter": event.fighter,
             "round_number": event.round_number,
             "start_time": float(getattr(event, "start_time", event.peak_time)),
             "time_seconds": float(event.peak_time),
             "end_time": float(getattr(event, "end_time", event.peak_time)),
-            "technique": event.technique if trusted else None,
+            "technique": event.technique if action_accepted else None,
             "family": event.family,
-            "limb": event.limb if trusted else None,
+            "limb": event.limb if action_accepted else None,
             "target": event.target if outcome_reliable else None,
-            "outcome": outcome if trusted else "unclassified",
+            "outcome": outcome if action_accepted else "unclassified",
             "confidence": float(
                 min(event.confidence, event.contact_confidence) if outcome_reliable else event.confidence
             ),
-            "verification": "verified" if outcome_reliable else "supported" if trusted else "observed",
+            "verification": "verified" if outcome_reliable else "supported" if action_accepted else "observed",
         })
     return payload if limit is None else payload[-max(1, int(limit)):]
 
@@ -304,7 +305,10 @@ def _live_event_diagnostics(events: list, ruleset: str, trusted: bool, emitted: 
     return {
         "candidate_events_seen": len(events),
         "identity_safe_attempts": sum(_live_attempt_reliable(event) for event in events),
-        "verified_events": sum(_live_event_reliable(event, ruleset) for event in events),
+        "verified_events": sum(
+            trusted and accepted_model_event(event) and _live_event_reliable(event, ruleset)
+            for event in events
+        ),
         "events_emitted": len(emitted),
         "event_mode": "validated_actions" if trusted else "observed_attempts",
     }
@@ -314,8 +318,11 @@ def _provisional_stats(
     live_events: list[dict], found: dict, analyzed_frames: int, trusted: bool,
     processed_seconds: float | None = None,
 ) -> dict:
+    # Internal callers may pass already-adjudicated event dictionaries without
+    # a feed verification field. A present, non-verified field always vetoes.
+    all_verified = trusted and all(event.get("verification", "verified") == "verified" for event in live_events)
     return summarize_fight_events(
-        live_events, found, analyzed_frames, trusted, processed_seconds,
+        live_events, found, analyzed_frames, all_verified, processed_seconds,
     )
 
 
@@ -686,7 +693,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     try:
         preflight = probe_video(
             req.video_path, pose_tracker.model,
-            start_seconds=req.start_seconds, end_seconds=segment_end_seconds)
+            start_seconds=req.start_seconds, end_seconds=segment_end_seconds,
+            device=pose_tracker.device)
     except Exception as error:  # noqa: BLE001 - a probe must never block a paid run
         preflight = Preflight()
         preflight.warnings.append("The video could not be measured before analysis: %s" % error)
@@ -1191,12 +1199,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     )
     final_live_events = all_final_live_events[-160:]
     public_event_ids = {item["id"] for item in all_final_live_events}
+    all_actions_verified = bool(final_live_stats["action_labels_available"])
     report_events = (
         [
             event for event in events
             if f"{event.fighter}-{event.peak_frame}-{event.technique}" in public_event_ids
         ]
-        if live_action_trusted else events
+        if all_actions_verified else events
     )
     classifier["actions_discarded_out_of_range"] = out_of_range_actions
     metric_data = metrics.finalize(report_events, defenses, segment_duration)
@@ -1403,7 +1412,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # history all consume this same snapshot so their numbers cannot drift.
     report["statistics"] = final_live_stats
     report["event_feed"] = all_final_live_events
-    if live_action_trusted:
+    if all_actions_verified:
         for fighter in ("A", "B"):
             public = final_live_stats["fighters"][fighter]
             attacks = report["metrics"][fighter]["attacks"]

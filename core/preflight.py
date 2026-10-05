@@ -53,6 +53,7 @@ avoid.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 import cv2
@@ -193,8 +194,33 @@ def _global_shift(previous: np.ndarray, current: np.ndarray) -> float:
     return float(np.hypot(dx, dy)) / 160.0 * 100.0
 
 
+@contextmanager
+def _without_tracking_callbacks(model):
+    """Keep sampling frames from advancing a cached fight tracker's state."""
+    callbacks = getattr(model, "callbacks", None)
+    if not isinstance(callbacks, dict):
+        yield
+        return
+    saved = {}
+    for event in ("on_predict_start", "on_predict_postprocess_end"):
+        original = callbacks.get(event)
+        if not isinstance(original, list):
+            continue
+        saved[event] = original
+        callbacks[event] = [
+            callback for callback in original
+            if getattr(getattr(callback, "func", callback), "__module__", None) != "ultralytics.trackers.track"
+        ]
+    try:
+        yield
+    finally:
+        for event, original in saved.items():
+            callbacks[event] = original
+
+
 def probe(video_path: str, model, start_seconds: float = 0.0,
-          end_seconds: float | None = None, samples: int = 8) -> Preflight:
+          end_seconds: float | None = None, samples: int = 8,
+          *, device: int | str | None = None) -> Preflight:
     """Measure a video. `model` is a loaded pose model; nothing is loaded here.
 
     Sampling rather than reading everything: this runs before the user has
@@ -270,24 +296,27 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     report.camera_shift_percent = float(np.median(shifts)) if shifts else 0.0
 
     heights, counts, ankles = [], [], []
-    for size in PROBE_SIZES:
-        heights, counts, ankles = [], [], []
-        for frame in frames:
-            result = model.predict(frame, imgsz=size, conf=SETTINGS.detection_conf,
-                                   classes=[0], verbose=False)[0]
-            if result.boxes is None or not len(result.boxes):
-                counts.append(0)
-                continue
-            boxes = result.boxes.xyxy.cpu().numpy()
-            counts.append(len(boxes))
-            # The tallest few, not the average: the subject of a fight video is
-            # nearer the camera than the room behind them, and the median over
-            # everybody in a busy hall describes the hall.
-            tall = np.sort(boxes[:, 3] - boxes[:, 1])[-3:]
-            heights.extend(float(h) for h in tall)
-            ankles.extend(_ankles_seen(result, boxes))
-        if heights:
-            break
+    predict_options = {"conf": SETTINGS.detection_conf, "classes": [0], "verbose": False}
+    if device is not None:
+        predict_options["device"] = device
+    with _without_tracking_callbacks(model):
+        for size in PROBE_SIZES:
+            heights, counts, ankles = [], [], []
+            for frame in frames:
+                result = model.predict(frame, imgsz=size, **predict_options)[0]
+                if result.boxes is None or not len(result.boxes):
+                    counts.append(0)
+                    continue
+                boxes = result.boxes.xyxy.cpu().numpy()
+                counts.append(len(boxes))
+                # The tallest few, not the average: the subject of a fight video is
+                # nearer the camera than the room behind them, and the median over
+                # everybody in a busy hall describes the hall.
+                tall = np.sort(boxes[:, 3] - boxes[:, 1])[-3:]
+                heights.extend(float(h) for h in tall)
+                ankles.extend(_ankles_seen(result, boxes))
+            if heights:
+                break
 
     if not heights:
         report.blocking.append(

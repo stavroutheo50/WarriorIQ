@@ -7,6 +7,7 @@ import numpy as np
 
 from core.action import Sample, _feature_vector
 from core.config import DATASET, OUTPUTS, SETTINGS
+from core.fight_stats import normalize_outcome
 from core.model_validation import classification_metrics
 from core.scoring import is_legal_event
 from core.temporal_model import ACTION_CLASSES
@@ -18,6 +19,17 @@ def _temporal_label(technique: str) -> str:
     for height in ("low", "body", "head"):
         value = value.replace(f"_{height}_kick", "_round_kick")
     return value if value in ACTION_CLASSES else "none"
+
+
+def _reviewed_label(value: object) -> str | None:
+    """Keep an explicit negative distinct from an absent or coarse review."""
+    if not isinstance(value, str):
+        return None
+    technique = value.strip().lower()
+    if technique == "none":
+        return "none"
+    label = _temporal_label(technique)
+    return label if label != "none" else None
 
 
 def _sample(record: dict, fighter: str) -> Sample | None:
@@ -96,51 +108,92 @@ def accuracy_summary(annotations: list[dict]) -> dict:
     counts = {name: {"correct": 0, "total": 0, "threshold": threshold} for name, (_, threshold) in fields.items()}
 
     def side(value):
-        text = (value or "").lower()
-        return "left" if "left" in text else "right" if "right" in text else "unspecified"
+        if not isinstance(value, str):
+            return None
+        text = value.lower()
+        return "left" if "left" in text else "right" if "right" in text else None
+
+    classifiable = []
+    timing_errors = []
+    source_hashes = set()
+    positive_labels = negative_labels = 0
 
     for item in annotations:
         predicted, corrected = item["predicted"], item["corrected"]
+        truth = _reviewed_label(corrected.get("technique"))
+        guess = _reviewed_label(predicted.get("technique"))
+        if truth == "none":
+            negative_labels += 1
+        elif truth is not None:
+            positive_labels += 1
+        if truth is not None and guess is not None:
+            classifiable.append((truth, guess))
+        source_hash = item.get("video_sha256")
+        if (truth is not None and isinstance(source_hash, str) and len(source_hash) == 64
+                and all(character in "0123456789abcdefABCDEF" for character in source_hash)):
+            source_hashes.add(source_hash.lower())
         for name, (field, _) in fields.items():
             if name == "limb_side":
-                a, b = side(predicted.get("technique")), side(corrected.get("technique"))
+                if truth in {None, "none"}:
+                    continue
+                b = side(corrected.get("limb"))
+                if b is None:
+                    continue
+                a = side(predicted.get("limb"))
             elif name == "legality":
-                # A negative label means the candidate was not an action, so
-                # legality is not a meaningful comparison for that sample.
-                if corrected.get("technique") == "none":
+                if (truth in {None, "none"} or corrected.get("family") not in {"punch", "kick", "knee"}
+                        or corrected.get("target") not in {"head", "body", "leg"}
+                        or not item.get("ruleset")):
                     continue
                 def event(data):
+                    if (_reviewed_label(data.get("technique")) in {None, "none"}
+                            or data.get("family") not in {"punch", "kick", "knee"}
+                            or data.get("target") not in {"head", "body", "leg"}):
+                        return None
                     return StrikeEvent(data.get("fighter", "A"), "B", 1, 0, 0, 0, 0, 0, 0,
-                                       data.get("technique", "none"), data.get("family", "punch"), data.get("limb", "right_hand"),
+                                       data["technique"], data["family"], data.get("limb") or "",
                                        outcome=data.get("outcome", "uncertain"), target=data.get("target"))
-                a = is_legal_event(event(predicted), item["ruleset"])
+                predicted_event = event(predicted)
+                a = None if predicted_event is None else is_legal_event(predicted_event, item["ruleset"])
                 b = is_legal_event(event(corrected), item["ruleset"])
+            elif name == "fighter_identity":
+                b = corrected.get(field)
+                if truth in {None, "none"} or b not in {"A", "B"}:
+                    continue
+                a = predicted.get(field)
+            elif name == "technique":
+                if truth is None:
+                    continue
+                a, b = predicted.get(field), corrected.get(field)
+            elif name == "target":
+                b = corrected.get(field)
+                if truth in {None, "none"} or b not in {"head", "body", "leg"}:
+                    continue
+                a = predicted.get(field)
+            elif name == "outcome":
+                b = normalize_outcome(corrected.get(field))
+                if truth in {None, "none"} or b == "uncertain":
+                    continue
+                a = normalize_outcome(predicted.get(field))
             else:
                 a, b = predicted.get(field), corrected.get(field)
             counts[name]["total"] += 1
             counts[name]["correct"] += int(a == b)
-    for value in counts.values():
-        value["accuracy"] = None if not value["total"] else value["correct"] / value["total"]
-        value["passed"] = value["accuracy"] is not None and value["accuracy"] >= value["threshold"]
-    fights = len({item["job_id"] for item in annotations})
-    negative_labels = sum(item.get("corrected", {}).get("technique") == "none" for item in annotations)
-    positive_labels = len(annotations) - negative_labels
-    timing_errors = []
-    for item in annotations:
-        predicted_technique = item.get("predicted", {}).get("technique", "none")
-        corrected = item.get("corrected", {})
-        corrected_technique = corrected.get("technique", "none")
-        # Missed actions and false candidates are counted by classification,
-        # but they have no like-for-like predicted contact timestamp.
-        if predicted_technique == "none" or corrected_technique == "none":
+        # Timing needs an independently supplied contact timestamp. A missing
+        # timestamp is not proof that the proposal landed at exactly that time.
+        if truth in {None, "none"} or guess in {None, "none"}:
             continue
         try:
             predicted_time = float(item["event_time"])
-            corrected_time = float(corrected.get("contact_time", predicted_time))
+            corrected_time = float(corrected["contact_time"])
         except (KeyError, TypeError, ValueError):
             continue
-        if np.isfinite(predicted_time) and np.isfinite(corrected_time):
+        if np.isfinite(predicted_time) and np.isfinite(corrected_time) and predicted_time >= 0 and corrected_time >= 0:
             timing_errors.append(abs(predicted_time - corrected_time))
+    for value in counts.values():
+        value["accuracy"] = None if not value["total"] else value["correct"] / value["total"]
+        value["passed"] = value["accuracy"] is not None and value["accuracy"] >= value["threshold"]
+    fights = len(source_hashes)
     timing_samples = len(timing_errors)
     timing = {
         "samples": timing_samples,
@@ -153,8 +206,8 @@ def accuracy_summary(annotations: list[dict]) -> dict:
     timing["within_250ms_rate"] = None if not timing_samples else timing["within_250ms"] / timing_samples
     timing["within_500ms_rate"] = None if not timing_samples else timing["within_500ms"] / timing_samples
     technique_validation = classification_metrics(
-        [_temporal_label(item.get("corrected", {}).get("technique", "none")) for item in annotations],
-        [_temporal_label(item.get("predicted", {}).get("technique", "none")) for item in annotations],
+        [truth for truth, _ in classifiable],
+        [guess for _, guess in classifiable],
         classes=ACTION_CLASSES,
     )
     return {
@@ -163,6 +216,7 @@ def accuracy_summary(annotations: list[dict]) -> dict:
         "positive_labels": positive_labels,
         "negative_labels": negative_labels,
         "fights": fights,
+        "verified_source_fights": fights,
         "train_ready": fights >= 2 and positive_labels >= 20 and negative_labels >= 20,
         "technique_validation": technique_validation,
         "timing": timing,

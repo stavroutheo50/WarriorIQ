@@ -100,7 +100,8 @@ class VisualsWithoutCountedOutcomesTests(unittest.TestCase):
         self.assertFalse(visuals["strikes_shown"])
         self.assertNotIn("landed", {row["key"] for row in visuals["head_to_head"]})
         self.assertEqual(visuals["timeline"], [])
-        self.assertEqual(sum(visuals["landed"].values()) + sum(visuals["taken"].values()), 0)
+        self.assertIsNone(visuals["landed"])
+        self.assertIsNone(visuals["taken"])
         # The pose rows stay: they are measured, not inferred from strikes.
         self.assertIn("guard", {row["key"] for row in visuals["head_to_head"]})
 
@@ -110,12 +111,12 @@ class VisualsWithoutCountedOutcomesTests(unittest.TestCase):
         visuals = build(self._report("boxing"), "A", outcomes_counted=True)
         self.assertFalse(visuals["strikes_shown"])
 
-    def test_counted_outcomes_keep_the_strike_sections(self):
+    def test_counted_outcomes_flag_cannot_override_unvalidated_actions(self):
         from core.report_visuals import build
 
         visuals = build(self._report("kickboxing"), "A", outcomes_counted=True)
-        self.assertTrue(visuals["strikes_shown"])
-        self.assertIn("landed", {row["key"] for row in visuals["head_to_head"]})
+        self.assertFalse(visuals["strikes_shown"])
+        self.assertNotIn("landed", {row["key"] for row in visuals["head_to_head"]})
 
     def test_the_page_passes_whether_outcomes_were_counted(self):
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")

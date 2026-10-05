@@ -634,6 +634,7 @@ class ActionEngine:
                     jumping = family in {"kick", "knee"} and _is_jumping(start_sample, peak_sample)
 
                     model_source = "temporal_rules"
+                    temporal_decision = {"status": "unavailable", "reason": self.temporal.status}
                     confidence = min(
                         CONFIDENCE_CEILING,
                         CONFIDENCE_FLOOR
@@ -645,9 +646,14 @@ class ActionEngine:
                     # sequence is available and its confidence is strong.
                     if self.temporal.available and len(state.features) >= SETTINGS.action_window:
                         sequence = np.stack(list(state.features)[-SETTINGS.action_window :], axis=0)
-                        prediction = self.temporal.predict(sequence)
-                        if prediction is not None:
-                            label, model_conf = prediction
+                        decision = self.temporal.predict_decision(sequence)
+                        temporal_decision = {"status": decision.status, "reason": decision.reason,
+                                             "label": decision.label, "confidence": decision.confidence}
+                        if decision.status == "no_action":
+                            state.active.pop(active_key, None)
+                            continue
+                        if decision.status == "strike":
+                            label, model_conf = decision.label, decision.confidence
                             # Only allow same-family overrides; this stops a
                             # noisy model from turning a kick candidate into a punch.
                             same_family = (
@@ -658,8 +664,13 @@ class ActionEngine:
                             side_consistent = label_side is None or label_side == event_side
                             if same_family and side_consistent:
                                 technique = label
-                                confidence = max(confidence, model_conf)
+                                confidence = model_conf
                                 model_source = "warrioriq_temporal_model"
+                            else:
+                                temporal_decision["status"] = "uncertain"
+                                temporal_decision["reason"] = "family_or_side_disagreement"
+                    elif self.temporal.available:
+                        temporal_decision = {"status": "unavailable", "reason": "incomplete_window"}
 
                     opponent_name = "B" if fighter_name == "A" else "A"
                     # Keep a compact temporal contact trajectory separate from
@@ -733,6 +744,7 @@ class ActionEngine:
                             # Evidence that a kick was a kick. See _foot_lift:
                             # None means the pose could not say.
                             "foot_lift_torsos": foot_lift,
+                            "temporal_decision": temporal_decision,
                         },
                     )
                     events.append(event)

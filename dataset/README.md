@@ -2,6 +2,11 @@
 
 The market-grade action classifier requires **real labeled kickboxing sequences**, not random/untrained weights.
 
+See [external source review](EXTERNAL_SOURCES.md) before importing third-party
+data. Normal customers are never required to label their fights; the workflow
+below is for private model development, and a source's public availability alone
+does not establish commercial footage rights or fight-level label quality.
+
 ## Dataset rule that cannot be compromised
 
 Keep whole fights separated across train/validation/test. Clips from one source fight must never be randomly split into both training and validation because that inflates accuracy through leakage.
