@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +70,10 @@ def validate_regression_manifest(payload: Any) -> list[dict[str, Any]]:
                 event_time = float(annotation["event_time"])
             except (KeyError, TypeError, ValueError) as error:
                 raise RuntimeError(f"Regression annotation for {fight_id} has an invalid event time") from error
-            flattened.append({**annotation, "job_id": fight_id, "event_time": event_time})
+            if not math.isfinite(event_time) or event_time < 0:
+                raise RuntimeError(f"Regression annotation for {fight_id} has an invalid event time")
+            flattened.append({**annotation, "job_id": fight_id,
+                              "video_sha256": fight.get("video_sha256"), "event_time": event_time})
 
     if payload.get("annotation_count") != len(flattened):
         raise RuntimeError("Regression manifest annotation count does not match its contents")

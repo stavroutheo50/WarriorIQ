@@ -12,7 +12,7 @@ from core.coaching import (
 )
 from core.sport_profiles import build_sport_coaching
 from core.config import SETTINGS
-from core.evidence_trust import automated_evidence_trust
+from core.evidence_trust import accepted_model_event, automated_evidence_trust
 from core.scoring import (
     SAME_INSTANT_SECONDS, event_legality, is_legal_event, is_verified_scoring_event,
     minimum_kicks_per_round, score_fight, sport_counted_families, sport_of,
@@ -1034,7 +1034,13 @@ def build_report(
     tracking["fighter_B_initial_lock_safe"] = identity_ready["B"]
     required_fighters = ("A", "B") if req.analysis_target == "BOTH" else (req.analysis_target,)
     identity_evidence_trusted = all(identity_ready[fighter] for fighter in required_fighters)
-    action_metrics_trusted = automated_evidence_trusted and identity_evidence_trusted
+    # A release-ready model still has to have confirmed each event itself
+    # (core.evidence_trust.accepted_model_event); rule-only candidates are not
+    # promoted to verified facts because the model is loaded.
+    action_metrics_trusted = (
+        automated_evidence_trusted and identity_evidence_trusted
+        and all(accepted_model_event(event) for event in events)
+    )
     round_numbers = [r.number for r in rounds if r.selected]
     minimum_coverage = min(float(tracking.get("fighter_A_coverage", 0)), float(tracking.get("fighter_B_coverage", 0)))
     scoring_reliable = action_metrics_trusted and minimum_coverage >= SETTINGS.min_tracking_coverage_for_score

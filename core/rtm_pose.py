@@ -29,6 +29,7 @@ referee's joint positions are not measured by anything.
 from __future__ import annotations
 
 import logging
+import time
 
 import numpy as np
 
@@ -98,6 +99,25 @@ def _get() -> "_Refiner | None":
             )
             return None
     return _refiner
+
+
+def warmup() -> bool:
+    """Pay the first ONNX inference cost while a long-lived worker is idle."""
+    if not SETTINGS.rtm_pose_enabled:
+        return False
+    refiner = _get()
+    if refiner is None:
+        return False
+    started = time.perf_counter()
+    try:
+        frame = np.zeros((256, 192, 3), dtype=np.uint8)
+        box = np.asarray([[0, 0, 191, 255]], dtype=np.float32)
+        refiner(frame, box)
+    except Exception as exc:  # noqa: BLE001 - a warmup must not stop the worker
+        LOGGER.warning("rtm_pose_warmup_failed error=%s", type(exc).__name__)
+        return False
+    LOGGER.info("rtm_pose_warmup_complete seconds=%.3f", time.perf_counter() - started)
+    return True
 
 
 def refine(frame, observations: list[PersonObservation | None]) -> int:

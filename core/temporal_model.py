@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +29,14 @@ ACTION_CLASSES = [
     "left_knee",
     "right_knee",
 ]
+
+
+@dataclass(frozen=True)
+class TemporalDecision:
+    status: str
+    label: str | None = None
+    confidence: float | None = None
+    reason: str | None = None
 
 
 def build_temporal_network(architecture: str, input_dim: int, classes: int):
@@ -187,9 +196,9 @@ class TemporalModel:
             "inference_failures": self.inference_failures,
         }
 
-    def predict(self, sequence: np.ndarray) -> tuple[str, float] | None:
+    def predict_decision(self, sequence: np.ndarray) -> TemporalDecision:
         if not self.available or self.model is None:
-            return None
+            return TemporalDecision("unavailable", reason=self.status)
         try:
             import torch
 
@@ -206,9 +215,11 @@ class TemporalModel:
             confidence, index = torch.max(probs, dim=0)
             label = ACTION_CLASSES[int(index)]
             value = float(confidence)
-            if label == "none" or value < SETTINGS.temporal_probability_threshold:
-                return None
-            return label, value
+            if value < SETTINGS.temporal_probability_threshold:
+                return TemporalDecision("uncertain", label, value, "below_threshold")
+            if label == "none":
+                return TemporalDecision("no_action", label, value)
+            return TemporalDecision("strike", label, value)
         except Exception as exc:
             # Stop retrying a broken checkpoint for every strike and revoke its
             # release status for this run. The report retains the reason.
@@ -217,4 +228,11 @@ class TemporalModel:
             self.error_type = type(exc).__name__
             self.inference_failures += 1
             LOGGER.error("temporal_inference_failed error_type=%s", self.error_type)
-            return None
+            return TemporalDecision("unavailable", reason=self.status)
+
+    def predict(self, sequence: np.ndarray) -> tuple[str, float] | None:
+        """Retain the existing tuple-or-None interface for older callers."""
+        decision = self.predict_decision(sequence)
+        if decision.status == "strike":
+            return decision.label, decision.confidence
+        return None

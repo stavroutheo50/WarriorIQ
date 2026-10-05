@@ -163,6 +163,21 @@ def run_claimed_job(worker_id: str, job_id: str, job: dict) -> None:
             })
 
 
+def _start_idle_pose_warmup() -> threading.Thread:
+    """Warm the pose model without pausing worker heartbeats."""
+    def prepare() -> None:
+        try:
+            from core.rtm_pose import warmup
+
+            warmup()
+        except Exception:  # noqa: BLE001 - idle preparation must not kill the worker
+            LOGGER.exception("Idle pose warmup failed; analysis will initialize the model on demand")
+
+    thread = threading.Thread(target=prepare, name="warrioriq-pose-warmup", daemon=True)
+    thread.start()
+    return thread
+
+
 @contextlib.contextmanager
 def _keep_machine_awake():
     """Stop Windows sleeping mid-analysis, and only mid-analysis.
@@ -205,10 +220,14 @@ def run_worker(*, once: bool = False) -> int:
             LOGGER.error("WARRIORIQ_WORKER_TOKEN is required with WARRIORIQ_WORKER_REMOTE_URL")
             return 2
         return run_remote_worker(worker_id, once=once)
+    idle_warmup: threading.Thread | None = None
     while True:
         # Says "still here" to the single-worker lock as well as to the queue.
         refresh_worker_lock()
         record_worker_heartbeat(worker_id)
+        if idle_warmup is not None and idle_warmup.is_alive():
+            time.sleep(SETTINGS.worker_poll_seconds)
+            continue
         claimed = claim_next_job(worker_id)
         if claimed:
             job_id, job = claimed
@@ -218,6 +237,10 @@ def run_worker(*, once: bool = False) -> int:
         elif once:
             return 0
         else:
+            if idle_warmup is None:
+                # Pay the first inference cost only after an empty poll, never
+                # before the worker can claim a job already in the queue.
+                idle_warmup = _start_idle_pose_warmup()
             time.sleep(SETTINGS.worker_poll_seconds)
 
 
@@ -516,6 +539,7 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
     client = RemoteWorkerClient(SETTINGS.worker_remote_url, SETTINGS.worker_token, worker_id)
     running_code = _source_fingerprint()
     LOGGER.info("Worker running analysis code %s", running_code)
+    idle_warmup: threading.Thread | None = None
     while True:
         # Checked between jobs, never during one. Exiting hands the queue back
         # cleanly and whatever supervises this restarts it on the new code.
@@ -545,6 +569,9 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
         refresh_worker_lock()
         try:
             retry_heartbeat(client)
+            if idle_warmup is not None and idle_warmup.is_alive():
+                time.sleep(max(2.0, SETTINGS.worker_poll_seconds))
+                continue
             claimed = client.claim()
         except RemoteWorkerError as exc:
             LOGGER.warning("Remote worker connection unavailable: %s", exc)
@@ -571,6 +598,10 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
             elif once:
                 return 0
             else:
+                if idle_warmup is None:
+                    # Heartbeat and claim first, so model warmup cannot make an
+                    # otherwise healthy remote worker look disconnected.
+                    idle_warmup = _start_idle_pose_warmup()
                 time.sleep(SETTINGS.worker_poll_seconds)
         except AnalysisRunLost:
             # A newer run or a recovery already owns this fight.

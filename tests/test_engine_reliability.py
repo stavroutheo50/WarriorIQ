@@ -6,6 +6,7 @@ import pytest
 from core import temporal_model
 from core.action import ActionEngine
 from core.config import SETTINGS
+from core.evidence_trust import accepted_model_event
 from core.model_validation import (
     audit_dataset_split,
     audit_sequence_directory,
@@ -14,6 +15,16 @@ from core.model_validation import (
 from core.temporal_model import ACTION_CLASSES, TemporalModel
 from core.types import PersonObservation
 from core.video import SourceTimestampClock
+
+
+def test_contact_height_rewrite_preserves_only_the_confirmed_round_kick():
+    event = {
+        "model_source": "warrioriq_temporal_model", "technique": "left_low_kick",
+        "evidence": {"temporal_decision": {"status": "strike", "label": "left_round_kick", "confidence": .95}},
+    }
+    assert accepted_model_event(event)
+    assert not accepted_model_event({**event, "technique": "right_low_kick"})
+    assert not accepted_model_event({**event, "evidence": {"temporal_decision": {"status": "uncertain", "label": "left_round_kick", "confidence": .95}}})
 
 
 @pytest.mark.parametrize("fps", [0, -1, float("nan"), float("inf")])

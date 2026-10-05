@@ -54,6 +54,7 @@ avoid.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 import cv2
@@ -208,8 +209,80 @@ def _global_shift(previous: np.ndarray, current: np.ndarray) -> float:
     return float(np.hypot(dx, dy)) / 160.0 * 100.0
 
 
+@contextmanager
+def _without_tracking_callbacks(model):
+    """Keep sampling frames from advancing a cached fight tracker's state."""
+    callbacks = getattr(model, "callbacks", None)
+    if not isinstance(callbacks, dict):
+        yield
+        return
+    saved = {}
+    for event in ("on_predict_start", "on_predict_postprocess_end"):
+        original = callbacks.get(event)
+        if not isinstance(original, list):
+            continue
+        saved[event] = original
+        callbacks[event] = [
+            callback for callback in original
+            if getattr(getattr(callback, "func", callback), "__module__", None) != "ultralytics.trackers.track"
+        ]
+    try:
+        yield
+    finally:
+        for event, original in saved.items():
+            callbacks[event] = original
+
+
+def _climb_probe_sizes(frames, model, predict_options: dict, long_edge: int):
+    """Measure the sampled frames at the default size, climbing only when needed."""
+    heights, counts, ankles = [], [], []
+    for size in (FIRST_PROBE_SIZE, *PROBE_SIZES):
+        # Nobody at all at the smaller size: look at a few frames at this one
+        # before paying for all of them. Measured on a 0:06 clip with nobody in
+        # it, the full climb was 24 model runs at up to 2048 - 50 s on CPU -
+        # to conclude "no people". If none of these finds anyone the size is
+        # done; if one does, the rest are measured exactly as before.
+        order = range(len(frames))
+        quick = size != FIRST_PROBE_SIZE and not any(counts) and len(frames) > len(NOBODY_CHECK_FRAMES)
+        if quick:
+            first_look = sorted({int(round(f * (len(frames) - 1))) for f in NOBODY_CHECK_FRAMES})
+            order = first_look + [i for i in range(len(frames)) if i not in first_look]
+        heights, counts, ankles = [], [], []
+        try:
+            for position, index in enumerate(order):
+                if quick and position == len(first_look) and not any(counts):
+                    break
+                result = model.predict(frames[index], imgsz=size, **predict_options)[0]
+                if result.boxes is None or not len(result.boxes):
+                    counts.append(0)
+                    continue
+                boxes = result.boxes.xyxy.cpu().numpy()
+                counts.append(len(boxes))
+                # The tallest few, not the average: the subject of a fight video is
+                # nearer the camera than the room behind them, and the median over
+                # everybody in a busy hall describes the hall.
+                tall = np.sort(boxes[:, 3] - boxes[:, 1])[-3:]
+                heights.extend(float(h) for h in tall)
+                ankles.extend(_ankles_seen(result, boxes))
+        except Exception as exc:                                    # noqa: BLE001
+            # A size the loaded backend cannot serve (a TensorRT engine has a
+            # largest input) is a size this probe cannot use, not a reason to
+            # lose the measurement already taken at a smaller one.
+            LOGGER.info("preflight_probe_size_unavailable size=%s error=%s", size, type(exc).__name__)
+            break
+        # At the first size, both fighters have to have been found as well: a
+        # close spectator can be tall at 640 while two small fighters behind
+        # them are missed, and only the larger size would show it.
+        if heights and (size != FIRST_PROBE_SIZE or (
+                float(np.median(counts)) >= 2
+                and inference_size_for_subject(long_edge, float(np.median(heights))) <= FIRST_PROBE_SIZE)):
+            break
+    return heights, counts, ankles
+
+
 def probe(video_path: str, model, start_seconds: float = 0.0,
-          end_seconds: float | None = None, samples: int = 8) -> Preflight:
+          end_seconds: float | None = None, samples: int = 8,
+          *, device: int | str | None = None) -> Preflight:
     """Measure a video. `model` is a loaded pose model; nothing is loaded here.
 
     Sampling rather than reading everything: this runs before the user has
@@ -286,49 +359,12 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     shifts = [_global_shift(frames[i], frames[i + 1]) for i in range(len(frames) - 1)]
     report.camera_shift_percent = float(np.median(shifts)) if shifts else 0.0
 
+    predict_options = {"conf": SETTINGS.detection_conf, "classes": [0], "verbose": False}
+    if device is not None:
+        predict_options["device"] = device
     heights, counts, ankles = [], [], []
-    for size in (FIRST_PROBE_SIZE, *PROBE_SIZES):
-        # Nobody at all at the smaller size: look at a few frames at this one
-        # before paying for all of them. Measured on a 0:06 clip with nobody in
-        # it, the full climb was 24 model runs at up to 2048 - 50 s on CPU -
-        # to conclude "no people". If none of these finds anyone the size is
-        # done; if one does, the rest are measured exactly as before.
-        order = range(len(frames))
-        quick = size != FIRST_PROBE_SIZE and not any(counts) and len(frames) > len(NOBODY_CHECK_FRAMES)
-        if quick:
-            first_look = sorted({int(round(f * (len(frames) - 1))) for f in NOBODY_CHECK_FRAMES})
-            order = first_look + [i for i in range(len(frames)) if i not in first_look]
-        heights, counts, ankles = [], [], []
-        try:
-            for position, index in enumerate(order):
-                if quick and position == len(first_look) and not any(counts):
-                    break
-                result = model.predict(frames[index], imgsz=size, conf=SETTINGS.detection_conf,
-                                       classes=[0], verbose=False)[0]
-                if result.boxes is None or not len(result.boxes):
-                    counts.append(0)
-                    continue
-                boxes = result.boxes.xyxy.cpu().numpy()
-                counts.append(len(boxes))
-                # The tallest few, not the average: the subject of a fight video is
-                # nearer the camera than the room behind them, and the median over
-                # everybody in a busy hall describes the hall.
-                tall = np.sort(boxes[:, 3] - boxes[:, 1])[-3:]
-                heights.extend(float(h) for h in tall)
-                ankles.extend(_ankles_seen(result, boxes))
-        except Exception as exc:                                    # noqa: BLE001
-            # A size the loaded backend cannot serve (a TensorRT engine has a
-            # largest input) is a size this probe cannot use, not a reason to
-            # lose the measurement already taken at a smaller one.
-            LOGGER.info("preflight_probe_size_unavailable size=%s error=%s", size, type(exc).__name__)
-            break
-        # At the first size, both fighters have to have been found as well: a
-        # close spectator can be tall at 640 while two small fighters behind
-        # them are missed, and only the larger size would show it.
-        if heights and (size != FIRST_PROBE_SIZE or (
-                float(np.median(counts)) >= 2
-                and inference_size_for_subject(long_edge, float(np.median(heights))) <= FIRST_PROBE_SIZE)):
-            break
+    with _without_tracking_callbacks(model):
+        heights, counts, ankles = _climb_probe_sizes(frames, model, predict_options, long_edge)
 
     if not heights:
         report.blocking.append(
