@@ -1025,6 +1025,14 @@ class Settings:
     # drains the queue and shuts down again. Polling a GPU would bill idle time;
     # waking one on demand bills only the analysis itself.
     worker_wake_url: str = os.getenv("WARRIORIQ_WORKER_WAKE_URL", "").strip()
+    # Cloud GPU as a backup to the analysis PC rather than a second runner of
+    # every fight. 0 (the default) wakes the cloud at once, as before. Above
+    # 0, the PC is woken first and the cloud only if the fight is still
+    # unclaimed this many seconds later - the PC is off, asleep past waking,
+    # offline, or busy with another fight - so the cloud bills only for fights
+    # the PC could not take. A PC wakes and claims in about 20 seconds.
+    cloud_fallback_after_seconds: float = max(
+        0.0, float(os.getenv("WARRIORIQ_CLOUD_FALLBACK_SECONDS", "0")))
     # Wake-on-LAN for an analysis machine that sleeps between fights. The queue
     # cannot reach a sleeping PC and a sleeping PC cannot poll, so the web
     # process sends a magic packet the network card still listens for. Needs the

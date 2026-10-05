@@ -1,0 +1,74 @@
+name: deploy cloud GPU worker
+
+# The cloud GPU (deploy/modal_worker.py) is the backup for the analysis PC.
+# The website refuses work to a worker older than itself (core/build_info), so
+# the cloud worker is redeployed from every commit that reaches main - the same
+# commit the website deploys - and never falls behind.
+#
+# Does nothing until the Modal account is connected. Repository secrets used:
+#   MODAL_TOKEN_ID, MODAL_TOKEN_SECRET   from modal.com -> Settings -> API tokens
+#   WARRIORIQ_WORKER_TOKEN               the same worker token the website uses
+# Run it by hand (Actions -> this workflow -> Run workflow) with "build engines"
+# ticked the first time, so the TensorRT engine for the cloud GPU is built once.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_engines:
+        description: "Also build the TensorRT engine (first deploy, or a new GPU type)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      WORKER_TOKEN: ${{ secrets.WARRIORIQ_WORKER_TOKEN }}
+
+    steps:
+      - name: Not connected to Modal yet
+        if: env.MODAL_TOKEN_ID == '' || env.MODAL_TOKEN_SECRET == '' || env.WORKER_TOKEN == ''
+        run: echo "MODAL_TOKEN_ID, MODAL_TOKEN_SECRET or WARRIORIQ_WORKER_TOKEN is not set - skipping the cloud worker deploy."
+
+      - uses: actions/checkout@v4
+        if: env.MODAL_TOKEN_ID != '' && env.MODAL_TOKEN_SECRET != '' && env.WORKER_TOKEN != ''
+
+      - uses: actions/setup-python@v5
+        if: env.MODAL_TOKEN_ID != '' && env.MODAL_TOKEN_SECRET != '' && env.WORKER_TOKEN != ''
+        with:
+          python-version: "3.12"
+
+      - name: Install the Modal client
+        if: env.MODAL_TOKEN_ID != '' && env.MODAL_TOKEN_SECRET != '' && env.WORKER_TOKEN != ''
+        run: pip install "modal>=1.5,<2"
+
+      - name: Give the worker the website's address and token
+        if: env.MODAL_TOKEN_ID != '' && env.MODAL_TOKEN_SECRET != '' && env.WORKER_TOKEN != ''
+        run: |
+          modal secret create warrioriq --force \
+            "WARRIORIQ_WORKER_REMOTE_URL=https://warrioriq.eu" \
+            "WARRIORIQ_WORKER_TOKEN=$WORKER_TOKEN" > /dev/null
+          echo "Modal secret 'warrioriq' updated."
+
+      - name: Build the TensorRT engine
+        if: env.MODAL_TOKEN_ID != '' && env.MODAL_TOKEN_SECRET != '' && env.WORKER_TOKEN != '' && inputs.build_engines
+        run: modal run deploy/modal_worker.py::build_engines
+
+      - name: Deploy
+        if: env.MODAL_TOKEN_ID != '' && env.MODAL_TOKEN_SECRET != '' && env.WORKER_TOKEN != ''
+        run: |
+          modal deploy deploy/modal_worker.py | tee deploy.log
+          echo "## Cloud worker deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "Wake URL (set it as WARRIORIQ_WORKER_WAKE_URL on the website):" >> "$GITHUB_STEP_SUMMARY"
+          grep -o 'https://[^ ]*wake[^ ]*modal.run' deploy.log | head -1 >> "$GITHUB_STEP_SUMMARY" || true
