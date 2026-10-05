@@ -110,6 +110,9 @@ class FighterState:
     # of somebody sixty pixels tall does not describe them well enough to
     # recognise them again; see core/reid.py.
     anchor_reid_samples: list = field(default_factory=list)
+    # Box areas of the last committed sightings, for the size gate in
+    # core.identity.IdentityManager._score.
+    recent_areas: list = field(default_factory=list)
     # Whether the person originally selected scored as the official. If they
     # did, the referee filter stands down for this fighter rather than
     # refusing every candidate who is actually the person the user picked.

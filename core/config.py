@@ -632,6 +632,11 @@ class Settings:
     # with tools/compare_official_stats.py or a labelled fight, and keep only
     # if the counts get closer.
     dense_exchange_sampling: bool = env_bool("WARRIORIQ_DENSE_EXCHANGES", False)
+    # Refuse a candidate far smaller than the fighter's recent sightings - a
+    # spectator or the next mat's bout behind them (core/identity.py, the size
+    # gate in IdentityManager._score). Off until measured on every identity
+    # benchmark clip: tools/run_identity_benchmark.py compares both settings.
+    identity_size_gate: bool = env_bool("WARRIORIQ_IDENTITY_SIZE_GATE", False)
     # Centres closer than this many body heights count as an exchange.
     dense_exchange_body_lengths: float = float(os.getenv("WARRIORIQ_DENSE_EXCHANGE_BODY_LENGTHS", "1.5"))
     # The fighters being close is not the same as the strike reaching. Measured
