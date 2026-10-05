@@ -277,7 +277,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
 
     def test_password_reset_is_one_time_and_revokes_existing_sessions(self):
         account = register("reset@example.com", "Strong-Local-Password")
-        with patch.object(webapp, "send_transactional_email", return_value=True) as send_email:
+        with patch.object(webapp, "deliver_email", return_value=None) as send_email:
             requested = self.client.post("/forgot-password", data={"email": "reset@example.com"})
         self.assertEqual(requested.status_code, 200)
         self.assertEqual(database.list_outbound_messages(account["id"]), [])
@@ -2534,7 +2534,7 @@ class TransactionalEmailConfigTests(unittest.TestCase):
 
         self.assertFalse(sent)
         smtp.SMTP.assert_not_called()
-        self.assertIn("missing_smtp_password", "".join(logged.output))
+        self.assertIn("WARRIORIQ_SMTP_PASSWORD is empty", "".join(logged.output))
 
 
 class SocialIdentityLinkingTests(unittest.TestCase):

@@ -1013,6 +1013,10 @@ class Settings:
     worker_poll_seconds: float = max(0.2, float(os.getenv("WARRIORIQ_WORKER_POLL_SECONDS", "1.0")))
     worker_lease_seconds: int = max(30, int(os.getenv("WARRIORIQ_WORKER_LEASE_SECONDS", "180")))
     worker_stale_seconds: int = max(60, int(os.getenv("WARRIORIQ_WORKER_STALE_SECONDS", "300")))
+    # Email the administrators when a fight has waited this long with no
+    # analysis worker connected, and again when it connects (core/worker_alerts.py).
+    # 0 switches it off.
+    worker_alert_seconds: int = max(0, int(os.getenv("WARRIORIQ_WORKER_ALERT_SECONDS", "600")))
     # Remote mode lets a GPU machine claim jobs over HTTPS instead of requiring
     # the web server and worker to share a filesystem. The token must be the
     # same high-entropy secret on both machines and is never sent to browsers.

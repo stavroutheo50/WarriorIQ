@@ -48,6 +48,7 @@ def test_poisoned_hosts_are_rejected_before_reset_email(monkeypatch, settings):
     settings(public_base_url="https://warrioriq.eu")
     sent = []
     monkeypatch.setattr(web, "send_transactional_email", lambda *args: sent.append(args))
+    monkeypatch.setattr(web, "deliver_email", lambda *args: sent.append(args))
     with BrowserClient(web.app, base_url="https://warrioriq.eu") as client:
         for header in ("host", "x-forwarded-host"):
             response = client.post("/forgot-password", data={"email": "victim@example.test"},
@@ -60,7 +61,7 @@ def test_reset_email_uses_configured_origin_even_on_allowed_alias(monkeypatch, s
     settings(public_base_url="https://warrioriq.eu", allowed_hosts=("testserver", "internal.example"))
     account = db.create_account(f"reset-{uuid.uuid4().hex}@example.test", "not-a-login-hash")
     sent = []
-    monkeypatch.setattr(web, "send_transactional_email", lambda *args: sent.append(args) or True)
+    monkeypatch.setattr(web, "deliver_email", lambda *args: sent.append(args))
     with BrowserClient(web.app, base_url="https://internal.example") as client:
         response = client.post("/forgot-password", data={"email": account["email"]})
         assert response.status_code == 200

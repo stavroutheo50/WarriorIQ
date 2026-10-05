@@ -44,6 +44,7 @@ from app.state import (
     analysis_run_directory, completed_artifact_directory, persist_completed_job,
     finalize_job_from_worker, get_job, list_jobs, prepare_job_run, record_worker_heartbeat,
     start_job_run, state_generation, update_job, update_job_for_worker, wake_status, worker_status,
+    worker_status_heartbeat_age,
 )
 from core.auth import (
     authenticate, end_session, hash_password, issue_session, normalize_email, register, resolve_session,
@@ -91,7 +92,8 @@ from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.coaching import build_coaching, build_training_plan
 from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
-from core.notifications import send_transactional_email
+from core import worker_alerts
+from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
 from core.metric_catalog import BY_KEY as METRIC_CATALOG, readings as metric_readings
@@ -3186,16 +3188,19 @@ def request_password_reset(request: Request, email: str = Form(...)):
         expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
         save_password_reset_token(int(account["id"]), token_digest(token), expires)
         reset_url = f"{_public_base(request)}/reset-password/{token}"
+        failure = None
         try:
-            delivered = send_transactional_email(
+            deliver_email(
                 account["email"], "Reset your WarriorIQ password",
                 f"Use this one-time link within 30 minutes:\n\n{reset_url}\n\nIf you did not request this, ignore this message.",
             )
-        except Exception:
-            delivered = False
+        except EmailNotSent as reason:
+            failure = str(reason)
+            LOGGER.error("password_reset_email_not_sent account_id=%s reason=%s", account["id"], failure)
         record_security_event(
             "password_reset_requested", account_id=int(account["id"]),
-            metadata={"email_delivery": "sent" if delivered else "unavailable"},
+            severity="warning" if failure else "info",
+            metadata={"email_delivery": "sent" if failure is None else "failed", "reason": failure},
         )
     return templates.TemplateResponse(
         request=request, name="password_reset.html",
@@ -4367,6 +4372,8 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
     _require_remote_worker(request)
     worker_id = _validated_worker_id(payload.worker_id)
     record_worker_heartbeat(worker_id)
+    worker_alerts.note_worker_connected(outputs=OUTPUTS, recipients=SETTINGS.admin_emails,
+                                        send=send_transactional_email)
     if payload.analysis_version is None or payload.analysis_version < ANALYSIS_VERSION:
         # QA, 2026-10-04: a GPU worker deployed from an older checkout kept
         # analysing from the fighter-selection frame for days after the web
@@ -4865,11 +4872,26 @@ def _public_job_status(job_id: str, job: dict) -> dict:
     return payload
 
 
+def _worker_connected() -> bool:
+    """Is an analysis worker heartbeating? Cheap: one small file read."""
+    if SETTINGS.analysis_worker_mode == "inprocess":
+        return True
+    age = worker_status_heartbeat_age()
+    return age is not None and age <= SETTINGS.worker_stale_seconds
+
+
 @app.get("/api/status/{job_id}")
 def status(request: Request, response: Response, job_id: str):
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)
+    if job.get("status") == "queued" and SETTINGS.worker_alert_seconds:
+        # Someone is waiting on this fight right now: if no worker is there to
+        # take it, tell the owner (core/worker_alerts.py).
+        worker_alerts.check_waiting_fight(
+            job, worker_online=_worker_connected(), outputs=OUTPUTS,
+            recipients=SETTINGS.admin_emails, threshold_seconds=SETTINGS.worker_alert_seconds,
+            send=send_transactional_email)
     if job.get("status") == "complete":
         response.set_cookie(
             LAST_COMPLETED_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
@@ -7059,8 +7081,31 @@ def admin_page(request: Request, q: str = ""):
             "request": request, "query": q[:200], "users": list_accounts(q),
             "reports": list_moderation_reports(), "security_events": list_security_events(),
             "traffic": page_view_summary(30),
+            "email_problem": email_settings_problem(),
+            "email_test": request.query_params.get("email_test", "")[:600],
         },
     )
+
+
+@app.post("/admin/email/test", dependencies=[Depends(require_csrf)])
+def admin_send_test_email(request: Request):
+    """Send a test message to the signed-in admin and show exactly what happened.
+
+    Password resets, verification and guardian emails all go through the same
+    sender, so this is the one place an administrator can see why they fail.
+    """
+    if not _is_admin(request):
+        raise HTTPException(404)
+    actor = _account(request)
+    try:
+        deliver_email(actor["email"], "WarriorIQ test email",
+                      "This is a test from the WarriorIQ admin page. Email is working.")
+        outcome = f"Sent to {actor['email']}. If it has not arrived within a few minutes, check the spam folder."
+    except EmailNotSent as reason:
+        outcome = f"Not sent: {reason}"
+    record_security_event("admin_email_test", account_id=int(actor["id"]), resource_type="email",
+                          metadata={"outcome": outcome[:300]})
+    return RedirectResponse("/admin?" + urlencode({"email_test": outcome}), status_code=303)
 
 
 @app.post("/admin/accounts/{account_id}/status", dependencies=[Depends(require_csrf)])
