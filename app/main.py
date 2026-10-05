@@ -2509,29 +2509,11 @@ def _wake_analysis_worker(job_id: str) -> None:
                 for _ in range(2)
             )
             LOGGER.info("analysis_worker_wol job_id=%s sent=%s", job_id, sent)
-        if SETTINGS.worker_wake_url and _cloud_still_needed(job_id):
+        if SETTINGS.worker_wake_url:
             woken = wake_remote_worker(SETTINGS.worker_wake_url, SETTINGS.worker_token, job_id)
             LOGGER.info("analysis_worker_wake job_id=%s delivered=%s", job_id, woken)
 
     threading.Thread(target=run, name=f"wiq-wake-{job_id}", daemon=True).start()
-
-
-def _cloud_still_needed(job_id: str, sleep=time.sleep) -> bool:
-    """With a cloud fallback delay, wake the cloud only for a fight still waiting.
-
-    See SETTINGS.cloud_fallback_after_seconds. Without a delay the cloud is
-    woken at once, as it always was.
-    """
-    delay = SETTINGS.cloud_fallback_after_seconds
-    if delay <= 0:
-        return True
-    sleep(delay)
-    status = (get_job(job_id) or {}).get("status")
-    if status != "queued":
-        LOGGER.info("analysis_cloud_not_needed job_id=%s status=%s after_seconds=%.0f", job_id, status, delay)
-        return False
-    LOGGER.info("analysis_cloud_fallback job_id=%s unclaimed_after_seconds=%.0f", job_id, delay)
-    return True
 
 
 def _looks_alike_message(similarity: float, kit: dict | None = None) -> str:
