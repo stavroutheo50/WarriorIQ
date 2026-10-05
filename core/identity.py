@@ -11,6 +11,14 @@ from core.reid import similarity as reid_similarity
 from core.types import FighterState, PersonObservation
 
 
+# The size gate in IdentityManager._score: a candidate under this share of the
+# fighter's median box area over their last RECENT_AREA_SIGHTINGS sightings is
+# not them. Needs MIN_SIGHTINGS_FOR_SIZE_GATE sightings before it judges.
+MIN_AREA_SHARE_OF_RECENT = 0.35
+RECENT_AREA_SIGHTINGS = 30
+MIN_SIGHTINGS_FOR_SIZE_GATE = 5
+
+
 def box_area(box) -> float:
     if box is None:
         return 0.0
@@ -524,6 +532,18 @@ class IdentityManager:
         # a real bout.
         if candidate.track_id in (-1001, -1002) and candidate.track_id != (-1001 if state.name == "A" else -1002):
             return self._refuse(state, "other_fighters_stand_in")
+        # A fighter does not shrink to a fraction of their size between two
+        # sightings; a spectator or the next mat's bout behind them is that
+        # small. Measured on a handheld pankration bout (identity_pankration
+        # ma640): most frames where a fighter's box sat on someone else, that
+        # someone was 15-30 px wide against a fighter's 50 - a fifth of the area.
+        # Judged against the fighter's own recent sightings, so a camera zoom,
+        # which changes size gradually, moves the reference with it; and on
+        # area, so a crouch - shorter but wider - is not refused.
+        if SETTINGS.identity_size_gate and len(state.recent_areas) >= MIN_SIGHTINGS_FOR_SIZE_GATE:
+            typical = float(np.median(state.recent_areas))
+            if box_area(candidate.box) < MIN_AREA_SHARE_OF_RECENT * typical:
+                return self._refuse(state, "too_small_to_be_them")
         # A learned appearance space when one is available, and the colour
         # histogram when it is not. Measured on real footage the histogram
         # cannot separate a referee from a fighter at all - their similarity
@@ -644,6 +664,8 @@ class IdentityManager:
                 and len(state.anchor_reid_samples) < SETTINGS.reid_pool_size):
             state.anchor_reid_samples.append(
                 np.asarray(obs.reid, dtype=np.float32).ravel())
+        state.recent_areas.append(box_area(obs.box))
+        del state.recent_areas[:-RECENT_AREA_SIGHTINGS]
         state.last_seen_source_frame = source_frame
         return obs
 
