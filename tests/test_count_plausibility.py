@@ -63,3 +63,15 @@ def test_an_implausible_report_loses_its_estimated_score():
         main._withhold_score_while_counts_are_off(good)
     assert bad["scorecard"]["available"] is False and bad["scorecard"]["status"] == "strike_counts_implausible"
     assert good["scorecard"]["available"] is True
+
+
+def test_a_rebuilt_statistics_block_keeps_an_impossible_verdict():
+    from app import main
+
+    earlier = {"plausibility": {"implausible": True, "reasons": ["x"]}}
+    rebuilt = {"plausibility": {"implausible": False, "reasons": []},
+               "attempt_counts_available": True, "action_labels_available": True}
+    kept = main._keep_plausibility_verdict(rebuilt, earlier)
+    assert kept["plausibility"]["implausible"] and kept["attempt_counts_available"] is False
+    fine = {"plausibility": {"implausible": False}, "attempt_counts_available": True}
+    assert main._keep_plausibility_verdict(dict(fine), {})["attempt_counts_available"] is True

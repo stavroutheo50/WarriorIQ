@@ -2620,6 +2620,101 @@ class RtmPoseRefinementTests(unittest.TestCase):
         self.assertTrue(rtm_pose._unavailable, "it gives up rather than retrying every frame")
         self.assertTrue((person.keypoints == 0).all())
 
+    def test_idle_warmup_runs_one_inference_without_fight_data(self):
+        import dataclasses
+
+        from core import rtm_pose
+
+        calls = []
+
+        def infer(frame, boxes):
+            calls.append((frame.shape, boxes.shape))
+            return [], []
+
+        on = dataclasses.replace(rtm_pose.SETTINGS, rtm_pose_enabled=True)
+        with mock.patch.object(rtm_pose, "SETTINGS", on), mock.patch.object(rtm_pose, "_get", return_value=infer):
+            self.assertTrue(rtm_pose.warmup())
+        self.assertEqual(calls, [((256, 192, 3), (1, 4))])
+
+    def test_idle_warmup_is_optional_and_cannot_stop_the_worker(self):
+        import dataclasses
+
+        from core import rtm_pose
+
+        off = dataclasses.replace(rtm_pose.SETTINGS, rtm_pose_enabled=False)
+        with mock.patch.object(rtm_pose, "SETTINGS", off), mock.patch.object(rtm_pose, "_get") as load:
+            self.assertFalse(rtm_pose.warmup())
+            load.assert_not_called()
+        on = dataclasses.replace(rtm_pose.SETTINGS, rtm_pose_enabled=True)
+        with mock.patch.object(rtm_pose, "SETTINGS", on), mock.patch.object(
+            rtm_pose, "_get", return_value=mock.Mock(side_effect=RuntimeError("warmup failed"))
+        ):
+            self.assertFalse(rtm_pose.warmup())
+
+    def test_resident_worker_warms_after_an_empty_poll_but_one_shot_does_not(self):
+        import worker
+
+        settings = mock.Mock(worker_remote_url="", worker_poll_seconds=0)
+        warming = mock.Mock()
+        warming.is_alive.side_effect = [True, False]
+        with mock.patch.object(worker, "SETTINGS", settings), mock.patch.object(
+            worker, "_start_idle_pose_warmup", return_value=warming
+        ) as warm, mock.patch.object(worker, "refresh_worker_lock"), mock.patch.object(
+            worker, "record_worker_heartbeat"
+        ), mock.patch.object(worker, "claim_next_job", side_effect=[None, SystemExit(0)]) as claim, mock.patch.object(
+            worker.time, "sleep"
+        ):
+            with self.assertRaises(SystemExit):
+                worker.run_worker()
+            warm.assert_called_once_with()
+            self.assertEqual(claim.call_count, 2)
+            warm.reset_mock()
+            claim.side_effect = [None]
+            self.assertEqual(worker.run_worker(once=True), 0)
+            warm.assert_not_called()
+
+    def test_remote_worker_heartbeats_and_checks_queue_before_idle_warmup(self):
+        import worker
+
+        settings = mock.Mock(worker_remote_url="https://example.invalid", worker_token="test-token",
+                             worker_poll_seconds=0)
+        client = mock.Mock()
+        client.claim.side_effect = [None, SystemExit(0)]
+        order = []
+        warming = mock.Mock()
+        warming.is_alive.side_effect = [True, False]
+
+        def heartbeat(_client):
+            order.append("heartbeat")
+
+        def begin_warmup():
+            order.append("warmup_started")
+            return warming
+
+        with mock.patch.object(worker, "SETTINGS", settings), mock.patch.object(
+            worker, "RemoteWorkerClient", return_value=client
+        ), mock.patch.object(worker, "_source_fingerprint", return_value="unchanged"), mock.patch.object(
+            worker, "_code_changed_since", return_value=False
+        ), mock.patch.object(worker, "refresh_worker_lock"), mock.patch.object(
+            worker, "retry_heartbeat", side_effect=heartbeat
+        ), mock.patch.object(worker, "_start_idle_pose_warmup", side_effect=begin_warmup), mock.patch.object(
+            worker.time, "sleep"
+        ):
+            with self.assertRaises(SystemExit):
+                worker.run_remote_worker("test-worker")
+        self.assertEqual(order, ["heartbeat", "warmup_started", "heartbeat", "heartbeat"])
+        self.assertEqual(client.claim.call_count, 2)
+
+    def test_idle_warmup_thread_calls_the_model_without_blocking_the_worker(self):
+        import worker
+        from core import rtm_pose
+
+        with mock.patch.object(rtm_pose, "warmup", return_value=True) as warm:
+            thread = worker._start_idle_pose_warmup()
+            thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+        warm.assert_called_once_with()
+
 
 class RejectionReasonTests(unittest.TestCase):
     """A refusal count with no reason cannot be acted on."""

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
+from core.config import SETTINGS
 from core.temporal_model import ACTION_CLASSES
 from core.release_validation import assess_end_to_end_validation
 
@@ -132,3 +134,45 @@ def automated_evidence_trust(classifier: dict[str, Any] | None) -> dict[str, Any
 def report_evidence_trust(report: dict[str, Any]) -> dict[str, Any]:
     """Return a fresh trust decision so older saved reports are also safe."""
     return automated_evidence_trust(report.get("classifier"))
+
+
+def accepted_model_event(event: Any) -> bool:
+    """A release-ready model does not validate every individual candidate."""
+    source = event.get("model_source") if isinstance(event, dict) else getattr(event, "model_source", None)
+    evidence = event.get("evidence") if isinstance(event, dict) else getattr(event, "evidence", None)
+    technique = event.get("technique") if isinstance(event, dict) else getattr(event, "technique", None)
+    decision = evidence.get("temporal_decision") if isinstance(evidence, dict) else None
+    # Contact adds the height to a model-confirmed round kick after inference.
+    # Keep that known rewrite without accepting a different technique or side.
+    model_technique = technique
+    if isinstance(technique, str) and technique.endswith(("_low_kick", "_body_kick", "_head_kick")):
+        model_technique = f"{technique.split('_', 1)[0]}_round_kick"
+    try:
+        confidence = float(decision.get("confidence")) if isinstance(decision, dict) else float("nan")
+    except (TypeError, ValueError):
+        confidence = float("nan")
+    return bool(
+        source == "warrioriq_temporal_model"
+        and isinstance(decision, dict)
+        and decision.get("status") == "strike"
+        and decision.get("label") == model_technique
+        and model_technique in ACTION_CLASSES
+        and math.isfinite(confidence)
+        and SETTINGS.temporal_probability_threshold <= confidence <= 1.0
+    )
+
+
+def report_actions_trusted(report: dict[str, Any]) -> bool:
+    """Recheck stored trust flags before rendering action-derived facts."""
+    integrity = report.get("integrity") or {}
+    if not integrity.get("action_metrics_trusted"):
+        return False
+    if integrity.get("human_review_complete"):
+        return True
+    if not report_evidence_trust(report)["automated_evidence_trusted"]:
+        return False
+    return all(
+        accepted_model_event(event)
+        for key in ("events", "key_moments", "illegal_moves")
+        for event in (report.get(key) or [])
+    )

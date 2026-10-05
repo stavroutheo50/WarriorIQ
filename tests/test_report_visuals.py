@@ -100,8 +100,8 @@ class PunchGateTests(unittest.TestCase):
             _event(outcome="clean"), _event(outcome="missed"),
             _event(outcome="uncertain"), _event(outcome="blocked"),
         ])
-        # clean and blocked arrived; missed and uncertain did not.
-        self.assertEqual(build(report, "A")["landed"]["leg"], 2)
+        # A blocked strike arrived near the defender, but did not land.
+        self.assertEqual(build(report, "A")["landed"]["leg"], 1)
         self.assertTrue({"clean", "blocked"} <= set(ARRIVED_OUTCOMES))
 
     def test_the_page_says_what_it_counted(self):
@@ -199,22 +199,17 @@ class RealReportTests(unittest.TestCase):
         self.visuals = build(json.loads(stored.read_text(encoding="utf-8")), "A")
 
     def test_it_reshapes_a_real_report(self):
-        """The figures here moved when knees stopped being counted.
-
-        Fighter A's map went 1/4/4 to 1/3/2 and what they took went 0/2/1 to
-        0/2/0 - nine published strikes down to six, across both fighters 12
-        down to 8. That is the size of the knee bucket on a real bout, and on
-        this footage two of every five in it were punches.
-        """
-        self.assertEqual(self.visuals["landed"], {"head": 1, "body": 3, "leg": 2})
-        self.assertEqual(self.visuals["taken"], {"head": 0, "body": 2, "leg": 0})
-        self.assertEqual(self.visuals["defence_total"], 22)
-        self.assertEqual(self.visuals["chain_longest"], 8)
-        self.assertEqual(len(self.visuals["head_to_head"]), 5)
+        """Old candidate reports retain pose rows, not unverified hit maps."""
+        self.assertFalse(self.visuals["action_ready"])
+        self.assertIsNone(self.visuals["landed"])
+        self.assertIsNone(self.visuals["taken"])
+        self.assertEqual(self.visuals["defence_total"], 0)
+        self.assertEqual(self.visuals["chain_longest"], 0)
+        self.assertIn("guard", {row["key"] for row in self.visuals["head_to_head"]})
 
     def test_it_works_on_an_analysis_that_predates_it(self):
-        """Built at render time, so nothing has to be re-run to gain it."""
-        self.assertTrue(self.visuals["timeline"])
+        """Old reports are rechecked at render time rather than trusted blindly."""
+        self.assertEqual(self.visuals["timeline"], [])
         self.assertTrue(self.visuals["guard_low"])
 
 
