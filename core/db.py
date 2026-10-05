@@ -484,6 +484,20 @@ def init_db() -> None:
                 FOREIGN KEY(profile_id) REFERENCES profiles(id)
             );
             CREATE INDEX IF NOT EXISTS idx_story_shares_job ON story_shares(job_id, profile_id);
+
+            -- Athletes following athletes (core/social.py). 'pending' until a
+            -- private profile's owner approves; a public profile accepts at once.
+            CREATE TABLE IF NOT EXISTS follows (
+                follower_profile_id INTEGER NOT NULL,
+                followed_profile_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(follower_profile_id, followed_profile_id),
+                FOREIGN KEY(follower_profile_id) REFERENCES profiles(id),
+                FOREIGN KEY(followed_profile_id) REFERENCES profiles(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_follows_followed ON follows(followed_profile_id, status);
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -493,6 +507,13 @@ def init_db() -> None:
             con.execute("ALTER TABLE profiles ADD COLUMN default_fighter TEXT NOT NULL DEFAULT 'A'")
         if "allow_model_training" not in columns:
             con.execute("ALTER TABLE profiles ADD COLUMN allow_model_training INTEGER NOT NULL DEFAULT 0")
+        # Public athlete profiles (core/social.py). Every existing profile is
+        # private with no handle: nothing becomes visible that was not before.
+        for column, definition in (("handle", "TEXT"), ("visibility", "TEXT NOT NULL DEFAULT 'private'"),
+                                   ("bio", "TEXT NOT NULL DEFAULT ''"), ("gym", "TEXT NOT NULL DEFAULT ''")):
+            if column not in columns:
+                con.execute(f"ALTER TABLE profiles ADD COLUMN {column} {definition}")
+        con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_handle ON profiles(handle) WHERE handle IS NOT NULL")
         if "account_type" not in columns:
             # Athlete unless told otherwise: an existing workspace holds one
             # person's fights, and upgrading somebody to a coach account they
@@ -2069,6 +2090,9 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM fighters WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM camp_missions WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM story_shares WHERE profile_id=?", (profile_id,))
+        # Both directions: whom this athlete followed, and who followed them.
+        con.execute("DELETE FROM follows WHERE follower_profile_id=? OR followed_profile_id=?",
+                    (profile_id, profile_id))
         con.execute("DELETE FROM training_sessions WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM points_ledger WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM coach_assignments WHERE profile_id=?", (profile_id,))
@@ -2362,3 +2386,109 @@ def page_view_summary(days: int = 30) -> dict:
         stamp = (today - timedelta(days=offset)).strftime("%Y-%m-%d")
         timeline.append({"day": stamp, "views": per_day.get(stamp, 0)})
     return {"days": timeline, "pages": pages, "total": sum(per_day.values())}
+
+
+# ---------------------------------------------------------------------------
+# Public athlete profiles and follows (core/social.py holds the rules)
+# ---------------------------------------------------------------------------
+
+class HandleTaken(ValueError):
+    pass
+
+
+def get_profile_by_handle(handle: str) -> dict | None:
+    init_db()
+    with connection() as con:
+        row = con.execute("SELECT * FROM profiles WHERE handle=?", (handle,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_account_by_profile(profile_id: int) -> dict | None:
+    init_db()
+    with connection() as con:
+        row = con.execute("SELECT * FROM accounts WHERE profile_id=?", (profile_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def set_public_profile(profile_id: int, handle: str | None, visibility: str, bio: str, gym: str) -> None:
+    """Raises HandleTaken when another profile already uses the handle."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        if handle:
+            other = con.execute("SELECT id FROM profiles WHERE handle=? AND id<>?", (handle, profile_id)).fetchone()
+            if other:
+                raise HandleTaken(handle)
+        con.execute("UPDATE profiles SET handle=?, visibility=?, bio=?, gym=?, updated_at=? WHERE id=?",
+                    (handle, visibility, bio, gym, now, profile_id))
+        if visibility == "public":
+            # Going public accepts everyone already waiting, as a public
+            # profile would have on the day they asked.
+            con.execute("UPDATE follows SET status='accepted', updated_at=? WHERE followed_profile_id=? AND status='pending'",
+                        (now, profile_id))
+
+
+def follow_status(follower_profile_id: int, followed_profile_id: int) -> str | None:
+    init_db()
+    with connection() as con:
+        row = con.execute("SELECT status FROM follows WHERE follower_profile_id=? AND followed_profile_id=?",
+                          (follower_profile_id, followed_profile_id)).fetchone()
+        return row["status"] if row else None
+
+
+def request_follow(follower_profile_id: int, followed_profile_id: int, accepted: bool) -> str:
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    status = "accepted" if accepted else "pending"
+    with connection() as con:
+        con.execute(
+            """INSERT INTO follows(follower_profile_id, followed_profile_id, status, created_at, updated_at)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(follower_profile_id, followed_profile_id) DO NOTHING""",
+            (follower_profile_id, followed_profile_id, status, now, now))
+        row = con.execute("SELECT status FROM follows WHERE follower_profile_id=? AND followed_profile_id=?",
+                          (follower_profile_id, followed_profile_id)).fetchone()
+        return row["status"]
+
+
+def remove_follow(follower_profile_id: int, followed_profile_id: int) -> bool:
+    init_db()
+    with connection() as con:
+        cursor = con.execute("DELETE FROM follows WHERE follower_profile_id=? AND followed_profile_id=?",
+                             (follower_profile_id, followed_profile_id))
+        return cursor.rowcount > 0
+
+
+def accept_follow(follower_profile_id: int, followed_profile_id: int) -> bool:
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE follows SET status='accepted', updated_at=? WHERE follower_profile_id=? AND followed_profile_id=? AND status='pending'",
+            (now, follower_profile_id, followed_profile_id))
+        return cursor.rowcount > 0
+
+
+def list_follows(profile_id: int, *, direction: str, status: str = "accepted") -> list[dict]:
+    """direction 'followers' (who follows profile_id) or 'following' (whom it follows)."""
+    init_db()
+    mine, theirs = (("followed_profile_id", "follower_profile_id") if direction == "followers"
+                    else ("follower_profile_id", "followed_profile_id"))
+    with connection() as con:
+        rows = con.execute(
+            f"""SELECT p.id, p.display_name, p.handle, p.photo_path, f.status, f.created_at
+                FROM follows f JOIN profiles p ON p.id = f.{theirs}
+                WHERE f.{mine}=? AND f.status=? ORDER BY f.created_at DESC""",
+            (profile_id, status)).fetchall()
+        return [dict(row) for row in rows]
+
+
+def count_follows(profile_id: int) -> dict:
+    init_db()
+    with connection() as con:
+        followers = con.execute("SELECT COUNT(*) FROM follows WHERE followed_profile_id=? AND status='accepted'",
+                                (profile_id,)).fetchone()[0]
+        following = con.execute("SELECT COUNT(*) FROM follows WHERE follower_profile_id=? AND status='accepted'",
+                                (profile_id,)).fetchone()[0]
+        return {"followers": int(followers), "following": int(following)}
+

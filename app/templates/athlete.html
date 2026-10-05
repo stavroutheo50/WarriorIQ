@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><meta name="robots" content="noindex">{% endblock %}
+{% block title %}@{{athlete.handle}} · WarriorIQ{% endblock %}
+{% block content %}
+{# Only the athlete's own numbers appear here: never an opponent, never a fight
+   video. See core/social.py for who may see what. #}
+{% if reported %}<div class="notice good" role="status">Thank you. The report has been sent to WarriorIQ for review.</div>{% endif %}
+<header class="athlete-head profile-head-band">
+  <div class="athlete-id">
+    {% if visible and athlete.photo_path %}<img class="athlete-avatar athlete-photo" src="{{athlete.photo_path}}" width="56" height="56" alt="" decoding="async">
+    {% else %}<span class="athlete-avatar" aria-hidden="true">{{athlete.display_name[:1]|upper}}</span>{% endif %}
+    <div>
+      <div class="eyebrow">{% if public %}Public athlete{% else %}Private athlete{% endif %}</div>
+      <h1>{{athlete.display_name}}</h1>
+      <p class="athlete-facts">
+        <span>@{{athlete.handle}}</span>
+        {% if visible and athlete.gym %}<span>{{athlete.gym}}</span>{% endif %}
+        <span>{{counts.followers}} follower{{'' if counts.followers == 1 else 's'}}</span>
+        <span>{{counts.following}} following</span>
+      </p>
+    </div>
+  </div>
+  <div class="athlete-actions">
+    {% if is_owner %}
+      <a class="btn secondary" href="/profile#public-profile">Edit profile</a>
+    {% elif can_follow %}
+      {% if follow == 'accepted' %}
+        <form action="/athlete/{{athlete.handle}}/unfollow" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Following · Unfollow</button></form>
+      {% elif follow == 'pending' %}
+        <form action="/athlete/{{athlete.handle}}/unfollow" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Requested · Cancel</button></form>
+      {% else %}
+        <form action="/athlete/{{athlete.handle}}/follow" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">{% if public %}Follow{% else %}Request to follow{% endif %}</button></form>
+      {% endif %}
+    {% elif not signed_in %}
+      <a class="btn" href="/login?next=/athlete/{{athlete.handle}}">Sign in to follow</a>
+    {% endif %}
+  </div>
+</header>
+
+{% if visible %}
+  {% if athlete.bio %}<section class="card"><p>{{athlete.bio}}</p></section>{% endif %}
+  <section class="card">
+    <div class="eyebrow">Fight Camp</div>
+    {% if standing %}
+    <h2>{{standing.rank}} · Level {{standing.level}}</h2>
+    <p class="athlete-facts">
+      <span>{{standing.points}} points</span>
+      <span>{{standing.streak_weeks}} week{{'' if standing.streak_weeks == 1 else 's'}} training streak</span>
+      <span>{{standing.week_sessions}} session{{'' if standing.week_sessions == 1 else 's'}} this week</span>
+      <span>{{fights_analysed}} fight{{'' if fights_analysed == 1 else 's'}} analysed</span>
+    </p>
+    {% endif %}
+  </section>
+{% else %}
+  <section class="card"><h2>This profile is private</h2><p class="muted">{% if follow == 'pending' %}Your request is waiting for {{athlete.display_name}} to approve it.{% else %}Follow {{athlete.display_name}} to see their Fight Camp level and progress once they approve.{% endif %}</p></section>
+{% endif %}
+
+{% if not is_owner %}
+<details class="card"><summary>Report this profile</summary>
+  <form action="/athlete/{{athlete.handle}}/report" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <div class="field"><label for="reportReason">What is wrong with it?</label><textarea id="reportReason" name="reason" rows="3" maxlength="2000" required></textarea></div>
+    <button class="btn secondary" type="submit">Send report</button>
+  </form>
+</details>
+{% endif %}
+{% endblock %}
