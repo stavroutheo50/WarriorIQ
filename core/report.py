@@ -5,6 +5,7 @@ import os
 from html import escape
 from pathlib import Path
 
+from core.count_plausibility import counts_implausible
 from core.coaching import (
     POSE_DIMENSIONS,
     build_coaching, build_pose_coaching, build_training_plan, build_training_progression,
@@ -436,12 +437,16 @@ ESTIMATED_SCORE_NOTE = (
 _FAMILY_OF_PLURAL = {"punches": "punch", "kicks": "kick", "knees": "knee"}
 
 
-def published_families(sport: str | None) -> tuple[str, ...]:
+def published_families(sport: str | None, report: dict | None = None) -> tuple[str, ...]:
     """The strike families a report shows for this sport, singular.
 
     Only what the sport scores - a boxing report does not list kicks the
-    detector proposed - and none at all while counts are not published.
+    detector proposed - and none at all while counts are not published, or
+    when ``report``'s counts failed the plausibility check
+    (core/count_plausibility.py).
     """
+    if counts_implausible(report):
+        return ()
     try:
         scored = tuple(_FAMILY_OF_PLURAL[f] for f in sport_counted_families(sport or "kickboxing"))
     except (KeyError, ValueError):
@@ -483,7 +488,7 @@ def share_card(report: dict) -> dict | None:
         return None
     scorecard = report.get("scorecard") or {}
     sport = scorecard.get("sport")
-    families = published_families(sport)
+    families = published_families(sport, report)
     totals = scorecard.get("totals") or {}
     scored = bool(scorecard.get("available")) and None not in (totals.get("A"), totals.get("B"))
     metrics = report.get("metrics") or {}
@@ -594,7 +599,7 @@ def observed_summary(report: dict) -> dict | None:
     statistics = (report.get("statistics") or {}).get("fighters") or {}
     if not statistics:
         return None
-    shown = published_families((report.get("scorecard") or {}).get("sport"))
+    shown = published_families((report.get("scorecard") or {}).get("sport"), report)
     out = {}
     for fighter in ("A", "B"):
         item = statistics.get(fighter) or {}
@@ -666,7 +671,7 @@ def unattributed_kick_total(report: dict) -> dict | None:
     rows = [fighters.get(fighter) or {} for fighter in ("A", "B")]
     # With counts published this is every family the sport scores; the
     # function keeps its name so callers and stored reports stay compatible.
-    shown = published_families((report.get("scorecard") or {}).get("sport"))
+    shown = published_families((report.get("scorecard") or {}).get("sport"), report)
     if not shown:
         # Strike counts are switched off: a total of none would read as zero.
         return None
@@ -1234,7 +1239,7 @@ def write_report(job_dir: Path, report: dict) -> tuple[Path, Path]:
     punches_are_readable = (STRIKE_COUNTS_PUBLISHED
                             or subject_pixels >= PUNCHES_NEED_THIS_MANY_PIXELS)
     if STRIKE_COUNTS_PUBLISHED:
-        countable_families = set(published_families((report.get("scorecard") or {}).get("sport")))
+        countable_families = set(published_families((report.get("scorecard") or {}).get("sport"), report))
     else:
         countable_families = {"kick"} | ({"punch"} if punches_are_readable else set())
 
