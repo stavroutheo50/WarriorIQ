@@ -123,6 +123,7 @@
     var url = box.querySelector("[data-story-url]"), create = box.querySelector("[data-story-create]");
     var share = box.querySelector("[data-story-share]"), revoke = box.querySelector("[data-story-revoke]");
     var showName = box.querySelector("[data-story-show-name]"), name = box.querySelector("[data-story-name]");
+    var profile = box.querySelector("[data-story-profile]");
 
     function show() {
       var link = links[currentSide()];
@@ -131,6 +132,7 @@
       share.hidden = !(link && navigator.share);
       revoke.hidden = !Object.keys(links).length;
       if (link && link.name) { showName.checked = true; name.value = link.name; }
+      if (profile) profile.textContent = link && link.on_profile ? "Remove from my profile" : "Post to my profile";
     }
 
     async function copy(text) {
@@ -157,7 +159,8 @@
         var response = await post("/story/" + encodeURIComponent(job), body);
         if (!response.ok) throw new Error(String(response.status));
         var made = await response.json();
-        links[side] = { side: side, url: made.url, name: showName.checked ? name.value : null };
+        links[side] = { side: side, url: made.url, name: showName.checked ? name.value : null,
+                        on_profile: !!(links[side] && links[side].on_profile) };
         show();
         toast(await copy(made.url) ? "Link copied. Paste it into your story's Link sticker, or send it."
                                     : "Your link is ready: copy it from the box.", "success");
@@ -172,6 +175,27 @@
       if (!link) return;
       try { await navigator.share({ title: "My fight on WarriorIQ", url: link.url }); }
       catch (err) { if (err && err.name !== "AbortError") toast("Could not open sharing. Copy the link instead.", "error"); }
+    });
+    if (profile) profile.addEventListener("click", async function () {
+      var side = currentSide(), link = links[side], posting = !(link && link.on_profile), body = new FormData();
+      body.append("side", side);
+      body.append("name", showName.checked ? name.value : "");
+      body.append("posted", posting ? "1" : "0");
+      profile.disabled = true;
+      try {
+        var response = await post("/story/" + encodeURIComponent(job) + "/profile", body);
+        if (!response.ok) throw new Error(String(response.status));
+        var made = await response.json();
+        if (made.url) links[side] = { side: side, url: made.url, name: showName.checked ? name.value : null, on_profile: made.posted };
+        show();
+        if (!posting) toast("Removed from your profile.", "success");
+        else if (made.profile_url) toast("Posted to your profile.", "success");
+        else toast("Posted. Choose a username under Profile so your athlete page can show it.", "success");
+      } catch (err) {
+        toast("Could not update your profile. Try again.", "error");
+      } finally {
+        profile.disabled = false;
+      }
     });
     revoke.addEventListener("click", async function () {
       if (!window.confirm("Turn off your links to this fight? Anyone who opens one will see it was turned off.")) return;

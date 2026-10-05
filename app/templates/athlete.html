@@ -52,6 +52,20 @@
     </p>
     {% endif %}
   </section>
+  {#- Stats-only fight cards the athlete posted (app.main.post_story_to_profile):
+      the same picture as their public fight link. No opponent name, no video. -#}
+  <section class="card athlete-posts" id="posts">
+    <div class="eyebrow">Shared fights</div>
+    {% if posts %}
+    <ul class="athlete-post-grid">{% for post in posts %}
+      <li><a href="{{post.url}}"><img src="{{post.image}}" width="1200" height="630" alt="{{post.sport}} fight stats{% if post.total is not none %}: {{post.total}} strikes{% endif %}" loading="lazy" decoding="async"></a>
+        <span class="small muted">{{post.sport}} · <time datetime="{{post.posted_at}}" data-local="date">{{post.posted_at|fight_moment(false)}}</time></span>
+        {% if is_owner %}<form action="/story/{{post.job_id}}/profile" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="side" value="{{post.side}}"><input type="hidden" name="posted" value="0"><input type="hidden" name="next_path" value="athlete"><button class="btn secondary tiny" type="submit">Remove from profile</button></form>{% endif %}
+      </li>{% endfor %}
+    </ul>
+    {% elif is_owner %}<p class="muted">Nothing posted yet. Open a fight, choose <b>Share</b>, then <b>Post to my profile</b>. Only the stats go up: no video and no opponent's name.</p>
+    {% else %}<p class="muted">No fights shared yet.</p>{% endif %}
+  </section>
 {% else %}
   <section class="card athlete-camp"><h2>This profile is private</h2><p class="muted">{% if follow == 'pending' %}Your request is waiting for {{athlete.display_name}} to approve it.{% else %}Follow {{athlete.display_name}} to see their Fight Camp level and progress once they approve.{% endif %}</p></section>
 {% endif %}

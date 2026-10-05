@@ -615,6 +615,11 @@
         <button class="btn secondary" type="button" data-story-share hidden>Share link</button>
         <button class="btn secondary" type="button" data-story-revoke hidden>Turn off link</button>
       </div>
+      {#- The same card on the athlete's WarriorIQ page (/athlete/<handle>), for
+          whoever may see that profile. -#}
+      <div class="share-link-row">
+        <button class="btn secondary" type="button" data-story-profile>Post to my profile</button>
+      </div>
     </div>
     <script type="application/json" id="storyLinks">{{ story_links|tojson }}</script>
   </dialog>
