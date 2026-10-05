@@ -581,6 +581,16 @@ def record_worker_heartbeat(worker_id: str, current_job_id: str | None = None) -
         LOGGER.error("worker_heartbeat_write_failed worker_id=%s error=%s", worker_id, type(exc).__name__)
 
 
+def worker_status_heartbeat_age() -> float | None:
+    """Seconds since the last worker heartbeat, or None when there has been none."""
+    try:
+        payload = json.loads((OUTPUTS / _WORKER_HEARTBEAT_FILE).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    heartbeat = float(payload.get("heartbeat_epoch", 0.0) or 0.0)
+    return max(0.0, time.time() - heartbeat) if heartbeat else None
+
+
 def worker_status() -> dict:
     path = OUTPUTS / _WORKER_HEARTBEAT_FILE
     try:
