@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><meta name="robots" content="noindex">{% endblock %}
+{% block title %}Feed · WarriorIQ{% endblock %}
+{% block content %}
+{#- The athletes this person follows (app.main.feed_page): only what is already
+    on their own pages - posted fight cards, levels, training streaks. -#}
+<header class="athlete-head">
+  <div>
+    <div class="eyebrow">Feed</div>
+    <h1>Athletes you follow</h1>
+    <p class="muted">Fights they shared, levels they reached and training streaks. Stats only: no videos and no opponents.</p>
+  </div>
+  <div class="athlete-actions">{% if own_handle %}<a class="btn secondary" href="/athlete/{{own_handle}}">My athlete page</a>{% else %}<a class="btn secondary" href="/profile#public-profile">Set up my athlete page</a>{% endif %}</div>
+</header>
+
+{% if items %}
+<ol class="feed-list">
+  {% for item in items %}
+  <li class="card feed-item">
+    <div class="feed-who">
+      {% if item.who.photo %}<img class="athlete-avatar athlete-photo" src="{{item.who.photo}}" width="40" height="40" alt="" decoding="async">
+      {% else %}<span class="athlete-avatar" aria-hidden="true">{{item.who.name[:1]|upper}}</span>{% endif %}
+      <span><a class="feed-name" href="/athlete/{{item.who.handle}}">{{item.who.name}}</a>
+        <time class="small muted" datetime="{{item.at}}" data-local="date">{{item.at|fight_moment(false)}}</time></span>
+    </div>
+    {% if item.kind == 'post' %}
+      <p class="feed-text">Shared a {{item.sport|lower}} fight</p>
+      <a class="feed-card" href="{{item.url}}"><img src="{{item.image}}" width="1200" height="630" alt="{{item.sport}} fight stats" loading="lazy" decoding="async"></a>
+    {% elif item.kind == 'level' %}
+      <p class="feed-text">{% if item.new_rank %}Became a <b>{{item.rank}}</b>: reached level {{item.level}}{% else %}Reached <b>level {{item.level}}</b> in Fight Camp{% endif %}</p>
+    {% elif item.kind == 'streak' %}
+      <p class="feed-text">Trained <b>{{item.weeks}} weeks in a row</b></p>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{% elif following_count %}
+<section class="card"><h2>Nothing new yet</h2><p class="muted">The athletes you follow have not shared a fight, reached a level or built a training streak yet. It will show here when they do.</p></section>
+{% else %}
+<section class="card"><h2>You are not following anyone yet</h2><p class="muted">Open another athlete's page (warrioriq.eu/athlete/their-username) and press Follow. What they share shows up here.</p></section>
+{% endif %}
+{% endblock %}
