@@ -117,6 +117,20 @@ def build_progress(records: list[dict], fighter: str) -> dict:
         (key for key in ("guard", "balance", "center") if sum(point.get(key) is not None for point in points) >= 2),
         "coverage",
     )
+    # The newest measured value of each movement number, with its fight. The
+    # newest fight often lacks one (the athlete was barely seen), and showing
+    # "—" there while the squad table showed the same number from the fight
+    # before read as a contradiction. Each value says which fight it is from.
+    recent = {}
+    for key in ("guard", "balance", "center", "coverage"):
+        found = next((point for point in reversed(points) if point.get(key) is not None), None)
+        if found is not None:
+            recent[key] = {"value": found[key], "created_at": found["created_at"],
+                           "job_id": found["job_id"], "is_latest": found is latest}
+    # Lead with a movement number the athlete can train, not with how clearly
+    # the camera saw them; coverage leads only when nothing else was measured.
+    headline_key = trend_key if trend_key != "coverage" else next(
+        (key for key in ("guard", "balance", "center") if key in recent), "coverage")
     trend_labels = {
         "guard": "Guard position", "balance": "Post-action balance",
         "center": "Ring-center position", "coverage": "How clearly you were seen",
@@ -137,4 +151,7 @@ def build_progress(records: list[dict], fighter: str) -> dict:
         "action_fight_count": sum(bool(point.get("action_trusted")) for point in points),
         "trend_key": trend_key,
         "trend_label": trend_labels[trend_key],
+        "recent": recent,
+        "headline_key": headline_key,
+        "headline_label": trend_labels[headline_key],
     }

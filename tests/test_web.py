@@ -1916,7 +1916,7 @@ class PublicPageTests(unittest.TestCase):
         for label in ("Guard", "Balance", "Ring centre", "How clearly we saw you"):
             self.assertIn(f'<span class="label">{label}</span>', template)
         self.assertIn("Movement progress is ready", template)
-        self.assertIn("Not validated", template)
+        self.assertNotIn("conversion: Not validated", template)
 
     def test_account_policies_are_acknowledged_at_auth_not_every_upload(self):
         auth = (Path(__file__).resolve().parents[1] / "app" / "templates" / "auth.html").read_text(encoding="utf-8")

@@ -18,6 +18,7 @@
         <span>{{counts.followers}} follower{{'' if counts.followers == 1 else 's'}}</span>
         <span>{{counts.following}} following</span>
       </p>
+      {% if visible and athlete.bio %}<p class="athlete-bio">{{athlete.bio}}</p>{% endif %}
     </div>
   </div>
   <div class="athlete-actions">
@@ -37,9 +38,9 @@
   </div>
 </header>
 
+<div class="athlete-stack">
 {% if visible %}
-  {% if athlete.bio %}<section class="card"><p>{{athlete.bio}}</p></section>{% endif %}
-  <section class="card">
+  <section class="card athlete-camp">
     <div class="eyebrow">Fight Camp</div>
     {% if standing %}
     <h2>{{standing.rank}} · Level {{standing.level}}</h2>
@@ -52,11 +53,12 @@
     {% endif %}
   </section>
 {% else %}
-  <section class="card"><h2>This profile is private</h2><p class="muted">{% if follow == 'pending' %}Your request is waiting for {{athlete.display_name}} to approve it.{% else %}Follow {{athlete.display_name}} to see their Fight Camp level and progress once they approve.{% endif %}</p></section>
+  <section class="card athlete-camp"><h2>This profile is private</h2><p class="muted">{% if follow == 'pending' %}Your request is waiting for {{athlete.display_name}} to approve it.{% else %}Follow {{athlete.display_name}} to see their Fight Camp level and progress once they approve.{% endif %}</p></section>
 {% endif %}
+</div>
 
 {% if not is_owner %}
-<details class="card"><summary>Report this profile</summary>
+<details class="athlete-report"><summary>Report this profile</summary>
   <form action="/athlete/{{athlete.handle}}/report" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
     <div class="field"><label for="reportReason">What is wrong with it?</label><textarea id="reportReason" name="reason" rows="3" maxlength="2000" required></textarea></div>
     <button class="btn secondary" type="submit">Send report</button>

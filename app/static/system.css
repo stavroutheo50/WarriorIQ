@@ -448,9 +448,14 @@ summary:focus-visible,
   font-size: var(--wiq-text-sm);
 }
 
-/* Hairline separators between facts, drawn only between them. */
-.athlete-facts span + span { position: relative; padding-left: 15px; }
-.athlete-facts span + span::before {
+/* Hairline separators between facts. Each fact draws one at its left and the
+   list is shifted left by the same 15px and clipped there, so the separator of
+   whichever fact begins a row - the first, or one that wrapped onto a new line
+   on a phone - is hidden. Drawing them only on "span + span" left a separator
+   at the start of every wrapped line. */
+.athlete-facts { margin-left: -15px; clip-path: inset(0 0 0 15px); }
+.athlete-facts span { position: relative; padding-left: 15px; }
+.athlete-facts span::before {
   content: "";
   position: absolute;
   left: 0;
