@@ -95,7 +95,7 @@ from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.coaching import build_coaching, build_training_plan
 from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
-from core import social, worker_alerts
+from core import feed, social, worker_alerts
 from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
@@ -6191,6 +6191,50 @@ def athlete_page(request: Request, handle: str):
             "public": social.effective_visibility(profile, minor) == "public",
             "reported": request.query_params.get("reported") == "1",
         },
+    )
+
+
+FEED_ITEMS = 40
+FEED_POSTS_PER_ATHLETE = 5
+
+
+@app.get("/feed", response_class=HTMLResponse)
+def feed_page(request: Request):
+    """What the athletes this person follows have done, newest first.
+
+    Only accepted follows, and each athlete's page rules are applied again
+    here (core/social.py), so the feed never shows more than their profile
+    would: a profile made private keeps its approved followers, and a minor's
+    is shown to nobody.
+    """
+    viewer = _profile_id(request)
+    if viewer is None:
+        return RedirectResponse("/login?next=/feed", status_code=303)
+    items = []
+    following = list_follows(viewer, direction="following")
+    for person in following:
+        profile = get_profile(int(person["id"])) or {}
+        if not profile.get("handle"):
+            continue
+        minor = social.is_minor_account(get_account_by_profile(int(profile["id"])))
+        if not social.can_view(viewer_profile_id=viewer, profile=profile, minor=minor, follow="accepted"):
+            continue
+        who = {"name": profile.get("display_name") or profile["handle"], "handle": profile["handle"],
+               "photo": profile.get("photo_path")}
+        for share in list_profile_posts(int(profile["id"]), limit=FEED_POSTS_PER_ATHLETE):
+            card = _story_card(share["job_id"])
+            if card is not None:
+                items.append({"kind": "post", "at": share["on_profile_at"], "who": who, "sport": card["sport"],
+                              "url": f"/f/{share['token']}", "image": f"/f/{share['token']}/card.png"})
+        for item in feed.level_ups(list_points(int(profile["id"]))):
+            items.append({**item, "who": who})
+        for item in feed.streak_milestones(list_training_sessions(int(profile["id"]))):
+            items.append({**item, "who": who})
+    return templates.TemplateResponse(
+        request=request, name="feed.html",
+        context={"request": request, "items": feed.newest_first(items, FEED_ITEMS),
+                 "following_count": len(following),
+                 "own_handle": (get_profile(viewer) or {}).get("handle")},
     )
 
 

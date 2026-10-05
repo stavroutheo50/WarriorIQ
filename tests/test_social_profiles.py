@@ -224,3 +224,36 @@ def test_nobody_posts_someone_elses_fight():
     other, _ = _athlete()
     assert other.post(f"/story/{job_id}/profile", data={"side": "A"}).status_code == 404
     assert db.list_profile_posts(owner_id) == []
+
+
+# --- the feed -------------------------------------------------------------------------
+
+def test_the_feed_shows_followed_athletes_posts_and_levels():
+    handle = _handle()
+    owner, owner_id = _athlete(handle, "public")
+    token = owner.post(f"/story/{_shareable_fight(owner_id)}/profile", data={"side": "A"}).json()["url"].rsplit("/", 1)[1]
+    db.award_points(owner_id, 120, "session", "test-" + uuid.uuid4().hex)
+
+    fan, _ = _athlete()
+    assert f"/f/{token}" not in fan.get("/feed").text
+    fan.post(f"/athlete/{handle}/follow")
+    page = fan.get("/feed").text
+    assert f"/f/{token}/card.png" in page
+    assert "level 2" in page
+    assert "Giorgos" not in page
+
+
+def test_the_feed_needs_an_accepted_follow_on_a_private_profile():
+    handle = _handle()
+    owner, owner_id = _athlete(handle, "private")
+    token = owner.post(f"/story/{_shareable_fight(owner_id)}/profile", data={"side": "A"}).json()["url"].rsplit("/", 1)[1]
+    fan, fan_id = _athlete()
+    fan.post(f"/athlete/{handle}/follow")
+    assert f"/f/{token}" not in fan.get("/feed").text            # still a request
+    owner.post(f"/profile/followers/{fan_id}/approve")
+    assert f"/f/{token}/card.png" in fan.get("/feed").text
+
+
+def test_the_feed_asks_for_sign_in():
+    response = BrowserClient(main.app).get("/feed", follow_redirects=False)
+    assert response.status_code == 303 and "/login" in response.headers["location"]
