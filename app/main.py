@@ -80,7 +80,8 @@ from core.db import (
     record_security_event, record_subscription_action, release_analysis, reserve_analysis,
     list_active_report_shares, resolve_moderation_report, revoke_account_sessions,
     revoke_report_shares, save_annotation,
-    get_story_share, list_profile_story_shares, list_story_shares, revoke_story_shares, story_share,
+    get_story_share, list_profile_posts, list_profile_story_shares, list_story_shares, revoke_story_shares,
+    set_story_on_profile, story_share,
     save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
     set_guardian_approval_status,
     set_account_status, set_annotation_sequence,
@@ -5470,7 +5471,8 @@ def result_page(request: Request, job_id: str):
             else "stats"),
         # The fight's live public links, one per fighter (story_page).
         "story_links": [
-            {"side": link["side"], "name": link["name"], "url": f"{_public_base(request)}/f/{link['token']}"}
+            {"side": link["side"], "name": link["name"], "url": f"{_public_base(request)}/f/{link['token']}",
+             "on_profile": bool(link.get("on_profile_at"))}
             for link in (list_story_shares(job_id, _profile) if _profile is not None and _account(request) else [])
         ],
         "went_down_note": (report.get("went_down") or {}).get("note"),
@@ -6162,7 +6164,18 @@ def athlete_page(request: Request, handle: str):
     visible = social.can_view(viewer_profile_id=viewer, profile=profile, minor=minor, follow=follow)
     standing = None
     fights_analysed = 0
+    posts = []
     if visible:
+        # Fights the athlete posted: their public stats-only links (story_page),
+        # so nothing here is more than anyone holding the link already sees.
+        for share in list_profile_posts(int(profile["id"]), limit=9):
+            card = _story_card(share["job_id"])
+            if card is None:
+                continue
+            me = card["fighters"][share["side"]]
+            posts.append({"url": f"/f/{share['token']}", "image": f"/f/{share['token']}/card.png",
+                          "sport": card["sport"], "total": me.get("total"), "posted_at": share["on_profile_at"],
+                          "job_id": share["job_id"], "side": share["side"]})
         standing = camp_standing(list_points(int(profile["id"])), list_training_sessions(int(profile["id"])),
                                  datetime.now(timezone.utc).date())
         fights_analysed = len(list_fights(int(profile["id"])))
@@ -6173,6 +6186,7 @@ def athlete_page(request: Request, handle: str):
             "is_owner": viewer is not None and int(viewer) == int(profile["id"]),
             "follow": follow, "can_follow": social.can_follow(viewer_profile_id=viewer, profile=profile, minor=minor),
             "signed_in": viewer is not None, "standing": standing, "fights_analysed": fights_analysed,
+            "posts": posts,
             "counts": count_follows(int(profile["id"])),
             "public": social.effective_visibility(profile, minor) == "public",
             "reported": request.query_params.get("reported") == "1",
@@ -7996,6 +8010,43 @@ def create_story_link(request: Request, job_id: str, side: str = Form(...), name
     token = story_share(job_id, profile_id, side, corner if corner in {"red", "blue"} else None,
                         _story_name(name))
     return {"url": f"{_public_base(request)}/f/{token}"}
+
+
+@app.post("/story/{job_id}/profile", dependencies=[Depends(require_csrf)])
+def post_story_to_profile(request: Request, job_id: str, side: str = Form(...), name: str = Form(""),
+                          posted: str = Form("1"), next_path: str = Form("")):
+    """Put this fight's stats-only link on the owner's athlete page, or take it off.
+
+    The page shows the same card as the link itself, to whoever may see the
+    profile (core/social.py): private profiles to approved followers only.
+    """
+    _enforce_rate_limit(request, "story-link", 20, 3600)
+    profile_id = _profile_id(request)
+    fight = get_fight(job_id)
+    if profile_id is None or not fight or int(fight["profile_id"]) != profile_id:
+        raise HTTPException(404)
+    if side not in {"A", "B"}:
+        raise HTTPException(400, "Choose which fighter you were.")
+    wanted = posted == "1"
+    existing = next((link for link in list_story_shares(job_id, profile_id) if link["side"] == side), None)
+    if wanted:
+        if _story_card(job_id) is None:
+            raise HTTPException(409, "This fight has no stats that can be shared.")
+        job = _authorized_job(request, job_id) or {}
+        corner = str(job.get("fighter_a_corner") or "").lower()
+        if corner in {"red", "blue"} and side == "B":
+            corner = "blue" if corner == "red" else "red"
+        token = story_share(job_id, profile_id, side, corner if corner in {"red", "blue"} else None,
+                            _story_name(name))
+    else:
+        token = existing["token"] if existing else None
+    if token:
+        set_story_on_profile(token, profile_id, wanted)
+    handle = (get_profile(profile_id) or {}).get("handle")
+    if next_path == "athlete" and handle:
+        return RedirectResponse(f"/athlete/{quote(handle)}#posts", status_code=303)
+    return {"url": f"{_public_base(request)}/f/{token}" if token else None, "posted": wanted and bool(token),
+            "profile_url": f"/athlete/{quote(handle)}" if handle else None}
 
 
 @app.post("/story/{job_id}/revoke", dependencies=[Depends(require_csrf)])

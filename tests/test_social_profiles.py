@@ -142,3 +142,85 @@ def test_deleting_an_account_removes_its_follows():
     account = db.get_account_by_profile(fan_id)
     db.delete_account(int(account["id"]))
     assert db.count_follows(star)["followers"] == 0
+
+
+# --- fights posted to a profile -----------------------------------------------------
+
+def _shareable_fight(profile_id):
+    """A completed fight whose stats can go on a card (core.report.share_card)."""
+    import json
+
+    job_id = "post" + uuid.uuid4().hex[:10]
+    job_dir = main.OUTPUTS / job_id
+    job_dir.mkdir(parents=True)
+    video = main.UPLOADS / f"{job_id}.mp4"
+    video.parent.mkdir(parents=True, exist_ok=True)
+    video.write_bytes(b"video-placeholder")
+    report = {
+        "setup": {"ruleset": "K1", "fighter_name": "Nikos"},
+        "video": {"focus_fighter": "A", "analysis_target": "BOTH", "original_name": "Nikos vs Giorgos.mp4"},
+        "integrity": {"identity_evidence_trusted": True},
+        "tracking": {"fighter_A_seed_source": "pose_detector", "fighter_B_seed_source": "pose_detector",
+                     "initial_iou_A": 0.72, "initial_iou_B": 0.93, "fighter_A_coverage": 0.9,
+                     "fighter_B_coverage": 0.9, "fighters_separable": True, "identity_confusions": 0},
+        "metrics": {"A": {"guard_index": 0.6}, "B": {}},
+        "rounds": [{"number": 1, "selected": True}],
+        "events": [],
+        "statistics": {"fighters": {"A": {"punch_attempts": 41, "kick_attempts": 28, "knee_attempts": 7},
+                                    "B": {"punch_attempts": 12, "kick_attempts": 30, "knee_attempts": 0}}},
+        "scorecard": {"available": True, "sport": "kickboxing", "sport_label": "Kickboxing", "totals": {"A": 29, "B": 28}},
+    }
+    (job_dir / "report.json").write_text(json.dumps(report), encoding="utf-8")
+    db.save_fight(job_id, profile_id, "f.mp4", str(video), str(job_dir / "report.json"),
+                  "competition", "K1", "BOTH", {})
+    return job_id
+
+
+def test_a_posted_fight_shows_on_the_athletes_page_without_names():
+    handle = _handle()
+    owner, owner_id = _athlete(handle, "public")
+    job_id = _shareable_fight(owner_id)
+    made = owner.post(f"/story/{job_id}/profile", data={"side": "A", "posted": "1"})
+    assert made.status_code == 200, made.text
+    assert made.json()["posted"] and made.json()["profile_url"] == f"/athlete/{handle}"
+    token = made.json()["url"].rsplit("/", 1)[1]
+
+    stranger, _ = _athlete()
+    page = stranger.get(f"/athlete/{handle}").text
+    assert f"/f/{token}/card.png" in page and "Shared fights" in page
+    assert "Giorgos" not in page and "Nikos" not in page
+
+    # Taken off again by its owner, from the profile page.
+    owner.post(f"/story/{job_id}/profile", data={"side": "A", "posted": "0", "next_path": "athlete"})
+    assert f"/f/{token}/card.png" not in stranger.get(f"/athlete/{handle}").text
+
+
+def test_a_private_athletes_posts_reach_approved_followers_only():
+    handle = _handle()
+    owner, owner_id = _athlete(handle, "private")
+    job_id = _shareable_fight(owner_id)
+    token = owner.post(f"/story/{job_id}/profile", data={"side": "A"}).json()["url"].rsplit("/", 1)[1]
+
+    fan, fan_id = _athlete()
+    assert f"/f/{token}" not in fan.get(f"/athlete/{handle}").text
+    fan.post(f"/athlete/{handle}/follow")
+    owner.post(f"/profile/followers/{fan_id}/approve")
+    assert f"/f/{token}/card.png" in fan.get(f"/athlete/{handle}").text
+
+
+def test_turning_off_the_fight_links_takes_the_post_down():
+    handle = _handle()
+    owner, owner_id = _athlete(handle, "public")
+    job_id = _shareable_fight(owner_id)
+    owner.post(f"/story/{job_id}/profile", data={"side": "A"})
+    assert len(db.list_profile_posts(owner_id)) == 1
+    owner.post(f"/story/{job_id}/revoke")
+    assert db.list_profile_posts(owner_id) == []
+
+
+def test_nobody_posts_someone_elses_fight():
+    _, owner_id = _athlete(_handle(), "public")
+    job_id = _shareable_fight(owner_id)
+    other, _ = _athlete()
+    assert other.post(f"/story/{job_id}/profile", data={"side": "A"}).status_code == 404
+    assert db.list_profile_posts(owner_id) == []

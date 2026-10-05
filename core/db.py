@@ -519,6 +519,11 @@ def init_db() -> None:
             # person's fights, and upgrading somebody to a coach account they
             # did not ask for would offer them seats they are not paying for.
             con.execute("ALTER TABLE profiles ADD COLUMN account_type TEXT NOT NULL DEFAULT 'athlete'")
+        story_columns = {row[1] for row in con.execute("PRAGMA table_info(story_shares)").fetchall()}
+        if "on_profile_at" not in story_columns:
+            # When the owner put this fight link on their athlete page; NULL
+            # (every existing link) is not on it.
+            con.execute("ALTER TABLE story_shares ADD COLUMN on_profile_at TEXT")
         fight_columns = {row[1] for row in con.execute("PRAGMA table_info(fights)").fetchall()}
         if "fighter_id" not in fight_columns:
             # Nullable on purpose: every fight analysed before the roster
@@ -1952,6 +1957,27 @@ def list_story_shares(job_id: str, profile_id: int) -> list[dict]:
         rows = con.execute(
             "SELECT * FROM story_shares WHERE job_id=? AND profile_id=? AND revoked_at IS NULL ORDER BY created_at",
             (job_id, int(profile_id))).fetchall()
+    return [dict(row) for row in rows]
+
+
+def set_story_on_profile(token: str, profile_id: int, posted: bool) -> bool:
+    """Put a live fight link on its owner's athlete page, or take it off."""
+    init_db()
+    value = datetime.now(timezone.utc).isoformat() if posted else None
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE story_shares SET on_profile_at=? WHERE token=? AND profile_id=? AND revoked_at IS NULL",
+            (value, token, int(profile_id)))
+        return cursor.rowcount == 1
+
+
+def list_profile_posts(profile_id: int, limit: int = 12) -> list[dict]:
+    """The live fight links the athlete chose to show on their page, newest first."""
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM story_shares WHERE profile_id=? AND revoked_at IS NULL AND on_profile_at IS NOT NULL "
+            "ORDER BY on_profile_at DESC LIMIT ?", (int(profile_id), int(limit))).fetchall()
     return [dict(row) for row in rows]
 
 
