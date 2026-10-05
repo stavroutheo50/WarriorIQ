@@ -45,6 +45,16 @@ function Run($what, [scriptblock]$command) {
     return ($LASTEXITCODE -eq 0 -or $null -eq $LASTEXITCODE)
 }
 
+# Python code goes through a file, never `python -c "..."`: Windows PowerShell
+# 5.1 strips the double quotes inside an argument to a native program, so
+# print("ENGINE") arrived as print(ENGINE) and every step that used it failed.
+function Run-Python($what, [string]$code) {
+    $step = Join-Path $logDir 'update-worker-step.py'
+    $prelude = "import os, sys`nsys.path.insert(0, os.getcwd())`n"
+    [System.IO.File]::WriteAllText($step, $prelude + $code, (New-Object System.Text.UTF8Encoding $false))
+    return (Run $what { & $python $step })
+}
+
 function Stop-Here($why) {
     Say "STOPPED: $why"
     Say "Nothing after this step was done. Send logs\update-worker.log to get it fixed."
@@ -52,6 +62,7 @@ function Stop-Here($why) {
 }
 
 if (-not (Test-Path $python)) { Stop-Here "the project .venv is missing ($python)" }
+$problems = @()
 
 # 1. Stop the worker, so files are not replaced under a running analysis.
 $scheduled = Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
@@ -85,7 +96,7 @@ if (-not (Run "Pulling the latest code" { git pull --ff-only origin main })) { S
 
 # 4. Packages. PyTorch must be the CUDA 12.8 build for an RTX 50-series card.
 Run "Upgrading pip" { & $python -m pip install --upgrade pip } | Out-Null
-$torchOk = & $python -c "import torch; print(torch.version.cuda or '')" 2>$null
+$torchOk = & $python -c "import torch; print(torch.version.cuda or 0)" 2>$null
 if (-not ("$torchOk" -match '^12\.(8|9)|^13')) {
     if (-not (Run "Installing PyTorch for CUDA 12.8" { & $python -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128 })) { Stop-Here "PyTorch install failed" }
 }
@@ -100,9 +111,18 @@ if (-not (Run "Installing the RTMPose GPU runtime" { & $python -m pip install -r
 if (-not (Run "Installing RTMPose" { & $python -m pip install --no-deps rtmlib==0.0.16 })) { Stop-Here "rtmlib install failed" }
 
 # 5. TensorRT engine for this GPU, built once and reused (core/trt_engine.py).
-$build = 'from core.config import MODELS; from core.trt_engine import ensure_pose_engine; print("ENGINE", ensure_pose_engine(MODELS))'
-if (-not (Run "Building the TensorRT engine (first time takes several minutes)" { & $python -c $build })) {
-    Say "TensorRT engine build failed - analyses still run, just slower"
+$build = @'
+import logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+from core.config import MODELS
+from core.trt_engine import ensure_pose_engine
+engine = ensure_pose_engine(MODELS)
+print("ENGINE", engine)
+raise SystemExit(0 if engine else 1)
+'@
+if (-not (Run-Python "Building the TensorRT engine (first time takes several minutes)" $build)) {
+    Say "TensorRT engine build failed - analyses still run, just slower; the reason is above"
+    $problems += "TensorRT engine not built"
 }
 
 # 6. Prove it works rather than assume.
@@ -122,8 +142,9 @@ print("RTMPose providers", providers)
 assert "CUDAExecutionProvider" in providers, "RTMPose would run on the CPU"
 print("ALL CHECKS PASSED")
 '@
-if (-not (Run "Checking GPU, RTMPose and the pose model" { & $python -c $check })) {
+if (-not (Run-Python "Checking GPU, RTMPose and the pose model" $check)) {
     Say "The check reported a problem above - the worker is restarted anyway; send logs\update-worker.log"
+    $problems += "GPU / RTMPose / pose model check failed"
 }
 
 # 7. Start the worker again, the way it was being run.
@@ -134,4 +155,8 @@ if ($scheduled) {
     Start-Process -FilePath (Join-Path $root 'start-worker.bat') -WorkingDirectory $root
     Say "Started start-worker.bat in a new window"
 }
-Say "Done. The worker is on the latest code."
+if ($problems.Count -eq 0) {
+    Say "Done. The worker is on the latest code. ALL CHECKS PASSED"
+} else {
+    Say "Done, BUT NOT EVERYTHING WORKED: $($problems -join '; '). Send logs\update-worker.log"
+}
