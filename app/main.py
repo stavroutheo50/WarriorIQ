@@ -63,6 +63,8 @@ from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
+    HandleTaken, accept_follow, count_follows, follow_status, get_account_by_profile, get_profile_by_handle,
+    list_follows, remove_follow, request_follow, set_public_profile,
     add_assignment, analysis_allowance, apply_subscription_change, award_points, link_camp_mission, list_camp_missions,
     list_points, list_training_sessions, record_training_session, redeem_points_for_analysis, apply_checkout_event, consume_email_verification_token,
     consume_password_reset_token,
@@ -92,7 +94,7 @@ from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.coaching import build_coaching, build_training_plan
 from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
-from core import worker_alerts
+from core import social, worker_alerts
 from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
@@ -6106,8 +6108,127 @@ def profile_page(request: Request, error: str = ""):
             "request": request, "error": error[:200],
             "profile": get_profile(profile_id) if profile_id is not None else None,
             "fights": list_fights(profile_id) if profile_id is not None else [],
+            "minor": social.is_minor_account(_account(request)),
+            "follow_requests": list_follows(profile_id, direction="followers", status="pending") if profile_id is not None else [],
+            "followers": list_follows(profile_id, direction="followers") if profile_id is not None else [],
+            "following": list_follows(profile_id, direction="following") if profile_id is not None else [],
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Public athlete profiles and follows. The rules live in core/social.py.
+# ---------------------------------------------------------------------------
+
+def _social_target(handle: str) -> tuple[dict, bool]:
+    profile = get_profile_by_handle(handle.strip().lstrip("@").lower()) if handle else None
+    if not profile:
+        raise HTTPException(404)
+    return profile, social.is_minor_account(get_account_by_profile(int(profile["id"])))
+
+
+@app.post("/profile/public", dependencies=[Depends(require_csrf)])
+def save_public_profile(request: Request, handle: str = Form(""), visibility: str = Form("private"),
+                        bio: str = Form(""), gym: str = Form("")):
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse("/login?next=/profile", status_code=303)
+    try:
+        clean = social.normalize_handle(handle)
+    except ValueError as reason:
+        return RedirectResponse("/profile?" + urlencode({"error": str(reason)}) + "#public-profile", status_code=303)
+    minor = social.is_minor_account(get_account(int(account["id"])) or account)
+    wanted = visibility if visibility in social.VISIBILITIES else "private"
+    if wanted == "public" and (minor or not clean):
+        wanted = "private"
+    try:
+        set_public_profile(profile_id, clean, wanted, " ".join(bio.split())[:280], " ".join(gym.split())[:80])
+    except HandleTaken:
+        return RedirectResponse("/profile?" + urlencode({"error": "That username is taken. Choose another."})
+                                + "#public-profile", status_code=303)
+    record_security_event("profile_visibility_changed", account_id=int(account["id"]),
+                          resource_type="profile", resource_id=str(profile_id), metadata={"visibility": wanted})
+    return RedirectResponse("/profile#public-profile", status_code=303)
+
+
+@app.get("/athlete/{handle}", response_class=HTMLResponse)
+def athlete_page(request: Request, handle: str):
+    profile, minor = _social_target(handle)
+    viewer = _profile_id(request)
+    if not social.is_discoverable(viewer_profile_id=viewer, profile=profile, minor=minor):
+        raise HTTPException(404)
+    follow = follow_status(viewer, int(profile["id"])) if viewer is not None else None
+    visible = social.can_view(viewer_profile_id=viewer, profile=profile, minor=minor, follow=follow)
+    standing = None
+    fights_analysed = 0
+    if visible:
+        standing = camp_standing(list_points(int(profile["id"])), list_training_sessions(int(profile["id"])),
+                                 datetime.now(timezone.utc).date())
+        fights_analysed = len(list_fights(int(profile["id"])))
+    return templates.TemplateResponse(
+        request=request, name="athlete.html",
+        context={
+            "request": request, "athlete": profile, "visible": visible, "minor": minor,
+            "is_owner": viewer is not None and int(viewer) == int(profile["id"]),
+            "follow": follow, "can_follow": social.can_follow(viewer_profile_id=viewer, profile=profile, minor=minor),
+            "signed_in": viewer is not None, "standing": standing, "fights_analysed": fights_analysed,
+            "counts": count_follows(int(profile["id"])),
+            "public": social.effective_visibility(profile, minor) == "public",
+            "reported": request.query_params.get("reported") == "1",
+        },
+    )
+
+
+@app.post("/athlete/{handle}/follow", dependencies=[Depends(require_csrf)])
+def follow_athlete(request: Request, handle: str):
+    viewer = _profile_id(request)
+    if viewer is None:
+        return RedirectResponse(f"/login?next=/athlete/{quote(handle)}", status_code=303)
+    _enforce_rate_limit(request, "follow", 60, 3600)
+    profile, minor = _social_target(handle)
+    if not social.can_follow(viewer_profile_id=viewer, profile=profile, minor=minor):
+        raise HTTPException(404)
+    request_follow(viewer, int(profile["id"]), accepted=social.effective_visibility(profile, minor) == "public")
+    return RedirectResponse(f"/athlete/{quote(profile['handle'])}", status_code=303)
+
+
+@app.post("/athlete/{handle}/unfollow", dependencies=[Depends(require_csrf)])
+def unfollow_athlete(request: Request, handle: str):
+    viewer = _profile_id(request)
+    if viewer is None:
+        return RedirectResponse("/login", status_code=303)
+    profile, _ = _social_target(handle)
+    remove_follow(viewer, int(profile["id"]))
+    return RedirectResponse(f"/athlete/{quote(profile['handle'])}", status_code=303)
+
+
+@app.post("/profile/followers/{follower_id}/{action}", dependencies=[Depends(require_csrf)])
+def answer_follower(request: Request, follower_id: int, action: str):
+    """Approve or decline a follow request, or remove an existing follower."""
+    owner = _profile_id(request)
+    if owner is None:
+        return RedirectResponse("/login?next=/profile", status_code=303)
+    if action == "approve":
+        accept_follow(follower_id, owner)
+    elif action in {"decline", "remove"}:
+        remove_follow(follower_id, owner)
+    else:
+        raise HTTPException(404)
+    return RedirectResponse("/profile#followers", status_code=303)
+
+
+@app.post("/athlete/{handle}/report", dependencies=[Depends(require_csrf)])
+def report_athlete(request: Request, handle: str, reason: str = Form("")):
+    """Anyone can report a profile; it lands in the admin moderation queue."""
+    _enforce_rate_limit(request, "profile-report", 10, 3600)
+    profile, _ = _social_target(handle)
+    account = _account(request)
+    report_id = create_moderation_report(
+        "profile", (account or {}).get("email", "anonymous"), " ".join(reason.split())[:2000] or "No reason given",
+        f"profile:{profile['id']}:@{profile['handle']}")
+    record_security_event("profile_reported", resource_type="moderation_report", resource_id=str(report_id))
+    return RedirectResponse(f"/athlete/{quote(profile['handle'])}?reported=1", status_code=303)
 
 
 @app.get("/settings")
@@ -7966,6 +8087,11 @@ def export_account_data(request: Request, password: str = Form(...),
         "profile": profile,
         "fights": fights,
         "annotations": annotations,
+        "follows": {
+            "followers": list_follows(profile_id, direction="followers"),
+            "following": list_follows(profile_id, direction="following"),
+            "pending_requests": list_follows(profile_id, direction="followers", status="pending"),
+        },
         "coach_assignments": list_assignments(profile_id),
         # Fight Camp: missions taken, training sessions (the check's findings
         # and a fingerprint - the clips themselves are never kept) and points.
