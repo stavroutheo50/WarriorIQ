@@ -540,6 +540,8 @@
 .camp-note{grid-column:1/-1;margin:0}
 /* Fight Camp: the next step, with the points beside it (camp.html #today). */
 .camp-today{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px 22px;margin:4px 0 14px;padding:20px;border-radius:18px;border:1px solid rgba(79,215,255,.28);background:radial-gradient(420px 200px at 0 0,rgba(79,215,255,.12),transparent),rgba(255,255,255,.03)}
+.camp-next{display:flex;flex-direction:column;justify-content:center}
+.camp-next .camp-rules{margin-top:18px}
 .camp-next h2{margin:6px 0 8px;font-size:clamp(22px,3vw,30px);line-height:1.15}
 .camp-next p{margin:0 0 12px}
 .camp-next-actions{display:flex;flex-wrap:wrap;gap:8px}
@@ -626,11 +628,15 @@
 .camp-history .up{color:#52d6a3}
 .camp-history .down{color:#ff718f}
 /* The squad, folded away unless this is a coach's workspace. */
-.camp-squad>summary{cursor:pointer;list-style:none;display:flex;flex-direction:column;gap:4px;padding:14px 0}
+.camp-squad>summary{cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0}
 .camp-squad>summary::-webkit-details-marker{display:none}
+.camp-squad>summary>span:first-child{display:flex;flex-direction:column;gap:4px;min-width:0}
 .camp-squad>summary h2{margin:0}
-.camp-squad>summary h2::after{content:" ▾";font-size:.6em;color:#98a2b3}
-.camp-squad[open]>summary h2::after{content:" ▴"}
+/* Said in words: a lone triangle after the heading read as a stray glyph. */
+.camp-squad-toggle{flex:none;padding:7px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.14);font-size:13px;color:#c7cede}
+.camp-squad-toggle::after{content:"Show"}
+.camp-squad[open] .camp-squad-toggle::after{content:"Hide"}
+.camp-squad>summary+section{margin-top:8px}
 .progress-trend{margin-top:16px}
 /* Every number (result.html #report-numbers): label, fighter, opponent. */
 .fight-numbers{margin:22px 0;display:grid;gap:14px}
@@ -666,3 +672,25 @@
 /* Numbers that could not be confirmed as this fighter's own. */
 .fight-vitals[data-unverified="true"]{opacity:.6;filter:grayscale(.8)}
 .vitals-unverified-label{display:inline-block;margin:0 0 8px;padding:4px 10px;border:1px dashed #7a6a3a;border-radius:999px;color:#f1e3bd;font-size:12px;font-weight:700;letter-spacing:.02em}
+/* Athlete pages (athlete.html, the followers card on profile.html). The site's
+   section + section rule spaces whole page sections up to 72px apart; these
+   cards are one stack and sit 16px apart. */
+.athlete-stack{display:grid;gap:16px;margin-top:20px}
+.athlete-stack>section,.athlete-stack>section+section{margin:0}
+.athlete-bio{margin:10px 0 0;max-width:640px;color:var(--wiq-text-secondary,#b9c4d6);line-height:1.6}
+.athlete-camp h2{margin:6px 0 4px;font-size:clamp(22px,2.6vw,28px)}
+.athlete-report{margin-top:28px;font-size:13px;color:var(--wiq-text-secondary,#98a3b6)}
+.athlete-report summary{cursor:pointer;display:inline}
+.athlete-report form{margin-top:12px;max-width:520px}
+.person-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.person-row .person-name{min-width:0;overflow-wrap:anywhere}
+.person-actions{display:flex;gap:8px;flex-wrap:wrap}
+.person-actions form{margin:0}
+.person-actions .btn{min-height:38px;padding:8px 14px}
+/* Squad table on wide screens: the fighter picker took half the row, so
+   "Work on" wrapped and "Open" was clipped at the edge. */
+@media(min-width:901px){
+  #squad .fighter-assign select{width:150px;min-width:0}
+  #squad td[data-label="Work on"]{min-width:120px}
+  #squad .squad-open{white-space:nowrap;padding-right:12px}
+}

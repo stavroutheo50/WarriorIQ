@@ -59,6 +59,32 @@ class FollowedSideTests(unittest.TestCase):
         self.assertEqual(progress["identity_failed_count"], 1)
 
 
+class NewestMeasuredValueTests(unittest.TestCase):
+    """Fight Camp showed "—" for guard while the squad table showed Guard 12%."""
+
+    def test_a_newest_fight_without_a_guard_keeps_the_one_before(self):
+        from core.progress_insights import build_progress
+
+        progress = build_progress([
+            _record("one", "2026-08-01", .12),
+            _record("two", "2026-08-08", None),
+        ], "A")
+        self.assertEqual(progress["latest"]["guard"], None)
+        recent = progress["recent"]["guard"]
+        self.assertEqual((recent["value"], recent["job_id"], recent["is_latest"]), (.12, "one", False))
+        # A movement number leads, not how clearly the camera saw the athlete.
+        self.assertEqual(progress["headline_key"], "guard")
+        self.assertEqual(progress["trend_key"], "coverage")
+
+    def test_coverage_leads_only_when_nothing_else_was_measured(self):
+        from core.progress_insights import build_progress
+
+        progress = build_progress([_record("one", "2026-08-01", None)], "A")
+        self.assertNotIn("guard", progress["recent"])
+        self.assertEqual(progress["headline_key"], "coverage")
+        self.assertTrue(progress["recent"]["coverage"]["is_latest"])
+
+
 class SeparabilityIsGatedTests(unittest.TestCase):
     """A "fighters look too alike" fight was charted: the stored flag ignored it."""
 
