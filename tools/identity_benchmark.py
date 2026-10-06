@@ -8,8 +8,16 @@ standing frame, each fighter's box is one of:
 
   right    on that fighter (IoU >= MATCH_IOU with the marked box)
   swapped  on the other fighter
+  partial  on that fighter, but a smaller box than the marked one: at least
+           PART_INSIDE of it lies inside the marked box (an upper body, the
+           legs), and it is not on the other fighter. Measured 2026-10-06: 8 of
+           the 15 "other" frames on the analysis PC were this - the right
+           person, which "other" had been blaming on referees and spectators
   other    on somebody else - the referee, a spectator, another bout
   missing  no box at all
+
+"right" is unchanged by "partial": a partial box is still not counted right,
+only no longer counted as a different person.
 
 Coverage, the number the analysis reports about itself, counts "right",
 "swapped" and "other" alike, which is why it looked healthy on bouts where the
@@ -31,6 +39,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.identity import box_iou
 
 MATCH_IOU = 0.5
+PART_INSIDE = 0.9
 # On the ground the marked box holds both fighters; a fighter's box inside it
 # is as right as anything can be there.
 PAIR_IOU = 0.3
@@ -44,6 +53,27 @@ def _nearest(records: list[dict], frame: int) -> dict | None:
 def _box(record: dict, fighter: str):
     observation = (record.get(f"fighter_{fighter}") or {}).get("observation")
     return None if not observation else observation.get("box")
+
+
+def _inside(box, marked) -> float:
+    """The share of `box` that lies inside `marked`."""
+    width = max(0.0, min(box[2], marked[2]) - max(box[0], marked[0]))
+    height = max(0.0, min(box[3], marked[3]) - max(box[1], marked[1]))
+    area = max(1e-9, (box[2] - box[0]) * (box[3] - box[1]))
+    return width * height / area
+
+
+def classify(box, own, other) -> str:
+    """right, swapped, partial, other or missing, for one fighter on one frame."""
+    if box is None:
+        return "missing"
+    if box_iou(box, own) >= MATCH_IOU:
+        return "right"
+    if other is not None and box_iou(box, other) >= MATCH_IOU:
+        return "swapped"
+    if _inside(box, own) >= PART_INSIDE and (other is None or _inside(box, other) < 0.5):
+        return "partial"
+    return "other"
 
 
 def score(records: list[dict], truth: dict) -> dict:
@@ -62,16 +92,8 @@ def score(records: list[dict], truth: dict) -> dict:
         for fighter, other in (("A", "B"), ("B", "A")):
             if frame.get(fighter) is None:
                 continue
-            box = _box(record, fighter)
-            if box is None:
-                counts[fighter]["missing"] += 1
-            elif box_iou(box, frame[fighter]) >= MATCH_IOU:
-                counts[fighter]["right"] += 1
-            elif frame.get(other) is not None and box_iou(box, frame[other]) >= MATCH_IOU:
-                counts[fighter]["swapped"] += 1
-            else:
-                counts[fighter]["other"] += 1
-    keys = ("right", "swapped", "other", "missing")
+            counts[fighter][classify(_box(record, fighter), frame[fighter], frame.get(other))] += 1
+    keys = ("right", "swapped", "partial", "other", "missing")
     out = {fighter: {key: counts[fighter][key] for key in keys} for fighter in ("A", "B")}
     for fighter in ("A", "B"):
         out[fighter]["frames"] = sum(out[fighter][key] for key in keys)
@@ -93,7 +115,7 @@ def main() -> int:
     for fighter in ("A", "B"):
         r = result[fighter]
         print(f"fighter {fighter}: right {r['right']}/{r['frames']}  swapped {r['swapped']}  "
-              f"other person {r['other']}  missing {r['missing']}")
+              f"right person, smaller box {r['partial']}  other person {r['other']}  missing {r['missing']}")
     g = result["ground"]
     print(f"ground (both fighters in one box): on the pair {g['on_the_pair']}  elsewhere {g['elsewhere']}  missing {g['missing']}")
     return 0
