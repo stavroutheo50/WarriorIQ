@@ -31,8 +31,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.identity import box_iou  # noqa: E402
-from tools.identity_benchmark import MATCH_IOU, _box, _nearest  # noqa: E402
+from tools.identity_benchmark import _box, _nearest, classify  # noqa: E402
 from tools.run_identity_benchmark import TRUTH, WORK  # noqa: E402
 
 TILE_WIDTH = 480
@@ -53,11 +52,8 @@ def misses(records: list[dict], truth: dict) -> list[dict]:
             if frame.get(fighter) is None:
                 continue
             box = _box(record, fighter)
-            if box is None or box_iou(box, frame[fighter]) >= MATCH_IOU:
-                continue
-            if frame.get(other) is not None and box_iou(box, frame[other]) >= MATCH_IOU:
-                continue                                            # a swap, not another person
-            found.append({"fighter": fighter, "followed": box, "frame": frame})
+            if classify(box, frame[fighter], frame.get(other)) == "other":
+                found.append({"fighter": fighter, "followed": box, "frame": frame})
     return found
 
 

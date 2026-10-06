@@ -100,8 +100,9 @@ def main(argv: list[str] | None = None) -> int:
         "WARRIORIQ_OUTPUTS_DIR": str(runs / "outputs"),
         "WARRIORIQ_DB_PATH": str(runs / "benchmark.sqlite3"),
     })
-    totals = {arm: {"right": 0, "swapped": 0, "other": 0, "missing": 0, "checked": 0} for arm in ARMS}
-    print(f"{'clip':8} {'arm':4} {'right':>7} {'swapped':>8} {'other':>6} {'missing':>8} {'seconds':>8}")
+    keys = ("right", "swapped", "partial", "other", "missing")
+    totals = {arm: {**{key: 0 for key in keys}, "checked": 0} for arm in ARMS}
+    print(f"{'clip':8} {'arm':4} {'right':>7} {'swapped':>8} {'partial':>8} {'other':>6} {'missing':>8} {'seconds':>8}")
     for path in chosen:
         truth = json.loads(path.read_text(encoding="utf-8"))
         video = _download(truth)
@@ -115,21 +116,21 @@ def main(argv: list[str] | None = None) -> int:
             seconds = _analyse(video, truth, out_dir, args.phone_seconds)
             records = [json.loads(line) for line in (out_dir / "tracking.jsonl").read_text().splitlines() if line]
             result = score(records, marked)
-            row = {key: 0 for key in ("right", "swapped", "other", "missing", "checked")}
+            row = {**{key: 0 for key in keys}, "checked": 0}
             for fighter in ("A", "B"):
                 counts = result[fighter]
-                for key in ("right", "swapped", "other", "missing"):
+                for key in keys:
                     row[key] += int(counts.get(key, 0))
                 row["checked"] += int(counts["frames"])
             for key in row:
                 totals[arm][key] += row[key]
             print(f"{path.stem:8} {arm:4} {row['right']:>3}/{row['checked']:<3} {row['swapped']:>8} "
-                  f"{row['other']:>6} {row['missing']:>8} {seconds:>8.0f}", flush=True)
+                  f"{row['partial']:>8} {row['other']:>6} {row['missing']:>8} {seconds:>8.0f}", flush=True)
     print()
     for arm, row in totals.items():
-        print(f"TOTAL size gate {arm:3}: right {row['right']}/{row['checked']}, wrong person "
-              f"{row['swapped'] + row['other']} (swapped {row['swapped']}, other {row['other']}), "
-              f"missing {row['missing']}")
+        print(f"TOTAL size gate {arm:3}: right {row['right']}/{row['checked']}, right person with a smaller box "
+              f"{row['partial']}, wrong person {row['swapped'] + row['other']} (swapped {row['swapped']}, "
+              f"other {row['other']}), missing {row['missing']}")
     return 0
 
 
