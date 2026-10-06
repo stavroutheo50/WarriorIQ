@@ -111,12 +111,44 @@ if (-not (Run "Installing the RTMPose GPU runtime" { & $python -m pip install -r
 if (-not (Run "Installing RTMPose" { & $python -m pip install --no-deps rtmlib==0.0.16 })) { Stop-Here "rtmlib install failed" }
 
 # 5. TensorRT engine for this GPU, built once and reused (core/trt_engine.py).
+# An engine that exists is not one that loads: one built by another TensorRT
+# version is rejected at the first frame, and every analysis then ran on
+# PyTorch while "ALL CHECKS PASSED" (2026-10-06). So each engine is run once
+# here. One that cannot load is renamed to .rejected (kept, not deleted), and
+# this GPU's own engine is rebuilt if it is the one refused.
 $build = @'
 import logging
+from pathlib import Path
+import numpy as np
 logging.basicConfig(level=logging.INFO, format="%(message)s")
-from core.config import MODELS
+from core.config import MODELS, SETTINGS
 from core.trt_engine import ensure_pose_engine
+from ultralytics import YOLO
+
+def loads(path):
+    try:
+        YOLO(str(path)).predict(np.zeros((640, 640, 3), np.uint8), device=0, imgsz=640, verbose=False)
+        return True
+    except Exception as exc:
+        print("ENGINE CANNOT LOAD", path, type(exc).__name__, str(exc)[:160])
+        return False
+
+def set_aside(path):
+    target = Path(str(path) + ".rejected")
+    if target.exists():
+        target.unlink()
+    Path(path).rename(target)
+    print("RENAMED", path, "->", target.name)
+
 engine = ensure_pose_engine(MODELS)
+if engine and not loads(engine):
+    set_aside(engine)
+    engine = ensure_pose_engine(MODELS)
+    if engine and not loads(engine):
+        engine = None
+configured = Path(SETTINGS.pose_model_engine)
+if engine and configured.exists() and configured.resolve() != Path(engine).resolve() and not loads(configured):
+    set_aside(configured)
 print("ENGINE", engine)
 raise SystemExit(0 if engine else 1)
 '@
@@ -131,8 +163,12 @@ import torch  # before onnxruntime: see core/rtm_pose.py
 print("GPU", torch.cuda.get_device_name(0), "capability", torch.cuda.get_device_capability(0), "CUDA", torch.version.cuda)
 from core.build_info import ANALYSIS_VERSION, build_commit
 print("analysis version", ANALYSIS_VERSION, "commit", build_commit())
+import numpy as np
 from core.pose_tracker import PoseTracker
-print("pose model", PoseTracker().model_path)
+tracker = PoseTracker()
+tracker.warmup(np.zeros((720, 1280, 3), np.uint8))
+print("pose model", tracker.model_path)
+assert tracker.model_path.endswith(".engine"), "the TensorRT engine did not load - analyses would run on PyTorch, slower"
 from core import rtm_pose
 refiner = rtm_pose._get()
 assert refiner is not None, "RTMPose did not load - see the warning above"

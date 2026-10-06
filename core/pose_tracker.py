@@ -373,6 +373,21 @@ def resolve_pose_engine(configured: str | None = None, gpu_name: str | None = No
     return primary
 
 
+def _own_engine_besides(rejected: str | Path) -> Path | None:
+    """This GPU's cached engine, if there is one and it is not the rejected file."""
+    from core.config import MODELS
+    from core.trt_engine import engine_path_for
+
+    for folder in (Path(rejected).parent, MODELS):
+        try:
+            candidate = engine_path_for(folder)
+        except Exception:                                           # noqa: BLE001
+            continue
+        if candidate.exists() and candidate.resolve() != Path(rejected).resolve():
+            return candidate
+    return None
+
+
 class PoseTracker:
     def __init__(self):
         requested = str(SETTINGS.device).strip().lower()
@@ -427,15 +442,38 @@ class PoseTracker:
             # back to the original PyTorch checkpoint on another device. This
             # is the second silent way to lose TensorRT and the harder one to
             # spot: the engine file is right there, it just will not run here.
+            rejected = self.model_path
             LOGGER.warning(
-                "pose_backend=pytorch_fallback engine=%s rejected error=%s detail=%s - "
-                "the engine exists but this runtime cannot load it, most likely built "
-                "for a different GPU or TensorRT version",
-                self.model_path, type(exc).__name__, str(exc)[:200],
+                "pose_engine_rejected engine=%s error=%s detail=%s - the engine exists but "
+                "this runtime cannot load it, most likely built for a different GPU or "
+                "TensorRT version", rejected, type(exc).__name__, str(exc)[:200],
             )
+            self._focus_model = None
+            # This GPU's own engine (core/trt_engine.py), built on this machine
+            # by its installed TensorRT, before giving up on TensorRT. On the
+            # analysis PC an old models/yolo26m-pose.engine from a newer
+            # TensorRT was rejected and every analysis ran on PyTorch while the
+            # 5060's engine sat beside it (2026-10-06).
+            own = _own_engine_besides(rejected)
+            if own is not None:
+                try:
+                    self.model_path = str(own)
+                    self.model = YOLO(self.model_path)
+                    _ = self.model.predict(
+                        frame, device=self.device, imgsz=SETTINGS.default_imgsz,
+                        conf=SETTINGS.detection_conf, classes=[0], verbose=False,
+                    )
+                    LOGGER.warning("pose_backend=tensorrt engine=%s (instead of the rejected %s)",
+                                   own, rejected)
+                    self._warmed = True
+                    return
+                except Exception as own_exc:                        # noqa: BLE001
+                    LOGGER.warning("pose_engine_rejected engine=%s error=%s detail=%s",
+                                   own, type(own_exc).__name__, str(own_exc)[:200])
+            LOGGER.warning("pose_backend=pytorch_fallback model=%s - no TensorRT engine this "
+                           "runtime can load, so this analysis runs slower", SETTINGS.pose_model_pt)
             self.model_path = SETTINGS.pose_model_pt
             self.model = YOLO(self.model_path)
-            self._focus_model = None
             _ = self.model.predict(
                 frame,
                 device=self.device,

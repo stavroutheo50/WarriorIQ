@@ -164,3 +164,70 @@ class EngineResolutionTests(unittest.TestCase):
             trt_engine.engine_path_for(tmp, "NVIDIA GeForce RTX 5060").write_bytes(b"engine")
             missing = Path(tmp) / "absent.engine"
             self.assertEqual(resolve_pose_engine(str(missing), "NVIDIA A10"), missing)
+
+
+class RejectedEngineTests(unittest.TestCase):
+    """An engine the runtime rejects falls back to this GPU's own engine first.
+
+    On the analysis PC (2026-10-06) models/yolo26m-pose.engine had been built
+    by a newer TensorRT than the one installed; it was rejected, and every
+    analysis ran on PyTorch while the 5060's own engine sat in the same folder.
+    """
+
+    def _tracker(self, rejected):
+        from core import pose_tracker
+
+        tracker = object.__new__(pose_tracker.PoseTracker)
+        tracker.model_path, tracker.device, tracker.uses_cuda = str(rejected), 0, True
+        tracker._warmed, tracker._focus_model = False, None
+        return tracker
+
+    def _fake_yolo(self, refuses):
+        class FakeYOLO:
+            def __init__(self, path):
+                self.path = str(path)
+
+            def predict(self, *args, **kwargs):
+                if self.path in refuses:
+                    raise AttributeError("'NoneType' object has no attribute 'create_execution_context'")
+                return []
+        return FakeYOLO
+
+    def test_this_gpus_engine_is_used_before_pytorch(self):
+        from core import pose_tracker
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rejected = Path(tmp) / "yolo26m-pose.engine"
+            own = Path(tmp) / "pose_engine_gpu_640_max1920.engine"
+            rejected.write_bytes(b"old")
+            own.write_bytes(b"new")
+            tracker = self._tracker(rejected)
+            with mock.patch.object(pose_tracker, "YOLO", self._fake_yolo({str(rejected)})), \
+                    mock.patch("core.trt_engine.engine_path_for", return_value=own):
+                tracker.warmup(object())
+            self.assertEqual(tracker.model_path, str(own))
+            self.assertTrue(tracker._warmed)
+
+    def test_pytorch_when_no_engine_loads(self):
+        from core import pose_tracker
+        from core.config import SETTINGS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rejected = Path(tmp) / "yolo26m-pose.engine"
+            own = Path(tmp) / "pose_engine_gpu_640_max1920.engine"
+            rejected.write_bytes(b"old")
+            own.write_bytes(b"also old")
+            tracker = self._tracker(rejected)
+            with mock.patch.object(pose_tracker, "YOLO", self._fake_yolo({str(rejected), str(own)})), \
+                    mock.patch("core.trt_engine.engine_path_for", return_value=own):
+                tracker.warmup(object())
+            self.assertEqual(tracker.model_path, SETTINGS.pose_model_pt)
+
+    def test_the_rejected_engine_is_never_retried_as_its_own_replacement(self):
+        from core import pose_tracker
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rejected = Path(tmp) / "pose_engine_gpu_640_max1920.engine"
+            rejected.write_bytes(b"old")
+            with mock.patch("core.trt_engine.engine_path_for", return_value=rejected):
+                self.assertIsNone(pose_tracker._own_engine_besides(rejected))
