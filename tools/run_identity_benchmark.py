@@ -1,12 +1,14 @@
 """Measure who-is-who on the hand-marked clips, with and without a change.
 
-    python tools/run_identity_benchmark.py                      # size gate off vs on
+    python tools/run_identity_benchmark.py                      # bystander memory off vs on
     python tools/run_identity_benchmark.py --clips ma640 V16    # a subset
+    python tools/run_identity_benchmark.py --setting WARRIORIQ_IDENTITY_SIZE_GATE
 
 Downloads the public-domain clips the truth files in
 dataset/regression/identity_* describe (archive.org) into
 dataset/public/identity_clips/, analyses each one twice - once with
-WARRIORIQ_IDENTITY_SIZE_GATE off and once on - and scores both against the
+the compared setting (--setting, WARRIORIQ_BYSTANDER_MEMORY unless told
+otherwise) off and once on - and scores both against the
 frames a person marked (tools/identity_benchmark.py). Prints one table.
 
 Nothing touches the real fight database or outputs: each analysis runs in its
@@ -88,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--clips", nargs="*", help="truth file names without .json (default: all)")
+    parser.add_argument("--setting", default="WARRIORIQ_BYSTANDER_MEMORY",
+                        help="the on/off setting to compare (default: WARRIORIQ_BYSTANDER_MEMORY; "
+                             "the size gate was WARRIORIQ_IDENTITY_SIZE_GATE)")
     parser.add_argument("--phone-seconds", type=float, default=PHONE_SECONDS,
                         help="how much of each phone clip to analyse (default 55, as measured before)")
     args = parser.parse_args(argv)
@@ -111,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             limit = float(truth["start_seconds"]) + args.phone_seconds
             marked["frames"] = [f for f in truth["frames"] if float(f["time_seconds"]) <= limit]
         for arm, value in ARMS.items():
-            os.environ["WARRIORIQ_IDENTITY_SIZE_GATE"] = value
+            os.environ[args.setting] = value
             out_dir = runs / arm / path.stem
             seconds = _analyse(video, truth, out_dir, args.phone_seconds)
             records = [json.loads(line) for line in (out_dir / "tracking.jsonl").read_text().splitlines() if line]
@@ -128,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
                   f"{row['partial']:>8} {row['other']:>6} {row['missing']:>8} {seconds:>8.0f}", flush=True)
     print()
     for arm, row in totals.items():
-        print(f"TOTAL size gate {arm:3}: right {row['right']}/{row['checked']}, right person with a smaller box "
+        print(f"TOTAL {args.setting} {arm:3}: right {row['right']}/{row['checked']}, right person with a smaller box "
               f"{row['partial']}, wrong person {row['swapped'] + row['other']} (swapped {row['swapped']}, "
               f"other {row['other']}), missing {row['missing']}")
     return 0

@@ -264,6 +264,9 @@ class IdentityManager:
         self.confusions = 0
         self.last_confusion_frame: int | None = None
         self.source_fps = max(1.0, float(source_fps))
+        # People seen beside the fighters while both were held with confidence,
+        # by track: how often, and what they look like. See _learn_bystanders.
+        self._bystanders: dict[int, dict] = {}
 
     def _remember_positions(self, people: list[PersonObservation], source_frame: int) -> None:
         for person in people:
@@ -526,6 +529,10 @@ class IdentityManager:
                 and candidate.referee_prob is not None
                 and candidate.referee_prob >= SETTINGS.min_referee_probability):
             return self._refuse(state, "referee")
+        # The same question for an official in no recognisable uniform: is this
+        # somebody already seen standing beside the two fighters?
+        if SETTINGS.bystander_memory and self._looks_like_a_bystander(state, candidate, anchor):
+            return self._refuse(state, "looks_like_a_known_bystander")
         # A stand-in is a crop searched where one named fighter was expected
         # (see core/pose_tracker.py), so it is evidence about that fighter
         # only. Handing B's stand-in to A swapped them twice in the close-up of
@@ -623,6 +630,60 @@ class IdentityManager:
         if keep_id_bonus and candidate.track_id is not None and candidate.track_id == state.current_track_id:
             score += SETTINGS.track_id_bonus
         return float(score)
+
+    def _learn_bystanders(self, people: list[PersonObservation], a_obs: PersonObservation | None,
+                          b_obs: PersonObservation | None) -> None:
+        """Remember who stands beside the fighters while both are surely held.
+
+        The referee filter (core/referee.py) recognises an official by the
+        uniform the rulebooks prescribe. An official in anything else - on the
+        pankration benchmark a black shirt and khaki shorts, close to the
+        fighters' own kit - scores near nothing, stands right beside a fighter
+        all bout, and is the person the fighter's box goes to.
+
+        What he cannot hide is that while both fighters are visibly held, he is
+        a third person beside them. Learnt only from frames where both are held
+        at SETTINGS.bystander_min_confidence or better, and only from people
+        seen there on SETTINGS.bystander_min_sightings frames, so a single
+        frame where a box is already on the wrong person teaches nothing.
+        """
+        if a_obs is None or b_obs is None:
+            return
+        if min(self.a.identity_confidence, self.b.identity_confidence) < SETTINGS.bystander_min_confidence:
+            return
+        for person in people:
+            if person is a_obs or person is b_obs or person.appearance is None:
+                continue
+            if person.track_id is None or int(person.track_id) < 0:
+                continue
+            near = min(pair_separation(person.box, a_obs.box), pair_separation(person.box, b_obs.box))
+            if near > SETTINGS.bystander_near_body_lengths:
+                continue
+            seen = self._bystanders.setdefault(int(person.track_id), {"sightings": 0, "appearance": None})
+            seen["sightings"] += 1
+            seen["appearance"] = ema(seen["appearance"], person.appearance, SETTINGS.appearance_ema)
+
+    def _looks_like_a_bystander(self, state: FighterState, candidate: PersonObservation, like_fighter: float) -> bool:
+        """Is the candidate a person already seen standing beside both fighters?
+
+        Judged by the tracker's track, not by colour. On the pankration
+        benchmark the colour histogram put the referee at 0.79 and 0.84 against
+        the two fighters while they scored 0.76 against each other, so "looks
+        like the referee" would have refused the fighters themselves. A track
+        that has spent many confident frames as a third person beside them is
+        a far more specific statement. It is set aside only when the candidate
+        clearly looks more like the fighter picked than like that person, which
+        is what a fighter inheriting the track after an occlusion would show.
+        """
+        if candidate.track_id is None or int(candidate.track_id) < 0:
+            return False
+        seen = self._bystanders.get(int(candidate.track_id))
+        if seen is None or seen["sightings"] < SETTINGS.bystander_min_sightings:
+            return False
+        if candidate.appearance is None or state.anchor_appearance is None or seen["appearance"] is None:
+            return True
+        like_bystander = appearance_similarity(seen["appearance"], candidate.appearance)
+        return like_fighter - like_bystander < SETTINGS.bystander_margin
 
     def _commit(self, state: FighterState, obs: PersonObservation, source_frame: int, score: float, recovered: bool = False) -> PersonObservation:
         old_center = box_center(state.last_box) if state.last_box is not None else None
@@ -852,6 +913,8 @@ class IdentityManager:
         a_obs = None if furniture_a else a_obs
         b_obs = None if furniture_b else b_obs
         a_obs, b_obs = self._correct_swap(a_obs, b_obs)
+        if SETTINGS.bystander_memory and not ambiguous:
+            self._learn_bystanders(people, a_obs, b_obs)
 
         # Why *this fighter* is unassigned in *this frame*, judged against the
         # one person standing closest to where they were last seen. Counted
