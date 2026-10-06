@@ -129,7 +129,7 @@ from core.count_plausibility import counts_implausible
 from core.report import (
     build_preliminary_scorecard, identity_failure, identity_verdict, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
-    refresh_identity_integrity, share_card, unattributed_kick_total,
+    coaching_moments, refresh_identity_integrity, share_card, unattributed_kick_total,
 )
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
@@ -1324,6 +1324,13 @@ def _fight_footage_summary(report: dict) -> dict | None:
         note = (f"{_clock(excluded)} of the analysed footage was left out of every number because "
                 f"{footage['main_exclusion_text']}.")
     return {"label": f"{_clock(fight)} of {_clock(duration)}", "note": note}
+
+
+def _moment_fighters(report: dict) -> list[str]:
+    """Whose coaching moments the replay shows: the focus fighter, or both."""
+    video = report.get("video") or {}
+    focus = video.get("focus_fighter") or video.get("analysis_target") or "BOTH"
+    return [focus] if focus in {"A", "B"} else ["A", "B"]
 
 
 def _visual_focus(report: dict) -> str:
@@ -5435,6 +5442,9 @@ def result_page(request: Request, job_id: str):
             (report.get("scorecard") or {}).get("sport") or _job_sport(job) or "kickboxing"
         )["withheld_families"],
         "progress_since_last": progress_since_last,
+        "moment_count": len(coaching_moments(
+            report, _moment_fighters(report),
+            str(report_access.get("report_tier") or ""), report_access.get("coaching_items"))),
         "identity": sport_identity(report.get("scorecard", {}).get("sport", "kickboxing")),
         "report_access": report_access,
         "analysis_quality": _analysis_quality_summary(report),
@@ -6006,6 +6016,7 @@ def replay_page(
             } for row in counted[:200]]
             replay_mode = "counted_strikes"
     _pin_sport_to_fight(request, (report.get("scorecard") or {}).get("sport"))
+    plan = _request_plan(request)
     return templates.TemplateResponse(
         request=request,
         name="replay.html",
@@ -6014,6 +6025,11 @@ def replay_page(
             "identity_safe": identity_safe,
             "replay_chapters": replay_chapters,
             "replay_mode": replay_mode,
+            # The report's coaching points that carry moments, as cards beside
+            # the skeleton video. Same identity and plan rules as the report.
+            "moments": coaching_moments(report, _moment_fighters(report),
+                                        str(plan.get("report_tier") or ""), plan.get("coaching_items")),
+            "names": _fighter_names(request, _authorized_job(request, job_id) or {}, report),
             "counting_policy": policy.as_dict(),
             "evidence_filter": " · ".join(
                 value.replace("_", " ").title()

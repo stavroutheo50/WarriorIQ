@@ -708,3 +708,23 @@
 .feed-name:hover,.feed-name:focus-visible{text-decoration:underline}
 .feed-text{margin:12px 0 0}
 .feed-card img{display:block;width:100%;height:auto;margin-top:12px;border-radius:12px;border:1px solid rgba(255,255,255,.08)}
+/* Key moments on the replay page (replay.html): one swipeable card per
+   coaching point, its times playing the skeleton video. */
+.moments{margin:6px 0 26px}
+.moments-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:10px}
+.moments-head h3{margin:4px 0 0}
+.moments-nav{display:flex;align-items:center;gap:8px}
+.moments-track{list-style:none;margin:0;padding:0 0 6px;display:grid;grid-auto-flow:column;grid-auto-columns:min(420px,86%);gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain}
+.moment-card{scroll-snap-align:start;display:flex;flex-direction:column;gap:8px;padding:16px;border-radius:16px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.035)}
+.moment-card[data-kind="keep"]{border-color:rgba(82,214,163,.35)}
+.moment-card[data-kind="fix"]{border-color:rgba(255,113,143,.35)}
+.moment-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.moment-badge{padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700}
+.moment-card[data-kind="keep"] .moment-badge{background:rgba(82,214,163,.15);color:#52d6a3}
+.moment-card[data-kind="fix"] .moment-badge{background:rgba(255,113,143,.15);color:#ff8fa6}
+.moment-card h4{margin:2px 0 0;font-size:17px;line-height:1.3}
+.moment-card p{margin:0;color:var(--wiq-text-secondary,#b9c4d6);font-size:14px;line-height:1.5}
+.moment-times{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:auto}
+.moment-time{min-height:36px;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:transparent;color:inherit;font:inherit;cursor:pointer}
+.moment-time:hover,.moment-time:focus-visible{background:rgba(255,255,255,.08)}
+.moment-watch{align-self:flex-start}
