@@ -637,6 +637,29 @@ class Settings:
     # gate in IdentityManager._score). Off until measured on every identity
     # benchmark clip: tools/run_identity_benchmark.py compares both settings.
     identity_size_gate: bool = env_bool("WARRIORIQ_IDENTITY_SIZE_GATE", False)
+    # Remember the people (tracker tracks) who stand beside the two fighters
+    # while both are held with confidence - in practice the referee - and
+    # refuse to hand a fighter's box to one of them (core/identity.py,
+    # IdentityManager._learn_bystanders and _looks_like_a_bystander).
+    # The referee filter (core/referee.py) knows only the white-over-dark
+    # uniform; on identity_pankration ma604 the referee wears a black shirt
+    # and khaki shorts, scored ~0, and took the fighters' boxes in 4-6 of the
+    # 7 "other person" frames measured on the analysis PC (2026-10-06).
+    # Off until measured: tools/run_identity_benchmark.py compares both.
+    bystander_memory: bool = env_bool("WARRIORIQ_BYSTANDER_MEMORY", False)
+    # Who counts as beside the fighters: centre within this many body heights
+    # of either one.
+    bystander_near_body_lengths: float = float(os.getenv("WARRIORIQ_BYSTANDER_NEAR", "1.5"))
+    # Both fighters must be held at least this confidently for a frame to
+    # teach anything, so a frame where a fighter's box is already on the wrong
+    # person cannot teach that the real fighter is a bystander.
+    bystander_min_confidence: float = float(os.getenv("WARRIORIQ_BYSTANDER_MIN_CONFIDENCE", "0.6"))
+    # Frames a person must be seen beside the fighters before they count.
+    bystander_min_sightings: int = int(os.getenv("WARRIORIQ_BYSTANDER_MIN_SIGHTINGS", "15"))
+    # A known bystander's track is still let through when the candidate looks
+    # this much more like the fighter picked than like that bystander - a
+    # fighter who inherited the track after an occlusion.
+    bystander_margin: float = float(os.getenv("WARRIORIQ_BYSTANDER_MARGIN", "0.05"))
     # Centres closer than this many body heights count as an exchange.
     dense_exchange_body_lengths: float = float(os.getenv("WARRIORIQ_DENSE_EXCHANGE_BODY_LENGTHS", "1.5"))
     # The fighters being close is not the same as the strike reaching. Measured

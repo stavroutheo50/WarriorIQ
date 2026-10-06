@@ -1,8 +1,9 @@
 # WarriorIQ - test the fighter-lock fix on this PC, in one go.
 #
 # Runs tools/run_identity_benchmark.py: every hand-marked clip is analysed
-# twice, with the identity size gate off and on, and scored against the frames
-# a person marked. The answer decides whether the gate is switched on.
+# twice, with the setting under test off and on (WARRIORIQ_BYSTANDER_MEMORY:
+# remembering the referee who stands beside the fighters), and scored against the frames
+# a person marked. The answer decides whether the setting is switched on.
 #
 #   1. stops the worker, so the benchmark has the GPU to itself;
 #   2. pulls the latest main (skipped, with a note, if this PC cannot);
