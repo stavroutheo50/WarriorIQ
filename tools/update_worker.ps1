@@ -127,8 +127,8 @@ from ultralytics import YOLO
 
 def loads(path):
     try:
-        YOLO(str(path)).predict(np.zeros((640, 640, 3), np.uint8), device=0, imgsz=640, verbose=False)
-        return True
+        result = YOLO(str(path), task="pose").predict(np.zeros((640, 640, 3), np.uint8), device=0, imgsz=640, verbose=False)
+        return result[0].keypoints is not None
     except Exception as exc:
         print("ENGINE CANNOT LOAD", path, type(exc).__name__, str(exc)[:160])
         return False
@@ -169,6 +169,11 @@ tracker = PoseTracker()
 tracker.warmup(np.zeros((720, 1280, 3), np.uint8))
 print("pose model", tracker.model_path)
 assert tracker.model_path.endswith(".engine"), "the TensorRT engine did not load - analyses would run on PyTorch, slower"
+# A pose model run as plain detection finds people but no body keypoints, and
+# the analysis has nothing to measure (2026-10-06): prove keypoints come back.
+probe = tracker.model.predict(np.zeros((720, 1280, 3), np.uint8), device=0, imgsz=640, verbose=False)
+print("pose task", tracker.model.task, "keypoints returned", probe[0].keypoints is not None)
+assert probe[0].keypoints is not None, "the pose model returned no body keypoints"
 from core import rtm_pose
 refiner = rtm_pose._get()
 assert refiner is not None, "RTMPose did not load - see the warning above"
