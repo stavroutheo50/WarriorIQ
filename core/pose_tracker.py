@@ -373,6 +373,13 @@ def resolve_pose_engine(configured: str | None = None, gpu_name: str | None = No
     return primary
 
 
+# Ultralytics guesses a model's task from its file name when the file is not a
+# .pt checkpoint: "yolo26m-pose.engine" reads as pose, but this GPU's cached
+# engine, "pose_engine_<gpu>_640_max1920.engine", reads as plain detection -
+# boxes with no body keypoints (2026-10-06). Every load says pose outright.
+POSE_TASK = "pose"
+
+
 def _own_engine_besides(rejected: str | Path) -> Path | None:
     """This GPU's cached engine, if there is one and it is not the rejected file."""
     from core.config import MODELS
@@ -409,7 +416,7 @@ class PoseTracker:
                 "pose_backend=pytorch model=%s - no TensorRT engine at %s, so this "
                 "analysis runs slower than it needs to", model_path, engine_path,
             )
-        self.model = YOLO(model_path)
+        self.model = YOLO(model_path, task=POSE_TASK)
         self._focus_model = None
         self._focus_lock = RLock()
         self._warmed = False
@@ -458,7 +465,7 @@ class PoseTracker:
             if own is not None:
                 try:
                     self.model_path = str(own)
-                    self.model = YOLO(self.model_path)
+                    self.model = YOLO(self.model_path, task=POSE_TASK)
                     _ = self.model.predict(
                         frame, device=self.device, imgsz=SETTINGS.default_imgsz,
                         conf=SETTINGS.detection_conf, classes=[0], verbose=False,
@@ -473,7 +480,7 @@ class PoseTracker:
             LOGGER.warning("pose_backend=pytorch_fallback model=%s - no TensorRT engine this "
                            "runtime can load, so this analysis runs slower", SETTINGS.pose_model_pt)
             self.model_path = SETTINGS.pose_model_pt
-            self.model = YOLO(self.model_path)
+            self.model = YOLO(self.model_path, task=POSE_TASK)
             _ = self.model.predict(
                 frame,
                 device=self.device,
@@ -530,7 +537,7 @@ class PoseTracker:
                 focus_path = str(pt_path)
             LOGGER.info("focus_backend=%s model=%s",
                         "tensorrt" if focus_path.endswith(".engine") else "pytorch", focus_path)
-            self._focus_model = YOLO(focus_path)
+            self._focus_model = YOLO(focus_path, task=POSE_TASK)
         return self._focus_model
 
     def predict_selection(self, frame):

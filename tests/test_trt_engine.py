@@ -184,7 +184,8 @@ class RejectedEngineTests(unittest.TestCase):
 
     def _fake_yolo(self, refuses):
         class FakeYOLO:
-            def __init__(self, path):
+            def __init__(self, path, task=None):
+                assert task == "pose"
                 self.path = str(path)
 
             def predict(self, *args, **kwargs):
@@ -231,3 +232,20 @@ class RejectedEngineTests(unittest.TestCase):
             rejected.write_bytes(b"old")
             with mock.patch("core.trt_engine.engine_path_for", return_value=rejected):
                 self.assertIsNone(pose_tracker._own_engine_besides(rejected))
+
+
+class PoseTaskTests(unittest.TestCase):
+    """This GPU's engine file name does not say "pose"; every load must."""
+
+    def test_ultralytics_would_guess_detect_from_the_cached_engines_name(self):
+        from ultralytics.nn.tasks import guess_model_task
+
+        name = trt_engine.engine_path_for("models", "NVIDIA GeForce RTX 5060").name
+        self.assertEqual(guess_model_task(name), "detect")
+
+    def test_every_model_load_in_the_tracker_says_pose(self):
+        source = (Path(__file__).resolve().parents[1] / "core" / "pose_tracker.py").read_text(encoding="utf-8")
+        loads = [line for line in source.splitlines() if "YOLO(" in line and "import" not in line]
+        self.assertTrue(loads)
+        for line in loads:
+            self.assertIn("task=POSE_TASK", line)
