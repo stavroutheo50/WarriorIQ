@@ -77,3 +77,25 @@ def test_a_fighter_who_inherits_the_bystanders_track_is_still_followed(memory_on
     # After an occlusion the tracker hands track 9 to fighter A himself.
     a, _ = manager.update([_person(9, 110, 210, A_LOOK), _person(2, 400, 500, B_LOOK)], 100)
     assert a is not None and a.track_id == 9
+
+
+def test_the_fighter_mask_does_not_reopen_a_known_bystander(memory_on):
+    """A fighter hidden behind the referee leaves a mask the referee overlaps."""
+    manager = IdentityManager(_person(1, 100, 200, A_LOOK), _person(2, 400, 500, B_LOOK), 0)
+    _bout(manager, SETTINGS.bystander_min_sightings + 2)
+    referee = _person(9, 110, 210, REF_LOOK)
+    a, _ = manager.update([referee, _person(2, 400, 500, B_LOOK)], 100,
+                          sam_guidance={"A": referee.box.copy(), "B": None})
+    assert a is None
+
+
+def test_somebody_who_looks_like_a_fighter_is_never_learnt(memory_on):
+    """If A's box is on the wrong man, the real A beside him must not be learnt."""
+    manager = IdentityManager(_person(1, 100, 200, A_LOOK), _person(2, 400, 500, B_LOOK), 0)
+    manager.a.identity_confidence = manager.b.identity_confidence = 1.0
+    wrong_a = _person(1, 100, 200, REF_LOOK)                  # A's box drifted onto the referee
+    real_a = _person(5, 210, 310, A_LOOK)
+    b = _person(2, 400, 500, B_LOOK)
+    for _ in range(SETTINGS.bystander_min_sightings + 5):
+        manager._learn_bystanders([wrong_a, real_a, b], wrong_a, b)
+    assert 5 not in manager._bystanders

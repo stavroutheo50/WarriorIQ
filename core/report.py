@@ -465,6 +465,44 @@ def _sport_estimate_note(sport: str | None) -> str:
     return counting_policy(sport).estimate_note or ESTIMATE_NOTE
 
 
+MOMENT_TIMES_PER_CARD = 4
+
+
+def coaching_moments(report: dict, fighters: list[str], tier: str, items: int | None) -> list[dict]:
+    """The report's own coaching points that point at moments, as replay cards.
+
+    One card per point, never one per second: the same advice repeated over a
+    run of cards reads as filler. Only what the result page itself shows - the
+    same tier cut, nothing when the identity check failed (the page withholds
+    coaching then) - and only points that carry evidence times, because a card
+    that cannot take you to the moment is just the report again.
+    """
+    if not (report.get("integrity") or {}).get("identity_evidence_trusted", True):
+        return []
+    cards = []
+    for fighter in fighters:
+        coaching = (report.get("coaching") or {}).get(fighter) or {}
+        strengths = list(coaching.get("strengths") or [])
+        improvements = list(coaching.get("improvements") or [])
+        if tier == "compact":
+            strengths, improvements = [], improvements[:items or 1]
+        elif tier != "full" and items is not None:
+            strengths, improvements = strengths[:items], improvements[:items]
+        for kind, points in (("keep", strengths), ("fix", improvements)):
+            for point in points:
+                times = sorted({round(float(t), 2) for t in point.get("evidence_times") or []
+                                if isinstance(t, (int, float))})
+                if not times:
+                    continue
+                cards.append({
+                    "kind": kind, "fighter": fighter,
+                    "title": str(point.get("title") or "").removeprefix("Work on: "),
+                    "detail": str(point.get("detail") or ""),
+                    "times": times[:MOMENT_TIMES_PER_CARD],
+                })
+    return sorted(cards, key=lambda card: card["times"][0])
+
+
 def share_card(report: dict) -> dict | None:
     """What a stats-only story card may show, per fighter; None when it may not.
 

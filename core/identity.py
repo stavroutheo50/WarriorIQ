@@ -149,6 +149,11 @@ def ema(old: np.ndarray | None, new: np.ndarray | None, alpha: float) -> np.ndar
     return (alpha * old + (1.0 - alpha) * new).astype(np.float32)
 
 
+# Refusals that say who a candidate is, not where or how they moved, so the
+# propagated fighter mask may not overrule them (IdentityManager.update).
+NOT_REOPENED_BY_THE_MASK = frozenset({"looks_like_a_known_bystander"})
+
+
 class IdentityManager:
     """Owns stable WarriorIQ identities A/B independent of tracker IDs.
 
@@ -659,6 +664,15 @@ class IdentityManager:
             near = min(pair_separation(person.box, a_obs.box), pair_separation(person.box, b_obs.box))
             if near > SETTINGS.bystander_near_body_lengths:
                 continue
+            # Never learn somebody who looks at least as much like a fighter
+            # picked as the person now holding that fighter's box: if the box
+            # is on the wrong man, this is the real fighter. On the PC's ma604
+            # recording the real fighter A had been learnt 42 times this way
+            # by 168 s, and was then refused.
+            if any(appearance_similarity(state.anchor_appearance, person.appearance)
+                   >= appearance_similarity(state.anchor_appearance, held.appearance)
+                   for state, held in ((self.a, a_obs), (self.b, b_obs))):
+                continue
             seen = self._bystanders.setdefault(int(person.track_id), {"sightings": 0, "appearance": None})
             seen["sightings"] += 1
             seen["appearance"] = ema(seen["appearance"], person.appearance, SETTINGS.appearance_ema)
@@ -830,6 +844,13 @@ class IdentityManager:
                 # correct reappearance. Strong agreement with the propagated
                 # fighter mask is allowed to reopen that gate.
                 if guide is None or box_iou(guide, obs.box) < 0.18:
+                    return base
+                # But not a refusal about *who* the candidate is. A fighter
+                # hidden behind the referee leaves a mask the referee overlaps,
+                # and this reopened him: on the analysis PC's ma604 recording
+                # every frame where a fighter's box went to the remembered
+                # bystander came through here (2026-10-06).
+                if state.last_refusal in NOT_REOPENED_BY_THE_MASK:
                     return base
                 base = 0.36 + 0.28 * box_iou(guide, obs.box)
             appearance = appearance_similarity(state.appearance, obs.appearance)
