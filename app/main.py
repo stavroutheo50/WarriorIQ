@@ -1328,6 +1328,26 @@ def _numbers_state(report: dict) -> dict:
     return {"state": "ok", "message": None, "share_reason": None}
 
 
+def _recording_warnings(report: dict, job: dict | None) -> list[str]:
+    """What was wrong with the recording, for the top of the report.
+
+    QA, 2026-10-07: a 160x90 copy of a fight was analysed and its report
+    carried no warning, though the check that runs before the analysis had
+    measured it as too small (tracking.recording, core/preflight.py) and the
+    upload had warned about it. Those findings were only in the downloadable
+    report. The upload's own warnings (a sideways video it could not turn)
+    are on the job. Both are shown, each once.
+    """
+    recording = (report.get("tracking") or {}).get("recording") or {}
+    found = [str(text) for text in list(recording.get("blocking") or []) + list(recording.get("warnings") or [])
+             if text]
+    orientation = (job or {}).get("orientation") or {}
+    if orientation.get("warning"):
+        found.insert(0, str(orientation["warning"]))
+    seen: set[str] = set()
+    return [text for text in found if not (text in seen or seen.add(text))]
+
+
 def _fight_footage_summary(report: dict) -> dict | None:
     """"Fight footage analysed: X of Y", and what was left out and why."""
     footage = (report.get("video") or {}).get("fight_footage")
@@ -5388,6 +5408,7 @@ def result_page(request: Request, job_id: str):
         solo_name = _fighter_names(request, job, report)["A"]
         return templates.TemplateResponse(request=request, name="solo_result.html", context={
             "request": request, "job_id": job_id, "report": report,
+            "recording_warnings": _recording_warnings(report, job),
             "analysed_span": _analysed_span_summary(report),
             "analysis_build": result_check(report),
             "subject_name": None if solo_name == "Fighter A" else solo_name,
@@ -5456,6 +5477,7 @@ def result_page(request: Request, job_id: str):
         "names": names,
         "analysed_span": _analysed_span_summary(report),
         "analysis_build": result_check(report),
+        "recording_warnings": _recording_warnings(report, job),
         "fight_footage": _fight_footage_summary(report),
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),

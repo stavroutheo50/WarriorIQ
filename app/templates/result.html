@@ -54,6 +54,9 @@
 {% endif %}
 {% endif %}
 {% if analysed_span and analysed_span.note %}<p class="analysed-span-note" role="note">{{analysed_span.note}}</p>{% endif %}
+{#- What was wrong with the recording, measured before the analysis and at
+    upload (app.main._recording_warnings). It was only in the download. -#}
+{% if recording_warnings %}<div class="notice" role="note" id="recordingWarnings"><strong>About this recording.</strong><ul class="list-clean">{% for text in recording_warnings %}<li>{{ text }}</li>{% endfor %}</ul></div>{% endif %}
 {% if numbers.state == 'no_fight' %}<div class="notice bad" role="alert"><strong>Too little fight footage to measure.</strong> {{ numbers.message }} Upload a clip where the two fighters are in shot and fighting for most of it, and pick a frame where both are clearly visible.</div>
 {% elif numbers.state == 'movement_only' %}<div class="notice bad" role="alert" id="notAFightNotice"><strong>Not recognised as a fight.</strong> {{ numbers.message }} If this is a real fight, upload a clip where both fighters are in full view and exchanging.</div>
 {% elif fight_footage and fight_footage.note %}<p class="analysed-span-note" role="note">{{ fight_footage.note }}</p>{% endif %}
@@ -353,10 +356,12 @@
     </div>
     <div class="fight-numbers-group" role="table" aria-label="Defence">
       <h3>Defence</h3>
-      {{ row('Hands up by the face', ('%.0f%%'|format(mp.hands_up_share*100)) if mp.hands_up_share is not none else '—', ('%.0f%%'|format(mo.hands_up_share*100)) if mo and mo.hands_up_share is not none else '—', 'of the time seen') }}
       {%- set guard_a = report.metrics[primary] if report.metrics and primary in report.metrics else {} -%}
       {%- set guard_b = report.metrics[opponent] if report.metrics and opponent in report.metrics else {} -%}
-      {{ row('Longest with hands down', 'Not measured' if guard_a.guard_note and mp.longest_hands_down_seconds is none else secs(mp.longest_hands_down_seconds), 'Not measured' if guard_b.guard_note and (not mo or mo.longest_hands_down_seconds is none) else secs(mo.longest_hands_down_seconds if mo else none), 'poses never changed' if numbers.state == 'movement_only' and (guard_a.guard_note or guard_b.guard_note) else 'older report — re-run to measure' if guard_a.guard_note or guard_b.guard_note else '') }}
+      {#- "Not measured", with why, wherever core/guard.py withheld a figure. -#}
+      {%- set guard_why = guard_a.guard_note_short or guard_b.guard_note_short or '' -%}
+      {{ row('Hands up by the face', ('%.0f%%'|format(mp.hands_up_share*100)) if mp.hands_up_share is not none else ('Not measured' if guard_a.guard_note else '—'), ('%.0f%%'|format(mo.hands_up_share*100)) if mo and mo.hands_up_share is not none else ('Not measured' if guard_b.guard_note else '—'), 'of the time seen' if not (guard_a.guard_note or guard_b.guard_note) or (mp.hands_up_share is not none and mo and mo.hands_up_share is not none) else guard_why) }}
+      {{ row('Longest with hands down', 'Not measured' if guard_a.guard_note and mp.longest_hands_down_seconds is none else secs(mp.longest_hands_down_seconds), 'Not measured' if guard_b.guard_note and (not mo or mo.longest_hands_down_seconds is none) else secs(mo.longest_hands_down_seconds if mo else none), guard_why) }}
       {{ row('Times off balance', mp.off_balance_count if mp.off_balance_count is not none else '—', mo.off_balance_count if mo and mo.off_balance_count is not none else '—') }}
       {{ row('Defensive moves', (report.metrics[primary].defenses|default({})).values()|sum, (report.metrics[opponent].defenses|default({})).values()|sum, 'slips, blocks and evasions seen') }}
     </div>

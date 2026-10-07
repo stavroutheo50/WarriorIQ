@@ -917,6 +917,7 @@ def withhold_for_not_a_fight(report: dict, verdict: dict) -> None:
             own["guard_index"] = None
             own["balance_index"] = None
             own["guard_note"] = RIGID_POSE_NOTE
+            own["guard_note_short"] = "poses never changed"
             numbers = own.get("numbers")
             if isinstance(numbers, dict):
                 numbers.update({"hands_up_share": None, "longest_hands_down_seconds": None,

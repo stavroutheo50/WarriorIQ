@@ -19,22 +19,115 @@ and every guard figure is derived from that classification: the share (which
 is ``guard_index``), the seconds up and down, the longest stretch down, the
 moments the guard dropped, and the block-level spread coaching compares on.
 Nothing else computes a guard figure.
+
+**The reading itself** (QA, 2026-10-07: the same clip gave 27% / 45% at
+1280x720 and 18% / 18% at 160x90, with no warning) is the distance from the
+nearer wrist to the chin, over shoulder width - so it is in the fighter's own
+proportions, not the picture's - and only on frames where the face, both
+shoulders, the hips and a wrist were found confidently and the body is big
+enough in the picture for a wrist to be placed. Each reading is then smoothed
+over a fraction of a second before it is classified, so one misplaced wrist
+does not count as a dropped guard. Below those floors guard is "Not measured",
+with the reason, rather than a number made of pose-model noise.
 """
 
 from __future__ import annotations
+
+from collections import Counter
 
 import numpy as np
 
 # Stored on each fighter's metrics so a report says which guard it carries.
 # Reports without it were made by the old, inconsistent summaries; see
 # reconcile_report_guard.
-GUARD_DEFINITION = "hands_up_share/1"
+GUARD_DEFINITION = "hands_up_share/2"
+# Consistent summaries, both of them: /1 classified the old body-length
+# reading, /2 the wrist-to-chin reading below. Only reports made before either
+# are reconciled.
+CONSISTENT_DEFINITIONS = frozenset({"hands_up_share/1", GUARD_DEFINITION})
 LEGACY_DEFINITION = "legacy_hands_up_share"
 
-# The per-frame reading (core/metrics.py) at or above which the hands count as
-# up by the face. The line "Hands up by the face" already used, so the figure
-# a fighter has seen in the Defence table keeps its meaning.
-HANDS_UP = 0.5
+# ---- The per-frame reading -------------------------------------------------
+# COCO keypoints have no chin. It is placed this far from the head towards the
+# middle of the shoulders: a nose sits roughly a third of the way from the top
+# of the head to the shoulder line in front view, and the chin about the same
+# again below it.
+CHIN_FRACTION = 0.35
+# Keypoint confidence each part must reach before it is used.
+FACE_CONFIDENCE = 0.4
+SHOULDER_CONFIDENCE = 0.5
+HIP_CONFIDENCE = 0.3
+WRIST_CONFIDENCE = 0.5
+# Side-on, the two shoulders overlap in the picture and their distance falls
+# towards zero, which would make every hand look far from the face. The scale
+# is therefore the larger of the measured shoulder width and the width an
+# upright body of this torso length has square-on (about 0.8 of the
+# shoulder-to-hip length). On the repository's real kick-light track the
+# fighters stand side-on: measured shoulder width was a median 0.39 of torso.
+UPRIGHT_SHOULDER_WIDTH = 0.8
+# The scale, in pixels, below which a wrist cannot be placed well enough.
+# Measured by shrinking the real track and rounding keypoints to whole pixels
+# with 0.6 px of pose jitter: the hands-up share held within about 3 points
+# down to an 8 px scale, drifted by up to 8 points at 4 px, and broke at
+# 2.5 px - which is where a 160x90 copy of a 1280x720 fight sits.
+MIN_SCALE_PX = 8.0
+# Wrist within this many shoulder widths of the chin: hands up by the face.
+# About 28 cm on an adult, close to what the old line meant (~26 cm from the
+# nose). A definition, not a validated norm: no labelled guard data exists.
+HANDS_UP = 0.7
+# Readings are the median over +-this many seconds before they are
+# classified, so one misplaced wrist is not a dropped guard.
+SMOOTH_SECONDS = 0.25
+
+_FACE = (0, 1, 2, 3, 4)
+
+# Why a frame gave no reading.
+TOO_SMALL = "too_small"
+UNCLEAR = "unclear"
+NOT_MEASURED_TEXT = {
+    TOO_SMALL: ("Not measured: the fighter is too small in this video for a wrist to be placed "
+                "reliably. Film from closer, or upload the original file rather than a smaller copy."),
+    UNCLEAR: ("Not measured: the face, shoulders or wrists were not seen clearly often enough "
+              "to tell where the hands were."),
+}
+NOT_MEASURED_SHORT = {TOO_SMALL: "too small in the picture", UNCLEAR: "hands or face not seen clearly"}
+
+
+def reading(keypoints, confidence) -> tuple[float | None, str | None]:
+    """Nearer wrist to chin, over shoulder width, for one frame.
+
+    Returns (reading, None), or (None, why) where ``why`` is TOO_SMALL or
+    UNCLEAR. Lower readings are hands nearer the face.
+    """
+    if keypoints is None or confidence is None or len(confidence) < 17 or len(keypoints) < 17:
+        return None, UNCLEAR
+    points = np.asarray(keypoints, dtype=np.float32)[:, :2]
+    conf = np.asarray(confidence, dtype=np.float32)
+
+    def seen(index: int, floor: float) -> bool:
+        return float(conf[index]) >= floor and float(points[index][0]) > 0 and float(points[index][1]) > 0
+
+    if not (seen(5, SHOULDER_CONFIDENCE) and seen(6, SHOULDER_CONFIDENCE)
+            and seen(11, HIP_CONFIDENCE) and seen(12, HIP_CONFIDENCE)):
+        return None, UNCLEAR
+    face = [points[i] for i in _FACE if seen(i, FACE_CONFIDENCE)]
+    wrists = [points[i] for i in (9, 10) if seen(i, WRIST_CONFIDENCE)]
+    if not face or not wrists:
+        return None, UNCLEAR
+    neck = (points[5] + points[6]) / 2.0
+    torso = float(np.linalg.norm(neck - (points[11] + points[12]) / 2.0))
+    scale = max(float(np.linalg.norm(points[5] - points[6])), UPRIGHT_SHOULDER_WIDTH * torso)
+    if scale < MIN_SCALE_PX:
+        return None, TOO_SMALL
+    head = np.mean(np.asarray(face, dtype=np.float32), axis=0)
+    chin = head + CHIN_FRACTION * (neck - head)
+    return float(min(np.linalg.norm(wrist - chin) for wrist in wrists)) / scale, None
+
+
+def not_measured_reason(rejected: Counter | dict) -> str:
+    """The reason guard was not measured, from per-frame rejection counts."""
+    counts = Counter(rejected or {})
+    return TOO_SMALL if counts.get(TOO_SMALL, 0) >= counts.get(UNCLEAR, 0) and counts.get(TOO_SMALL) else UNCLEAR
 
 # A sample stands for the time until the next one, never for more than this:
 # across a longer gap nothing was measured. The same rule as
@@ -61,7 +154,16 @@ def is_up(reading) -> bool | None:
     """Hands up by the face on this frame, or None when it was not measured."""
     if reading is None:
         return None
-    return float(reading) >= HANDS_UP
+    return float(reading) <= HANDS_UP
+
+
+def _smoothed(times: list[float], values: list[float]) -> list[float]:
+    """Each reading replaced by the median of those within SMOOTH_SECONDS."""
+    stamps = np.asarray(times, dtype=np.float64)
+    data = np.asarray(values, dtype=np.float64)
+    low = np.searchsorted(stamps, stamps - SMOOTH_SECONDS, side="left")
+    high = np.searchsorted(stamps, stamps + SMOOTH_SECONDS, side="right")
+    return [float(np.median(data[a:b])) for a, b in zip(low, high)]
 
 
 def _weights(times: list[float]) -> list[float]:
@@ -119,7 +221,7 @@ def summarise(readings) -> dict | None:
     if not pairs:
         return None
     times = [t for t, _ in pairs]
-    states = [bool(is_up(v)) for _, v in pairs]
+    states = [bool(is_up(v)) for v in _smoothed(times, [v for _, v in pairs])]
     weights = _weights(times)
     measured = float(sum(weights))
     up_seconds = float(sum(w for w, up in zip(weights, states) if up))
@@ -190,7 +292,7 @@ def reconcile_report_guard(report: dict) -> dict:
         own = metrics.get(fighter)
         if not isinstance(own, dict):
             continue
-        if own.get("guard_definition") in (GUARD_DEFINITION, LEGACY_DEFINITION):
+        if own.get("guard_definition") in CONSISTENT_DEFINITIONS | {LEGACY_DEFINITION}:
             continue
         if "guard_index" not in own and not own.get("numbers"):
             continue
@@ -199,6 +301,7 @@ def reconcile_report_guard(report: dict) -> dict:
         own["guard_index"] = None if share is None else float(share)
         own["guard_definition"] = LEGACY_DEFINITION
         own["guard_note"] = LEGACY_NOTE if share is None else LEGACY_PARTIAL_NOTE
+        own["guard_note_short"] = "older report — re-run to measure"
         if numbers is not None:
             numbers["longest_hands_down_seconds"] = None
         moments = own.get("moments")

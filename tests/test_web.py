@@ -1226,7 +1226,7 @@ class PublicPageTests(unittest.TestCase):
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
                        scorecard_available=None, measurement=None, kick_minimum=None,
                        action_labels_available=None, report_access=None, metrics=None, extra=None,
-                       refresh=False):
+                       refresh=False, context=None):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -1283,6 +1283,7 @@ class PublicPageTests(unittest.TestCase):
             kick_minimum=kick_minimum,
             **({"numbers": __import__("app.main", fromlist=["_numbers_state"])._numbers_state(report)}
                if refresh else {}),
+            **(context or {}),
             # As result_page passes it; the suite runs with counts published.
             strike_counts_published=STRIKE_COUNTS_PUBLISHED,
         )
@@ -1365,6 +1366,23 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("Final coaching summary", page)
         # The movement measured stays.
         self.assertIn('class="fight-vitals"', page)
+
+    def test_recording_warnings_reach_the_report_header(self):
+        """QA, 2026-10-07: a 160x90 copy got a full report with no warning."""
+        from app.main import _recording_warnings
+
+        report = {"tracking": {"recording": {
+            "blocking": ["This video is 160x90, which is too small to make out a fighter's arms and legs."],
+            "warnings": ["The fighters are small, so tracking will drop out often."]}}}
+        job = {"orientation": {"warning": "This video looks like it was filmed sideways, and WarriorIQ could not turn it."}}
+        warnings = _recording_warnings(report, job)
+        self.assertEqual(len(warnings), 3)
+        self.assertTrue(warnings[0].startswith("This video looks like it was filmed sideways"))
+        self.assertEqual(_recording_warnings({"tracking": {"recording": {"warnings": ["x", "x"]}}}, None), ["x"])
+        page = self._render_result({}, context={"recording_warnings": warnings})
+        header = page[:page.index('class="result-overview"')]
+        self.assertIn("About this recording.", header)
+        self.assertIn("160x90", header)
 
     def _render_identity(self, trusted):
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader

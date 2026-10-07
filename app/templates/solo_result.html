@@ -11,6 +11,7 @@
 <div class="section-title result-hero">
   <div><div class="eyebrow">{% if trusted %}Analysis complete{% else %}Needs one quick step{% endif %} · Solo session</div><h1 class="result-title">{% if subject_name %}{{ subject_name }}'s session{% else %}Solo session report{% endif %}</h1></div>
 </div>
+{% if recording_warnings %}<div class="notice" role="note" id="recordingWarnings"><strong>About this recording.</strong><ul class="list-clean">{% for text in recording_warnings %}<li>{{ text }}</li>{% endfor %}</ul></div>{% endif %}
 <section class="card">
   {% if analysed_span %}<p class="small muted">Analysed: <strong>{{ analysed_span.label }}</strong></p>{% if analysed_span.note %}<p class="analysed-span-note" role="note">{{ analysed_span.note }}</p>{% endif %}{% endif %}
   {% if not trusted %}

@@ -33,6 +33,8 @@ LONG_RANGE = 1.8
 OFF_BALANCE = 0.45
 OFF_BALANCE_SECONDS = 0.5
 BUSY_WINDOW_SECONDS = 10.0
+# movement_numbers' default: work the guard out from the samples.
+_FROM_SAMPLES = object()
 
 
 def _durations(times: list[float]) -> list[float]:
@@ -63,7 +65,7 @@ def _runs(times: list[float], flags: list[bool], minimum: float) -> int:
 
 
 def movement_numbers(samples: list[dict], middle: np.ndarray | None, radius: float | None,
-                     round_of=None, guard: dict | None = None) -> dict | None:
+                     round_of=None, guard=_FROM_SAMPLES) -> dict | None:
     """Seconds and distances for one fighter from their per-frame samples.
 
     Each sample: {"t", "x", "y", "body", "guard", "balance", "toward",
@@ -73,7 +75,9 @@ def movement_numbers(samples: list[dict], middle: np.ndarray | None, radius: flo
     `middle` and `radius` are the area the fight used (core.metrics.ring_frame).
     `round_of(seconds)` gives the round number, or None in a break.
     `guard` is this fighter's core.guard.summarise() result, worked out from
-    the same samples when not passed in.
+    the same samples when not passed in. None means guard was withheld (too
+    few readings passed core/guard.py's gates), and every guard figure here
+    is None with it - not recomputed from the few frames that did pass.
     """
     if len(samples) < 2:
         return None
@@ -114,7 +118,7 @@ def movement_numbers(samples: list[dict], middle: np.ndarray | None, radius: flo
             body = max(1.0, (previous["body"] + current["body"]) / 2.0)
             distance += float(np.hypot(current["x"] - previous["x"], current["y"] - previous["y"])) / body
 
-    if guard is None:
+    if guard is _FROM_SAMPLES:
         guard = guard_measure.summarise((item["t"], item.get("guard")) for item in samples)
     balances = [item.get("balance") for item in samples]
 

@@ -45,9 +45,11 @@ class MovementNumbersTests(unittest.TestCase):
         self.assertEqual(movement_numbers(samples, None, None)["distance_body_lengths"], 2.0)
 
     def test_hands_down_and_off_balance(self):
-        samples = ([sample(i / 5, 500, guard=0.9) for i in range(10)]
-                   + [sample(2 + i / 5, 500, guard=0.1, balance=0.2) for i in range(8)]
-                   + [sample(3.6 + i / 5, 500, guard=0.9) for i in range(10)])
+        # Guard readings are wrist-to-chin in shoulder widths (core/guard.py):
+        # 0.3 is hands by the face, 1.5 hands down.
+        samples = ([sample(i / 5, 500, guard=0.3) for i in range(10)]
+                   + [sample(2 + i / 5, 500, guard=1.5, balance=0.2) for i in range(8)]
+                   + [sample(3.6 + i / 5, 500, guard=0.3) for i in range(10)])
         numbers = movement_numbers(samples, self.MIDDLE, self.RADIUS)
         # Eight samples 0.2 s apart stand for 1.6 s, each until the next one:
         # the same seconds the hands-up share counts as down (8 of 28 samples
