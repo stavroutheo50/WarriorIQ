@@ -10,6 +10,7 @@ from core.coaching import (
     POSE_DIMENSIONS,
     build_coaching, build_pose_coaching, build_training_plan, build_training_progression,
 )
+from core.guard import reconcile_report_guard
 from core.sport_profiles import build_sport_coaching
 from core.config import SETTINGS
 from core.evidence_trust import accepted_model_event, automated_evidence_trust
@@ -863,6 +864,9 @@ def refresh_identity_integrity(report: dict) -> dict:
     usable after the lock policy improves.  It also upgrades safe legacy
     reports with pose-only coaching when action labels are still unvalidated.
     """
+    # Before anything reads a guard figure: older reports carried three guard
+    # summaries that disagreed with each other (core/guard.py).
+    reconcile_report_guard(report)
     tracking = report.setdefault("tracking", {})
     # Two fighters who cannot be told apart in this video fail identity however
     # well they were followed. Coverage answers "was somebody tracked", never

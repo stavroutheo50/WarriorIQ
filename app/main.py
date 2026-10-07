@@ -93,6 +93,7 @@ from core.db import (
 from core.evidence_trust import accepted_model_event, report_evidence_trust
 from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.coaching import build_coaching, build_training_plan
+from core.guard import reconcile_report_guard
 from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core import feed, social, worker_alerts
@@ -5361,6 +5362,7 @@ def result_page(request: Request, job_id: str):
     if report.get("mode") == "solo":
         # One person, no opponent and no strikes (core/solo.py): its own page,
         # since every section of the fight report is about two fighters.
+        reconcile_report_guard(report)
         solo_name = _fighter_names(request, job, report)["A"]
         return templates.TemplateResponse(request=request, name="solo_result.html", context={
             "request": request, "job_id": job_id, "report": report,

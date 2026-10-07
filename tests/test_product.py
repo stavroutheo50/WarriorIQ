@@ -1573,7 +1573,9 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
                              "fighter_B_coverage": 0.81, "fighters_separable": True, "identity_confusions": 0},
                 # Both fighters: a saved report's coaching is rebuilt from these
                 # on reload, and a drill needs A behind B.
-                "metrics": {"A": {"guard_index": guard}, "B": {"guard_index": 0.16}},
+                # A current report: its guard is the hands-up share (core/guard.py).
+                "metrics": {"A": {"guard_index": guard, "guard_definition": "hands_up_share/1"},
+                            "B": {"guard_index": 0.16, "guard_definition": "hands_up_share/1"}},
                 "coaching": {"A": {"improvements": [{"title": "Work on: Guard", "detail": why, "evidence_times": [3.0]}],
                                    "drills": [{"name": "Fighter A · Guard-return audit", "why": why,
                                                "metric": "guard_index", "label": "Guard", "measured": guard,

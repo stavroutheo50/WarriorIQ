@@ -1225,7 +1225,7 @@ class PublicPageTests(unittest.TestCase):
 
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
                        scorecard_available=None, measurement=None, kick_minimum=None,
-                       action_labels_available=None, report_access=None):
+                       action_labels_available=None, report_access=None, metrics=None):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -1253,6 +1253,12 @@ class PublicPageTests(unittest.TestCase):
         fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
         report = json.loads(fixture.read_text(encoding="utf-8"))
         report["selection_check"] = selection_check
+        if metrics is not None:
+            from core.guard import reconcile_report_guard
+
+            for fighter, values in metrics.items():
+                report["metrics"][fighter].update(values)
+            reconcile_report_guard(report)
         if measurement is not None:
             for fighter in ("A", "B"):
                 report.setdefault("metrics", {}).setdefault(fighter, {})["measurement"] = measurement
@@ -1271,6 +1277,36 @@ class PublicPageTests(unittest.TestCase):
             # As result_page passes it; the suite runs with counts published.
             strike_counts_published=STRIKE_COUNTS_PUBLISHED,
         )
+
+    def test_legacy_guard_figures_render_without_contradiction(self):
+        """QA, 2026-10-07: "Guard 27%" above "Hands up by the face 0%" and
+        "Longest with hands down 20 s" on one page. An older report now shows
+        its hands-up share everywhere and withholds what it cannot recover,
+        saying why (core/guard.py)."""
+        from core.fight_numbers import movement_numbers
+
+        def legacy_numbers(longest):
+            # A real numbers block, with the guard fields as the old code stored them.
+            base = movement_numbers([{"t": i / 6, "x": 500.0 + i, "y": 300.0, "body": 200.0, "guard": 0.4,
+                                      "balance": 0.8, "toward": 0.0, "speed": 0.5, "gap": 1.2}
+                                     for i in range(120)], None, None)
+            return {**base, "hands_up_share": 0.0, "longest_hands_down_seconds": longest}
+
+        page = self._render_result({}, metrics={
+            "A": {"guard_index": 0.27, "numbers": legacy_numbers(20.0)},
+            "B": {"guard_index": 0.45, "numbers": legacy_numbers(0.0)},
+        })
+        self.assertNotIn(">27<", page)
+        self.assertNotIn("27%", page)
+        self.assertNotIn("45%", page)
+        import re
+
+        hands_down = re.search(r'Longest with hands down.*?</div>', page, re.S).group(0)
+        self.assertNotIn("20 s", hands_down)
+        self.assertEqual(hands_down.count("Not measured"), 2)
+        self.assertIn("re-run to measure", hands_down)
+        hands_up = re.search(r'Hands up by the face.*?</div>', page, re.S).group(0)
+        self.assertEqual(hands_up.count(">0%<"), 2)
 
     def _render_identity(self, trusted):
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader

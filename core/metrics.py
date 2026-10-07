@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
+from core import guard as guard_measure
 from core.config import SETTINGS
 from core.fight_numbers import movement_numbers
 from core.types import DefenseEvent, PersonObservation, StrikeEvent
@@ -222,8 +223,14 @@ class MetricsAccumulator:
                 break
         return sorted(picked)
 
-    def _moments(self, fighter: str) -> dict:
-        """Where to look, per movement measurement, at both ends."""
+    def _moments(self, fighter: str, guard: dict | None = None) -> dict:
+        """Where to look, per movement measurement, at both ends.
+
+        Guard moments are when the hands came down and when they were held up
+        (core/guard.py), not the lowest and highest readings: four of the
+        lowest readings were marked "Your guard dropped" on fighters whose
+        hands were never counted as down.
+        """
         timed_footwork = []
         previous = None
         for seconds, who, x, y in self.timed_positions:
@@ -234,15 +241,16 @@ class MetricsAccumulator:
                 timed_footwork.append((seconds, step))
             previous = (seconds, x, y)
         sources = {
-            "guard_index": self.timed_guard[fighter],
             "balance_index": self.timed_balance[fighter],
             "pressure_index": [(t, v) for t, who, v in self.timed_pressure if who == fighter],
             "footwork_body_lengths_per_second": timed_footwork,
         }
-        return {
+        moments = {
             key: {"low": self._extremes(values, True), "high": self._extremes(values, False)}
             for key, values in sources.items()
         }
+        moments["guard_index"] = {"low": list(guard["drops"]), "high": list(guard["held"])} if guard else {"low": [], "high": []}
+        return moments
 
     @staticmethod
     def _spread(samples, block_seconds: float = 2.0) -> dict | None:
@@ -289,7 +297,7 @@ class MetricsAccumulator:
         # 1.0 is dead centre of the area used; 0.0 is at or beyond its edge.
         return float(np.mean(np.clip(1.0 - distances / radius, 0.0, 1.0)))
 
-    def _numbers(self, fighter: str) -> dict | None:
+    def _numbers(self, fighter: str, guard: dict | None = None) -> dict | None:
         everyone = [point for side in ("A", "B") for point in (self.positions.get(side) or [])]
         frame = ring_frame(np.stack(everyone)) if len(everyone) >= 10 else None
         middle, radius = frame if frame is not None else (None, None)
@@ -300,7 +308,7 @@ class MetricsAccumulator:
             def round_of(seconds: float) -> int | None:
                 spec = round_at_time(self._rounds, seconds)
                 return spec.number if spec is not None and spec.selected else None
-        return movement_numbers(self.timeline[fighter], middle, radius, round_of)
+        return movement_numbers(self.timeline[fighter], middle, radius, round_of, guard=guard)
 
     @staticmethod
     def _attack_stats(fighter: str, events: list[StrikeEvent]) -> dict:
@@ -390,11 +398,15 @@ class MetricsAccumulator:
             enough = measured >= SETTINGS.min_metric_samples
             advanced_available = coverage >= SETTINGS.min_pose_coverage_for_metric
 
+            # Every guard figure in the report - card, bars, Defence table,
+            # longest stretch down, drop moments, coaching - comes from this
+            # one summary. See core/guard.py.
+            guard_summary = guard_measure.summarise(self.timed_guard[fighter]) if enough else None
             if enough:
                 footwork = self.movement[fighter] / max(1.0, segment_duration)
                 pressure = float(np.mean(self.pressure_samples[fighter])) if self.pressure_samples[fighter] else None
                 ring_control = self._center_control(fighter)
-                guard = float(np.mean(self.guard_samples[fighter])) if self.guard_samples[fighter] else None
+                guard = guard_summary["share"] if guard_summary else None
                 balance = float(np.mean(self.balance_samples[fighter])) if self.balance_samples[fighter] else None
             else:
                 footwork = pressure = ring_control = guard = balance = None
@@ -447,17 +459,18 @@ class MetricsAccumulator:
                 "vulnerability_techniques": dict(vulnerability_techniques),
                 "footwork_body_lengths_per_second": footwork,
                 # Seconds and distances in plain numbers. See core/fight_numbers.py.
-                "numbers": self._numbers(fighter) if enough else None,
+                "numbers": self._numbers(fighter, guard_summary) if enough else None,
                 "pressure_index": pressure,
                 "ring_center_control": ring_control,
                 "guard_index": guard,
+                "guard_definition": guard_measure.GUARD_DEFINITION,
                 "balance_index": balance,
                 # Seconds a coach can click, at both ends of each measurement.
                 # Empty when there was not enough to average in the first place.
-                "moments": self._moments(fighter) if enough else {},
+                "moments": self._moments(fighter, guard_summary) if enough else {},
                 # The uncertainty of the two ranked averages (see _spread).
                 "spread": {
-                    "guard_index": self._spread(self.timed_guard[fighter]),
+                    "guard_index": guard_summary["spread"] if guard_summary else None,
                     "balance_index": self._spread(self.timed_balance[fighter]),
                 } if enough else {},
                 "dashboard": {

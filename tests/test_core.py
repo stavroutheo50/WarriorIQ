@@ -2761,6 +2761,9 @@ class MetricSampleBasisTests(unittest.TestCase):
             t.visible[fighter] = guard_samples
             t.movement[fighter] = 12.0
             t.guard_samples[fighter] = [0.4] * guard_samples
+            # update() keeps every guard reading with its second; the guard
+            # figures are summarised from these (core/guard.py).
+            t.timed_guard[fighter] = [(i / 15.0, 0.4) for i in range(guard_samples)]
             t.balance_samples[fighter] = [0.7] * guard_samples
             t.pressure_samples[fighter] = [0.1] * guard_samples
         return t

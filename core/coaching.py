@@ -63,7 +63,8 @@ def _measured_baseline_drills(fighter: str, own: dict) -> list[dict]:
             1.0 if guard is None else 1.0 - float(guard),
             "Guard-retention rounds",
             f"3 x 2 min: Fighter {fighter} finishes every exchange in stance and records a successful guard reset before the partner returns.",
-            f"Targets the measured guard index ({_pct(guard) if guard is not None else 'insufficient pose evidence'}%).",
+            (f"Targets the measured guard: hands up {_pct(guard):.0f}% of the time seen." if guard is not None
+             else "Guard was not measured: too little pose evidence."),
         ),
         (
             1.0 if balance is None else 1.0 - float(balance),
@@ -427,18 +428,18 @@ def build_coaching(fighter: str, metrics: dict, events: list[StrikeEvent]) -> di
     if guard is not None:
         if guard >= 0.62:
             strengths.append({
-                "title": f"Consistent guard · {_pct(guard)}% index",
-                "detail": f"Guard-position index was {_pct(guard)}% on frames with sufficient pose evidence.",
-                "evidence_times": [],
+                "title": f"Consistent guard · hands up {_pct(guard):.0f}% of the time",
+                "detail": f"Hands were up by the face {_pct(guard):.0f}% of the time they could be measured.",
+                "evidence_times": _moment_times(own, "guard_index", want_low=False),
             })
         elif guard < 0.42:
             improvements.append({
-                "title": f"Guard recovery · {_pct(guard)}% index",
-                "detail": f"Guard-position index was {_pct(guard)}%. Hands frequently remained far from the head line after movement/attacks.",
-                "evidence_times": [],
+                "title": f"Guard recovery · hands up {_pct(guard):.0f}% of the time",
+                "detail": f"Hands were up by the face {_pct(guard):.0f}% of the time they could be measured, and stayed away from the head after moving or attacking.",
+                "evidence_times": _moment_times(own, "guard_index", want_low=True),
             })
             drills.append({
-                "name": f"Guard recovery · {_pct(guard)}% baseline",
+                "name": f"Guard recovery · {_pct(guard):.0f}% hands up",
                 "prescription": "4 x 90 sec technical rounds. Every strike must finish with both hands returning to defensive position before the next action.",
                 "why": "Builds automatic guard recovery.",
             })

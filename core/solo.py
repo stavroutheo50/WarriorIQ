@@ -48,7 +48,7 @@ MIN_TRUSTED_COVERAGE = 0.45
 # The movement measurements a solo session reports. Everything else in a
 # fighter's metrics is about strikes or an opponent.
 SOLO_METRICS = ("pose_coverage", "measurement", "footwork_body_lengths_per_second",
-                "guard_index", "balance_index", "moments", "spread", "numbers")
+                "guard_index", "guard_definition", "balance_index", "moments", "spread", "numbers")
 
 
 def _centre(box) -> np.ndarray:

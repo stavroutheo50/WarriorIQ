@@ -49,7 +49,11 @@ class MovementNumbersTests(unittest.TestCase):
                    + [sample(2 + i / 5, 500, guard=0.1, balance=0.2) for i in range(8)]
                    + [sample(3.6 + i / 5, 500, guard=0.9) for i in range(10)])
         numbers = movement_numbers(samples, self.MIDDLE, self.RADIUS)
-        self.assertAlmostEqual(numbers["longest_hands_down_seconds"], 1.4, places=1)
+        # Eight samples 0.2 s apart stand for 1.6 s, each until the next one:
+        # the same seconds the hands-up share counts as down (8 of 28 samples
+        # of 5.6 s). It was 1.4, first-to-last sample, so the two figures could
+        # not be checked against each other.
+        self.assertAlmostEqual(numbers["longest_hands_down_seconds"], 1.6, places=1)
         self.assertEqual(numbers["off_balance_count"], 1)
         self.assertAlmostEqual(numbers["hands_up_share"], 20 / 28, places=3)
 
