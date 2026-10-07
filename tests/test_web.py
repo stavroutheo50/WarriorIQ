@@ -1225,7 +1225,8 @@ class PublicPageTests(unittest.TestCase):
 
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
                        scorecard_available=None, measurement=None, kick_minimum=None,
-                       action_labels_available=None, report_access=None, metrics=None, extra=None):
+                       action_labels_available=None, report_access=None, metrics=None, extra=None,
+                       refresh=False):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -1260,6 +1261,11 @@ class PublicPageTests(unittest.TestCase):
             for fighter, values in metrics.items():
                 report["metrics"][fighter].update(values)
             reconcile_report_guard(report)
+        if refresh:
+            # As the result page prepares a saved report, before rendering.
+            from core.report import refresh_identity_integrity
+
+            refresh_identity_integrity(report)
         if measurement is not None:
             for fighter in ("A", "B"):
                 report.setdefault("metrics", {}).setdefault(fighter, {})["measurement"] = measurement
@@ -1275,6 +1281,8 @@ class PublicPageTests(unittest.TestCase):
             analysis_quality=_analysis_quality_summary(report), can_share=can_share,
             sharing=sharing, score_withheld=score_withheld, unavailable=[],
             kick_minimum=kick_minimum,
+            **({"numbers": __import__("app.main", fromlist=["_numbers_state"])._numbers_state(report)}
+               if refresh else {}),
             # As result_page passes it; the suite runs with counts published.
             strike_counts_published=STRIKE_COUNTS_PUBLISHED,
         )
@@ -1337,6 +1345,26 @@ class PublicPageTests(unittest.TestCase):
                     self.assertNotIn(criterion, section)
                 self.assertIn("not a score", section)
                 self.assertIn("51% / 49%", section)
+
+    def test_photo_cutouts_render_measured_movement_only(self):
+        """QA, 2026-10-07 (/result/9138ca9b38a7): two photo cut-outs got
+        "Strong observation evidence", strengths and a four-week plan."""
+        from core.fight_presence import PLAUSIBILITY_TEXT
+
+        verdict = {"plausible": False, "reasons": ["rigid"], "text": [PLAUSIBILITY_TEXT["rigid"]],
+                   "signals": {}}
+        page = self._render_result({}, refresh=True, extra={"video": {
+            **json.loads((Path(__file__).resolve().parent / "fixtures" / "report_sample.json")
+                         .read_text(encoding="utf-8"))["video"], "plausibility": verdict}})
+        self.assertIn("Not recognised as a fight.", page)
+        self.assertIn("cut-outs", page)
+        self.assertNotIn("Strong observation evidence", page)
+        self.assertNotIn("Keep doing", page)
+        self.assertNotIn("Next-session plan", page)
+        self.assertNotIn("The next four weeks", page)
+        self.assertNotIn("Final coaching summary", page)
+        # The movement measured stays.
+        self.assertIn('class="fight-vitals"', page)
 
     def _render_identity(self, trusted):
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader

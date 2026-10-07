@@ -269,7 +269,7 @@
           {% else %}<span class="muted">Not filed</span>{% endif %}
         </td>
         <td data-label="Fight">{{f.label}}</td>
-        <td data-label="Seen">{{'%.0f'|format(f.coverage*100)}}%{% if f.unusable_reason == 'identity' %} <small class="muted">couldn't tell who was who</small>{% elif not f.usable %} <small class="muted">too low to compare</small>{% endif %}</td>
+        <td data-label="Seen">{{'%.0f'|format(f.coverage*100)}}%{% if f.unusable_reason == 'identity' %} <small class="muted">couldn't tell who was who</small>{% elif f.unusable_reason == 'not_a_fight' %} <small class="muted">not recognised as a fight</small>{% elif not f.usable %} <small class="muted">too low to compare</small>{% endif %}</td>
         <td class="small{% if not f.movement_verdict %} is-empty{% endif %}" data-label="Movement">{{f.movement_verdict or '—'}}</td>
         <td data-label="Pressure">{{f.pressure|movement_value('pressure')}}</td>
         <td{% if f.centre is none %} class="is-empty"{% endif %} data-label="Centre">{% if f.centre is not none %}{{'%.0f'|format(f.centre*100)}}%{% else %}—{% endif %}</td>
@@ -328,7 +328,7 @@
 <section class="card" id="squad">
   <div class="section-title" style="margin-top:0">
     <div><div class="eyebrow">Squad</div><h2>Every fight, newest first</h2>{% if squad.trend_fighter %}<small class="muted">Trend shown for {{squad.trend_fighter}}</small>{% endif %}</div>
-    <span class="pill">{{squad.usable_count}} comparable{% if squad.unusable_coverage %} · {{squad.unusable_coverage}} not tracked well enough{% endif %}{% if squad.unusable_identity %} · {{squad.unusable_identity}} couldn't tell who was who{% endif %}</span>
+    <span class="pill">{{squad.usable_count}} comparable{% if squad.unusable_coverage %} · {{squad.unusable_coverage}} not tracked well enough{% endif %}{% if squad.unusable_identity %} · {{squad.unusable_identity}} couldn't tell who was who{% endif %}{% if squad.unusable_not_a_fight %} · {{squad.unusable_not_a_fight}} not recognised as a fight{% endif %}</span>
   </div>
 
   {% if squad.trend_available %}

@@ -55,6 +55,7 @@
 {% endif %}
 {% if analysed_span and analysed_span.note %}<p class="analysed-span-note" role="note">{{analysed_span.note}}</p>{% endif %}
 {% if numbers.state == 'no_fight' %}<div class="notice bad" role="alert"><strong>Too little fight footage to measure.</strong> {{ numbers.message }} Upload a clip where the two fighters are in shot and fighting for most of it, and pick a frame where both are clearly visible.</div>
+{% elif numbers.state == 'movement_only' %}<div class="notice bad" role="alert" id="notAFightNotice"><strong>Not recognised as a fight.</strong> {{ numbers.message }} If this is a real fight, upload a clip where both fighters are in full view and exchanging.</div>
 {% elif fight_footage and fight_footage.note %}<p class="analysed-span-note" role="note">{{ fight_footage.note }}</p>{% endif %}
 <section class="result-overview" aria-label="Fight summary" data-motion-sequence="result-summary">
   <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="{{ names.A }} portrait" data-hide-on-error><span>{% if corners and corners.A %}<small>{{corners.A}}</small>{% endif %}<strong>{{ names.A }}</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="{{ names.B }} portrait" data-hide-on-error><span>{% if corners and corners.B %}<small>{{corners.B}}</small>{% endif %}<strong>{{ names.B }}</strong></span></div></div>
@@ -355,7 +356,7 @@
       {{ row('Hands up by the face', ('%.0f%%'|format(mp.hands_up_share*100)) if mp.hands_up_share is not none else '—', ('%.0f%%'|format(mo.hands_up_share*100)) if mo and mo.hands_up_share is not none else '—', 'of the time seen') }}
       {%- set guard_a = report.metrics[primary] if report.metrics and primary in report.metrics else {} -%}
       {%- set guard_b = report.metrics[opponent] if report.metrics and opponent in report.metrics else {} -%}
-      {{ row('Longest with hands down', 'Not measured' if guard_a.guard_note and mp.longest_hands_down_seconds is none else secs(mp.longest_hands_down_seconds), 'Not measured' if guard_b.guard_note and (not mo or mo.longest_hands_down_seconds is none) else secs(mo.longest_hands_down_seconds if mo else none), 'older report — re-run to measure' if guard_a.guard_note or guard_b.guard_note else '') }}
+      {{ row('Longest with hands down', 'Not measured' if guard_a.guard_note and mp.longest_hands_down_seconds is none else secs(mp.longest_hands_down_seconds), 'Not measured' if guard_b.guard_note and (not mo or mo.longest_hands_down_seconds is none) else secs(mo.longest_hands_down_seconds if mo else none), 'poses never changed' if numbers.state == 'movement_only' and (guard_a.guard_note or guard_b.guard_note) else 'older report — re-run to measure' if guard_a.guard_note or guard_b.guard_note else '') }}
       {{ row('Times off balance', mp.off_balance_count if mp.off_balance_count is not none else '—', mo.off_balance_count if mo and mo.off_balance_count is not none else '—') }}
       {{ row('Defensive moves', (report.metrics[primary].defenses|default({})).values()|sum, (report.metrics[opponent].defenses|default({})).values()|sum, 'slips, blocks and evasions seen') }}
     </div>
@@ -631,7 +632,7 @@
       only when the report is about the people the user picked
       (core.report.identity_verdict). They were shown beside "identity check
       failed" (QA, 2026-10-04). -#}
-  {% if not identity_failed %}
+  {% if not identity_failed and numbers.state != 'movement_only' %}
   <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'No clear strength yet'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% else %}<small>Nothing in this fight stood out clearly enough to name. A longer clip with both of you in view gives WarriorIQ more to go on.</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Nothing clear to fix yet'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% else %}<small>WarriorIQ does not name a weakness it could not see in the footage.</small>{% endif %}</article></div>
   {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary"><div class="eyebrow">Final coaching summary · {{ names.get(primary, 'Fighter ' ~ primary) }}</div><h2>What this fight says to work on next</h2><div class="performance-insights">{#- Only what "Keep doing" / "Fix next" above has not already said: this
     repeated their first strength and first fix word for word (QA, 2026-10-04). -#}{% set worked = keep[1] if keep|length > 1 else None %}{% set hurt = fix[1] if fix|length > 1 else None %}{% if worked %}<article><span>Also worked</span><strong>{{worked.title}}</strong><p>{{worked.detail}}</p></article>{% endif %}{% if hurt %}<article><span>Also hurt performance</span><strong>{{hurt.title}}</strong><p>{{hurt.detail}}</p></article>{% endif %}{% set plan=report.training_plan[primary]|default([]) %}<article><span>Next training priority</span><strong>{{plan[0].focus if plan else 'Collect a cleaner sample'}}</strong><p>{{plan[0].work if plan else 'Use a clear full-body camera angle and keep both fighters visible.'}}</p></article><article><span>Success target</span><strong>{{plan[0].goal if plan else 'Improve usable evidence'}}</strong>{% if plan %}<p>This target comes from {{ names.get(primary, 'Fighter ' ~ primary) }}’s measured report, not a generic template.</p>{% else %}<p>No measured target yet: this fight did not give enough evidence to set one.</p>{% endif %}</article></div></section>{% endif %}
@@ -974,7 +975,10 @@
   {% if report.scorecard.available %}<div class="table-wrap"><table><thead><tr><th>Round</th><th>A</th><th>B</th><th>Estimate</th></tr></thead><tbody>{% for r in report.scorecard.rounds %}<tr><td>{{r.round}}</td><td>{{r.fighter_A}}</td><td>{{r.fighter_B}}</td><td>{{r.winner}}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
 </section>
 
-<div class="grid{% if focus != 'BOTH' %} single{% endif %}" id="report-coaching">
+{#- Not recognised as a fight: the movement above is measured; coaching
+    and a plan built on it would treat it as fighting (QA, 2026-10-07). -#}
+{% if numbers.state == 'movement_only' %}<section class="card" id="report-coaching"><div class="eyebrow">Coach advice and training plan</div><p class="muted">Withheld. {{ numbers.message }}</p></section>
+{% else %}<div class="grid{% if focus != 'BOTH' %} single{% endif %}" id="report-coaching">
 {% for fighter in ['A','B'] %}
 {% if focus == 'BOTH' or focus == fighter %}
 <section class="card"><div class="eyebrow">Coach report · {{ names.get(fighter, 'Fighter ' ~ fighter) }}</div>{% if report.coaching[fighter].evidence_type|default('') == 'pose_only' %}<p class="muted">Built from this fighter's identity-safe pose measurements. Strike-specific advice remains hidden until action labels are validated.</p>{% elif not action_ready %}<p class="muted">Coach advice is withheld because this fighter did not pass the identity check.</p>{% endif %}
@@ -1009,6 +1013,7 @@
 </section>
 {% endif %}{% endfor %}
 </div>{% else %}<section class="locked-report-card" id="report-training"><div><div class="eyebrow">Complete training plan</div><h2>Turn the report into your next session.</h2><p class="muted">Expanded and Complete reports include a fighter-specific training plan linked to the measured evidence.</p></div><a class="btn secondary" href="/pricing">See report options</a></section>{% endif %}
+{% endif %}
 
 {% endif %}{# numbers.state != 'no_fight' #}
 {% set focus = report.video.focus_fighter|default(report.video.analysis_target|default('BOTH'), true) %}

@@ -113,7 +113,10 @@ class SeparabilityIsGatedTests(unittest.TestCase):
 
     def test_progress_reapplies_the_gate_to_saved_snapshots(self):
         source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
-        self.assertIn("report = refresh_identity_integrity(deepcopy(compact))", source)
+        # A copy of the snapshot, given its "is this a fight?" verdict from the
+        # saved track first (core/fight_presence.py), then gated.
+        self.assertIn("snapshot = deepcopy(compact)", source)
+        self.assertIn("report = refresh_identity_integrity(snapshot)", source)
 
     def test_the_coach_squad_does_not_count_an_inseparable_fight(self):
         from core.squad import summarize_fight
