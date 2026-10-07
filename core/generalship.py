@@ -23,6 +23,13 @@ ground, which anyone can check against the video.
 
 Everything here is derived from positions and directions only. No strike, no
 contact, no target.
+
+Only rulesets judged on a ten-point-must card (boxing, Muay Thai, MMA) are
+judged on criteria like these at all. Taekwondo and every WAKO discipline are
+decided by counting techniques, so for them this is a plain movement
+comparison with neutral wording, and nothing here is ever a score unless a
+ten-point-must ruleset asks for one while scoring is on. See judge_fight and
+movement_comparison.
 """
 from __future__ import annotations
 
@@ -151,12 +158,20 @@ def _round_slices(samples, rounds):
     return buckets
 
 
-def judge_fight(metrics, rounds, coverage: dict[str, float], minimum_coverage: float) -> dict:
-    """A scorecard for the three criteria that movement can evidence.
+def judge_fight(metrics, rounds, coverage: dict[str, float], minimum_coverage: float,
+                score_rounds: bool = False) -> dict:
+    """A round-by-round movement comparison, and a movement score only on request.
+
+    ``score_rounds`` adds ten-point-must round scores and totals. The analyzer
+    asks for them only for a ruleset judged on a ten-point-must card while
+    scoring is on (see core.scoring.RuleProfile.ten_point_must). Without it
+    nothing here is a score: QA, 2026-10-07 found "Movement scorecard 10-10"
+    beside "Score: Not scored" on WT taekwondo and point-fighting reports,
+    sports that are decided by counting techniques and never scored 10-10.
 
     Withheld entirely when tracking was not good enough, for the same reason
-    the striking scorecard is withheld: a score from a fight the system did not
-    watch properly is worse than no score.
+    the striking scorecard is withheld: a comparison of a fight the system did
+    not watch properly is worse than none.
     """
     worst = min(float(coverage.get("A", 0.0)), float(coverage.get("B", 0.0)))
     if worst < minimum_coverage:
@@ -222,29 +237,17 @@ def judge_fight(metrics, rounds, coverage: dict[str, float], minimum_coverage: f
             "rounds": [],
         }
 
-    totals = {f: sum(item.score(f) for item in judgements) for f in ("A", "B")}
-    won = {f: sum(1 for item in judgements if item.winner == f) for f in ("A", "B")}
-    leader = None if totals["A"] == totals["B"] else ("A" if totals["A"] > totals["B"] else "B")
-    return {
+    led = {f: sum(1 for item in judgements if item.winner == f) for f in ("A", "B")}
+    card = {
         "available": True,
-        "status": "movement_criteria_only",
-        "totals": totals,
-        "rounds_won": won,
-        "leader": leader,
-        "criteria_scored": ["effective aggression", "ring generalship", "territory"],
-        "criteria_excluded": ["clean effective striking"],
-        "disclaimer": (
-            "Scored on movement only: effective aggression, ring generalship and territory. "
-            "Clean striking is not included, because WarriorIQ cannot yet detect strikes "
-            "reliably enough to score them. This is not an official result and does not "
-            "replace the judges - it is a reproducible record of who pressed, who held the "
-            "middle, and who gave ground, which can be checked against the video."
-        ),
+        "status": "movement_comparison",
+        # Rounds in which one fighter was clearly ahead on movement. A
+        # comparison, not rounds won.
+        "rounds_led": led,
         "rounds": [
             {
                 "number": item.number,
-                "A": item.score("A"), "B": item.score("B"),
-                "winner": item.winner, "margin": item.margin, "note": item.note,
+                "leader": item.winner, "margin": item.margin,
                 "aggression": item.aggression,
                 "generalship": item.generalship,
                 "territory": item.territory,
@@ -252,3 +255,100 @@ def judge_fight(metrics, rounds, coverage: dict[str, float], minimum_coverage: f
             for item in judgements
         ],
     }
+    if not score_rounds:
+        return card
+    totals = {f: sum(item.score(f) for item in judgements) for f in ("A", "B")}
+    card.update({
+        "status": "movement_criteria_only",
+        "totals": totals,
+        "rounds_won": led,
+        "leader": None if totals["A"] == totals["B"] else ("A" if totals["A"] > totals["B"] else "B"),
+        "criteria_scored": ["effective aggression", "ring generalship", "ground taken"],
+        "criteria_excluded": ["clean effective striking"],
+    })
+    for row, item in zip(card["rounds"], judgements):
+        row.update({"A": item.score("A"), "B": item.score("B"), "winner": item.winner, "note": item.note})
+    return card
+
+
+# What each comparison is called, and the judging criterion it speaks to where
+# the ruleset really is judged round by round. Ground taken is not a judging
+# criterion in any of them, so it carries none.
+COMPARISONS = ("aggression", "generalship", "territory")
+_NEUTRAL_LABELS = {"aggression": "Moved forward", "generalship": "In the middle", "territory": "Gained ground"}
+_JUDGED_LABELS = {"aggression": "Pressed forward", "generalship": "Held the middle", "territory": "Took ground"}
+_JUDGED_CRITERIA = {"aggression": "effective aggression", "generalship": "ring generalship", "territory": None}
+_READS = {
+    "aggression": "{name} moved forward more of the time.",
+    "generalship": "{name} spent more of the round in the middle.",
+    "territory": "{name} gained more ground.",
+}
+
+
+def _leading_comparison(row: dict) -> str | None:
+    shares = [(key, row.get(key) or {}) for key in COMPARISONS]
+    shares = [(key, share) for key, share in shares if "A" in share]
+    if not shares:
+        return None
+    return max(shares, key=lambda item: abs(float(item[1]["A"]) - 0.5))[0]
+
+
+def movement_comparison(card: dict | None, ruleset: str | None, scoring_available: bool,
+                        names: dict | None = None) -> dict | None:
+    """What the report shows of a stored movement card, for any report age.
+
+    Reports saved before 2026-10-07 carry 10-10 round scores and "judging
+    criteria" for every ruleset; this decides at render time what may be
+    shown, so they are corrected without being re-run:
+
+    * a score - round scores and totals - only for a ten-point-must ruleset
+      while scoring is on, and only when the card holds one;
+    * judging-criteria wording only for a ten-point-must ruleset; every other
+      ruleset is decided by counting techniques, so it gets neutral wording.
+    """
+    if not card:
+        return None
+    from core.scoring import RULESETS, normalize_ruleset
+
+    profile = RULESETS.get(normalize_ruleset(ruleset or ""))
+    judged = bool(profile and profile.ten_point_must)
+    names = names or {}
+    labels = _JUDGED_LABELS if judged else _NEUTRAL_LABELS
+    view = {
+        "available": bool(card.get("available")),
+        "reason": card.get("reason"),
+        "title": "Movement comparison",
+        "judged": judged,
+        "columns": [{"key": key, "label": labels[key],
+                     "criterion": _JUDGED_CRITERIA[key] if judged else None} for key in COMPARISONS],
+    }
+    sport = (profile.sport_label if profile and profile.sport != "kickboxing" else profile.label) if profile else None
+    if judged:
+        view["basis"] = (
+            f"{sport} rounds are judged as a whole. This compares the part of that judging movement "
+            "can show - who pressed forward and who held the middle - plus who gained ground. Clean "
+            "striking is not included, because WarriorIQ cannot yet count strikes reliably, so this "
+            "is not a score and does not replace the judges.")
+    else:
+        view["basis"] = (
+            "Movement only: who moved forward, who spent more time in the middle of the area used, "
+            "and who gained ground. "
+            + (f"{sport} is decided by counting scoring techniques, so none of this is how the bout "
+               "is judged, and it is not a score." if sport else "It is not a score."))
+    show_scores = judged and bool(scoring_available) and isinstance(card.get("totals"), dict)
+    view["scores"] = ({"totals": card["totals"], "leader": card.get("leader")} if show_scores else None)
+    rounds = []
+    for row in card.get("rounds") or []:
+        leader = row.get("leader", row.get("winner"))
+        key = _leading_comparison(row)
+        if leader in ("A", "B") and key:
+            read = _READS[key].format(name=names.get(leader) or f"Fighter {leader}")
+        else:
+            read = "Too close to separate on movement."
+        shown = {"number": row.get("number"), "read": read,
+                 "shares": {key: row.get(key) or None for key in COMPARISONS}}
+        if show_scores:
+            shown["score"] = {"A": row.get("A"), "B": row.get("B")}
+        rounds.append(shown)
+    view["rounds"] = rounds
+    return view

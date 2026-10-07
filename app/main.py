@@ -94,6 +94,7 @@ from core.evidence_trust import accepted_model_event, report_evidence_trust
 from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.coaching import build_coaching, build_training_plan
 from core.guard import reconcile_report_guard
+from core.generalship import movement_comparison
 from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core import feed, social, worker_alerts
@@ -302,6 +303,9 @@ templates.env.globals["preflight_limits"] = json.dumps(client_thresholds())
 # One name, one definition and one reference per measurement, so the report
 # cannot call the same number three things in three sections.
 templates.env.globals["metric_catalog"] = METRIC_CATALOG
+# The movement comparison is decided at render time, so reports saved with a
+# "10-10" movement scorecard are shown without one (core/generalship.py).
+templates.env.globals["movement_comparison"] = movement_comparison
 templates.env.filters["metric_readings"] = metric_readings
 # Pressure 0-100, centre as a percentage, footwork in body lengths a second:
 # the units the report and Progress already use. See core.squad.movement_value.

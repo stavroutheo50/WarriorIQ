@@ -139,12 +139,15 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
     movement = report.get("movement_scorecard") or {}
     verdict = None
     if movement.get("available"):
-        totals = movement.get("totals") or {}
+        # Rounds in which each fighter led the movement comparison - not a
+        # movement score, which reports no longer carry outside ten-point-must
+        # rulesets (core/generalship.py). Older cards call it rounds_won.
+        led = movement.get("rounds_led") or movement.get("rounds_won") or {}
         other = "B" if focus == "A" else "A"
-        if totals.get(focus) is not None and totals.get(other) is not None:
-            if totals[focus] > totals[other]:
+        if led.get(focus) is not None and led.get(other) is not None:
+            if led[focus] > led[other]:
                 verdict = "ahead on movement"
-            elif totals[focus] < totals[other]:
+            elif led[focus] < led[other]:
                 verdict = "behind on movement"
             else:
                 verdict = "level on movement"

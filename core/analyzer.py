@@ -1956,10 +1956,15 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # report["scorecard"] on purpose: that one scores strikes and is withheld
     # because strikes cannot be detected reliably, while this one scores
     # aggression, generalship and territory and says exactly what it leaves out.
+    # Round scores only where the ruleset really is judged round by round on
+    # a ten-point-must card and the scorecard itself is on; everywhere else
+    # this is a movement comparison with no numbers out of ten.
     report["movement_scorecard"] = judge_fight(
         metrics, rounds,
         {f: float(report["tracking"].get(f"fighter_{f}_coverage", 0.0)) for f in ("A", "B")},
         SETTINGS.min_tracking_coverage_for_score,
+        score_rounds=bool(RULESETS[normalize_ruleset(req.ruleset)].ten_point_must
+                          and (report.get("scorecard") or {}).get("available")),
     )
     report["selection_check"] = assess_selection(
         observed_separations,

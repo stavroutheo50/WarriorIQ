@@ -1225,7 +1225,7 @@ class PublicPageTests(unittest.TestCase):
 
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
                        scorecard_available=None, measurement=None, kick_minimum=None,
-                       action_labels_available=None, report_access=None, metrics=None):
+                       action_labels_available=None, report_access=None, metrics=None, extra=None):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -1253,6 +1253,7 @@ class PublicPageTests(unittest.TestCase):
         fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
         report = json.loads(fixture.read_text(encoding="utf-8"))
         report["selection_check"] = selection_check
+        report.update(extra or {})
         if metrics is not None:
             from core.guard import reconcile_report_guard
 
@@ -1307,6 +1308,35 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("re-run to measure", hands_down)
         hands_up = re.search(r'Hands up by the face.*?</div>', page, re.S).group(0)
         self.assertEqual(hands_up.count(">0%<"), 2)
+
+    def test_saved_movement_scorecard_renders_as_a_comparison_for_counted_rulesets(self):
+        """QA, 2026-10-07 (/result/b0bc06c741a7, /result/480b87c056cf): a saved
+        "Movement scorecard 10-10" beside "Score: Not scored", in boxing terms,
+        on WT taekwondo and point-fighting reports."""
+        legacy = {"available": True, "status": "movement_criteria_only", "totals": {"A": 10, "B": 10},
+                  "leader": None, "rounds_won": {"A": 0, "B": 0},
+                  "criteria_scored": ["effective aggression", "ring generalship", "territory"],
+                  "criteria_excluded": ["clean effective striking"],
+                  "disclaimer": "Scored on movement only: effective aggression, ring generalship and territory.",
+                  "rounds": [{"number": 1, "A": 10, "B": 10, "winner": None, "margin": 0.02,
+                              "note": "Too close to separate on movement alone.",
+                              "aggression": {"A": 0.51, "B": 0.49}, "generalship": {"A": 0.5, "B": 0.5},
+                              "territory": {"A": 0.52, "B": 0.48}}]}
+        for ruleset in ("WT_TAEKWONDO", "POINT_FIGHTING"):
+            with self.subTest(ruleset=ruleset):
+                page = self._render_result({}, scorecard_available=False, extra={
+                    "movement_scorecard": legacy,
+                    "setup": {"ruleset": ruleset, "round_count": 1, "selected_rounds": [1]}})
+                section = page[page.index('id="report-movement-score"'):]
+                section = section[:section.index("</section>")]
+                self.assertIn("Movement comparison", section)
+                self.assertNotIn("Movement scorecard", section)
+                self.assertNotIn('class="score"', section)
+                self.assertNotIn("<td>10</td>", section)
+                for criterion in ("effective aggression", "ring generalship", "judging criteria"):
+                    self.assertNotIn(criterion, section)
+                self.assertIn("not a score", section)
+                self.assertIn("51% / 49%", section)
 
     def _render_identity(self, trusted):
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader
@@ -2472,11 +2502,13 @@ class MovementScorecardRenderTests(unittest.TestCase):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates"
                     / "result.html").read_text(encoding="utf-8")
         self.assertIn('id="report-movement-score"', template)
-        self.assertIn("movement.criteria_scored", template)
-        # The exclusion is not optional dressing: a scorecard that does not say
-        # it left out clean striking is claiming to be a full score.
-        self.assertIn("movement.criteria_excluded", template)
-        self.assertIn("movement.disclaimer", template)
+        # Shown through core.generalship.movement_comparison, which decides the
+        # wording and whether any score may appear (QA, 2026-10-07: "10-10"
+        # beside "Not scored"). Its basis says what is left out and that it
+        # is not a score; see tests/test_movement_comparison.py.
+        self.assertIn("movement_comparison(", template)
+        self.assertIn("movement.basis", template)
+        self.assertIn("not a score", template)
         # And it must render its own withheld state rather than vanishing.
         self.assertIn("movement.reason", template)
 
@@ -3577,7 +3609,7 @@ class ReportOrderTests(unittest.TestCase):
         """
         page = self._page()
         self.assertLess(page.index('class="fight-vitals"'),
-                        page.index("Movement scorecard"))
+                        page.index('id="report-movement-score"'))
 
     def test_the_order_is_explained_where_someone_would_change_it(self):
         page = self._page()
