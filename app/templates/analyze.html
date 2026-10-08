@@ -20,6 +20,11 @@
       <p><b>{{ policy.setup_line }}</b>{% if policy.estimates %} {{ policy.estimate_note }}{% endif %}</p>
       {% if policy.not_analysed_line %}<p>{{ policy.not_analysed_line }}</p>{% endif %}
     </div>
+    {#- Training clips up front (after mmagpt.app, which is built around them).
+        Solo sessions existed but were only offered after upload, on the
+        selection page (core/solo.py measures one person: movement, guard and
+        balance). Any clip of 2 s or more is analysed (core/preflight.py). -#}
+    <p class="setup-solo" id="setupSolo"><b>Training on your own?</b> A 20&ndash;60 second clip of shadowboxing, bag or pad work works too &mdash; choose <b>Solo session</b> on the next step. You get movement, guard and balance; no opponent numbers or score.</p>
   </header>
 
   <div class="setup-card" id="analyze" data-upload-state="empty">

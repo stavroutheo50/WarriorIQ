@@ -749,3 +749,4 @@
 .since-last{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:0 0 18px;padding:12px 16px;border:1px solid rgba(255,255,255,.08);border-radius:12px}
 .since-last .list-clean{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0;padding:0}
 .since-last li{font-size:14px;color:#c7d2e3}
+.setup-solo{margin:12px 0 0;padding:10px 14px;border-left:3px solid rgba(255,255,255,.18);color:#c7d2e3;font-size:14px}
