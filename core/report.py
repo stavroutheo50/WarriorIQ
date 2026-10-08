@@ -10,6 +10,7 @@ from core.coaching import (
     POSE_DIMENSIONS,
     build_coaching, build_pose_coaching, build_training_plan, build_training_progression,
 )
+from core.guard import reconcile_report_guard
 from core.sport_profiles import build_sport_coaching
 from core.config import SETTINGS
 from core.evidence_trust import accepted_model_event, automated_evidence_trust
@@ -521,6 +522,9 @@ def share_card(report: dict) -> dict | None:
     # card has none to post either.
     if (report.get("integrity") or {}).get("fight_footage_sufficient") is False:
         return None
+    # Not recognised as a fight: nothing on it would be a fighter's result.
+    if not_a_fight(report):
+        return None
     statistics = (report.get("statistics") or {}).get("fighters") or {}
     if not statistics:
         return None
@@ -856,6 +860,73 @@ def identity_verdict(report: dict) -> dict:
     }
 
 
+def not_a_fight(report: dict) -> dict | None:
+    """The plausibility verdict when the footage did not move like a fight.
+
+    core/fight_presence.py FightPresence.plausibility, stored with the video.
+    None for a fight, and for a saved report with no verdict and no track.
+    """
+    verdict = (report.get("video") or {}).get("plausibility")
+    if isinstance(verdict, dict) and verdict.get("plausible") is False:
+        return verdict
+    return None
+
+
+def not_a_fight_reason(verdict: dict) -> str:
+    reasons = [str(text) for text in (verdict.get("text") or []) if text]
+    why = "; and ".join(reasons) if reasons else "the movement did not look like two people fighting"
+    return f"This clip was not recognised as a fight: {why}."
+
+
+# Shown where guard and balance are withheld because the poses never changed.
+RIGID_POSE_NOTE = ("Not measured: the bodies' poses never changed, so there was no guard or "
+                   "stance to follow.")
+
+
+def withhold_for_not_a_fight(report: dict, verdict: dict) -> None:
+    """Measured movement only: no coaching, no plan, no score, no key moments.
+
+    QA, 2026-10-07: two photo cut-outs got "Strong observation evidence",
+    strengths and a four-week plan. Where the poses never changed at all,
+    guard and balance are not readings of a body either, and go too.
+    """
+    reason = not_a_fight_reason(verdict)
+    integrity = report.setdefault("integrity", {})
+    integrity["fight_plausible"] = False
+    integrity["action_metrics_trusted"] = False
+    integrity["coaching_evidence_mode"] = "withheld_not_a_fight"
+    scorecard = report.setdefault("scorecard", {})
+    scorecard.update({"available": False, "totals": {"A": None, "B": None}, "rounds": [],
+                      "winner_estimate": None, "status": "not_a_fight",
+                      "disclaimer": f"Not scored. {reason}"})
+    report["key_moments"] = []
+    report["illegal_moves"] = []
+    for fighter in ("A", "B"):
+        report.setdefault("coaching", {})[fighter] = {
+            "strengths": [], "improvements": [], "drills": [],
+            "note": f"Coaching and the training plan are withheld. {reason}",
+        }
+        report.setdefault("training_plan", {})[fighter] = []
+        report.setdefault("training_progression", {})[fighter] = []
+    if "rigid" in (verdict.get("reasons") or []):
+        metrics = report.get("metrics") or {}
+        for fighter in ("A", "B"):
+            own = metrics.get(fighter)
+            if not isinstance(own, dict):
+                continue
+            own["guard_index"] = None
+            own["balance_index"] = None
+            own["guard_note"] = RIGID_POSE_NOTE
+            numbers = own.get("numbers")
+            if isinstance(numbers, dict):
+                numbers.update({"hands_up_share": None, "longest_hands_down_seconds": None,
+                                "off_balance_count": None})
+            for key in ("moments", "spread"):
+                if isinstance(own.get(key), dict):
+                    own[key].pop("guard_index", None)
+                    own[key].pop("balance_index", None)
+
+
 def refresh_identity_integrity(report: dict) -> dict:
     """Apply the current identity safety gate to new and legacy reports.
 
@@ -863,6 +934,9 @@ def refresh_identity_integrity(report: dict) -> dict:
     usable after the lock policy improves.  It also upgrades safe legacy
     reports with pose-only coaching when action labels are still unvalidated.
     """
+    # Before anything reads a guard figure: older reports carried three guard
+    # summaries that disagreed with each other (core/guard.py).
+    reconcile_report_guard(report)
     tracking = report.setdefault("tracking", {})
     # Two fighters who cannot be told apart in this video fail identity however
     # well they were followed. Coverage answers "was somebody tracked", never
@@ -910,6 +984,13 @@ def refresh_identity_integrity(report: dict) -> dict:
             }
             report.setdefault("training_plan", {})[fighter] = []
             report.setdefault("training_progression", {})[fighter] = []
+        return report
+
+    # The footage did not move like a fight (core/fight_presence.py): the
+    # movement measured is shown, nothing that interprets it as fighting.
+    implausible = not_a_fight(report)
+    if implausible:
+        withhold_for_not_a_fight(report, implausible)
         return report
 
     if not bool(integrity.get("action_metrics_trusted", False)):

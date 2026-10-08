@@ -93,6 +93,9 @@ from core.db import (
 from core.evidence_trust import accepted_model_event, report_evidence_trust
 from core.fight_stats import normalize_outcome, summarize_fight_events
 from core.coaching import build_coaching, build_training_plan
+from core.guard import reconcile_report_guard
+from core.generalship import movement_comparison
+from core.fight_presence import attach_plausibility
 from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core import feed, social, worker_alerts
@@ -129,7 +132,8 @@ from core.count_plausibility import counts_implausible
 from core.report import (
     build_preliminary_scorecard, identity_failure, identity_verdict, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
-    coaching_moments, refresh_identity_integrity, share_card, unattributed_kick_total,
+    coaching_moments, not_a_fight, not_a_fight_reason, refresh_identity_integrity, share_card,
+    unattributed_kick_total,
 )
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
@@ -301,6 +305,9 @@ templates.env.globals["preflight_limits"] = json.dumps(client_thresholds())
 # One name, one definition and one reference per measurement, so the report
 # cannot call the same number three things in three sections.
 templates.env.globals["metric_catalog"] = METRIC_CATALOG
+# The movement comparison is decided at render time, so reports saved with a
+# "10-10" movement scorecard are shown without one (core/generalship.py).
+templates.env.globals["movement_comparison"] = movement_comparison
 templates.env.filters["metric_readings"] = metric_readings
 # Pressure 0-100, centre as a percentage, footwork in body lengths a second:
 # the units the report and Progress already use. See core.squad.movement_value.
@@ -1172,11 +1179,13 @@ def _full_progress_report(path: Path) -> dict | None:
         full_report = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    report = refresh_identity_integrity({
+    trimmed = {
         key: full_report.get(key, {})
         for key in ("video", "setup", "integrity", "metrics", "coaching",
                     "training_plan", "tracking")
-    })
+    }
+    attach_plausibility(trimmed, path.parent / "tracking.jsonl")
+    report = refresh_identity_integrity(trimmed)
     _progress_report_cache[str(path)] = (modified, report)
     return report
 
@@ -1197,7 +1206,9 @@ def _reports_for_profile(profile_id: int) -> list[dict]:
             # them, from the full report (read once, cached) when it predates
             # them.
             if compact.get("tracking"):
-                report = refresh_identity_integrity(deepcopy(compact))
+                snapshot = deepcopy(compact)
+                attach_plausibility(snapshot, Path(fight["report_path"]).parent / "tracking.jsonl")
+                report = refresh_identity_integrity(snapshot)
             else:
                 full = _full_progress_report(Path(fight["report_path"]))
                 report = compact if full is None else {
@@ -1307,6 +1318,13 @@ def _numbers_state(report: dict) -> dict:
                 "share_reason": ("WarriorIQ could not confirm who was who in this fight, so the numbers on "
                                  "this page are unverified and may include other people. They cannot go on "
                                  "a story card; a coach link shows your coach the report without them.")}
+    implausible = not_a_fight(report)
+    if implausible:
+        # Measured movement only (core/fight_presence.py plausibility).
+        return {"state": "movement_only",
+                "message": (f"{not_a_fight_reason(implausible)} The movement measured is shown below; "
+                            "coaching, the training plan, key moments and any score are withheld."),
+                "share_reason": "This clip was not recognised as a fight, so there is nothing to put on a story card."}
     return {"state": "ok", "message": None, "share_reason": None}
 
 
@@ -1361,6 +1379,9 @@ def _analysis_quality_summary(report: dict) -> dict:
     stable = verdict["trusted"]
     if not stable:
         label, tone = "Needs another fighter selection", "bad"
+    elif not_a_fight(report):
+        # Coverage says somebody was followed, not that it was a fight.
+        label, tone = "Not recognised as a fight", "bad"
     elif not verdict["followed_enough_to_score"]:
         # The score section says "we lost sight of a fighter too often".
         label, tone = "Partial observation evidence", "review"
@@ -5358,9 +5379,12 @@ def result_page(request: Request, job_id: str):
     if not path.exists():
         raise HTTPException(404)
     report = json.loads(path.read_text(encoding="utf-8"))
+    # Saved before the "is this a fight?" check: run it on the saved track.
+    attach_plausibility(report, path.parent / "tracking.jsonl")
     if report.get("mode") == "solo":
         # One person, no opponent and no strikes (core/solo.py): its own page,
         # since every section of the fight report is about two fighters.
+        reconcile_report_guard(report)
         solo_name = _fighter_names(request, job, report)["A"]
         return templates.TemplateResponse(request=request, name="solo_result.html", context={
             "request": request, "job_id": job_id, "report": report,
@@ -5477,7 +5501,7 @@ def result_page(request: Request, job_id: str):
         "share_card_missing": (
             "account" if not _account(request)
             else "identity" if not identity_trusted
-            else "no_fight" if numbers["state"] == "no_fight"
+            else "no_fight" if numbers["state"] in ("no_fight", "movement_only")
             else "stats"),
         # The fight's live public links, one per fighter (story_page).
         "story_links": [
@@ -6969,6 +6993,7 @@ def take_camp_mission(request: Request, job_id: str = Form(...), index: int = Fo
     if not fight or int(fight["profile_id"]) != profile_id:
         raise HTTPException(404)
     report = json.loads(Path(fight["report_path"]).read_text(encoding="utf-8"))
+    attach_plausibility(report, Path(fight["report_path"]).parent / "tracking.jsonl")
     refresh_identity_integrity(report)
     fighter = _camp_fighter(report, (get_profile(profile_id) or {}).get("default_fighter", "A"))
     missions = missions_from_report(report, fighter)["missions"]
@@ -7999,6 +8024,7 @@ def shared_report(request: Request, token: str):
     if not path.exists():
         raise HTTPException(404, gone)
     report = json.loads(path.read_text(encoding="utf-8"))
+    attach_plausibility(report, path.parent / "tracking.jsonl")
     _apply_report_annotations(report, [])
     refresh_identity_integrity(report)
     return templates.TemplateResponse(
@@ -8037,9 +8063,11 @@ STORY_GONE = "This fight link was turned off by the fighter who shared it."
 def _story_card(job_id: str) -> dict | None:
     """The fight's share card, built by the same steps as its result page."""
     try:
-        report = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
+        report_path = _require_completed_artifact(job_id, "report.json")
+        report = json.loads(report_path.read_text(encoding="utf-8"))
     except (HTTPException, OSError, json.JSONDecodeError):
         return None
+    attach_plausibility(report, report_path.parent / "tracking.jsonl")
     _score_and_identity_as_shown(report)
     _estimate_score_withheld_for_punches(report)
     return share_card(report)

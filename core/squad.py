@@ -22,7 +22,8 @@ from datetime import datetime
 from pathlib import Path
 
 from core.config import RULESET_LABELS
-from core.report import refresh_identity_integrity
+from core.fight_presence import attach_plausibility
+from core.report import not_a_fight, refresh_identity_integrity
 
 # Below this the fight was not watched well enough for its numbers to belong in
 # a comparison. Showing it anyway would let a badly tracked fight look like a
@@ -139,12 +140,15 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
     movement = report.get("movement_scorecard") or {}
     verdict = None
     if movement.get("available"):
-        totals = movement.get("totals") or {}
+        # Rounds in which each fighter led the movement comparison - not a
+        # movement score, which reports no longer carry outside ten-point-must
+        # rulesets (core/generalship.py). Older cards call it rounds_won.
+        led = movement.get("rounds_led") or movement.get("rounds_won") or {}
         other = "B" if focus == "A" else "A"
-        if totals.get(focus) is not None and totals.get(other) is not None:
-            if totals[focus] > totals[other]:
+        if led.get(focus) is not None and led.get(other) is not None:
+            if led[focus] > led[other]:
                 verdict = "ahead on movement"
-            elif totals[focus] < totals[other]:
+            elif led[focus] < led[other]:
                 verdict = "behind on movement"
             else:
                 verdict = "level on movement"
@@ -157,6 +161,9 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
     )
     unusable_reason = (
         "identity" if identity_failed
+        # Not recognised as a fight (core/fight_presence.py): its movement is
+        # not a fighter's form, so it stays out of the trend.
+        else "not_a_fight" if not_a_fight(report)
         else "coverage" if min(coverage["A"], coverage["B"]) < _MIN_COVERAGE
         else None
     )
@@ -250,6 +257,7 @@ def build_squad_view(fights: list[dict], limit: int = 25) -> dict:
         # The same current gate and coaching the report page applies on every
         # view. Without it the squad showed the priority saved at analysis
         # time, after the coaching rules had changed.
+        attach_plausibility(report, path.parent / "tracking.jsonl")
         refresh_identity_integrity(report)
         row = summarize_fight(report, fight)
         if row is not None:
@@ -288,6 +296,7 @@ def build_squad_view(fights: list[dict], limit: int = 25) -> dict:
         "unusable_count": len(rows) - len(usable),
         "unusable_identity": sum(1 for row in rows if row.get("unusable_reason") == "identity"),
         "unusable_coverage": sum(1 for row in rows if row.get("unusable_reason") == "coverage"),
+        "unusable_not_a_fight": sum(1 for row in rows if row.get("unusable_reason") == "not_a_fight"),
         "trend": trend,
         "trend_available": bool(trend),
         "trend_sport": trend_sport,

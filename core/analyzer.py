@@ -206,7 +206,7 @@ from core.preflight import Preflight
 from core.preflight import probe as probe_video
 from core.pose_smoothing import JointGate
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
-from core.report import build_report, identity_tracking, write_report
+from core.report import build_report, identity_tracking, not_a_fight, withhold_for_not_a_fight, write_report
 from core.rtm_pose import refine as refine_fighter_pose
 from core.edgetam_recovery import build_recovery
 from core.sam_recovery import nearest_guidance, sam_sampling_stride
@@ -1949,17 +1949,28 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # Which analysis code made this, so a result from an out-of-date worker
     # can be recognised and refused by the web app (core/build_info.py).
     report["analysis_build"] = build_stamp()
+    # Whether what was tracked moved like two people fighting at all, kept
+    # beside the footage it describes. core.report.refresh_identity_integrity
+    # withholds coaching, the plan and the score when it did not.
+    plausibility = fight_footage.pop("plausibility", None)
     report["video"]["fight_footage"] = fight_footage
+    report["video"]["plausibility"] = plausibility
     report.setdefault("integrity", {})["fight_footage_sufficient"] = bool(fight_footage["sufficient"])
+    report["integrity"]["fight_plausible"] = bool((plausibility or {}).get("plausible", True))
 
     # A scorecard for the criteria movement can evidence. Kept separate from
     # report["scorecard"] on purpose: that one scores strikes and is withheld
     # because strikes cannot be detected reliably, while this one scores
     # aggression, generalship and territory and says exactly what it leaves out.
+    # Round scores only where the ruleset really is judged round by round on
+    # a ten-point-must card and the scorecard itself is on; everywhere else
+    # this is a movement comparison with no numbers out of ten.
     report["movement_scorecard"] = judge_fight(
         metrics, rounds,
         {f: float(report["tracking"].get(f"fighter_{f}_coverage", 0.0)) for f in ("A", "B")},
         SETTINGS.min_tracking_coverage_for_score,
+        score_rounds=bool(RULESETS[normalize_ruleset(req.ruleset)].ten_point_must
+                          and (report.get("scorecard") or {}).get("available")),
     )
     report["selection_check"] = assess_selection(
         observed_separations,
@@ -2029,6 +2040,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "realtime_speed": realtime_speed,
         "within_video_length_budget": within_budget,
     })
+    # Not recognised as a fight: the saved file and the progress snapshot hold
+    # measured movement only, as every page that reads them will show it.
+    implausible = not_a_fight(report)
+    if implausible:
+        withhold_for_not_a_fight(report, implausible)
     json_path, html_path = write_report(job_dir, report)
     events_path.write_text(json.dumps([e.to_dict() for e in events], indent=2), encoding="utf-8")
     progress(

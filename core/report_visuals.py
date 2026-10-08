@@ -81,7 +81,7 @@ def head_to_head(metrics: dict, mine: str, theirs: str, landed: dict) -> list[di
     rows = [
         {"key": "landed", "label": "Kicks landed", "sub": "kicks only",
          "a": landed.get(mine, 0), "b": landed.get(theirs, 0), "absolute": False},
-        {"key": "guard", "label": "Guard up", "sub": "% of the round",
+        {"key": "guard", "label": "Guard up", "sub": "% of the time seen",
          "a": _percent(a.get("guard_index")), "b": _percent(b.get("guard_index")),
          "absolute": True, "suffix": "%"},
         {"key": "balance", "label": "Balanced", "sub": "% of the round",

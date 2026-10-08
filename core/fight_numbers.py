@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from core import guard as guard_measure
+
 # A sample stands for the time until the next one, but never for more than
 # this: across a gap where the fighter was not seen, nothing was measured.
 MAX_SAMPLE_SECONDS = 0.5
@@ -25,10 +27,9 @@ DIRECTIONAL = 0.5
 # Distance between the two fighters, in body lengths.
 CLOSE_RANGE = 0.9
 LONG_RANGE = 1.8
-# Guard and balance readings are 0..1 (core/metrics.py). Below these the
-# hands are down or the fighter is off balance.
-HANDS_UP = 0.5
-HANDS_DOWN = 0.3
+# Balance readings are 0..1 (core/metrics.py). Below this the fighter is off
+# balance. Guard is not decided here: core/guard.py classifies every frame
+# once, and the hands-up share and longest stretch down below are its figures.
 OFF_BALANCE = 0.45
 OFF_BALANCE_SECONDS = 0.5
 BUSY_WINDOW_SECONDS = 10.0
@@ -44,23 +45,6 @@ def _durations(times: list[float]) -> list[float]:
     if len(out) >= 2:
         out[-1] = float(np.median(out[:-1]))
     return out
-
-
-def _longest_run(times: list[float], flags: list[bool]) -> float:
-    """Longest stretch of consecutive samples where the flag held, in seconds."""
-    longest = start = 0.0
-    running = False
-    previous = None
-    for moment, flag in zip(times, flags):
-        broken = previous is not None and moment - previous > MAX_SAMPLE_SECONDS
-        if flag and running and not broken:
-            longest = max(longest, moment - start)
-        elif flag:
-            running, start = True, moment
-        else:
-            running = False
-        previous = moment
-    return round(longest, 1)
 
 
 def _runs(times: list[float], flags: list[bool], minimum: float) -> int:
@@ -79,7 +63,7 @@ def _runs(times: list[float], flags: list[bool], minimum: float) -> int:
 
 
 def movement_numbers(samples: list[dict], middle: np.ndarray | None, radius: float | None,
-                     round_of=None) -> dict | None:
+                     round_of=None, guard: dict | None = None) -> dict | None:
     """Seconds and distances for one fighter from their per-frame samples.
 
     Each sample: {"t", "x", "y", "body", "guard", "balance", "toward",
@@ -88,6 +72,8 @@ def movement_numbers(samples: list[dict], middle: np.ndarray | None, radius: flo
     distance to the opponent in body lengths (None when not measured).
     `middle` and `radius` are the area the fight used (core.metrics.ring_frame).
     `round_of(seconds)` gives the round number, or None in a break.
+    `guard` is this fighter's core.guard.summarise() result, worked out from
+    the same samples when not passed in.
     """
     if len(samples) < 2:
         return None
@@ -128,8 +114,8 @@ def movement_numbers(samples: list[dict], middle: np.ndarray | None, radius: flo
             body = max(1.0, (previous["body"] + current["body"]) / 2.0)
             distance += float(np.hypot(current["x"] - previous["x"], current["y"] - previous["y"])) / body
 
-    guards = [item.get("guard") for item in samples]
-    guarded = [g for g in guards if g is not None]
+    if guard is None:
+        guard = guard_measure.summarise((item["t"], item.get("guard")) for item in samples)
     balances = [item.get("balance") for item in samples]
 
     # Tiring: how fast they moved in the second half of the time they were
@@ -164,9 +150,9 @@ def movement_numbers(samples: list[dict], middle: np.ndarray | None, radius: flo
         "standing_seconds": seconds([not m for m in moving]),
         "range_seconds": ranges,
         "distance_body_lengths": round(distance, 1),
-        "hands_up_share": (round(sum(g >= HANDS_UP for g in guarded) / len(guarded), 3) if guarded else None),
-        "longest_hands_down_seconds": (_longest_run(times, [g is not None and g < HANDS_DOWN for g in guards])
-                                       if guarded else None),
+        # The same figures as the guard card and coaching (core/guard.py).
+        "hands_up_share": guard["share"] if guard else None,
+        "longest_hands_down_seconds": guard["longest_down_seconds"] if guard else None,
         "off_balance_count": (_runs(times, [b is not None and b < OFF_BALANCE for b in balances], OFF_BALANCE_SECONDS)
                               if any(b is not None for b in balances) else None),
         "pace_change_percent": pace_change,

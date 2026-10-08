@@ -1225,7 +1225,8 @@ class PublicPageTests(unittest.TestCase):
 
     def _render_result(self, selection_check, can_share=False, sharing=None, score_withheld=None,
                        scorecard_available=None, measurement=None, kick_minimum=None,
-                       action_labels_available=None, report_access=None):
+                       action_labels_available=None, report_access=None, metrics=None, extra=None,
+                       refresh=False):
         """Actually render result.html, rather than grepping its source.
 
         Every other check on this template matches text in the file, which
@@ -1253,6 +1254,18 @@ class PublicPageTests(unittest.TestCase):
         fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
         report = json.loads(fixture.read_text(encoding="utf-8"))
         report["selection_check"] = selection_check
+        report.update(extra or {})
+        if metrics is not None:
+            from core.guard import reconcile_report_guard
+
+            for fighter, values in metrics.items():
+                report["metrics"][fighter].update(values)
+            reconcile_report_guard(report)
+        if refresh:
+            # As the result page prepares a saved report, before rendering.
+            from core.report import refresh_identity_integrity
+
+            refresh_identity_integrity(report)
         if measurement is not None:
             for fighter in ("A", "B"):
                 report.setdefault("metrics", {}).setdefault(fighter, {})["measurement"] = measurement
@@ -1268,9 +1281,90 @@ class PublicPageTests(unittest.TestCase):
             analysis_quality=_analysis_quality_summary(report), can_share=can_share,
             sharing=sharing, score_withheld=score_withheld, unavailable=[],
             kick_minimum=kick_minimum,
+            **({"numbers": __import__("app.main", fromlist=["_numbers_state"])._numbers_state(report)}
+               if refresh else {}),
             # As result_page passes it; the suite runs with counts published.
             strike_counts_published=STRIKE_COUNTS_PUBLISHED,
         )
+
+    def test_legacy_guard_figures_render_without_contradiction(self):
+        """QA, 2026-10-07: "Guard 27%" above "Hands up by the face 0%" and
+        "Longest with hands down 20 s" on one page. An older report now shows
+        its hands-up share everywhere and withholds what it cannot recover,
+        saying why (core/guard.py)."""
+        from core.fight_numbers import movement_numbers
+
+        def legacy_numbers(longest):
+            # A real numbers block, with the guard fields as the old code stored them.
+            base = movement_numbers([{"t": i / 6, "x": 500.0 + i, "y": 300.0, "body": 200.0, "guard": 0.4,
+                                      "balance": 0.8, "toward": 0.0, "speed": 0.5, "gap": 1.2}
+                                     for i in range(120)], None, None)
+            return {**base, "hands_up_share": 0.0, "longest_hands_down_seconds": longest}
+
+        page = self._render_result({}, metrics={
+            "A": {"guard_index": 0.27, "numbers": legacy_numbers(20.0)},
+            "B": {"guard_index": 0.45, "numbers": legacy_numbers(0.0)},
+        })
+        self.assertNotIn(">27<", page)
+        self.assertNotIn("27%", page)
+        self.assertNotIn("45%", page)
+        import re
+
+        hands_down = re.search(r'Longest with hands down.*?</div>', page, re.S).group(0)
+        self.assertNotIn("20 s", hands_down)
+        self.assertEqual(hands_down.count("Not measured"), 2)
+        self.assertIn("re-run to measure", hands_down)
+        hands_up = re.search(r'Hands up by the face.*?</div>', page, re.S).group(0)
+        self.assertEqual(hands_up.count(">0%<"), 2)
+
+    def test_saved_movement_scorecard_renders_as_a_comparison_for_counted_rulesets(self):
+        """QA, 2026-10-07 (/result/b0bc06c741a7, /result/480b87c056cf): a saved
+        "Movement scorecard 10-10" beside "Score: Not scored", in boxing terms,
+        on WT taekwondo and point-fighting reports."""
+        legacy = {"available": True, "status": "movement_criteria_only", "totals": {"A": 10, "B": 10},
+                  "leader": None, "rounds_won": {"A": 0, "B": 0},
+                  "criteria_scored": ["effective aggression", "ring generalship", "territory"],
+                  "criteria_excluded": ["clean effective striking"],
+                  "disclaimer": "Scored on movement only: effective aggression, ring generalship and territory.",
+                  "rounds": [{"number": 1, "A": 10, "B": 10, "winner": None, "margin": 0.02,
+                              "note": "Too close to separate on movement alone.",
+                              "aggression": {"A": 0.51, "B": 0.49}, "generalship": {"A": 0.5, "B": 0.5},
+                              "territory": {"A": 0.52, "B": 0.48}}]}
+        for ruleset in ("WT_TAEKWONDO", "POINT_FIGHTING"):
+            with self.subTest(ruleset=ruleset):
+                page = self._render_result({}, scorecard_available=False, extra={
+                    "movement_scorecard": legacy,
+                    "setup": {"ruleset": ruleset, "round_count": 1, "selected_rounds": [1]}})
+                section = page[page.index('id="report-movement-score"'):]
+                section = section[:section.index("</section>")]
+                self.assertIn("Movement comparison", section)
+                self.assertNotIn("Movement scorecard", section)
+                self.assertNotIn('class="score"', section)
+                self.assertNotIn("<td>10</td>", section)
+                for criterion in ("effective aggression", "ring generalship", "judging criteria"):
+                    self.assertNotIn(criterion, section)
+                self.assertIn("not a score", section)
+                self.assertIn("51% / 49%", section)
+
+    def test_photo_cutouts_render_measured_movement_only(self):
+        """QA, 2026-10-07 (/result/9138ca9b38a7): two photo cut-outs got
+        "Strong observation evidence", strengths and a four-week plan."""
+        from core.fight_presence import PLAUSIBILITY_TEXT
+
+        verdict = {"plausible": False, "reasons": ["rigid"], "text": [PLAUSIBILITY_TEXT["rigid"]],
+                   "signals": {}}
+        page = self._render_result({}, refresh=True, extra={"video": {
+            **json.loads((Path(__file__).resolve().parent / "fixtures" / "report_sample.json")
+                         .read_text(encoding="utf-8"))["video"], "plausibility": verdict}})
+        self.assertIn("Not recognised as a fight.", page)
+        self.assertIn("cut-outs", page)
+        self.assertNotIn("Strong observation evidence", page)
+        self.assertNotIn("Keep doing", page)
+        self.assertNotIn("Next-session plan", page)
+        self.assertNotIn("The next four weeks", page)
+        self.assertNotIn("Final coaching summary", page)
+        # The movement measured stays.
+        self.assertIn('class="fight-vitals"', page)
 
     def _render_identity(self, trusted):
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader
@@ -2436,11 +2530,13 @@ class MovementScorecardRenderTests(unittest.TestCase):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates"
                     / "result.html").read_text(encoding="utf-8")
         self.assertIn('id="report-movement-score"', template)
-        self.assertIn("movement.criteria_scored", template)
-        # The exclusion is not optional dressing: a scorecard that does not say
-        # it left out clean striking is claiming to be a full score.
-        self.assertIn("movement.criteria_excluded", template)
-        self.assertIn("movement.disclaimer", template)
+        # Shown through core.generalship.movement_comparison, which decides the
+        # wording and whether any score may appear (QA, 2026-10-07: "10-10"
+        # beside "Not scored"). Its basis says what is left out and that it
+        # is not a score; see tests/test_movement_comparison.py.
+        self.assertIn("movement_comparison(", template)
+        self.assertIn("movement.basis", template)
+        self.assertIn("not a score", template)
         # And it must render its own withheld state rather than vanishing.
         self.assertIn("movement.reason", template)
 
@@ -3541,7 +3637,7 @@ class ReportOrderTests(unittest.TestCase):
         """
         page = self._page()
         self.assertLess(page.index('class="fight-vitals"'),
-                        page.index("Movement scorecard"))
+                        page.index('id="report-movement-score"'))
 
     def test_the_order_is_explained_where_someone_would_change_it(self):
         page = self._page()
