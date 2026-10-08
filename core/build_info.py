@@ -23,7 +23,11 @@ from pathlib import Path
 #    identity (core/analyzer.py _analyze_from_seed).
 # 3: solo sessions (core/solo.py). An older worker would read a solo job as a
 #    two-fighter one with no Fighter B.
-ANALYSIS_VERSION = 3
+# 4: a quarter turn applied while decoding (AnalysisRequest.rotate_clockwise),
+#    with the fighter boxes drawn on the turned frame; and guard measured as
+#    wrist-to-chin over shoulder width (core/guard.py). An older worker would
+#    analyse a turned job unturned, with its boxes on the wrong pixels.
+ANALYSIS_VERSION = 4
 
 ROOT = Path(__file__).resolve().parents[1]
 

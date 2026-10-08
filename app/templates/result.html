@@ -143,7 +143,7 @@
   {#- Every number above is an average, and the reader is owed the ground it
      stands on. These used to be withheld entirely below 60% coverage, so a
      fighter saw a row of dashes and no reason for them. -#}
-  {% if m.guard_note %}<p class="vitals-basis small muted">Guard: {{ m.guard_note }}</p>{% endif %}
+  {% if m.pose_note %}<p class="vitals-basis small muted">{{ m.pose_note }}</p>{% elif m.guard_note %}<p class="vitals-basis small muted">Guard: {{ m.guard_note }}</p>{% endif %}
   {% if identity_failed %}
   <p class="vitals-basis small muted">These may include other people&rsquo;s movement &mdash; the opponent, an official or someone at ringside. {% if identity_failure %}{{ identity_failure.advice }}{% endif %}</p>
   {% endif %}

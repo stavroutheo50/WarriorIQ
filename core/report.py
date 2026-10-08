@@ -909,23 +909,58 @@ def withhold_for_not_a_fight(report: dict, verdict: dict) -> None:
         report.setdefault("training_plan", {})[fighter] = []
         report.setdefault("training_progression", {})[fighter] = []
     if "rigid" in (verdict.get("reasons") or []):
-        metrics = report.get("metrics") or {}
-        for fighter in ("A", "B"):
-            own = metrics.get(fighter)
-            if not isinstance(own, dict):
-                continue
-            own["guard_index"] = None
-            own["balance_index"] = None
-            own["guard_note"] = RIGID_POSE_NOTE
-            own["guard_note_short"] = "poses never changed"
-            numbers = own.get("numbers")
-            if isinstance(numbers, dict):
-                numbers.update({"hands_up_share": None, "longest_hands_down_seconds": None,
-                                "off_balance_count": None})
-            for key in ("moments", "spread"):
-                if isinstance(own.get(key), dict):
-                    own[key].pop("guard_index", None)
-                    own[key].pop("balance_index", None)
+        withhold_pose_figures(report, RIGID_POSE_NOTE, "poses never changed")
+
+
+def withhold_pose_figures(report: dict, note: str, short: str) -> None:
+    """Guard and balance, and everything derived from them, become "Not measured".
+
+    For footage where they are not readings of an upright, live body: frozen
+    poses (core/fight_presence.py) or a video still lying on its side.
+    Movement, centre and pressure come from where the body was, not its
+    shape, and stay.
+    """
+    metrics = report.get("metrics") or {}
+    for fighter in ("A", "B"):
+        own = metrics.get(fighter)
+        if not isinstance(own, dict):
+            continue
+        own["guard_index"] = None
+        own["balance_index"] = None
+        own["guard_note"] = note
+        own["guard_note_short"] = short
+        own["pose_note"] = note
+        numbers = own.get("numbers")
+        if isinstance(numbers, dict):
+            numbers.update({"hands_up_share": None, "longest_hands_down_seconds": None,
+                            "off_balance_count": None})
+        for key in ("moments", "spread"):
+            if isinstance(own.get(key), dict):
+                own[key].pop("guard_index", None)
+                own[key].pop("balance_index", None)
+        availability = own.get("availability")
+        if isinstance(availability, dict):
+            for name in ("guard", "balance"):
+                availability[name] = {**(availability.get(name) or {}), "available": False, "reason": note}
+
+
+SIDEWAYS_NOTE = ("Guard and balance are not measured: this video was still filmed sideways, so "
+                 "WarriorIQ could not tell up from down for the body. Turn it with \"Rotate 90°\" on "
+                 "the fighter-selection page and analyse it again.")
+
+
+def still_sideways(report: dict) -> bool:
+    return bool(((report.get("video") or {}).get("orientation") or {}).get("sideways"))
+
+
+def withhold_for_sideways(report: dict) -> dict:
+    """QA, 2026-10-07: "filmed sideways, could not turn it" at upload, then a
+    solo report with guard 39%. Hands "up by the face" and a balanced stance
+    are directions on an upright body; read from a body lying across the
+    picture they are not measurements."""
+    if still_sideways(report):
+        withhold_pose_figures(report, SIDEWAYS_NOTE, "video still sideways")
+    return report
 
 
 def refresh_identity_integrity(report: dict) -> dict:
@@ -938,6 +973,7 @@ def refresh_identity_integrity(report: dict) -> dict:
     # Before anything reads a guard figure: older reports carried three guard
     # summaries that disagreed with each other (core/guard.py).
     reconcile_report_guard(report)
+    withhold_for_sideways(report)
     tracking = report.setdefault("tracking", {})
     # Two fighters who cannot be told apart in this video fail identity however
     # well they were followed. Coverage answers "was somebody tracked", never

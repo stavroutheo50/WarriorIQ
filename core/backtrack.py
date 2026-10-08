@@ -47,6 +47,7 @@ import numpy as np
 from core.identity import box_iou
 from core.reid import pool as reid_pool
 from core.reid import similarity as reid_similarity
+from core.video import open_capture
 
 LOGGER = logging.getLogger("warrioriq.backtrack")
 
@@ -254,7 +255,7 @@ def _buffer_samples(video_path: str, frames_wanted: list[int], workdir: Path,
     wanted_set = set(wanted)
     stored: dict[int, Path] = {}
     cuts: set[int] = set()
-    capture = cv2.VideoCapture(video_path)
+    capture = open_capture(video_path)
     try:
         if not capture.isOpened():
             return stored, cuts

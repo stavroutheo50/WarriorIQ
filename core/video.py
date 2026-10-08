@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
@@ -12,6 +13,100 @@ import numpy as np
 from core.types import AnalysisRequest, RoundSpec, VideoInfo
 
 LOGGER = logging.getLogger("warrioriq")
+
+
+# ---- A quarter turn applied while decoding --------------------------------
+#
+# QA, 2026-10-07: a video filmed sideways was analysed as it lay - the upload
+# said "filmed sideways, could not turn it" and a solo report still printed
+# guard 39%. core/orientation.py writes a rotation tag into the file when it
+# can; when it cannot, or when the person turns the video on the selection
+# page, the turn is applied to every frame as it is decoded instead. The file
+# is never re-encoded (see normalize_container on why not on the web host).
+#
+# The analysis registers the turn for its video path for as long as it runs
+# (decoding_rotation), so every reader that opens the file through
+# open_capture, get_video_info or read_frame sees the same upright frames
+# without each one being handed the turn.
+_ROTATIONS: dict[str, int] = {}
+_ROTATE_CODES = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+
+
+def quarter_turn(value) -> int:
+    """0, 90, 180 or 270 clockwise; anything else is no turn."""
+    try:
+        turn = int(value) % 360
+    except (TypeError, ValueError):
+        return 0
+    return turn if turn in _ROTATE_CODES else 0
+
+
+def rotate_frame(frame, clockwise):
+    turn = quarter_turn(clockwise)
+    if frame is None or not turn:
+        return frame
+    return cv2.rotate(frame, _ROTATE_CODES[turn])
+
+
+def _rotation_key(path) -> str:
+    return str(Path(path).resolve())
+
+
+def rotation_for(path) -> int:
+    return _ROTATIONS.get(_rotation_key(path), 0)
+
+
+@contextmanager
+def decoding_rotation(path, clockwise):
+    """Decode ``path`` turned ``clockwise`` degrees inside this block."""
+    turn = quarter_turn(clockwise)
+    if not turn:
+        yield
+        return
+    key = _rotation_key(path)
+    previous = _ROTATIONS.get(key)
+    _ROTATIONS[key] = turn
+    try:
+        yield
+    finally:
+        if previous is None:
+            _ROTATIONS.pop(key, None)
+        else:
+            _ROTATIONS[key] = previous
+
+
+class _TurnedCapture:
+    """cv2.VideoCapture whose frames and frame size come out turned."""
+
+    def __init__(self, capture, turn: int):
+        self._capture = capture
+        self._turn = turn
+
+    def read(self, *args):
+        ok, frame = self._capture.read(*args)
+        return ok, rotate_frame(frame, self._turn) if ok else frame
+
+    def retrieve(self, *args):
+        ok, frame = self._capture.retrieve(*args)
+        return ok, rotate_frame(frame, self._turn) if ok else frame
+
+    def get(self, prop):
+        if self._turn in (90, 270):
+            if prop == cv2.CAP_PROP_FRAME_WIDTH:
+                return self._capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+                return self._capture.get(cv2.CAP_PROP_FRAME_WIDTH)
+        return self._capture.get(prop)
+
+    def __getattr__(self, name):
+        return getattr(self._capture, name)
+
+
+def open_capture(path):
+    """cv2.VideoCapture for ``path``, turned when a turn is registered for it."""
+    capture = cv2.VideoCapture(str(path))
+    turn = rotation_for(path)
+    return _TurnedCapture(capture, turn) if turn else capture
 
 
 class SourceTimestampClock:
@@ -48,7 +143,7 @@ def get_video_info(path: str | Path) -> VideoInfo:
     if not path.exists():
         raise FileNotFoundError(f"Fight video not found: {path}")
 
-    cap = cv2.VideoCapture(str(path))
+    cap = open_capture(path)
     if not cap.isOpened():
         raise RuntimeError(f"OpenCV could not open video: {path}")
 
@@ -251,7 +346,7 @@ def probe_upload(path: str | Path, info: VideoInfo, search_share: float = 0.25,
 
 
 def read_frame(path: str | Path, frame_index: int):
-    cap = cv2.VideoCapture(str(path))
+    cap = open_capture(path)
     if not cap.isOpened():
         raise RuntimeError(f"Could not open video: {path}")
     target = max(0, int(frame_index))
@@ -310,7 +405,8 @@ def ffmpeg_frame(path: str | Path, seconds: float):
         return None
     if result.returncode != 0 or not result.stdout:
         return None
-    return cv2.imdecode(np.frombuffer(result.stdout, dtype=np.uint8), cv2.IMREAD_COLOR)
+    return rotate_frame(cv2.imdecode(np.frombuffer(result.stdout, dtype=np.uint8), cv2.IMREAD_COLOR),
+                        rotation_for(path))
 
 
 def selection_frame(path: str | Path, info: VideoInfo, preferred_frame: int):

@@ -198,6 +198,6 @@ function useStills(){if(stillMode)return;stillMode=true;try{video.pause()}catch{
 // Fetch the frame of the newest observation, one at a time, so the skeletons
 // always sit on the picture they were measured on.
 function refreshStill(){if(!stillMode||stillPending)return;const observation=latestData?.latest_observation,time=Number(observation?.time_seconds);if(!Number.isFinite(time)||Math.abs(time-stillTime)<.5)return;stillPending=true;const next=new Image();next.onload=()=>{liveStill.src=next.src;stillTime=time;stillPending=false;renderOverlay();};next.onerror=()=>{stillPending=false;};next.src=`/live-frame/${jobId}?t=${time.toFixed(2)}`;}
-video.addEventListener('error',useStills);video.addEventListener('loadedmetadata',()=>{if(!(video.videoWidth>0))useStills();});render(initialState);poll();
+video.addEventListener('error',useStills);video.addEventListener('loadedmetadata',()=>{if(!(video.videoWidth>0))useStills();});if({{ live_turned|default(false)|tojson }})useStills();render(initialState);poll();
 </script>
 {% endblock %}
