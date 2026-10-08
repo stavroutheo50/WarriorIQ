@@ -78,7 +78,7 @@
   </div>
   <section class="analysis-choice">
     <div class="analysis-choice-copy"><div class="eyebrow">Detailed report</div>{% if fighter_name %}<h2>Which one is {{fighter_name}}?</h2><p>You filed this fight under {{fighter_name}}. Pick the box that is {{fighter_name}} &mdash; they get the full report, coach insights, replay and training plan. Both fighters are still tracked for context and scoring.</p>{% else %}<h2>Who are you training?</h2><p>Both fighters are tracked for context and scoring. Your chosen athlete receives the full report, coach insights, replay, and personal training plan.</p>{% endif %}</div>
-    <div class="analysis-choice-actions"><div class="target-options" id="targetOptions" role="radiogroup" aria-label="Choose the athlete for the detailed report"><label><input type="radio" name="focusFighter" value="A" {% if default_focus != 'B' %}checked{% endif %}><span><i>A</i> Fighter A{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label><label><input type="radio" name="focusFighter" value="B" {% if default_focus == 'B' %}checked{% endif %}><span><i>B</i> Fighter B{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label></div><div class="start-wrap"><button class="btn" id="start" type="button" data-motion-primary disabled aria-describedby="startReason">Start WarriorIQ analysis <span aria-hidden="true">→</span></button>{#- Why Start is disabled, right under the button: the reason was only in the
+    <div class="analysis-choice-actions"><div class="target-options" id="targetOptions" role="radiogroup" aria-label="Choose the athlete for the detailed report"><label><input type="radio" name="focusFighter" value="A" {% if default_focus != 'B' %}checked{% endif %}><span><i aria-hidden="true">A</i> Fighter A{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label><label><input type="radio" name="focusFighter" value="B" {% if default_focus == 'B' %}checked{% endif %}><span><i aria-hidden="true">B</i> Fighter B{% if fighter_name %} is {{fighter_name}}{% endif %}</span></label></div><div class="start-wrap"><button class="btn" id="start" type="button" data-motion-primary disabled aria-describedby="startReason">Start WarriorIQ analysis <span aria-hidden="true">→</span></button>{#- Why Start is disabled, right under the button: the reason was only in the
         status line at the top of the sidebar (QA, 2026-10-04). -#}<p class="start-reason" id="startReason" role="status" aria-live="polite">Box Fighter A to start.</p></div></div>
     <p class="start-feedback" id="startFeedback" role="alert" hidden></p>
   </section>
@@ -312,6 +312,10 @@ function buildPickList(){
       };
       const text=document.createElement('span');
       text.textContent=describeDetection(box,index);
+      // Both lists offer the same people, so on their own the names were
+      // identical in a screen reader's list of form fields; say which
+      // fighter this choice is for (QA, 2026-10-07).
+      input.setAttribute('aria-label',`Fighter ${side}: ${text.textContent}`);
       label.append(input,text);
       group.appendChild(label);
     });
