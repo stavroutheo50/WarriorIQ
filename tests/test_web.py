@@ -957,7 +957,9 @@ class PublicPageTests(unittest.TestCase):
         change that would explain it, and teaches everyone to re-run. So the
         generated values go before the assertion, and nothing else does.
         """
-        html = re.sub(r'(content|value)="[A-Za-z0-9_\-]{20,}"',
+        # The CSP nonce on every script tag is random base64url too: one read
+        # nonce="OKjln82V4x3klZX-vd95GBTJ" (8 hits in 300 renders, 2026-10-08).
+        html = re.sub(r'(content|value|nonce)="[A-Za-z0-9_\-]{20,}"',
                       r'\1="<generated>"', html)
         return re.sub(r'\?v=[0-9a-f]+', "?v=<generated>", html)
 
