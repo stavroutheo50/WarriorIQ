@@ -225,7 +225,10 @@
     if(f.size===0)return 'That file is empty. Pick the full clip.';
     if(overLimit(f.size))return `That file is ${fmtMB(f.size)}. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps instead of 4K or 60 fps, or trim to a single round.`;
     return null};
-  const rejectFile=(message)=>{hidePreflight();videoInput.value='';fileButtonText.textContent='Choose fight video';fileStatus.textContent=message;fileStatus.dataset.tone='bad';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');uploadCard.dataset.uploadState='empty';uploadSubmit.disabled=true;uploadSubmit.textContent='Choose a video to continue';window.wiqToast(message,'error')};
+  // A rejected file also cancels the footage check still running on it, or
+  // that check finishes later and puts "This recording looks usable" beside
+  // the blocking message (QA, 2026-10-07: a 1-second clip showed both).
+  const rejectFile=(message)=>{preflightToken++;hidePreflight();videoInput.value='';fileButtonText.textContent='Choose fight video';fileStatus.textContent=message;fileStatus.dataset.tone='bad';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');uploadCard.dataset.uploadState='empty';uploadSubmit.disabled=true;uploadSubmit.textContent='Choose a video to continue';window.wiqToast(message,'error')};
   // Duration needs the browser to read the header, which it will only do
   // asynchronously, so it can only add to what the status line says.
   const checkDuration=(f)=>{const probe=document.createElement('video');probe.preload='metadata';const url=URL.createObjectURL(f);probe.onloadedmetadata=()=>{URL.revokeObjectURL(url);const seconds=probe.duration;if(!isFinite(seconds))return;

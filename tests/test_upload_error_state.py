@@ -33,3 +33,15 @@ def test_choosing_a_file_clears_both_error_displays():
 def test_a_failure_shows_the_error_state_through_show_progress():
     restore = _function("restore")
     assert "showProgress('error')" in restore
+
+
+def test_a_rejected_file_cancels_the_footage_check_still_running_on_it():
+    """QA, 2026-10-07: a 1-second clip showed "needs at least 2 seconds" and a
+    quality panel saying the recording looked usable. Reproduced in Chromium:
+    the duration check rejected the file, then the footage check on the same
+    file finished and showed its verdict. Rejecting now invalidates it."""
+    reject = PAGE[PAGE.index("const rejectFile="):]
+    reject = reject[:reject.index("};") + 2]
+    assert "preflightToken++" in reject
+    preflight = PAGE[PAGE.index("const runPreflight="):]
+    assert "if(token!==preflightToken)return;" in preflight
