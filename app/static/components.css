@@ -734,3 +734,19 @@
 .moment-time{min-height:36px;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:transparent;color:inherit;font:inherit;cursor:pointer}
 .moment-time:hover,.moment-time:focus-visible{background:rgba(255,255,255,.08)}
 .moment-watch{align-self:flex-start}
+/* Fix this first (result.html, core.report.fix_first): one fault, its moment, its drill. */
+.fix-first{margin:18px 0;border-left:4px solid var(--wiq-accent,#4fd7ff)}
+.fix-first h2{margin:6px 0 8px;font-size:clamp(22px,4vw,30px);line-height:1.15;overflow-wrap:anywhere}
+.fix-first-detail{margin:0 0 14px;color:#c7d2e3}
+.fix-first-moment{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 16px}
+.fix-first-drill{padding:14px 16px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(255,255,255,.03);margin:0 0 12px}
+.fix-first-drill span{display:block;color:#7f8ea3;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.8px}
+.fix-first-drill strong{display:block;margin:4px 0;font-size:17px}
+.fix-first-drill p{margin:0 0 6px}
+/* With the fault moved to the top, "Keep doing" may stand alone. */
+.keep-fix-row article:only-child{grid-column:1/-1}
+/* Since your last fight, near the top (result.html): arrows, never a verdict. */
+.since-last{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:0 0 18px;padding:12px 16px;border:1px solid rgba(255,255,255,.08);border-radius:12px}
+.since-last .list-clean{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0;padding:0}
+.since-last li{font-size:14px;color:#c7d2e3}
+.setup-solo{margin:12px 0 0;padding:10px 14px;border-left:3px solid rgba(255,255,255,.18);color:#c7d2e3;font-size:14px}

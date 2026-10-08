@@ -357,6 +357,9 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None,
             "title": f"Work on: {title}",
             "detail": detail,
             "evidence_times": _moment_times(own, _key, want_low=True),
+            # The measurement, so the report can put this finding's own drill
+            # under it (core.report.fix_first) rather than guess by position.
+            "metric": _key,
         })
         drills.append({
             "name": f"Fighter {fighter} · {drill}",

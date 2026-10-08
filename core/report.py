@@ -1644,3 +1644,58 @@ header{{display:flex;justify-content:space-between;align-items:end;margin-bottom
 </body></html>"""
     html_path.write_text(html, encoding="utf-8")
     return json_path, html_path
+
+
+def _clock(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def fix_first(report: dict, fighter: str, *, training_items: int | None = None) -> dict | None:
+    """The one thing to fix first, where it happened, and the drill for it.
+
+    The report's top card, after mmagpt.app's "Fix this first": one finding
+    first, the proof next to it, something to do about it under it. Built
+    only from what the analysis already measured - the fighter's first
+    improvement (core/coaching.py), its own evidence times, and the drill made
+    for the same measurement - so nothing here is new or guessed. None when
+    there is no measured fault to name (or the identity check failed, when the
+    page shows no coaching at all), and the page falls back to its usual rows.
+
+    ``training_items`` is the plan's allowance (core/payments.py): 0 keeps the
+    drill off, like the training plan it comes from.
+    """
+    if not (report.get("integrity") or {}).get("identity_evidence_trusted", True):
+        return None
+    coaching = (report.get("coaching") or {}).get(fighter) or {}
+    improvements = [item for item in coaching.get("improvements") or [] if isinstance(item, dict)]
+    if not improvements:
+        return None
+    first = improvements[0]
+    drills = [d for d in coaching.get("drills") or [] if isinstance(d, dict)]
+    # Matched by measurement on new reports, by the sentence on older ones
+    # (a drill's "why" is its finding's detail, core/coaching.py).
+    drill = (next((d for d in drills if first.get("metric") and d.get("metric") == first.get("metric")), None)
+             or next((d for d in drills if d.get("why") and d.get("why") == first.get("detail")), None))
+    times = sorted(float(t) for t in first.get("evidence_times") or [] if isinstance(t, (int, float)))
+    if drill is None and not times:
+        # "Nothing behind your opponent" and the like: no fault, no moment.
+        return None
+    card = {
+        "title": str(first.get("title") or "").removeprefix("Work on: "),
+        "detail": str(first.get("detail") or ""),
+        "moment_seconds": times[0] if times else None,
+        "moment_clock": _clock(times[0]) if times else None,
+        "more_moments": max(0, len(times) - 1),
+        "drill": None,
+    }
+    if drill is not None and training_items != 0:
+        plan = next((row for row in (report.get("training_plan") or {}).get(fighter) or []
+                     if isinstance(row, dict) and str(row.get("work") or "").endswith(str(drill.get("prescription")))),
+                    None)
+        card["drill"] = {
+            "name": str(drill.get("name") or "").split(" · ", 1)[-1],
+            "prescription": str(drill.get("prescription") or ""),
+            "goal": str((plan or {}).get("goal") or ""),
+        }
+    return card
