@@ -39,7 +39,7 @@ if str(ROOT) not in sys.path:
 
 import numpy as np  # noqa: E402
 
-from core.strike_exam import AUTO_PREFIX, BAR, CountCheck, VERDICT_PATH, decide, window_checks  # noqa: E402
+from core.strike_exam import BAR, CountCheck, VERDICT_PATH, decide, not_an_answer_key, window_checks  # noqa: E402
 
 SPORTS_WITH_OFFICIAL_COUNTS = ("mma",)
 
@@ -63,8 +63,9 @@ def load_windows(directories, excluded_fights: set[str]):
         for path in files:
             with np.load(path, allow_pickle=False) as data:
                 fight = _fight_id(path, data)
-                if fight.startswith(AUTO_PREFIX):
-                    raise ExamRefused(f"{path}: {fight} is an auto-label; WarriorIQ's own labels are never answers")
+                refused = not_an_answer_key(fight)
+                if refused:
+                    raise ExamRefused(f"{path}: {fight} is {refused}")
                 if fight in excluded_fights:
                     raise ExamRefused(f"{path}: fight {fight} was used to train or select this model")
                 rows.append((np.asarray(data["x"], dtype=np.float32), int(data["y"]), fight, directory.name))

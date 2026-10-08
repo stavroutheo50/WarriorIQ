@@ -53,7 +53,7 @@ class RunnerTests(unittest.TestCase):
 
     def test_refuses_training_validation_and_auto_label_fights(self):
         _, seen, _ = runner.load_model(self.ckpt)
-        for fight in ("train_fight", "val_fight", "auto_job42"):
+        for fight in ("train_fight", "val_fight", "auto_job42", "strikemetrics_haggertyvnaito"):
             directory = self._windows(f"d_{fight}", fight, "jab", 2)
             with self.assertRaises(runner.ExamRefused):
                 runner.load_windows([directory], seen)

@@ -66,6 +66,7 @@ dataset/sequences_combined/
 # repository on the same reasoning as everything above.
 dataset/tkd_kick3/
 dataset/sequences_tkd_kick3/
+dataset/sequences_strikemetrics/
 
 # What tools/build_labelled_sequences.py and the training mixes build. Same
 # reasoning: pose measurements of identifiable athletes, public repository.

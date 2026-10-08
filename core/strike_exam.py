@@ -55,6 +55,18 @@ BAR = {
 
 FAMILIES = ("punch", "kick", "knee")
 AUTO_PREFIX = "auto_"
+# Fight ids that are training material only, never exam answers: WarriorIQ's
+# own labels, and datasets that mark only some strikes (an unmarked window may
+# hold a strike, so precision cannot be measured on them).
+NOT_ANSWER_KEYS = {
+    AUTO_PREFIX: "an auto-label; WarriorIQ's own labels are never answers",
+    "strikemetrics_": "StrikeMetrics marks only some strikes, so precision cannot be measured on it",
+}
+
+
+def not_an_answer_key(fight_id: str) -> str | None:
+    """Why ``fight_id`` may not be used as exam evidence, or None if it may."""
+    return next((why for prefix, why in NOT_ANSWER_KEYS.items() if str(fight_id).startswith(prefix)), None)
 
 
 def family_of(action_class: str | None) -> str | None:
