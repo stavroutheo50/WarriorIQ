@@ -153,6 +153,10 @@
   const showProgress=tone=>{
     if(!progressPinned){document.body.appendChild(progress);progressPinned=true}
     progress.hidden=false;progress.dataset.tone=tone;
+    // "Keep this tab open... moves you on by itself" is about an upload in
+    // flight. Under a failure it promised a move that will not come
+    // (QA, 2026-10-07).
+    const hint=document.getElementById('uploadProgressHint');if(hint)hint.hidden=tone==='error';
   };
   const holdPage=event=>{if(!uploadInFlight)return;event.preventDefault();event.returnValue=''};
   window.addEventListener('beforeunload',holdPage);
@@ -421,7 +425,10 @@
     return {action:`Press the button to try again. If it keeps happening, tell support the error number ${status}.`};
   };
   const uploadError=document.getElementById('uploadError'),uploadErrorDetail=document.getElementById('uploadErrorDetail'),uploadErrorAction=document.getElementById('uploadErrorAction'),uploadErrorLink=document.getElementById('uploadErrorLink');
-  const hideUploadError=()=>{if(uploadError)uploadError.hidden=true};
+  // A failure shows twice: the error panel and the progress strip in its
+  // error tone. Choosing another file clears both (QA, 2026-10-07: the red
+  // error stayed up over the new file).
+  const hideUploadError=()=>{if(uploadError)uploadError.hidden=true;const strip=document.getElementById('uploadProgress');if(strip&&strip.dataset.tone==='error')strip.hidden=true};
   const showUploadError=(status,detail)=>{
     if(!uploadError)return;
     const step=nextStepFor(status,detail);
