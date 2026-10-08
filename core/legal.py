@@ -64,8 +64,8 @@ LEGAL_DOCUMENTS = {
         "sections": [
             ("Essential cookies", "warrioriq_session keeps a signed-in account authenticated for up to 30 days. warrioriq_guest separates a temporary guest job from other browser sessions for up to 24 hours. warrioriq_oauth is a signed, HttpOnly cookie used for up to 10 minutes to protect an optional social sign-in attempt and is removed when the browser session ends. These cookies use Secure on HTTPS; the social-sign-in cookie uses SameSite=None in production so Apple can safely return a form POST, while the others use SameSite=Lax."),
             ("Preference storage", "WarriorIQ stores a first-party preference cookie recording Accept All, Reject Non-Essential or a custom selection. Signed-in choices are also linked to the account. Essential security and session storage remains separate and cannot be disabled while using authenticated or temporary private functions."),
-            ("Analytics", "Google Analytics 4 is installed through a Google tag. The tag loads on every page so the installation stays verifiable to Google's own tag detection, but Google Consent Mode holds analytics storage denied until you choose Accept All or select analytics under Manage Preferences; no analytics cookie is written before that, and Reject Non-Essential leaves it denied."),
-            ("Advertising", "The same Google tag carries a Google Ads tag, which receives a page-view signal. Advertising storage, ad user data and ad personalisation are set to denied and are never granted by WarriorIQ, including under Accept All, so no advertising cookie is written and the signal is sent without personalisation. Fight footage and report contents are not sent to Google."),
+            ("Analytics", "Google Analytics 4 is installed through a Google tag. The tag is not loaded at all until you choose Accept All or select analytics under Manage Preferences, and then only on WarriorIQ's public pages: the home page, pricing and the guides. It is never loaded on sign-in, account, upload, fight-selection, progress, report, replay, sharing or legal pages, so the addresses of those pages are never sent to Google. Reject Non-Essential keeps it off everywhere."),
+            ("Advertising", "The same Google tag carries a Google Ads destination, which receives a page-view signal from those public pages once you have accepted analytics. Advertising storage, ad user data and ad personalisation are set to denied and are never granted by WarriorIQ, including under Accept All, so no advertising cookie is written and the signal is sent without personalisation. Fight footage and report contents are not sent to Google."),
             ("Managing storage", "You can remove cookies and local storage in browser settings. Removing an essential cookie can sign you out or make a temporary guest analysis inaccessible. The service must not use a cookie wall for functions that do not require optional tracking."),
         ],
     },
@@ -250,9 +250,11 @@ def subprocessor_sections() -> list[tuple[str, str]]:
             "the fight video and the two fighter boxes from this website and deletes them when the run ends.")))
     if SETTINGS.analytics_measurement_id or SETTINGS.gtm_container_id:
         sections.append(("Google (analytics and advertising measurement)", (
-            "Google receives website usage data through a Google tag: analytics events once you accept analytics "
-            "storage, and a page-view signal to Google Ads sent without personalisation. Advertising storage and "
-            "ad personalisation are refused at all times. Fight footage and report contents are never sent.")))
+            "Google receives website usage data through a Google tag, which loads only after you accept analytics "
+            "and only on WarriorIQ's public pages (home, pricing and guides): analytics events, and a page-view "
+            "signal to Google Ads sent without personalisation. It never loads on sign-in, account, upload, report, "
+            "replay or sharing pages, so their addresses are never sent. Advertising storage and ad "
+            "personalisation are refused at all times. Fight footage and report contents are never sent.")))
     if SETTINGS.email_provider:
         sections.append((f"{SETTINGS.email_provider} (email)", (
             f"{SETTINGS.email_provider} delivers WarriorIQ's account emails, such as sign-in and verification "

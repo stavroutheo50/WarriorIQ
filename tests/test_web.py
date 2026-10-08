@@ -74,17 +74,22 @@ class AnalyticsPolicyTests(unittest.TestCase):
         finally:
             object.__setattr__(SETTINGS, "analytics_measurement_id", previous)
 
-    def test_declining_analytics_denies_storage_but_keeps_the_tag_detectable(self):
-        """Consent Mode: the tag is present, storage is denied.
-
-        Withholding the tag entirely also hides it from Google's tag detection,
-        which then reports a correctly installed site as having no tag.
-        """
+    def test_declining_analytics_loads_no_google_tag_at_all(self):
+        """QA, 2026-10-07: the tag loaded before consent and its Google Ads
+        destination sent the page URL. Declined means not loaded, and the
+        policy does not name Google's hosts (app.main.google_tag_allowed)."""
         with self.tag_enabled():
-            response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "essential"})
-            self.assertIn("googletagmanager", response.text)
-            self.assertIn("'analytics_storage': 'denied'", response.text)
-            self.assertNotIn("'analytics_storage': 'granted'", response.text)
+            for cookie in ("essential", None):
+                response = self.client.get("/", cookies={"warrioriq_cookie_preferences": cookie} if cookie else {})
+                self.assertNotIn("googletagmanager", response.text)
+                self.assertNotIn("googletagmanager", response.headers["content-security-policy"])
+
+    def test_private_pages_never_load_it_even_after_consent(self):
+        with self.tag_enabled():
+            for path in ("/result/abc", "/progress/abc", "/history", "/login", "/privacy", "/f/abc"):
+                response = self.client.get(path, cookies={"warrioriq_cookie_preferences": "all"})
+                self.assertNotIn("googletagmanager.com/gtag/js", response.text, path)
+                self.assertNotIn("googletagmanager", response.headers.get("content-security-policy", ""), path)
 
     def test_a_choice_made_against_an_older_policy_version_is_asked_again(self):
         """The cookie recorded the choice but not the version it answered.
@@ -183,22 +188,12 @@ class AnalyticsPolicyTests(unittest.TestCase):
             frame = [part for part in policy.split(";") if part.strip().startswith("frame-src")][0]
             self.assertIn("https://www.googletagmanager.com", frame)
 
-    def test_declining_analytics_loads_the_container_with_storage_denied(self):
-        """The container is present so it stays verifiable, but stores nothing.
-
-        Consent Mode is what keeps this compliant: the container may load, and
-        it may not write an analytics cookie until consent is granted.
-        """
+    def test_declining_analytics_loads_no_container(self):
+        """Not loaded at all until consent (QA, 2026-10-07)."""
         with self.container_enabled() as container:
             response = self.client.get("/", cookies={"warrioriq_cookie_preferences": "essential"})
-            self.assertIn(container, response.text)
-            self.assertIn("'analytics_storage': 'denied'", response.text)
-            self.assertNotIn("'analytics_storage': 'granted'", response.text)
-            # The consent default must be pushed before the container can fire.
-            self.assertLess(
-                response.text.index("gtag('consent', 'default'"),
-                response.text.index("gtm.js?id="),
-            )
+            self.assertNotIn(container, response.text)
+            self.assertNotIn("gtm.js?id=", response.text)
 
     def test_clearing_both_ids_disables_analytics_entirely(self):
         """Emptying one id must not silently leave the other measuring."""
