@@ -1434,7 +1434,27 @@ def _fight_footage_summary(report: dict) -> dict | None:
     if excluded >= 1.0 and footage.get("main_exclusion_text"):
         note = (f"{_clock(excluded)} of the analysed footage was left out of every number because "
                 f"{footage['main_exclusion_text']}.")
-    return {"label": f"{_clock(fight)} of {_clock(duration)}", "note": note}
+    return {"label": f"{_clock(fight)} of {_clock(duration)}", "note": note,
+            "fight_seconds": fight, "duration_seconds": duration}
+
+
+def _analysed_label(span: dict | None, footage: dict | None) -> str | None:
+    """One "Analysed" figure for the report header.
+
+    The header printed "Analysed: Whole video · 0:20" and "Fight footage
+    analysed: 0:20 of 0:20" side by side (QA, 2026-10-07): two summaries of
+    the same footage, built separately. The fight-footage figure is added only
+    when it says something the span does not - that part of it was not fight.
+    """
+    if not span:
+        return footage["label"] if footage else None
+    label = span["label"]
+    if footage:
+        covered = float(span["end_seconds"]) - float(span["start_seconds"])
+        fight = float(footage.get("fight_seconds") or 0.0)
+        if covered - fight >= 1.0:
+            label += f" · {_clock(fight)} of it fight footage"
+    return label
 
 
 def _moment_fighters(report: dict) -> list[str]:
@@ -5679,6 +5699,7 @@ def result_page(request: Request, job_id: str):
         "analysis_build": result_check(report),
         "recording_warnings": _recording_warnings(report, job),
         "fight_footage": _fight_footage_summary(report),
+        "analysed_label": _analysed_label(_analysed_span_summary(report), _fight_footage_summary(report)),
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
         "identity_failure": _identity_failure(report),

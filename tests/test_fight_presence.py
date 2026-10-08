@@ -213,5 +213,7 @@ def test_a_verified_report_reads_as_the_fighters_own(result_client):
     install(report)
     page = client.get("/result/abcdef123456").text
     assert 'data-unverified="true"' not in page
-    assert "Fight footage analysed" in page and "1:40 of 1:56" in page
+    # One "Analysed" figure, with the fight share only because it differs.
+    assert "Whole video · 1:56 · 1:40 of it fight footage" in page
+    assert "Fight footage analysed" not in page
     assert "0:16 of the analysed footage was left out of every number" in page
