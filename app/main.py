@@ -6932,6 +6932,11 @@ def compare_page(request: Request, a: str = "", b: str = ""):
             fight.get("fighter_name"))
         fight["choice_stamp"] = fight_choice_stamp(fight.get("created_at"))
     allowed = {fight["job_id"] for fight in fights}
+    # A solo session picked by its address (it is not offered in the picker)
+    # was answered "Choose two different saved fights", which says the reader
+    # did something they did not (QA, 2026-10-07).
+    all_fights = list_fights(profile_id) if profile_id is not None else []
+    solo_ids = {f["job_id"] for f in all_fights if f["job_id"] in (a, b) and _is_solo_fight(f)}
     reports = []
     for job_id in (a, b):
         report = None
@@ -6951,6 +6956,7 @@ def compare_page(request: Request, a: str = "", b: str = ""):
             # the page can say when the two are different fighters.
             "picked": [next((f for f in fights if f["job_id"] == job_id), None) for job_id in (a, b)],
             "signed_in": profile_id is not None,
+            "solo_picked": bool(solo_ids),
             # The page promised a movement comparison "below" and rendered
             # nothing. These are the numbers that survive the strike gate.
             "movement": compare_movement(reports),
