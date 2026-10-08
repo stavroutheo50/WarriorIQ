@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from core.config import SETTINGS
+from core.video import open_capture
 
 
 def sam_sampling_stride(source_fps: float, total_source_frames: int) -> int:
@@ -339,7 +340,7 @@ class SamRecovery:
         tracks: dict[int, dict[str, np.ndarray]] = {}
         seeds = {"A": np.asarray(fighter_a_box, dtype=np.float32),
                  "B": np.asarray(fighter_b_box, dtype=np.float32)}
-        cap = cv2.VideoCapture(video_path)
+        cap = open_capture(video_path)
         try:
             if not cap.isOpened():
                 raise RuntimeError("Could not open video for SAM2 propagation")

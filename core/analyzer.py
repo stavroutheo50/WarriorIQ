@@ -219,7 +219,8 @@ from core.scoring import (
 _PLURAL_FAMILY = {"punch": "punches", "kick": "kicks", "knee": "knees"}
 from core.types import AnalysisProgress, AnalysisRequest, PersonObservation, PoseFrame, RoundSpec
 from core.video import (
-    SourceTimestampClock, build_round_schedule, decodable_copy, get_video_info, opencv_decodes,
+    SourceTimestampClock, build_round_schedule, decodable_copy, decoding_rotation, get_video_info,
+    open_capture, opencv_decodes,
     requested_segment_end, round_at_time,
 )
 
@@ -675,7 +676,7 @@ def _for_metrics(obs: PersonObservation | None) -> PersonObservation | None:
 
 def _seed_frame_kit(video_path: str, frame_index: int, box_a, box_b) -> dict | None:
     """Kit similarity on the frame the person chose, with their boxes."""
-    capture = cv2.VideoCapture(video_path)
+    capture = open_capture(video_path)
     try:
         capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ok, frame = capture.read()
@@ -732,7 +733,8 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
         else:
             run = _analyze_from_seed
         if opencv_decodes(req.video_path):
-            return run(req, progress_callback)
+            with decoding_rotation(req.video_path, req.rotate_clockwise):
+                return run(req, progress_callback)
         # OpenCV cannot read this file at all - an AV1 WebM is the usual one:
         # it opens, reports its frames and decodes none. Rather than fail a
         # real fight, analyse an H.264 copy with the same frames and timing,
@@ -751,10 +753,11 @@ def analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = N
                     "The analysis machine cannot decode this video's format, and no converter is "
                     "installed on it.")
             LOGGER.info("analysing_decodable_copy original=%s", Path(req.video_path).name)
-            return run(
-                replace(req, video_path=str(copy),
-                        original_name=req.original_name or Path(req.video_path).name),
-                progress_callback)
+            with decoding_rotation(copy, req.rotate_clockwise):
+                return run(
+                    replace(req, video_path=str(copy),
+                            original_name=req.original_name or Path(req.video_path).name),
+                    progress_callback)
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
 
@@ -1071,7 +1074,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     }
     live_action_trusted = bool(automated_evidence_trust(classifier)["automated_evidence_trusted"])
 
-    cap = cv2.VideoCapture(req.video_path)
+    cap = open_capture(req.video_path)
     if not cap.isOpened():
         raise RuntimeError("Could not open fight video")
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
@@ -1944,6 +1947,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # Which part of the video this report describes. Every surface that states
     # a duration reads it from here, so none of them can call a span "the
     # fight" without saying what was left out.
+    # Which way up the frames were read, and whether they still looked
+    # sideways; core.report withholds guard and balance when they did.
+    report.setdefault("video", {})["orientation"] = {
+        "rotated_clockwise": int(req.rotate_clockwise or 0), "sideways": bool(req.sideways)}
     report.setdefault("video", {})["analysed_span"] = _analysed_span(
         info, req.start_seconds, segment_end_seconds, seed_seconds, handoff, excluded_reason)
     # Which analysis code made this, so a result from an out-of-date worker

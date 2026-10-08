@@ -111,6 +111,11 @@ def _request_from_job(job_id: str, job: dict) -> AnalysisRequest:
         output_dir=str(analysis_run_directory(job_id, str(job["analysis_run_id"]))) if job.get("analysis_run_id") else None,
         openai_identity_recovery=bool(job.get("openai_identity_recovery") and job.get("external_ai_opted_in")),
         fighter_id=job.get("fighter_id"),
+        rotate_clockwise=int(job.get("rotate_clockwise") or 0),
+        # Sent by the server for a remote worker; read from the job's own
+        # orientation record by a local one (app.main._job_still_sideways).
+        sideways=bool(job["sideways"] if "sideways" in job else (job.get("orientation") or {}).get(
+            "sideways", bool((job.get("orientation") or {}).get("warning")) and not job.get("rotate_clockwise"))),
     )
 
 

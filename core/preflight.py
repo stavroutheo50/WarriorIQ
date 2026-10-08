@@ -61,6 +61,7 @@ import cv2
 import numpy as np
 
 from core.config import SETTINGS
+from core.video import open_capture
 
 LOGGER = logging.getLogger("warrioriq.preflight")
 
@@ -293,7 +294,7 @@ def probe(video_path: str, model, start_seconds: float = 0.0,
     undercounting a failure by an order of magnitude.
     """
     report = Preflight()
-    capture = cv2.VideoCapture(str(video_path))
+    capture = open_capture(str(video_path))
     if not capture.isOpened():
         report.blocking.append("This file could not be opened as a video.")
         return report

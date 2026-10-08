@@ -26,9 +26,10 @@ FPS = 6.0
 def _person(x: float, reading: float) -> PersonObservation:
     """A standing body whose nearer wrist sits where ``reading`` puts it.
 
-    Shoulders at y=100 and hips at y=200 give a torso of 100 px, so a body
-    length (core/metrics.py _body) of 215 px; the reading is
-    1 - (wrist-to-nose / body length) / 0.48.
+    The reading is wrist-to-chin over shoulder width (core/guard.py). Shoulders
+    40 px apart over a 100 px torso give a scale of max(40, 0.8 x 100) = 80 px;
+    the nose at y=80 and the shoulder line at y=100 put the chin at y=87.
+    Lower readings are hands nearer the face; up is <= guard.HANDS_UP.
     """
     kp = np.zeros((17, 3), dtype=np.float32)
     nose = (x, 80.0)
@@ -36,9 +37,9 @@ def _person(x: float, reading: float) -> PersonObservation:
     kp[5, :2], kp[6, :2] = (x - 20, 100), (x + 20, 100)
     kp[11, :2], kp[12, :2] = (x - 15, 200), (x + 15, 200)
     kp[15, :2], kp[16, :2] = (x - 25, 330), (x + 25, 330)
-    distance = (1.0 - reading) * 0.48 * 215.0
-    kp[9, :2] = (nose[0], nose[1] + distance)
-    kp[10, :2] = (nose[0] + 5, nose[1] + distance + 30)
+    chin_y = nose[1] + guard.CHIN_FRACTION * (100.0 - nose[1])
+    kp[9, :2] = (nose[0], chin_y + reading * 80.0)
+    kp[10, :2] = (nose[0] + 5, chin_y + reading * 80.0 + 30)
     kp[:, 2] = 0.9
     return PersonObservation(track_id=None, box=np.array([x - 40, 60, x + 40, 340], dtype=np.float32),
                              confidence=0.9, keypoints=kp[:, :2], keypoint_conf=kp[:, 2])
@@ -65,12 +66,13 @@ class QaReproTests(unittest.TestCase):
     """The report that said 27%/45% beside 0%/0% and 20 s/0 s."""
 
     def setUp(self):
-        # 20 s at 6 fps. A: mostly low hands, briefly mid. B: hands carried
-        # between the old "down" (0.3) and "up" (0.5) lines the whole time,
-        # which the old summaries called 45% guard, 0% up and 0 s down at once.
+        # 20 s at 6 fps, in wrist-to-chin shoulder widths. A: hands low, then
+        # nearer but still short of the face. B: carried at chest height the
+        # whole time - the hands the old summaries called 45% guard, 0% up and
+        # 0 s down at once.
         n = 120
-        self.a_readings = [0.15] * 90 + [0.45] * 30
-        self.b_readings = [0.45] * n
+        self.a_readings = [1.6] * 90 + [0.95] * 30
+        self.b_readings = [0.95] * n
         self.result = _finalize(self.a_readings, self.b_readings)
 
     def test_card_and_defence_table_are_the_same_number(self):
@@ -110,8 +112,8 @@ class InvariantTests(unittest.TestCase):
         rng = random.Random(20261007)
         for _case in range(60):
             n = rng.randint(80, 240)
-            level = rng.random()
-            readings = [min(1.0, max(0.0, level + rng.gauss(0, 0.25))) for _ in range(n)]
+            level = rng.random() * 1.6
+            readings = [max(0.0, level + rng.gauss(0, 0.35)) for _ in range(n)]
             # Some frames lose the wrists, as real footage does.
             readings = [None if rng.random() < 0.1 else r for r in readings]
             times = [i / FPS for i in range(n)]
@@ -123,7 +125,11 @@ class InvariantTests(unittest.TestCase):
             self.assertLessEqual(summary["longest_down_seconds"], summary["down_seconds"] + 0.05)
             if summary["share"] >= 1.0:
                 self.assertEqual(summary["drops"], [])
-            measured = {round(t, 2): r for t, r in zip(times, readings) if r is not None}
+            # Classified after smoothing, so markers are checked against the
+            # smoothed reading of their frame.
+            kept = [(t, r) for t, r in zip(times, readings) if r is not None]
+            smoothed = guard._smoothed([t for t, _ in kept], [r for _, r in kept])
+            measured = {round(t, 2): value for (t, _), value in zip(kept, smoothed)}
             for moment in summary["drops"]:
                 self.assertFalse(guard.is_up(measured[moment]), "a drop marker must sit on a hands-down frame")
             for moment in summary["held"]:
@@ -131,8 +137,8 @@ class InvariantTests(unittest.TestCase):
 
     def test_whole_pipeline_agrees(self):
         rng = random.Random(7)
-        a = [min(1.0, max(0.0, 0.45 + rng.gauss(0, 0.2))) for _ in range(150)]
-        b = [min(1.0, max(0.0, 0.6 + rng.gauss(0, 0.2))) for _ in range(150)]
+        a = [max(0.0, 0.8 + rng.gauss(0, 0.3)) for _ in range(150)]
+        b = [max(0.0, 0.6 + rng.gauss(0, 0.3)) for _ in range(150)]
         result = _finalize(a, b)
         for fighter in ("A", "B"):
             own = result[fighter]

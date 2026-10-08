@@ -59,6 +59,14 @@ class AnalysisRequest:
     # One person - shadowboxing, bag or pad work (core/solo.py). Only
     # fighter_a_box is used; fighter_b_box may be empty.
     solo: bool = False
+    # Quarter turn (clockwise degrees) applied to every frame as it is decoded:
+    # a sideways video turned on the selection page, or one whose file could
+    # not be tagged (core/video.py decoding_rotation). Boxes are drawn on the
+    # turned frame, so they are in its coordinates.
+    rotate_clockwise: int = 0
+    # The video still looks sideways after any turn; guard and balance are
+    # then not measurements of an upright body and are withheld.
+    sideways: bool = False
 
 
 @dataclass

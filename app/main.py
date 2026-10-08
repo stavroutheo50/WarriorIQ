@@ -92,7 +92,7 @@ from core.db import (
 )
 from core.evidence_trust import accepted_model_event, report_evidence_trust
 from core.fight_stats import normalize_outcome, summarize_fight_events
-from core.coaching import build_coaching, build_training_plan
+from core.coaching import build_coaching, build_training_plan, coaching_gaps
 from core.guard import reconcile_report_guard
 from core.generalship import movement_comparison
 from core.fight_presence import attach_plausibility
@@ -133,7 +133,7 @@ from core.report import (
     build_preliminary_scorecard, identity_failure, identity_verdict, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
     coaching_moments, not_a_fight, not_a_fight_reason, refresh_identity_integrity, share_card,
-    unattributed_kick_total,
+    unattributed_kick_total, withhold_for_sideways,
 )
 from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
@@ -152,7 +152,8 @@ from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import (
     detect_shot_changes, ffmpeg_frame, get_video_info, normalize_container, opencv_decodes,
-    playback_file, probe_upload, read_frame, remove_derivative, selection_frame,
+    playback_file, probe_upload, quarter_turn, read_frame, remove_derivative, rotate_frame,
+    selection_frame,
 )
 from core.video import _ffmpeg_exe
 
@@ -308,6 +309,8 @@ templates.env.globals["metric_catalog"] = METRIC_CATALOG
 # The movement comparison is decided at render time, so reports saved with a
 # "10-10" movement scorecard are shown without one (core/generalship.py).
 templates.env.globals["movement_comparison"] = movement_comparison
+# Why a coaching card is empty, in one place (core/coaching.py coaching_gaps).
+templates.env.globals["coaching_gaps"] = coaching_gaps
 templates.env.filters["metric_readings"] = metric_readings
 # Pressure 0-100, centre as a percentage, footwork in body lengths a second:
 # the units the report and Progress already use. See core.squad.movement_value.
@@ -1326,6 +1329,26 @@ def _numbers_state(report: dict) -> dict:
                             "coaching, the training plan, key moments and any score are withheld."),
                 "share_reason": "This clip was not recognised as a fight, so there is nothing to put on a story card."}
     return {"state": "ok", "message": None, "share_reason": None}
+
+
+def _recording_warnings(report: dict, job: dict | None) -> list[str]:
+    """What was wrong with the recording, for the top of the report.
+
+    QA, 2026-10-07: a 160x90 copy of a fight was analysed and its report
+    carried no warning, though the check that runs before the analysis had
+    measured it as too small (tracking.recording, core/preflight.py) and the
+    upload had warned about it. Those findings were only in the downloadable
+    report. The upload's own warnings (a sideways video it could not turn)
+    are on the job. Both are shown, each once.
+    """
+    recording = (report.get("tracking") or {}).get("recording") or {}
+    found = [str(text) for text in list(recording.get("blocking") or []) + list(recording.get("warnings") or [])
+             if text]
+    orientation = (job or {}).get("orientation") or {}
+    if orientation.get("warning"):
+        found.insert(0, str(orientation["warning"]))
+    seen: set[str] = set()
+    return [text for text in found if not (text in seen or seen.add(text))]
 
 
 def _fight_footage_summary(report: dict) -> dict | None:
@@ -2423,7 +2446,36 @@ def _analysis_request(job_id: str, job: dict, fighter_a_box: list[float], fighte
         persist_result=bool(job.get("persist_result", False)),
         openai_identity_recovery=bool(job.get("openai_identity_recovery") and job.get("external_ai_opted_in")),
         fighter_id=job.get("fighter_id"),
+        rotate_clockwise=quarter_turn(job.get("rotate_clockwise")),
+        sideways=_job_still_sideways(job),
     )
+
+
+def _attach_orientation(report: dict, job: dict | None) -> dict:
+    """A report saved before it recorded its orientation takes the job's.
+
+    QA, 2026-10-07 (/result/f5f685f3b5cc): "filmed sideways, could not turn
+    it" at upload, then guard 39% on the report. The job still holds what the
+    upload found, so that report is corrected without being re-run.
+    """
+    video = report.setdefault("video", {})
+    if not isinstance(video.get("orientation"), dict) and job:
+        video["orientation"] = {"rotated_clockwise": quarter_turn(job.get("rotate_clockwise")),
+                                "sideways": _job_still_sideways(job)}
+    return report
+
+
+def _job_still_sideways(job: dict) -> bool:
+    """Whether this upload's frames still look sideways after every turn.
+
+    Set by the upload (core/orientation.py) and re-checked whenever the person
+    turns the video on the selection page. A job stored before the check
+    recorded it has only the upload's warning, which meant exactly this.
+    """
+    orientation = (job or {}).get("orientation") or {}
+    if "sideways" in orientation:
+        return bool(orientation["sideways"])
+    return bool(orientation.get("warning")) and not quarter_turn(job.get("rotate_clockwise"))
 
 
 def _run_job(job_id: str, req: AnalysisRequest, analysis_run_id: str):
@@ -3758,7 +3810,7 @@ async def upload(
     # Filmed sideways with no rotation tag: turn it upright before anything
     # reads it, so the analysis, the replay and the "left / right" words on the
     # selection page all see the people where they really are (core/orientation.py).
-    orientation = {"turned_clockwise": 0, "warning": None}
+    orientation = {"turned_clockwise": 0, "warning": None, "sideways": False}
     if frame is not None and server_decodes:
         turn = await run_in_threadpool(needed_turn, frame, detect_people_in_frame)
         if turn:
@@ -3772,9 +3824,8 @@ async def upload(
                     LOGGER.warning("upload_rotated_frame_unreadable job_id=%s error=%s", job_id, type(exc).__name__)
                     chosen_index, frame = None, None
             else:
-                orientation["warning"] = (
-                    "This video looks like it was filmed sideways, and WarriorIQ could not turn it. "
-                    "Rotate it on your phone and upload it again for the best result.")
+                orientation["warning"] = SIDEWAYS_UPLOAD_WARNING
+                orientation["sideways"] = True
     if frame is not None:
         # Failing to *save* a frame that decoded is this server's disk, not the
         # video, and the browser's frame would fail to save the same way.
@@ -4013,6 +4064,8 @@ def live_frame(request: Request, job_id: str, t: float = 0.0):
     frame = read_frame(str(path), int(round(seconds * info.fps)))
     if frame is None:
         raise HTTPException(404)
+    # Skeletons from a turned analysis are in the turned frame's pixels.
+    frame = rotate_frame(frame, job.get("rotate_clockwise"))
     height, width = frame.shape[:2]
     if width > 960:
         frame = cv2.resize(frame, (960, max(1, int(round(height * 960 / width)))))
@@ -4021,6 +4074,15 @@ def live_frame(request: Request, job_id: str, t: float = 0.0):
         raise HTTPException(500, "Could not prepare this frame.")
     return Response(encoded.tobytes(), media_type="image/jpeg",
                     headers={"Cache-Control": "private, max-age=3600"})
+
+
+SIDEWAYS_UPLOAD_WARNING = (
+    "This video looks like it was filmed sideways, and WarriorIQ could not turn it. "
+    "Use \"Rotate 90°\" below until the fighters stand upright, or rotate it on your phone and "
+    "upload it again.")
+SIDEWAYS_STILL_WARNING = (
+    "The fighters still look sideways in this frame. Use \"Rotate 90°\" again until they stand "
+    "upright. Until then, guard and balance will not be measured.")
 
 
 def _seek_selection_frame(job_id: str, job: dict, seconds: float, source: str = "chosen") -> tuple[float, int]:
@@ -4044,6 +4106,8 @@ def _seek_selection_frame(job_id: str, job: dict, seconds: float, source: str = 
         # Nothing on this host decodes it. The frame picker answers this by
         # capturing the frame in the browser (selection_frame_image).
         raise HTTPException(422, "This moment cannot be decoded on the server; your browser will capture it instead.")
+    # The turn the person chose on this page: the fighters are boxed upright.
+    frame = rotate_frame(frame, job.get("rotate_clockwise"))
     (OUTPUTS / job_id).mkdir(parents=True, exist_ok=True)
     if not cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), frame):
         raise HTTPException(500, "Could not save the selected fighter frame.")
@@ -4092,6 +4156,8 @@ async def selection_frame_image(request: Request, job_id: str, seconds: float = 
         if abs(got_width / max(1, got_height) - width / max(1, height)) > 0.02:
             raise HTTPException(400, "That frame is not the shape of this video.")
         image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+    # The browser plays the file as filmed; the turn chosen here is applied.
+    image = rotate_frame(image, job.get("rotate_clockwise"))
     duration = float(job.get("video_duration") or 0.0)
     seconds = max(0.0, min(float(seconds), max(0.0, duration - 0.001)))
     fps = float(get_video_info(job["video_path"]).fps or 0.0) or 30.0
@@ -4123,6 +4189,11 @@ def _auto_pick_selection_frame(job_id: str) -> list[dict] | None:
         job = get_job(job_id)
         if not job or job.get("auto_frame_done"):
             return None
+        if quarter_turn(job.get("rotate_clockwise")):
+            # The automatic pick reads the file as filmed; its boxes would be
+            # on the wrong pixels of a turned frame.
+            update_job(job_id, {"auto_frame_done": True})
+            return None
         try:
             moment = find_clear_moment(job["video_path"])
         except Exception as exc:                                    # noqa: BLE001
@@ -4151,6 +4222,49 @@ def set_selection_frame(request: Request, job_id: str, payload: SelectionFramePa
         raise HTTPException(404)
     seconds, frame_number = _seek_selection_frame(job_id, job, float(payload.seconds))
     return {"ok": True, "seconds": seconds, "frame": frame_number}
+
+
+class RotatePayload(BaseModel):
+    clockwise: int = 90
+
+
+@app.post("/api/selection-frame/{job_id}/rotate", dependencies=[Depends(require_csrf)])
+async def rotate_selection(request: Request, job_id: str, payload: RotatePayload):
+    """Turn a sideways video a quarter at a time, before the analysis starts.
+
+    QA, 2026-10-07: the upload said "filmed sideways, could not turn it" and
+    offered nothing but uploading again. The turn is stored on the job and
+    applied to every frame as it is decoded (core/video.py decoding_rotation),
+    the fighter boxes are drawn on the turned frame, and whether it still
+    looks sideways is checked again on that frame.
+    """
+    _enforce_rate_limit(request, "selection-frame", 90, 300)
+    job = _authorized_job(request, job_id)
+    if not job:
+        raise HTTPException(404)
+    if job.get("status") in {"queued", "running"}:
+        raise HTTPException(409, "The analysis has already started, so the video can no longer be turned.")
+    step = quarter_turn(payload.clockwise)
+    if not step:
+        raise HTTPException(400, "Turn by 90, 180 or 270 degrees.")
+    path = OUTPUTS / job_id / "selection.jpg"
+    frame = await run_in_threadpool(cv2.imread, str(path))
+    if frame is None:
+        raise HTTPException(409, "The selected frame is unavailable. Choose another frame.")
+    frame = rotate_frame(frame, step)
+    if not await run_in_threadpool(cv2.imwrite, str(path), frame):
+        raise HTTPException(500, "Could not save the turned frame.")
+    turn = quarter_turn(quarter_turn(job.get("rotate_clockwise")) + step)
+    # Still sideways? Asked of the turned frame, by the check the upload used.
+    still = bool(await run_in_threadpool(needed_turn, frame, detect_people_in_frame))
+    orientation = dict(job.get("orientation") or {})
+    orientation.update({"sideways": still, "turned_by_person": turn,
+                        "warning": SIDEWAYS_STILL_WARNING if still else None})
+    # Fresh boxes are drawn on the turned frame; the automatic pick reads the
+    # file as filmed and is not run on a turned one.
+    update_job(job_id, {"rotate_clockwise": turn, "orientation": orientation, "auto_frame_done": True})
+    return {"ok": True, "rotate_clockwise": turn, "sideways": still,
+            "warning": orientation["warning"]}
 
 
 @app.get("/api/detect/{job_id}")
@@ -4354,6 +4468,9 @@ def _remote_job_payload(job_id: str, job: dict) -> dict:
         "selected_rounds": job.get("selected_rounds"),
         "openai_identity_recovery": bool(job.get("openai_identity_recovery") and job.get("external_ai_opted_in")),
         "external_ai_opted_in": bool(job.get("external_ai_opted_in")),
+        # The turn the boxes were drawn under, and whether it is still sideways.
+        "rotate_clockwise": quarter_turn(job.get("rotate_clockwise")),
+        "sideways": _job_still_sideways(job),
     }
 
 
@@ -4669,6 +4786,9 @@ def start(request: Request, job_id: str, payload: StartPayload):
     capacity = _require_analysis_capacity()
     video_width = float(job.get("video_width") or 0)
     video_height = float(job.get("video_height") or 0)
+    if quarter_turn(job.get("rotate_clockwise")) in (90, 270):
+        # The boxes were drawn on the turned frame.
+        video_width, video_height = video_height, video_width
     if video_width <= 0 or video_height <= 0:
         selection = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
         if selection is None:
@@ -4849,6 +4969,9 @@ def progress_page(request: Request, job_id: str):
     _pin_sport_to_fight(request, _job_sport(job))
     return templates.TemplateResponse(request=request, name="progress.html", context={
         "request": request, "job_id": job_id, "initial_status": _public_job_status(job_id, job),
+        # A turned analysis draws its skeletons on turned frames, which the
+        # browser's video is not; the page shows turned stills instead.
+        "live_turned": bool(quarter_turn(job.get("rotate_clockwise"))),
         # The same counting policy as the upload page and the report, so the
         # live view cannot claim "leg strikes only" above a feed of punches.
         "live_counting_note": counting_policy(_job_sport(job)).live_note,
@@ -5381,13 +5504,18 @@ def result_page(request: Request, job_id: str):
     report = json.loads(path.read_text(encoding="utf-8"))
     # Saved before the "is this a fight?" check: run it on the saved track.
     attach_plausibility(report, path.parent / "tracking.jsonl")
+    _attach_orientation(report, job)
     if report.get("mode") == "solo":
         # One person, no opponent and no strikes (core/solo.py): its own page,
         # since every section of the fight report is about two fighters.
         reconcile_report_guard(report)
+        # Fight reports get this in refresh_identity_integrity; a solo page
+        # does not go through it.
+        withhold_for_sideways(report)
         solo_name = _fighter_names(request, job, report)["A"]
         return templates.TemplateResponse(request=request, name="solo_result.html", context={
             "request": request, "job_id": job_id, "report": report,
+            "recording_warnings": _recording_warnings(report, job),
             "analysed_span": _analysed_span_summary(report),
             "analysis_build": result_check(report),
             "subject_name": None if solo_name == "Fighter A" else solo_name,
@@ -5456,6 +5584,7 @@ def result_page(request: Request, job_id: str):
         "names": names,
         "analysed_span": _analysed_span_summary(report),
         "analysis_build": result_check(report),
+        "recording_warnings": _recording_warnings(report, job),
         "fight_footage": _fight_footage_summary(report),
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
@@ -6047,6 +6176,10 @@ def replay_page(
         context={
             "request": request, "job_id": job_id, "report": report,
             "identity_safe": identity_safe,
+            # The turn the analysis decoded the video with: its skeletons are
+            # in the turned frame, the browser plays the file as filmed.
+            "replay_turn": quarter_turn(((report.get("video") or {}).get("orientation") or {}).get(
+                "rotated_clockwise", (_authorized_job(request, job_id) or {}).get("rotate_clockwise"))),
             "replay_chapters": replay_chapters,
             "replay_mode": replay_mode,
             # The report's coaching points that carry moments, as cards beside

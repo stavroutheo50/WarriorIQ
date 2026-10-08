@@ -11,7 +11,8 @@
   </ol>
   <header class="workflow-heading">
     <div><div class="eyebrow">Fighter selection</div><h1>Tell WarriorIQ who is who.</h1>{#- Says "tap" only once boxes are actually drawn (loadDetectionCandidates).
-    It promised boxes on every page, and on the live host none ever came. -#}<p id="selectIntro">Drag a box around each fighter: Fighter A first, then Fighter B. Keep each box tight around the whole body.</p>{% set orientation = job.orientation|default({}, true) %}{% if orientation.turned_clockwise %}<p class="frame-source-note" role="note">This video was filmed sideways, so WarriorIQ turned it upright before analysing it.</p>{% elif orientation.warning %}<p class="pair-warning" role="alert">{{ orientation.warning }}</p>{% endif %}<p class="small muted">The whole video is analysed. This frame only tells WarriorIQ which fighter is which - pick one where both are fully visible and apart.</p>{#- A frame nobody chose is said to be one, so choosing a moment is never
+    It promised boxes on every page, and on the live host none ever came. -#}<p id="selectIntro">Drag a box around each fighter: Fighter A first, then Fighter B. Keep each box tight around the whole body.</p>{% set orientation = job.orientation|default({}, true) %}{% if orientation.warning %}<p class="pair-warning" role="alert" id="orientationWarning">{{ orientation.warning }}</p>{% elif orientation.turned_by_person %}<p class="frame-source-note" role="note">Turned {{ orientation.turned_by_person }}° by you. The whole video is analysed this way up.</p>{% elif orientation.turned_clockwise %}<p class="frame-source-note" role="note">This video was filmed sideways, so WarriorIQ turned it upright before analysing it.</p>{% endif %}{#- Turning is the fix for a sideways video, so it is offered on every
+    upload rather than only when the check noticed (QA, 2026-10-07). -#}<p class="rotate-control"><button class="btn secondary" id="rotateFrame" type="button" aria-describedby="rotateStatus">Rotate 90°</button> <span class="small muted" id="rotateStatus" role="status" aria-live="polite">Turns the video clockwise if the fighters are lying on their side.</span></p><p class="small muted">The whole video is analysed. This frame only tells WarriorIQ which fighter is which - pick one where both are fully visible and apart.</p>{#- A frame nobody chose is said to be one, so choosing a moment is never
     skipped without a word. Refined once detection has looked at it. -#}{% if frame_source in ['auto', 'auto_pair'] %}<p class="frame-source-note" id="frameNote" data-source="{{frame_source}}">WarriorIQ chose this moment ({{frame_clock}}) for you. <a class="text-link" href="/frame/{{job_id}}">Pick a different moment</a></p>{% endif %}</div>
     {#- Only when the note above does not already carry the same link: both
         showed on an automatically chosen frame (QA, 2026-10-04). -#}
@@ -20,7 +21,7 @@
   <div class="fighter-lock-layout">
     <section class="fighter-stage-panel" aria-labelledby="fighter-stage-title">
       <div class="panel-heading"><div><span class="panel-kicker">Identity canvas</span><h2 id="fighter-stage-title">Tap each fighter</h2></div><span class="manual-badge">Tap or draw</span></div>
-      <div class="select-stage" id="stage"><img id="frame" src="/selection-image/{{job_id}}" alt="Selected fight frame for drawing Fighter A and Fighter B boxes"><canvas id="canvas" aria-label="Draw a full-body box around Fighter A, followed by Fighter B"></canvas></div>
+      <div class="select-stage" id="stage"><img id="frame" src="/selection-image/{{job_id}}?turn={{ job.rotate_clockwise|default(0, true) }}" alt="Selected fight frame for drawing Fighter A and Fighter B boxes"><canvas id="canvas" aria-label="Draw a full-body box around Fighter A, followed by Fighter B"></canvas></div>
       <div class="selection-edit-actions" aria-label="Correct fighter selections">
         <button class="selection-edit-button" id="redrawA" type="button">Start over</button>
         <button class="selection-edit-button" id="redrawB" type="button" hidden>Redraw Fighter B</button>
@@ -84,6 +85,21 @@
 </section>
 {% endblock %}
 {% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
+(function(){
+  const button=document.getElementById('rotateFrame'),status=document.getElementById('rotateStatus');
+  if(!button)return;
+  button.addEventListener('click',async()=>{
+    button.disabled=true;status.textContent='Turning the video…';
+    try{
+      const response=await fetch(`/api/selection-frame/${{ job_id|tojson }}/rotate`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({clockwise:90})});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok){status.textContent=(data&&data.detail)||'The video could not be turned. Try again.';button.disabled=false;return}
+      // Boxes drawn on the old frame no longer match it, so the page is
+      // reloaded on the turned frame with its warnings re-read.
+      window.location.reload();
+    }catch(error){status.textContent='The video could not be turned. Check the connection and try again.';button.disabled=false}
+  });
+})();
 const jobId={{job_id|tojson}},videoWidth={{job.video_width}},videoHeight={{job.video_height}};
 const image=document.getElementById('frame'),stage=document.getElementById('stage'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
 const keyA=document.getElementById('keyA'),keyB=document.getElementById('keyB'),pairWarning=document.getElementById('pairWarning');

@@ -32,6 +32,7 @@ from core.config import OUTPUTS
 from core.identity import appearance_similarity, box_iou
 from core.metrics import MetricsAccumulator
 from core.types import AnalysisProgress, AnalysisRequest, PersonObservation
+from core.video import open_capture
 
 LOGGER = logging.getLogger("warrioriq.solo")
 
@@ -48,7 +49,8 @@ MIN_TRUSTED_COVERAGE = 0.45
 # The movement measurements a solo session reports. Everything else in a
 # fighter's metrics is about strikes or an opponent.
 SOLO_METRICS = ("pose_coverage", "measurement", "footwork_body_lengths_per_second",
-                "guard_index", "guard_definition", "balance_index", "moments", "spread", "numbers")
+                "guard_index", "guard_definition", "guard_note", "guard_note_short", "pose_note",
+                "balance_index", "moments", "spread", "numbers")
 
 
 def _centre(box) -> np.ndarray:
@@ -163,7 +165,7 @@ def analyze_solo(req: AnalysisRequest, progress_callback=None) -> dict:
     progress(1.0, "Following the person through the video", 0.0, "tracking")
     pose_tracker = get_pose_tracker()
     quality = QualityController(info.fps, info.width, info.height)
-    cap = cv2.VideoCapture(req.video_path)
+    cap = open_capture(req.video_path)
     if not cap.isOpened():
         raise RuntimeError("Could not open the video")
     samples: list[tuple[int, float, list[PersonObservation]]] = []
@@ -219,6 +221,7 @@ def analyze_solo(req: AnalysisRequest, progress_callback=None) -> dict:
             "source_name": req.original_name or Path(req.video_path).name,
             "analysis_target": "A", "focus_fighter": "A",
             "fps": fps, "width": info.width, "height": info.height,
+            "orientation": {"rotated_clockwise": int(req.rotate_clockwise or 0), "sideways": bool(req.sideways)},
             "analysed_span": {
                 "start_seconds": round(start_seconds, 3), "end_seconds": round(end_seconds, 3),
                 "video_duration_seconds": round(float(info.duration), 3),

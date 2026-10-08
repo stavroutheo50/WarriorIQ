@@ -9,9 +9,7 @@ from core.config import SETTINGS
 from core.fight_numbers import movement_numbers
 from core.types import DefenseEvent, PersonObservation, StrikeEvent
 
-NOSE = 0
 L_SHOULDER, R_SHOULDER = 5, 6
-L_WRIST, R_WRIST = 9, 10
 L_HIP, R_HIP = 11, 12
 L_ANKLE, R_ANKLE = 15, 16
 
@@ -87,6 +85,9 @@ class MetricsAccumulator:
         # were not, which is why every movement claim shipped with an empty
         # evidence list while the report template had the buttons ready.
         self.timed_guard = {"A": [], "B": []}
+        # Frames with the fighter in view but no guard reading, by reason
+        # (core/guard.py reading): too small in the picture, or not clear.
+        self.guard_rejected = {"A": Counter(), "B": Counter()}
         self.timed_balance = {"A": [], "B": []}
         self.round_frames = defaultdict(lambda: {"A": 0, "B": 0})
         self.round_visible = defaultdict(lambda: {"A": 0, "B": 0})
@@ -168,17 +169,15 @@ class MetricsAccumulator:
         self.timed_positions.append((float(seconds), fighter, float(center[0]), float(center[1])))
 
         kp = obs.keypoints
-        nose, lw, rw = _p(kp, NOSE), _p(kp, L_WRIST), _p(kp, R_WRIST)
-        if nose is not None and (lw is not None or rw is not None):
-            distances = []
-            for wrist in (lw, rw):
-                if wrist is not None:
-                    distances.append(float(np.linalg.norm(wrist - nose)) / body)
-            if distances:
-                value = 1.0 - min(1.0, min(distances) / 0.48)
-                sample["guard"] = value
-                self.guard_samples[fighter].append(value)
-                self.timed_guard[fighter].append((float(seconds), value))
+        # Wrist to chin over shoulder width, confidence- and size-gated; one
+        # definition, in core/guard.py.
+        value, rejected = guard_measure.reading(kp, getattr(obs, "keypoint_conf", None))
+        if value is not None:
+            sample["guard"] = value
+            self.guard_samples[fighter].append(value)
+            self.timed_guard[fighter].append((float(seconds), value))
+        else:
+            self.guard_rejected[fighter][rejected] += 1
 
         ls, rs, lh, rh, la, ra = (_p(kp, i) for i in (L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, L_ANKLE, R_ANKLE))
         if all(x is not None for x in (ls, rs, lh, rh)):
@@ -391,17 +390,19 @@ class MetricsAccumulator:
             #
             # The floor that remains is a sample floor, not a coverage one:
             # below it there genuinely is not enough to average.
-            measured = min(
-                len(self.guard_samples[fighter]),
-                len(self.balance_samples[fighter]),
-            )
+            # Guard has its own, stricter gate (core/guard.py) and is withheld
+            # on its own below it; it no longer takes the movement numbers
+            # with it.
+            measured = len(self.balance_samples[fighter])
             enough = measured >= SETTINGS.min_metric_samples
             advanced_available = coverage >= SETTINGS.min_pose_coverage_for_metric
 
             # Every guard figure in the report - card, bars, Defence table,
             # longest stretch down, drop moments, coaching - comes from this
             # one summary. See core/guard.py.
-            guard_summary = guard_measure.summarise(self.timed_guard[fighter]) if enough else None
+            guard_measured = len(self.timed_guard[fighter]) >= SETTINGS.min_metric_samples
+            guard_summary = guard_measure.summarise(self.timed_guard[fighter]) if enough and guard_measured else None
+            guard_why = None if guard_summary else guard_measure.not_measured_reason(self.guard_rejected[fighter])
             if enough:
                 footwork = self.movement[fighter] / max(1.0, segment_duration)
                 pressure = float(np.mean(self.pressure_samples[fighter])) if self.pressure_samples[fighter] else None
@@ -464,6 +465,10 @@ class MetricsAccumulator:
                 "ring_center_control": ring_control,
                 "guard_index": guard,
                 "guard_definition": guard_measure.GUARD_DEFINITION,
+                # Why guard reads "Not measured", when it does.
+                **({"guard_note": guard_measure.NOT_MEASURED_TEXT[guard_why],
+                    "guard_note_short": guard_measure.NOT_MEASURED_SHORT[guard_why]}
+                   if enough and guard_why else {}),
                 "balance_index": balance,
                 # Seconds a coach can click, at both ends of each measurement.
                 # Empty when there was not enough to average in the first place.
@@ -497,7 +502,7 @@ class MetricsAccumulator:
                     },
                     "guard": {
                         "available": guard is not None,
-                        "reason": None if guard is not None else ("The wrist and head keypoints were not visible often enough." if advanced_available else f"Pose coverage was {coverage*100:.1f}%; at least {SETTINGS.min_pose_coverage_for_metric*100:.0f}% is required."),
+                        "reason": None if guard is not None else (guard_measure.NOT_MEASURED_TEXT[guard_why] if guard_why else f"Pose coverage was {coverage*100:.1f}%; at least {SETTINGS.min_pose_coverage_for_metric*100:.0f}% is required."),
                         "samples": len(self.guard_samples[fighter]),
                     },
                     "balance": {

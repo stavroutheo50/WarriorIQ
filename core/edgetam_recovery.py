@@ -55,6 +55,7 @@ import torch
 
 from core.config import SETTINGS
 from core.sam_recovery import sam_sampling_stride
+from core.video import open_capture
 
 LOGGER = logging.getLogger("warrioriq.edgetam")
 
@@ -132,7 +133,7 @@ class EdgeTamRecovery:
             return tracks
 
         stride = sam_sampling_stride(source_fps, max(0, end_frame - start_frame))
-        capture = cv2.VideoCapture(video_path)
+        capture = open_capture(video_path)
         if not capture.isOpened():
             return tracks
         capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
