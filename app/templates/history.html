@@ -2,6 +2,7 @@
 {% block title %}History · WarriorIQ{% endblock %}
 {% block content %}
 <header class="archive-hero" data-reveal><div><div class="eyebrow">Private fight archive</div><h1>Your fight library.</h1><p>Every saved analysis, ready for the next review.</p></div>{% if signed_in %}<a class="btn" data-motion-primary href="/analyze">{% if fights %}Analyze another fight{% else %}Analyze a fight{% endif %} <span aria-hidden="true">→</span></a>{% endif %}</header>
+{% if cancelled_notice %}<div class="notice" id="library-notice" role="status" tabindex="-1"><strong>Upload cancelled.</strong> Its video was deleted and it no longer counts towards your pending fights.</div>{% endif %}
 {% if signed_in and pending %}
 <section class="pending-fights" id="pending" aria-labelledby="pendingHeading" data-reveal>
   <div class="eyebrow">Pending</div>

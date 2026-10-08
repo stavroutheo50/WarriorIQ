@@ -6848,7 +6848,9 @@ def cancel_pending_job(request: Request, job_id: str):
     )
     if "application/json" in request.headers.get("accept", ""):
         return {"cancelled": True}
-    return RedirectResponse("/history#pending", status_code=303)
+    # Said on arrival: the item just vanished, and when it was the last one
+    # the whole Pending section went with it (QA, 2026-10-07).
+    return RedirectResponse("/history?cancelled=1#library-notice", status_code=303)
 
 
 def _is_solo_fight(fight: dict) -> bool:
@@ -6859,7 +6861,7 @@ def _is_solo_fight(fight: dict) -> bool:
 
 
 @app.get("/history", response_class=HTMLResponse)
-def history_page(request: Request):
+def history_page(request: Request, cancelled: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
     for fight in fights:
@@ -6868,6 +6870,7 @@ def history_page(request: Request):
     return templates.TemplateResponse(
         request=request, name="history.html",
         context={"request": request, "fights": fights, "pending": pending,
+                 "cancelled_notice": (cancelled == "1" and profile_id is not None),
                  "signed_in": profile_id is not None},
     )
 
