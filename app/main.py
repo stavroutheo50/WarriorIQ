@@ -257,6 +257,29 @@ def _ruleset_label(value: str | None) -> str:
 
 
 templates.env.filters["fight_moment"] = _fight_moment
+
+
+def _date_search_terms(value: str | None) -> str:
+    """A fight's date in the ways somebody might type it into a search.
+
+    QA, 2026-10-07: cards read "OCT 7 2026" but only "7 oct" matched; "oct
+    7", "2026-10-07" and "october" found nothing. The page adds the date as
+    the viewer's browser shows it, in their own time zone (history.html);
+    this covers the stored (UTC) date for the rest.
+    """
+    try:
+        moment = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    day, month, year = moment.day, moment.month, moment.year
+    short, long = moment.strftime("%b").lower(), moment.strftime("%B").lower()
+    forms = [f"{day} {short} {year}", f"{short} {day} {year}", f"{day} {long} {year}", f"{long} {day} {year}",
+             f"{year}-{month:02d}-{day:02d}", f"{day:02d}/{month:02d}/{year}", f"{month:02d}/{day:02d}/{year}",
+             f"{day}/{month}/{year}", f"{month}/{day}/{year}", f"{day}.{month}.{year}", f"{day:02d}.{month:02d}.{year}"]
+    return " | ".join(forms)
+
+
+templates.env.filters["date_search_terms"] = _date_search_terms
 # "1 attempt", never "1 attempts": {{ n|count_of('attempt') }}.
 templates.env.filters["count_of"] = count_of
 templates.env.filters["ruleset_label"] = _ruleset_label
