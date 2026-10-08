@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import cv2
@@ -152,6 +155,66 @@ def _silence_progress_bar() -> None:
     predictor_module._warrioriq_quiet_progress = True
 
 
+LOGGER = logging.getLogger(__name__)
+
+# One built predictor kept for the life of the worker process, so a job does
+# not pay for building SAM2 again (core/config.py sam_keep_warm). Between uses
+# it waits in host memory: the frame pass after the sweep needs the card's
+# memory, which is why release() existed. Taken out by one user at a time.
+_WARM_LOCK = threading.Lock()
+_warm: dict = {"model_id": None, "predictor": None}
+
+
+def _build_predictor():
+    from sam2.build_sam import build_sam2_video_predictor_hf
+
+    return build_sam2_video_predictor_hf(SETTINGS.sam_model_id, device="cuda")
+
+
+def _take_warm():
+    """The parked predictor on the card, or None when there is none to reuse."""
+    with _WARM_LOCK:
+        predictor, model_id = _warm["predictor"], _warm["model_id"]
+        _warm["predictor"] = _warm["model_id"] = None
+    if predictor is None or model_id != SETTINGS.sam_model_id:
+        return None
+    try:
+        return predictor.to("cuda")
+    except Exception as exc:  # noqa: BLE001 - a failed move means rebuild, as before
+        LOGGER.warning("sam_warm_reuse_failed error=%s", type(exc).__name__)
+        return None
+
+
+def _park(predictor) -> None:
+    """Keep the predictor in host memory for the next use, freeing the card."""
+    if predictor is None or not SETTINGS.sam_keep_warm:
+        return
+    try:
+        predictor = predictor.to("cpu")
+    except Exception as exc:  # noqa: BLE001 - cannot park it: drop it, as before
+        LOGGER.warning("sam_park_failed error=%s", type(exc).__name__)
+        return
+    with _WARM_LOCK:
+        _warm["predictor"], _warm["model_id"] = predictor, SETTINGS.sam_model_id
+
+
+def preload() -> bool:
+    """Build SAM2 while the worker is idle and park it, so the first job is warm."""
+    if not (SETTINGS.sam_recovery_enabled and SETTINGS.sam_keep_warm and torch.cuda.is_available()):
+        return False
+    if str(SETTINGS.sam_backend).strip().lower() != "sam2":
+        return False
+    with _WARM_LOCK:
+        if _warm["predictor"] is not None:
+            return True
+    started = time.perf_counter()
+    _park(_build_predictor())
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    LOGGER.info("sam_preload_complete seconds=%.2f", time.perf_counter() - started)
+    return True
+
+
 class SamRecovery:
     """Best-effort short-window SAM2.1 identity recovery.
 
@@ -167,6 +230,9 @@ class SamRecovery:
         self.failure_reason = None
         self.continuous_frames = 0
         self.continuous_failure_reason = None
+        # Seconds spent getting a predictor onto the card this run, every
+        # load included (core/analyzer.py stage_seconds).
+        self.load_seconds = 0.0
 
     def _load(self) -> bool:
         if self.available is not None:
@@ -175,23 +241,27 @@ class SamRecovery:
             self.available = False
             self.failure_reason = "disabled"
             return False
+        started = time.perf_counter()
         try:
-            from sam2.build_sam import build_sam2_video_predictor_hf
-
-            self.predictor = build_sam2_video_predictor_hf(
-                SETTINGS.sam_model_id,
-                device="cuda",
-            )
+            predictor = _take_warm() if SETTINGS.sam_keep_warm else None
+            self.predictor = predictor if predictor is not None else _build_predictor()
             self.available = True
         except Exception as exc:  # optional dependency must never kill analysis
             self.available = False
             self.failure_reason = f"{type(exc).__name__}: {exc}"
+        self.load_seconds += time.perf_counter() - started
         return bool(self.available)
 
     def release(self) -> None:
-        """Release the large video predictor after continuous propagation."""
-        self.predictor = None
+        """Free the card after continuous propagation, keeping the model warm.
+
+        The predictor is parked in host memory (_park) rather than dropped, so
+        the next load - a frame-pass rescue in this job, or the next job - moves
+        it back instead of building SAM2 again.
+        """
+        predictor, self.predictor = self.predictor, None
         self.available = None
+        _park(predictor)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 

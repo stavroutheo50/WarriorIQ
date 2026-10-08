@@ -533,6 +533,11 @@ class Settings:
     # core/analyzer.py says so. It is a memory decision, not a quality one.
     sam_continuous_chunk_frames: int = int(os.getenv("WARRIORIQ_SAM_CHUNK_FRAMES", "360"))
     sam_model_id: str = os.getenv("WARRIORIQ_SAM_MODEL", "facebook/sam2.1-hiera-small")
+    # Keep the built SAM2 predictor between jobs, parked in host memory while
+    # the frame pass needs the card (core/sam_recovery.py). Every job used to
+    # rebuild it from disk, and a frame-pass rescue after the sweep rebuilt it
+    # again mid-job (QA, 2026-10-07, item 26). Off restores rebuild-per-use.
+    sam_keep_warm: bool = env_bool("WARRIORIQ_SAM_KEEP_WARM", True)
     # Which model runs the continuous sweep: "sam2" or "edgetam".
     #
     # EdgeTAM is 2.5x faster on this footage - 0.078 s/frame against 0.197,
