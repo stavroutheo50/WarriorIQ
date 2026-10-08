@@ -118,7 +118,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         comparison = self.client.get("/compare")
         self.assertEqual(comparison.status_code, 200)
         self.assertIn("Two fights required", comparison.text)
-        self.assertIn('href="/analyze">Analyze another fight', comparison.text)
+        self.assertIn('href="/analyze">Analyse another fight', comparison.text)
         self.assertNotIn('id="compareForm"', comparison.text)
 
     def test_signup_requires_account_manager_terms_and_privacy_acceptance(self):

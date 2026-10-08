@@ -154,13 +154,13 @@
   {% if open_cards %}
   <ol class="mission-list">{% for card in open_cards %}{{ mission_card(card) }}{% endfor %}</ol>
   {% elif camp.reason == 'identity' %}
-  <p class="muted">WarriorIQ could not tell the two fighters apart in your recent fights, so it cannot say whose weak spots it saw. Open the fight and show it who is who, or analyze a video where both fighters stay in view.</p>
+  <p class="muted">WarriorIQ could not tell the two fighters apart in your recent fights, so it cannot say whose weak spots it saw. Open the fight and show it who is who, or analyse a video where both fighters stay in view.</p>
   {% elif camp.reason == 'no_drill' %}
-  <p class="muted">Your latest fight did not show any measured number far enough behind to build a drill around, so there is no mission from it. Nothing is made up to fill this space: add your own below, or analyze your next fight.</p>
+  <p class="muted">Your latest fight did not show any measured number far enough behind to build a drill around, so there is no mission from it. Nothing is made up to fill this space: add your own below, or analyse your next fight.</p>
   {% elif not finished_cards %}
-  <p class="muted">Analyze a fight and your first missions appear here.</p>
+  <p class="muted">Analyse a fight and your first missions appear here.</p>
   {% else %}
-  <p class="muted">Nothing in training right now. Analyze your next fight for new missions, or add your own below.</p>
+  <p class="muted">Nothing in training right now. Analyse your next fight for new missions, or add your own below.</p>
   {% endif %}
   {% if camp.skipped_newer_fight %}<p class="small muted">Your newest fight is not used: we couldn't tell who was who in it.</p>{% endif %}
   {% if finished_cards %}
@@ -176,7 +176,7 @@
 <div id="progress" class="camp-progress">
 <div class="section-title"><div><div class="eyebrow">Progress</div><h2>Is it working?</h2></div></div>
 {% if not progress.fight_count %}
-<section class="empty-workspace card"><h2>Your baseline starts with one fight</h2><p class="muted">Analyze a fight and pick yourself as the detailed-report athlete. WarriorIQ will show only measurements supported by that report.</p><a class="btn" href="/analyze">Analyze first fight</a></section>
+<section class="empty-workspace card"><h2>Your baseline starts with one fight</h2><p class="muted">Analyse a fight and pick yourself as the detailed-report athlete. WarriorIQ will show only measurements supported by that report.</p><a class="btn" href="/analyze">Analyse first fight</a></section>
 {% else %}
 {# One headline number, then the supporting ones. Five equal tiles asked the
    reader to decide what mattered; the trend WarriorIQ actually tracks leads,
@@ -190,7 +190,10 @@
       from the newest fight; an older value says which fight it came from. -#}
   {%- set r = progress.recent.get(key) -%}
   {%- set d = progress.trends.get(key) -%}
-  {%- if r and r.is_latest and d is not none -%}<i class="{% if d > 0 %}up{% elif d < 0 %}down{% else %}quiet{% endif %}">{{'%+.0f'|format(d*100)}}</i>
+  {#- Rounded before the sign is chosen: '%+.0f' printed a change of -0.3
+      points as "-0" (QA, 2026-10-07). -#}
+  {%- set pts = (d*100)|round|int if d is not none else 0 -%}
+  {%- if r and r.is_latest and d is not none -%}<i class="{% if pts > 0 %}up{% elif pts < 0 %}down{% else %}quiet{% endif %}">{{'%+d'|format(pts) if pts else '0'}}</i>
   {%- elif r and not r.is_latest -%}<i class="quiet">from <time datetime="{{r.created_at}}" data-local="date">{{r.created_at|fight_moment(false)}}</time></i>{%- endif -%}
 {%- endmacro -%}
 {% set hk = progress.headline_key %}{% set headline = progress.recent.get(hk) %}
@@ -199,8 +202,9 @@
     <span class="eyebrow">{{progress.headline_label}}</span>
     <strong class="wiq-num">{% if headline %}{{'%.0f'|format(headline.value*100)}}<em>%</em>{% else %}—{% endif %}</strong>
     {% set delta = progress.trends.get(hk) %}
+    {% set delta_pts = (delta*100)|round|int if delta is not none else 0 %}
     {% if headline and not headline.is_latest %}<span class="stat-delta flat">From your fight on <time datetime="{{headline.created_at}}" data-local="date">{{headline.created_at|fight_moment(false)}}</time></span>
-    {% elif delta is not none and delta != 0 %}<span class="stat-delta {% if delta > 0 %}up{% else %}down{% endif %}">{{'%+.0f'|format(delta*100)}} pts since last fight</span>
+    {% elif delta is not none and delta_pts != 0 %}<span class="stat-delta {% if delta_pts > 0 %}up{% else %}down{% endif %}">{{'%+d'|format(delta_pts)}} pts since last fight</span>
     {% elif delta is not none %}<span class="stat-delta flat">Same as last fight</span>
     {% else %}<span class="stat-delta flat">First measured fight</span>{% endif %}
   </div>

@@ -105,7 +105,7 @@ from core import feed, social, worker_alerts
 from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
 from core.progress_insights import build_progress
 from core.quality_guardian import inspect_video_quality
-from core.metric_catalog import BY_KEY as METRIC_CATALOG, readings as metric_readings
+from core.metric_catalog import BY_KEY as METRIC_CATALOG, evidence_limitations, readings as metric_readings
 from core.chunked_upload import (
     ChunkedUploadError, StoredUpload, append as append_chunk, begin as begin_chunked,
     discard as discard_chunked, extend_lease, finalise as finalise_chunked,
@@ -142,7 +142,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.build_info import ANALYSIS_VERSION, result_check
+from core.build_info import ANALYSIS_VERSION, engine_name, result_check
 from core.orientation import needed_turn, tag_rotation
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
@@ -253,7 +253,14 @@ def _ruleset_label(value: str | None) -> str:
     key = str(value or "").strip()
     if not key:
         return "—"
+    # Some callers hand over a label already (core/progress_insights._point);
+    # title-casing it again printed "Mma (Standing Exchanges)" (QA, 2026-10-07).
+    if key in _RULESET_LABEL_VALUES:
+        return key
     return RULESET_LABELS.get(key, key.replace("_", " ").title())
+
+
+_RULESET_LABEL_VALUES = frozenset(RULESET_LABELS.values())
 
 
 templates.env.filters["fight_moment"] = _fight_moment
@@ -337,6 +344,8 @@ templates.env.globals["metric_catalog"] = METRIC_CATALOG
 templates.env.globals["movement_comparison"] = movement_comparison
 # Why a coaching card is empty, in one place (core/coaching.py coaching_gaps).
 templates.env.globals["coaching_gaps"] = coaching_gaps
+# Missing measurements, each reason once (core/metric_catalog.py).
+templates.env.globals["evidence_limitations"] = evidence_limitations
 # What is switched on, for every page that describes the product
 # (core/features.py): marketing, meta description, pricing and reports.
 templates.env.globals["features"] = feature_status()
@@ -1334,7 +1343,9 @@ def _analysed_span_summary(report: dict) -> dict | None:
         end = max([float(r.get("end_seconds") or 0.0) for r in rounds] or [start])
         duration = float((report.get("performance") or {}).get("segment_duration_seconds") or 0.0) + start
         duration = max(duration, end)
-        reason = "older reports started at the frame chosen for fighter selection"
+        # Named, not "older reports": the stale worker made a report like this
+        # three days before QA (2026-10-07). The whole video is analysed from v2.
+        reason = f"it was made by {engine_name(report)}, which started at the frame chosen for fighter selection"
     if duration <= 0 or end <= start:
         return None
     whole = start < 1.0 and duration - end < 1.0
@@ -1423,7 +1434,27 @@ def _fight_footage_summary(report: dict) -> dict | None:
     if excluded >= 1.0 and footage.get("main_exclusion_text"):
         note = (f"{_clock(excluded)} of the analysed footage was left out of every number because "
                 f"{footage['main_exclusion_text']}.")
-    return {"label": f"{_clock(fight)} of {_clock(duration)}", "note": note}
+    return {"label": f"{_clock(fight)} of {_clock(duration)}", "note": note,
+            "fight_seconds": fight, "duration_seconds": duration}
+
+
+def _analysed_label(span: dict | None, footage: dict | None) -> str | None:
+    """One "Analysed" figure for the report header.
+
+    The header printed "Analysed: Whole video · 0:20" and "Fight footage
+    analysed: 0:20 of 0:20" side by side (QA, 2026-10-07): two summaries of
+    the same footage, built separately. The fight-footage figure is added only
+    when it says something the span does not - that part of it was not fight.
+    """
+    if not span:
+        return footage["label"] if footage else None
+    label = span["label"]
+    if footage:
+        covered = float(span["end_seconds"]) - float(span["start_seconds"])
+        fight = float(footage.get("fight_seconds") or 0.0)
+        if covered - fight >= 1.0:
+            label += f" · {_clock(fight)} of it fight footage"
+    return label
 
 
 def _moment_fighters(report: dict) -> list[str]:
@@ -2302,7 +2333,7 @@ def _apply_human_scorecard(report: dict, confirmed_events: list[StrikeEvent]) ->
             "rounds": [],
             "winner_estimate": None,
             "status": "both_fighters_required",
-            "disclaimer": "To receive an estimated scorecard, choose Analyze both fighters. A one-fighter analysis does not count the opponent's points.",
+            "disclaimer": "To receive an estimated scorecard, choose Analyse both fighters. A one-fighter analysis does not count the opponent's points.",
         })
         return
     ruleset = report.get("setup", {}).get("ruleset", "K1")
@@ -5327,7 +5358,7 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
     if status == "both_fighters_required":
         return {
             "reason": "You analysed one fighter, so there is no opponent to score against.",
-            "fix": "Run it again and choose Analyze both fighters.",
+            "fix": "Run it again and choose Analyse both fighters.",
         }
     # Withheld because strike counting is not validated, not because of the
     # footage. A boxing report said "Tracking was not steady enough" at 89%
@@ -5566,7 +5597,7 @@ def _score_and_identity_as_shown(report: dict) -> None:
     report.setdefault("scorecard", {})["available"] = bool(report.get("scorecard", {}).get("available", coverage_ok) and coverage_ok)
     if report.get("video", {}).get("analysis_target", "BOTH") != "BOTH":
         report["scorecard"]["available"] = False
-        report["scorecard"]["disclaimer"] = "To receive an estimated scorecard, choose Analyze both fighters. A one-fighter analysis does not count the opponent's points."
+        report["scorecard"]["disclaimer"] = "To receive an estimated scorecard, choose Analyse both fighters. A one-fighter analysis does not count the opponent's points."
     # Customer reports are fully automatic. Human annotations remain isolated
     # in the model-validation lab and never become required report work.
     _apply_report_annotations(report, [])
@@ -5668,6 +5699,7 @@ def result_page(request: Request, job_id: str):
         "analysis_build": result_check(report),
         "recording_warnings": _recording_warnings(report, job),
         "fight_footage": _fight_footage_summary(report),
+        "analysed_label": _analysed_label(_analysed_span_summary(report), _fight_footage_summary(report)),
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
         "identity_failure": _identity_failure(report),
@@ -5949,16 +5981,16 @@ def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
         raise HTTPException(409, "Choose the fighters again before correcting action evidence.")
     predicted = _prediction_at(report, payload.event_time)
     if predicted is None and not payload.manual:
-        raise HTTPException(404, "No analyzed action exists at that time")
+        raise HTTPException(404, "No analysed action exists at that time")
     segment_end = float(report.get("setup", {}).get("end_seconds") or (
         float(report.get("setup", {}).get("start_seconds", 0))
         + float(report.get("performance", {}).get("segment_duration_seconds", 0))
     ))
     if contact_time > segment_end + 0.05:
-        raise HTTPException(400, "The exact contact time is outside the analyzed segment")
+        raise HTTPException(400, "The exact contact time is outside the analysed segment")
     if predicted is None:
         if payload.event_time > segment_end + 0.05:
-            raise HTTPException(400, "The label time is outside the analyzed segment")
+            raise HTTPException(400, "The label time is outside the analysed segment")
         predicted = {"fighter": fighter, "technique": "none", "target": None,
                      "outcome": "uncertain", "family": "none", "limb": "none"}
     annotation_id = save_annotation(job_id, payload.event_time, report.get("setup", {}).get("ruleset", "K1"), predicted, corrected)

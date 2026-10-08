@@ -457,8 +457,8 @@ class DurableAnalysisStateTests(TestCase):
         self.assertNotIn("\"Following both fighters with SAM2\"", analyzer)
         self.assertNotIn("\"Loading GPU models\"", analyzer)
         # The frame pass announces itself as soon as it starts...
-        self.assertIn('progress("Analyzing fight", ANALYSIS_PHASE_START,', analyzer)
-        self.assertLess(analyzer.index('progress("Analyzing fight", ANALYSIS_PHASE_START,'),
+        self.assertIn('progress("Analysing fight", ANALYSIS_PHASE_START,', analyzer)
+        self.assertLess(analyzer.index('progress("Analysing fight", ANALYSIS_PHASE_START,'),
                         analyzer.index("pose_pass_start = time.perf_counter()"))
         # ...and reports on time as well as on frame count.
         self.assertIn("PROGRESS_MAX_SILENCE_SECONDS)):", analyzer)
@@ -480,7 +480,7 @@ class DurableAnalysisStateTests(TestCase):
 
             running = client.get("/dashboard").text
             self.assertIn(f'href="/progress/{job_id}"', running)
-            self.assertIn("Analyzing 44%", running)
+            self.assertIn("Analysing 44%", running)
 
             state.update_job(job_id, {"status": "complete", "percent": 100.0})
             completed = client.get("/dashboard").text
@@ -517,7 +517,7 @@ class DurableAnalysisStateTests(TestCase):
 
             dashboard = client.get("/dashboard").text
             self.assertIn(f'href="/progress/{active_id}"', dashboard)
-            self.assertIn("Analyzing 37%", dashboard)
+            self.assertIn("Analysing 37%", dashboard)
             self.assertNotIn(f'href="/result/{completed_id}"', dashboard)
 
             navigation = client.get("/api/active-analysis").json()

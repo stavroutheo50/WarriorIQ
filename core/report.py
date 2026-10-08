@@ -8,7 +8,7 @@ from pathlib import Path
 from core.count_plausibility import counts_implausible
 from core.coaching import (
     POSE_DIMENSIONS,
-    build_coaching, build_pose_coaching, build_training_plan, build_training_progression,
+    build_coaching, build_pose_coaching, build_training_plan, build_training_progression, drop_work_prefix,
 )
 from core.features import is_on as feature_on
 from core.guard import reconcile_report_guard
@@ -977,6 +977,7 @@ def refresh_identity_integrity(report: dict) -> dict:
     # Before anything reads a guard figure: older reports carried three guard
     # summaries that disagreed with each other (core/guard.py).
     reconcile_report_guard(report)
+    drop_work_prefix(report)
     withhold_for_sideways(report)
     tracking = report.setdefault("tracking", {})
     # Two fighters who cannot be told apart in this video fail identity however
@@ -1093,7 +1094,7 @@ def build_preliminary_scorecard(
             "rounds": [],
             "winner_estimate": None,
             "status": "both_fighters_required",
-            "disclaimer": "To receive an estimated scorecard, choose Analyze both fighters. A one-fighter analysis does not count the opponent's points.",
+            "disclaimer": "To receive an estimated scorecard, choose Analyse both fighters. A one-fighter analysis does not count the opponent's points.",
         })
     elif not coverage_ok:
         scorecard["status"] = "insufficient_observation_coverage"
@@ -1255,7 +1256,7 @@ def build_report(
                 "status": "identity_integrity_failed",
                 "disclaimer": (
                     f"Scorecard withheld because {failed} did not pass the fighter-identity gate. "
-                    "Return to fighter selection and analyze again; person coverage alone cannot prove identity."
+                    "Return to fighter selection and analyse again; person coverage alone cannot prove identity."
                 ),
             })
     if req.analysis_target != "BOTH":
@@ -1263,7 +1264,7 @@ def build_report(
         scorecard["totals"] = {"A": None, "B": None}
         scorecard["rounds"] = []
         scorecard["winner_estimate"] = None
-        scorecard["disclaimer"] = "To receive an estimated scorecard, choose Analyze both fighters. A one-fighter analysis does not count the opponent's points."
+        scorecard["disclaimer"] = "To receive an estimated scorecard, choose Analyse both fighters. A one-fighter analysis does not count the opponent's points."
     elif action_metrics_trusted and not scoring_reliable:
         scorecard["disclaimer"] = (
             f"An estimated score requires at least {SETTINGS.min_tracking_coverage_for_score*100:.0f}% verified tracking "
@@ -1361,7 +1362,7 @@ def build_report(
             "uncertainty_policy": "WarriorIQ leaves a fighter/action unavailable or uncertain when evidence is insufficient rather than inventing a result.",
             "scoring_status": scorecard["disclaimer"],
             "minimum_fighter_coverage_for_score": SETTINGS.min_tracking_coverage_for_score,
-            "model_validation_status": "A custom WarriorIQ temporal checkpoint is used only when present. Otherwise the multi-frame deterministic classifier is labeled as fallback.",
+            "model_validation_status": "A custom WarriorIQ temporal checkpoint is used only when present. Otherwise the multi-frame deterministic classifier is labelled as fallback.",
             "rules_reference": "WAKO Rules revision 25.10.2022; K-1 2026 amendment takes effect 01.01.2027 and is not applied before that date.",
         },
     }

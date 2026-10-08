@@ -142,12 +142,29 @@ MOMENT_LIMIT = 4
 # Coaching compares fighters over two-second blocks (core/metrics.py _spread).
 BLOCK_SECONDS = 2.0
 
-# Shown where an older report's guard figure cannot be recovered.
-LEGACY_NOTE = ("Not measured in this report: it was made before the guard was measured "
-               "consistently. Re-run the analysis to measure it.")
-LEGACY_PARTIAL_NOTE = ("This report was made before the guard was measured consistently, so only "
-                       "the share of time with hands up is shown. Re-run the analysis for the "
-                       "longest stretch with hands down and the moments the guard dropped.")
+# Shown where an older report's guard figure cannot be recovered. They name
+# the engine that made the report: "older report" said nothing a fighter could
+# check, and was said of a report three days old (QA, 2026-10-07).
+# Analysis engine version that first measured the guard this way
+# (core/build_info.py ANALYSIS_VERSION 4).
+GUARD_ENGINE_VERSION = 4
+LEGACY_NOTE = ("Not measured in this report: it was made by {engine}, before the guard was measured "
+               "consistently (engine v{current}). Re-run the analysis to measure it.")
+LEGACY_PARTIAL_NOTE = ("This report was made by {engine}, before the guard was measured consistently "
+                       "(engine v{current}), so only the share of time with hands up is shown. Re-run "
+                       "the analysis for the longest stretch with hands down and the moments the guard "
+                       "dropped.")
+LEGACY_SHORT_NOTE = "made by {engine} — re-run to measure"
+
+
+def legacy_notes(report: dict) -> tuple[str, str, str]:
+    """(full note, partial note, short note) naming the engine that made ``report``."""
+    from core.build_info import engine_name
+
+    engine = engine_name(report)
+    fill = {"engine": engine, "current": GUARD_ENGINE_VERSION}
+    return (LEGACY_NOTE.format(**fill), LEGACY_PARTIAL_NOTE.format(**fill),
+            LEGACY_SHORT_NOTE.format(engine=engine.replace("analysis engine", "engine")))
 
 
 def is_up(reading) -> bool | None:
@@ -288,6 +305,7 @@ def reconcile_report_guard(report: dict) -> dict:
     metrics = report.get("metrics")
     if not isinstance(metrics, dict):
         return report
+    full_note, partial_note, short_note = legacy_notes(report)
     for fighter in ("A", "B"):
         own = metrics.get(fighter)
         if not isinstance(own, dict):
@@ -300,8 +318,8 @@ def reconcile_report_guard(report: dict) -> dict:
         share = numbers.get("hands_up_share") if numbers else None
         own["guard_index"] = None if share is None else float(share)
         own["guard_definition"] = LEGACY_DEFINITION
-        own["guard_note"] = LEGACY_NOTE if share is None else LEGACY_PARTIAL_NOTE
-        own["guard_note_short"] = "older report — re-run to measure"
+        own["guard_note"] = full_note if share is None else partial_note
+        own["guard_note_short"] = short_note
         if numbers is not None:
             numbers["longest_hands_down_seconds"] = None
         moments = own.get("moments")
@@ -313,5 +331,5 @@ def reconcile_report_guard(report: dict) -> dict:
         availability = own.get("availability")
         if isinstance(availability, dict) and share is None:
             availability["guard"] = {**(availability.get("guard") or {}), "available": False,
-                                     "reason": LEGACY_NOTE}
+                                     "reason": full_note}
     return report

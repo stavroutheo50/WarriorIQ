@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}History · WarriorIQ{% endblock %}
 {% block content %}
-<header class="archive-hero" data-reveal><div><div class="eyebrow">Private fight archive</div><h1>Your fight library.</h1><p>Every saved analysis, ready for the next review.</p></div>{% if signed_in %}<a class="btn" data-motion-primary href="/analyze">{% if fights %}Analyze another fight{% else %}Analyze a fight{% endif %} <span aria-hidden="true">→</span></a>{% endif %}</header>
+<header class="archive-hero" data-reveal><div><div class="eyebrow">Private fight archive</div><h1>Your fight library.</h1><p>Every saved analysis, ready for the next review.</p></div>{% if signed_in %}<a class="btn" data-motion-primary href="/analyze">{% if fights %}Analyse another fight{% else %}Analyse a fight{% endif %} <span aria-hidden="true">→</span></a>{% endif %}</header>
 {% if cancelled_notice %}<div class="notice" id="library-notice" role="status" tabindex="-1"><strong>Upload cancelled.</strong> Its video was deleted and it no longer counts towards your pending fights.</div>{% endif %}
 {% if signed_in and pending %}
 <section class="pending-fights" id="pending" aria-labelledby="pendingHeading" data-reveal>
@@ -39,7 +39,7 @@
     Paged in the script below, after search, filter and sort, so a search still
     covers every fight; with scripts off every fight is listed. -#}
 <nav class="archive-pager" id="historyPager" aria-label="Fight library pages" hidden><button class="btn secondary" type="button" id="historyPrev">Previous</button><span id="historyPageInfo" aria-live="polite"></span><button class="btn secondary" type="button" id="historyNext">Next</button></nav><div class="archive-no-results" id="historyNoResults" hidden><p id="historyNoResultsText"></p><button class="btn secondary" type="button" id="historyNoResultsAction"></button></div>
-{% else %}<div class="empty-workspace empty-state"><span class="empty-state-mark" aria-hidden="true">＋</span><div><div class="eyebrow">Your archive is ready</div><h2>Your first fight starts the library</h2><p>Analyze a bout and WarriorIQ will keep the completed report here.</p><a class="btn" href="/analyze">Analyze first fight</a></div></div>{% endif %}
+{% else %}<div class="empty-workspace empty-state"><span class="empty-state-mark" aria-hidden="true">＋</span><div><div class="eyebrow">Your archive is ready</div><h2>Your first fight starts the library</h2><p>Analyse a bout and WarriorIQ will keep the completed report here.</p><a class="btn" href="/analyze">Analyse first fight</a></div></div>{% endif %}
 {% endif %}
 </section>
 {% endblock %}

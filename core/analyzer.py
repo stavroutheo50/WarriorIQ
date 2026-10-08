@@ -1176,7 +1176,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # The bar reserves 0-35% for SAM2. Without a GPU SAM2 is skipped at once,
     # and the bar used to sit at 1% until the first frame-pass update, then
     # jump past 50%. Mark the start of the frame pass as soon as it begins.
-    progress("Analyzing fight", ANALYSIS_PHASE_START, time.perf_counter() - wall_start, 0.0,
+    progress("Analysing fight", ANALYSIS_PHASE_START, time.perf_counter() - wall_start, 0.0,
              manager, None, quality, stage="analysis")
     # SAM2 reads the segment independently. Resume the pose pass immediately
     # after the already-consumed selection frame.
@@ -1588,7 +1588,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                     live_candidates, req.ruleset, live_action_trusted, all_live_event_data,
                 )
                 progress(
-                    "Analyzing fight",
+                    "Analysing fight",
                     percent,
                     elapsed,
                     processed_seconds,
@@ -1741,7 +1741,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # share is the detector degrading on footage it finds hard, and that is
         # worth seeing before the metrics built on those joints start drifting.
         "pose_gate": None if joint_gate is None else joint_gate.summary(),
-        "metric_definition": "Observation coverage: accepted fighter observations divided by analyzed frames. This is not ground-truth identity accuracy.",
+        "metric_definition": "Observation coverage: accepted fighter observations divided by analysed frames. This is not ground-truth identity accuracy.",
         # Where the forward pass was seeded. Equal to the frame the person
         # picked unless the fighters were followed back from it, in which
         # case identity_seed says where they picked and how far back it went.

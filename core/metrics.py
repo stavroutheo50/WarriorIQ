@@ -522,7 +522,7 @@ class MetricsAccumulator:
                     },
                     "round_consistency": {
                         "available": consistency is not None,
-                        "reason": None if consistency is not None else "At least two analyzed rounds containing verified attacks are required.",
+                        "reason": None if consistency is not None else "At least two analysed rounds containing verified attacks are required.",
                         "samples": len(round_attempt_rates),
                     },
                 },

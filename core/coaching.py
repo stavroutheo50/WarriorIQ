@@ -81,7 +81,7 @@ def _measured_baseline_drills(fighter: str, own: dict) -> list[dict]:
         (
             1.0 / (1.0 + defenses),
             "Defend-and-return rounds",
-            f"4 x 90 sec: Fighter {fighter} earns a repetition only after a visible defense followed by an immediate legal return; beat the detected baseline of {defenses} defenses.",
+            f"4 x 90 sec: Fighter {fighter} earns a repetition only after a visible defence followed by an immediate legal return; beat the detected baseline of {defenses} defences.",
             "Targets the fighter's measured defensive activity.",
         ),
     ]
@@ -157,8 +157,8 @@ POSE_DIMENSIONS = [
     ),
     (
         "ring_center_control", "Holding the middle", (0.50, 0.15),
-        "Center-line movement rounds",
-        "3 x 2 min: use a marked center lane; exit every exchange at an angle and recover the lane before restarting.",
+        "Centre-line movement rounds",
+        "3 x 2 min: use a marked centre lane; exit every exchange at an angle and recover the lane before restarting.",
     ),
     (
         "pressure_index", "Walking them down", (0.03, 0.10),
@@ -454,7 +454,7 @@ def build_coaching(fighter: str, metrics: dict, events: list[StrikeEvent]) -> di
         drills.append({
             "name": f"Finish in stance · {_pct(balance)}% baseline",
             "prescription": "3 x 2 min on pads: freeze for one count after every combination and verify stance width, posture, and guard.",
-            "why": "Reduces over-rotation and makes follow-up defense faster.",
+            "why": "Reduces over-rotation and makes follow-up defence faster.",
         })
 
     defense_counts = own.get("defenses", {})
@@ -462,7 +462,7 @@ def build_coaching(fighter: str, metrics: dict, events: list[StrikeEvent]) -> di
     if total_defenses >= 3:
         best_defense = max(defense_counts, key=defense_counts.get)
         strengths.append({
-            "title": f"Active defense · {count_of(total_defenses, 'action')}",
+            "title": f"Active defence · {count_of(total_defenses, 'action')}",
             "detail": f"Detected {total_defenses} evidence-supported defensive actions; {best_defense} was the most common.",
             "evidence_times": [],
         })
@@ -482,7 +482,7 @@ def build_coaching(fighter: str, metrics: dict, events: list[StrikeEvent]) -> di
                 ][:6],
             })
             drills.append({
-                "name": f"{target.title()} defense · {count}-action baseline",
+                "name": f"{target.title()} defence · {count}-action baseline",
                 "prescription": "Partner technical rounds with the attacker limited to two or three known entries; defender scores only by defending and returning immediately.",
                 "why": f"Targets the most common detected scoring area against Fighter {fighter}.",
             })
@@ -603,7 +603,7 @@ def build_training_progression(coaching: dict, fighter: str, own: dict) -> list[
             "theme": theme,
             "method": method,
             "sessions_per_week": sessions,
-            "work": [f"Fighter {fighter}: {drill['prescription']}" for drill in drills],
+            "work": [drill["prescription"] for drill in drills],
             "targets": targets,
             "check": (
                 "Film a round and analyse it. These are the numbers that should have moved."
@@ -666,11 +666,33 @@ def build_training_plan(coaching: dict, fighter: str, own: dict) -> list[dict]:
         plan.append({
             "session_block": index,
             "focus": f"Block {index}: {drill['name']}",
-            "work": f"Fighter {fighter}: {drill['prescription']}",
+            # The prescription names the fighter where it needs to, and the plan
+            # is headed with the name: a "Fighter A: " prefix printed the name
+            # twice in every line once the page put names in (QA, 2026-10-07).
+            "work": drill["prescription"],
             "goal": measured_goal(drill),
             "baseline": baseline,
         })
     return plan
+
+
+def drop_work_prefix(report: dict) -> dict:
+    """Remove the "Fighter A: " that stored plans put before every drill line.
+
+    Reports saved before the prefix was dropped (build_training_plan) still
+    carry it; the render-time gate removes it so they read like new ones.
+    Idempotent.
+    """
+    for fighter in ("A", "B"):
+        prefix = f"Fighter {fighter}: "
+        for item in ((report.get("training_plan") or {}).get(fighter) or []):
+            if isinstance(item, dict) and str(item.get("work") or "").startswith(prefix):
+                item["work"] = item["work"][len(prefix):]
+        for week in ((report.get("training_progression") or {}).get(fighter) or []):
+            if isinstance(week, dict) and isinstance(week.get("work"), list):
+                week["work"] = [line[len(prefix):] if isinstance(line, str) and line.startswith(prefix) else line
+                                for line in week["work"]]
+    return report
 
 
 # What the report says where coaching found nothing to name - the "Keep

@@ -133,7 +133,7 @@ def build_progress(records: list[dict], fighter: str) -> dict:
         (key for key in ("guard", "balance", "center") if key in recent), "coverage")
     trend_labels = {
         "guard": "Guard position", "balance": "Post-action balance",
-        "center": "Ring-center position", "coverage": "How clearly you were seen",
+        "center": "Ring-centre position", "coverage": "How clearly you were seen",
     }
     return {
         "fighter": fighter,

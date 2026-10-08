@@ -51,7 +51,8 @@
     var x = 96, y = 190;
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = INK; ctx.font = font(800, 52); ctx.fillText("WARRIOR", x, y);
-    var wordmark = ctx.measureText("WARRIOR ").width;
+    // One word, as the site header spells it (QA, 2026-10-07: "WARRIOR IQ").
+    var wordmark = ctx.measureText("WARRIOR").width;
     ctx.fillStyle = CYAN; ctx.fillText("IQ", x + wordmark, y);
 
     y += 90;

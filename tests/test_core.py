@@ -2317,11 +2317,13 @@ class TrainingProgressionTests(unittest.TestCase):
         guard = [week["targets"][0]["to"] for week in weeks]
         self.assertEqual(len(set(guard)), 4, f"targets must step up: {guard}")
 
-    def test_the_plan_names_the_fighter_and_carries_the_real_drill(self):
+    def test_the_plan_carries_the_real_drill_without_repeating_the_name(self):
         from core.coaching import build_training_progression
 
         weeks = build_training_progression(self._coaching(), "B", {})
-        self.assertTrue(all(item.startswith("Fighter B:") for week in weeks for item in week["work"]))
+        # The plan is headed with the fighter's name; each line repeating it
+        # read "Alex: ... Alex ..." (QA, 2026-10-07).
+        self.assertFalse(any(item.startswith("Fighter B:") for week in weeks for item in week["work"]))
         self.assertIn("freeze in stance", weeks[0]["work"][0])
 
     def test_no_drills_means_no_invented_progression(self):

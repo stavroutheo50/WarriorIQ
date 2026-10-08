@@ -38,10 +38,23 @@ def build_commit() -> str:
 
     A Modal image ships without .git, so the deploy bakes the commit into
     WARRIORIQ_BUILD_COMMIT; a checkout answers from git directly.
+
+    QA, 2026-10-07: reports said "build unknown". The cPanel deploy copies the
+    code without .git and records the commit in DEPLOYED_COMMIT (.cpanel.yml),
+    and Render sets RENDER_GIT_COMMIT; neither was read here, so an analysis
+    run on either host could not name its own code. Both are now asked before
+    git.
     """
-    baked = os.getenv("WARRIORIQ_BUILD_COMMIT", "").strip()
-    if baked:
-        return baked[:12]
+    for name in ("WARRIORIQ_BUILD_COMMIT", "RENDER_GIT_COMMIT"):
+        baked = os.getenv(name, "").strip()
+        if baked:
+            return baked[:12]
+    try:
+        deployed = (ROOT / "DEPLOYED_COMMIT").read_text(encoding="utf-8").strip()
+    except OSError:
+        deployed = ""
+    if deployed:
+        return deployed[:12]
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short=12", "HEAD"], cwd=ROOT,
@@ -54,6 +67,17 @@ def build_commit() -> str:
 
 def stamp() -> dict:
     return {"analysis_version": ANALYSIS_VERSION, "commit": build_commit()}
+
+
+def engine_name(report: dict | None) -> str:
+    """The engine that made a report, for notices about older reports.
+
+    "Older reports" said nothing a fighter could check, and a report three days
+    old was called one (QA, 2026-10-07). Stamping began with version 2, so a
+    report without a stamp came from before it.
+    """
+    version = result_check(report or {})["analysis_version"]
+    return f"analysis engine v{version}" if version else "an analysis engine from before v2"
 
 
 def result_check(report: dict) -> dict:
