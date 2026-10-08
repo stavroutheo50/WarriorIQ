@@ -2279,7 +2279,10 @@ class DowngradeBlockTests(unittest.TestCase):
         page = self.client.get("/pricing?audience=coach").text
         self.assertIn("Too small", page)
         self.assertIn("you have 8 fighters", page)
-        self.assertIn("Not enough room", page)
+        # The button says the numbers, not "Not enough room" (QA, 2026-10-07).
+        self.assertIn("You have 8 fighters — this plan holds 5", page)
+        self.assertNotIn("Not enough room", page)
+        self.assertIn('id="blocked-coach_5"', page)
 
 
 class AddFighterFromCoachPageTests(unittest.TestCase):

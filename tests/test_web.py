@@ -4218,11 +4218,16 @@ class CoachFilenameTests(unittest.TestCase):
         self.assertNotIn("<th>Ruleset</th>", coach)
         self.assertNotIn("<th>Sport</th>", coach)
 
-    def test_the_promise_that_makes_this_a_defect_is_still_on_the_pricing_page(self):
-        pricing = (Path(__file__).resolve().parents[1] / "app" / "templates"
-                   / "pricing.html").read_text(encoding="utf-8")
-        self.assertIn("No video filename shown", pricing,
-                      "the promise moved; this test should follow it")
+    def test_the_pricing_page_no_longer_promises_no_filename(self):
+        """QA, 2026-10-07: the Pending list and library search show and search
+        the filename - it is how people find their own fights - so the promise
+        was removed rather than the filename. Fight labels stay on coach views."""
+        from fastapi.testclient import TestClient
+
+        import app.main as webapp
+
+        pricing = TestClient(webapp.app).get("/pricing").text
+        self.assertNotIn("No video filename shown", pricing)
 
 
 class BackNavigationTests(unittest.TestCase):
