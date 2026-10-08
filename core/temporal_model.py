@@ -123,6 +123,17 @@ def build_temporal_network(architecture: str, input_dim: int, classes: int):
     return PoseTransformer()
 
 
+def checkpoint_sha256(path) -> str:
+    """SHA-256 of a checkpoint file: the identity the strike exam is tied to."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 class TemporalModel:
     """Optional trained WarriorIQ kickboxing temporal classifier.
 
@@ -142,6 +153,10 @@ class TemporalModel:
         self.error_type = None
         self.inference_failures = 0
         self.input_dim = 102
+        # Which exact file this is, recorded in every report so the accuracy
+        # exam's verdict applies only to the model it examined
+        # (core/strike_exam.py). None until a checkpoint loads.
+        self.checkpoint_sha256 = None
         checkpoint = Path(SETTINGS.temporal_checkpoint)
         if not checkpoint.exists():
             LOGGER.warning("temporal_model_unavailable reason=checkpoint_missing")
@@ -178,6 +193,7 @@ class TemporalModel:
                     "macro_action_test_f1": payload.get("macro_action_test_f1"),
                     "end_to_end_validation": payload.get("end_to_end_validation"),
                 }
+            self.checkpoint_sha256 = checkpoint_sha256(checkpoint)
             self.available = True
             self.input_dim = input_dim
             self.status = "ready"

@@ -5731,11 +5731,14 @@ def result_page(request: Request, job_id: str):
                      if identity_trusted and not (report.get("scorecard") or {}).get("available")
                      else None),
         "kick_total": None if identity_trusted else unattributed_kick_total(report),
-        "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
+        # The global switch, or this sport's accuracy exam for the model that
+        # made the report (core/strike_exam.py): published_families says both.
+        "strike_counts_published": bool(published_families(
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)),
         # Attributions, like the per-fighter cards, so only when identity held.
         "counted_strikes": (_with_checks(job_id, _counted_strikes(report, published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)))
-            if identity_trusted and STRIKE_COUNTS_PUBLISHED else []),
+            if identity_trusted else []),
         "can_check_strikes": bool(_account(request)),
         "went_down": _went_down(job_id, report),
         "wrong_sport": _wrong_sport(report, job),
@@ -5756,7 +5759,7 @@ def result_page(request: Request, job_id: str):
         ],
         "went_down_note": (report.get("went_down") or {}).get("note"),
         "estimate_note": counting_policy(
-            (report.get("scorecard") or {}).get("sport") or _job_sport(job)).estimate_note,
+            (report.get("scorecard") or {}).get("sport") or _job_sport(job), report=report).estimate_note,
         "families_shown": published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job), report),
         # Only Full Contact has an obligatory kick count, so this is None for
@@ -6267,8 +6270,8 @@ def replay_page(
         outcome.lower() if outcome else None,
     )
     sport = (report.get("scorecard") or {}).get("sport") or _job_sport(_authorized_job(request, job_id) or {})
-    policy = counting_policy(sport)
-    if replay_mode == "movement_chapters" and identity_safe and STRIKE_COUNTS_PUBLISHED:
+    policy = counting_policy(sport, report=report)
+    if replay_mode == "movement_chapters" and identity_safe and published_families(sport, report):
         # The report lists every counted strike ("Watch every counted strike")
         # while this page said no action had passed. The same list is offered
         # here, labelled as what it is: automatic counts, estimates.

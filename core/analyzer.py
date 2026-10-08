@@ -1094,6 +1094,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "temporal_architecture": action_engine.temporal.architecture,
         "temporal_validation": action_engine.temporal.validation,
         "temporal_runtime": action_engine.temporal.diagnostics(),
+        # The exact strike model, for the per-sport accuracy exam's verdict
+        # (core/strike_exam.py). None when no checkpoint is loaded.
+        "temporal_checkpoint_sha256": getattr(action_engine.temporal, "checkpoint_sha256", None),
         "contact_classifier": "pose_geometry_temporal_contact",
         "max_engagement_body_lengths": SETTINGS.max_engagement_body_lengths,
         "uncertainty_policy": "No single-frame strike events, temporal support for contact, and no identity reassignment when recovery evidence is ambiguous.",
@@ -1530,6 +1533,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             if live_action_trusted and not action_engine.temporal.available:
                 live_action_trusted = False
                 classifier["custom_temporal_checkpoint_loaded"] = False
+            if not action_engine.temporal.available:
+                # The model stopped part-way: later strikes came from the rules,
+                # so the report must not claim the examined model made them.
+                classifier["temporal_checkpoint_sha256"] = None
             classifier["temporal_runtime"] = action_engine.temporal.diagnostics()
 
             # Fighters move. Someone at ringside does not, and that is the

@@ -458,7 +458,13 @@ def published_families(sport: str | None, report: dict | None = None) -> tuple[s
         scored = ("punch", "kick", "knee")
     if STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED:
         return scored
-    return ()
+    # Otherwise only what this sport's accuracy exam passed, for the exact
+    # strike model that made this report (core/strike_exam.py). No verdict,
+    # or another model, means nothing.
+    from core.strike_exam import passed_families
+
+    exam = passed_families(sport, report)
+    return tuple(family for family in scored if family in exam)
 
 
 SHARE_CARD_NOTE = "Automatic estimate by WarriorIQ, not checked by a person."
