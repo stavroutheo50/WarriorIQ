@@ -220,6 +220,53 @@ CONTACT_ADDRESS_FALLBACKS = {
 }
 
 
+# Words that name a protocol, a role or nothing at all rather than a company.
+# QA, 2026-10-07: /subprocessors listed the email provider as "smtp".
+PLACEHOLDER_NAMES = frozenset({
+    "smtp", "smtps", "imap", "sendmail", "mail", "email", "e-mail", "mailer", "host", "hosting", "server",
+    "localhost", "provider", "gpu", "worker", "cloud", "vps", "tbd", "todo", "tba", "changeme", "example",
+    "n/a", "na", "none", "null", "unknown", "-", "?",
+})
+FREE_MAIL_DOMAINS = ("gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com")
+
+
+def is_placeholder_name(value: str | None) -> bool:
+    text = str(value or "").strip().lower()
+    return not text or text in PLACEHOLDER_NAMES or "example" in text or text.startswith(("your ", "the "))
+
+
+def _named(value: str | None) -> bool:
+    return not is_placeholder_name(value)
+
+
+def public_config_problems(settings=None) -> list[str]:
+    """What a public legal page would print that is a placeholder, not a fact.
+
+    Run by tools/check_public_config.py (and tools/verify_project.py against a
+    configured deployment), which fail on any of these.
+    """
+    cfg = settings or SETTINGS
+    problems = []
+    for label, value in (("WARRIORIQ_HOSTING_PROVIDER", cfg.hosting_provider),
+                         ("WARRIORIQ_EMAIL_PROVIDER_NAME", cfg.email_provider_name),
+                         ("WARRIORIQ_ANALYSIS_PROVIDER_NAME", cfg.analysis_provider_name)):
+        if str(value or "").strip() and is_placeholder_name(value):
+            problems.append(f"{label} is {value!r}, which is not a company name")
+    if cfg.email_provider and not str(cfg.email_provider_name or "").strip():
+        problems.append("email is switched on (WARRIORIQ_EMAIL_PROVIDER) but WARRIORIQ_EMAIL_PROVIDER_NAME, "
+                        "the company that delivers it, is empty")
+    if not str(cfg.hosting_provider or "").strip():
+        problems.append("WARRIORIQ_HOSTING_PROVIDER is empty, so /subprocessors cannot name the host")
+    for key in ("support_email", "privacy_email"):
+        address = str(getattr(cfg, key, "") or "").strip()
+        if not address:
+            problems.append(f"WARRIORIQ_{key.upper()} is empty, so legal pages print a placeholder for it")
+        elif address.lower().rsplit("@", 1)[-1] in FREE_MAIL_DOMAINS:
+            problems.append(f"WARRIORIQ_{key.upper()} is a {address.rsplit('@', 1)[-1]} address, not one on "
+                            "WarriorIQ's own domain")
+    return problems
+
+
 def subprocessor_sections() -> list[tuple[str, str]]:
     """Who receives personal data from this deployment, and for what.
 
@@ -244,6 +291,11 @@ def subprocessor_sections() -> list[tuple[str, str]]:
             "Modal provides the cloud graphics card that analyses each fight. For one analysis it receives the "
             "fight video and the two fighter boxes you drew, returns the measurements to this website, and the "
             "video and working files are deleted from it when the run ends.")))
+    elif SETTINGS.analysis_worker_mode == "remote" and _named(SETTINGS.analysis_provider_name):
+        name = SETTINGS.analysis_provider_name
+        sections.append((f"{name} (fight analysis)", (
+            f"{name} provides the machine that analyses each fight. For one analysis it downloads the fight "
+            "video and the two fighter boxes from this website and deletes them when the run ends.")))
     elif SETTINGS.analysis_worker_mode == "remote":
         sections.append(("Analysis computer", (
             "Fights are analysed on a separate analysis computer run for WarriorIQ. For one analysis it downloads "
@@ -255,9 +307,16 @@ def subprocessor_sections() -> list[tuple[str, str]]:
             "signal to Google Ads sent without personalisation. It never loads on sign-in, account, upload, report, "
             "replay or sharing pages, so their addresses are never sent. Advertising storage and ad "
             "personalisation are refused at all times. Fight footage and report contents are never sent.")))
-    if SETTINGS.email_provider:
-        sections.append((f"{SETTINGS.email_provider} (email)", (
-            f"{SETTINGS.email_provider} delivers WarriorIQ's account emails, such as sign-in and verification "
+    if SETTINGS.email_provider and _named(SETTINGS.email_provider_name):
+        name = SETTINGS.email_provider_name
+        sections.append((f"{name} (email)", (
+            f"{name} delivers WarriorIQ's account emails, such as sign-in and verification "
+            "messages, and so receives your email address and the message.")))
+    elif SETTINGS.email_provider:
+        # Email is switched on but its company is not named. Never the
+        # transport ("smtp"); tools/check_public_config.py fails on this.
+        sections.append(("Email delivery", (
+            "An email delivery service sends WarriorIQ's account emails, such as sign-in and verification "
             "messages, and so receives your email address and the message.")))
     sign_in = [name for name, configured in (
         ("Google", SETTINGS.google_client_id and SETTINGS.google_client_secret),

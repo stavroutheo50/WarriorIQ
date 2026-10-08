@@ -98,6 +98,16 @@ def main():
     for path in sorted((ROOT / "app" / "templates").glob("*.html")):
         app.main.templates.env.get_template(path.name)
     check(True, "all Jinja templates compile with application filters")
+    # Against a configured deployment (a public address set), the legal pages
+    # must name real providers and contacts, never "smtp" or a placeholder.
+    # A development checkout has none of that configured and is not asked.
+    from core.config import SETTINGS as _settings
+    from core.legal import public_config_problems
+
+    if _settings.public_base_url:
+        problems = public_config_problems()
+        check(not problems, "public legal pages name real providers and contacts"
+              + ("" if not problems else ": " + "; ".join(problems)))
 
     import importlib.util
     import subprocess

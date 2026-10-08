@@ -1333,7 +1333,18 @@ class Settings:
     # re-widens frame-src, which is why that is only widened when a container
     # is actually loaded.
     gtm_container_id: str = os.getenv("WARRIORIQ_GTM_ID", "").strip()
+    # How email is sent: "smtp" switches sending on (core/notifications.py).
+    # A transport, not a company - /subprocessors printed it literally as the
+    # email provider's name (QA, 2026-10-07). The company is named below.
     email_provider: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER", "").strip()
+    # The company that delivers WarriorIQ's email, as /subprocessors names it
+    # (for example the SMTP service's operator). tools/check_public_config.py
+    # fails while email is switched on and this is empty or a placeholder.
+    email_provider_name: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER_NAME", "").strip()
+    # The company that provides the analysis machine, when it is not detected
+    # (Modal is recognised from WARRIORIQ_WORKER_WAKE_URL). Empty for a
+    # machine run by WarriorIQ itself, which /subprocessors then says.
+    analysis_provider_name: str = os.getenv("WARRIORIQ_ANALYSIS_PROVIDER_NAME", "").strip()
     # Who hosts the website, its database and the uploaded fights, named on
     # /subprocessors. Render sets RENDER on its own services, so a Render
     # deployment names itself; any other host is named here.
