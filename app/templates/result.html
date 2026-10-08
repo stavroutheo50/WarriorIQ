@@ -143,6 +143,17 @@
   <p class="small muted">Measured from your video. A second pair of eyes, not a replacement for your coach.</p>
 </section>
 {% endif %}
+{#- Compare to last video, one tap from the top (after mmagpt.app). Arrows
+    only: pressure, centre and movement have no better direction
+    (core/metric_catalog.py), so this strip never calls a change better. -#}
+{% set since = progress_since_last|default({}, true) %}
+{% if since.available and not identity_failed %}
+<nav class="since-last" aria-label="Compared with your last fight">
+  <span class="eyebrow">Since your last fight</span>
+  <ul class="list-clean">{% for c in since.changes %}<li><b>{{ c.label }}</b> {% if c.direction == 'up' %}<span aria-hidden="true">▲</span> higher{% elif c.direction == 'down' %}<span aria-hidden="true">▼</span> lower{% else %}<span aria-hidden="true">—</span> steady{% endif %}</li>{% endfor %}</ul>
+  <a class="text-link" href="#report-progress">Details</a>{% if since.previous_job_id %} · <a class="text-link" href="/compare?a={{ since.previous_job_id }}&amp;b={{ job_id }}">Side by side</a>{% endif %}
+</nav>
+{% endif %}
 {#- No numbers at all when too little of the video was fight footage
     (core/fight_presence.py): the notice above says so instead. -#}
 {% if numbers.state != 'no_fight' %}

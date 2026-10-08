@@ -745,3 +745,7 @@
 .fix-first-drill p{margin:0 0 6px}
 /* With the fault moved to the top, "Keep doing" may stand alone. */
 .keep-fix-row article:only-child{grid-column:1/-1}
+/* Since your last fight, near the top (result.html): arrows, never a verdict. */
+.since-last{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:0 0 18px;padding:12px 16px;border:1px solid rgba(255,255,255,.08);border-radius:12px}
+.since-last .list-clean{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0;padding:0}
+.since-last li{font-size:14px;color:#c7d2e3}

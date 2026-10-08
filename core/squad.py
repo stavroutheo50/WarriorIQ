@@ -384,6 +384,8 @@ def compare_with_previous(report: dict, fights: list[dict], job_id: str) -> dict
         "changes": changes,
         "previous_name": previous.get("name"),
         "previous_date": (previous.get("created_at") or "")[:10],
+        # For the side-by-side link at the top of the report.
+        "previous_job_id": previous.get("job_id"),
     }
 
 
