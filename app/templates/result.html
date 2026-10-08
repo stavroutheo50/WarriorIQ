@@ -127,6 +127,22 @@
   </div>
   {% endif %}
 </section>
+{#- Fix this first (core.report.fix_first): the one measured fault, the moment
+    it happened on the skeleton replay, and its drill - the shape of
+    mmagpt.app's report, built only from what this analysis measured. Not
+    shown when there is no fault to name, or the coaching is withheld. -#}
+{% set ff_focus = report.video.focus_fighter|default(report.video.analysis_target, true) %}
+{% set ff = fix_first(report, ff_focus if ff_focus in ['A', 'B'] else 'A', training_items=report_access.training_items) if not identity_failed and numbers.state not in ('movement_only', 'no_fight') else none %}
+{% if ff %}
+<section class="card fix-first" id="fix-first" aria-labelledby="fixFirstTitle" data-reveal>
+  <div class="eyebrow">Fix this first</div>
+  <h2 id="fixFirstTitle">{{ ff.title }}</h2>
+  <p class="fix-first-detail">{{ ff.detail }}</p>
+  {% if ff.moment_seconds is not none %}<div class="fix-first-moment"><a class="btn" href="/replay/{{ job_id }}?t={{ '%.2f'|format([ff.moment_seconds - 1, 0]|max) }}">▶ Watch it at {{ ff.moment_clock }}</a>{% if ff.more_moments %}<small class="muted">and {{ ff.more_moments }} more time{{ '' if ff.more_moments == 1 else 's' }} in the replay</small>{% endif %}</div>{% endif %}
+  {% if ff.drill %}<div class="fix-first-drill"><span>Your drill</span><strong>{{ ff.drill.name }}</strong><p>{{ ff.drill.prescription }}</p>{% if ff.drill.goal %}<small>Goal: {{ ff.drill.goal }}</small>{% endif %}</div>{% endif %}
+  <p class="small muted">Measured from your video. A second pair of eyes, not a replacement for your coach.</p>
+</section>
+{% endif %}
 {#- No numbers at all when too little of the video was fight footage
     (core/fight_presence.py): the notice above says so instead. -#}
 {% if numbers.state != 'no_fight' %}
@@ -647,7 +663,7 @@
       failed" (QA, 2026-10-04). -#}
   {% if not identity_failed and numbers.state != 'movement_only' %}
   {%- set gaps = coaching_gaps(report, primary, (report.scorecard|default({})).sport) -%}
-  <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'No clear strength yet'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% else %}<small>{{ gaps.keep }}</small>{% endif %}</article><article><span>Fix next</span>{% set fix=report.coaching[primary].improvements|default([]) %}<strong>{{fix[0].title if fix else 'Nothing clear to fix yet'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% else %}<small>{{ gaps.fix }}</small>{% endif %}</article></div>
+  <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'No clear strength yet'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% else %}<small>{{ gaps.keep }}</small>{% endif %}</article>{% set fix=report.coaching[primary].improvements|default([]) %}{#- Said once: at the top as "Fix this first" when that card is shown. -#}{% if not ff %}<article><span>Fix next</span><strong>{{fix[0].title if fix else 'Nothing clear to fix yet'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% else %}<small>{{ gaps.fix }}</small>{% endif %}</article>{% endif %}</div>
   {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary">{#- The cards fill the row however many there are, and a long name is cut
     with its full text in a title, instead of wrapping over several lines
     (QA, 2026-10-07; static/fixes.css .performance-insights). -#}{% set summary_name = names.get(primary, 'Fighter ' ~ primary) %}<div class="eyebrow">Final coaching summary · <span class="fighter-name-fit" title="{{ summary_name }}">{{ summary_name }}</span></div><h2>What this fight says to work on next</h2><div class="performance-insights">{#- Only what "Keep doing" / "Fix next" above has not already said: this
