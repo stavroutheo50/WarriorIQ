@@ -68,6 +68,10 @@ dataset/tkd_kick3/
 dataset/sequences_tkd_kick3/
 dataset/sequences_strikemetrics/
 dataset/sequences_auto/
+# tools/strike_pipeline.py: the training mix, and the held-out exam clips plus
+# the local list of analysed UFC bouts (paths on this machine).
+dataset/sequences_pipeline/
+dataset/exam/
 
 # What tools/build_labelled_sequences.py and the training mixes build. Same
 # reasoning: pose measurements of identifiable athletes, public repository.
