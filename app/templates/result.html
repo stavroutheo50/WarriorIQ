@@ -317,9 +317,10 @@
   {% if perf.analysis_seconds and perf.segment_duration_seconds %}
   {% set took = perf.analysis_seconds %}{% set length = perf.segment_duration_seconds %}
   <p class="small muted analysis-run" id="report-analysis-run">Analysed at {{ '%.0f'|format(perf.final_analysis_fps or 0) }} frames a second on {{ 'the processor (no graphics card)' if (perf.gpu|default('CPU', true)) == 'CPU' else 'a graphics card' }} · took {{ '%d:%02d'|format((took//60)|int, (took%60)|int) }} for {{ '%d:%02d'|format((length//60)|int, (length%60)|int) }} of video.</p>
-  {#- Where the time went, for whoever has to make it faster. Absent on
-      reports from before these were recorded. -#}
-  {% if perf.frame_pass_seconds_per_frame is defined and perf.frame_pass_seconds_per_frame is not none %}
+  {#- Where the time went, for whoever has to make it faster: admins only,
+      like the other engine internals. Absent on reports from before these
+      were recorded. -#}
+  {% if request.state.is_admin and perf.frame_pass_seconds_per_frame is defined and perf.frame_pass_seconds_per_frame is not none %}
   <details class="small muted analysis-run-detail" id="report-analysis-detail"><summary>Technical details</summary>
     <p>Following both fighters (SAM2): {{ '%.0f'|format(perf.sam_sweep_seconds or 0) }} s · frame by frame: {{ '%.0f'|format(perf.frame_pass_seconds or 0) }} s at {{ '%.3f'|format(perf.frame_pass_seconds_per_frame) }} s a frame · processed at {{ perf.final_imgsz }} px · body-point model: {{ 'fast (TensorRT)' if (perf.pose_model|default('', true)).endswith('.engine') else 'standard (not TensorRT)' }}.</p>
     {% if perf.frame_pass_breakdown_per_frame %}{% set steps = {'reading_video': 'reading video', 'pose_model': 'pose model', 'appearance': 'appearance check', 'missing_fighter_search': 'missing-fighter search', 'identity': 'identity', 'joint_refinement': 'joint refinement', 'other': 'everything else'} %}
@@ -1066,6 +1067,14 @@
 <div class="table-wrap"><table>
   <tr><td>Fighter A first-frame identity gate</td><td>{% if report.tracking.fighter_A_initial_lock_safe|default(false) %}Passed · {{report.tracking.fighter_A_seed_source|replace('_',' ')|title}}{% else %}<span class="bad">Failed · choose Fighter A again</span>{% endif %}</td></tr>
   <tr><td>Fighter B first-frame identity gate</td><td>{% if report.tracking.fighter_B_initial_lock_safe|default(false) %}Passed · {{report.tracking.fighter_B_seed_source|replace('_',' ')|title}}{% else %}<span class="bad">Failed · choose Fighter B again</span>{% endif %}</td></tr>
+</table></div>
+{% if report.metrics.round_pose_coverage %}<h3>Round-by-round pose evidence</h3><div class="table-wrap"><table><thead><tr><th>Round</th><th>{{ names.A }}</th><th>{{ names.B }}</th></tr></thead><tbody>{% for round,coverage in report.metrics.round_pose_coverage.items() %}<tr><td>{{round}}</td><td>{{'%.1f'|format(coverage.A*100)}}%</td><td>{{'%.1f'|format(coverage.B*100)}}%</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+<p class="small muted">Observation coverage means a fighter observation was available; it is not presented as identity accuracy. First-frame identity and propagated-mask agreement are checked separately.</p>
+{#- Engine internals - model files, the graphics card, the tracker and referee
+    counters, the classifier name, the speed budget and quality mode - are for
+    whoever runs WarriorIQ, not for the fighter (QA, 2026-10-07). -#}
+{% if request.state.is_admin %}<div class="admin-only" data-admin-only><div class="eyebrow">Admin only · engine internals</div>
+<div class="table-wrap"><table>
   <tr><td>SAM2 continuous mask tracking</td><td>{% if report.tracking.sam_continuous_frames|default(0, true) > 0 %}Active · {{report.tracking.sam_continuous_frames}} propagated frames{% else %}Unavailable{% if report.tracking.sam_continuous_failure_reason %} · {{report.tracking.sam_continuous_failure_reason}}{% endif %}{% endif %}</td></tr>
   <tr><td>Pose detector and ReID tracker</td><td>{#- File name only: the stored value is the worker's full local path, which does not belong on a report page. -#}{{ (report.performance.pose_model|string).replace('\\', '/').split('/')|last }} · {{report.performance.gpu}}</td></tr>
   <tr><td>Fighter A SAM-confirmed observations</td><td>{{report.tracking.fighter_A_sam_guided_frames|default(0)}}</td></tr>
@@ -1074,14 +1083,14 @@
   <tr><td>Fighter B focused pose recoveries</td><td>{{report.tracking.fighter_B_guided_pose_recoveries|default(0)}}</td></tr>
   <tr><td>OpenAI ambiguity referee</td><td>{% if report.tracking.openai_identity_enabled %}Enabled · {{report.tracking.openai_identity_attempts}} reviews · {{report.tracking.openai_identity_recoveries}} recoveries{% else %}Not enabled for this analysis{% endif %}</td></tr>
 </table></div>
-{% if report.metrics.round_pose_coverage %}<h3>Round-by-round pose evidence</h3><div class="table-wrap"><table><thead><tr><th>Round</th><th>{{ names.A }}</th><th>{{ names.B }}</th></tr></thead><tbody>{% for round,coverage in report.metrics.round_pose_coverage.items() %}<tr><td>{{round}}</td><td>{{'%.1f'|format(coverage.A*100)}}%</td><td>{{'%.1f'|format(coverage.B*100)}}%</td></tr>{% endfor %}</tbody></table></div>{% endif %}
-<p class="small muted">Observation coverage means a fighter observation was available; it is not presented as identity accuracy. First-frame identity and propagated-mask agreement are checked separately.</p>
 <p class="small muted">Classifier: {{report.classifier.action_classifier}} · {{report.integrity.uncertainty_policy}}</p>
 <p class="small muted">Speed budget: {% if report.performance.within_video_length_budget %}passed{% else %}not yet passed{% endif %}. Quality mode: {{report.performance.quality_mode}}.</p>
+<p class="small muted">Build {{analysis_build.commit}}</p>
+</div>{% endif %}
 </div></details>{% endif %}
 </div></details>
 <aside class="notice ai-report-notice"><strong>AI-Assisted Analysis.</strong> WarriorIQ uses computer vision and AI; detection mistakes are possible. Statistics and scores are estimates, not guaranteed facts or an official judging decision. Use this report as training and performance guidance—not medical advice. Camera angle, resolution, obstruction and poor lighting can reduce analysis quality. <a class="text-link" href="/ai-transparency">How WarriorIQ AI works</a> · <a class="text-link" href="/sports-medical-disclaimer">Sports &amp; medical safety</a></aside>
-<p class="small muted analysis-build" data-analysis-build>Analysis engine {% if analysis_build.analysis_version %}v{{analysis_build.analysis_version}}{% else %}version not recorded{% endif %} · build {{analysis_build.commit}}{% if analysis_build.outdated %} · <strong>made by an older analysis engine than the current one (v{{analysis_build.current_version}}); analyse again for a report from the current one.</strong>{% endif %}</p>
+<p class="small muted analysis-build" data-analysis-build>Analysis engine {% if analysis_build.analysis_version %}v{{analysis_build.analysis_version}}{% else %}version not recorded{% endif %}{% if analysis_build.outdated %} · <strong>made by an older analysis engine than the current one (v{{analysis_build.current_version}}); analyse again for a report from the current one.</strong>{% endif %}</p>
 {% endblock %}
 {% block scripts %}
 <script nonce="{{ request.state.csp_nonce }}">
