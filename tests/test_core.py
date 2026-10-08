@@ -5358,7 +5358,8 @@ class FightLabelTests(unittest.TestCase):
             fight_choice_label("K1", "2026-09-02T18:54:00+00:00", "competition"),
         ]
         self.assertEqual(len(set(same_day)), 3, same_day)
-        self.assertEqual(same_day[0], "Kick Light · 2 Sep, 18:54")
+        # "UTC" rides with the stored time; the page swaps it for local time.
+        self.assertEqual(same_day[0], "Kick Light · 2 Sep, 18:54 UTC")
 
         # The fighter's name leads when the row has one. A coach with several
         # athletes cannot tell two of their fights apart by ruleset and clock
@@ -5368,7 +5369,7 @@ class FightLabelTests(unittest.TestCase):
             fight_choice_label("KICK_LIGHT", "2026-09-02T18:54:00+00:00", "competition", "Theodoulos"),
             fight_choice_label("KICK_LIGHT", "2026-09-02T18:54:00+00:00", "competition", "Maria"),
         ]
-        self.assertEqual(named[0], "Theodoulos · Kick Light · 2 Sep, 18:54")
+        self.assertEqual(named[0], "Theodoulos · Kick Light · 2 Sep, 18:54 UTC")
         self.assertEqual(len(set(named)), 2, named)
         # A fight with no fighter attached keeps the old label rather than
         # gaining a leading separator, and a name of only spaces counts as none.

@@ -149,13 +149,16 @@
     // reader's own zone. The browser already knows it, so nothing has to be
     // stored or asked for; with JavaScript off the UTC text stands, which is
     // correct, just not local.
+    // One formatter for every date the site shows, in the reader's own zone,
+    // so a header and the picker beside it can never read differently
+    // (QA, 2026-10-07: "7 Oct, 13:59" over a picker saying "Oct 7 2026, 04:59 PM").
+    window.wiqLocalTime=(when,withTime=true)=>when.toLocaleString(undefined,withTime
+      ?{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}
+      :{day:'numeric',month:'short',year:'numeric'}).replace(',','');
     document.querySelectorAll('time[data-local]').forEach(el=>{
       const iso=el.getAttribute('datetime');if(!iso)return;
       const when=new Date(iso);if(isNaN(when))return;
-      const opts=el.dataset.local==='date'
-        ?{day:'numeric',month:'short',year:'numeric'}
-        :{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'};
-      try{el.textContent=when.toLocaleString(undefined,opts).replace(',','')}catch{}
+      try{el.textContent=window.wiqLocalTime(when,el.dataset.local!=='date')}catch{}
     });
     // Labels that must stay plain text - a picker's options cannot hold a
     // time element - carry the UTC part they were built with in data-local-stamp,
@@ -163,7 +166,7 @@
     // /compare picker showed UTC beside a Profile in local time (QA, 2026-10-04).
     document.querySelectorAll('[data-local-at][data-local-stamp]').forEach(el=>{
       const when=new Date(el.dataset.localAt),stamp=el.dataset.localStamp;if(!stamp||isNaN(when))return;
-      try{const local=when.toLocaleString(undefined,{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}).replace(',','');el.textContent=el.textContent.replace(stamp,local)}catch{}
+      try{el.textContent=el.textContent.replace(stamp,window.wiqLocalTime(when))}catch{}
     });
     // The header chip was rendered once, from whatever the job said when the
     // page loaded, and never again: "Analyzing 0%" beside a page reading 35%,

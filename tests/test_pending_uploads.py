@@ -125,7 +125,7 @@ def test_real_waiting_fights_count_and_cancelling_one_frees_the_slot(account):
 
         cancelled = client.post(f"/pending/{jobs[0]}/cancel", follow_redirects=False)
         assert cancelled.status_code == 303
-        assert cancelled.headers["location"] == "/history#pending"
+        assert cancelled.headers["location"] == "/history?cancelled=1#library-notice"
         assert state.get_job(jobs[0]) is None
 
         probe = uuid.uuid4().hex[:12]

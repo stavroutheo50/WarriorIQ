@@ -71,13 +71,15 @@ def fight_choice_stamp(created_at: str | None) -> str:
     """The date-and-time part of a fight's label, in UTC as stored.
 
     The page swaps exactly this text for the reader's local time (base.html,
-    data-local-stamp), so it is kept separate from the rest of the label.
+    data-local-stamp), so it is kept separate from the rest of the label. It
+    says "UTC", so wherever it is not swapped it still reads correctly
+    rather than passing for local time (QA, 2026-10-07).
     """
     if not created_at:
         return ""
     try:
         moment = datetime.fromisoformat(str(created_at))
-        return f"{_short_date(created_at)}, {moment:%H:%M}"
+        return f"{_short_date(created_at)}, {moment:%H:%M} UTC"
     except (TypeError, ValueError):
         return str(created_at)[:10]
 
