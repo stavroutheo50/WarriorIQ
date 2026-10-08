@@ -1952,6 +1952,12 @@ async def viewer_context(request: Request, call_next):
 async def http_error_page(request: Request, exc: StarletteHTTPException):
     if _wants_json(request):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+    if exc.status_code == 405 and request.method in {"GET", "HEAD"}:
+        # A browser opening an action address (/share/<id>, /story/<id>, a
+        # cancel or revoke) as a link: those answer only to their form, so
+        # there is no page here. It read "405 Method Not Allowed" (QA,
+        # 2026-10-07); a visitor gets the ordinary not-found page instead.
+        exc = StarletteHTTPException(404)
     if not hasattr(request.state, "account"):
         # An asset or probe request: the page layout needs the visitor context
         # those requests deliberately skip, so the refusal is plain text.
