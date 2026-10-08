@@ -5005,6 +5005,15 @@ def progress_page(request: Request, job_id: str):
     if not authorized:
         raise HTTPException(404)
     job = get_job(job_id) or authorized
+    # QA, 2026-10-07: opened before the fighters were picked it showed
+    # "Analysis running 0.0% - Loading the analysis models" forever, and a
+    # finished one waited for the page's own polling to move on. Neither has
+    # anything to show here.
+    status = job.get("status")
+    if status == "selecting":
+        return RedirectResponse(f"/select/{job_id}", status_code=303)
+    if status == "complete":
+        return RedirectResponse(f"/result/{job_id}", status_code=303)
     _pin_sport_to_fight(request, _job_sport(job))
     return templates.TemplateResponse(request=request, name="progress.html", context={
         "request": request, "job_id": job_id, "initial_status": _public_job_status(job_id, job),
