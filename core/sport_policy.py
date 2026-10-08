@@ -34,6 +34,9 @@ from dataclasses import dataclass
 
 from core.scoring import sport_counted_families, sport_unobserved
 
+# sport_counted_families speaks in plurals; the exam in families.
+_FAMILY_OF_PLURAL = {"punches": "punch", "kicks": "kick", "knees": "knee"}
+
 SPORT_LABELS = {
     "kickboxing": "Kickboxing", "boxing": "Boxing", "muay_thai": "Muay Thai",
     "taekwondo": "Taekwondo", "mma": "MMA",
@@ -118,25 +121,36 @@ class CountingPolicy:
 
 
 def counting_policy(sport: str | None, *, published: bool | None = None,
-                    validated: bool | None = None) -> CountingPolicy:
-    """The one answer to "what does this sport's report count, and how well"."""
+                    validated: bool | None = None, report: dict | None = None) -> CountingPolicy:
+    """The one answer to "what does this sport's report count, and how well".
+
+    ``report``, when given, lets a sport's accuracy exam (core/strike_exam.py)
+    count the families it passed for the model that made that report.
+    """
     from core import report as _report
+    from core.strike_exam import exam_note, passed_families
 
     sport = sport if sport in SPORT_LABELS else "kickboxing"
     label = SPORT_LABELS[sport]
     published = _report.STRIKE_COUNTS_PUBLISHED if published is None else published
     validated = _report.STRIKE_COUNTS_PRECISION_VALIDATED if validated is None else validated
     scored = tuple(sport_counted_families(sport))
+    examined = ()
     if published or validated:
         counted, withheld = scored, ()
     else:
-        # Switched off, nothing is counted - the same answer as
-        # core.report.published_families.
-        counted, withheld = (), scored
+        # Switched off, only what the exam passed for this report's model -
+        # the same answer as core.report.published_families.
+        passed = set(passed_families(sport, report)) if report is not None else set()
+        examined = tuple(f for f in scored if _FAMILY_OF_PLURAL.get(f) in passed)
+        counted = examined
+        withheld = tuple(f for f in scored if f not in examined)
     estimates = bool(counted) and not validated
     not_analysed = _NOT_ANALYSED.get(sport, ()) if sport_unobserved(sport) else ()
 
-    if estimates:
+    if examined:
+        estimate_note = f"Automatic counts, not checked by a person. {exam_note(sport)}".strip()
+    elif estimates:
         estimate_note = f"Automatic counts, not checked by a person. {_ACCURACY[sport]}"
     elif counted:
         estimate_note = "Counts are validated against hand-labelled footage."
