@@ -827,7 +827,7 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
         result["rounds"] = []
         result["totals"] = {"A": None, "B": None}
         result["winner_estimate"] = None
-        result["disclaimer"] = "No score is shown because fighter tracking was not reliable enough for a fair estimate. Re-select both fighters on a clearer frame and analyze again."
+        result["disclaimer"] = "No score is shown because fighter tracking was not reliable enough for a fair estimate. Re-select both fighters on a clearer frame and analyse again."
         return result
 
     if profile.ten_point_must:

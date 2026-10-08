@@ -204,3 +204,26 @@ def readings(metrics: dict | None) -> list[dict]:
     """Every catalogued measurement for one fighter, in reading order."""
     values = metrics or {}
     return [metric.reading(values.get(metric.key)) for metric in CATALOG]
+
+
+def evidence_limitations(metrics: dict | None, round_count: int | None = None) -> list[dict]:
+    """Why measurements are missing for one fighter: each reason once.
+
+    One cause - too little of the body seen - is recorded against movement,
+    guard and balance alike, so listing one line per measurement printed
+    "Pose coverage was 2.6%" two or three times in a row (QA, 2026-10-07).
+    The reasons are listed in the order the measurements are, each with the
+    measurements it covers.
+    """
+    availability = (metrics or {}).get("availability") or {}
+    grouped: dict[str, dict] = {}
+    for key, item in availability.items():
+        if not isinstance(item, dict) or item.get("available"):
+            continue
+        if key == "round_consistency" and (round_count or 0) < 2:
+            continue
+        reason = " ".join(str(item.get("reason") or "").split())
+        if not reason:
+            continue
+        grouped.setdefault(reason, {"reason": reason, "keys": []})["keys"].append(key)
+    return list(grouped.values())

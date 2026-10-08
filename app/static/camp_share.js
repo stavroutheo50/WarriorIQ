@@ -20,7 +20,7 @@
     ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
     var x = 96, y = 190;
     ctx.fillStyle = INK; ctx.font = font(800, 52); ctx.fillText("WARRIOR", x, y);
-    ctx.fillStyle = CYAN; ctx.fillText("IQ", x + ctx.measureText("WARRIOR ").width, y);
+    ctx.fillStyle = CYAN; ctx.fillText("IQ", x + ctx.measureText("WARRIOR").width, y);  // one word, as on the site
     y += 90; ctx.font = font(600, 36); ctx.fillStyle = MUTED; ctx.fillText("FIGHT CAMP", x, y);
     y += 300; ctx.font = font(800, 190); ctx.fillStyle = GOLD; ctx.fillText(String(card.rank || "Rookie"), x - 8, y);
     y += 90; ctx.font = font(600, 50); ctx.fillStyle = INK;

@@ -70,7 +70,9 @@ def preview_png(card: dict, side: str, corner: str | None) -> bytes:
     canvas = _backdrop()
 
     x = 64
-    width = _text(canvas, "WARRIOR ", x, 92, 1.5, INK, 3)
+    # One word, as the site header spells it: a trailing space after WARRIOR
+    # left a gap that read as two words (QA, 2026-10-07).
+    width = _text(canvas, "WARRIOR", x, 92, 1.5, INK, 3)
     _text(canvas, "IQ", x + width, 92, 1.5, CYAN, 3)
     _text(canvas, _ascii(f"{card.get('sport') or 'Fight'} - fight analysis").upper(), x, 138, 0.8, MUTED, 2)
 

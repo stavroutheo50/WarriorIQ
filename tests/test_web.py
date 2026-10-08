@@ -2074,7 +2074,7 @@ class PublicPageTests(unittest.TestCase):
 
     def test_history_new_analysis_button_targets_the_upload_card(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "history.html").read_text(encoding="utf-8")
-        self.assertIn('href="/analyze">{% if fights %}Analyze another fight', template)
+        self.assertIn('href="/analyze">{% if fights %}Analyse another fight', template)
         # A signed-out visitor has no library to add to and is offered sign-in
         # instead, so the button is not rendered for them at all.
         self.assertIn("{% if signed_in %}<a class=\"btn\" data-motion-primary href=\"/analyze\">", template)
@@ -2113,7 +2113,7 @@ class PublicPageTests(unittest.TestCase):
         validation counts.
         """
         menu = self.client.get("/").text.split('<div class="mobile-menu"', 1)[1].split('</div>', 1)[0]
-        for label in (">Analyze fight<", ">How it works<", ">Plans<", ">Sign in<", ">Create account<"):
+        for label in (">Analyse fight<", ">How it works<", ">Plans<", ">Sign in<", ">Create account<"):
             self.assertIn(label, menu)
         for hidden in ("Accuracy", "Compare", "Fight library", ">Progress<", ">Coach<"):
             self.assertNotIn(hidden, menu, "workspace tools are not offered before there is a workspace")
@@ -2123,7 +2123,7 @@ class PublicPageTests(unittest.TestCase):
         with self.signed_in():
             menu = self.client.get("/").text.split('<div class="mobile-menu"', 1)[1].split('</div>', 1)[0]
         # Progress and Coach are one page now, Fight Camp.
-        for label in (">Analyze<", ">Fight library<", ">Fight Camp<", ">Plans<"):
+        for label in (">Analyse<", ">Fight library<", ">Fight Camp<", ">Plans<"):
             self.assertIn(label, menu)
         self.assertNotIn("Accuracy", menu, "still never the accuracy lab")
 

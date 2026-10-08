@@ -189,7 +189,10 @@ class LegacyReportTests(unittest.TestCase):
         report = guard.reconcile_report_guard({"metrics": {"A": {"guard_index": 0.12}}})
         own = report["metrics"]["A"]
         self.assertIsNone(own["guard_index"])
-        self.assertEqual(own["guard_note"], guard.LEGACY_NOTE)
+        self.assertEqual(own["guard_note"], guard.legacy_notes({})[0])
+        # It says which engine made the report, not "older report".
+        self.assertIn("an analysis engine from before v2", own["guard_note"])
+        self.assertNotIn("older report", own["guard_note_short"])
 
     def test_idempotent_and_current_reports_untouched(self):
         once = guard.reconcile_report_guard(self._legacy())

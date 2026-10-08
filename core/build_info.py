@@ -69,6 +69,17 @@ def stamp() -> dict:
     return {"analysis_version": ANALYSIS_VERSION, "commit": build_commit()}
 
 
+def engine_name(report: dict | None) -> str:
+    """The engine that made a report, for notices about older reports.
+
+    "Older reports" said nothing a fighter could check, and a report three days
+    old was called one (QA, 2026-10-07). Stamping began with version 2, so a
+    report without a stamp came from before it.
+    """
+    version = result_check(report or {})["analysis_version"]
+    return f"analysis engine v{version}" if version else "an analysis engine from before v2"
+
+
 def result_check(report: dict) -> dict:
     """Whether a result came from analysis code at least as new as this one.
 
