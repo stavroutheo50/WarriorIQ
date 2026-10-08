@@ -4,6 +4,19 @@ import os
 from datetime import datetime, timezone
 
 from core.config import SETTINGS
+from core.features import is_on as feature_on
+
+
+# What each plan's feature list is written in. Two lines are never typed by
+# hand, because typing them is how they went wrong (QA, 2026-10-07):
+#   DAILY    the plan's daily_limit - the Coach 15 card left its 20 a day out
+#            while the comparison table, which reads daily_limit, had it;
+#   MOMENTS  the plan's evidence_limit as key moments - listed while key
+#            moments were switched off on every report.
+# A (feature, text, text_while_off) entry follows core/features.py: "while
+# off" text, or nothing when that is None.
+DAILY = "daily"
+MOMENTS = "moments"
 
 
 # How many fighters a workspace may hold, and who each plan is for.
@@ -24,7 +37,7 @@ PLANS = {
         "description": "A simple daily check-in for athletes getting started.",
         "limit_label": "1 analysis every day",
         "report_label": "Compact report",
-        "features": ["1 analysis per day", "Compact performance summary", "3 verified key moments", "1 coaching priority"],
+        "feature_spec": [DAILY, "Compact performance summary", MOMENTS, "1 coaching priority"],
         "daily_limit": 1,
         "monthly_limit": None,
         "unlimited": False,
@@ -47,7 +60,9 @@ PLANS = {
         "description": "For athletes reviewing training and competition every day.",
         "limit_label": "3 analyses every day",
         "report_label": "Expanded report",
-        "features": ["3 analyses per day", "Expanded performance report", "Scorecard and core coaching", "Up to 8 verified key moments", "Private report sharing"],
+        "feature_spec": [DAILY, "Expanded performance report",
+                         ("scoring", "Scorecard and core coaching", "Core coaching"), MOMENTS,
+                         "Private report sharing"],
         "daily_limit": 3,
         "monthly_limit": None,
         "unlimited": False,
@@ -70,7 +85,9 @@ PLANS = {
         "description": "The complete WarriorIQ experience for active competitors.",
         "limit_label": "10 analyses every day",
         "report_label": "Complete report",
-        "features": ["10 analyses per day", "Complete performance analysis", "Full coach report and training plan", "Full evidence replay and legality review", "Fight comparisons and corrections"],
+        "feature_spec": [DAILY, "Complete performance analysis", "Full coach report and training plan",
+                         ("illegal_moves", "Full evidence replay and legality review", "Full skeleton replay"),
+                         "Fight comparisons and corrections"],
         "daily_limit": 10,
         "monthly_limit": None,
         "unlimited": False,
@@ -103,9 +120,9 @@ PLANS = {
         "description": "For a corner working with a handful of fighters.",
         "limit_label": "Up to 5 fighters",
         "report_label": "Complete report",
-        "features": ["Up to 5 fighters on the roster", "10 analyses per day",
-                     "Complete report for every fighter", "Squad view and per-fighter trends",
-                     "Full evidence replay and legality review"],
+        "feature_spec": ["Up to 5 fighters on the roster", DAILY,
+                         "Complete report for every fighter", "Squad view and per-fighter trends",
+                         ("illegal_moves", "Full evidence replay and legality review", "Full skeleton replay")],
         "daily_limit": 10,
         "monthly_limit": None,
         "unlimited": False,
@@ -128,8 +145,8 @@ PLANS = {
         "description": "For a club squad training through a season.",
         "limit_label": "Up to 15 fighters",
         "report_label": "Complete report",
-        "features": ["Up to 15 fighters on the roster", "Everything in Coach 5",
-                     "Squad view and per-fighter trends", "Fight comparisons across the roster"],
+        "feature_spec": ["Up to 15 fighters on the roster", DAILY, "Everything in Coach 5",
+                         "Squad view and per-fighter trends", "Fight comparisons across the roster"],
         "daily_limit": 20,
         "monthly_limit": None,
         "unlimited": False,
@@ -160,8 +177,7 @@ PLANS = {
         "description": "For a full team with several coaches working from it.",
         "limit_label": "Up to 30 fighters",
         "report_label": "Complete report",
-        "features": ["Up to 30 fighters on the roster", "Everything in Coach 15",
-                     "40 analyses per day"],
+        "feature_spec": ["Up to 30 fighters on the roster", DAILY, "Everything in Coach 15"],
         "daily_limit": 40,
         "monthly_limit": None,
         "unlimited": False,
@@ -184,7 +200,7 @@ PLANS = {
         "description": "The unlimited WarriorIQ suite for busy gyms and fight teams.",
         "limit_label": "Unlimited fighters",
         "report_label": "Complete report",
-        "features": ["Unlimited fight analyses", "Everything in Coach 30", "Complete reports for every fight", "Coach assignments and private sharing", "Saved fight library and comparisons", "Priority gym onboarding"],
+        "feature_spec": [DAILY, "Everything in Coach 30", "Complete reports for every fight", "Coach assignments and private sharing", "Saved fight library and comparisons", "Priority gym onboarding"],
         "daily_limit": None,
         "monthly_limit": None,
         "unlimited": True,
@@ -202,6 +218,38 @@ PLANS = {
         "mode": "subscription",
     },
 }
+
+
+def plan_features(plan: dict) -> list[str]:
+    """A plan's feature list, from its own limits and the feature switches."""
+    out: list[str] = []
+    for item in plan.get("feature_spec") or []:
+        if item == DAILY:
+            daily = plan.get("daily_limit")
+            if plan.get("unlimited") or daily is None:
+                out.append("Unlimited fight analyses")
+            else:
+                out.append(f"{daily} analys{'is' if daily == 1 else 'es'} per day")
+        elif item == MOMENTS:
+            if not feature_on("key_moments"):
+                continue
+            limit = plan.get("evidence_limit")
+            out.append("All verified key moments" if limit is None
+                       else f"{limit} verified key moments" if plan.get("report_tier") == "compact"
+                       else f"Up to {limit} verified key moments")
+        elif isinstance(item, tuple):
+            key, text, off = item
+            if feature_on(key):
+                out.append(text)
+            elif off:
+                out.append(off)
+        else:
+            out.append(str(item))
+    return out
+
+
+for _plan in PLANS.values():
+    _plan["features"] = plan_features(_plan)
 
 
 # The Coach plan was withdrawn. Anyone already carrying that key keeps

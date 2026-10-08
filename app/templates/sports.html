@@ -34,9 +34,8 @@
   </div>
 
   <p class="chooser-note small muted">
-    Reports count kicks. Punch and knee counts are not shown yet &mdash; checked
-    against video they were not accurate enough &mdash; so a boxing report shows
-    movement, guard and balance but no punch numbers. Where a sport also scores
+    {% if features.strike_counts.on %}Strike counts are estimates, with their measured accuracy shown beside them.{% else %}{{ features.strike_counts.coming }}{% endif %}
+    Where a sport also scores
     something the analysis cannot observe, the card says so here and the report
     repeats it beside the score.
   </p>

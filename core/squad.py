@@ -54,9 +54,10 @@ def fight_label(sport_label: str | None, ruleset: str | None, created_at: str | 
     """What to call a fight in front of a person.
 
     The squad table printed the uploaded file's name - IMG_4554.mov, 2.mp4, a
-    camera's hash - while /pricing carries the check-marked promise "No video
-    filename shown". The filename stays in the database, where reprocessing
-    needs it; it stops being what a coach reads.
+    camera's hash - which tells a coach nothing about the fight. The filename
+    stays in the database, where reprocessing needs it, and the uploader still
+    sees and searches it in their own library; it stops being what a coach
+    reads. (/pricing no longer promises "No video filename shown".)
     """
     parts = [
         (sport_label or "").strip(),
