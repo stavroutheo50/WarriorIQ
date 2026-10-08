@@ -72,7 +72,9 @@
 {% else %}{% set fmt_secs = report.setup.round_duration_seconds|int %}
 <div><span>Format</span><strong>{{report.setup.round_count}} × {% if fmt_secs >= 60 and fmt_secs % 60 == 0 %}{{ (fmt_secs / 60)|int }} min{% else %}{{ fmt_secs }}s{% endif %}</strong></div>
 {% endif %}{% if analysed_span %}<div><span>Analysed</span><strong>{{analysed_span.label}}</strong></div>{% endif %}{% if fight_footage %}<div><span>Fight footage analysed</span><strong>{{fight_footage.label}}</strong></div>{% endif %}<div><span>Report focus</span><strong>{% set rf = report.video.focus_fighter|default(report.video.analysis_target, true) %}{{ names.get(rf, 'Fighter ' ~ rf) }}</strong></div></div>
-  <div class="result-scoreline">{% if report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}{{ names.get(report.scorecard.winner_estimate, 'Fighter ' ~ report.scorecard.winner_estimate) }} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
+  {#- core/features.py: while scoring is switched off the score is "coming",
+      not "Not scored" with a per-fight reason that reads as this fight's fault. -#}
+  <div class="result-scoreline">{% if features is defined and features.scoring and not features.scoring.on %}<span>Score</span><strong class="score-muted">Coming</strong><small>{{ features.scoring.coming }}</small>{% elif report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}{{ names.get(report.scorecard.winner_estimate, 'Fighter ' ~ report.scorecard.winner_estimate) }} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
   {# When the score is withheld the page used to stop here. It knows more than
      nothing: what each fighter was seen doing, and over how much of the round.
      Every number below is a floor with its denominator attached, and none of
@@ -200,7 +202,7 @@
     scores that WarriorIQ cannot see, in the scorecard section. -#}
 {% if report.scorecard.coverage_note and report.scorecard.available %}<aside class="notice coverage-notice"><strong>Striking read only.</strong> {{report.scorecard.sport_label}} also scores {% for action in report.scorecard.unobserved_actions %}{{action}}{% if not loop.last %}, {% endif %}{% endfor %}. WarriorIQ cannot see any of that, so the score below counts only the strikes it observed. Read it as a striking summary, not as the round.</aside>{% endif %}
 
-{% if report_access.report_tier != 'full' %}<div class="report-access-banner"><div><span class="eyebrow">{{report_access.report_label}}</span><strong>{{report_access.label}} report depth</strong><p>{% if report_access.report_tier == 'compact' %}This view includes the essential summary, estimated scorecard, three key moments, and one coaching priority.{% else %}This view includes core performance, scorecard, coaching highlights, and a short training plan.{% endif %}</p></div><a class="btn secondary" href="/pricing">Compare report levels</a></div>{% endif %}
+{% if report_access.report_tier != 'full' %}<div class="report-access-banner"><div><span class="eyebrow">{{report_access.report_label}}</span><strong>{{report_access.label}} report depth</strong><p>{%- set fx_on = features is defined and features.scoring -%}{% if report_access.report_tier == 'compact' %}This view includes the essential summary{% if not fx_on or features.scoring.on %}, estimated scorecard{% endif %}{% if not fx_on or features.key_moments.on %}, three key moments{% endif %}, and one coaching priority.{% else %}This view includes core performance{% if not fx_on or features.scoring.on %}, scorecard{% endif %}, coaching highlights, and a short training plan.{% endif %}</p></div><a class="btn secondary" href="/pricing">Compare report levels</a></div>{% endif %}
 
 {% set focus=report.video.focus_fighter|default(report.video.analysis_target|default('BOTH'), true) %}{% set analysis_target=report.video.analysis_target|default('BOTH') %}{% set action_ready=report.integrity.action_metrics_trusted|default(false) and strike_counts_published|default(false) %}
 {% set selection=report.selection_check|default({}, true) %}
@@ -445,10 +447,12 @@
     <div class="table-wrap"><table><thead><tr><th>Time</th><th>Round</th><th>Sequence</th><th>Outcomes</th><th>Landed</th></tr></thead><tbody>{% for sequence in p.combination_sequences %}<tr><td>{{'%.2f'|format(sequence.start_time)}}s</td><td>{{sequence.round_number or '—'}}</td><td>{{sequence.techniques|map('replace','_',' ')|join(' → ')|title}}</td><td>{{sequence.outcomes|join(' · ')|title}}</td><td>{{sequence.landed}} / {{sequence.length}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No uninterrupted multi-strike sequence passed the combination rule.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
+  {#- Key moments are counted strikes (core/features.py). -#}
+  {% if features is defined and features.key_moments and not features.key_moments.on %}<section class="card complete-report-section" id="report-key-moments"><div class="numbers-section-heading"><div><span class="eyebrow">Key moments</span><h2>Coming</h2></div></div><p class="muted">{{ features.key_moments.coming }}</p></section>{% else %}
   <section class="card complete-report-section" id="report-key-moments">
     <div class="numbers-section-heading"><div><span class="eyebrow">Key moments</span><h2>Replay the most important supported actions</h2></div><span>Replay begins one second early</span></div>
     {% set moments=namespace(count=0) %}{% for moment in report.key_moments|default([]) %}{% if focus == 'BOTH' or moment.fighter == primary %}{% set moments.count=moments.count+1 %}<a class="event" href="/replay/{{job_id}}?t={{moment.peak_time}}"><div>R{{moment.round_number or '—'}}</div><div class="time">{{'%.2f'|format(moment.peak_time)}}s</div><div><strong>{{ names.get(moment.fighter, 'Fighter ' ~ moment.fighter) }}</strong> · {{moment.technique|replace('_',' ')|title}}</div><div>{{moment.outcome|replace('_',' ')|title}}</div><div class="small muted">{{moment.target|default('Target not classified',true)|title}}</div></a>{% endif %}{% endfor %}{% if moments.count == 0 %}<p class="muted">No single moment was read clearly enough to feature here. Use the full skeleton replay instead.</p>{% endif %}
-  </section>
+  </section>{% endif %}
   {% endif %}
   {% else %}
   {#- Kick attempts, the one strike family the report stands behind, from the
@@ -969,8 +973,9 @@
    behind. See core/generalship.py. #}
 
 <section class="card" id="report-scorecard">
-  <div class="section-title" style="margin-top:0"><h2>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary automatic scorecard{% else %}Automatic estimated scorecard{% endif %}</h2><span class="pill">{{report.scorecard.ruleset_label}}</span></div>
-  {% if report.scorecard.available %}<div class="grid">
+  {%- set scoring_off = features is defined and features.scoring and not features.scoring.on -%}
+  <div class="section-title" style="margin-top:0"><h2>{% if scoring_off %}Score estimate{% elif report.scorecard.status == 'preliminary_unvalidated' %}Preliminary automatic scorecard{% else %}Automatic estimated scorecard{% endif %}</h2><span class="pill">{% if scoring_off %}Coming{% else %}{{report.scorecard.ruleset_label}}{% endif %}</span></div>
+  {% if scoring_off %}<div class="notice">{{ features.scoring.coming }}</div>{% elif report.scorecard.available %}<div class="grid">
     <div><div class="score">{{report.scorecard.totals.A}}</div><div class="muted">{{ names.A }}</div></div>
     <div><div class="score">{{report.scorecard.totals.B}}</div><div class="muted">{{ names.B }}</div></div>
   </div>{% else %}<div class="notice">{{report.scorecard.disclaimer}}</div>{% endif %}
@@ -1038,7 +1043,9 @@
      with a timestamp. Found on 1947 boxing footage, where a colour histogram
      scores the two boxers as identical (pair similarity 1.0) and the report
      already said fighters_separable false and withheld the whole scorecard. -#}
-  {% if not action_ready or report.scorecard.status == 'identity_integrity_failed' %}
+  {% if features is defined and features.illegal_moves and not features.illegal_moves.on %}
+  <p class="muted">{{ features.illegal_moves.coming }}</p>
+  {% elif not action_ready or report.scorecard.status == 'identity_integrity_failed' %}
   <p class="muted">Illegal-move flags are switched off for this fight. {% if report.scorecard.status == 'identity_integrity_failed' %}WarriorIQ could not tell the two fighters apart well enough, so putting a foul on one of them would be a guess.{% else %}WarriorIQ cannot read strikes accurately enough yet to call a foul on anyone, so it does not.{% endif %}</p>
   {% else %}
   {% for e in report.illegal_moves|default([]) %}{% if focus == 'BOTH' or focus == e.fighter %}<div class="event"><div>R{{e.round_number or '-'}}</div><div class="time">{{'%.2f'|format(e.peak_time)}}s</div><div><strong>{{ names.get(e.fighter, 'Fighter ' ~ e.fighter) }}</strong> · {{e.technique.replace('_',' ')|title}}</div><div class="bad">Illegal</div><div class="small muted">{{e.legality_reason}}</div></div>{% endif %}{% else %}<p class="muted">Nothing was read clearly enough to flag as illegal for {{ names.get(focus, 'Fighter ' ~ focus) }} under this ruleset.</p>{% endfor %}

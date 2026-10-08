@@ -96,6 +96,9 @@ from core.coaching import build_coaching, build_training_plan, coaching_gaps
 from core.guard import reconcile_report_guard
 from core.generalship import movement_comparison
 from core.fight_presence import attach_plausibility
+from core.features import FEATURES
+from core.features import is_on as feature_is_on
+from core.features import status as feature_status
 from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core import feed, social, worker_alerts
@@ -311,6 +314,9 @@ templates.env.globals["metric_catalog"] = METRIC_CATALOG
 templates.env.globals["movement_comparison"] = movement_comparison
 # Why a coaching card is empty, in one place (core/coaching.py coaching_gaps).
 templates.env.globals["coaching_gaps"] = coaching_gaps
+# What is switched on, for every page that describes the product
+# (core/features.py): marketing, meta description, pricing and reports.
+templates.env.globals["features"] = feature_status()
 templates.env.filters["metric_readings"] = metric_readings
 # Pressure 0-100, centre as a percentage, footwork in body lengths a second:
 # the units the report and Progress already use. See core.squad.movement_value.
@@ -465,9 +471,12 @@ SEARCH_GUIDES = {
         "heading": "Turn a full fight into a clearer next session.",
         "intro": "WarriorIQ helps kickboxers and coaches review what the footage can actually support. It follows both selected fighters, separates measured observations from uncertain action labels, and links useful findings back to the video.",
         "sections": [
-            {"title": "What a useful fight review should answer", "body": "A good review should show where the athlete was effective, where position or timing broke down, and which moments deserve another look. WarriorIQ keeps fighter identity, round context and evidence coverage visible so a number never appears without context.", "items": ["Movement, guard and balance observations", "Ruleset-aware supported actions", "Round-by-round performance context", "Evidence replay and fighter-specific training priorities"]},
+            {"title": "What a useful fight review should answer", "body": "A good review should show where the athlete was effective, where position or timing broke down, and which moments deserve another look. WarriorIQ keeps fighter identity, round context and evidence coverage visible so a number never appears without context.", "items": ["Movement, guard and balance observations", *(["Ruleset-aware supported actions"] if feature_is_on("strike_counts") else []), "Round-by-round performance context", "Evidence replay and fighter-specific training priorities"]},
             {"title": "What happens when the footage is unclear", "body": "Fast exchanges, camera movement, obstructions and low light can limit any video model. WarriorIQ does not invent strikes to fill a report. Unsupported claims are withheld or presented as review candidates, while tracking and pose coverage remain visible."},
-            {"title": "Built for training, not official judging", "body": "The scorecard is an evidence-gated training estimate. It is designed to help athletes and coaches structure review; it does not replace licensed officials or the governing rules of an event."},
+            {"title": "Built for training, not official judging", "body": (
+                "The scorecard is an evidence-gated training estimate. It is designed to help athletes and coaches structure review; it does not replace licensed officials or the governing rules of an event."
+                if feature_is_on("scoring") else
+                "WarriorIQ does not score fights yet: score estimates are coming once strikes can be counted accurately. When they arrive they will be training estimates, not a replacement for licensed officials or the governing rules of an event.")},
         ],
         "faqs": [
             {"question": "Can WarriorIQ analyse sparring as well as competition footage?", "answer": "Yes. Sparring and competition footage are analysed the same way."},
@@ -477,13 +486,17 @@ SEARCH_GUIDES = {
     },
     "k1-fight-analysis": {
         "title": "K-1 Fight Analysis and Video Review | WarriorIQ",
-        "description": "Review K-1 fight video with ruleset-aware evidence, fighter tracking, round context, coaching priorities and replayable key moments.",
+        "description": ("Review K-1 fight video with ruleset-aware evidence, fighter tracking, round context, coaching priorities"
+                        + (" and replayable key moments." if feature_is_on("key_moments") else " and a skeleton replay.")),
         "eyebrow": "K-1 video review",
         "heading": "Review a K-1 fight with the ruleset in view.",
         "intro": "K-1 review needs more than a generic strike counter. WarriorIQ keeps punches, kicks and permitted knee actions in the selected ruleset context while suppressing unsupported contact and scoring claims.",
         "sections": [
-            {"title": "Ruleset-aware evidence", "body": "Select K-1 before analysis so legality checks and report wording use the correct style. The event promoter or federation remains the authority for the exact rules used in a particular bout.", "items": ["Separate fighter attribution", "Outcome labels only when supported", "Round and interruption context", "Illegal-action review kept separate from supported scoring evidence"]},
-            {"title": "A replay your coach can use", "body": "Supported moments link back to the contact time and replay begins just before the event, giving the coach enough context to see the setup, defensive response and exit."},
+            {"title": "Ruleset-aware evidence", "body": "Select K-1 before analysis so legality checks and report wording use the correct style. The event promoter or federation remains the authority for the exact rules used in a particular bout.", "items": ["Separate fighter attribution", *(["Outcome labels only when supported"] if feature_is_on("strike_counts") else []), "Round and interruption context", *(["Illegal-action review kept separate from supported scoring evidence"] if feature_is_on("illegal_moves") else ["Illegal-move flags are coming"])]},
+            {"title": "A replay your coach can use", "body": (
+                "Supported moments link back to the contact time and replay begins just before the event, giving the coach enough context to see the setup, defensive response and exit."
+                if feature_is_on("key_moments") else
+                "The replay draws both fighters' skeletons over the video, and coaching points link to the seconds they were measured at. Strike-by-strike key moments are coming.")},
             {"title": "Honest limits", "body": "A high tracking percentage is observation coverage, not proof that every action label is correct. WarriorIQ shows the difference and withholds a score when the available evidence is not strong enough."},
         ],
         "faqs": [
@@ -505,7 +518,10 @@ SEARCH_GUIDES = {
         ],
         "faqs": [
             {"question": "Can I compare an athlete across fights?", "answer": "Saved analyses can contribute to progress views when the same athlete profile is used and the underlying observations are available."},
-            {"question": "Will every report contain a scorecard?", "answer": "No. A scorecard is withheld when both fighters were not analysed or the evidence gates are not met."},
+            {"question": "Will every report contain a scorecard?", "answer": (
+                "No. A scorecard is withheld when both fighters were not analysed or the evidence gates are not met."
+                if feature_is_on("scoring") else
+                "Not yet. Score estimates are coming once strikes can be counted accurately; reports show measured movement, guard, balance and coaching until then.")},
         ],
         "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
     },
@@ -2174,7 +2190,10 @@ def _withhold_score_while_counts_are_off(report: dict) -> None:
     while counts were on loses its score on read too. Never written back.
     """
     implausible = counts_implausible(report)
-    if (STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED) and not implausible:
+    counts_on = STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED
+    # The score's own switch too (core/features.py): marketing, pricing and
+    # the report all read it, so a score is shown only while it is on.
+    if counts_on and feature_is_on("scoring") and not implausible:
         return
     scorecard = report.get("scorecard") or {}
     if scorecard.get("available") or scorecard.get("status") == "punch_counting_unavailable":
@@ -2183,7 +2202,8 @@ def _withhold_score_while_counts_are_off(report: dict) -> None:
         report["scorecard"] = {
             **scorecard, "available": False, "totals": {"A": None, "B": None}, "rounds": [],
             "winner_estimate": None,
-            "status": "strike_counts_implausible" if implausible else "strike_counts_off",
+            "status": ("strike_counts_implausible" if implausible
+                       else "strike_counts_off" if not counts_on else "scoring_off"),
         }
 
 
@@ -5257,6 +5277,11 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
     # coverage, and a taekwondo report said "None were clear enough" above a
     # panel counting 28 kicks - both sending the athlete to redo a selection
     # or refilm a bout that was fine.
+    if status == "scoring_off":
+        coming = FEATURES["scoring"].coming
+        return {"reason": coming,
+                "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+                "disclaimer": f"No score is shown. {coming}"}
     if status == "strike_counts_off":
         return {
             "reason": ("A score is built from counted strikes, and WarriorIQ does not count strikes "
@@ -8160,6 +8185,7 @@ def shared_report(request: Request, token: str):
     attach_plausibility(report, path.parent / "tracking.jsonl")
     _apply_report_annotations(report, [])
     refresh_identity_integrity(report)
+    _withhold_score_while_counts_are_off(report)
     return templates.TemplateResponse(
         request=request, name="shared.html",
         context={"request": request, "report": report, "expires_at": share["expires_at"],
@@ -8203,6 +8229,8 @@ def _story_card(job_id: str) -> dict | None:
     attach_plausibility(report, report_path.parent / "tracking.jsonl")
     _score_and_identity_as_shown(report)
     _estimate_score_withheld_for_punches(report)
+    # As the result page does: no score on a card while scoring is off.
+    _withhold_score_while_counts_are_off(report)
     return share_card(report)
 
 

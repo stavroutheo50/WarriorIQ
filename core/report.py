@@ -10,6 +10,7 @@ from core.coaching import (
     POSE_DIMENSIONS,
     build_coaching, build_pose_coaching, build_training_plan, build_training_progression,
 )
+from core.features import is_on as feature_on
 from core.guard import reconcile_report_guard
 from core.sport_profiles import build_sport_coaching
 from core.config import SETTINGS
@@ -418,7 +419,10 @@ STRIKE_COUNTS_PRECISION_VALIDATED = False
 # balance, centre and pressure stay. Set WARRIORIQ_PUBLISH_STRIKE_COUNTS=1 to
 # show them again once strike classification meets the release targets on
 # /validation.
-STRIKE_COUNTS_PUBLISHED = os.getenv("WARRIORIQ_PUBLISH_STRIKE_COUNTS", "0").strip() == "1"
+#
+# Read through core/features.py, which every page's copy reads as well, so the
+# report and the marketing cannot disagree about what is switched on.
+STRIKE_COUNTS_PUBLISHED = feature_on("strike_counts")
 
 # The kickboxing sentence of core.sport_policy, kept here under its old name
 # for callers that predate the per-sport policy; a test holds them equal. Every

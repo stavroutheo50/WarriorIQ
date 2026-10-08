@@ -158,8 +158,8 @@
 <section class="report-levels">
   <div class="section-intro"><div class="eyebrow">What changes between reports?</div><h2>More detail when the work gets serious.</h2><p>The tracking and analysis pipeline stays evidence-first on every plan. The report depth changes.</p></div>
   <div class="grid3">
-    <div class="card"><span class="report-dot compact"></span><h3>Compact</h3><p class="muted">Essential performance numbers, three key moments, and one clear coaching priority.</p></div>
-    <div class="card"><span class="report-dot expanded"></span><h3>Expanded</h3><p class="muted">Core performance, estimated scorecard, coaching highlights, and a short training plan.</p></div>
+    <div class="card"><span class="report-dot compact"></span><h3>Compact</h3><p class="muted">Essential performance numbers{% if features.key_moments.on %}, three key moments,{% endif %} and one clear coaching priority.</p></div>
+    <div class="card"><span class="report-dot expanded"></span><h3>Expanded</h3><p class="muted">Core performance{% if features.scoring.on %}, estimated scorecard{% endif %}, coaching highlights, and a short training plan.</p></div>
     <div class="card"><span class="report-dot full"></span><h3>Complete</h3><p class="muted">Every supported metric, full coaching, training, evidence, ruleset, correction, and integrity view.</p></div>
   </div>
 </section>
