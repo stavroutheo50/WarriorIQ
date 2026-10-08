@@ -6,6 +6,7 @@ branch now refreshes that line, and only that line, so the error stays."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 PAGE = (Path(__file__).resolve().parents[1] / "app" / "templates" / "select.html").read_text(encoding="utf-8")
@@ -14,7 +15,7 @@ PAGE = (Path(__file__).resolve().parents[1] / "app" / "templates" / "select.html
 def test_the_failure_branch_refreshes_the_start_reason():
     start = PAGE.index("async function startAnalysis(){")
     body = PAGE[start:PAGE.index("\n", start)]
-    failure = body[body.index("catch(error){"):]
+    failure = re.sub(r"/\*.*?\*/", "", body[body.index("catch(error){"):])
     assert failure.index("starting=false") < failure.index("startReason.textContent=startReasonText(")
     assert "startReason.hidden=!startReason.textContent" in failure
     # Not a full redraw, which would overwrite the error in the status box.
