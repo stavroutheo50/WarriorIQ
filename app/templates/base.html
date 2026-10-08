@@ -5,14 +5,14 @@
 {% set page_description %}{% block description %}WarriorIQ analyzes combat sports fight video - kickboxing, boxing, Muay Thai, taekwondo and MMA - into evidence-linked performance reports, coaching priorities and fighter-specific training plans.{% endblock %}{% endset %}
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#081226">
 {% set analytics_id = request.state.analytics_measurement_id %}
-{% set gtm_id = request.state.gtm_container_id %}
+{% set gtm_id = request.state.gtm_container_id if request.state.google_tag_allowed else '' %}
+{% if not request.state.google_tag_allowed %}{% set analytics_id = '' %}{% endif %}
 {% if analytics_id or gtm_id %}
-  <!-- Google Consent Mode v2.
-       The tag loads on every page but stores nothing until the visitor accepts
-       analytics cookies. Withholding the tag entirely until consent also hides
-       it from Google's own tag detection, which reports the site as having no
-       tag installed; denying storage instead keeps the install verifiable while
-       still setting no analytics cookie for anyone who has not agreed. -->
+  {#- Only on a public marketing page, and only after the visitor accepted
+      analytics (app.main.google_tag_allowed). It used to load on every page,
+      private reports included, and its Google Ads destination sent the page
+      URL before any consent (QA, 2026-10-07). Consent Mode still denies
+      advertising storage at all times. -#}
   <script nonce="{{ request.state.csp_nonce }}">
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
@@ -83,7 +83,7 @@
 </head>
 {% set page_key = request.url.path.strip('/').split('/')[0] if request.url.path.strip('/') else 'home' %}
 <body data-page="{{page_key}}"{% if identity %} data-sport="{{identity.key}}" style="--sport-accent:{{identity.accent}};--sport-accent-soft:{{identity.accent_soft}}"{% endif %}>
-{% if request.state.gtm_container_id %}
+{% if request.state.gtm_container_id and request.state.google_tag_allowed %}
   <!-- Google Tag Manager (noscript). Must be the first thing inside <body>.
        Consent Mode governs what this may store. -->
   <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{request.state.gtm_container_id}}"

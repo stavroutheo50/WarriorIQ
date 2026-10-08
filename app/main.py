@@ -457,6 +457,26 @@ PRIVATE_ROUTE_PREFIXES = (
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
     "/auth/", "/guardian",
 )
+# The only pages the Google tag may load on (QA, 2026-10-07: it loaded on every
+# page, private reports included, and its Google Ads destination sent the full
+# report URL in a page-view ping before any consent). Public marketing pages
+# only - no sign-in, account, upload, report, share or legal page - and only
+# after the visitor accepts analytics (google_tag_allowed).
+GOOGLE_TAG_PATHS = frozenset({
+    "/", "/pricing", "/kickboxing-fight-analysis", "/k1-fight-analysis",
+    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
+})
+
+
+def google_tag_allowed(path: str, cookie_preferences: dict) -> bool:
+    """Whether this response may load the Google tag at all."""
+    if not (SETTINGS.analytics_measurement_id or SETTINGS.gtm_container_id):
+        return False
+    if path.startswith(PRIVATE_ROUTE_PREFIXES) or path not in GOOGLE_TAG_PATHS:
+        return False
+    return bool((cookie_preferences or {}).get("analytics"))
+
+
 # Private areas robots.txt does not name. Listing them there advertised the
 # admin console, validation tooling and payment webhook to anyone who reads the
 # file (QA, 2026-09); they are kept out of search by the X-Robots-Tag header
@@ -1613,6 +1633,7 @@ def _load_viewer_state(request: Request) -> None:
     request.state.analytics_measurement_id = SETTINGS.analytics_measurement_id
     request.state.site_verification_token = SETTINGS.site_verification_token
     request.state.gtm_container_id = SETTINGS.gtm_container_id
+    request.state.google_tag_allowed = google_tag_allowed(request.url.path, request.state.cookie_preferences)
     request.state.external_ai_available = bool(os.getenv("OPENAI_API_KEY", "").strip())
     request.state.is_admin = _is_admin(request)
     request.state.noindex = (
@@ -1731,16 +1752,14 @@ def _apply_response_headers(request: Request, response) -> None:
     response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
     if request.url.path.startswith(PRIVATE_ROUTE_PREFIXES):
         response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
-    # The analytics tag is only rendered once a visitor accepts analytics
-    # cookies, so the policy only names Google's hosts for those visitors.
-    # Without this the browser blocks googletagmanager.com outright and no
-    # measurement ever reaches Google, however the tag is configured.
-    # Consent Mode loads the tag on every page and denies storage until the
-    # visitor accepts, so the policy has to permit Google's hosts whenever a tag
-    # is configured. Consent controls what may be stored, not whether the script
-    # is reachable; gating the policy on consent hid the tag from Google's own
-    # detection and made a correct install look absent.
-    analytics_allowed = bool(SETTINGS.analytics_measurement_id or SETTINGS.gtm_container_id)
+    # Google's hosts are named only on a response that loads the Google tag:
+    # a public marketing page, after the visitor accepted analytics
+    # (google_tag_allowed). It used to load - and the policy to allow it - on
+    # every page so Google's own tag detection could see the install; that put
+    # private report URLs in a Google Ads page-view ping before any consent
+    # (QA, 2026-10-07). An install that is only visible after consent is the
+    # price of not doing that.
+    analytics_allowed = bool(getattr(request.state, "google_tag_allowed", False))
     # A per-response nonce rather than 'unsafe-inline': an injected <script>
     # cannot know the value, so it does not run. Inline on*= attributes cannot
     # carry a nonce, which is why the templates have none (see base.html).
