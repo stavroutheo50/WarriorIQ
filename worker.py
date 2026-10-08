@@ -169,7 +169,13 @@ def run_claimed_job(worker_id: str, job_id: str, job: dict) -> None:
 
 
 def _start_idle_pose_warmup() -> threading.Thread:
-    """Warm the pose model without pausing worker heartbeats."""
+    """Warm the models without pausing worker heartbeats.
+
+    Only the joint refiner was warmed here. The pose detector was loaded and
+    run for the first time inside the first job, and SAM2 was built inside
+    every job (QA, 2026-10-07, item 26). Each step is independent: one failing
+    leaves the others warm and the analysis loads what is missing on demand.
+    """
     def prepare() -> None:
         try:
             from core.rtm_pose import warmup
@@ -177,6 +183,22 @@ def _start_idle_pose_warmup() -> threading.Thread:
             warmup()
         except Exception:  # noqa: BLE001 - idle preparation must not kill the worker
             LOGGER.exception("Idle pose warmup failed; analysis will initialize the model on demand")
+        try:
+            import numpy as np
+
+            from core.analyzer import get_pose_tracker
+
+            started = time.perf_counter()
+            get_pose_tracker().warmup(np.zeros((640, 640, 3), dtype=np.uint8))
+            LOGGER.info("pose_detector_warmup_complete seconds=%.2f", time.perf_counter() - started)
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Idle pose detector warmup failed; analysis will load it on demand")
+        try:
+            from core.sam_recovery import preload
+
+            preload()
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Idle SAM2 preload failed; analysis will build it on demand")
 
     thread = threading.Thread(target=prepare, name="warrioriq-pose-warmup", daemon=True)
     thread.start()

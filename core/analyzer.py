@@ -507,6 +507,32 @@ def get_pose_tracker() -> PoseTracker:
         return _cached_pose_tracker()
 
 
+def _stage_seconds(*, total: float, before_analysis: float, model_setup: float, sam_sweep: float,
+                   sam_model_load: float, before_frame_pass: float, frame_pass: float) -> dict:
+    """Where one analysis's time went, in stages that add up to ``total``.
+
+    "setup_before_sweep" is model loading, the footage probe and identity
+    seeding; on a warm CPU worker it measured about 4 s of a 20 s clip, almost
+    none of it loading. "after_frame_pass" (rounds, scoring, report) is what
+    is left, so the stages
+    always sum to the wait the person had. "sam_model_load" is inside
+    "sam_sweep" plus any later rescue, so it is reported beside the stages, not
+    added to them.
+    """
+    stages = {
+        "footage_check_and_backward_pass": before_analysis,
+        "setup_before_sweep": model_setup,
+        "sam_sweep": sam_sweep,
+        "before_frame_pass": before_frame_pass,
+        "frame_pass": frame_pass,
+    }
+    stages = {key: max(0.0, float(value)) for key, value in stages.items()}
+    stages["after_frame_pass"] = max(0.0, float(total) - sum(stages.values()))
+    rounded = {key: round(value, 2) for key, value in stages.items()}
+    rounded["sam_model_load_included_above"] = round(max(0.0, float(sam_model_load)), 2)
+    return rounded
+
+
 def _validate_request(req: AnalysisRequest, duration: float) -> None:
     req.analysis_target = (req.analysis_target or "BOTH").upper()
     if req.analysis_target not in {"A", "B", "BOTH"}:
@@ -1609,6 +1635,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         cap.release()
         if tracking_file is not None:
             tracking_file.close()
+        # A rescue during the frame pass loads SAM2 again; park it for the next
+        # job instead of dropping it with this run (core/sam_recovery.py).
+        sam_recovery.release()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -2046,6 +2075,17 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "analysis_seconds": analysis_seconds,
         "realtime_speed": realtime_speed,
         "within_video_length_budget": within_budget,
+        # The whole wait, stage by stage, adding up to analysis_seconds. The
+        # fields above covered the SAM2 sweep and the frame pass; model
+        # loading, the backward identity pass and everything after the frame
+        # pass were one unexplained remainder (QA, 2026-10-07, item 26).
+        "stage_seconds": _stage_seconds(
+            total=analysis_seconds, before_analysis=float(budget_spent_before),
+            model_setup=sweep_start - wall_start, sam_sweep=sam_sweep_seconds,
+            # Every SAM2 load this run: the sweep's and any frame-pass rescue's.
+            sam_model_load=float(getattr(sam_recovery, "load_seconds", 0.0) or 0.0),
+            before_frame_pass=pose_pass_start - sweep_start - sam_sweep_seconds,
+            frame_pass=frame_pass_seconds),
     })
     # Not recognised as a fight: the saved file and the progress snapshot hold
     # measured movement only, as every page that reads them will show it.
