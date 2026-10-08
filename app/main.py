@@ -92,7 +92,7 @@ from core.db import (
 )
 from core.evidence_trust import accepted_model_event, report_evidence_trust
 from core.fight_stats import normalize_outcome, summarize_fight_events
-from core.coaching import build_coaching, build_training_plan
+from core.coaching import build_coaching, build_training_plan, coaching_gaps
 from core.guard import reconcile_report_guard
 from core.generalship import movement_comparison
 from core.fight_presence import attach_plausibility
@@ -309,6 +309,8 @@ templates.env.globals["metric_catalog"] = METRIC_CATALOG
 # The movement comparison is decided at render time, so reports saved with a
 # "10-10" movement scorecard are shown without one (core/generalship.py).
 templates.env.globals["movement_comparison"] = movement_comparison
+# Why a coaching card is empty, in one place (core/coaching.py coaching_gaps).
+templates.env.globals["coaching_gaps"] = coaching_gaps
 templates.env.filters["metric_readings"] = metric_readings
 # Pressure 0-100, centre as a percentage, footwork in body lengths a second:
 # the units the report and Progress already use. See core.squad.movement_value.

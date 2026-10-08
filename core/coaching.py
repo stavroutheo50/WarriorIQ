@@ -671,3 +671,77 @@ def build_training_plan(coaching: dict, fighter: str, own: dict) -> list[dict]:
             "baseline": baseline,
         })
     return plan
+
+
+# What the report says where coaching found nothing to name - the "Keep
+# doing", "Fix next" and training-target cards - and why.
+#
+# QA, 2026-10-07 (/result/b0bc06c741a7): "this fight did not give enough
+# evidence" beside "100% seen". The plan was empty because nothing measured
+# was clearly behind the opponent - not because too little was seen - and the
+# page had one sentence for every empty plan.
+TOO_LITTLE = "too_little_measured"
+NO_DIRECTION = "nothing_ranked"
+NO_CLEAR_GAP = "no_clear_gap"
+NOTHING_UNUSUAL = "nothing_unusual"
+WITHHELD = "withheld"
+
+
+def _listed(labels: list[str]) -> str:
+    labels = [label.lower() for label in labels]
+    if len(labels) <= 1:
+        return "".join(labels)
+    return ", ".join(labels[:-1]) + " and " + labels[-1]
+
+
+def coaching_gaps(report: dict, fighter: str, sport: str | None = None) -> dict:
+    """Why this fighter has no strength, no fix or no training target.
+
+    ``code`` is one of WITHHELD, TOO_LITTLE, NO_DIRECTION, NO_CLEAR_GAP or
+    NOTHING_UNUSUAL; ``keep``, ``fix`` and ``plan`` are the sentences for the
+    three cards. Only "too little measured" says anything about the footage.
+    """
+    report = report or {}
+    coaching = (report.get("coaching") or {}).get(fighter) or {}
+    mode = (report.get("integrity") or {}).get("coaching_evidence_mode")
+    if mode in ("withheld_identity_failure", "withheld_not_a_fight") and coaching.get("note"):
+        note = str(coaching["note"])
+        return {"code": WITHHELD, "keep": note, "fix": note, "plan": note}
+
+    metrics = report.get("metrics") or {}
+    own = metrics.get(fighter) or {}
+    other = metrics.get("B" if fighter == "A" else "A") or {}
+    measured = [(key, label) for key, label, *_rest in POSE_DIMENSIONS if own.get(key) is not None]
+    if not measured:
+        seen = own.get("pose_coverage")
+        why = own.get("pose_note") or own.get("guard_note")
+        text = ("Too little of the body was measured to name anything"
+                + (f": the camera saw you for {float(seen) * 100:.0f}% of the video, but guard, balance, "
+                   "centre, pressure and movement could not be measured from it" if seen else "")
+                + "." + (f" {why}" if why else " A longer clip, filmed head to toe, gives more to measure."))
+        return {"code": TOO_LITTLE, "keep": text, "fix": text, "plan": text}
+
+    ranked = [(key, label) for key, label in measured if _has_better_direction(key, sport)]
+    names = _listed([label for _, label in measured])
+    if not ranked:
+        text = (f"{names.capitalize()} were measured, but none has a better direction to aim for here "
+                "- they depend on how you fight - so there is nothing to rank as a strength or a fix.")
+        return {"code": NO_DIRECTION, "keep": text, "fix": text,
+                "plan": text + " A drill is only set from a number you were behind on."}
+
+    ranked_names = _listed([label for _, label in ranked])
+    if any(other.get(key) is not None for key, _ in ranked):
+        return {
+            "code": NO_CLEAR_GAP,
+            "keep": f"On {ranked_names} you were not clearly ahead of your opponent - the gaps were too small to call.",
+            "fix": f"On {ranked_names} you were not clearly behind your opponent either.",
+            "plan": (f"No target from this fight: on {ranked_names} you were not clearly behind your "
+                     "opponent, so there was no measured gap to set one from."),
+        }
+    return {
+        "code": NOTHING_UNUSUAL,
+        "keep": f"With no opponent to compare against, {ranked_names} sat in their usual range.",
+        "fix": f"With no opponent to compare against, {ranked_names} sat in their usual range.",
+        "plan": (f"No target from this fight: with no opponent to compare against, {ranked_names} "
+                 "did not sit far enough from their usual range to set one."),
+    }
