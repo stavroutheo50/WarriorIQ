@@ -69,8 +69,8 @@
   <meta property="og:title" content="{{page_title|striptags|trim}}">
   <meta property="og:description" content="{{page_description|striptags|trim}}">
   {% if request.state.canonical_url %}<meta property="og:url" content="{{request.state.canonical_url}}">{% endif %}
-  {% if request.state.social_image_url %}<meta property="og:image" content="{{request.state.social_image_url}}"><meta property="og:image:alt" content="WarriorIQ logo">{% endif %}
-  <meta name="twitter:card" content="summary"><meta name="twitter:title" content="{{page_title|striptags|trim}}"><meta name="twitter:description" content="{{page_description|striptags|trim}}">
+  {% if request.state.social_image_url %}<meta property="og:image" content="{{request.state.social_image_url}}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="WarriorIQ: combat-sports fight video analysis">{% endif %}
+  <meta name="twitter:card" content="{{ 'summary_large_image' if request.state.social_image_url else 'summary' }}"><meta name="twitter:title" content="{{page_title|striptags|trim}}"><meta name="twitter:description" content="{{page_description|striptags|trim}}">
   {% if request.state.social_image_url %}<meta name="twitter:image" content="{{request.state.social_image_url}}">{% endif %}
   {% endblock %}
   <title>{{page_title|striptags|trim}}</title>

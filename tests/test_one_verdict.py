@@ -82,6 +82,7 @@ def test_every_section_agrees_with_the_verdict():
 
 def test_the_measured_target_sentence_needs_a_measured_target():
     page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
-    sentence = "This target comes from {{ names.get(primary, 'Fighter ' ~ primary) }}’s measured report, not a generic template."
+    sentence = ('This target comes from <span class="fighter-name-fit" title="{{ summary_name }}">'
+                "{{ summary_name }}</span>’s measured report, not a generic template.")
     before = page[:page.index(sentence)]
     assert before.rstrip().endswith("{% if plan %}<p>")

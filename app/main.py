@@ -1701,7 +1701,9 @@ def _load_viewer_state(request: Request) -> None:
     )
     request.state.site_url = SETTINGS.public_base_url
     request.state.social_image_url = (
-        f"{SETTINGS.public_base_url}/static/warrioriq-logo.png" if SETTINGS.public_base_url else ""
+        # A 1200x630 card, not the square logo: previews drew a small
+        # thumbnail (QA, 2026-10-07). Redraw with tools/make_social_card.py.
+        f"{SETTINGS.public_base_url}/static/warrioriq-social-card.png" if SETTINGS.public_base_url else ""
     )
 
 

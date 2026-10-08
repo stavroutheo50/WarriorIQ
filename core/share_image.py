@@ -117,3 +117,43 @@ def preview_png(card: dict, side: str, corner: str | None) -> bytes:
     if not ok:
         raise RuntimeError("could not encode the preview image")
     return encoded.tobytes()
+
+
+# The site's own link preview (base.html og:image). QA, 2026-10-07: links to
+# warrioriq.eu showed the bare square logo with twitter:card "summary", so
+# WhatsApp, X and LinkedIn drew a small thumbnail. This is a 1200x630 card in
+# the fight card's look. Its words describe what every report contains today
+# (core/features.py: strike counts and scores are not switched on), so it
+# makes no claim a report cannot back.
+SITE_CARD_LINES = (
+    "Combat-sports fight video analysis",
+    "Movement, guard, balance and pressure,",
+    "measured from your own fight video.",
+)
+
+
+def site_card_png(logo: np.ndarray | None = None) -> bytes:
+    """1200x630 PNG for links to the site itself."""
+    canvas = _backdrop()
+    x = 96
+    if logo is not None:
+        size = 260
+        mark = cv2.resize(logo, (size, size), interpolation=cv2.INTER_AREA)
+        top, left = (H - size) // 2, W - size - 110
+        if mark.shape[2] == 4:
+            alpha = mark[..., 3:4].astype(np.float32) / 255.0
+            region = canvas[top:top + size, left:left + size].astype(np.float32)
+            canvas[top:top + size, left:left + size] = (
+                region * (1 - alpha) + mark[..., :3].astype(np.float32) * alpha).astype(np.uint8)
+        else:
+            canvas[top:top + size, left:left + size] = mark[..., :3]
+    width = _text(canvas, "WARRIOR", x, 250, 2.6, INK, 5)
+    _text(canvas, "IQ", x + width, 250, 2.6, CYAN, 5)
+    _text(canvas, SITE_CARD_LINES[0].upper(), x, 318, 0.9, MUTED, 2)
+    _text(canvas, SITE_CARD_LINES[1], x, 410, 1.0, INK, 2)
+    _text(canvas, SITE_CARD_LINES[2], x, 456, 1.0, INK, 2)
+    _text(canvas, "warrioriq.eu", x, 548, 0.9, CYAN, 2)
+    ok, encoded = cv2.imencode(".png", canvas, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    if not ok:
+        raise RuntimeError("could not encode the site card")
+    return encoded.tobytes()
