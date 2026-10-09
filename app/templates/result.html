@@ -60,6 +60,37 @@
 {% if numbers.state == 'no_fight' %}<div class="notice bad" role="alert"><strong>Too little fight footage to measure.</strong> {{ numbers.message }} Upload a clip where the two fighters are in shot and fighting for most of it, and pick a frame where both are clearly visible.</div>
 {% elif numbers.state == 'movement_only' %}<div class="notice bad" role="alert" id="notAFightNotice"><strong>Not recognised as a fight.</strong> {{ numbers.message }} If this is a real fight, upload a clip where both fighters are in full view and exchanging.</div>
 {% elif fight_footage and fight_footage.note %}<p class="analysed-span-note" role="note">{{ fight_footage.note }}</p>{% endif %}
+{#- Fix this first (core.report.fix_first): the one measured fault, the moment
+    it happened on the skeleton replay, and its drill - the shape of
+    mmagpt.app's report, built only from what this analysis measured. Not
+    shown when there is no fault to name, or the coaching is withheld. -#}
+{% set ff_focus = report.video.focus_fighter|default(report.video.analysis_target, true) %}
+{% set ff = fix_first(report, ff_focus if ff_focus in ['A', 'B'] else 'A', training_items=report_access.training_items) if not identity_failed and numbers.state not in ('movement_only', 'no_fight') else none %}
+{% if ff %}
+<section class="card fix-first" id="fix-first" aria-labelledby="fixFirstTitle" data-reveal>
+  <div class="eyebrow">Fix this first</div>
+  <h2 id="fixFirstTitle">{{ ff.title }}</h2>
+  <p class="fix-first-detail">{{ ff.detail }}</p>
+  {% if ff.moment_seconds is not none %}<div class="fix-first-moment"><a class="btn" href="/replay/{{ job_id }}?t={{ '%.2f'|format([ff.moment_seconds - 1, 0]|max) }}">▶ Watch it at {{ ff.moment_clock }}</a>{% if ff.more_moments %}<small class="muted">and {{ ff.more_moments }} more time{{ '' if ff.more_moments == 1 else 's' }} in the replay</small>{% endif %}</div>{% endif %}
+  {% if ff.drill %}<div class="fix-first-drill"><span>Your drill</span><strong>{{ ff.drill.name }}</strong><p>{{ ff.drill.prescription }}</p>{% if ff.drill.goal %}<small>Goal: {{ ff.drill.goal }}</small>{% endif %}</div>{% endif %}
+  <p class="small muted">Measured from your video. A second pair of eyes, not a replacement for your coach.</p>
+</section>
+{#- One thing to keep beside the one to fix (core.report.did_well): the
+    fighter's first measured strength, the same item "Keep doing" shows. -#}
+{% set dw = did_well(report, ff_focus if ff_focus in ['A', 'B'] else 'A') if report_access.report_tier != 'compact' else none %}
+{% if dw %}
+<section class="card did-well" id="did-well" aria-labelledby="didWellTitle" data-reveal>
+  <div class="eyebrow">What you did well</div>
+  <h2 id="didWellTitle">{{ dw.title }}</h2>
+  {% if dw.detail %}<p class="fix-first-detail">{{ dw.detail }}</p>{% endif %}
+  {% if dw.moment_seconds is not none %}<a class="text-link" href="/replay/{{ job_id }}?t={{ '%.2f'|format([dw.moment_seconds - 1, 0]|max) }}">▶ Watch it at {{ dw.moment_clock }}</a>{% endif %}
+</section>
+{% endif %}
+{% endif %}
+{#- The fight's details after its answer (2026-10-09): on a phone the
+    ruleset, format, focus and score-coming lines filled the first screen and
+    "Fix this first" started under the fold. When there is no such card the
+    order is as before. -#}
 <section class="result-overview" aria-label="Fight summary" data-motion-sequence="result-summary">
   <div class="result-fighters"><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/A" alt="{{ names.A }} portrait" data-hide-on-error><span>{% if corners and corners.A %}<small>{{corners.A}}</small>{% endif %}<strong>{{ names.A }}</strong></span></div><span class="result-versus">vs</span><div class="result-fighter"><img src="/fighter-portrait/{{job_id}}/B" alt="{{ names.B }} portrait" data-hide-on-error><span>{% if corners and corners.B %}<small>{{corners.B}}</small>{% endif %}<strong>{{ names.B }}</strong></span></div></div>
   <div class="result-context"><div><span>Ruleset</span><strong>{{report.scorecard.ruleset_label}}</strong></div>{#- The rounds the analysis used: the ones it found in the footage
@@ -71,7 +102,7 @@
 <div><span>Format</span><strong>{{ found_rounds|length }} round{{ '' if found_rounds|length == 1 else 's' }} · {% if found_rounds|length > 1 %}about {% endif %}{{ '%d:%02d'|format(each // 60, each % 60) }}{% if found_rounds|length > 1 %} each{% endif %}</strong></div>
 {% else %}{% set fmt_secs = report.setup.round_duration_seconds|int %}
 <div><span>Format</span><strong>{{report.setup.round_count}} × {% if fmt_secs >= 60 and fmt_secs % 60 == 0 %}{{ (fmt_secs / 60)|int }} min{% else %}{{ fmt_secs }}s{% endif %}</strong></div>
-{% endif %}{% if analysed_label %}<div><span>Analysed</span><strong>{{analysed_label}}</strong></div>{% endif %}<div><span>Report focus</span><strong>{% set rf = report.video.focus_fighter|default(report.video.analysis_target, true) %}{{ names.get(rf, 'Fighter ' ~ rf) }}</strong></div></div>
+{% endif %}{% if analysed_label %}<div><span>Analysed</span><strong>{{analysed_label}}</strong></div>{% endif %}<div class="result-context-focus"><span>Report focus</span><strong>{% set rf = report.video.focus_fighter|default(report.video.analysis_target, true) %}{{ names.get(rf, 'Fighter ' ~ rf) }}</strong></div></div>
   {#- core/features.py: while scoring is switched off the score is "coming",
       not "Not scored" with a per-fight reason that reads as this fight's fault. -#}
   <div class="result-scoreline">{% if features is defined and features.scoring and not features.scoring.on %}<span>Score</span><strong class="score-muted">Coming</strong><small>{{ features.scoring.coming }}</small>{% elif report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}{{ names.get(report.scorecard.winner_estimate, 'Fighter ' ~ report.scorecard.winner_estimate) }} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
@@ -127,33 +158,6 @@
   </div>
   {% endif %}
 </section>
-{#- Fix this first (core.report.fix_first): the one measured fault, the moment
-    it happened on the skeleton replay, and its drill - the shape of
-    mmagpt.app's report, built only from what this analysis measured. Not
-    shown when there is no fault to name, or the coaching is withheld. -#}
-{% set ff_focus = report.video.focus_fighter|default(report.video.analysis_target, true) %}
-{% set ff = fix_first(report, ff_focus if ff_focus in ['A', 'B'] else 'A', training_items=report_access.training_items) if not identity_failed and numbers.state not in ('movement_only', 'no_fight') else none %}
-{% if ff %}
-<section class="card fix-first" id="fix-first" aria-labelledby="fixFirstTitle" data-reveal>
-  <div class="eyebrow">Fix this first</div>
-  <h2 id="fixFirstTitle">{{ ff.title }}</h2>
-  <p class="fix-first-detail">{{ ff.detail }}</p>
-  {% if ff.moment_seconds is not none %}<div class="fix-first-moment"><a class="btn" href="/replay/{{ job_id }}?t={{ '%.2f'|format([ff.moment_seconds - 1, 0]|max) }}">▶ Watch it at {{ ff.moment_clock }}</a>{% if ff.more_moments %}<small class="muted">and {{ ff.more_moments }} more time{{ '' if ff.more_moments == 1 else 's' }} in the replay</small>{% endif %}</div>{% endif %}
-  {% if ff.drill %}<div class="fix-first-drill"><span>Your drill</span><strong>{{ ff.drill.name }}</strong><p>{{ ff.drill.prescription }}</p>{% if ff.drill.goal %}<small>Goal: {{ ff.drill.goal }}</small>{% endif %}</div>{% endif %}
-  <p class="small muted">Measured from your video. A second pair of eyes, not a replacement for your coach.</p>
-</section>
-{#- One thing to keep beside the one to fix (core.report.did_well): the
-    fighter's first measured strength, the same item "Keep doing" shows. -#}
-{% set dw = did_well(report, ff_focus if ff_focus in ['A', 'B'] else 'A') if report_access.report_tier != 'compact' else none %}
-{% if dw %}
-<section class="card did-well" id="did-well" aria-labelledby="didWellTitle" data-reveal>
-  <div class="eyebrow">What you did well</div>
-  <h2 id="didWellTitle">{{ dw.title }}</h2>
-  {% if dw.detail %}<p class="fix-first-detail">{{ dw.detail }}</p>{% endif %}
-  {% if dw.moment_seconds is not none %}<a class="text-link" href="/replay/{{ job_id }}?t={{ '%.2f'|format([dw.moment_seconds - 1, 0]|max) }}">▶ Watch it at {{ dw.moment_clock }}</a>{% endif %}
-</section>
-{% endif %}
-{% endif %}
 {#- Compare to last video, one tap from the top (after mmagpt.app). Arrows
     only: pressure, centre and movement have no better direction
     (core/metric_catalog.py), so this strip never calls a change better. -#}
@@ -1144,6 +1148,9 @@
 {% endblock %}
 {% block scripts %}
 <script nonce="{{ request.state.csp_nonce }}">
+/* Phones show each of the six numbers with its name only; a tap shows the
+   sentence that explains it (static/components.css .fight-vitals). */
+document.querySelectorAll('.fight-vitals article').forEach(card=>{card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-expanded','false');const flip=()=>card.setAttribute('aria-expanded',String(card.classList.toggle('show-note')));card.addEventListener('click',flip);card.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();flip()}})});
 /* A link to a section folded inside a closed <details> ("Details" on the
    since-last strip, the section chips) opens it first, so the jump lands. */
 (()=>{const openFor=id=>{let node=id&&document.getElementById(decodeURIComponent(id));if(!node)return;let fold=node.closest('details');while(fold){fold.open=true;fold=fold.parentElement&&fold.parentElement.closest('details')}};

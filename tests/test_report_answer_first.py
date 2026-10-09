@@ -64,6 +64,12 @@ class PageTests(unittest.TestCase):
         self.assertTrue(folded.rstrip().endswith("</details>"))
         self.assertIn('class="numbers-first-report"', folded)
 
+    def test_the_answer_comes_before_the_fight_details(self):
+        # 2026-10-09: on a phone the details filled the first screen.
+        page = self._page(_report())
+        self.assertLess(page.index('id="did-well"'), page.index('class="result-overview"'))
+        self.assertIn('class="result-context-focus"', page)
+
     def test_without_fix_this_first_nothing_is_folded(self):
         page = self._page(_report(improvements=[]))
         self.assertNotIn('id="fix-first"', page)
