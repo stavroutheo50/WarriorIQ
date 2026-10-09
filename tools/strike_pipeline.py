@@ -21,8 +21,9 @@ Stages, each skipped with a reason when its input is missing:
    them a model learns the datasets, not fights: one trained on BoxingVI alone
    fired on 99.8% of real windows.
 4. **Hold out the exam.** TKD-Kick3's test split (and, with BoxingVI, three of
-   its punch videos plus V6, its people-labelled quiet footage) is copied to
-   dataset/exam/ and never trained on.
+   its punch videos and the last 60% of V6, its people-labelled quiet
+   footage) is copied to dataset/exam/ and never trained on. V6's first 30%
+   trains, so the model sees quiet moments from that footage too.
 5. **Train** (tools/train_temporal_model.py) on everything else.
 6. **Auto-label** your finished analyses (tools/auto_label.py) with that model,
    where the rules and the model name the same strike, then **train again**
@@ -62,13 +63,19 @@ CANDIDATE = ROOT / "models" / "warrioriq_temporal_candidate.pt"
 UFC_MANIFEST = EXAM / "ufc_bouts.json"
 UFC_CSV = DATASET / "public" / "ufc_stats" / "ufc_fight_stats.csv"
 
-# Held out for the exam: never copied into the training directory. BoxingVI's
-# V6 is the one people-labelled source of quiet windows (the footage between
-# its labelled punches); the exam needs them to measure precision at all
-# (core/strike_exam.py), so it is examined on rather than trained on. Training
-# keeps the quiet windows from your own footage and the auto-labels.
+# Held out for the exam: never copied into the training directory.
 EXAM_FIGHTS = {"tkd_test": "tkd_kick3_test"}
-BOXINGVI_EXAM = ("boxingvi_V6", "boxingvi_V8", "boxingvi_V9", "boxingvi_V10")
+BOXINGVI_EXAM = ("boxingvi_V8", "boxingvi_V9", "boxingvi_V10")
+# BoxingVI's V6 is the one people-labelled source of quiet windows (the footage
+# between its labelled punches), and both sides need it. The exam needs it to
+# measure precision at all (core/strike_exam.py). Training needs it too: held
+# out whole, the model saw quiet moments only from our own footage, learned
+# "BoxingVI-looking = punch" and called all 952 quiet V6 windows punches
+# (precision 0.344, RTX 5060 run, 2026-10-09). So V6 is split in time: the
+# first 30% trains (as boxingvi_V6a), the last 60% is examined (boxingvi_V6b,
+# enough quiet windows for one per held-out punch), and the 10% between is
+# dropped so no exam window sits beside a training one.
+SPLIT_FIGHTS = {"boxingvi_V6": ("boxingvi_test", 0.30, 0.40)}
 
 
 def step(title: str, command: list[str]) -> bool:
@@ -96,7 +103,20 @@ def fingerprint(path: Path) -> str:
         return hashlib.sha256(np.asarray(data["x"], dtype=np.float32).tobytes(order="C")).hexdigest()
 
 
-def gather(sources: list[Path], exam_fights: dict[str, str]) -> dict:
+def split_part(index: int, total: int, train_until: float, exam_from: float) -> str | None:
+    """'train', 'exam' or None (the gap) for window ``index`` of ``total`` in time order."""
+    position = index / max(1, total)
+    return "train" if position < train_until else "exam" if position >= exam_from else None
+
+
+def copy_as(path: Path, destination: Path, fight_id: str) -> None:
+    import numpy as np
+
+    with np.load(path, allow_pickle=False) as data:
+        np.savez_compressed(destination, x=data["x"], y=data["y"], fight_id=fight_id)
+
+
+def gather(sources: list[Path], exam_fights: dict[str, str], split_fights: dict | None = None) -> dict:
     """Copy sequences into TRAIN, and the held-out fights into EXAM/<name>.
 
     A window that repeats one already gathered is left out: the trainer refuses
@@ -104,16 +124,46 @@ def gather(sources: list[Path], exam_fights: dict[str, str]) -> dict:
     would leak the answer. Repeats are expected - the auto-labeller and the
     negative miner cut windows from the same tracking - so exam windows are
     taken first and the earlier source wins.
+
+    A fight in ``split_fights`` ({fight: (exam dir, train_until, exam_from)})
+    is cut in time by its window file names (zero-padded positions): the early
+    part trains as ``<fight>a``, the late part is examined as ``<fight>b``.
     """
-    for directory in [TRAIN, *(EXAM / name for name in set(exam_fights.values()))]:
+    split_fights = split_fights or {}
+    exam_dirs = set(exam_fights.values()) | {target for target, _, _ in split_fights.values()}
+    for directory in [TRAIN, *(EXAM / name for name in exam_dirs)]:
         if directory.exists():
             shutil.rmtree(directory)
         directory.mkdir(parents=True)
-    counts = {"train": 0, "exam": 0, "duplicates": 0}
+    counts = {"train": 0, "exam": 0, "duplicates": 0, "gap": 0}
     files = [(source, path, fight_of(path)) for source in sources for path in sorted(source.glob("*.npz"))]
+    order = {fight: [path for _, path, f in files if f == fight] for fight in split_fights}
+    part = {}
+    for fight, paths in order.items():
+        _, train_until, exam_from = split_fights[fight]
+        for index, path in enumerate(paths):
+            part[path] = split_part(index, len(paths), train_until, exam_from)
     seen: set[str] = set()
     for held_out in (True, False):
         for source, path, fight in files:
+            if fight in split_fights:
+                if part[path] is None:
+                    counts["gap"] += held_out
+                    continue
+                if (part[path] == "exam") != held_out:
+                    continue
+                digest = fingerprint(path)
+                if digest in seen:
+                    counts["duplicates"] += 1
+                    continue
+                seen.add(digest)
+                if held_out:
+                    copy_as(path, EXAM / split_fights[fight][0] / f"{source.name}__{path.name}", fight + "b")
+                    counts["exam"] += 1
+                else:
+                    copy_as(path, TRAIN / f"{source.name}__{path.name}", fight + "a")
+                    counts["train"] += 1
+                continue
             if (fight in exam_fights) != held_out:
                 continue
             digest = fingerprint(path)
@@ -177,11 +227,13 @@ def main(argv=None) -> int:
                                      "--out", "dataset/sequences_strikemetrics"]):
         sources.append(DATASET / "sequences_strikemetrics")
     exam_fights = dict(EXAM_FIGHTS)
+    split_fights: dict = {}
     if not args.no_boxingvi and (DATASET / "public" / "boxingvi").exists() and step(
             "Import BoxingVI", ["tools/import_boxingvi.py", "--source", "dataset/public/boxingvi",
                                 "--out", "dataset/sequences_boxingvi", "--sided"]):
         sources.append(DATASET / "sequences_boxingvi")
         exam_fights.update({fight: "boxingvi_test" for fight in BOXINGVI_EXAM})
+        split_fights.update(SPLIT_FIGHTS)
     if step("Negatives from your own footage", ["tools/mine_own_negatives.py", "--reuse"]):
         sources.append(DATASET / "sequences_own_negatives")
     sources = [s for s in sources if s.exists() and any(s.glob("*.npz"))]
@@ -195,7 +247,7 @@ def main(argv=None) -> int:
         training_sources = list(sources)
         if round_number > 1 and auto.exists() and any(auto.glob("*.npz")):
             training_sources.append(auto)
-        counts = gather(training_sources, exam_fights)
+        counts = gather(training_sources, exam_fights, split_fights)
         print(f"\nRound {round_number}: {counts['train']} training windows, {counts['exam']} held out for the exam"
               f" ({counts['duplicates']} repeated windows left out)")
         if not step(f"Train (round {round_number})", ["tools/train_temporal_model.py", "--data", str(TRAIN),
@@ -212,7 +264,8 @@ def main(argv=None) -> int:
             step("Auto-label your analyses", ["tools/auto_label.py", "--checkpoint", str(CANDIDATE),
                                               "--jobs", *map(str, jobs), "--out", str(auto)])
 
-    windows = [str(EXAM / name) for name in sorted(set(exam_fights.values()))
+    exam_dirs = set(exam_fights.values()) | {target for target, _, _ in split_fights.values()}
+    windows = [str(EXAM / name) for name in sorted(exam_dirs)
                if (EXAM / name).exists() and any((EXAM / name).glob("*.npz"))]
     if not windows:
         print("\nNo held-out exam clips; cannot examine.")
