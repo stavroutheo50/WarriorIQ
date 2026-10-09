@@ -134,3 +134,12 @@
 .select-more>*+*{margin-top:12px}
 .select-more .focus-pick legend{font-weight:800}
 .select-more fieldset{border:0;padding:0;margin-left:0;margin-right:0}
+
+/* Phones: the picture and its one instruction on the first screen. The intro
+   and the "WarriorIQ chose this moment" note repeat what the instruction
+   says, and "Pick a different moment" is under More options; the note stays
+   when no pair was found, because then it says what to do (2026-10-09). */
+@media(max-width:700px){
+  .workflow-heading .eyebrow,#selectIntro,#frameNote:not([data-found="none"]){display:none}
+  .workflow-heading h1{font-size:30px;margin:4px 0 0}
+}
