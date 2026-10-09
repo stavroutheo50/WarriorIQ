@@ -142,6 +142,17 @@
   {% if ff.drill %}<div class="fix-first-drill"><span>Your drill</span><strong>{{ ff.drill.name }}</strong><p>{{ ff.drill.prescription }}</p>{% if ff.drill.goal %}<small>Goal: {{ ff.drill.goal }}</small>{% endif %}</div>{% endif %}
   <p class="small muted">Measured from your video. A second pair of eyes, not a replacement for your coach.</p>
 </section>
+{#- One thing to keep beside the one to fix (core.report.did_well): the
+    fighter's first measured strength, the same item "Keep doing" shows. -#}
+{% set dw = did_well(report, ff_focus if ff_focus in ['A', 'B'] else 'A') if report_access.report_tier != 'compact' else none %}
+{% if dw %}
+<section class="card did-well" id="did-well" aria-labelledby="didWellTitle" data-reveal>
+  <div class="eyebrow">What you did well</div>
+  <h2 id="didWellTitle">{{ dw.title }}</h2>
+  {% if dw.detail %}<p class="fix-first-detail">{{ dw.detail }}</p>{% endif %}
+  {% if dw.moment_seconds is not none %}<a class="text-link" href="/replay/{{ job_id }}?t={{ '%.2f'|format([dw.moment_seconds - 1, 0]|max) }}">▶ Watch it at {{ dw.moment_clock }}</a>{% endif %}
+</section>
+{% endif %}
 {% endif %}
 {#- Compare to last video, one tap from the top (after mmagpt.app). Arrows
     only: pressure, centre and movement have no better direction
@@ -190,6 +201,12 @@
    tell the two fighters apart - so the number is about two names the report
    does not stand behind. Withholding the score and then printing who won it
    is the contradiction, not the score itself. #}
+{#- Answer first, details after (after mmagpt.app; a newcomer could not find
+    the point of a 25-section page, 2026-10-09). When "Fix this first" leads
+    the report, everything from here to the deep dive folds under one row.
+    Only then: without that card, the warnings and numbers below are the
+    report and stay open. -#}
+{% if ff %}<details class="report-all" id="reportAll"><summary><span><strong>See all the details</strong><small>Every number, the rounds, the score and the share card</small></span><b aria-hidden="true">+</b></summary>{% endif %}
 {% set movement = none if identity_failed else movement_comparison(report.movement_scorecard|default({}, true), (report.setup|default({})).ruleset, (report.scorecard|default({})).available, names) %}
 {% if movement %}
 <section class="card" id="report-movement-score">
@@ -808,6 +825,7 @@
   </div>
 </section>
 {% endif %}
+{% if ff %}</details>{% endif %}
 
 <details class="report-deep-dive"><summary><span><strong>Complete performance report and training plan</strong><small>Open the full movement, scoring, coaching, and integrity detail</small></span><b aria-hidden="true">＋</b></summary><div class="report-deep-dive-body">
 {#- Built from the same two gates that decide whether each section is emitted,
@@ -1126,6 +1144,11 @@
 {% endblock %}
 {% block scripts %}
 <script nonce="{{ request.state.csp_nonce }}">
+/* A link to a section folded inside a closed <details> ("Details" on the
+   since-last strip, the section chips) opens it first, so the jump lands. */
+(()=>{const openFor=id=>{let node=id&&document.getElementById(decodeURIComponent(id));if(!node)return;let fold=node.closest('details');while(fold){fold.open=true;fold=fold.parentElement&&fold.parentElement.closest('details')}};
+document.addEventListener('click',event=>{const link=event.target.closest('a[href^="#"]');if(link)openFor(link.getAttribute('href').slice(1))});
+window.addEventListener('hashchange',()=>openFor(location.hash.slice(1)));if(location.hash)openFor(location.hash.slice(1))})();
 /* Unavailable sharing controls stay real buttons, marked aria-disabled, and
    say why when pressed instead of doing nothing. */
 document.querySelectorAll('[data-reveal-reason]').forEach(button=>button.addEventListener('click',()=>{const reason=document.getElementById(button.getAttribute('aria-controls'));if(!reason)return;const open=reason.hidden;reason.hidden=!open;document.querySelectorAll('[data-reveal-reason]').forEach(b=>b.setAttribute('aria-expanded',String(open)));}));

@@ -135,7 +135,7 @@ from core.count_plausibility import counts_implausible
 from core.report import (
     build_preliminary_scorecard, identity_failure, identity_verdict, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
-    coaching_moments, fix_first, not_a_fight, not_a_fight_reason, refresh_identity_integrity, share_card,
+    coaching_moments, did_well, fix_first, not_a_fight, not_a_fight_reason, refresh_identity_integrity, share_card,
     unattributed_kick_total, withhold_for_sideways,
 )
 from core.retention import (
@@ -346,6 +346,7 @@ templates.env.globals["movement_comparison"] = movement_comparison
 templates.env.globals["coaching_gaps"] = coaching_gaps
 # The report's top card: the one fault, its moment and its drill (core/report.py).
 templates.env.globals["fix_first"] = fix_first
+templates.env.globals["did_well"] = did_well
 # Missing measurements, each reason once (core/metric_catalog.py).
 templates.env.globals["evidence_limitations"] = evidence_limitations
 # What is switched on, for every page that describes the product
