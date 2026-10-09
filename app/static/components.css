@@ -774,3 +774,9 @@
 .report-all[open]>summary b{transform:rotate(45deg)}
 .report-all[open]>summary{border-bottom:1px solid var(--line,#2d4268)}
 .report-all>:not(summary){margin-left:12px;margin-right:12px}
+/* Phones: the button on the first screen (analyze.html). The
+   lines hidden here repeat what the sport card just said. */
+.setup-notes{margin-top:18px}
+@media(max-width:700px){
+  .setup-decided,.setup-card .console-head .eyebrow,.setup-card .console-head h2{display:none}
+}
