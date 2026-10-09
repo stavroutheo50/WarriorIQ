@@ -750,3 +750,14 @@
 .since-last .list-clean{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0;padding:0}
 .since-last li{font-size:14px;color:#c7d2e3}
 .setup-solo{margin:12px 0 0;padding:10px 14px;border-left:3px solid rgba(255,255,255,.18);color:#c7d2e3;font-size:14px}
+
+/* Upload one question at a time (analyze.html). An author display rule on
+   .field would otherwise beat the hidden attribute. */
+[data-upload-step][hidden]{display:none!important}
+[data-upload-step]:not([hidden]){animation:wiq-step-in .28s ease-out}
+@keyframes wiq-step-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){[data-upload-step]:not([hidden]){animation:none}}
+.upload-more{margin:4px 0 14px;border:1px solid var(--line,#2d4268);border-radius:12px;padding:0 14px}
+.upload-more>summary{cursor:pointer;padding:12px 0;font-size:13px;font-weight:750;color:#c9d6ea}
+.upload-more[open]>summary{border-bottom:1px solid var(--line,#2d4268);margin-bottom:12px}
+.upload-more>.field,.upload-more>fieldset{margin-bottom:12px}
