@@ -156,6 +156,13 @@ LEGAL_DOCUMENTS = {
             ("What the AI does not do", "It does not provide an official WAKO result, biometric identification of a real-world identity, medical advice, or a decision with legal or similarly significant effects. It can confuse fighters, limbs, techniques, timing, contact or ruleset outcomes."),
             ("User control", "Users choose Fighter A and Fighter B once, then the performance report runs automatically. No scorecard labelling or correction work is required. Users can replay supported evidence, and unsupported measurements remain hidden or clearly unavailable. Preliminary estimates never become verified facts merely because tracking coverage is high."),
             ("Quality and complaints", "Tracking coverage is a system observation metric, not a guarantee of correctness. Report material errors through support and include the analysis identifier rather than sending the original filename in public channels."),
+            # Attribution these datasets' licences ask for (dataset/EXTERNAL_SOURCES.md).
+            # Only keypoints and labels are used, never their videos.
+            ("Training data", "WarriorIQ trains its strike-recognition model on pose keypoints and labels from public datasets, credited here: "
+             "BoxingVI by R. Kumar, V. Baghel, S. Singh, B. K. Badatya, S. Yadav, B. Srinivasan and R. Hegde (\"BoxingVI: A Multi-Modal Benchmark for Boxing Action Recognition and Localization\", arXiv:2511.16524), Creative Commons, used with the authors' permission; "
+             "TKD-Kick3 (Zenodo, doi:10.5281/zenodo.20390892), CC BY 4.0; "
+             "StrikeMetrics by sswhitehat (github.com/sswhitehat/StrikeMetrics---Kickboxing-AI-Tool), MIT licence. "
+             "Strike counts are checked against official UFC statistics (ufcstats.com) before they are shown."),
         ],
     },
     "security": {
