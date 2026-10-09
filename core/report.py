@@ -1699,3 +1699,27 @@ def fix_first(report: dict, fighter: str, *, training_items: int | None = None) 
             "goal": str((plan or {}).get("goal") or ""),
         }
     return card
+
+
+def did_well(report: dict, fighter: str) -> dict | None:
+    """What the fighter did well, beside "Fix this first": their first strength.
+
+    The same item the report's "Keep doing" row shows (core/coaching.py), with
+    the first moment it was seen, so the top of the report gives one thing
+    to keep as well as one to fix. Built only from what the analysis measured;
+    None when there is no strength to name, or the identity check failed.
+    """
+    if not (report.get("integrity") or {}).get("identity_evidence_trusted", True):
+        return None
+    coaching = (report.get("coaching") or {}).get(fighter) or {}
+    strengths = [item for item in coaching.get("strengths") or [] if isinstance(item, dict) and item.get("title")]
+    if not strengths:
+        return None
+    first = strengths[0]
+    times = sorted(float(t) for t in first.get("evidence_times") or [] if isinstance(t, (int, float)))
+    return {
+        "title": str(first["title"]),
+        "detail": str(first.get("detail") or ""),
+        "moment_seconds": times[0] if times else None,
+        "moment_clock": _clock(times[0]) if times else None,
+    }
