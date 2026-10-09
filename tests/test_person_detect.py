@@ -194,8 +194,8 @@ class AutoFrameRouteTests(unittest.TestCase):
         page = self.client.get(f"/select/{self.job_id}").text
         self.assertIn("WarriorIQ chose this moment (0:12) for you.", page)
         self.assertIn(f'href="/frame/{self.job_id}">Pick a different moment', page)
-        # Until boxes are drawn, the copy asks for drawn boxes, not taps.
-        self.assertIn('<p id="selectIntro">Drag a box around each fighter', page)
+        # Until people are found the copy promises no taps.
+        self.assertIn('<p id="selectIntro">Point out each fighter in the picture below.</p>', page)
         self.client.post(f"/api/selection-frame/{self.job_id}", json={"seconds": 0.5}, headers=self._csrf())
         self.assertNotIn('id="frameNote"', self.client.get(f"/select/{self.job_id}").text)
 

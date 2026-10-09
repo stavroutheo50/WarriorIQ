@@ -124,3 +124,13 @@
 /* Lock rules and the pick list sit under the canvas (select.html). */
 .stage-extras{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px 28px;margin-top:22px;align-items:start}
 .stage-extras .selection-without-drawing{grid-column:1/-1}
+
+/* One instruction above the picture (select.html, 2026-10-09). */
+.select-instruction{margin:0 0 12px;padding:14px 16px;border-radius:14px;font-size:clamp(18px,2.4vw,22px);font-weight:800;line-height:1.3;color:#f2f7ff}
+.select-instruction[data-state=ready]{color:#b7f5cf}
+.select-more{margin-top:14px;border:1px solid var(--line,#2d4268);border-radius:12px;padding:0 14px}
+.select-more>summary{cursor:pointer;padding:12px 0;font-size:13px;font-weight:750;color:#c9d6ea}
+.select-more[open]>summary{border-bottom:1px solid var(--line,#2d4268);margin-bottom:12px}
+.select-more>*+*{margin-top:12px}
+.select-more .focus-pick legend{font-weight:800}
+.select-more fieldset{border:0;padding:0;margin-left:0;margin-right:0}
