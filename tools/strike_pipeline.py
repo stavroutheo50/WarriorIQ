@@ -12,7 +12,8 @@ Stages, each skipped with a reason when its input is missing:
 
 1. **Fetch** the commercially usable public sets (tools/fetch_public_datasets.py):
    TKD-Kick3 (CC BY 4.0), StrikeMetrics (MIT), UFC official statistics.
-   BoxingVI only with ``--include-boxingvi``: it states no licence.
+   BoxingVI too (Creative Commons with attribution, the authors' email of
+   2026-10-09; it needs ``pip install gdown``); ``--no-boxingvi`` leaves it out.
 2. **Import** them into sequences (tools/import_tkd_kick3.py,
    tools/import_strikemetrics.py, tools/import_boxingvi.py).
 3. **Negatives from your own footage** (tools/mine_own_negatives.py) when the
@@ -105,7 +106,8 @@ def finished_jobs() -> list[Path]:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--include-boxingvi", action="store_true", help="BoxingVI states no licence")
+    parser.add_argument("--no-boxingvi", action="store_true",
+                        help="leave BoxingVI out (included by default: CC with attribution, authors' email)")
     parser.add_argument("--rounds", type=int, default=2, help="train / auto-label rounds")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--skip-fetch", action="store_true")
@@ -113,7 +115,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if not args.skip_fetch:
-        only = ["tkd_kick3", "strikemetrics", "ufc_stats"] + (["boxingvi"] if args.include_boxingvi else [])
+        only = ["tkd_kick3", "strikemetrics", "ufc_stats"] + ([] if args.no_boxingvi else ["boxingvi"])
         step("Fetch public datasets", ["tools/fetch_public_datasets.py", "--only", *only])
 
     sources = []
@@ -126,7 +128,7 @@ def main(argv=None) -> int:
                                      "--out", "dataset/sequences_strikemetrics"]):
         sources.append(DATASET / "sequences_strikemetrics")
     exam_fights = dict(EXAM_FIGHTS)
-    if args.include_boxingvi and (DATASET / "public" / "boxingvi").exists() and step(
+    if not args.no_boxingvi and (DATASET / "public" / "boxingvi").exists() and step(
             "Import BoxingVI", ["tools/import_boxingvi.py", "--source", "dataset/public/boxingvi",
                                 "--out", "dataset/sequences_boxingvi", "--sided"]):
         sources.append(DATASET / "sequences_boxingvi")

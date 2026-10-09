@@ -10,7 +10,7 @@ Searched 2026-10-04. What exists, and what it is good for:
 
     source            sport           what is labelled                         licence
     tkd_kick3         taekwondo       765 kicks: front, roundhouse, axe        CC BY 4.0
-    boxingvi          boxing          6,915 punches, 6 types, keypoints        none stated
+    boxingvi          boxing          6,915 punches, 6 types, keypoints        CC, attribution (email)
     strikemetrics     kickboxing/MT   ~400 strikes in 5 pro fights; F1/F2/Ref  MIT (annotations)
                                       boxes. Sparse: not every strike marked
     fight_judge       MMA             5,106 UFC frames, fighter boxes + pose   CC BY-NC-SA 4.0
@@ -66,8 +66,13 @@ SOURCES = (
     Source("tkd_kick3", "taekwondo", "front, roundhouse and axe kicks as keypoint sequences",
            "CC BY 4.0", "yes", "https://zenodo.org/records/20390892",
            "zenodo", "https://zenodo.org/records/20390892/files/TKD-Kick3.zip?download=1"),
+    # Licence: the repository states none. Asked by email; Prof. R. Hegde
+    # (corresponding author) replied on 2026-10-09: "Please use it with
+    # attribution. It is creative commons." - in answer to a question about
+    # commercial use. Credited on /ai-transparency.
     Source("boxingvi", "boxing", "punch type and start/end frame, AlphaPose keypoints",
-           "none stated", "unclear", "https://github.com/Bikudebug/BoxingVI",
+           "Creative Commons, attribution (authors' email, 2026-10-09)", "yes",
+           "https://github.com/Bikudebug/BoxingVI",
            "gdrive", "https://drive.google.com/drive/folders/1Vyl8twJQ1qkqEPwhvfsrJsJ8nLQ92uoy"),
     Source("strikemetrics", "kickboxing, muay thai", "strike type at one frame; Fighter 1, Fighter 2 and "
            "referee boxes; MoveNet keypoints for every frame. Not every strike is marked",
