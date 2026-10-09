@@ -2125,7 +2125,7 @@ class PublicPageTests(unittest.TestCase):
         with self.signed_in():
             menu = self.client.get("/").text.split('<div class="mobile-menu"', 1)[1].split('</div>', 1)[0]
         # Progress and Coach are one page now, Fight Camp.
-        for label in (">Analyse<", ">Fight library<", ">Fight Camp<", ">Plans<"):
+        for label in (">Analyse a video<", ">Fight library<", ">Fight Camp<", ">Plans<"):
             self.assertIn(label, menu)
         self.assertNotIn("Accuracy", menu, "still never the accuracy lab")
 

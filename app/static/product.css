@@ -396,3 +396,6 @@ body[data-page=home] main > .hero{padding-bottom:clamp(32px,5vh,56px)}
   .record-delete{min-height:44px}
   .archive-sort select,.fight-record-actions .btn{min-height:44px}
 }
+/* Phone menu: three main links, then the rest smaller under "More" (base.html). */
+.mobile-menu-label{display:block;margin:8px 13px 0;padding-top:10px;border-top:1px solid var(--line,#2d4268);color:#7f90aa;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.8px}
+.mobile-menu a.mobile-menu-minor{padding:9px 13px;min-height:38px;color:#aebdd3;font-size:14px}

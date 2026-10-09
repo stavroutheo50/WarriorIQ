@@ -19,7 +19,7 @@
        anonymous request, because footage carries identifiable athletes and the
        allowance is counted per account. The button says so rather than sending
        someone to a sign-in wall they were not told about. -#}
-    <div class="hero-actions">{% if request.state.account %}<a class="btn btn-lead" data-motion-primary href="/analyze">Choose your sport <span aria-hidden="true">&#8594;</span></a>{% else %}<a class="btn btn-lead" data-motion-primary href="/signup?next=/analyze">Create a free account <span aria-hidden="true">&#8594;</span></a>{% endif %}<a class="btn secondary" href="#how-it-works">How it works</a></div>
+    <div class="hero-actions">{% if request.state.account %}<a class="btn btn-lead" data-motion-primary href="/analyze">Analyse my video <span aria-hidden="true">&#8594;</span></a>{% else %}<a class="btn btn-lead" data-motion-primary href="/signup?next=/analyze">Create a free account <span aria-hidden="true">&#8594;</span></a>{% endif %}<a class="btn secondary" href="#how-it-works">How it works</a></div>
     <div class="fight-path" aria-label="WarriorIQ workflow"><span><b>01</b> Upload</span><i aria-hidden="true"></i><span><b>02</b> Review</span><i aria-hidden="true"></i><span><b>03</b> Train</span></div>
     <div class="trust-row"><span class="status-dot"></span><span class="small muted">Private processing</span><span class="pill">Evidence linked</span></div>
     <div class="sport-rail" aria-label="Sports analysed">{% for sport, name in sports.items() %}<b>{{name}}</b>{% endfor %}</div>
@@ -40,7 +40,7 @@
 
 <section class="product-section workflow-section" id="how-it-works"><div class="section-intro" data-reveal><div class="eyebrow">How WarriorIQ works</div><h2>Four steps. No technical homework.</h2><p>Accounts are open to every age; under {{request.state.minimum_account_age}}, a parent or guardian approves the account by email before any fight is uploaded. Junior athletes can appear in footage only when the uploader has all required rights and appropriate parent or guardian permission.</p></div><div class="workflow-track" data-motion-sequence="steps">
   <article><span>01</span><div><h3>Upload fight</h3><p>A quick quality check catches hard-to-see footage before the analysis starts.</p></div></article>
-  <article><span>02</span><div><h3>Select fighters</h3><p>Choose one clear frame and draw a tight box around each athlete.</p></div></article>
+  <article><span>02</span><div><h3>Tap the fighters</h3><p>Tap each fighter once in one picture. WarriorIQ follows them through the whole video.</p></div></article>
   <article><span>03</span><div><h3>Analyse</h3><p>Follow real progress, fighter locks, measured movement, and supported attempts.</p></div></article>
   <article><span>04</span><div><h3>Improve</h3><p>Take the replay, coach report, and fighter-specific plan into training.</p></div></article>
 </div></section>
