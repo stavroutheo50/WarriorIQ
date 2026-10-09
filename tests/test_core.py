@@ -2711,7 +2711,16 @@ class RtmPoseRefinementTests(unittest.TestCase):
         import worker
         from core import rtm_pose
 
-        with mock.patch.object(rtm_pose, "warmup", return_value=True) as warm:
+        # The thread also warms the pose detector and preloads SAM2 (item 26,
+        # 2026-10-08). Stubbed here: unstubbed, it loaded the real model, and
+        # under a busy suite that outran the 2 s join and failed at random.
+        class _Tracker:
+            def warmup(self, frame):
+                return None
+
+        with mock.patch.object(rtm_pose, "warmup", return_value=True) as warm, \
+                mock.patch("core.analyzer.get_pose_tracker", return_value=_Tracker()), \
+                mock.patch("core.sam_recovery.preload", return_value=False):
             thread = worker._start_idle_pose_warmup()
             thread.join(timeout=2)
         self.assertFalse(thread.is_alive())
