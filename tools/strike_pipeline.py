@@ -52,6 +52,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 DATASET = ROOT / "dataset"
 EXAM = DATASET / "exam"
 TRAIN = DATASET / "sequences_pipeline"
@@ -79,23 +81,65 @@ def fight_of(path: Path) -> str:
         return str(np.asarray(data["fight_id"]).item()) if "fight_id" in data else path.stem.split("__", 1)[0]
 
 
+def fingerprint(path: Path) -> str:
+    """The trainer's duplicate test (core.model_validation): the same frames, whatever the label."""
+    import hashlib
+
+    import numpy as np
+
+    with np.load(path, allow_pickle=False) as data:
+        return hashlib.sha256(np.asarray(data["x"], dtype=np.float32).tobytes(order="C")).hexdigest()
+
+
 def gather(sources: list[Path], exam_fights: dict[str, str]) -> dict:
-    """Copy sequences into TRAIN, and the held-out fights into EXAM/<name>."""
+    """Copy sequences into TRAIN, and the held-out fights into EXAM/<name>.
+
+    A window that repeats one already gathered is left out: the trainer refuses
+    a directory with duplicates, and a repeat of an exam window in training
+    would leak the answer. Repeats are expected - the auto-labeller and the
+    negative miner cut windows from the same tracking - so exam windows are
+    taken first and the earlier source wins.
+    """
     for directory in [TRAIN, *(EXAM / name for name in set(exam_fights.values()))]:
         if directory.exists():
             shutil.rmtree(directory)
         directory.mkdir(parents=True)
-    counts = {"train": 0, "exam": 0}
-    for source in sources:
-        for path in sorted(source.glob("*.npz")):
-            fight = fight_of(path)
-            if fight in exam_fights:
+    counts = {"train": 0, "exam": 0, "duplicates": 0}
+    files = [(source, path, fight_of(path)) for source in sources for path in sorted(source.glob("*.npz"))]
+    seen: set[str] = set()
+    for held_out in (True, False):
+        for source, path, fight in files:
+            if (fight in exam_fights) != held_out:
+                continue
+            digest = fingerprint(path)
+            if digest in seen:
+                counts["duplicates"] += 1
+                continue
+            seen.add(digest)
+            if held_out:
                 shutil.copy2(path, EXAM / exam_fights[fight] / f"{source.name}__{path.name}")
                 counts["exam"] += 1
             else:
                 shutil.copy2(path, TRAIN / f"{source.name}__{path.name}")
                 counts["train"] += 1
     return counts
+
+
+def refusal_reason(directory: Path) -> str:
+    """What the trainer's readiness audit found, in the terms of its rule."""
+    from core.model_validation import audit_sequence_directory
+
+    audit = audit_sequence_directory(directory)
+    found = (f"The training set has {audit['positive_sequences']} strikes, {audit['negative_sequences']} \"none\" "
+             f"windows, {audit['fights']} fights, {audit['invalid_sequences']} unreadable and "
+             f"{audit['duplicate_sequences']} repeated windows (it needs 20, 20, 2, 0 and 0).")
+    if audit["negative_sequences"] < 20:
+        found += (" The public sets hold only strikes, so the \"none\" windows come from your own footage "
+                  "(the library fights in tools/verified_seeds.json must be on this machine) or, from round 2, "
+                  "auto-labels.")
+    if audit["invalid_sequences"]:
+        found += f" First unreadable: {audit['issues'][0]['file']}: {audit['issues'][0]['reason']}"
+    return found
 
 
 def finished_jobs() -> list[Path]:
@@ -147,13 +191,12 @@ def main(argv=None) -> int:
         if round_number > 1 and auto.exists() and any(auto.glob("*.npz")):
             training_sources.append(auto)
         counts = gather(training_sources, exam_fights)
-        print(f"\nRound {round_number}: {counts['train']} training windows, {counts['exam']} held out for the exam")
+        print(f"\nRound {round_number}: {counts['train']} training windows, {counts['exam']} held out for the exam"
+              f" ({counts['duplicates']} repeated windows left out)")
         if not step(f"Train (round {round_number})", ["tools/train_temporal_model.py", "--data", str(TRAIN),
                                                       "--epochs", str(args.epochs), "--out", str(CANDIDATE),
                                                       "--dataset-version", f"pipeline-round-{round_number}"]):
-            print("\nTraining refused or failed. The usual cause is too few \"none\" windows: the public sets "
-                  "hold only strikes, so the negatives come from your own footage (the library fights in "
-                  "tools/verified_seeds.json must be on this machine) or, from round 2, auto-labels.")
+            print("\nTraining refused or failed. " + refusal_reason(TRAIN))
             return 1
         if round_number < args.rounds:
             if not jobs:
