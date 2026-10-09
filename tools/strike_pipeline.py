@@ -21,7 +21,8 @@ Stages, each skipped with a reason when its input is missing:
    them a model learns the datasets, not fights: one trained on BoxingVI alone
    fired on 99.8% of real windows.
 4. **Hold out the exam.** TKD-Kick3's test split (and, with BoxingVI, three of
-   its videos) is copied to dataset/exam/ and never trained on.
+   its punch videos plus V6, its people-labelled quiet footage) is copied to
+   dataset/exam/ and never trained on.
 5. **Train** (tools/train_temporal_model.py) on everything else.
 6. **Auto-label** your finished analyses (tools/auto_label.py) with that model,
    where the rules and the model name the same strike, then **train again**
@@ -61,9 +62,13 @@ CANDIDATE = ROOT / "models" / "warrioriq_temporal_candidate.pt"
 UFC_MANIFEST = EXAM / "ufc_bouts.json"
 UFC_CSV = DATASET / "public" / "ufc_stats" / "ufc_fight_stats.csv"
 
-# Held out for the exam: never copied into the training directory.
+# Held out for the exam: never copied into the training directory. BoxingVI's
+# V6 is the one people-labelled source of quiet windows (the footage between
+# its labelled punches); the exam needs them to measure precision at all
+# (core/strike_exam.py), so it is examined on rather than trained on. Training
+# keeps the quiet windows from your own footage and the auto-labels.
 EXAM_FIGHTS = {"tkd_test": "tkd_kick3_test"}
-BOXINGVI_EXAM = ("boxingvi_V8", "boxingvi_V9", "boxingvi_V10")
+BOXINGVI_EXAM = ("boxingvi_V6", "boxingvi_V8", "boxingvi_V9", "boxingvi_V10")
 
 
 def step(title: str, command: list[str]) -> bool:

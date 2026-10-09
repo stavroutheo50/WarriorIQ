@@ -17,9 +17,9 @@ MODEL = "a" * 64
 
 
 def _passing_windows():
-    return {"punch": WindowCheck("punch", 120, 100, 90, ("tkd_kick3",)),
-            "kick": WindowCheck("kick", 80, 60, 40, ("tkd_kick3",)),          # 67%: fails
-            "knee": WindowCheck("knee", 10, 10, 10, ())}                       # too few: fails
+    return {"punch": WindowCheck("punch", 120, 100, 90, ("tkd_kick3",), 200),
+            "kick": WindowCheck("kick", 80, 60, 40, ("tkd_kick3",), 200),     # 67%: fails
+            "knee": WindowCheck("knee", 10, 10, 10, (), 200)}                  # too few: fails
 
 
 def _passing_counts(sport="mma"):
@@ -50,8 +50,23 @@ class MeasurementTests(unittest.TestCase):
         self.assertAlmostEqual(punch.recall, 0.8)
 
     def test_too_few_strikes_never_passes(self):
-        self.assertFalse(WindowCheck("knee", BAR["min_true_strikes"] - 1, 10, 10, ()).passed())
-        self.assertTrue(WindowCheck("knee", BAR["min_true_strikes"], 10, 10, ()).passed())
+        self.assertFalse(WindowCheck("knee", BAR["min_true_strikes"] - 1, 10, 10, (), 100).passed())
+        self.assertTrue(WindowCheck("knee", BAR["min_true_strikes"], 10, 10, (), 100).passed())
+
+    def test_clips_without_quiet_windows_prove_nothing(self):
+        # 2026-10-09: 499/499 on held-out clips that were all punches.
+        everything_is_a_punch = window_checks([("jab", "cross")] * 499)
+        self.assertEqual(everything_is_a_punch["punch"].precision, 1.0)
+        self.assertFalse(everything_is_a_punch["punch"].passed())
+        with_quiet = window_checks([("jab", "cross")] * 60 + [("none", "jab")] * 60)
+        self.assertEqual(with_quiet["punch"].none_windows, 60)
+        self.assertAlmostEqual(with_quiet["punch"].precision, 0.5)
+        self.assertFalse(with_quiet["punch"].passed())
+        honest = window_checks([("jab", "cross")] * 60 + [("none", "none")] * 60)
+        self.assertTrue(honest["punch"].passed())
+
+    def test_rule_picked_quiet_windows_are_not_answers(self):
+        self.assertIsNotNone(strike_exam.not_an_answer_key("own_b883"))
 
     def test_count_check_needs_rounds_bouts_and_error(self):
         good = _passing_counts()["mma"]
