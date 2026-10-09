@@ -850,3 +850,7 @@ p { max-width: 68ch; }
   .sport-card, .sport-card-mark, .sport-card-go, .sport-option span { transition: none; }
   .sport-card:hover { transform: none; }
 }
+
+/* Phones: sport cards show the sport and what its report counts; the rules
+   line and description wait for a wider screen (sports.html, 2026-10-09). */
+@media(max-width:700px){.sport-card-decided,.sport-card-rules{display:none}}
