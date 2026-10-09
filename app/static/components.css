@@ -780,3 +780,18 @@
 @media(max-width:700px){
   .setup-decided,.setup-card .console-head .eyebrow,.setup-card .console-head h2{display:none}
 }
+
+/* Report on phones (result.html, 2026-10-09): the fight's details in one
+   line, the score note short, and each number's explanation on tap. */
+@media(max-width:700px){
+  .result-context{display:flex!important;flex-wrap:wrap;gap:2px 10px}
+  .result-context>div{display:inline}
+  .result-context>div span,.result-context-focus{display:none!important}
+  .result-context>div strong{font-size:14px;font-weight:700}
+  .result-context>div+div strong:before{content:"· ";color:#7f90aa}
+  .result-scoreline strong{font-size:18px!important}
+  .result-scoreline:has(.score-muted) small{display:none}
+  .fight-vitals article small{display:none}
+  .fight-vitals article.show-note small{display:block}
+  .fight-vitals article{cursor:pointer}
+}
