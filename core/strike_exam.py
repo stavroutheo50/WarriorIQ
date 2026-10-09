@@ -12,8 +12,13 @@ report:
 * **Clip check, per family.** Held-out clips that people labelled completely
   (public datasets such as TKD-Kick3): of the windows the model calls this
   family, at least ``min_precision`` really are, over at least
-  ``min_true_strikes`` real ones. A sparse dataset - one that marks only
-  some strikes - cannot measure precision and is not accepted here.
+  ``min_true_strikes`` real ones, **and** the same clips hold at least
+  ``min_none_per_strike`` people-labelled quiet windows ("none") per real
+  strike. Without quiet windows precision measures nothing: on clips that are
+  all punches, a model that calls everything a punch scores 100%. At one quiet
+  window per strike that model scores at most 50%. A sparse dataset - one
+  that marks only some strikes - cannot measure precision and is not accepted
+  here.
 * **Count check, per sport.** Whole fights against totals people counted -
   official per-round statistics today (core/official_stats.py): WarriorIQ's
   count is within ``max_round_error`` of the official total in a typical
@@ -48,6 +53,9 @@ SCHEMA = "warrioriq.strike_exam.v1"
 BAR = {
     "min_precision": 0.80,
     "min_true_strikes": 50,
+    # Added 2026-10-09 after a run scored 499/499 on clips holding no quiet
+    # windows at all: stricter, never looser, than the bar agreed above.
+    "min_none_per_strike": 1.0,
     "max_round_error": 0.20,
     "min_rounds": 10,
     "min_bouts": 3,
@@ -61,6 +69,7 @@ AUTO_PREFIX = "auto_"
 NOT_ANSWER_KEYS = {
     AUTO_PREFIX: "an auto-label; WarriorIQ's own labels are never answers",
     "strikemetrics_": "StrikeMetrics marks only some strikes, so precision cannot be measured on it",
+    "own_": "a quiet window picked by the rules (tools/mine_own_negatives.py), not labelled by a person",
 }
 
 
@@ -88,6 +97,7 @@ class WindowCheck:
     predicted: int
     correct: int
     sources: tuple[str, ...]
+    none_windows: int = 0      # people-labelled quiet windows in the same clips
 
     @property
     def precision(self) -> float | None:
@@ -99,11 +109,12 @@ class WindowCheck:
 
     def passed(self, bar: dict = BAR) -> bool:
         return (self.true_strikes >= bar["min_true_strikes"] and self.precision is not None
-                and self.precision >= bar["min_precision"])
+                and self.precision >= bar["min_precision"]
+                and self.none_windows >= self.true_strikes * bar.get("min_none_per_strike", 1.0))
 
     def as_dict(self, bar: dict = BAR) -> dict:
         return {"family": self.family, "true_strikes": self.true_strikes, "predicted": self.predicted,
-                "correct": self.correct, "precision": _round(self.precision), "recall": _round(self.recall),
+                "correct": self.correct, "none_windows": self.none_windows, "precision": _round(self.precision), "recall": _round(self.recall),
                 "sources": list(self.sources), "passed": self.passed(bar)}
 
 
@@ -117,8 +128,10 @@ def window_checks(pairs, sources_by_family: dict[str, set] | None = None) -> dic
     true_n = {family: 0 for family in FAMILIES}
     predicted = {family: 0 for family in FAMILIES}
     correct = {family: 0 for family in FAMILIES}
+    quiet = 0
     for truth, guess in pairs:
         t, g = family_of(truth), family_of(guess)
+        quiet += truth == "none"
         if t in true_n:
             true_n[t] += 1
         if g in predicted:
@@ -127,7 +140,7 @@ def window_checks(pairs, sources_by_family: dict[str, set] | None = None) -> dic
                 correct[g] += 1
     sources_by_family = sources_by_family or {}
     return {family: WindowCheck(family, true_n[family], predicted[family], correct[family],
-                                tuple(sorted(sources_by_family.get(family, ()))))
+                                tuple(sorted(sources_by_family.get(family, ()))), quiet)
             for family in FAMILIES}
 
 
