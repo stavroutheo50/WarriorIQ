@@ -78,6 +78,15 @@ BOXINGVI_EXAM = ("boxingvi_V8", "boxingvi_V9", "boxingvi_V10")
 SPLIT_FIGHTS = {"boxingvi_V6": ("boxingvi_test", 0.30, 0.40)}
 
 
+# How the pipeline trains (2026-10-09): on our own fights the model fired on
+# only 3-24% of the actions the rules found, so training varies each window
+# (core/temporal_augment.py) and also scores the strike family, which is what
+# a count needs; the auto-labeller then keeps windows where the rules and the
+# model agree on the family. Run the trainer by hand without these to get the
+# earlier behaviour.
+TRAIN_OPTIONS = ("--augment", "--family-weight", "1.0")
+
+
 def step(title: str, command: list[str]) -> bool:
     print(f"\n=== {title}\n$ {' '.join(command)}", flush=True)
     result = subprocess.run([sys.executable, *command], cwd=ROOT)
@@ -252,7 +261,8 @@ def main(argv=None) -> int:
               f" ({counts['duplicates']} repeated windows left out)")
         if not step(f"Train (round {round_number})", ["tools/train_temporal_model.py", "--data", str(TRAIN),
                                                       "--epochs", str(args.epochs), "--out", str(CANDIDATE),
-                                                      "--dataset-version", f"pipeline-round-{round_number}"]):
+                                                      "--dataset-version", f"pipeline-round-{round_number}",
+                                                      *TRAIN_OPTIONS]):
             print("\nTraining refused or failed. " + refusal_reason(TRAIN))
             return 1
         if round_number < args.rounds:
@@ -262,7 +272,8 @@ def main(argv=None) -> int:
             if auto.exists():
                 shutil.rmtree(auto)
             step("Auto-label your analyses", ["tools/auto_label.py", "--checkpoint", str(CANDIDATE),
-                                              "--jobs", *map(str, jobs), "--out", str(auto)])
+                                              "--jobs", *map(str, jobs), "--out", str(auto),
+                                              "--agree-on", "family"])
 
     exam_dirs = set(exam_fights.values()) | {target for target, _, _ in split_fights.values()}
     windows = [str(EXAM / name) for name in sorted(exam_dirs)

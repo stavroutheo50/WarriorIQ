@@ -87,6 +87,19 @@ class AutoLabelTests(unittest.TestCase):
         tally = auto_label.label_job(job, _Says("left_hook", 0.6), out2, _args(), np.random.default_rng(0))
         self.assertEqual(tally["dropped: model not sure enough"], 1)
 
+    def test_family_agreement_labels_with_the_model_technique(self):
+        # 2026-10-09: rules and model never named the same technique on our fights.
+        job = _job(self.root)
+        args = _args()
+        args.agree_on = "family"
+        tally = auto_label.label_job(job, _Says("cross", 0.97), self.out, args, np.random.default_rng(0))
+        self.assertEqual(tally["cross"], 1)
+        self.assertIn(("cross", "auto_job1"), self._labels())
+        out2 = self.root / "out2"
+        out2.mkdir()
+        tally = auto_label.label_job(job, _Says("left_round_kick", 0.97), out2, args, np.random.default_rng(0))
+        self.assertEqual(tally["dropped: rules and model disagree"], 1)
+
     def test_quiet_moments_need_a_sure_none(self):
         job = _job(self.root)
         tally = auto_label.label_job(job, _Says("none", 0.99), self.out, _args(), np.random.default_rng(0))
