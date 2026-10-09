@@ -748,7 +748,7 @@ class DurableAnalysisStateTests(TestCase):
             self.assertNotIn("original_name", payload)
             self.assertNotIn("owner_key", payload)
             self.assertEqual(other_client.get(f"/api/status/{job_id}").status_code, 404)
-            self.assertIn("Watch WarriorIQ read the fight", client.get(f"/progress/{job_id}").text)
+            self.assertIn("Analysing your fight.", client.get(f"/progress/{job_id}").text)
         finally:
             state.delete_job(job_id)
             client.close()
