@@ -39,7 +39,7 @@ class PipelineTests(unittest.TestCase):
         _seq(source, "tkd_train", 5)
         _seq(source, "tkd_test", 3)
         counts = pipeline.gather([source], {"tkd_test": "tkd_kick3_test"})
-        self.assertEqual(counts, {"train": 5, "exam": 3, "duplicates": 0})
+        self.assertEqual(counts, {"train": 5, "exam": 3, "duplicates": 0, "gap": 0})
         trained = {pipeline.fight_of(p) for p in (self.root / "train").glob("*.npz")}
         self.assertEqual(trained, {"tkd_train"})
         self.assertEqual(len(list((self.root / "exam" / "tkd_kick3_test").glob("*.npz"))), 3)
@@ -60,9 +60,24 @@ class PipelineTests(unittest.TestCase):
         _seq(auto, "auto_leak", 1, value=9.0)
         _seq(self.root / "exam_src", "tkd_test", 1, value=9.0)
         counts = pipeline.gather([own, auto, self.root / "exam_src"], {"tkd_test": "tkd_kick3_test"})
-        self.assertEqual(counts, {"train": 1, "exam": 1, "duplicates": 3})
+        self.assertEqual(counts, {"train": 1, "exam": 1, "duplicates": 3, "gap": 0})
         trained = {pipeline.fight_of(p) for p in (self.root / "train").glob("*.npz")}
         self.assertEqual(trained, {"own_b883"})
+
+    def test_quiet_footage_is_split_in_time_between_training_and_exam(self):
+        # 2026-10-09: V6 held out whole, the model called all 952 of its quiet
+        # windows punches. Early part trains, late part is examined, gap between.
+        source = self.root / "sequences_boxingvi"
+        _seq(source, "boxingvi_V6", 10, y=0)
+        counts = pipeline.gather([source], {}, {"boxingvi_V6": ("boxingvi_test", 0.3, 0.4)})
+        self.assertEqual(counts, {"train": 3, "exam": 6, "duplicates": 0, "gap": 1})
+        trained = sorted(p.name for p in (self.root / "train").glob("*.npz"))
+        examined = sorted(p.name for p in (self.root / "exam" / "boxingvi_test").glob("*.npz"))
+        self.assertEqual([n.rsplit("__", 1)[1] for n in trained], ["0.npz", "1.npz", "2.npz"])
+        self.assertEqual([n.rsplit("__", 1)[1] for n in examined], [f"{i}.npz" for i in range(4, 10)])
+        self.assertEqual({pipeline.fight_of(p) for p in (self.root / "train").glob("*.npz")}, {"boxingvi_V6a"})
+        self.assertEqual({pipeline.fight_of(p) for p in (self.root / "exam" / "boxingvi_test").glob("*.npz")},
+                         {"boxingvi_V6b"})
 
     def test_refusal_names_the_gap(self):
         _seq(self.root / "train", "a", 25)
