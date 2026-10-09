@@ -714,7 +714,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
     def test_primary_actions_are_real_and_explain_their_state(self):
         self._sign_in("actions@example.com")
         home = self.client.get("/").text
-        self.assertIn('href="/analyze">Choose your sport', home)
+        self.assertIn('href="/analyze">Analyse my video', home)
         self.assertIn('class="nav-more"', home)
         self.assertIn('href="/history">Fight library', home)
 
