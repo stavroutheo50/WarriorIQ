@@ -11,7 +11,13 @@ WarriorIQ has two ways of reading a strike that do not share a decision:
   human-labelled datasets, which names a class from the 12-frame window.
 
 A window becomes a label only when both name **the same class** and the model
-is at least ``--min-probability`` (0.90) sure. A "none" window is one where the
+is at least ``--min-probability`` (0.90) sure. With ``--agree-on family`` it is
+enough that both name the same strike **family** (punch, kick, knee) and the
+model gives that family at least the same probability; the window is then
+labelled with the model's technique. The rules and the model never named the
+same technique on WarriorIQ's own fights (0 of 537, 2026-10-09), so exact
+agreement added no strikes from this footage at all, while counting only needs
+the family. A "none" window is one where the
 rules found nothing within ``--quiet-seconds`` (1.0 s) for that fighter and the
 model says "none" at ``--min-none-probability`` (0.95). Anything else -
 disagreement, a less certain model, a fighter not held for the whole window -
@@ -52,7 +58,7 @@ if str(TOOLS) not in sys.path:
 import numpy as np  # noqa: E402
 
 from core.action import _feature_vector  # noqa: E402
-from core.strike_exam import AUTO_PREFIX  # noqa: E402
+from core.strike_exam import AUTO_PREFIX, family_of  # noqa: E402
 from core.temporal_model import ACTION_CLASSES  # noqa: E402
 
 
@@ -101,11 +107,17 @@ def label_job(job: Path, model, out: Path, args, rng: np.random.Generator) -> co
                 continue
             strike_windows.append(x)
             strike_classes.append(ACTION_CLASSES.index(event["technique"]))
+        by_family = getattr(args, "agree_on", "technique") == "family"
         for x, rule_class, p in zip(strike_windows, strike_classes, probabilities(model, strike_windows)):
             guess = int(p.argmax())
-            if guess != rule_class:
+            family = family_of(ACTION_CLASSES[rule_class])
+            if by_family and family_of(ACTION_CLASSES[guess]) == family:
+                sure = sum(float(p[i]) for i, name in enumerate(ACTION_CLASSES) if family_of(name) == family)
+            else:
+                sure = float(p[guess]) if guess == rule_class else None
+            if sure is None:
                 tally["dropped: rules and model disagree"] += 1
-            elif float(p[guess]) < args.min_probability:
+            elif sure < args.min_probability:
                 tally["dropped: model not sure enough"] += 1
             else:
                 np.savez_compressed(out / f"{group}__{written:05d}.npz", x=x, y=np.int64(guess), fight_id=group)
@@ -158,6 +170,8 @@ def main(argv=None) -> int:
     parser.add_argument("--max-none", type=int, default=40, help="quiet windows kept per fighter per job")
     parser.add_argument("--window", type=int, default=int(SETTINGS.action_window))
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--agree-on", choices=["technique", "family"], default="technique",
+                        help="what the rules and the model must agree on for a strike label")
     args = parser.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=True)
     model = load_model(args.checkpoint)
