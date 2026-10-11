@@ -161,7 +161,59 @@ def movement_numbers(samples: list[dict], middle: np.ndarray | None, radius: flo
                               if any(b is not None for b in balances) else None),
         "pace_change_percent": pace_change,
         "rounds": {str(number): row for number, row in sorted(rounds.items())},
+        # The same readings over time, for the report's graphs.
+        "series": over_time(samples, weights, guard_measured=guard is not None),
     }
+
+
+# A graph point stands for this many seconds at least; longer fights get
+# wider points so a graph never has more than SERIES_POINTS of them.
+SERIES_MIN_STEP = 5.0
+SERIES_POINTS = 30
+# A point needs this many readings to say anything; with fewer it is a gap.
+SERIES_MIN_READINGS = 3
+
+
+def over_time(samples: list[dict], weights: list[float], guard_measured: bool = True) -> dict | None:
+    """How fast the fighter moved, and how often their hands were up, through the fight.
+
+    The fight is cut into equal steps (5 s, or wider for a long fight). Each
+    point is the average speed in body lengths a second over the readings in
+    its step, and the share of guard readings with the hands up by the face
+    (core.guard.is_up), each None when the step had fewer than
+    SERIES_MIN_READINGS readings - a gap, not a zero. ``seen`` is the seconds
+    the fighter was seen in the step. Hands-up is left out altogether when
+    core/guard.py withheld the guard for the fight (``guard_measured``).
+    """
+    if len(samples) < 2:
+        return None
+    first, last = float(samples[0]["t"]), float(samples[-1]["t"])
+    span = last - first
+    if span < 2 * SERIES_MIN_STEP:
+        return None
+    step = max(SERIES_MIN_STEP, SERIES_MIN_STEP * float(np.ceil(span / (SERIES_MIN_STEP * SERIES_POINTS))))
+    start = float(np.floor(first / step) * step)
+    count = int(np.floor((last - start) / step)) + 1
+    buckets = [{"seen": 0.0, "speed": [], "up": []} for _ in range(count)]
+    for item, weight in zip(samples, weights):
+        bucket = buckets[min(count - 1, int((float(item["t"]) - start) // step))]
+        bucket["seen"] += weight
+        if item.get("speed") is not None:
+            bucket["speed"].append(float(item["speed"]))
+        up = guard_measure.is_up(item.get("guard")) if guard_measured else None
+        if up is not None:
+            bucket["up"].append(up)
+    points = []
+    for index, bucket in enumerate(buckets):
+        speeds, ups = bucket["speed"], bucket["up"]
+        points.append({
+            "t": round(start + index * step, 1),
+            "seen": round(bucket["seen"], 1),
+            "speed": round(float(np.mean(speeds)), 2) if len(speeds) >= SERIES_MIN_READINGS else None,
+            "hands_up": (round(sum(ups) / len(ups), 2) if guard_measured and len(ups) >= SERIES_MIN_READINGS
+                         else None),
+        })
+    return {"step_seconds": step, "points": points}
 
 
 def output_numbers(strike_times: list[float], opponent_times: list[float],

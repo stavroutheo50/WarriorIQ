@@ -228,6 +228,59 @@
   {% if seen and seen.measured_frames %}
   <p class="vitals-basis small muted">Measured across {{'{:,}'.format(seen.measured_frames)}} of {{'{:,}'.format(seen.analyzed_frames)}} analysed frames{% if not seen.confident %} &mdash; just over {{'%.0f'|format(seen.share * 100)}}% of the fight, so read these as the part of the round WarriorIQ could see rather than the whole of it{% endif %}.</p>
   {% endif %}
+{#- Your fight in graphs (core/movement_graphs.py, 2026-10-11): the same
+    measurements as "Every number" further down, as shapes a fighter reads
+    at a glance. Only on a report whose identity check held. -#}
+{% if graphs and not identity_failed %}
+{% set g_you = names.get(graphs.focus, 'Fighter ' ~ graphs.focus) %}{% set g_them = names.get(graphs.opponent, 'Fighter ' ~ graphs.opponent) %}
+<section class="card fight-graphs" id="report-graphs" aria-labelledby="fightGraphsTitle" data-reveal>
+  <div class="eyebrow">Your fight in graphs</div>
+  <h2 id="fightGraphsTitle">How you moved</h2>
+  {% for title, rows, hint in [('Where you were going', graphs.moved, 'Seconds moving forward, backing up, circling and standing still.'), ('Distance between you', graphs.ranges, 'Close is under 1 body length, long is over 2.')] %}
+  {% if rows[graphs.focus] %}
+  <div class="graph-block">
+    <h3>{{ title }}</h3>
+    <p class="graph-hint">{{ hint }}</p>
+    {% for side, label in [(graphs.focus, g_you), (graphs.opponent, g_them)] %}{% if rows[side] %}
+    <div class="stack-row"><span class="stack-who">{{ label }}</span>
+      <div class="stack-bar" role="img" aria-label="{{ label }}: {% for part in rows[side] %}{{ part.label }} {{ part.clock }}{{ ', ' if not loop.last }}{% endfor %}">{% for part in rows[side] %}{% if part.share > 0 %}<i class="stack-part part-{{ part.key }}" style="--w:{{ part.share }}%" title="{{ part.label }} {{ part.clock }}"></i>{% endif %}{% endfor %}</div>
+    </div>
+    {% endif %}{% endfor %}
+    <ul class="stack-key list-clean">{% for part in rows[graphs.focus] %}<li><i class="part-{{ part.key }}" aria-hidden="true"></i>{{ part.label }} <b class="wiq-num">{{ part.clock }}</b></li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% endfor %}
+
+  {% if graphs.energy %}
+  <div class="graph-block">
+    <h3>Your energy through the fight</h3>
+    <p class="graph-hint">How fast you moved, every few seconds. Higher is busier. Gaps are where you were not seen.</p>
+    <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Speed through the fight, {{ g_you }}{% if graphs.energy.lines[graphs.opponent] %} and {{ g_them }}{% endif %}">
+      <line class="graph-base" x1="0" y1="{{ graphs.height }}" x2="{{ graphs.width }}" y2="{{ graphs.height }}"/>
+      {% for line in graphs.energy.lines.get(graphs.opponent, []) %}<polyline class="graph-line theirs" points="{{ line }}"/>{% endfor %}
+      {% for line in graphs.energy.lines[graphs.focus] %}<polyline class="graph-line mine" points="{{ line }}"/>{% endfor %}
+    </svg>
+    <div class="graph-axis"><span>{{ graphs.energy.axis[0] }}</span><span>{{ graphs.energy.axis[1] }}</span><span>{{ graphs.energy.axis[2] }}</span></div>
+    <ul class="stack-key list-clean"><li><i class="key-mine" aria-hidden="true"></i>{{ g_you }}</li>{% if graphs.energy.lines[graphs.opponent] %}<li><i class="key-theirs" aria-hidden="true"></i>{{ g_them }}</li>{% endif %}<li class="muted">Top of the graph: {{ graphs.energy.top }} body lengths a second</li></ul>
+  </div>
+  {% endif %}
+
+  {% if graphs.guard %}
+  <div class="graph-block">
+    <h3>Your guard through the fight</h3>
+    <p class="graph-hint">Each bar is a few seconds. A full bar means your hands were up by the face the whole time; an empty one, down the whole time. No bar at all means they could not be seen.</p>
+    <svg class="bar-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int }}" preserveAspectRatio="none" role="img" aria-label="Hands up through the fight, {{ g_you }}">
+      {% for bar in graphs.guard.bars %}<rect class="guard-track" x="{{ bar.x }}" y="0" width="{{ bar.width }}" height="{{ graphs.height }}"/><rect class="guard-bar" x="{{ bar.x }}" y="{{ graphs.height - bar.height }}" width="{{ bar.width }}" height="{{ bar.height }}"><title>{{ bar.clock }}: hands up {{ bar.share }}%</title></rect>{% endfor %}
+    </svg>
+    <div class="graph-axis"><span>{{ graphs.guard.axis[0] }}</span><span>{{ graphs.guard.axis[1] }}</span><span>{{ graphs.guard.axis[2] }}</span></div>
+  </div>
+  {% endif %}
+
+  {% if graphs.facts %}
+  <div class="graph-facts">{% for fact in graphs.facts %}<article><b class="wiq-num">{{ fact.value }}</b><span>{{ fact.label }}</span><small>{{ fact.sentence }}</small></article>{% endfor %}</div>
+  {% endif %}
+</section>
+{% endif %}
 {#- The movement scorecard sits *below* the fighter's own numbers, not
     above them. It needs 85% tracking coverage on both fighters and real
     footage rarely reaches that - all three reference bouts produced 19%

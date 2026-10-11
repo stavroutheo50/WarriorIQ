@@ -114,6 +114,7 @@ from core.chunked_upload import (
 from core.css_minify import minify as minify_css
 from core.preflight_client import client_thresholds
 from core.report_visuals import build as report_visuals
+from core.movement_graphs import build as movement_graphs
 from core.upload_security import (
     FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS, FIGHT_VIDEO_LABEL,
     UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, limit_upload_route, looks_like_video,
@@ -5727,6 +5728,9 @@ def result_page(request: Request, job_id: str):
             outcomes_counted=(bool((report.get("statistics") or {}).get("action_labels_available"))
                               and STRIKE_COUNTS_PUBLISHED),
         ) if identity_trusted else None),
+        # The movement graphs (core/movement_graphs.py), under the same gate:
+        # each one is about one named fighter.
+        "graphs": movement_graphs(report, _visual_focus(report)) if identity_trusted else None,
         "can_share": can_share,
         "sharing": _sharing_state(request, job_id, _profile) if can_share else None,
         "score_withheld": score_withheld,
