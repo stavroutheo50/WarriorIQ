@@ -20,6 +20,7 @@ class CreditTests(unittest.TestCase):
         page = TestClient(webapp.app).get("/ai-transparency").text
         self.assertIn("Training data", page)
         for credit in ("BoxingVI", "arXiv:2511.16524", "R. Hegde", "TKD-Kick3", "CC BY 4.0",
+                       "Combat Sports Dataset", "Evan Quinn", "zenodo.15349809",
                        "StrikeMetrics", "MIT licence"):
             self.assertIn(credit, page)
 
