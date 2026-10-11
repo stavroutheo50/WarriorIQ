@@ -2502,6 +2502,20 @@ def get_profile_by_handle(handle: str) -> dict | None:
         return dict(row) if row else None
 
 
+def search_profiles_by_handle(prefix: str, limit: int = 10) -> list[dict]:
+    """Profiles whose handle starts with ``prefix`` (already lowercase, safe chars).
+
+    Who may see each is decided by the caller (core/social.py), not here."""
+    init_db()
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM profiles WHERE handle LIKE ? ESCAPE '\\' ORDER BY handle LIMIT ?",
+            (escaped + "%", max(1, min(int(limit), 25))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_account_by_profile(profile_id: int) -> dict | None:
     init_db()
     with connection() as con:

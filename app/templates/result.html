@@ -236,6 +236,7 @@
 <section class="card fight-graphs" id="report-graphs" aria-labelledby="fightGraphsTitle" data-reveal>
   <div class="eyebrow">Your fight in graphs</div>
   <h2 id="fightGraphsTitle">How you moved</h2>
+  <details class="phone-fold" data-phone-fold open><summary>Show the graphs</summary>
   {% for title, rows, hint, read in [('Where you were going', graphs.moved, 'Each bar is the whole fight. The colours show how much of it you spent going forward, backing up, circling or standing still.', graphs.reads.moved), ('Distance between you', graphs.ranges, 'Each bar is the whole fight. Close is under 1 body length apart, far is over 2.', graphs.reads.ranges)] %}
   {% if rows[graphs.focus] %}
   <div class="graph-block">
@@ -282,6 +283,7 @@
   {% if graphs.facts %}
   <div class="graph-facts">{% for fact in graphs.facts %}<article><b class="wiq-num" data-count-up>{{ fact.value }}</b><span>{{ fact.label }}</span><small>{{ fact.sentence }}</small></article>{% endfor %}</div>
   {% endif %}
+  </details>
 </section>
 {% endif %}
 {#- The movement scorecard sits *below* the fighter's own numbers, not
@@ -307,6 +309,7 @@
       rendered this one much larger than its neighbours (D13, 2026-10-11). -#}
   <div class="eyebrow">Movement only &middot; not a score</div>
   <h2>{{ movement.title }}</h2>
+  <details class="phone-fold" data-phone-fold open><summary>Show the comparison</summary>
   {% if movement.available %}
   {% if movement.scores %}
   <div class="grid">
@@ -330,6 +333,7 @@
   {% else %}
   <div class="notice">{{movement.reason}}</div>
   {% endif %}
+  </details>
 </section>
 {% endif %}
 
@@ -481,6 +485,7 @@
   {% macro row(label, a, b, note='') %}<div role="row"><span role="rowheader">{{ label }}{% if note %}<small>{{ note }}</small>{% endif %}</span><b role="cell" class="wiq-num">{{ a }}</b><b role="cell" class="wiq-num">{{ b }}</b></div>{% endmacro %}
   <section class="fight-numbers" id="report-numbers" aria-labelledby="fightNumbersTitle">
     <div class="numbers-section-heading"><div><span class="eyebrow">Every number</span><h2 id="fightNumbersTitle">How the fight went, in numbers</h2></div><span>{{ names.get(primary, 'Fighter ' ~ primary) }} · {{ names.get(opponent, 'Fighter ' ~ opponent) }}</span></div>
+    <details class="phone-fold" data-phone-fold open><summary>Show every number</summary>
     {% if mp %}
     <div class="fight-numbers-group" role="table" aria-label="Ring control">
       <h3>Ring control</h3>{{ head() }}
@@ -536,6 +541,7 @@
     </div>
     {% endif %}
     <p class="small muted">Measured from the two tracked bodies frame by frame: seconds are seconds the fighter was seen. "The middle" is the inner half of the area the two of you used.</p>
+    </details>
   </section>
   {% endif %}
 
@@ -1014,7 +1020,9 @@
     {% if report_access.report_tier == 'full' %}
     <tr><td>Post-action balance baseline</td><td>{% if m.balance_index is not none %}{{'%.0f'|format(m.balance_index*100)}}%{% else %}{{m.availability.balance.reason}}{% endif %}</td></tr>
     <tr><td>Ring-centre position baseline</td><td>{% if m.ring_center_control is not none %}{{'%.0f'|format(m.ring_center_control*100)}}%{% else %}{{m.availability.movement.reason}}{% endif %}</td></tr>
-    <tr><td>Pressure index</td><td>{% if m.pressure_index is not none %}{{'%.2f'|format(m.pressure_index)}}{% else %}{{m.availability.movement.reason}}{% endif %}</td></tr>
+    {#- The 0-100 the rest of the page uses ("Pressure 56"); the raw -1..1
+        index beside it read as a second, contradicting number (D1). -#}
+    <tr><td>Pressure</td><td>{% if m.pressure_index is not none %}{{ ((m.pressure_index + 1) / 2 * 100)|round|int }} of 100 <small class="muted">(50 is neither forward nor back)</small>{% else %}{{m.availability.movement.reason}}{% endif %}</td></tr>
     <tr><td>Footwork</td><td>{% if m.footwork_body_lengths_per_second is not none %}{{'%.2f'|format(m.footwork_body_lengths_per_second)}} body-lengths/s{% else %}{{m.availability.movement.reason}}{% endif %}</td></tr>
     {% endif %}
   </table></div>
@@ -1117,7 +1125,7 @@
      analyses in this workspace and assumes they are the same person. On a
      shared coach workspace they may not be, so the fight it used is named
      rather than implied. #}
-  <p class="small muted">Compared with <b>{{progress.previous_name|truncate(30, true)}}</b>{% if progress.previous_date %} ({{progress.previous_date}}){% endif %} — the last fight WarriorIQ tracked well enough to compare. If that was a different fighter, ignore this. Movement only.</p>
+  <p class="small muted">Compared with <b>{{progress.previous_label|default('your previous fight', true)|truncate(40, true)}}</b>{% if progress.previous_date %} ({{progress.previous_date}}){% endif %} — the last fight WarriorIQ tracked well enough to compare. If that was a different fighter, ignore this. Movement only.</p>
 </section>
 {% endif %}
 
@@ -1136,7 +1144,7 @@
   {#- Printed once. The unscored branch above already carries it. -#}
   {% if report.scorecard.available %}<p class="small muted">{{report.scorecard.disclaimer}}</p>{% endif %}
   {% if report.scorecard.coverage_note %}<p class="small coverage-line">{{report.scorecard.coverage_note}}</p>{% endif %}
-  {% if report.scorecard.evidence and analysis_target == 'BOTH' and report.scorecard.status not in ['identity_integrity_failed', 'fighters_not_separable'] %}<p class="small muted">Evidence used: {% if report.scorecard.evidence.evidence_source == 'unvalidated_action_candidates' %}{{report.scorecard.evidence.scoring_action_candidates}} unverified scoring candidates{% else %}{{report.scorecard.evidence.verified_scoring_actions}} verified scoring actions{% endif %} · A {{'%.0f'|format(report.scorecard.evidence.fighter_A_tracking_coverage*100)}}% / B {{'%.0f'|format(report.scorecard.evidence.fighter_B_tracking_coverage*100)}}% observation coverage.</p>{% endif %}
+  {% if report.scorecard.evidence and analysis_target == 'BOTH' and report.scorecard.status not in ['identity_integrity_failed', 'fighters_not_separable'] %}<p class="small muted">Built from {% if report.scorecard.evidence.evidence_source == 'unvalidated_action_candidates' %}{{report.scorecard.evidence.scoring_action_candidates}} possible scoring strikes the system spotted but has not confirmed{% else %}{{report.scorecard.evidence.verified_scoring_actions}} scoring strikes that were checked{% endif %} &middot; {{ names.A }} seen {{'%.0f'|format(report.scorecard.evidence.fighter_A_tracking_coverage*100)}}%, {{ names.B }} seen {{'%.0f'|format(report.scorecard.evidence.fighter_B_tracking_coverage*100)}}% of the fight.</p>{% endif %}
   {% if report.scorecard.available %}<div class="table-wrap"><table><thead><tr><th>Round</th><th>A</th><th>B</th><th>Estimate</th></tr></thead><tbody>{% for r in report.scorecard.rounds %}<tr><td>{{r.round}}</td><td>{{r.fighter_A}}</td><td>{{r.fighter_B}}</td><td>{{r.winner}}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
 </section>
 
@@ -1213,16 +1221,16 @@
 {% if report_access.report_tier == 'full' %}<details class="card report-technical"><summary><span><strong>Technical analysis details</strong><small>Tracking, timing and model information</small></span><b aria-hidden="true">＋</b></summary><div class="report-technical-body"><div class="eyebrow">Performance integrity</div><div class="metric-grid">
   <div class="metric"><div class="value">{{'%.1f'|format(report.performance.analysis_seconds)}}s</div><div class="label">Analysis time</div></div>
   <div class="metric"><div class="value">{{'%.1f'|format(report.performance.segment_duration_seconds)}}s</div><div class="label">Video analysed</div></div>
-  <div class="metric"><div class="value">{{'%.1f'|format(report.tracking.fighter_A_coverage*100)}}%</div><div class="label">A observation coverage</div></div>
-  <div class="metric"><div class="value">{{'%.1f'|format(report.tracking.fighter_B_coverage*100)}}%</div><div class="label">B observation coverage</div></div>
+  <div class="metric"><div class="value">{{'%.1f'|format(report.tracking.fighter_A_coverage*100)}}%</div><div class="label">{{ names.A }} seen</div></div>
+  <div class="metric"><div class="value">{{'%.1f'|format(report.tracking.fighter_B_coverage*100)}}%</div><div class="label">{{ names.B }} seen</div></div>
 </div>
-<h3>AI tracking consensus</h3>
+<h3>Who is who</h3>
 <div class="table-wrap"><table>
-  <tr><td>Fighter A first-frame identity gate</td><td>{% if report.tracking.fighter_A_initial_lock_safe|default(false) %}Passed · {{report.tracking.fighter_A_seed_source|replace('_',' ')|title}}{% else %}<span class="bad">Failed · choose Fighter A again</span>{% endif %}</td></tr>
-  <tr><td>Fighter B first-frame identity gate</td><td>{% if report.tracking.fighter_B_initial_lock_safe|default(false) %}Passed · {{report.tracking.fighter_B_seed_source|replace('_',' ')|title}}{% else %}<span class="bad">Failed · choose Fighter B again</span>{% endif %}</td></tr>
+  <tr><td>{{ names.A }} at the start</td><td>{% if report.tracking.fighter_A_initial_lock_safe|default(false) %}Found where you pointed them out{% else %}<span class="bad">Not found where you pointed them out &middot; point them out again</span>{% endif %}</td></tr>
+  <tr><td>{{ names.B }} at the start</td><td>{% if report.tracking.fighter_B_initial_lock_safe|default(false) %}Found where you pointed them out{% else %}<span class="bad">Not found where you pointed them out &middot; point them out again</span>{% endif %}</td></tr>
 </table></div>
 {% if report.metrics.round_pose_coverage %}<h3>Round-by-round pose evidence</h3><div class="table-wrap"><table><thead><tr><th>Round</th><th>{{ names.A }}</th><th>{{ names.B }}</th></tr></thead><tbody>{% for round,coverage in report.metrics.round_pose_coverage.items() %}<tr><td>{{round}}</td><td>{{'%.1f'|format(coverage.A*100)}}%</td><td>{{'%.1f'|format(coverage.B*100)}}%</td></tr>{% endfor %}</tbody></table></div>{% endif %}
-<p class="small muted">Observation coverage means a fighter observation was available; it is not presented as identity accuracy. First-frame identity and propagated-mask agreement are checked separately.</p>
+<p class="small muted">&ldquo;Seen&rdquo; is how much of the fight a fighter was in view and measured. It does not prove WarriorIQ always had the right person; who is who is checked separately.</p>
 {#- Engine internals - model files, the graphics card, the tracker and referee
     counters, the classifier name, the speed budget and quality mode - are for
     whoever runs WarriorIQ, not for the fighter (QA, 2026-10-07). -#}
@@ -1245,7 +1253,12 @@
 <aside class="notice ai-report-notice"><strong>AI-Assisted Analysis.</strong> WarriorIQ uses computer vision and AI; detection mistakes are possible. {% if features is defined and features.scoring and features.scoring.on %}Measurements and scores are estimates{% else %}The measurements are estimates from video, and this report gives no score{% endif %}. These are not guaranteed facts or an official judging decision. Use this report as training and performance guidance—not medical advice. Camera angle, resolution, obstruction and poor lighting can reduce analysis quality. <a class="text-link" href="/ai-transparency">How WarriorIQ AI works</a> · <a class="text-link" href="/sports-medical-disclaimer">Sports &amp; medical safety</a></aside>
 <p class="small muted analysis-build" data-analysis-build>Analysis engine {% if analysis_build.analysis_version %}v{{analysis_build.analysis_version}}{% else %}from before v2 (no version recorded){% endif %}{% if analysis_build.outdated %} · <strong>the current engine is v{{analysis_build.current_version}}; analyse again for a report from it.</strong>{% endif %}</p>
 {% endblock %}
-{% block scripts %}
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
+// Secondary sections fold on a phone (D12, QA 2026-10-11: the report was about
+// 10,600 px tall at phone width). Open by default in the markup, so without
+// this script, and on a wider screen, everything shows.
+(()=>{if(!window.matchMedia||!matchMedia('(max-width: 700px)').matches)return;document.querySelectorAll('details[data-phone-fold]').forEach(d=>{if(!(location.hash&&d.querySelector(location.hash)))d.open=false})})();
+</script>
 <script nonce="{{ request.state.csp_nonce }}">
 /* A link to a section folded inside a closed <details> ("Details" on the
    since-last strip, the section chips) opens it first, so the jump lands. */

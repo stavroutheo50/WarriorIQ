@@ -121,7 +121,7 @@ body[data-page=home] .hero-copy>.trust-row{--hero-order:5}
 /* Results: dense sports analytics, clearer section transitions. */
 body[data-page=result] main{position:relative;padding-bottom:24px}
 body[data-page=result] .section-title:first-child{min-height:150px;align-items:center;margin:24px 0 18px;padding:24px 0;border-bottom:1px solid #263958}
-body[data-page=result] .section-title:first-child h2{font-size:clamp(40px,6vw,68px);margin:4px 0}
+body[data-page=result] .result-hero.section-title h2{font-size:clamp(40px,6vw,68px);margin:4px 0}
 body[data-page=result] .report-path{position:sticky;z-index:35;top:92px;box-shadow:0 16px 35px rgba(0,0,0,.18);transition:border-color var(--wiq-motion-base) ease,box-shadow var(--wiq-motion-base) ease}
 body[data-page=result] .report-path a[aria-current=true]{border-color:#7183d6;background:#1b2d50;color:#fff;transform:translateY(-1px)}
 body[data-page=result] .analysis-quality-grid strong,body[data-page=result] .performance-stat>strong,body[data-page=result] .metric .value,body[data-page=result] .score{font-variant-numeric:tabular-nums}
@@ -175,3 +175,8 @@ body[data-page=result] .comparison-table .is-better[data-wiq-counted=true]{text-
   .wiq-primary-motion:after{display:none!important}
   .page-scroll-progress{display:none}
 }
+/* The big percentage and its caption read as one block, right-aligned
+   together, rather than a number and a caption on different baselines (D7). */
+.analysis-scoreboard{flex-direction:column;align-items:flex-end;justify-content:flex-start;gap:2px}
+.analysis-scoreboard span{padding-bottom:0;text-align:right;max-width:26ch;line-height:1.4}
+@media(max-width:680px){.analysis-scoreboard{align-items:flex-start}.analysis-scoreboard span{text-align:left}}

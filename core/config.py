@@ -1354,6 +1354,14 @@ class Settings:
     # /subprocessors. Render sets RENDER on its own services, so a Render
     # deployment names itself; any other host is named here.
     hosting_provider: str = os.getenv("WARRIORIQ_HOSTING_PROVIDER", "Render" if IS_RENDER else "").strip()
+    # Where each provider processes data, as /subprocessors states it (E2,
+    # QA 2026-10-11), e.g. "Frankfurt, Germany (EU)". Empty until supplied:
+    # nothing here is guessed.
+    hosting_location: str = os.getenv("WARRIORIQ_HOSTING_LOCATION", "").strip()
+    analysis_provider_location: str = os.getenv("WARRIORIQ_ANALYSIS_PROVIDER_LOCATION", "").strip()
+    email_provider_location: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER_LOCATION", "").strip()
+    # The domain WarriorIQ's own support and privacy addresses must be on (E1).
+    public_email_domain: str = os.getenv("WARRIORIQ_PUBLIC_EMAIL_DOMAIN", "warrioriq.eu").strip().lower()
     require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 
 

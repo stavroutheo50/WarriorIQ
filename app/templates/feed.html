@@ -13,6 +13,15 @@
   <div class="athlete-actions">{% if own_handle %}<a class="btn secondary" href="/athlete/{{own_handle}}">My athlete page</a>{% else %}<a class="btn secondary" href="/profile#public-profile">Set up my athlete page</a>{% endif %}</div>
 </header>
 
+{#- Find athletes by username (D10, QA 2026-10-11): the Feed had no way to
+    discover anybody to follow. -#}
+<section class="card feed-search" aria-labelledby="feedSearchTitle">
+  <h2 id="feedSearchTitle">Find an athlete</h2>
+  <form method="get" action="/feed" role="search"><label for="athleteQuery" class="small muted">Search by username</label>
+    <div class="row"><input id="athleteQuery" name="q" type="search" value="{{ query }}" minlength="2" maxlength="40" placeholder="e.g. theo_kicks" autocomplete="off"><button class="btn secondary" type="submit">Search</button></div></form>
+  {% if query %}{% if search_results %}<ul class="list-clean feed-search-results">{% for person in search_results %}<li><a class="text-link" href="/athlete/{{ person.handle }}">@{{ person.handle }}</a>{% if person.name %} <span class="muted">{{ person.name }}</span>{% endif %}</li>{% endfor %}</ul>{% else %}<p class="small muted">No athlete with a username starting “{{ query }}”. Usernames are what follows /athlete/ in their page address.</p>{% endif %}{% endif %}
+</section>
+
 {% if items %}
 <ol class="feed-list">
   {% for item in items %}
@@ -37,6 +46,6 @@
 {% elif following_count %}
 <section class="card"><h2>Nothing new yet</h2><p class="muted">The athletes you follow have not shared a fight, reached a level or built a training streak yet. It will show here when they do.</p></section>
 {% else %}
-<section class="card"><h2>You are not following anyone yet</h2><p class="muted">Open another athlete's page (warrioriq.eu/athlete/their-username) and press Follow. What they share shows up here.</p></section>
+<section class="card"><h2>You are not following anyone yet</h2><p class="muted">Search for an athlete above, open their page and press Follow. What they share shows up here.</p></section>
 {% endif %}
 {% endblock %}

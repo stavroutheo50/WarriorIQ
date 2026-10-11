@@ -667,3 +667,234 @@ def test_c6_selection_page_warns_before_analysing_the_same_file_again():
         assert "You already analysed this exact video" in page
     finally:
         state.delete_job(job)
+
+
+# --- D1 ----------------------------------------------------------------------
+
+INTERNAL_WORDING = ("unverified scoring candidates", "first-frame identity gate", "propagated-mask agreement",
+                    "<td>Pressure index</td>", "a format this build cannot decode", "does not hard-code",
+                    "configured support", "configured operator", "The planned uncertainty flow",
+                    "Compared with <b>{{progress.previous_name")
+
+
+def test_d1_no_internal_wording_reaches_users():
+    sources = [TEMPLATES / name for name in ("result.html", "settings.html", "index.html", "legal_document.html")]
+    sources += [ROOT / "app" / "main.py"]
+    for path in sources:
+        body = path.read_text(encoding="utf-8")
+        for phrase in INTERNAL_WORDING:
+            assert phrase not in body, (path.name, phrase)
+    from core.legal import resolve_document
+
+    for slug in ("terms", "refunds", "accessibility", "security"):
+        assert "the configured" not in json.dumps(resolve_document(slug)["sections"]), slug
+
+
+def test_d1_since_last_fight_names_the_fight_not_the_file():
+    from core.squad import compare_with_previous
+
+    def report(guard):
+        return {"video": {"focus_fighter": "A"}, "tracking": {"fighter_A_coverage": .9, "fighter_B_coverage": .9},
+                "scorecard": {"sport": "boxing", "sport_label": "Boxing"},
+                "metrics": {"A": {"guard_index": guard, "guard_definition": "hands_up_share/2", "balance_index": .7,
+                                  "ring_center_control": .5}}}
+
+    fights = [{"job_id": "old", "original_name": "2.mp4", "created_at": "2026-10-01T10:00:00+00:00",
+               "ruleset": "BOXING", "report": report(0.5)}]
+    with patch("core.squad._load_report", return_value=report(0.5), create=True):
+        result = compare_with_previous(report(0.6), fights, "new")
+    if result.get("available"):
+        assert "2.mp4" not in (result.get("previous_label") or "")
+
+
+# --- D2 ----------------------------------------------------------------------
+
+def test_d2_one_display_name_everywhere():
+    profile = {"display_name": "My Athlete"}
+    fights = [{"fighter_name": "Theodoulos"}, {"fighter_name": "Theodoulos"}, {"fighter_name": None}]
+    assert web._display_name(profile, fights) == "Theodoulos"
+    assert web._display_name({"display_name": "Theo K"}, fights) == "Theo K"
+    assert web._display_name(profile, []) == "My Athlete"
+    shared = (TEMPLATES / "shared.html").read_text(encoding="utf-8")
+    assert "Names are never shown on a coach link" in shared
+
+
+# --- D3 ----------------------------------------------------------------------
+
+def test_d3_coach_forwards_to_fight_camp_and_the_home_page_sells_one_page():
+    client = BrowserClient(web.app)
+    response = client.get("/coach?x=1", follow_redirects=False)
+    assert response.status_code == 308 and response.headers["location"] == "/dashboard?x=1"
+    home = (TEMPLATES / "index.html").read_text(encoding="utf-8")
+    assert 'href="/coach"' not in home and "<span>Fight Camp</span>" in home
+
+
+# --- D4 ----------------------------------------------------------------------
+
+def test_d4_fight_camp_shows_guard_once_labels_the_chart_and_explains_zero_points():
+    page = (TEMPLATES / "camp.html").read_text(encoding="utf-8")
+    assert "{% if hk != 'guard' %}" in page
+    assert "chart-axis" in page and "fmtDate" in page
+    assert 'id="noPointsYet"' in page and "analysing a fight does not earn points" in page
+
+
+# --- D5 ----------------------------------------------------------------------
+
+def test_d5_upload_form_status_size_and_video_track():
+    page = (TEMPLATES / "analyze.html").read_text(encoding="utf-8")
+    assert "(b/1048576).toFixed(1)} MB" in page and "Math.round(b/1048576)" not in page
+    assert "form.addEventListener('change',()=>syncSubmit())" in page
+    assert "probe.videoWidth>0" in page and "it looks like sound only" in page
+    # Not "ready" before the device has read a picture from the file.
+    assert "text:`${fmtMB(b)} — checking the video on this device…`}" in page
+
+
+# --- D6 ----------------------------------------------------------------------
+
+def test_d6_selection_page_solo_hides_b_and_start_stays_in_view():
+    css = (ROOT / "app" / "static" / "fighter-selection.css").read_text(encoding="utf-8")
+    assert ".fighter-key-item[hidden]" in css and "display:none!important" in css
+    page = (TEMPLATES / "select.html").read_text(encoding="utf-8")
+    assert "guide.prepend(choice)" in page
+
+
+# --- D7 ----------------------------------------------------------------------
+
+def test_d7_opening_a_result_clears_a_finished_job_from_the_menu_cookie():
+    source = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
+    assert 'active_cookie == job_id or not _owned_job(' in source
+    css = (ROOT / "app" / "static" / "product.css").read_text(encoding="utf-8")
+    assert ".active-analysis-chip{white-space:nowrap" in css
+
+
+# --- D8 ----------------------------------------------------------------------
+
+def test_d8_the_header_is_the_same_on_every_page():
+    assert web.SPORT_IRRELEVANT_PREFIXES == ()
+
+
+# --- D9 ----------------------------------------------------------------------
+
+def test_d9_settings_shows_the_acceptance_date_and_names_each_fight():
+    created, client = _signed_in()
+    db.save_fight("qa1011set" + uuid.uuid4().hex[:4], int(created["profile_id"]), "a.mp4", "", "", "sparring",
+                  "K1", "A", {}, "2999-01-01T00:00:00+00:00")
+    page = client.get("/settings/privacy").text
+    assert "Terms accepted on" in page and "Terms version" in page
+    assert "<strong>Fight analysis</strong>" not in page
+    assert "Fighter A vs Fighter B" in page
+
+
+# --- D10 ---------------------------------------------------------------------
+
+def test_d10_feed_finds_athletes_by_username():
+    created, client = _signed_in()
+    other = db.create_account(f"other-{uuid.uuid4().hex}@example.test", "not-a-login-hash")
+    handle = "qafind" + uuid.uuid4().hex[:5]
+    db.set_public_profile(int(other["profile_id"]), handle, "public", "", "")
+    page = client.get(f"/feed?q={handle[:8]}").text
+    assert f'href="/athlete/{handle}"' in page
+    assert client.get("/feed?q=%25").status_code == 200        # wildcards are not a search
+
+
+# --- D11 ---------------------------------------------------------------------
+
+def test_d11_precheck_warns_about_low_light_and_same_kit():
+    from core.preflight_client import client_thresholds
+    from core.quality_guardian import LOW_LIGHT_BRIGHTNESS
+
+    assert client_thresholds()["low_light_brightness"] == LOW_LIGHT_BRIGHTNESS
+    page = (TEMPLATES / "analyze.html").read_text(encoding="utf-8")
+    assert "This video is very dark" in page and "Same kit?" in page
+    js = (ROOT / "app" / "static" / "preflight.js").read_text(encoding="utf-8")
+    assert "result.brightness = lumas.length ? median(lumas) : null;" in js
+
+
+# --- D12 ---------------------------------------------------------------------
+
+def test_d12_secondary_report_sections_fold_on_phones_and_settings_pages():
+    page = (TEMPLATES / "result.html").read_text(encoding="utf-8")
+    assert page.count("data-phone-fold open") >= 3
+    assert "matchMedia('(max-width: 700px)')" in page
+    settings = (TEMPLATES / "settings.html").read_text(encoding="utf-8")
+    assert 'data-page-size="10"' in settings
+
+
+# --- D13 ---------------------------------------------------------------------
+
+def test_d13_section_headings_share_one_size():
+    motion = (ROOT / "app" / "static" / "motion.css").read_text(encoding="utf-8")
+    assert ".section-title:first-child h2" not in motion
+    assert ".result-hero.section-title h2" in motion
+    page = (TEMPLATES / "result.html").read_text(encoding="utf-8")
+    assert '<div class="section-title" style="margin-top:0">\n    <h2>{{ movement.title }}</h2>' not in page
+
+
+# --- E1 / E2 -----------------------------------------------------------------
+
+def test_e1_support_address_must_be_on_the_warrioriq_domain(settings):
+    from core.legal import launch_readiness, public_config_problems
+
+    settings(support_email="help@gmail.com", privacy_email="privacy@warrioriq.eu")
+    assert any("@warrioriq.eu" in item for item in launch_readiness()["missing"])
+    assert any("WARRIORIQ_SUPPORT_EMAIL" in item for item in public_config_problems())
+    settings(support_email="support@warrioriq.eu")
+    assert not any("Customer-support email on" in item for item in launch_readiness()["missing"])
+    for name in ("legal_document.html", "privacy.html"):
+        assert "before paid public launch" not in (TEMPLATES / name).read_text(encoding="utf-8")
+    assert "Verification pending before paid launch" not in (TEMPLATES / "legal.html").read_text(encoding="utf-8")
+
+
+def test_e2_subprocessors_name_purpose_and_location(settings):
+    from core.legal import subprocessor_sections
+
+    settings(hosting_provider="Render", hosting_location="Frankfurt, Germany (EU)",
+             email_provider="smtp", email_provider_name="Postmark", email_provider_location="USA")
+    text = json.dumps(subprocessor_sections())
+    assert "Render (website hosting and storage)" in text and "Location: Frankfurt, Germany (EU)." in text
+    assert "Postmark (email)" in text and "Location: USA." in text
+    assert "the server that runs this website" not in text
+
+
+# --- E3 ----------------------------------------------------------------------
+
+def test_e3_corrections_are_not_sold_while_they_cannot_be_used():
+    import core.features as features
+    from core.payments import PLANS, plan_features
+
+    with patch.dict(features.FEATURES, {"strike_counts": features.Feature("strike_counts", "S", False, "", "")}):
+        assert "Fight comparisons and corrections" not in plan_features(PLANS["athlete_pro"])
+        assert "Fight comparisons" in plan_features(PLANS["athlete_pro"])
+
+
+# --- E4 ----------------------------------------------------------------------
+
+def test_e4_consented_public_pages_allow_googles_collection_endpoints(settings):
+    settings(analytics_measurement_id="G-TESTONLY")
+    client = BrowserClient(web.app)
+    response = client.get("/pricing", cookies={"warrioriq_cookie_preferences": "all"})
+    policy = response.headers["content-security-policy"]
+    connect = [part for part in policy.split(";") if part.strip().startswith("connect-src")][0]
+    for origin in ("pagead2.googlesyndication.com", "https://www.google.com", "google-analytics.com"):
+        assert origin in connect, origin
+    private = client.get("/history", cookies={"warrioriq_cookie_preferences": "all"})
+    assert "pagead2" not in private.headers["content-security-policy"]
+
+
+# --- F -----------------------------------------------------------------------
+
+def test_f_an_old_saved_report_is_re_rendered_without_its_stored_false_text():
+    from core.report import refresh_identity_integrity
+
+    report = json.loads((ROOT / "tests" / "fixtures" / "report_sample.json").read_text(encoding="utf-8"))
+    report["integrity"]["action_metrics_trusted"] = False
+    for side in ("A", "B"):
+        report["metrics"][side].update({"guard_index": 0.07, "guard_definition": "hands_up_share/2"})
+        report["coaching"][side] = {"strengths": [], "drills": [], "improvements": [{
+            "title": "Nothing behind your opponent",
+            "detail": "watch your counted strikes on the replay and judge them yourself."}]}
+    refresh_identity_integrity(report)
+    text = json.dumps(report["coaching"])
+    assert "counted strikes" not in text
+    assert "Work on: Guard 7%" in text
+    assert report["training_plan"]["A"]

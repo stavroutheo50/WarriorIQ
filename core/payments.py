@@ -87,7 +87,10 @@ PLANS = {
         "report_label": "Complete report",
         "feature_spec": [DAILY, "Complete performance analysis", "Full coach report and training plan",
                          ("illegal_moves", "Full evidence replay and legality review", "Full skeleton replay"),
-                         "Fight comparisons and corrections"],
+                         # "Corrections" are one-tap checks on counted strikes,
+                         # which only exist while strike counts are on (E3, QA
+                         # 2026-10-11): the bullet follows the same switch.
+                         ("strike_counts", "Fight comparisons and corrections", "Fight comparisons")],
         "daily_limit": 10,
         "monthly_limit": None,
         "unlimited": False,

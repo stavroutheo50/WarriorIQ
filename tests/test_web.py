@@ -287,7 +287,9 @@ class PublicPageTests(unittest.TestCase):
             legal.SETTINGS, support_email="", privacy_email="", dmca_email="")
         with mock.patch.object(legal, "SETTINGS", blank):
             page = self.client.get("/contact").text
-        self.assertIn("the configured support email", page)
+        # Plain words for a missing address, never an invented one (QA 2026-10-11).
+        self.assertIn("Write to WarriorIQ support for account access", page)
+        self.assertNotIn("the configured support email", page)
         self.assertNotIn("Write to  ", page, "an unset address must not leave a hole")
         self.assertNotIn("mailto:\"", page)
 
@@ -348,11 +350,15 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("chooser-head", response.text)
 
     def test_every_workspace_route_answers_a_guest_the_same_way(self):
-        for path in ("/analyze", "/dashboard", "/history", "/coach", "/profile", "/compare"):
+        for path in ("/analyze", "/dashboard", "/history", "/profile", "/compare"):
             with self.subTest(path=path):
                 response = self.client.get(path, follow_redirects=False)
                 self.assertEqual(response.status_code, 200, f"{path} still redirects")
                 self.assertIn("empty-workspace", response.text)
+        # /coach is the same page as /dashboard and now forwards there
+        # (QA 2026-10-11, D3), landing on the same signed-out shell.
+        self.assertEqual(self.client.get("/coach", follow_redirects=False).status_code, 308)
+        self.assertIn("empty-workspace", self.client.get("/coach").text)
 
     def test_every_sport_states_what_the_analysis_cannot_see(self):
         """Coverage is disclosed on the sport chooser, before an upload.
@@ -1937,7 +1943,10 @@ class PublicPageTests(unittest.TestCase):
 
     def test_scorecard_displays_exact_evidence_requirements(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(encoding="utf-8")
-        self.assertIn("verified scoring actions", template)
+        # Plain words (QA 2026-10-11): "possible scoring strikes ... not
+        # confirmed" or "scoring strikes that were checked".
+        self.assertIn("scoring strikes that were checked", template)
+        self.assertIn("possible scoring strikes the system spotted but has not confirmed", template)
 
     def test_focused_report_keeps_both_fighters_in_the_analysis_engine(self):
         app_source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
@@ -2720,9 +2729,11 @@ class SmallUiConsistencyTests(unittest.TestCase):
 
     def test_the_sport_chip_is_absent_where_sport_means_nothing(self):
         self.client.get("/analyze/muay_thai")
-        for path in ("/privacy", "/terms", "/legal"):
+        # The header is identical on every page (QA 2026-10-11, D8): the chip
+        # disappearing on some pages made the menu change shape.
+        for path in ("/privacy", "/terms", "/legal", "/profile", "/settings/privacy"):
             with self.subTest(path=path):
-                self.assertNotIn('class="sport-switch-name"', self.client.get(path).text)
+                self.assertIn('class="sport-switch-name"', self.client.get(path).text)
         # Plans, Progress and Coach are workspace tabs beside Analyze and the
         # library; the header must not change shape between them.
         for path in ("/pricing", "/dashboard", "/coach"):

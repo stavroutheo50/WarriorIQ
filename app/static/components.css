@@ -871,3 +871,12 @@
 .graph-read{margin:2px 0 6px;font-size:16px;line-height:1.45;color:#eef3ff}
 .stack-part{position:relative;overflow:hidden}
 .stack-part span{position:absolute;inset:0;display:flex;font-style:normal;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#0b0f17}
+/* Sections folded on phones (D12). On a wide screen the summary row is hidden
+   and the section reads as before. */
+.phone-fold>summary{cursor:pointer;margin:6px 0 10px;color:#9fd8ff;font-weight:750;font-size:14px}
+@media(min-width:701px){.phone-fold>summary{display:none}}
+/* One size for every section heading on the report (D13, QA 2026-10-11):
+   they ranged from 29px to 68px - a .section-title h2 inside a card took the
+   page-title size. The page's own h1 ("Fight report") is unaffected. */
+main:has(.result-title) section h2,
+main:has(.result-title) .section-title h2{font-size:clamp(22px,2.4vw,30px);line-height:1.15;letter-spacing:-.02em}

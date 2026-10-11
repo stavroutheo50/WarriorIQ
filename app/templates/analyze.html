@@ -23,7 +23,7 @@
     {% if pending_uploads %}<p class="console-pending small{% if pending_uploads.full %} pair-warning{% endif %}" id="pendingUploads" data-count="{{pending_uploads.count}}" data-limit="{{pending_uploads.limit if pending_uploads.limit is not none else ''}}">{% if pending_uploads.limit is none %}Fights waiting: {{pending_uploads.count}} &middot; no limit on your plan.{% elif pending_uploads.full %}Fights waiting: {{pending_uploads.count}} of {{pending_uploads.limit}}. Your plan allows {{pending_uploads.limit}} at a time &mdash; <a class="text-link" href="/history#pending">finish or cancel one</a> before uploading another.{% else %}Fights waiting: {{pending_uploads.count}} of {{pending_uploads.limit}} your plan allows at a time.{% endif %}</p>{% endif %}
     {% set allowance_exhausted = allowance and allowance.remaining == 0 %}
     <form id="fightUploadForm" action="/upload" method="post" enctype="multipart/form-data" data-sport="{{sport}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-      <div class="field upload-field" data-upload-step="video"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="{{fight_video_accept}}" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}Resets automatically{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% else %}{{fight_video_label}} &mdash; up to {{ (upload_limit_bytes / 1048576) | round | int }} MB{% endif %}</div>
+      <div class="field upload-field" data-upload-step="video"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="{{fight_video_accept}}" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}Resets automatically{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% else %}{{fight_video_label}} &mdash; up to {{ '%.1f'|format(upload_limit_bytes / 1048576) }} MB{% endif %}</div>
       {#- Filled in by the pre-upload check. Hidden until there is something
           measured to say, so an empty panel never occupies the page. #}
       <div class="preflight" id="preflightPanel" hidden aria-live="polite">
@@ -193,7 +193,9 @@
   const holdPage=event=>{if(!uploadInFlight)return;event.preventDefault();event.returnValue=''};
   window.addEventListener('beforeunload',holdPage);
   const releasePage=()=>{uploadInFlight=false};
-  const fmtMB=b=>b>=1073741824?`${(b/1073741824).toFixed(2)} GB`:b>=1048576?`${Math.round(b/1048576)} MB`:b>=1024?`${Math.round(b/1024)} KB`:`${b} B`;
+  // One decimal at every size (D5, QA 2026-10-11): 1,483 KB read "1 MB" here
+  // and 2,580 KB "3 MB" elsewhere. core/chunked_upload.py formats the same way.
+  const fmtMB=b=>b>=1073741824?`${(b/1073741824).toFixed(1)} GB`:b>=1048576?`${(b/1048576).toFixed(1)} MB`:b>=1024?`${(b/1024).toFixed(1)} KB`:`${b} B`;
   // "at this speed", not "left". The estimate genuinely rises when a
   // connection slows, and calling it a countdown made that read as the timer
   // running backwards. Rounded coarsely for the same reason: the exact second
@@ -227,7 +229,7 @@
   const overLimit=b=>b>UPLOAD_LIMIT;
   const sizeAdvice=b=>overLimit(b)?{tone:'bad',text:`${fmtMB(b)} — too large to upload. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps instead of 4K or 60 fps, or trim to a single round, and it will fit.`}:b>104857600?{tone:'warn',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data, less on Wi-Fi. Filming at 1080p and 30 fps instead of 4K or 60 fps makes it several times smaller with no loss to the analysis.`}
     :b>104857600?{tone:'note',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data. Wi-Fi will be quicker.`}
-    :{tone:'ok',text:`${fmtMB(b)} — ready to upload`};
+    :{tone:'ok',text:`${fmtMB(b)} — checking the video on this device…`};
   // Refuse an impossible file here rather than after the transfer. An 11-byte
   // text file renamed .mp4 turned the drop zone green, reported "0 MB - ready
   // for WarriorIQ analysis" and enabled submit; the failure only arrived from
@@ -263,13 +265,21 @@
   const rejectFile=(message)=>{preflightToken++;hidePreflight();videoInput.value='';fileButtonText.textContent='Choose fight video';fileStatus.textContent=message;fileStatus.dataset.tone='bad';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');uploadCard.dataset.uploadState='empty';uploadSubmit.disabled=true;uploadSubmit.textContent='Choose a video to continue';window.wiqToast(message,'error')};
   // Duration needs the browser to read the header, which it will only do
   // asynchronously, so it can only add to what the status line says.
-  const checkDuration=(f)=>{const probe=document.createElement('video');probe.preload='metadata';const url=URL.createObjectURL(f);probe.onloadedmetadata=()=>{URL.revokeObjectURL(url);const seconds=probe.duration;if(!isFinite(seconds))return;
+  // "Ready to upload" only once this device has read a picture from the file
+  // (D5, QA 2026-10-11): audio-only files and files that are not really video
+  // said "ready" before the server refused them.
+  const checkDuration=(f)=>{const probe=document.createElement('video');probe.preload='metadata';probe.muted=true;const url=URL.createObjectURL(f);let settled=false;
+    const unsure=()=>{if(settled||videoInput.files[0]!==f)return;settled=true;URL.revokeObjectURL(url);fileStatus.textContent=`${fmtMB(f.size)} — this browser cannot preview the file, so WarriorIQ checks it is a video when it arrives.`;fileStatus.dataset.tone='warn'};
+    setTimeout(unsure,10000);
+    probe.onloadedmetadata=()=>{if(settled)return;settled=true;URL.revokeObjectURL(url);const seconds=probe.duration;
+      if(!(probe.videoWidth>0&&probe.videoHeight>0)){rejectFile('This file has no picture — it looks like sound only. Pick the video file of the fight.');return}
+      if(!isFinite(seconds)){fileStatus.textContent=`${fmtMB(f.size)} — ready to upload`;return}
       // One frame of tolerance: a two-second clip often reports 1.97 s.
       if(seconds<PREFLIGHT_LIMITS.min_usable_seconds-0.05){rejectFile(`This clip is ${seconds.toFixed(1)} seconds long. WarriorIQ needs at least ${PREFLIGHT_LIMITS.min_usable_seconds} seconds of video to measure anything.`);return}
       const mins=Math.floor(seconds/60),secs=String(Math.round(seconds%60)).padStart(2,'0');
       if(seconds<SHORT_FIGHT_SECONDS){fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload. A clip this short gives only a few numbers; the report says how much fight it found.`;fileStatus.dataset.tone='warn';return}
       fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload`};
-    probe.onerror=()=>{URL.revokeObjectURL(url)};probe.src=url};
+    probe.onerror=unsure;probe.src=url};
 // What is still outstanding, named, above the button that refuses to work.
   // Pressing it fired three native bubbles at once and scrolled the page back
   // up to the consent block, which is not an explanation.
@@ -335,9 +345,12 @@
   };
   const rulesSelect=document.getElementById('fightRuleset'),rulesSummary=document.getElementById('rulesSummary');
   if(rulesSelect&&rulesSummary)rulesSelect.addEventListener('change',()=>{rulesSummary.textContent='\u00b7 Rules: '+rulesSelect.selectedOptions[0].textContent});
-  form.addEventListener('input',event=>{if(event.target.name==='fighter_name')syncSubmit()});
-  form.addEventListener('change',event=>{
-    if(['fighter_id','rights_confirmed','people_permissions_confirmed','minor_permission_status','openai_identity_recovery','external_ai_guardian_permission'].includes(event.target.name))syncSubmit()});
+  // Every answer, by any route (click, keyboard, autofill, a restored page),
+  // re-reads what is outstanding: the line said "One thing left: answer the
+  // under-18 question" after it was answered (D5, QA 2026-10-11).
+  form.addEventListener('input',()=>syncSubmit());
+  form.addEventListener('change',()=>syncSubmit());
+  window.addEventListener('pageshow',()=>syncSubmit());
   revealSteps();
   const setReady=()=>{const file=videoInput.files[0];
     if(file){const problem=fileProblem(file);if(problem){rejectFile(problem);return}}
@@ -513,7 +526,7 @@
   const restore=(message,status)=>{form.hidden=false;showProgress('error');progressText.textContent=message;progressBar.style.width='0%';uploadSubmit.removeAttribute('aria-busy');
     const step=showUploadError(status,message)||{};
     if(step.reselect){videoInput.value='';fileButton.classList.remove('uploaded');fileStatus.classList.remove('uploaded');fileButtonText.textContent='Choose fight video';fileStatus.textContent='Choose a different video';fileStatus.dataset.tone='bad';uploadCard.dataset.uploadState='empty';uploadSubmit.textContent='Choose a video to continue';syncSubmit()}
-    else{uploadSubmit.disabled=false;uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected'}
+    else{syncSubmit();uploadSubmit.textContent='Try upload again';fileStatus.textContent='Your video is still selected'}
     window.wiqToast(message,'error')};
   const fighterPick=document.getElementById('fighterPick'),fighterName=document.getElementById('fighterName');
   if(fighterPick&&fighterName){

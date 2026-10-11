@@ -116,7 +116,10 @@
   <div class="camp-standing" aria-label="Your Fight Camp points">
     <div class="camp-level"><span class="camp-rank">{{ standing.rank }}</span><span class="eyebrow">Level {{ standing.level }} · {{ standing.points }} points</span>
       <span class="camp-level-bar" role="progressbar" aria-valuemin="0" aria-valuemax="{{ standing.level_size }}" aria-valuenow="{{ standing.into_level }}" aria-label="Points towards level {{ standing.level + 1 }}"><i style="width:{{ (standing.into_level * 100 // standing.level_size) }}%"></i></span>
-      <small class="muted">{{ standing.level_size - standing.into_level }} to level {{ standing.level + 1 }}{% if standing.next_rank %} · {{ standing.next_rank }} at level {{ standing.next_rank_level }}{% endif %}</small></div>
+      <small class="muted">{{ standing.level_size - standing.into_level }} to level {{ standing.level + 1 }}{% if standing.next_rank %} · {{ standing.next_rank }} at level {{ standing.next_rank_level }}{% endif %}</small>
+      {#- 47 analyses and "0 points" with nothing to say why (QA, 2026-10-11).
+          Points come from missions, not from analysing fights. -#}
+      {% if not standing.points %}<p class="small muted camp-no-points" id="noPointsYet">No points yet: analysing a fight does not earn points on its own. Take a mission below and upload a training session for it (+{{ points_rules.session }}), finish the mission (+{{ points_rules.done }}), and your next fight showing its number improved earns +{{ points_rules.improved }}.</p>{% endif %}</div>
     {% set week_left = standing.week_target - standing.week_sessions %}
     <div class="camp-week">
       <span class="camp-week-ring" style="--done:{{ ([standing.week_sessions, standing.week_target]|min) * 100 // standing.week_target }}" role="img" aria-label="{{ standing.week_sessions }} of {{ standing.week_target }} training sessions this week"><b class="wiq-num">{{ standing.week_sessions }}/{{ standing.week_target }}</b></span>
@@ -209,9 +212,11 @@
     {% else %}<span class="stat-delta flat">First measured fight</span>{% endif %}
   </div>
   <div class="stat-support">
-    <div class="stat"><span class="label">Guard</span><b class="wiq-num">{{ recent_value('guard') }}</b>{{ recent_change('guard') }}</div>
-    <div class="stat"><span class="label">Balance</span><b class="wiq-num">{{ recent_value('balance') }}</b>{{ recent_change('balance') }}</div>
-    <div class="stat"><span class="label">Ring centre</span><b class="wiq-num">{{ recent_value('center') }}</b>{{ recent_change('center') }}</div>
+    {#- The headline figure is not repeated beside it ("GUARD POSITION 7%"
+        above "GUARD 7%", QA 2026-10-11). -#}
+    {% if hk != 'guard' %}<div class="stat"><span class="label">Guard</span><b class="wiq-num">{{ recent_value('guard') }}</b>{{ recent_change('guard') }}</div>{% endif %}
+    {% if hk != 'balance' %}<div class="stat"><span class="label">Balance</span><b class="wiq-num">{{ recent_value('balance') }}</b>{{ recent_change('balance') }}</div>{% endif %}
+    {% if hk != 'center' %}<div class="stat"><span class="label">Ring centre</span><b class="wiq-num">{{ recent_value('center') }}</b>{{ recent_change('center') }}</div>{% endif %}
     <div class="stat"><span class="label">How clearly we saw you</span><b class="wiq-num">{% if progress.average_coverage is not none %}{{'%.0f'|format(progress.average_coverage*100)}}%{% else %}—{% endif %}</b><i class="quiet">average</i></div>
   </div>
 </section>
@@ -427,7 +432,18 @@ document.querySelectorAll('.session-upload').forEach(form=>{
     label.firstChild.textContent='Uploading 0%…';
     xhr.open('POST',form.action);xhr.send(new FormData(form));});
 });
-</script>{% endif %}{% if profile and progress.fight_count %}<script nonce="{{ request.state.csp_nonce }}">const points={{progress.points|tojson}},metricKey={{progress.trend_key|tojson}},metricLabel={{progress.trend_label|tojson}},svg=document.getElementById('movementChart'),values=points.filter(p=>p[metricKey]!==null&&p[metricKey]!==undefined).map((p,i)=>({i,v:p[metricKey]}));if(values.length){const w=640,h=230,pad=34,min=Math.min(...values.map(p=>p.v)),max=Math.max(...values.map(p=>p.v)),range=Math.max(.1,max-min),x=i=>pad+(values.length===1?(w-2*pad)/2:i*(w-2*pad)/(values.length-1)),y=v=>h-pad-(v-min)*(h-2*pad)/range;for(let n=0;n<4;n++){const yy=pad+n*(h-2*pad)/3;svg.insertAdjacentHTML('beforeend',`<line x1="${pad}" y1="${yy}" x2="${w-pad}" y2="${yy}" class="chart-grid"/>`)}svg.insertAdjacentHTML('beforeend',`<polyline points="${values.map(p=>`${x(p.i)},${y(p.v)}`).join(' ')}" class="chart-line"/>`);for(const p of values)svg.insertAdjacentHTML('beforeend',`<circle cx="${x(p.i)}" cy="${y(p.v)}" r="5" class="chart-point"><title>${metricLabel}: ${(p.v*100).toFixed(0)}%</title></circle>`)}else svg.insertAdjacentHTML('beforeend','<text x="320" y="120" text-anchor="middle" class="chart-empty">No supported movement trend yet</text>');</script>{% endif %}{% if profile %}<script nonce="{{ request.state.csp_nonce }}">
+</script>{% endif %}{% if profile and progress.fight_count %}<script nonce="{{ request.state.csp_nonce }}">const points={{progress.points|tojson}},metricKey={{progress.trend_key|tojson}},metricLabel={{progress.trend_label|tojson}},svg=document.getElementById('movementChart'),values=points.filter(p=>p[metricKey]!==null&&p[metricKey]!==undefined).map((p,i)=>({i,v:p[metricKey],d:p.created_at}));
+// D4 (QA 2026-10-11): the trend had no axis, no values and no dates. The
+// y-axis is percent from 0 to 100 so two fights' heights mean the same thing,
+// each point is labelled, and the x-axis gives each fight's date.
+const fmtDate=s=>{const t=new Date(s);return isNaN(t)?'':t.toLocaleDateString(undefined,{day:'numeric',month:'short'})};
+if(values.length){const w=640,h=230,left=46,right=20,top=20,bottom=40,x=i=>left+(values.length===1?(w-left-right)/2:i*(w-left-right)/(values.length-1)),y=v=>h-bottom-Math.max(0,Math.min(1,v))*(h-top-bottom);
+  for(const tick of [0,.25,.5,.75,1]){const yy=y(tick);svg.insertAdjacentHTML('beforeend',`<line x1="${left}" y1="${yy}" x2="${w-right}" y2="${yy}" class="chart-grid"/><text x="${left-8}" y="${yy+4}" text-anchor="end" class="chart-axis">${Math.round(tick*100)}%</text>`)}
+  svg.insertAdjacentHTML('beforeend',`<polyline points="${values.map(p=>`${x(p.i)},${y(p.v)}`).join(' ')}" class="chart-line"/>`);
+  const every=Math.max(1,Math.ceil(values.length/6));
+  values.forEach((p,k)=>{svg.insertAdjacentHTML('beforeend',`<circle cx="${x(p.i)}" cy="${y(p.v)}" r="5" class="chart-point"><title>${metricLabel}: ${(p.v*100).toFixed(0)}% · ${fmtDate(p.d)}</title></circle>`);
+    if(k%every===0||k===values.length-1){svg.insertAdjacentHTML('beforeend',`<text x="${x(p.i)}" y="${y(p.v)-10}" text-anchor="middle" class="chart-value">${(p.v*100).toFixed(0)}%</text><text x="${x(p.i)}" y="${h-bottom+20}" text-anchor="middle" class="chart-axis">${fmtDate(p.d)}</text>`)}});
+}else svg.insertAdjacentHTML('beforeend','<text x="320" y="120" text-anchor="middle" class="chart-empty">No supported movement trend yet</text>');</script>{% endif %}{% if profile %}<script nonce="{{ request.state.csp_nonce }}">
 (()=>{
   // Filing was a full-page POST and reload, so choosing a fighter on row 12 of
   // a 15-row table threw the reader back to the top with nothing saying what

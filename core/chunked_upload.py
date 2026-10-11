@@ -137,8 +137,8 @@ def begin(job_id: str, account_id: int, *, filename: str, declared_bytes: int,
     if declared_bytes > ceiling:
         raise ChunkedUploadError(
             413,
-            f"That video is {declared_bytes / 1048576:.0f} MB. WarriorIQ accepts "
-            f"up to {ceiling / 1048576:.0f} MB. Trim it to a single round.")
+            f"That video is {declared_bytes / 1048576:.1f} MB. WarriorIQ accepts "
+            f"up to {ceiling / 1048576:.1f} MB. Trim it to a single round.")
     session = UploadSession(
         job_id=job_id, account_id=account_id, suffix=suffix,
         declared_bytes=declared_bytes, received_bytes=0,

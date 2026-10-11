@@ -63,7 +63,7 @@ from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
-    HandleTaken, accept_follow, count_follows, follow_status, get_account_by_profile, get_profile_by_handle,
+    HandleTaken, accept_follow, count_follows, follow_status, get_account_by_profile, get_profile_by_handle, search_profiles_by_handle,
     list_follows, remove_follow, request_follow, set_public_profile,
     add_assignment, analysis_allowance, apply_subscription_change, award_points, link_camp_mission, list_camp_missions,
     list_points, list_training_sessions, record_training_session, redeem_points_for_analysis, apply_checkout_event, consume_email_verification_token,
@@ -485,7 +485,10 @@ PUBLIC_INDEX_ROUTES = (
 # Progress and Coach used to be listed too, which made the header change shape
 # between the main workspace tabs - the chip appeared on Analyze and the fight
 # library and vanished on the three tabs beside them.
-SPORT_IRRELEVANT_PREFIXES = ("/profile", "/settings", "/legal", "/privacy", "/terms")
+# Empty: the header is the same on every page (D8, QA 2026-10-11). Hiding the
+# sport selector on /profile and /settings made the menu jump between pages.
+# Kept as a setting rather than deleted so the mechanism stays in one place.
+SPORT_IRRELEVANT_PREFIXES: tuple[str, ...] = ()
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/pending/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/live-frame/", "/dashboard", "/history",
@@ -1890,8 +1893,16 @@ def _apply_response_headers(request: Request, response) -> None:
     frame_src = "'self'"
     if analytics_allowed:
         script_src += " https://www.googletagmanager.com"
-        connect_src += " https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com"
-        img_src += " https://*.google-analytics.com https://*.googletagmanager.com"
+        # GA4 falls back to www.google.com/g/collect, and the Ads destination
+        # sends its (non-personalised) page view to pagead2.googlesyndication
+        # .com/ccm/collect. Both were refused by this policy after consent, so
+        # those events never arrived (E4, QA 2026-10-11, checked in Chromium).
+        # Google's documented origins for GA4 with Ads, and only here.
+        google_ads = (" https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net"
+                      " https://www.google.com https://google.com")
+        connect_src += (" https://*.google-analytics.com https://*.analytics.google.com"
+                        " https://*.googletagmanager.com" + google_ads)
+        img_src += " https://*.google-analytics.com https://*.googletagmanager.com" + google_ads
         if SETTINGS.gtm_container_id:
             frame_src += " https://www.googletagmanager.com"
     # Sign-in forms redirect to the provider, and form-action is enforced across
@@ -3878,7 +3889,7 @@ async def upload(
         raise HTTPException(
             400,
             "WarriorIQ could not read this file as a video. It may be corrupted, "
-            "still uploading, or saved in a format this build cannot decode. "
+            "still uploading, or saved in a format WarriorIQ cannot read. "
             "Try MP4 or MOV exported straight from your phone or camera.",
         ) from exc
 
@@ -5913,7 +5924,13 @@ def result_page(request: Request, job_id: str):
         "kick_minimum": kick_minimum_check(report) if identity_trusted else None,
     })
     response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
-    if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:
+    # The active-analysis cookie also stands in for a finished job
+    # (_analysis_navigation_state's fallback), so "Results ready" stayed in the
+    # menu after the result was opened whenever that cookie named a finished
+    # job (D7, QA 2026-10-11). Cleared unless it names one still running.
+    active_cookie = request.cookies.get(ACTIVE_ANALYSIS_COOKIE)
+    if active_cookie and (active_cookie == job_id or not _owned_job(
+            _owner_key(request), active_cookie, {"queued", "running", "interrupted"})):
         response.delete_cookie(ACTIVE_ANALYSIS_COOKIE, httponly=True, samesite="lax")
     return response
 
@@ -6423,6 +6440,7 @@ def replay_page(
         # while this page said no action had passed. The same list is offered
         # here, labelled as what it is: automatic counts, estimates.
         counted = _counted_strikes(report, published_families(sport, report))
+        replay_names = _fighter_names(request, _authorized_job(request, job_id) or {}, report)
         if fighter and fighter.upper() in {"A", "B"}:
             counted = [row for row in counted if row["fighter"] == fighter.upper()]
         if family and family.lower() in {"punch", "kick", "knee"}:
@@ -6430,7 +6448,7 @@ def replay_page(
         if counted:
             replay_chapters = [{
                 "time": round(row["seconds"], 3), "lead_seconds": 1.0,
-                "label": f"{row['clock']} · Fighter {row['fighter']} · {row['family'].title()}",
+                "label": f"{row['clock']} · {replay_names.get(row['fighter'], 'Fighter ' + row['fighter'])} · {row['family'].title()}",
                 "detail": "Counted automatically (estimate)", "kind": "counted_strike",
             } for row in counted[:200]]
             replay_mode = "counted_strikes"
@@ -6575,6 +6593,8 @@ def profile_page(request: Request, error: str = ""):
             "request": request, "error": error[:200],
             "profile": get_profile(profile_id) if profile_id is not None else None,
             "fights": list_fights(profile_id) if profile_id is not None else [],
+            "display_name": (_display_name(get_profile(profile_id), list_fights(profile_id))
+                             if profile_id is not None else None),
             "minor": social.is_minor_account(_account(request)),
             "follow_requests": list_follows(profile_id, direction="followers", status="pending") if profile_id is not None else [],
             "followers": list_follows(profile_id, direction="followers") if profile_id is not None else [],
@@ -6663,8 +6683,29 @@ FEED_ITEMS = 40
 FEED_POSTS_PER_ATHLETE = 5
 
 
+def _athlete_search(viewer: int, query: str) -> list[dict]:
+    """Athletes by username, for following (D10, QA 2026-10-11: the Feed had
+    no way to find anybody). The same rules as an athlete's own page: a
+    minor's profile is never listed to others, and a private profile shows its
+    username only."""
+    text = (query or "").strip().lstrip("@").lower()
+    if len(text) < 2 or not re.fullmatch(r"[a-z0-9_.-]+", text):
+        return []
+    found = []
+    for profile in search_profiles_by_handle(text, limit=10):
+        if int(profile["id"]) == int(viewer):
+            continue
+        minor = social.is_minor_account(get_account_by_profile(int(profile["id"])))
+        if not social.is_discoverable(viewer_profile_id=viewer, profile=profile, minor=minor):
+            continue
+        visible = social.can_view(viewer_profile_id=viewer, profile=profile, minor=minor, follow=None)
+        found.append({"handle": profile["handle"],
+                      "name": (profile.get("display_name") if visible else None)})
+    return found
+
+
 @app.get("/feed", response_class=HTMLResponse)
-def feed_page(request: Request):
+def feed_page(request: Request, q: str = ""):
     """What the athletes this person follows have done, newest first.
 
     Only accepted follows, and each athlete's page rules are applied again
@@ -6699,6 +6740,8 @@ def feed_page(request: Request):
         request=request, name="feed.html",
         context={"request": request, "items": feed.newest_first(items, FEED_ITEMS),
                  "following_count": len(following),
+                 "query": q.strip()[:40],
+                 "search_results": _athlete_search(viewer, q),
                  "own_handle": (get_profile(viewer) or {}).get("handle")},
     )
 
@@ -6778,6 +6821,8 @@ def settings_page(request: Request, section: str, notice: str = "", error: str =
             "account": account,
             "profile": get_profile(int(account["profile_id"])) or {},
             "fights": list_fights(int(account["profile_id"])),
+            "display_name": _display_name(get_profile(int(account["profile_id"])),
+                                          list_fights(int(account["profile_id"]))),
             "video_retention_days": SETTINGS.saved_video_retention_days,
             # The same resolver /pricing uses (effective_plan_key): reading
             # plan_override or plan by hand missed a granted plan, and Billing
@@ -7061,6 +7106,24 @@ def _athlete_name(profile: dict, fights: list[dict]) -> str:
     if names:
         return names.most_common(1)[0][0]
     return str(profile.get("display_name") or SETTINGS.default_profile_name)
+
+
+def _display_name(profile: dict | None, fights: list[dict]) -> str:
+    """The one name the account's own pages use for its athlete.
+
+    QA, 2026-10-11: "My Athlete" on /profile and /settings, "Theodoulos" in
+    Fight Camp, for the same person. A name the user typed wins; while the
+    profile still has the starting placeholder, the fighter the fights are
+    filed under is the name, as Fight Camp already showed.
+    """
+    own = " ".join(str((profile or {}).get("display_name") or "").split())
+    if own and own != SETTINGS.default_profile_name:
+        return own
+    filed = Counter(" ".join(str(fight.get("fighter_name")).split())
+                    for fight in fights if str(fight.get("fighter_name") or "").strip())
+    if filed:
+        return filed.most_common(1)[0][0]
+    return own or SETTINGS.default_profile_name
 
 
 def _athlete_fighter_id(fights: list[dict]) -> int | None:
@@ -7385,9 +7448,18 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     )
 
 
+@app.get("/coach")
+def coach_redirect(request: Request):
+    """/coach and /dashboard were one page at two addresses, sold on the home
+    page as two different things (D3, QA 2026-10-11). /coach now forwards to
+    Fight Camp; old links and bookmarks keep working, query string included
+    (the browser carries a #squad fragment across the redirect itself)."""
+    query = request.url.query
+    return RedirectResponse("/dashboard" + (f"?{query}" if query else ""), status_code=308)
+
+
 @app.get("/camp", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
-@app.get("/coach", response_class=HTMLResponse)
 def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = "", redeem: str = ""):
     """Fight Camp: missions from the latest fight, progress, and the squad.
 
@@ -7531,7 +7603,7 @@ def _roster_refusal(message: str, typed: str) -> RedirectResponse:
 
 
 @app.post("/coach/fighters", dependencies=[Depends(require_csrf)])
-def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/coach#squad")):
+def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/dashboard#squad")):
     """Add someone to the roster without having to analyse a fight first.
 
     Filing an old fight needs a fighter to file it against, and until now the
@@ -7559,7 +7631,7 @@ def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = 
                 name,
             )
     create_fighter(profile_id, cleaned)
-    return RedirectResponse(_safe_next(next_path, "/coach#squad"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/dashboard#squad"), status_code=303)
 
 
 @app.post("/coach/fights/{job_id}/fighter", dependencies=[Depends(require_csrf)])
@@ -7567,7 +7639,7 @@ def assign_fight_to_fighter(
     request: Request,
     job_id: str,
     fighter_id: str = Form(""),
-    next_path: str = Form("/coach#squad"),
+    next_path: str = Form("/dashboard#squad"),
 ):
     """File a past fight against a fighter.
 
@@ -7581,7 +7653,7 @@ def assign_fight_to_fighter(
     chosen = int(fighter_id) if fighter_id.strip().isdigit() else None
     if not assign_fighter_to_fight(profile_id, job_id, chosen):
         raise HTTPException(404, "That fight or fighter is not in this workspace.")
-    return RedirectResponse(_safe_next(next_path, "/coach#squad"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/dashboard#squad"), status_code=303)
 
 
 @app.post("/coach/assignments", dependencies=[Depends(require_csrf)])
