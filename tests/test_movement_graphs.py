@@ -104,6 +104,15 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(facts["time off balance"]["value"], "1")
         self.assertEqual(facts["longest with hands down"]["value"], "0:04")
 
+    def test_each_graph_says_what_it_shows_with_its_numbers(self):
+        reads = movement_graphs.build(_report(), "A")["reads"]
+        self.assertEqual(reads["moved"], "You went forward 40% of the time, backed up 20%, circled 20% and stood "
+                                         "still 20%. Your opponent went forward 100% of the time.")
+        self.assertEqual(reads["ranges"], "You were close to your opponent 10% of the time, at middle distance "
+                                          "70% and far apart 20%.")
+        self.assertIn("On average you moved 1.5 body lengths a second, your opponent 0.8.", reads["energy"])
+        self.assertTrue(reads["guard"].startswith("Your hands were up 100% of the time."))
+
     def test_an_older_report_still_gets_the_bars_without_the_lines(self):
         graphs = movement_graphs.build(_report(with_series=False), "A")
         self.assertIsNone(graphs["energy"])
@@ -134,6 +143,8 @@ class PageTests(unittest.TestCase):
         self.assertLess(page.index('class="fight-vitals"'), page.index('id="report-graphs"'))
         self.assertIn('class="graph-line mine"', page)
         self.assertIn("You moved 12% slower in the second half", page)
+        self.assertIn('class="graph-read"', page)
+        self.assertIn("<span>40%</span>", page)   # the share printed inside its bar
 
     def test_numbers_count_up_and_graphs_draw_in_but_never_against_reduced_motion(self):
         import re
