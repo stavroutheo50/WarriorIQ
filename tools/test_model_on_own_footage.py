@@ -107,6 +107,17 @@ def _peak_predict(model, batch):
     return collections.Counter(model.predict(np.stack([w[-1, :FEATURES] for w in batch])))
 
 
+SURE = (0.7, 0.9, 0.97)
+
+
+def _peak_sure(model, batch, threshold):
+    """Share of windows where the one-frame model is at least this sure of a strike."""
+    from core.peak_pose import FEATURES, PEAK_CLASSES
+
+    p = model.probabilities(np.stack([w[-1, :FEATURES] for w in batch]))
+    return float(np.mean(1.0 - p[:, PEAK_CLASSES.index("none")] >= threshold))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     group = parser.add_mutually_exclusive_group(required=True)
@@ -207,6 +218,14 @@ def main() -> int:
             return "%5d windows, fires %5.1f%%" % (len(batch), 100.0 * fired / len(batch))
 
         print("%-12s %26s %26s" % (key, rate(quiet_batch), rate(strike_batch)))
+        if arguments.peak_pose and quiet_batch and strike_batch:
+            # A model that cannot separate them at its default cut may still
+            # do so when it is very sure; this says whether it does.
+            for threshold in SURE:
+                print("%-12s %26s %26s" % (
+                    "  sure>=%.2f" % threshold,
+                    "fires %5.1f%%" % (100.0 * _peak_sure(peak_model, quiet_batch, threshold)),
+                    "fires %5.1f%%" % (100.0 * _peak_sure(peak_model, strike_batch, threshold))))
 
     print()
     print("Useful looks like a LOW quiet rate and a HIGH strike rate. Both near")
