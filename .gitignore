@@ -72,6 +72,8 @@ dataset/sequences_auto/
 # the local list of analysed UFC bouts (paths on this machine).
 dataset/sequences_pipeline/
 dataset/exam/
+# tools/import_combat_sports.py: pose measurements of identifiable people.
+dataset/peak_pose/
 
 # What tools/build_labelled_sequences.py and the training mixes build. Same
 # reasoning: pose measurements of identifiable athletes, public repository.

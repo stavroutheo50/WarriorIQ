@@ -34,6 +34,10 @@ negatives fixes it; the missing ingredient is labelled POSITIVES on this
 footage, which is a human task and the reason the label pack exists.
 
     python tools/test_model_on_own_footage.py --ckpt models/experiments/x.pt --fights 1mp4,b883
+
+``--peak-pose models/peak_pose_candidate.npz`` asks the same two questions of
+the one-frame model in core/peak_pose.py instead, on the last frame of each
+window - the frame a detected action peaks on.
 """
 from __future__ import annotations
 
@@ -96,9 +100,18 @@ def _predict(net, batch, classes):
     return collections.Counter(classes[p] for p in predicted)
 
 
+def _peak_predict(model, batch):
+    """The one-frame model on each window's last frame (its position half)."""
+    from core.peak_pose import FEATURES
+
+    return collections.Counter(model.predict(np.stack([w[-1, :FEATURES] for w in batch])))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--ckpt", required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--ckpt")
+    group.add_argument("--peak-pose", help="a core/peak_pose.py model (.npz) instead of a temporal checkpoint")
     parser.add_argument("--fights", default="1mp4,b883")
     parser.add_argument("--stride", type=int, default=3)
     parser.add_argument("--reuse", action="store_true",
@@ -108,22 +121,31 @@ def main() -> int:
     os.environ["WARRIORIQ_FORCE_STRIDE"] = str(int(arguments.stride))
 
     import cv2
-    import torch
 
     from core import analyzer
     from core.config import SETTINGS
-    from core.temporal_model import ACTION_CLASSES, build_temporal_network
     from core.types import AnalysisRequest
 
-    blob = torch.load(PROJECT_ROOT / arguments.ckpt, map_location="cpu", weights_only=False)
-    net = build_temporal_network("pose_transformer_v2", 102, len(ACTION_CLASSES))
-    net.load_state_dict(blob.get("state_dict", blob) if isinstance(blob, dict) else blob)
-    net.eval()
+    if arguments.peak_pose:
+        from core.peak_pose import PeakPoseModel
+
+        peak_model = PeakPoseModel.load(PROJECT_ROOT / arguments.peak_pose)
+        predict = lambda batch: _peak_predict(peak_model, batch)  # noqa: E731
+    else:
+        import torch
+
+        from core.temporal_model import ACTION_CLASSES, build_temporal_network
+
+        blob = torch.load(PROJECT_ROOT / arguments.ckpt, map_location="cpu", weights_only=False)
+        net = build_temporal_network("pose_transformer_v2", 102, len(ACTION_CLASSES))
+        net.load_state_dict(blob.get("state_dict", blob) if isinstance(blob, dict) else blob)
+        net.eval()
+        predict = lambda batch: _predict(net, batch, ACTION_CLASSES)  # noqa: E731
 
     seeds = json.loads(SEEDS_PATH.read_text(encoding="utf-8"))["fights"]
     window = int(SETTINGS.action_window)
 
-    print("checkpoint: %s" % arguments.ckpt)
+    print("checkpoint: %s" % (arguments.peak_pose or arguments.ckpt))
     print("%-12s %26s %26s" % ("fight", "quiet (all windows)", "strike (detected actions)"))
     for key in [k.strip() for k in arguments.fights.split(",") if k.strip()]:
         fight = seeds.get(key)
@@ -180,7 +202,7 @@ def main() -> int:
         def rate(batch):
             if not batch:
                 return "no complete windows"
-            tally = _predict(net, batch, ACTION_CLASSES)
+            tally = predict(batch)
             fired = sum(v for k, v in tally.items() if k != "none")
             return "%5d windows, fires %5.1f%%" % (len(batch), 100.0 * fired / len(batch))
 

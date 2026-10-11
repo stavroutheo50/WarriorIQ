@@ -161,6 +161,7 @@ LEGAL_DOCUMENTS = {
             ("Training data", "WarriorIQ trains its strike-recognition model on pose keypoints and labels from public datasets, credited here: "
              "BoxingVI by R. Kumar, V. Baghel, S. Singh, B. K. Badatya, S. Yadav, B. Srinivasan and R. Hegde (\"BoxingVI: A Multi-Modal Benchmark for Boxing Action Recognition and Localization\", arXiv:2511.16524), Creative Commons, used with the authors' permission; "
              "TKD-Kick3 (Zenodo, doi:10.5281/zenodo.20390892), CC BY 4.0; "
+             "Combat Sports Dataset by Evan Quinn (Zenodo, doi:10.5281/zenodo.15349809), CC BY 4.0, gym recordings only; "
              "StrikeMetrics by sswhitehat (github.com/sswhitehat/StrikeMetrics---Kickboxing-AI-Tool), MIT licence. "
              "Strike counts are checked against official UFC statistics (ufcstats.com) before they are shown."),
         ],
