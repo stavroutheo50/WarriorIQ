@@ -98,6 +98,14 @@ def strikes_while_standing(events, records) -> list:
     through grappling it turns scrambles, grips and position changes into
     punches (149 strikes on a round with 41 officially, 21 of them at
     distance). This keeps only the ones thrown standing.
+
+    Measured on UFC 326 Holloway vs Oliveira 2 (official distance strikes,
+    both fighters together; designed on round 1, then checked on 3 and 4):
+    round 1 149 -> 24 (official 21), round 3 157 -> 36 (12), round 4
+    314 -> 20 (17). Per fighter it is worse: the tracker swaps the two at
+    broadcast camera cuts (a quarter to a third of clearly-seen standing
+    frames), so a right total can still credit the wrong fighter. Not good
+    enough to publish; it narrows where the remaining error is.
     """
     standing = standing_seconds(records)
     kept = []
