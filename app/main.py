@@ -4485,6 +4485,20 @@ def _person_inside(person: list[float], drawn: list[float]) -> bool:
     return inter / person_area >= 0.5 and inter / drawn_area >= 0.2
 
 
+# How sure the selection-page detector must be that a person is inside a box
+# the user drew themselves. Lower than the bar for the boxes it offers
+# (core.person_detect.MIN_CONFIDENCE, 0.35): on 2026-10-11 a fighter in a
+# small, blurry WAKO hall video scored 0.30, was not offered and then had his
+# own box refused, with no way to start the analysis. Measured on 400 frames
+# of the Combat Sports Dataset gym videos: at 0.35 the detector found 84% of
+# the people labelled there and accepted 8% of boxes drawn around a punch bag
+# alone; at 0.20, 95% and 25%. A bag that gets through is still refused by
+# the analysis's own seed check (core.report.identity_failure, "could not
+# find ... where the box was drawn"); a real fighter refused here cannot be
+# analysed at all.
+DRAWN_BOX_CONFIDENCE = 0.20
+
+
 def _boxes_without_a_person(frame, boxes: dict[str, list[float]], width: float, height: float) -> list[str]:
     """The labels of drawn boxes that hold no detected person.
 
@@ -4497,7 +4511,7 @@ def _boxes_without_a_person(frame, boxes: dict[str, list[float]], width: float, 
     """
     if frame is None:
         return []
-    people = detect_people_in_frame(frame)
+    people = detect_people_in_frame(frame, min_confidence=DRAWN_BOX_CONFIDENCE, limit=50)
     if people is None:
         LOGGER.info("selection_person_check_unavailable")
         return []

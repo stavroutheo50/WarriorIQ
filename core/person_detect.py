@@ -108,7 +108,7 @@ def _anchors(stride: int) -> np.ndarray:
     return np.column_stack((xs.ravel() + 0.5 * (stride - 1), ys.ravel() + 0.5 * (stride - 1)))
 
 
-def _decode(outputs) -> list[tuple[list[float], float]]:
+def _decode(outputs, min_confidence: float = MIN_CONFIDENCE) -> list[tuple[list[float], float]]:
     """NanoDet heads -> (box in 416 space, person score).
 
     Output order differs between OpenCV 4 and 5 (interleaved or grouped), so
@@ -125,7 +125,7 @@ def _decode(outputs) -> list[tuple[list[float], float]]:
         if rows not in scores or rows not in boxes:
             continue
         person = scores[rows][:, _PERSON]
-        keep = person >= MIN_CONFIDENCE
+        keep = person >= min_confidence
         if not keep.any():
             continue
         dist = boxes[rows][keep].reshape(-1, _REG_MAX + 1)
@@ -142,15 +142,18 @@ def _decode(outputs) -> list[tuple[list[float], float]]:
     all_boxes = np.clip(np.concatenate(found_boxes), 0, _INPUT)
     all_scores = np.concatenate(found_scores)
     xywh = [[float(b[0]), float(b[1]), float(b[2] - b[0]), float(b[3] - b[1])] for b in all_boxes]
-    picked = cv2.dnn.NMSBoxes(xywh, [float(s) for s in all_scores], MIN_CONFIDENCE, 0.6)
+    picked = cv2.dnn.NMSBoxes(xywh, [float(s) for s in all_scores], min_confidence, 0.6)
     return [([float(v) for v in all_boxes[i]], float(all_scores[i])) for i in np.ravel(picked)]
 
 
-def detect_people(frame: np.ndarray) -> list[dict] | None:
+def detect_people(frame: np.ndarray, min_confidence: float = MIN_CONFIDENCE,
+                  limit: int = MAX_CANDIDATES) -> list[dict] | None:
     """People in a BGR frame as [{"box": [x1, y1, x2, y2], "confidence"}].
 
     None means the detector is unavailable, which is not the same as nobody
-    being in the frame.
+    being in the frame. ``min_confidence`` and ``limit`` default to what the
+    page offers as candidates; checking a box someone drew asks for less
+    (app.main.DRAWN_BOX_CONFIDENCE).
     """
     net = _load()
     if net is None or frame is None or frame.size == 0:
@@ -170,13 +173,13 @@ def detect_people(frame: np.ndarray) -> list[dict] | None:
         LOGGER.warning("person_detector_failed reason=%s", type(exc).__name__)
         return None
     people = []
-    for (x1, y1, x2, y2), score in _decode(outputs):
+    for (x1, y1, x2, y2), score in _decode(outputs, min_confidence):
         box = [max(0.0, (x1 - left) / scale), max(0.0, (y1 - top) / scale),
                min(float(width), (x2 - left) / scale), min(float(height), (y2 - top) / scale)]
         if box[2] > box[0] and box[3] > box[1]:
             people.append({"box": box, "confidence": score})
     people.sort(key=lambda p: -(p["box"][2] - p["box"][0]) * (p["box"][3] - p["box"][1]))
-    return people[:MAX_CANDIDATES]
+    return people[:limit]
 
 
 def _shared(a: list[float], b: list[float]) -> float:
