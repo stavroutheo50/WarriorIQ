@@ -114,7 +114,7 @@ from core.chunked_upload import (
 from core.css_minify import minify as minify_css
 from core.preflight_client import client_thresholds
 from core.report_visuals import build as report_visuals
-from core.movement_graphs import build as movement_graphs
+from core.movement_graphs import build as movement_graphs, compare as movement_graphs_compare
 from core.upload_security import (
     FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS, FIGHT_VIDEO_LABEL,
     UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, limit_upload_route, looks_like_video,
@@ -1466,6 +1466,14 @@ def _moment_fighters(report: dict) -> list[str]:
     video = report.get("video") or {}
     focus = video.get("focus_fighter") or video.get("analysis_target") or "BOTH"
     return [focus] if focus in {"A", "B"} else ["A", "B"]
+
+
+def _compare_graphs(reports: list) -> dict | None:
+    if len(reports) != 2 or not all(reports):
+        return None
+    sides = compare_movement(reports)
+    failed = sides.get("identity_failed") or [False, False]
+    return movement_graphs_compare(reports, [_visual_focus(r) for r in reports], list(failed))
 
 
 def _visual_focus(report: dict) -> str:
@@ -7013,6 +7021,10 @@ def compare_page(request: Request, a: str = "", b: str = ""):
             # The page promised a movement comparison "below" and rendered
             # nothing. These are the numbers that survive the strike gate.
             "movement": compare_movement(reports),
+            # The report's movement graphs for both fights, side by side
+            # (core/movement_graphs.py), with the same identity gate as the
+            # movement table.
+            "compare_graphs": _compare_graphs(reports),
         },
     )
 
