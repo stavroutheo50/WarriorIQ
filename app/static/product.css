@@ -410,3 +410,4 @@ body[data-page=home] main > .hero{padding-bottom:clamp(32px,5vh,56px)}
    (D7, 2026-10-11). Fixed-width digits so the width does not jitter. */
 .active-analysis-chip{white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums}
 .privacy-fight-list article[hidden]{display:none}
+.settings-fold>summary{cursor:pointer;color:#9fd8ff;font-weight:750;margin:6px 0 12px}

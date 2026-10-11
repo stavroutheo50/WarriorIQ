@@ -340,7 +340,7 @@
   <div class="eyebrow">Left out of your progress</div>
   <h2>{{ progress.identity_failed_fights|length }} fight{{ '' if progress.identity_failed_fights|length == 1 else 's' }} we couldn't tell who was who in</h2>
   <p class="muted">Show WarriorIQ who is who on each one and it joins your progress.</p>
-  <details class="left-out-list"{% if progress.identity_failed_fights|length <= 5 %} open{% endif %}><summary>Show {{ 'it' if progress.identity_failed_fights|length == 1 else 'them' }}</summary>
+  <details class="left-out-list"><summary>Show {{ 'it' if progress.identity_failed_fights|length == 1 else 'them' }}</summary>
   <ul class="list-clean">{% for item in progress.identity_failed_fights %}<li><span>{{ item.label }}</span> {% if item.fixable %}<a class="btn secondary tiny" href="/select/{{ item.job_id }}">Show me who is who</a>{% else %}<span class="small muted">The video was removed after {{ video_retention_days|default(30) }} days, so this one can no longer be fixed.</span> <a class="text-link" href="/result/{{ item.job_id }}">Open report</a>{% endif %}</li>{% endfor %}</ul>
   </details>
 </section>

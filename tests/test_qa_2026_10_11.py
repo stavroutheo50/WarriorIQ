@@ -763,6 +763,8 @@ def test_d6_selection_page_solo_hides_b_and_start_stays_in_view():
 def test_d7_opening_a_result_clears_a_finished_job_from_the_menu_cookie():
     source = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     assert 'active_cookie == job_id or not _owned_job(' in source
+    # Both report kinds clear it: the Solo page returned before this ran.
+    assert 'return _result_opened(request, templates.TemplateResponse(request=request, name="solo_result.html"' in source
     css = (ROOT / "app" / "static" / "product.css").read_text(encoding="utf-8")
     assert ".active-analysis-chip{white-space:nowrap" in css
 
@@ -898,3 +900,24 @@ def test_f_an_old_saved_report_is_re_rendered_without_its_stored_false_text():
     assert "counted strikes" not in text
     assert "Work on: Guard 7%" in text
     assert report["training_plan"]["A"]
+
+
+def test_d7_opening_a_solo_result_clears_results_ready():
+    client = BrowserClient(web.app)
+    client.get("/")
+    owner = f"guest:{client.cookies.get(web.GUEST_COOKIE)}"
+    job = "qa1011solo" + uuid.uuid4().hex[:5]
+    (web.OUTPUTS / job).mkdir()
+    report = {"mode": "solo", "setup": {"ruleset": "K1"}, "video": {"analysis_target": "A"}, "integrity": {},
+              "metrics": {"A": {"pose_coverage": 0.9, "guard_index": 0.3, "balance_index": 0.7}},
+              "tracking": {}, "performance": {"segment_duration_seconds": 10}}
+    (web.OUTPUTS / job / "report.json").write_text(json.dumps(report), encoding="utf-8")
+    state.create_job(job, {"owner_key": owner, "status": "complete", "video_path": ""})
+    try:
+        client.cookies.set(web.LAST_COMPLETED_ANALYSIS_COOKIE, job)
+        response = client.get(f"/result/{job}")
+        assert response.status_code == 200
+        assert any(web.LAST_COMPLETED_ANALYSIS_COOKIE in header and ("Max-Age=0" in header or "expires=" in header.lower())
+                   for header in response.headers.get_list("set-cookie"))
+    finally:
+        state.delete_job(job)

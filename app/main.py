@@ -5755,6 +5755,22 @@ def _score_and_identity_as_shown(report: dict) -> None:
     refresh_identity_integrity(report)
 
 
+def _result_opened(request: Request, response, job_id: str):
+    """The result has been seen: the menu stops saying "Results ready".
+
+    Every kind of report (a Solo session included, which returned before this
+    ran) clears the finished-job pointer. The active-analysis cookie also
+    stands in for a finished job (_analysis_navigation_state's fallback), so it
+    is cleared unless it names one still running (D7, QA 2026-10-11).
+    """
+    response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
+    active_cookie = request.cookies.get(ACTIVE_ANALYSIS_COOKIE)
+    if active_cookie and (active_cookie == job_id or not _owned_job(
+            _owner_key(request), active_cookie, {"queued", "running", "interrupted"})):
+        response.delete_cookie(ACTIVE_ANALYSIS_COOKIE, httponly=True, samesite="lax")
+    return response
+
+
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result_page(request: Request, job_id: str):
     job = _authorized_job(request, job_id)
@@ -5779,13 +5795,13 @@ def result_page(request: Request, job_id: str):
         # does not go through it.
         withhold_for_sideways(report)
         solo_name = _fighter_names(request, job, report)["A"]
-        return templates.TemplateResponse(request=request, name="solo_result.html", context={
+        return _result_opened(request, templates.TemplateResponse(request=request, name="solo_result.html", context={
             "request": request, "job_id": job_id, "report": report,
             "recording_warnings": _recording_warnings(report, job),
             "analysed_span": _analysed_span_summary(report),
             "analysis_build": result_check(report),
             "subject_name": None if solo_name == "Fighter A" else solo_name,
-        })
+        }), job_id)
     if "key_moments" not in report:
         report["key_moments"] = [e for e in report.get("events", []) if e.get("outcome") in {"clean", "likely_landed"} and float(e.get("confidence", 0)) >= .72 and float(e.get("contact_confidence", 0)) >= .62][:18]
     _score_and_identity_as_shown(report)
@@ -5923,16 +5939,7 @@ def result_page(request: Request, job_id: str):
         # every other discipline and the block simply does not render.
         "kick_minimum": kick_minimum_check(report) if identity_trusted else None,
     })
-    response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
-    # The active-analysis cookie also stands in for a finished job
-    # (_analysis_navigation_state's fallback), so "Results ready" stayed in the
-    # menu after the result was opened whenever that cookie named a finished
-    # job (D7, QA 2026-10-11). Cleared unless it names one still running.
-    active_cookie = request.cookies.get(ACTIVE_ANALYSIS_COOKIE)
-    if active_cookie and (active_cookie == job_id or not _owned_job(
-            _owner_key(request), active_cookie, {"queued", "running", "interrupted"})):
-        response.delete_cookie(ACTIVE_ANALYSIS_COOKIE, httponly=True, samesite="lax")
-    return response
+    return _result_opened(request, response, job_id)
 
 
 @app.get("/result/{job_id}/report.json", include_in_schema=False)
@@ -7599,7 +7606,7 @@ def _form_refusal(message: str, next_path: str, fallback: str) -> RedirectRespon
 def _roster_refusal(message: str, typed: str) -> RedirectResponse:
     """Send a rejected roster addition back to /coach, message and name intact."""
     query = urlencode({"error": message, "name": " ".join(typed.split())[:80]})
-    return RedirectResponse(f"/coach?{query}#squad", status_code=303)
+    return RedirectResponse(f"/dashboard?{query}#squad", status_code=303)
 
 
 @app.post("/coach/fighters", dependencies=[Depends(require_csrf)])
