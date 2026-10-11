@@ -4004,12 +4004,12 @@ class NavigationReachabilityTests(unittest.TestCase):
             return base[opened:base.index(end, opened)]
 
         desktop = (region('<div class="account-nav">', '<button class="mobile-menu-button"')
-                   + region('<details class="nav-more"', "</details>"))
+                   + region('<a data-nav="analyze" href="/analyze">Analyse a video', '{% else %}'))
         menu = region('<div class="mobile-menu" id="mobileMenu"', "<main id=")
 
         hidden = set(re.findall(r'href="(/[^"#]*)"', desktop))
         reachable = set(re.findall(r'href="(/[^"#]*)"', menu))
-        self.assertIn("/compare", hidden, "nav-more no longer holds the compare link")
+        self.assertIn("/compare", hidden, "the bar no longer holds the compare link")
         self.assertEqual(
             hidden - reachable, set(),
             f"hidden behind the hamburger but missing from it: {sorted(hidden - reachable)}")
