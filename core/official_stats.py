@@ -30,6 +30,7 @@ from pathlib import Path
 from core.fight_stats import normalize_outcome
 
 TARGETS = ("head", "body", "leg")
+POSITIONS = ("distance", "clinch", "ground")
 STRIKE_FAMILIES = ("punch", "kick", "knee", "elbow")
 
 
@@ -51,6 +52,10 @@ class RoundLine:
     by_target: dict[str, Count] = field(default_factory=lambda: {t: Count() for t in TARGETS})
     knockdowns: int = 0
     takedowns: Count = field(default_factory=Count)
+    # Significant strikes by where they were thrown, and seconds in a
+    # dominant position (ufcstats.com "CTRL").
+    by_position: dict[str, Count] = field(default_factory=lambda: {p: Count() for p in POSITIONS})
+    control_seconds: int = 0
 
 
 def _of(text: str) -> Count:
@@ -95,8 +100,16 @@ def official_rounds(rows: list[dict], *, bout: str, fighter: str, event: str | N
             by_target={target: _of(row[target.upper()]) for target in TARGETS},
             knockdowns=int(float(row.get("KD") or 0)),
             takedowns=_of(row["TD"]),
+            by_position={position: _of(row[position.upper()]) for position in POSITIONS if position.upper() in row},
+            control_seconds=_clock(row.get("CTRL")),
         )
     return lines
+
+
+def _clock(text) -> int:
+    """``"4:30"`` -> 270. A dash or blank is no control time recorded."""
+    match = re.fullmatch(r"\s*(\d+):(\d{2})\s*", str(text or ""))
+    return int(match.group(1)) * 60 + int(match.group(2)) if match else 0
 
 
 def load_official(path: str | Path) -> list[dict]:
