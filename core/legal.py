@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.config import SETTINGS
+from core.features import is_on as feature_on
 
 
 REQUIRED_LAUNCH_FIELDS = {
@@ -14,11 +15,28 @@ REQUIRED_LAUNCH_FIELDS = {
     "dmca_email": "Copyright/DMCA email",
     "dmca_agent_name": "Designated copyright agent name",
     "email_provider": "Transactional email provider",
+    # E2: the providers /subprocessors must name, with where they process data.
+    "hosting_provider": "Website hosting provider (company name)",
+    "hosting_location": "Website hosting location",
+    "email_provider_name": "Email delivery provider (company name)",
+    "email_provider_location": "Email delivery location",
+    "analysis_provider_location": "Fight-analysis computer location",
 }
+
+
+def _on_public_domain(address: str | None) -> bool:
+    domain = str(address or "").strip().lower().rsplit("@", 1)[-1]
+    wanted = SETTINGS.public_email_domain
+    return bool(domain) and (domain == wanted or domain.endswith("." + wanted))
 
 
 def launch_readiness() -> dict:
     missing = [label for field, label in REQUIRED_LAUNCH_FIELDS.items() if not getattr(SETTINGS, field, "")]
+    # The support and privacy addresses must be on WarriorIQ's own domain (E1).
+    for field, label in (("support_email", "Customer-support email"), ("privacy_email", "Privacy-rights email")):
+        value = getattr(SETTINGS, field, "")
+        if value and not _on_public_domain(value):
+            missing.append(f"{label} on @{SETTINGS.public_email_domain}")
     if SETTINGS.public_base_url and not SETTINGS.public_base_url.lower().startswith("https://"):
         missing.append("Public URL must use HTTPS")
     return {
@@ -47,14 +65,14 @@ LEGAL_DOCUMENTS = {
         "sections": [
             ("Who may use WarriorIQ", f"People of any age may create an account. Under {SETTINGS.minimum_account_age}, a parent or guardian must approve the account through a link WarriorIQ emails to them, and the account cannot upload fight footage until they do; by approving, they accept these Terms on the young person's behalf. Fight footage may show other junior athletes only when the uploader has every required right and appropriate parent or guardian permission."),
             ("Your footage and permissions", "You keep ownership of your footage. You give the operator a limited licence to store, decode, process, display and delete it only as needed to provide the service. Before uploading, you must have the rights to the recording and an appropriate legal basis or permission for every identifiable person shown. A checkbox does not replace consent or another legal basis required by local law."),
-            ("Analysis limitations", "WarriorIQ produces training and coaching support, not an official judging decision, medical assessment, safety guarantee or substitute for a qualified coach. Automated labels, identities and estimated scorecards can be wrong. Confidence labels and evidence replay must be considered before acting on a result."),
+            ("Analysis limitations", "WarriorIQ produces training and coaching support, not an official judging decision, medical assessment, safety guarantee or substitute for a qualified coach. " + ("Automated labels, identities and estimated scores can be wrong." if feature_on("scoring") else "Automated measurements, labels and fighter identities can be wrong; WarriorIQ does not score fights yet.") + " Confidence labels and evidence replay must be considered before acting on a result."),
             ("Accounts and security", "Provide accurate account information, protect your password, and tell support about suspected unauthorised access. A parent or legal guardian managing a child's workspace is responsible for its settings, uploads and sharing choices unless the law says otherwise."),
             ("Plans, billing and cancellation", "Paid plans renew for the period shown at checkout until cancelled. The price, taxes, analysis allowance, report depth and renewal terms must be presented before payment. Cancellation stops future renewal and does not erase legal refund or withdrawal rights. The Refund and Cancellation Policy forms part of these Terms."),
             ("Acceptable use", "Do not upload unlawful, stolen, abusive or secretly recorded content; identify or harass people; bypass access controls or allowances; scrape the service; reverse engineer protected components; distribute malware; or use the service to make high-impact decisions about another person. The Acceptable Use Policy gives more detail."),
             ("Suspension and termination", "Access may be restricted when reasonably necessary to protect users, the service, legal rights or security. Where practical and lawful, WarriorIQ explains the reason and gives a route to appeal. Users may delete their account from the Athlete Profile."),
             ("Intellectual property", "WarriorIQ branding, interface and original software are protected by applicable intellectual-property law. These Terms do not transfer them. User footage and lawful feedback remain subject to the rights described in these Terms and the Privacy Policy."),
             ("Disclaimers and liability", "The service is provided with the care required by applicable law, but uninterrupted operation and perfect analysis are not promised. Nothing in these Terms excludes rights or liability that cannot legally be excluded, including mandatory consumer protections."),
-            ("Changes and contact", "Material changes require a new policy version and renewed acceptance when appropriate. The configured operator and governing jurisdiction appear in the Legal Notice. Questions can be sent to the configured support address."),
+            ("Changes and contact", "Material changes require a new policy version and renewed acceptance when appropriate. The operator and governing jurisdiction are named at the end of this page. Questions can be sent to {support_email}."),
         ],
     },
     "cookies": {
@@ -86,7 +104,7 @@ LEGAL_DOCUMENTS = {
         "description": "Training purpose and important health limits of WarriorIQ analysis.",
         "intro": "WarriorIQ is an AI-assisted combat-sports training and performance analytics platform.",
         "sections": [
-            ("Training purpose", "Results are intended for training and educational review with a qualified coach. WarriorIQ is not an official fight judging authority and scores or statistics are estimates."),
+            ("Training purpose", "Results are intended for training and educational review with a qualified coach. WarriorIQ is not an official fight judging authority" + (", and its scores and statistics are estimates." if feature_on("scoring") else "; its measurements are estimates, and it does not score fights yet.") + ""),
             ("No medical advice", "WarriorIQ does not provide medical advice, diagnose concussion or injury, estimate brain damage or medical conditions, or determine whether an athlete is medically safe to continue fighting."),
             ("Seek qualified care", "Stop training and seek an appropriately qualified healthcare professional or emergency service for possible concussion, injury, severe symptoms or any health concern. Do not rely on a WarriorIQ report for a medical decision."),
             ("No diagnosis features", "Health-diagnosis features must not be added without separate medical, legal, privacy, safety and regulatory review."),
@@ -108,8 +126,8 @@ LEGAL_DOCUMENTS = {
         "description": "WarriorIQ subscription renewal, cancellation, refund and withdrawal information.",
         "intro": "The checkout must show the exact recurring price, billing period, included usage and payment obligation before an order is placed.",
         "sections": [
-            ("Cancellation", "A subscription can be cancelled through the configured billing portal or by contacting support. Cancellation stops the next renewal; access normally continues through the paid period unless the checkout terms say otherwise."),
-            ("Refund requests", "Send the account email, charge date and reason to the configured support address. Requests are assessed under applicable consumer law and the terms displayed at purchase. This policy does not reduce mandatory refund, conformity, cooling-off or charge-dispute rights."),
+            ("Cancellation", "A subscription can be cancelled in Settings, under Billing, or by writing to {support_email}. Cancellation stops the next renewal; access normally continues through the paid period unless the checkout terms say otherwise."),
+            ("Refund requests", "Send the account email, charge date and reason to {support_email}. Requests are assessed under applicable consumer law and the terms displayed at purchase. This policy does not reduce mandatory refund, conformity, cooling-off or charge-dispute rights."),
             ("EU/EEA withdrawal", "Where a statutory withdrawal period applies, the checkout must explain it before purchase. Immediate digital-service performance and any request to begin during that period must use a separate, explicit acknowledgement; WarriorIQ must not assume a waiver merely because the user paid."),
             ("Service failures", "If a paid analysis fails before completion, its reserved analysis use is returned automatically. Billing refunds for prolonged outages, duplicate charges or materially unavailable service are handled separately from analysis credits."),
         ],
@@ -144,7 +162,7 @@ LEGAL_DOCUMENTS = {
         "sections": [
             ("What the interface supports", "Pages use semantic headings, labelled fields, keyboard-operable controls, visible focus, text alternatives, responsive layouts and status messages that do not rely only on colour. Video evidence should retain native playback controls."),
             ("Known limits", "Complex canvas-based fighter selection and skeleton overlays may be difficult with some assistive technology. The selection workflow needs continued testing with keyboard, zoom, screen readers, reduced motion and mobile devices before a public accessibility claim is final."),
-            ("Feedback", "Report the page, device, browser, assistive technology and problem to the configured support email. WarriorIQ acknowledges accessibility requests and offers a reasonable alternative where it can."),
+            ("Feedback", "Report the page, device, browser, assistive technology and problem to {support_email}. WarriorIQ acknowledges accessibility requests and offers a reasonable alternative where it can."),
         ],
     },
     "ai-transparency": {
@@ -154,7 +172,7 @@ LEGAL_DOCUMENTS = {
         "sections": [
             ("What the AI does", "Local models estimate person boxes, pose, identity continuity, motion and action candidates. Ruleset logic filters legal techniques and an evidence layer decides what may be shown. Optional OpenAI identity recovery sends selected frames only after explicit upload-time opt-in and only when configured."),
             ("What the AI does not do", "It does not provide an official WAKO result, biometric identification of a real-world identity, medical advice, or a decision with legal or similarly significant effects. It can confuse fighters, limbs, techniques, timing, contact or ruleset outcomes."),
-            ("User control", "Users choose Fighter A and Fighter B once, then the performance report runs automatically. No scorecard labelling or correction work is required. Users can replay supported evidence, and unsupported measurements remain hidden or clearly unavailable. Preliminary estimates never become verified facts merely because tracking coverage is high."),
+            ("User control", "Users choose Fighter A and Fighter B once, then the performance report runs automatically. No labelling or correction work is required. Users can replay supported evidence, and unsupported measurements remain hidden or clearly unavailable. Preliminary estimates never become verified facts merely because tracking coverage is high."),
             ("Quality and complaints", "Tracking coverage is a system observation metric, not a guarantee of correctness. Report material errors through support and include the analysis identifier rather than sending the original filename in public channels."),
             # Attribution these datasets' licences ask for (dataset/EXTERNAL_SOURCES.md).
             # Only keypoints and labels are used, never their videos.
@@ -163,7 +181,7 @@ LEGAL_DOCUMENTS = {
              "TKD-Kick3 (Zenodo, doi:10.5281/zenodo.20390892), CC BY 4.0; "
              "Combat Sports Dataset by Evan Quinn (Zenodo, doi:10.5281/zenodo.15349809), CC BY 4.0, gym recordings only; "
              "StrikeMetrics by sswhitehat (github.com/sswhitehat/StrikeMetrics---Kickboxing-AI-Tool), MIT licence. "
-             "Strike counts are checked against official UFC statistics (ufcstats.com) before they are shown."),
+             + ("Strike counts are checked against official UFC statistics (ufcstats.com) before they are shown." if feature_on("strike_counts") else "Strike counts are not shown yet; before they are, they will be checked against official UFC statistics (ufcstats.com).")),
         ],
     },
     "security": {
@@ -174,7 +192,7 @@ LEGAL_DOCUMENTS = {
             ("Current application controls", "Passwords are salted and hashed; session tokens are stored as digests; account data and report access are owner-scoped; guest identifiers separate temporary sessions; uploads use generated storage names, extension allowlists, byte limits, file-signature checks and video decoding checks; sensitive responses disable caching; and security headers restrict framing, content types, browser permissions and content sources."),
             ("Abuse protection", "Requests are rate-limited per network address, with a readable page saying how long to wait, and repeated sign-in attempts from one address are refused for a while. The API schema and administration pages are not public."),
             ("Payments", "Card details are handled by configured Stripe-hosted checkout rather than stored by WarriorIQ. Stripe webhook signatures are verified and event identifiers are processed idempotently."),
-            ("Responsible disclosure", "Send a concise vulnerability report to the configured support address, including reproduction steps and impact. Do not access other users' data, disrupt service or publish exploitable details before the operator has had a reasonable opportunity to investigate."),
+            ("Responsible disclosure", "Send a concise vulnerability report to {support_email}, including reproduction steps and impact. Do not access other users' data, disrupt service or publish exploitable details before the operator has had a reasonable opportunity to investigate."),
         ],
     },
     "subprocessors": {
@@ -222,9 +240,12 @@ LEGAL_DOCUMENTS = {
 # would be worse than saying it is configured elsewhere. Nothing here makes up
 # a contact detail that has not been supplied.
 CONTACT_ADDRESS_FALLBACKS = {
-    "support_email": "the configured support email",
-    "privacy_email": "the configured privacy email",
-    "dmca_email": "the configured copyright address",
+    # Plain words, not "the configured support email" (D1, QA 2026-10-11).
+    # Still no invented address: until one is set the page names the route,
+    # and the launch checklist lists the missing setting.
+    "support_email": "WarriorIQ support",
+    "privacy_email": "WarriorIQ's privacy contact",
+    "dmca_email": "WarriorIQ's copyright contact",
 }
 
 
@@ -269,8 +290,8 @@ def public_config_problems(settings=None) -> list[str]:
         address = str(getattr(cfg, key, "") or "").strip()
         if not address:
             problems.append(f"WARRIORIQ_{key.upper()} is empty, so legal pages print a placeholder for it")
-        elif address.lower().rsplit("@", 1)[-1] in FREE_MAIL_DOMAINS:
-            problems.append(f"WARRIORIQ_{key.upper()} is a {address.rsplit('@', 1)[-1]} address, not one on "
+        elif not _on_public_domain(address):
+            problems.append(f"WARRIORIQ_{key.upper()} is not an address on @{cfg.public_email_domain}, "
                             "WarriorIQ's own domain")
     return problems
 
@@ -285,29 +306,35 @@ def subprocessor_sections() -> list[tuple[str, str]]:
     import os
 
     sections: list[tuple[str, str]] = []
+
+    def where(location: str) -> str:
+        return f" Location: {location}." if location else " Location: not yet published."
     if SETTINGS.hosting_provider:
         sections.append((f"{SETTINGS.hosting_provider} (website hosting and storage)", (
             f"{SETTINGS.hosting_provider} hosts this website. Accounts, the database, uploaded fight videos and "
             "finished reports are stored on its servers. Saved fight videos are deleted after "
-            f"{SETTINGS.saved_video_retention_days} days.")))
+            f"{SETTINGS.saved_video_retention_days} days.") + where(SETTINGS.hosting_location)))
     else:
-        sections.append(("Website hosting and storage", (
-            "Accounts, the database, uploaded fight videos and finished reports are stored on the server that "
-            f"runs this website. Saved fight videos are deleted after {SETTINGS.saved_video_retention_days} days.")))
+        sections.append(("Website hosting and storage (provider not yet named)", (
+            "Accounts, the database, uploaded fight videos and finished reports are stored with WarriorIQ's "
+            "hosting provider, which is named here before WarriorIQ takes payments. Saved fight videos are "
+            f"deleted after {SETTINGS.saved_video_retention_days} days.") + where(SETTINGS.hosting_location)))
     if "modal.run" in SETTINGS.worker_wake_url.lower():
         sections.append(("Modal (fight analysis)", (
             "Modal provides the cloud graphics card that analyses each fight. For one analysis it receives the "
             "fight video and the two fighter boxes you drew, returns the measurements to this website, and the "
-            "video and working files are deleted from it when the run ends.")))
+            "video and working files are deleted from it when the run ends.") + where(SETTINGS.analysis_provider_location)))
     elif SETTINGS.analysis_worker_mode == "remote" and _named(SETTINGS.analysis_provider_name):
         name = SETTINGS.analysis_provider_name
         sections.append((f"{name} (fight analysis)", (
             f"{name} provides the machine that analyses each fight. For one analysis it downloads the fight "
-            "video and the two fighter boxes from this website and deletes them when the run ends.")))
+            "video and the two fighter boxes from this website and deletes them when the run ends.")
+            + where(SETTINGS.analysis_provider_location)))
     elif SETTINGS.analysis_worker_mode == "remote":
         sections.append(("Analysis computer", (
             "Fights are analysed on a separate analysis computer run for WarriorIQ. For one analysis it downloads "
-            "the fight video and the two fighter boxes from this website and deletes them when the run ends.")))
+            "the fight video and the two fighter boxes from this website and deletes them when the run ends.")
+            + where(SETTINGS.analysis_provider_location)))
     if SETTINGS.analytics_measurement_id or SETTINGS.gtm_container_id:
         sections.append(("Google (analytics and advertising measurement)", (
             "Google receives website usage data through a Google tag, which loads only after you accept analytics "
@@ -319,13 +346,14 @@ def subprocessor_sections() -> list[tuple[str, str]]:
         name = SETTINGS.email_provider_name
         sections.append((f"{name} (email)", (
             f"{name} delivers WarriorIQ's account emails, such as sign-in and verification "
-            "messages, and so receives your email address and the message.")))
+            "messages, and so receives your email address and the message.") + where(SETTINGS.email_provider_location)))
     elif SETTINGS.email_provider:
         # Email is switched on but its company is not named. Never the
         # transport ("smtp"); tools/check_public_config.py fails on this.
-        sections.append(("Email delivery", (
-            "An email delivery service sends WarriorIQ's account emails, such as sign-in and verification "
-            "messages, and so receives your email address and the message.")))
+        sections.append(("Email delivery (provider not yet named)", (
+            "WarriorIQ's account emails, such as sign-in and verification messages, are sent through an email "
+            "delivery company, named here before WarriorIQ takes payments. It receives your email address and "
+            "the message.") + where(SETTINGS.email_provider_location)))
     sign_in = [name for name, configured in (
         ("Google", SETTINGS.google_client_id and SETTINGS.google_client_secret),
         ("Meta/Facebook", SETTINGS.facebook_client_id and SETTINGS.facebook_client_secret),

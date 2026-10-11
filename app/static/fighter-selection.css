@@ -143,3 +143,26 @@
   .workflow-heading .eyebrow,#selectIntro,#frameNote:not([data-found="none"]){display:none}
   .workflow-heading h1{font-size:30px;margin:4px 0 0}
 }
+
+/* "Upload a different video" is a form (it discards the pending upload), so
+   the button looks like the link it replaced (QA, 2026-10-11). */
+.quiet-back-form{margin:0}
+.quiet-back.link-button{border:0;background:none;cursor:pointer;font:inherit;font-size:12px;font-weight:800}
+/* Solo hides Fighter B's card with [hidden]; .fighter-key-item's display:flex
+   overrode it, so "B · Opponent - Tap now" stayed on screen (QA, 2026-10-11). */
+.fighter-key-item[hidden],.corner-pick[hidden],.focus-pick[hidden],.pick-fighter[hidden]{display:none!important}
+/* Start stays on screen on desktop: it sat below the fold under the picture
+   (D6, QA 2026-10-11). The script moves it into the right-hand column, where
+   it sticks under the header; a bar stuck to the bottom of the window would
+   cover the feet at the bottom of the picture, where boxes are drawn. */
+@media(min-width:921px){
+  /* overflow:hidden made the layout its own scroll box, so nothing inside it
+     could stick to the window; clip keeps the rounded corners without that. */
+  .fighter-lock-layout{overflow:clip}
+  .fighter-lock-guide .analysis-choice{position:sticky;top:96px;z-index:2;margin-top:0;padding:16px;grid-template-columns:1fr}
+  .fighter-lock-guide .analysis-choice .btn{width:100%;min-width:0}
+  .fighter-lock-guide .analysis-choice-actions{flex-direction:column;align-items:stretch}
+}
+/* No people found on the frame: turning it is offered up front (C4). */
+.rotate-prominent{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0 0;padding:12px 14px;border:1px solid #62502d;border-radius:10px;background:#1d1708}
+.rotate-prominent[hidden]{display:none}

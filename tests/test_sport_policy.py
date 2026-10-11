@@ -115,6 +115,8 @@ def test_replay_offers_counted_strikes_as_estimates(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "_authorized_job", lambda request, job_id: {"ruleset": "WT_TAEKWONDO"})
     monkeypatch.setattr(web, "_require_completed_artifact", lambda job_id, name: path)
     monkeypatch.setattr(web, "refresh_identity_integrity", lambda report: report)
+    # The video is still there (a removed one gets a message instead of the player).
+    monkeypatch.setattr(web, "_video_removed", lambda job_id: False)
     with BrowserClient(web.app) as client:
         page = client.get("/replay/abcdef123456").text
     assert "No action label passed the verification gate" not in page

@@ -340,6 +340,20 @@ def init_db() -> None:
                 FOREIGN KEY(account_id) REFERENCES accounts(id)
             );
 
+            -- Email change while signed in (2026-10-11): the new address is
+            -- held here until a link sent to it is opened. Additive table, no
+            -- existing column changes.
+            CREATE TABLE IF NOT EXISTS email_change_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                new_email TEXT NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT,
+                FOREIGN KEY(account_id) REFERENCES accounts(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_analysis_usage_account_period
             ON analysis_usage(account_id, period_key);
 
@@ -1180,6 +1194,61 @@ def consume_email_verification_token(token_hash: str) -> int | None:
         return int(row["account_id"])
 
 
+def save_email_change_token(account_id: int, new_email: str, token_hash: str, expires_at: str) -> None:
+    """Hold a requested new address until its link is opened; one at a time."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute(
+            "DELETE FROM email_change_tokens WHERE account_id=? OR expires_at<=? OR used_at IS NOT NULL",
+            (int(account_id), now),
+        )
+        con.execute(
+            "INSERT INTO email_change_tokens(account_id,new_email,token_hash,created_at,expires_at) VALUES(?,?,?,?,?)",
+            (int(account_id), new_email, token_hash, now, expires_at),
+        )
+
+
+def pending_email_change(account_id: int) -> str | None:
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        row = con.execute(
+            """SELECT new_email FROM email_change_tokens
+               WHERE account_id=? AND used_at IS NULL AND expires_at>? ORDER BY id DESC LIMIT 1""",
+            (int(account_id), now),
+        ).fetchone()
+    return row["new_email"] if row else None
+
+
+def consume_email_change_token(token_hash: str) -> tuple[int, str, str] | None:
+    """Apply a confirmed email change: (account id, old email, new email).
+
+    None when the link is unknown, used or expired, or the new address has
+    been taken by another account since it was requested.
+    """
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            """SELECT id,account_id,new_email FROM email_change_tokens
+               WHERE token_hash=? AND used_at IS NULL AND expires_at>?""",
+            (token_hash, now),
+        ).fetchone()
+        if not row:
+            return None
+        con.execute("UPDATE email_change_tokens SET used_at=? WHERE id=?", (now, int(row["id"])))
+        taken = con.execute("SELECT 1 FROM accounts WHERE email=? AND id<>?",
+                            (row["new_email"], int(row["account_id"]))).fetchone()
+        old = con.execute("SELECT email FROM accounts WHERE id=?", (int(row["account_id"]),)).fetchone()
+        if taken or not old:
+            return None
+        con.execute("UPDATE accounts SET email=?,email_verified_at=? WHERE id=?",
+                    (row["new_email"], now, int(row["account_id"])))
+        return int(row["account_id"]), str(old["email"]), str(row["new_email"])
+
+
 def mark_email_verified(account_id: int) -> None:
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
@@ -1677,6 +1746,9 @@ def save_completed_analysis(job_id: str, job: dict, report: dict, report_path: s
     summary = {
         "winner_estimate": scorecard.get("winner_estimate"),
         "score_totals": scorecard.get("totals", {"A": None, "B": None}),
+        # The uploaded file's SHA-256, so the same video uploaded twice is
+        # recognised and never compared with itself (C6, QA 2026-10-11).
+        "source_video_sha256": job.get("source_video_sha256"),
         "analysis_seconds": performance.get("analysis_seconds"),
         "video_seconds": performance.get("segment_duration_seconds"),
         "within_budget": performance.get("within_video_length_budget"),
@@ -2135,6 +2207,7 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM outbound_messages WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM password_reset_tokens WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM email_verification_tokens WHERE account_id=?", (account_id,))
+        con.execute("DELETE FROM email_change_tokens WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM oauth_identities WHERE account_id=?", (account_id,))
         con.execute(
             "UPDATE security_events SET account_id=NULL,metadata_json='{}' WHERE account_id=?",
@@ -2427,6 +2500,20 @@ def get_profile_by_handle(handle: str) -> dict | None:
     with connection() as con:
         row = con.execute("SELECT * FROM profiles WHERE handle=?", (handle,)).fetchone()
         return dict(row) if row else None
+
+
+def search_profiles_by_handle(prefix: str, limit: int = 10) -> list[dict]:
+    """Profiles whose handle starts with ``prefix`` (already lowercase, safe chars).
+
+    Who may see each is decided by the caller (core/social.py), not here."""
+    init_db()
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    with connection() as con:
+        rows = con.execute(
+            "SELECT * FROM profiles WHERE handle LIKE ? ESCAPE '\\' ORDER BY handle LIMIT ?",
+            (escaped + "%", max(1, min(int(limit), 25))),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_account_by_profile(profile_id: int) -> dict | None:

@@ -370,7 +370,7 @@ class ProductFoundationTests(unittest.TestCase):
         records = [{"created_at": "2026-08-10T00:00:00+00:00", "job_id": "old", "report": {
             "video": {"analysis_target": "BOTH", "focus_fighter": "A"},
             "setup": {"ruleset": "K1"}, "tracking": {"fighter_A_coverage": .9},
-            "metrics": {"A": {"pose_coverage": .9, "guard_index": .4,
+            "metrics": {"A": {"pose_coverage": .9, "guard_index": .4, "guard_definition": "hands_up_share/2",
                               "attacks": {"accuracy": .62, "attempts": 12,
                                           "families": {"punch": 8, "kick": 4}},
                               "dashboard": {"activity_attempts_per_minute": 6.0}}},
@@ -404,7 +404,8 @@ class ProductFoundationTests(unittest.TestCase):
             "setup": {"ruleset": "K1"},
             "integrity": {"action_metrics_trusted": False},
             "metrics": {"A": {
-                "pose_coverage": .91, "guard_index": .64, "balance_index": .58,
+                "pose_coverage": .91, "guard_index": .64, "guard_definition": "hands_up_share/2",
+                "balance_index": .58,
                 "ring_center_control": .47, "footwork_body_lengths_per_second": .32,
                 "attacks": {"accuracy": .99, "attempts": 99},
                 "dashboard": {"activity_attempts_per_minute": 30.0, "combinations_per_minute": 12.0},
@@ -1110,9 +1111,11 @@ class EngagementRangeTests(unittest.TestCase):
         """
         from core.coaching import build_pose_coaching, build_training_plan
 
-        a = dict(guard_index=0.125, balance_index=0.756, ring_center_control=0.505,
+        # Guards above the 42% WarriorIQ flags on its own (core/metric_catalog.py),
+        # so this tests the comparison with the opponent and nothing else.
+        a = dict(guard_index=0.525, balance_index=0.756, ring_center_control=0.505,
                  pressure_index=0.117, footwork_body_lengths_per_second=1.174)
-        b = dict(guard_index=0.236, balance_index=0.715, ring_center_control=0.548,
+        b = dict(guard_index=0.636, balance_index=0.715, ring_center_control=0.548,
                  pressure_index=-0.057, footwork_body_lengths_per_second=1.044)
         plan_b = build_training_plan(build_pose_coaching("B", b, a), "B", b)
         goals = " ".join(block["goal"] for block in plan_b)
@@ -1322,9 +1325,9 @@ class EngagementRangeTests(unittest.TestCase):
         """
         from core.coaching import build_pose_coaching
 
-        a = dict(guard_index=0.125, balance_index=0.756, ring_center_control=0.505,
+        a = dict(guard_index=0.525, balance_index=0.756, ring_center_control=0.505,
                  pressure_index=0.117, footwork_body_lengths_per_second=1.174)
-        b = dict(guard_index=0.236, balance_index=0.715, ring_center_control=0.548,
+        b = dict(guard_index=0.636, balance_index=0.715, ring_center_control=0.548,
                  pressure_index=-0.057, footwork_body_lengths_per_second=1.044)
         coach_a = build_pose_coaching("A", a, b)
         coach_b = build_pose_coaching("B", b, a)
@@ -1342,15 +1345,15 @@ class EngagementRangeTests(unittest.TestCase):
         everything was still handed a strength."""
         from core.coaching import build_pose_coaching
 
-        ahead = build_pose_coaching("A", dict(guard_index=0.22, balance_index=0.70),
-                                    dict(guard_index=0.12, balance_index=0.70))
+        ahead = build_pose_coaching("A", dict(guard_index=0.62, balance_index=0.70),
+                                    dict(guard_index=0.52, balance_index=0.70))
         self.assertEqual(ahead["strengths"][0]["title"], "Guard: ahead of your opponent")
-        self.assertIn("22%", ahead["strengths"][0]["detail"])
-        behind = build_pose_coaching("A", dict(guard_index=0.10, balance_index=0.60),
-                                     dict(guard_index=0.20, balance_index=0.75))
+        self.assertIn("62%", ahead["strengths"][0]["detail"])
+        behind = build_pose_coaching("A", dict(guard_index=0.50, balance_index=0.60),
+                                     dict(guard_index=0.60, balance_index=0.75))
         self.assertEqual(behind["strengths"], [])
-        level = build_pose_coaching("A", dict(guard_index=0.20, balance_index=0.70),
-                                    dict(guard_index=0.20, balance_index=0.70))
+        level = build_pose_coaching("A", dict(guard_index=0.60, balance_index=0.70),
+                                    dict(guard_index=0.60, balance_index=0.70))
         self.assertEqual(level["strengths"], [])
 
     def test_style_measurements_are_never_a_strength_or_a_fault(self):
@@ -1360,9 +1363,9 @@ class EngagementRangeTests(unittest.TestCase):
         from core.coaching import build_pose_coaching
 
         styles = ("Walking them down", "Holding the middle", "Moving your feet")
-        forward = dict(guard_index=0.20, balance_index=0.70, ring_center_control=0.80,
+        forward = dict(guard_index=0.60, balance_index=0.70, ring_center_control=0.80,
                        pressure_index=0.40, footwork_body_lengths_per_second=1.60)
-        counter = dict(guard_index=0.20, balance_index=0.70, ring_center_control=0.30,
+        counter = dict(guard_index=0.60, balance_index=0.70, ring_center_control=0.30,
                        pressure_index=-0.40, footwork_body_lengths_per_second=0.60)
         for own, other in ((forward, counter), (counter, forward), (counter, None)):
             coaching = build_pose_coaching("A", own, other)
@@ -5231,10 +5234,10 @@ class CompareMovementTests(unittest.TestCase):
         result = compare_movement([
             self._report(pressure_index=0.10, ring_center_control=0.60,
                          footwork_body_lengths_per_second=1.20, guard_index=0.20,
-                         balance_index=0.70),
+                         guard_definition="hands_up_share/2", balance_index=0.70),
             self._report(pressure_index=0.30, ring_center_control=0.40,
                          footwork_body_lengths_per_second=1.20, guard_index=0.20,
-                         balance_index=0.70),
+                         guard_definition="hands_up_share/2", balance_index=0.70),
         ])
         self.assertTrue(result["available"])
         rows = {row["key"]: row for row in result["rows"]}

@@ -47,7 +47,7 @@ from app.state import (
     worker_status_heartbeat_age,
 )
 from core.auth import (
-    authenticate, end_session, hash_password, issue_session, normalize_email, register, resolve_session,
+    authenticate, end_session, hash_password, verify_password, issue_session, normalize_email, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
 )
 from core.identity import fighter_pair_similarity
@@ -63,7 +63,7 @@ from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
-    HandleTaken, accept_follow, count_follows, follow_status, get_account_by_profile, get_profile_by_handle,
+    HandleTaken, accept_follow, count_follows, follow_status, get_account_by_profile, get_profile_by_handle, search_profiles_by_handle,
     list_follows, remove_follow, request_follow, set_public_profile,
     add_assignment, analysis_allowance, apply_subscription_change, award_points, link_camp_mission, list_camp_missions,
     list_points, list_training_sessions, record_training_session, redeem_points_for_analysis, apply_checkout_event, consume_email_verification_token,
@@ -82,7 +82,7 @@ from core.db import (
     revoke_report_shares, save_annotation,
     get_story_share, list_profile_posts, list_profile_story_shares, list_story_shares, revoke_story_shares,
     set_story_on_profile, story_share,
-    save_email_verification_token, save_fight, save_password_reset_token, save_report_share,
+    save_email_verification_token, save_email_change_token, consume_email_change_token, pending_email_change, save_fight, save_password_reset_token, save_report_share,
     set_guardian_approval_status,
     set_account_status, set_annotation_sequence,
     page_view_summary, plan_interest_counts, plans_wanted_by, policies_outdated,
@@ -119,7 +119,7 @@ from core.upload_security import (
     FIGHT_VIDEO_ACCEPT, FIGHT_VIDEO_EXTENSIONS, FIGHT_VIDEO_LABEL,
     UploadBodyLimitMiddleware, UploadCapacityError, is_fight_upload, limit_upload_route, looks_like_video,
     scan_upload,
-    reserve_upload_storage, release_upload_storage,
+    reserve_upload_storage, release_upload_storage, pending_upload_status,
 )
 from core import sport_check
 from core.fight_stats import _deduplicate as _deduplicate_strikes
@@ -485,7 +485,10 @@ PUBLIC_INDEX_ROUTES = (
 # Progress and Coach used to be listed too, which made the header change shape
 # between the main workspace tabs - the chip appeared on Analyze and the fight
 # library and vanished on the three tabs beside them.
-SPORT_IRRELEVANT_PREFIXES = ("/profile", "/settings", "/legal", "/privacy", "/terms")
+# Empty: the header is the same on every page (D8, QA 2026-10-11). Hiding the
+# sport selector on /profile and /settings made the menu jump between pages.
+# Kept as a setting rather than deleted so the mechanism stays in one place.
+SPORT_IRRELEVANT_PREFIXES: tuple[str, ...] = ()
 PRIVATE_ROUTE_PREFIXES = (
     "/api/", "/frame/", "/select/", "/pending/", "/progress/", "/result/", "/replay/", "/review/",
     "/media/", "/fighter-portrait/", "/selection-image/", "/live-frame/", "/dashboard", "/history",
@@ -1265,9 +1268,60 @@ def _full_progress_report(path: Path) -> dict | None:
     return report
 
 
+def _previous_fights_excluding_copies(profile_id: int, job_id: str) -> list[dict]:
+    """Every saved fight except other analyses of this same video."""
+    fights = list_fights(profile_id)
+    current = next((fight for fight in fights if fight.get("job_id") == job_id), None)
+    digest = _fight_digest(current) if current else (get_job(job_id) or {}).get("source_video_sha256")
+    return _without_duplicate_videos([fight for fight in fights if fight.get("job_id") == job_id
+                                      or not digest or _fight_digest(fight) != digest])
+
+
+def _same_video_elsewhere(request: Request, job_id: str, job: dict) -> dict | None:
+    """An earlier saved fight made from this exact file, for the selection page."""
+    digest = job.get("source_video_sha256")
+    profile_id = _profile_id(request)
+    if not digest or profile_id is None:
+        return None
+    for fight in list_fights(profile_id):
+        if fight.get("job_id") != job_id and _fight_digest(fight) == digest:
+            return {"job_id": fight["job_id"], "created_at": fight.get("created_at"),
+                    "report_available": _report_available(fight["job_id"])}
+    return None
+
+
+def _fight_digest(fight: dict) -> str | None:
+    """The SHA-256 of the video a saved fight was made from, when known.
+
+    Stored in the fight's summary since 2026-10-11; older fights still have it
+    on their job session, which upload has always written."""
+    digest = (fight.get("summary") or {}).get("source_video_sha256")
+    if not digest:
+        digest = (get_job(str(fight.get("job_id") or "")) or {}).get("source_video_sha256")
+    return str(digest) if digest else None
+
+
+def _without_duplicate_videos(fights: list[dict]) -> list[dict]:
+    """Newest-first fights with later copies of the same video dropped.
+
+    The same file uploaded three times was compared against itself under
+    "Since your last fight" and counted three times in progress (C6, QA
+    2026-10-11). The newest analysis of a video stands for it."""
+    seen: set[str] = set()
+    kept = []
+    for fight in fights:
+        digest = _fight_digest(fight)
+        if digest and digest in seen:
+            continue
+        if digest:
+            seen.add(digest)
+        kept.append(fight)
+    return kept
+
+
 def _reports_for_profile(profile_id: int) -> list[dict]:
     records = []
-    fights = list_fights(profile_id)
+    fights = _without_duplicate_videos(list_fights(profile_id))
     newest_legacy_ids = {fight["job_id"] for fight in fights[:2]}
     for fight in reversed(fights):
         base = {"job_id": fight["job_id"], "created_at": fight["created_at"],
@@ -1839,8 +1893,16 @@ def _apply_response_headers(request: Request, response) -> None:
     frame_src = "'self'"
     if analytics_allowed:
         script_src += " https://www.googletagmanager.com"
-        connect_src += " https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com"
-        img_src += " https://*.google-analytics.com https://*.googletagmanager.com"
+        # GA4 falls back to www.google.com/g/collect, and the Ads destination
+        # sends its (non-personalised) page view to pagead2.googlesyndication
+        # .com/ccm/collect. Both were refused by this policy after consent, so
+        # those events never arrived (E4, QA 2026-10-11, checked in Chromium).
+        # Google's documented origins for GA4 with Ads, and only here.
+        google_ads = (" https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net"
+                      " https://www.google.com https://google.com")
+        connect_src += (" https://*.google-analytics.com https://*.analytics.google.com"
+                        " https://*.googletagmanager.com" + google_ads)
+        img_src += " https://*.google-analytics.com https://*.googletagmanager.com" + google_ads
         if SETTINGS.gtm_container_id:
             frame_src += " https://www.googletagmanager.com"
     # Sign-in forms redirect to the provider, and form-action is enforced across
@@ -3577,6 +3639,10 @@ def _sport_context(request: Request, sport: str) -> dict:
         ),
         "version": SETTINGS.version,
         "allowance": analysis_allowance(int(account["id"])) if account else None,
+        # Fights already waiting (picking fighters or being analysed) and the
+        # plan's ceiling, shown before a file is picked: the 429 used to be the
+        # first anyone heard of the cap (QA, 2026-10-11).
+        "pending_uploads": pending_upload_status(int(account["id"])) if account else None,
     }
 
 
@@ -3823,7 +3889,7 @@ async def upload(
         raise HTTPException(
             400,
             "WarriorIQ could not read this file as a video. It may be corrupted, "
-            "still uploading, or saved in a format this build cannot decode. "
+            "still uploading, or saved in a format WarriorIQ cannot read. "
             "Try MP4 or MOV exported straight from your phone or camera.",
         ) from exc
 
@@ -4145,6 +4211,15 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
                  "frame_source": job.get("selection_source"),
                  "frame_clock": _clock(float(job.get("selection_seconds", job.get("start_seconds")) or 0.0)),
                  "fighter_name": (fighter or {}).get("name"),
+                 # A fresh upload (still waiting for its fighters, nothing
+                 # saved) is discarded by "Upload a different video"; it used
+                 # to stay pending and two of them locked uploads out with 429
+                 # (QA, 2026-10-11). Re-selection on a saved fight keeps it.
+                 "can_discard_upload": job.get("status") == "selecting" and not get_fight(job_id),
+                 # The same file was analysed before (C6): said before analysing.
+                 "duplicate_of": _same_video_elsewhere(request, job_id, job),
+                 "reselecting": bool(get_fight(job_id)) or seconds is not None,
+                 "back_url": f"/analyze/{_job_sport(job)}" if _job_sport(job) in SPORTS else "/analyze",
                  "default_corner": job.get("fighter_a_corner") or ""})
 
 
@@ -4525,6 +4600,34 @@ def _boxes_without_a_person(frame, boxes: dict[str, list[float]], width: float, 
     return missing
 
 
+# The bar the selection page's own candidates use (core.person_detect
+# MIN_CONFIDENCE). A box accepted only between DRAWN_BOX_CONFIDENCE and this is
+# one the light detector barely saw a person in - and the analysis, with a
+# different model, may not find anybody there at all: QA 2026-10-11 saw boxes
+# drawn on both fighters of a clip whose analysis then said "nobody was in
+# shot". The page says so before Start rather than the report after.
+CANDIDATE_CONFIDENCE = 0.35
+
+
+def _faint_boxes(frame, boxes: dict[str, list[float]], width: float, height: float) -> dict[str, float]:
+    """Boxes whose best person is under CANDIDATE_CONFIDENCE: label -> that confidence."""
+    if frame is None:
+        return {}
+    people = detect_people_in_frame(frame, min_confidence=DRAWN_BOX_CONFIDENCE, limit=50)
+    if people is None:
+        return {}
+    scale_x = frame.shape[1] / max(1.0, float(width))
+    scale_y = frame.shape[0] / max(1.0, float(height))
+    faint = {}
+    for label, box in boxes.items():
+        scaled = [box[0] * scale_x, box[1] * scale_y, box[2] * scale_x, box[3] * scale_y]
+        best = max((float(p.get("confidence") or 0.0) for p in people if _person_inside(p["box"], scaled)),
+                   default=0.0)
+        if best < CANDIDATE_CONFIDENCE:
+            faint[label] = round(best, 2)
+    return faint
+
+
 _WORKER_PROGRESS_FIELDS = {
     "percent", "message", "stage", "elapsed_seconds", "eta_seconds",
     "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
@@ -4888,12 +4991,22 @@ def pair_check(request: Request, job_id: str, payload: PairCheckPayload):
     height, width = chosen_frame.shape[:2]
     fighter_a_box = _validated_fighter_box(payload.fighter_a_box, width, height, "Fighter A")
     fighter_b_box = _validated_fighter_box(payload.fighter_b_box, width, height, "Fighter B")
+    faint = _faint_boxes(chosen_frame, {"A": fighter_a_box, "B": fighter_b_box}, width, height)
+    faint_message = None
+    if faint:
+        who = " and ".join(f"Fighter {label}" for label in sorted(faint))
+        faint_message = (f"WarriorIQ can barely make out a person in the {who} box on this picture. "
+                         "The analysis uses a stronger check and may not find them at all, which would "
+                         "leave the report empty. A moment where the fighters are bigger, sharper and "
+                         "better lit is much more likely to work.")
     kit = kit_similarity(chosen_frame, fighter_a_box, fighter_b_box)
     if kit is None:
-        return {"checked": False}
+        return {"checked": bool(faint), "looks_alike": False,
+                **({"faint": sorted(faint), "faint_message": faint_message} if faint else {})}
     alike = kit["similarity"]
     looks_alike = float(alike) >= SETTINGS.max_kit_similarity
     return {
+        **({"faint": sorted(faint), "faint_message": faint_message} if faint else {}),
         "checked": True,
         "similarity": round(float(alike), 3),
         "looks_alike": looks_alike,
@@ -5159,6 +5272,16 @@ def _public_job_status(job_id: str, job: dict) -> dict:
     payload["video_url"] = f"/media/{job_id}"
     payload["result_url"] = f"/result/{job_id}" if job.get("status") == "complete" else None
     payload["restart_url"] = f"/api/restart/{job_id}" if job.get("status") == "interrupted" else None
+    # Seconds since Start was pressed, whatever the worker has reported yet.
+    queued_at = job.get("queued_at_epoch")
+    payload["since_start_seconds"] = (round(max(0.0, time.time() - float(queued_at)), 1)
+                                      if queued_at and job.get("status") in {"queued", "running"} else None)
+    # Before the first frame is analysed the analysis computer is starting:
+    # loading models on a machine that was asleep. Said as that, not as an
+    # analysis "running" at 0.9% with an ETA "calculating" (QA, 2026-10-11).
+    payload["warming_up"] = bool(job.get("status") in {"queued", "running"}
+                                 and job.get("stage") in {None, "queued", "preparing", "loading", "models"}
+                                 and not float(job.get("processed_video_seconds") or 0.0))
     return payload
 
 
@@ -5632,6 +5755,22 @@ def _score_and_identity_as_shown(report: dict) -> None:
     refresh_identity_integrity(report)
 
 
+def _result_opened(request: Request, response, job_id: str):
+    """The result has been seen: the menu stops saying "Results ready".
+
+    Every kind of report (a Solo session included, which returned before this
+    ran) clears the finished-job pointer. The active-analysis cookie also
+    stands in for a finished job (_analysis_navigation_state's fallback), so it
+    is cleared unless it names one still running (D7, QA 2026-10-11).
+    """
+    response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
+    active_cookie = request.cookies.get(ACTIVE_ANALYSIS_COOKIE)
+    if active_cookie and (active_cookie == job_id or not _owned_job(
+            _owner_key(request), active_cookie, {"queued", "running", "interrupted"})):
+        response.delete_cookie(ACTIVE_ANALYSIS_COOKIE, httponly=True, samesite="lax")
+    return response
+
+
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result_page(request: Request, job_id: str):
     job = _authorized_job(request, job_id)
@@ -5643,6 +5782,8 @@ def result_page(request: Request, job_id: str):
     if not path.exists():
         raise HTTPException(404)
     report = json.loads(path.read_text(encoding="utf-8"))
+    # Read by the notes that would otherwise say "re-run the analysis".
+    report["video_removed"] = _video_removed(job_id)
     # Saved before the "is this a fight?" check: run it on the saved track.
     attach_plausibility(report, path.parent / "tracking.jsonl")
     _attach_orientation(report, job)
@@ -5654,13 +5795,13 @@ def result_page(request: Request, job_id: str):
         # does not go through it.
         withhold_for_sideways(report)
         solo_name = _fighter_names(request, job, report)["A"]
-        return templates.TemplateResponse(request=request, name="solo_result.html", context={
+        return _result_opened(request, templates.TemplateResponse(request=request, name="solo_result.html", context={
             "request": request, "job_id": job_id, "report": report,
             "recording_warnings": _recording_warnings(report, job),
             "analysed_span": _analysed_span_summary(report),
             "analysis_build": result_check(report),
             "subject_name": None if solo_name == "Fighter A" else solo_name,
-        })
+        }), job_id)
     if "key_moments" not in report:
         report["key_moments"] = [e for e in report.get("events", []) if e.get("outcome") in {"clean", "likely_landed"} and float(e.get("confidence", 0)) >= .72 and float(e.get("contact_confidence", 0)) >= .62][:18]
     _score_and_identity_as_shown(report)
@@ -5678,10 +5819,12 @@ def result_page(request: Request, job_id: str):
     # coach's squad view. See core/squad.py.
     _profile = _profile_id(request)
     progress_since_last = (
-        compare_with_previous(report, list_fights(_profile), job_id)
+        compare_with_previous(report, _previous_fights_excluding_copies(_profile, job_id), job_id)
         if _profile is not None else {"available": False}
     )
-    can_share = bool(_account(request) and report_access.get("can_share"))
+    # No coach link for a report that did not work (C3, QA 2026-10-11).
+    can_share = bool(_account(request) and report_access.get("can_share")
+                     and _numbers_state(report)["state"] not in FAILED_NUMBER_STATES)
     # Every per-fighter strike block is an attribution. When identity failed
     # the page has already said it cannot tell whose strikes were whose, so
     # the per-fighter kick cards, the "You hit / You got hit" visuals and the
@@ -5723,6 +5866,7 @@ def result_page(request: Request, job_id: str):
         "request": request, "job_id": job_id, "report": report,
         "corners": _corner_labels(job),
         "names": names,
+        "fight_format": _fight_format(report),
         "analysed_span": _analysed_span_summary(report),
         "analysis_build": result_check(report),
         "recording_warnings": _recording_warnings(report, job),
@@ -5795,10 +5939,7 @@ def result_page(request: Request, job_id: str):
         # every other discipline and the block simply does not render.
         "kick_minimum": kick_minimum_check(report) if identity_trusted else None,
     })
-    response.delete_cookie(LAST_COMPLETED_ANALYSIS_COOKIE, httponly=True, samesite="lax")
-    if request.cookies.get(ACTIVE_ANALYSIS_COOKIE) == job_id:
-        response.delete_cookie(ACTIVE_ANALYSIS_COOKIE, httponly=True, samesite="lax")
-    return response
+    return _result_opened(request, response, job_id)
 
 
 @app.get("/result/{job_id}/report.json", include_in_schema=False)
@@ -6286,6 +6427,7 @@ def replay_page(
     if not path.exists():
         raise HTTPException(404)
     report = json.loads(path.read_text(encoding="utf-8"))
+    report["video_removed"] = _video_removed(job_id)
     if "key_moments" not in report:
         report["key_moments"] = [e for e in report.get("events", []) if e.get("outcome") in {"clean", "likely_landed"} and float(e.get("confidence", 0)) >= .72 and float(e.get("contact_confidence", 0)) >= .62][:18]
     _apply_report_annotations(report, [])
@@ -6305,6 +6447,7 @@ def replay_page(
         # while this page said no action had passed. The same list is offered
         # here, labelled as what it is: automatic counts, estimates.
         counted = _counted_strikes(report, published_families(sport, report))
+        replay_names = _fighter_names(request, _authorized_job(request, job_id) or {}, report)
         if fighter and fighter.upper() in {"A", "B"}:
             counted = [row for row in counted if row["fighter"] == fighter.upper()]
         if family and family.lower() in {"punch", "kick", "knee"}:
@@ -6312,7 +6455,7 @@ def replay_page(
         if counted:
             replay_chapters = [{
                 "time": round(row["seconds"], 3), "lead_seconds": 1.0,
-                "label": f"{row['clock']} · Fighter {row['fighter']} · {row['family'].title()}",
+                "label": f"{row['clock']} · {replay_names.get(row['fighter'], 'Fighter ' + row['fighter'])} · {row['family'].title()}",
                 "detail": "Counted automatically (estimate)", "kind": "counted_strike",
             } for row in counted[:200]]
             replay_mode = "counted_strikes"
@@ -6324,6 +6467,10 @@ def replay_page(
         context={
             "request": request, "job_id": job_id, "report": report,
             "identity_safe": identity_safe,
+            # A removed video gets a sentence, not an empty player with a
+            # media error (QA, 2026-10-11).
+            "video_removed": report["video_removed"],
+            "video_retention_days": SETTINGS.saved_video_retention_days,
             # The turn the analysis decoded the video with: its skeletons are
             # in the turned frame, the browser plays the file as filmed.
             "replay_turn": quarter_turn(((report.get("video") or {}).get("orientation") or {}).get(
@@ -6392,6 +6539,28 @@ def fighter_portrait(request: Request, job_id: str, fighter: str):
     return FileResponse(path, media_type="image/jpeg")
 
 
+def _video_path_for(job_id: str) -> Path:
+    """Where this fight's original video is, or would be (same as /media)."""
+    job = get_job(job_id)
+    if job and job.get("video_path"):
+        return Path(job["video_path"])
+    fight = get_fight(job_id)
+    return Path(fight["video_path"]) if fight and fight.get("video_path") else Path("missing")
+
+
+def _video_removed(job_id: str) -> bool:
+    """True when the video behind this report is gone: removed after the
+    retention period, deleted by its owner, or missing from disk. The report
+    survives; the replay and anything that needs the video cannot."""
+    fight = get_fight(job_id)
+    if fight and fight.get("video_deleted_at"):
+        return True
+    try:
+        return not _video_path_for(job_id).is_file()
+    except OSError:
+        return True
+
+
 @app.get("/media/{job_id}")
 def media(request: Request, job_id: str):
     if not _authorized_job(request, job_id):
@@ -6431,6 +6600,8 @@ def profile_page(request: Request, error: str = ""):
             "request": request, "error": error[:200],
             "profile": get_profile(profile_id) if profile_id is not None else None,
             "fights": list_fights(profile_id) if profile_id is not None else [],
+            "display_name": (_display_name(get_profile(profile_id), list_fights(profile_id))
+                             if profile_id is not None else None),
             "minor": social.is_minor_account(_account(request)),
             "follow_requests": list_follows(profile_id, direction="followers", status="pending") if profile_id is not None else [],
             "followers": list_follows(profile_id, direction="followers") if profile_id is not None else [],
@@ -6519,8 +6690,29 @@ FEED_ITEMS = 40
 FEED_POSTS_PER_ATHLETE = 5
 
 
+def _athlete_search(viewer: int, query: str) -> list[dict]:
+    """Athletes by username, for following (D10, QA 2026-10-11: the Feed had
+    no way to find anybody). The same rules as an athlete's own page: a
+    minor's profile is never listed to others, and a private profile shows its
+    username only."""
+    text = (query or "").strip().lstrip("@").lower()
+    if len(text) < 2 or not re.fullmatch(r"[a-z0-9_.-]+", text):
+        return []
+    found = []
+    for profile in search_profiles_by_handle(text, limit=10):
+        if int(profile["id"]) == int(viewer):
+            continue
+        minor = social.is_minor_account(get_account_by_profile(int(profile["id"])))
+        if not social.is_discoverable(viewer_profile_id=viewer, profile=profile, minor=minor):
+            continue
+        visible = social.can_view(viewer_profile_id=viewer, profile=profile, minor=minor, follow=None)
+        found.append({"handle": profile["handle"],
+                      "name": (profile.get("display_name") if visible else None)})
+    return found
+
+
 @app.get("/feed", response_class=HTMLResponse)
-def feed_page(request: Request):
+def feed_page(request: Request, q: str = ""):
     """What the athletes this person follows have done, newest first.
 
     Only accepted follows, and each athlete's page rules are applied again
@@ -6555,6 +6747,8 @@ def feed_page(request: Request):
         request=request, name="feed.html",
         context={"request": request, "items": feed.newest_first(items, FEED_ITEMS),
                  "following_count": len(following),
+                 "query": q.strip()[:40],
+                 "search_results": _athlete_search(viewer, q),
                  "own_handle": (get_profile(viewer) or {}).get("handle")},
     )
 
@@ -6634,8 +6828,15 @@ def settings_page(request: Request, section: str, notice: str = "", error: str =
             "account": account,
             "profile": get_profile(int(account["profile_id"])) or {},
             "fights": list_fights(int(account["profile_id"])),
+            "display_name": _display_name(get_profile(int(account["profile_id"])),
+                                          list_fights(int(account["profile_id"]))),
             "video_retention_days": SETTINGS.saved_video_retention_days,
-            "plan": plan_for_key(account.get("plan_override") or account.get("plan")),
+            # The same resolver /pricing uses (effective_plan_key): reading
+            # plan_override or plan by hand missed a granted plan, and Billing
+            # said "Starter, €0 forever" while /pricing said Gym (QA, 2026-10-11).
+            "plan": plan_for_key(effective_plan_key(
+                account.get("plan"), account.get("plan_override"), account.get("email"))),
+            "pending_email": pending_email_change(int(account["id"])),
             "subscription_actions": list_subscription_actions(int(account["id"])),
         },
     )
@@ -6664,6 +6865,103 @@ def revoke_other_sessions(request: Request):
     revoke_account_sessions(int(account["id"]), token_digest(current) if current else None)
     record_security_event("other_sessions_revoked", account_id=int(account["id"]))
     return RedirectResponse("/settings/privacy?notice=Other+sessions+signed+out", status_code=303)
+
+
+def _settings_redirect(notice: str = "", error: str = "") -> RedirectResponse:
+    query = urlencode({key: value for key, value in (("notice", notice), ("error", error)) if value})
+    return RedirectResponse(f"/settings/privacy{'?' + query if query else ''}#security", status_code=303)
+
+
+def _current_password_ok(account_id: int, password: str) -> bool:
+    full = get_account(int(account_id)) or {}
+    return bool(full.get("password_login_enabled", 1)) and verify_password(password or "", full.get("password_hash") or "")
+
+
+@app.post("/settings/password", dependencies=[Depends(require_csrf)])
+def change_password(request: Request, current_password: str = Form(""), new_password: str = Form(""),
+                    confirm_password: str = Form("")):
+    """Change the password while signed in (QA, 2026-10-11: only
+    /forgot-password existed). Needs the current password; every other session
+    is signed out and this browser gets a fresh one."""
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    _enforce_rate_limit(request, "password-change", 10, 3600)
+    if not _current_password_ok(int(account["id"]), current_password):
+        record_security_event("password_change_refused", account_id=int(account["id"]))
+        return _settings_redirect(error="Your current password was not right. Nothing was changed.")
+    if not valid_password(new_password):
+        return _settings_redirect(error="The new password needs between 10 and 1,024 characters.")
+    if new_password != confirm_password:
+        return _settings_redirect(error="The two new passwords do not match. Nothing was changed.")
+    update_password_hash(int(account["id"]), hash_password(new_password))   # ends every session
+    record_security_event("password_changed", account_id=int(account["id"]))
+    response = _settings_redirect(notice="Password changed. Every other device has been signed out.")
+    response.set_cookie(SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
+                        httponly=True, samesite="lax", secure=_request_is_secure(request))
+    return response
+
+
+@app.post("/settings/email", dependencies=[Depends(require_csrf)])
+def request_email_change(request: Request, current_password: str = Form(""), new_email: str = Form("")):
+    """Start an email change: nothing changes until the link sent to the new
+    address is opened. The current address is told a change was asked for."""
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    _enforce_rate_limit(request, "email-change", 5, 3600)
+    if not _current_password_ok(int(account["id"]), current_password):
+        record_security_event("email_change_refused", account_id=int(account["id"]))
+        return _settings_redirect(error="Your current password was not right. Nothing was changed.")
+    email = normalize_email(new_email)
+    if not valid_email(email):
+        return _settings_redirect(error="Enter a valid new email address.")
+    if email == normalize_email(account.get("email") or ""):
+        return _settings_redirect(error="That is already your email address.")
+    if get_account_by_email(email):
+        return _settings_redirect(error="That email address cannot be used. Choose another one.")
+    token = session_token()
+    expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    save_email_change_token(int(account["id"]), email, token_digest(token), expires)
+    confirm_url = f"{_public_base(request)}/settings/email/confirm/{token}"
+    delivered = False
+    try:
+        delivered = send_transactional_email(
+            email, "Confirm your new WarriorIQ email",
+            f"Open this link within 24 hours to make this your WarriorIQ sign-in email:\n\n{confirm_url}\n\n"
+            "If you did not ask for this, ignore this message and nothing changes.")
+        send_transactional_email(
+            account["email"], "Your WarriorIQ email change",
+            "Someone signed in to your WarriorIQ account asked to change its email address. It changes only "
+            "when the link sent to the new address is opened. If this was not you, change your password in "
+            "Settings now.")
+    except Exception:                                                # noqa: BLE001
+        LOGGER.warning("email_change_delivery_failed account=%s", account["id"])
+    record_security_event("email_change_requested", account_id=int(account["id"]),
+                          metadata={"email_delivery": "sent" if delivered else "unavailable"})
+    if not delivered:
+        return _settings_redirect(error="The confirmation email could not be sent right now. Try again later.")
+    return _settings_redirect(notice=f"Check {email}: open the link in it to finish the change.")
+
+
+@app.get("/settings/email/confirm/{token}")
+def confirm_email_change(request: Request, token: str):
+    changed = consume_email_change_token(token_digest(token))
+    if changed is None:
+        raise HTTPException(410, "This email-change link is invalid, used or expired.")
+    account_id, old_email, new_email = changed
+    record_security_event("email_changed", account_id=account_id)
+    try:
+        send_transactional_email(
+            old_email, "Your WarriorIQ email was changed",
+            "The sign-in email for your WarriorIQ account was changed. If this was not you, reset your "
+            "password from the sign-in page and contact support.")
+    except Exception:                                                # noqa: BLE001
+        LOGGER.warning("email_change_notice_failed account=%s", account_id)
+    current = _account(request)
+    if current and int(current["id"]) == account_id:
+        return _settings_redirect(notice=f"Your email is now {new_email}.")
+    return RedirectResponse("/login?verified=1", status_code=303)
 
 
 @app.post("/settings/videos/{job_id}/delete", dependencies=[Depends(require_csrf)])
@@ -6817,10 +7115,114 @@ def _athlete_name(profile: dict, fights: list[dict]) -> str:
     return str(profile.get("display_name") or SETTINGS.default_profile_name)
 
 
+def _display_name(profile: dict | None, fights: list[dict]) -> str:
+    """The one name the account's own pages use for its athlete.
+
+    QA, 2026-10-11: "My Athlete" on /profile and /settings, "Theodoulos" in
+    Fight Camp, for the same person. A name the user typed wins; while the
+    profile still has the starting placeholder, the fighter the fights are
+    filed under is the name, as Fight Camp already showed.
+    """
+    own = " ".join(str((profile or {}).get("display_name") or "").split())
+    if own and own != SETTINGS.default_profile_name:
+        return own
+    filed = Counter(" ".join(str(fight.get("fighter_name")).split())
+                    for fight in fights if str(fight.get("fighter_name") or "").strip())
+    if filed:
+        return filed.most_common(1)[0][0]
+    return own or SETTINGS.default_profile_name
+
+
 def _athlete_fighter_id(fights: list[dict]) -> int | None:
     """The roster fighter this page follows: the one most fights are filed under."""
     ids = Counter(fight["fighter_id"] for fight in fights if fight.get("fighter_id") is not None)
     return ids.most_common(1)[0][0] if ids else None
+
+
+def _fight_format(report: dict) -> dict | None:
+    """Rounds and their length, from the one place both the report header and
+    the library card read: the rounds the analysis used (found in the footage
+    by core/round_detect.py, or the whole video as one). Only reports with no
+    round list fall back to the format typed in at upload. The library card
+    said "3 rounds" (typed in) while the report said "1 round · 2:00" (found)
+    for the same fight (QA, 2026-10-11)."""
+    rounds = [r for r in (report.get("rounds") or []) if isinstance(r, dict)]
+    if rounds:
+        total = sum(max(0.0, float(r.get("end_seconds") or 0) - float(r.get("start_seconds") or 0)) for r in rounds)
+        each = int(total / len(rounds))
+        count = len(rounds)
+        label = (f"{count} round{'' if count == 1 else 's'} · {'about ' if count > 1 else ''}"
+                 f"{each // 60}:{each % 60:02d}{' each' if count > 1 else ''}")
+        return {"count": count, "each_seconds": each, "label": label}
+    setup = report.get("setup") or {}
+    try:
+        count = int(setup.get("round_count") or 0)
+        secs = int(float(setup.get("round_duration_seconds") or 0))
+    except (TypeError, ValueError):
+        return None
+    if count <= 0:
+        return None
+    length = f"{secs // 60} min" if secs >= 60 and secs % 60 == 0 else f"{secs}s"
+    return {"count": count, "each_seconds": secs, "label": f"{count} × {length}"}
+
+
+# A library card reads its report through the same gates as the report page,
+# once per report file version: re-reading every report on every library view
+# would be the slow part of the page.
+_LIBRARY_CARD_CACHE: dict[str, tuple[float, dict]] = {}
+
+# Report states that mean the analysis did not produce a usable report: the
+# library says "Needs attention" rather than "Report ready" (C2), and sharing
+# is not offered (C3).
+FAILED_NUMBER_STATES = frozenset({"no_fight", "unverified", "movement_only"})
+
+
+def _report_failed(job_id: str) -> bool:
+    """Whether the saved report is one that did not work, read through the same
+    gates as the report page (attach_plausibility, then the identity gate)."""
+    try:
+        path = _require_completed_artifact(job_id, "report.json")
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:                                                # noqa: BLE001
+        return False
+    if report.get("mode") == "solo":
+        return False
+    attach_plausibility(report, path.parent / "tracking.jsonl")
+    _score_and_identity_as_shown(report)
+    return _numbers_state(report)["state"] in FAILED_NUMBER_STATES
+
+
+def _library_card(job_id: str) -> dict:
+    """What a library card may say about a saved report: its state, its format
+    and a score only when the report page itself would show one."""
+    try:
+        directory = completed_artifact_directory(job_id)
+        path = directory / "report.json" if directory is not None else None
+        if path is None or not path.is_file():
+            return {"available": False}
+        stamp = path.stat().st_mtime
+        cached = _LIBRARY_CARD_CACHE.get(str(path))
+        if cached and cached[0] == stamp:
+            return cached[1]
+        report = json.loads(path.read_text(encoding="utf-8"))
+        solo = report.get("mode") == "solo"
+        if not solo:
+            _score_and_identity_as_shown(report)
+            _estimate_score_withheld_for_punches(report)
+            _withhold_score_while_counts_are_off(report)
+        state = "ok" if solo else _numbers_state(report)["state"]
+        scorecard = report.get("scorecard") or {}
+        score = None
+        if (not solo and scorecard.get("available") and scorecard.get("winner_estimate")
+                and feature_is_on("scoring")):
+            score = {"totals": scorecard.get("totals") or {}, "winner": scorecard.get("winner_estimate")}
+        card = {"available": True, "numbers_state": state, "failed": state in FAILED_NUMBER_STATES,
+                "format": _fight_format(report), "score": score}
+        _LIBRARY_CARD_CACHE[str(path)] = (stamp, card)
+        return card
+    except Exception:                                                # noqa: BLE001
+        LOGGER.warning("library_card_unreadable job=%s", job_id)
+        return {"available": _report_available(job_id)}
 
 
 def _report_available(job_id: str) -> bool:
@@ -6905,7 +7307,7 @@ def _discard_pending_job(job_id: str, job: dict) -> None:
 
 
 @app.post("/pending/{job_id}/cancel", dependencies=[Depends(require_csrf)])
-def cancel_pending_job(request: Request, job_id: str):
+def cancel_pending_job(request: Request, job_id: str, next_path: str = Form("")):
     """Cancel an upload waiting for its fighters, or an analysis not finished."""
     owner = _owner_key(request)
     job = get_job(job_id)
@@ -6920,6 +7322,10 @@ def cancel_pending_job(request: Request, job_id: str):
     )
     if "application/json" in request.headers.get("accept", ""):
         return {"cancelled": True}
+    # "Upload a different video" on the selection page goes back to the upload
+    # form. Only a local /analyze path is followed.
+    if next_path == "/analyze" or re.fullmatch(r"/analyze/[a-z_]+", next_path or ""):
+        return RedirectResponse(next_path, status_code=303)
     # Said on arrival: the item just vanished, and when it was the last one
     # the whole Pending section went with it (QA, 2026-10-07).
     return RedirectResponse("/history?cancelled=1#library-notice", status_code=303)
@@ -6937,7 +7343,8 @@ def history_page(request: Request, cancelled: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
     for fight in fights:
-        fight["report_available"] = _report_available(fight["job_id"])
+        fight["card"] = _library_card(fight["job_id"])
+        fight["report_available"] = bool(fight["card"].get("available"))
     pending = _pending_jobs_for_owner(_owner_key(request)) if profile_id is not None else []
     return templates.TemplateResponse(
         request=request, name="history.html",
@@ -7030,6 +7437,11 @@ def compare_page(request: Request, a: str = "", b: str = ""):
             # Each card is headed with its fight, not "Fight analysis 1" - and
             # the page can say when the two are different fighters.
             "picked": [next((f for f in fights if f["job_id"] == job_id), None) for job_id in (a, b)],
+            # Two analyses of the one video file (C6): said, not presented as two fights.
+            "same_video": bool(a and b and a != b and a in allowed and b in allowed
+                               and _fight_digest(next(f for f in fights if f["job_id"] == a))
+                               and _fight_digest(next(f for f in fights if f["job_id"] == a))
+                               == _fight_digest(next(f for f in fights if f["job_id"] == b))),
             "signed_in": profile_id is not None,
             "solo_picked": bool(solo_ids),
             # The page promised a movement comparison "below" and rendered
@@ -7043,9 +7455,18 @@ def compare_page(request: Request, a: str = "", b: str = ""):
     )
 
 
+@app.get("/coach")
+def coach_redirect(request: Request):
+    """/coach and /dashboard were one page at two addresses, sold on the home
+    page as two different things (D3, QA 2026-10-11). /coach now forwards to
+    Fight Camp; old links and bookmarks keep working, query string included
+    (the browser carries a #squad fragment across the redirect itself)."""
+    query = request.url.query
+    return RedirectResponse("/dashboard" + (f"?{query}" if query else ""), status_code=308)
+
+
 @app.get("/camp", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
-@app.get("/coach", response_class=HTMLResponse)
 def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = "", redeem: str = ""):
     """Fight Camp: missions from the latest fight, progress, and the squad.
 
@@ -7079,6 +7500,12 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
                if athlete_id is None or record.get("fighter_id") in (None, athlete_id)]
     default_fighter = profile.get("default_fighter", "A")
     progress = build_progress(records, default_fighter)
+    # Whether each left-out fight can still be fixed: choosing the fighters
+    # again needs the video, which is removed after the retention period.
+    for item in progress.get("identity_failed_fights") or []:
+        item["fixable"] = not _video_removed(str(item.get("job_id") or ""))
+        fight = next((f for f in fights if f.get("job_id") == item.get("job_id")), None)
+        item["label"] = (fight or {}).get("choice_label") or "Fight"
     other_fights = sum(1 for fight in fights
                        if athlete_id is not None and fight.get("fighter_id") not in (None, athlete_id))
     assignments = list_assignments(profile_id)
@@ -7112,6 +7539,7 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
         request=request, name="camp.html",
         context={
             "request": request, "profile": profile, "signed_in": True, "progress": progress,
+            "video_retention_days": SETTINGS.saved_video_retention_days,
             "athlete_name": _athlete_name(profile, fights),
             "other_fighter_fights": other_fights,
             "assignments": assignments,
@@ -7178,11 +7606,11 @@ def _form_refusal(message: str, next_path: str, fallback: str) -> RedirectRespon
 def _roster_refusal(message: str, typed: str) -> RedirectResponse:
     """Send a rejected roster addition back to /coach, message and name intact."""
     query = urlencode({"error": message, "name": " ".join(typed.split())[:80]})
-    return RedirectResponse(f"/coach?{query}#squad", status_code=303)
+    return RedirectResponse(f"/dashboard?{query}#squad", status_code=303)
 
 
 @app.post("/coach/fighters", dependencies=[Depends(require_csrf)])
-def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/coach#squad")):
+def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/dashboard#squad")):
     """Add someone to the roster without having to analyse a fight first.
 
     Filing an old fight needs a fighter to file it against, and until now the
@@ -7210,7 +7638,7 @@ def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = 
                 name,
             )
     create_fighter(profile_id, cleaned)
-    return RedirectResponse(_safe_next(next_path, "/coach#squad"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/dashboard#squad"), status_code=303)
 
 
 @app.post("/coach/fights/{job_id}/fighter", dependencies=[Depends(require_csrf)])
@@ -7218,7 +7646,7 @@ def assign_fight_to_fighter(
     request: Request,
     job_id: str,
     fighter_id: str = Form(""),
-    next_path: str = Form("/coach#squad"),
+    next_path: str = Form("/dashboard#squad"),
 ):
     """File a past fight against a fighter.
 
@@ -7232,7 +7660,7 @@ def assign_fight_to_fighter(
     chosen = int(fighter_id) if fighter_id.strip().isdigit() else None
     if not assign_fighter_to_fight(profile_id, job_id, chosen):
         raise HTTPException(404, "That fight or fighter is not in this workspace.")
-    return RedirectResponse(_safe_next(next_path, "/coach#squad"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/dashboard#squad"), status_code=303)
 
 
 @app.post("/coach/assignments", dependencies=[Depends(require_csrf)])
@@ -8296,6 +8724,11 @@ def share_report(request: Request, job_id: str):
         raise HTTPException(403, "Private report sharing is available on Athlete, Pro, Coach and Gym plans.")
     if not fight or int(fight["profile_id"]) != profile_id:
         raise HTTPException(404)
+    # A report that did not work is not sent to a coach (C3, QA 2026-10-11):
+    # the button was offered on a failed analysis.
+    if _report_failed(job_id):
+        raise HTTPException(409, "This analysis did not work, so there is nothing to send to a coach. "
+                                 "Fix it or analyse another video first.")
     token = session_token()
     expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     save_report_share(job_id, profile_id, token_digest(token), expires)

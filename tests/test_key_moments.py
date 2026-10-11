@@ -63,6 +63,8 @@ def test_the_replay_page_shows_the_cards(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "_authorized_job", lambda request, job_id: {"ruleset": "K1"})
     monkeypatch.setattr(web, "_require_completed_artifact", lambda job_id, name: path)
     monkeypatch.setattr(web, "refresh_identity_integrity", lambda report: report)
+    # The video is still there (a removed one gets a message instead of the player).
+    monkeypatch.setattr(web, "_video_removed", lambda job_id: False)
     # The page rebuilds coaching from the metrics; this report states it directly.
     monkeypatch.setattr(web, "_apply_report_annotations", lambda report, annotations: None)
     monkeypatch.setattr(web, "_request_plan", lambda request: {"report_tier": "full", "coaching_items": None})

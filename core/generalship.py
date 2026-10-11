@@ -275,8 +275,16 @@ def judge_fight(metrics, rounds, coverage: dict[str, float], minimum_coverage: f
 # the ruleset really is judged round by round. Ground taken is not a judging
 # criterion in any of them, so it carries none.
 COMPARISONS = ("aggression", "generalship", "territory")
-_NEUTRAL_LABELS = {"aggression": "Moved forward", "generalship": "In the middle", "territory": "Gained ground"}
-_JUDGED_LABELS = {"aggression": "Pressed forward", "generalship": "Held the middle", "territory": "Took ground"}
+# Each column is a split between the two fighters (the two numbers add up to
+# 100%), not a share of the time. "Moved forward 52% / 48%" sat beside "went
+# forward 24% of the time" on the same report and read as the same measure
+# disagreeing (QA, 2026-10-11), so the labels say "split".
+_NEUTRAL_LABELS = {"aggression": "Forward pressure split", "generalship": "Middle-of-the-area split",
+                   "territory": "Ground gained split"}
+_JUDGED_LABELS = {"aggression": "Pressing forward split", "generalship": "Holding the middle split",
+                  "territory": "Ground taken split"}
+SPLIT_NOTE = ("Each column splits one measure between the two of you, so the two numbers add up to 100%. "
+              "They are not shares of the fight: the time you spent going forward is under How you moved.")
 _JUDGED_CRITERIA = {"aggression": "effective aggression", "generalship": "ring generalship", "territory": None}
 _READS = {
     "aggression": "{name} moved forward more of the time.",
@@ -318,6 +326,7 @@ def movement_comparison(card: dict | None, ruleset: str | None, scoring_availabl
         "available": bool(card.get("available")),
         "reason": card.get("reason"),
         "title": "Movement comparison",
+        "split_note": SPLIT_NOTE,
         "judged": judged,
         "columns": [{"key": key, "label": labels[key],
                      "criterion": _JUDGED_CRITERIA[key] if judged else None} for key in COMPARISONS],

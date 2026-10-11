@@ -191,10 +191,17 @@ def test_an_unverified_report_greys_out_its_numbers_and_keeps_them_off_the_story
     assert "data-share-card-open" not in page
     assert 'aria-disabled="true"' in page
     assert "They cannot go on a story card" in page
-    # A coach link is allowed: the coach's page withholds the numbers too.
-    assert 'action="/share/abcdef123456"' in page
-    created = client.post("/share/abcdef123456", follow_redirects=False)
-    assert created.status_code == 303
+    # No coach link for a report that did not work (QA, 2026-10-11, C3): it
+    # was offered on a failed analysis. Refused on the server too.
+    assert 'action="/share/abcdef123456"' not in page
+    assert client.post("/share/abcdef123456", follow_redirects=False).status_code == 409
+    # A link made before that rule still opens a coach page that withholds them.
+    from unittest.mock import patch
+
+    import app.main as web
+
+    with patch.object(web, "_report_failed", return_value=False):
+        created = client.post("/share/abcdef123456", follow_redirects=False)
     token = created.headers["location"].split("share=")[1]
     coach = client.get(f"/s/{token}").text
     assert "Identity check failed." in coach

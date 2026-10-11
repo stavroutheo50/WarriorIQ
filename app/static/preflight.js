@@ -388,7 +388,11 @@
       framingMeasured: false, reason: '',
       // How much evidence the framing number rests on. A read from one usable
       // pair is not the same fact as a read from seven.
-      pairsCompared: 0, pairsDuplicate: 0, density: 0, fpsSource: ''
+      pairsCompared: 0, pairsDuplicate: 0, density: 0, fpsSource: '',
+      // Median picture brightness, 0-255 (Rec. 601 luma) over the sampled
+      // frames; null when no frame decoded. A very dark clip passed as
+      // "looks usable" (QA, 2026-10-11).
+      brightness: null
     };
     var release = function () {
       try { video.removeAttribute('src'); video.load(); } catch (err) { /* nothing to undo */ }
@@ -473,6 +477,13 @@
               densities.push(m.density);
               if (m.touchesBottom) cutAtFeet++;
             }
+            var lumas = [];
+            for (var f = 0; f < frames.length; f++) {
+              var px = frames[f].data, sum = 0, n = 0;
+              for (var k = 0; k < px.length; k += 16) { sum += 0.299 * px[k] + 0.587 * px[k + 1] + 0.114 * px[k + 2]; n++; }
+              if (n) lumas.push(sum / n);
+            }
+            result.brightness = lumas.length ? median(lumas) : null;
             result.pairsCompared = shares.length;
             result.pairsDuplicate = duplicates;
             var share = median(shares);

@@ -2335,7 +2335,7 @@ class AddFighterFromCoachPageTests(unittest.TestCase):
         # Refused back to the page rather than as a 402 page, so the coach
         # keeps the squad they were looking at and can read why.
         self.assertEqual(second.status_code, 303)
-        self.assertIn("/coach?", second.headers["location"])
+        self.assertIn("/dashboard?", second.headers["location"])
         self.assertIn("all+in+use", second.headers["location"])
         self.assertEqual(len(database.list_fighters(self.profile)), 1)
         self.assertIn("all in use", self.client.get(

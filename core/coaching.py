@@ -251,6 +251,20 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None,
     # Ranked on the comparison that exists: against the opponent when there is
     # one, against the reference band when there is not.
     ranked = sorted(ranked_items, key=lambda item: item[6], reverse=True)
+    # The absolute thresholds the report itself states (core/metric_catalog.py:
+    # "Under 42% is what WarriorIQ flags as worth training"). A number under
+    # its threshold is always something to work on, whatever the opponent did:
+    # a report with Guard 7% said "Nothing behind your opponent" and "No drill
+    # from this fight" beside that very sentence (QA, 2026-10-11).
+    def _flag_level(key: str) -> float | None:
+        metric = BY_KEY.get(key)
+        return metric.band[0] if metric is not None and metric.band else None
+
+    flagged = sorted(
+        (item for item in ranked_items
+         if _flag_level(item[2]) is not None and item[1] < float(_flag_level(item[2]))),
+        key=lambda item: item[1] - float(_flag_level(item[2])))
+    flagged_keys = {item[2] for item in flagged}
     if comparable:
         ordered = sorted(comparable, key=lambda item: item[0], reverse=True)
         strongest = ordered[0]
@@ -272,6 +286,18 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None,
                    if item is not strongest and item[6] <= -REFERENCE_SPREADS][:2]
     else:
         strongest, weakest = None, []
+    # Flagged numbers first; a comparative finding still follows them.
+    weakest = flagged + [item for item in weakest if item[2] not in flagged_keys]
+    weakest = weakest[:max(2, len(flagged))]
+    # A number under its own threshold is never also called a strength.
+    if strongest is not None and strongest[2] in flagged_keys:
+        strongest = None
+
+    def _threshold_sentence(key: str) -> str:
+        level = _flag_level(key)
+        if key not in flagged_keys or level is None:
+            return ""
+        return f" Under {level * 100:.0f}% is what WarriorIQ flags as worth training."
 
     def _phrase(item) -> tuple[str, str]:
         gap, mine, key, label, _drill, _prescription, _rank = item
@@ -285,7 +311,7 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None,
             shown = f"{mine * 100:.0f}%"
             unit = ""
         if gap is None:
-            return f"{label} {shown}", f"Measured at {shown}{unit}."
+            return f"{label} {shown}", f"Measured at {shown}{unit}.{_threshold_sentence(key)}"
         theirs = opponent.get(key)
         if key == "pressure_index":
             theirs_shown = f"{(float(theirs) + 1) / 2 * 100:.0f}"
@@ -299,7 +325,7 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None,
             side = "better than" if gap > 0 else "behind"
         return (
             f"{label} {shown}",
-            f"You {shown}{unit}, them {theirs_shown} - {side} your opponent here.",
+            f"You {shown}{unit}, them {theirs_shown} - {side} your opponent here.{_threshold_sentence(key)}",
         )
 
     strengths = []
@@ -334,10 +360,10 @@ def build_pose_coaching(fighter: str, own: dict, opponent: dict | None = None,
         improvements.append({
             "title": "Nothing behind your opponent",
             "detail": (
-                f"On {ranked_names} there was no clear gap in their favour. {unranked} "
-                "The next gain is in the striking, which WarriorIQ "
-                "can only estimate so far - watch your counted strikes on the "
-                "replay and judge them yourself."
+                f"On {ranked_names} there was no clear gap in their favour, and none was under "
+                f"the level WarriorIQ flags as worth training. {unranked} "
+                "WarriorIQ does not judge the striking itself yet: go through the replay "
+                "with your coach for that."
             ),
             "evidence_times": [],
         })

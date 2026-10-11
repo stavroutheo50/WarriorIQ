@@ -15,7 +15,7 @@
     skipped without a word. Refined once detection has looked at it. -#}{% if frame_source in ['auto', 'auto_pair'] %}<p class="frame-source-note" id="frameNote" data-source="{{frame_source}}">WarriorIQ chose this moment ({{frame_clock}}) for you. <a class="text-link" href="/frame/{{job_id}}">Pick a different moment</a></p>{% endif %}</div>
     {#- Only when the note above does not already carry the same link: both
         showed on an automatically chosen frame (QA, 2026-10-04). -#}
-    <a class="quiet-back" href="/analyze">← Upload a different video</a>
+    {% if can_discard_upload %}<form class="quiet-back-form" id="discardUpload" action="/pending/{{job_id}}/cancel" method="post" data-confirm="Discard this upload? The video you just uploaded is deleted and you go back to the upload form."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="{{back_url}}"><button class="quiet-back link-button" type="submit">← Upload a different video</button></form>{% else %}<a class="quiet-back" href="{{back_url}}">← Upload a different video</a>{% endif %}
   </header>
   <div class="fighter-lock-layout">
     <section class="fighter-stage-panel" aria-labelledby="fighter-stage-title">
@@ -25,7 +25,12 @@
           a separate "which one is" question (2026-10-09). -#}
       <h2 id="fighter-stage-title" hidden>Who is who</h2>
       <div class="selection-status select-instruction" id="status" role="status" aria-live="polite">Finding the clearest moment in your fight…</div>
+      {% if duplicate_of %}<p class="pair-warning" id="duplicateWarning" role="note">You already analysed this exact video on <time datetime="{{ duplicate_of.created_at }}" data-local="date">{{ duplicate_of.created_at|fight_moment(false) }}</time>{% if duplicate_of.report_available %} &mdash; <a class="text-link" href="/result/{{ duplicate_of.job_id }}">open that report</a>{% endif %}. Analysing it again gives the same kind of report, and it is never compared with itself in your progress.</p>{% endif %}
       <p class="pair-warning" id="pairWarning" role="alert" hidden></p>
+      {#- No people found on the frame: the most common cause is a video filmed
+          sideways, and the turn was folded away under More options (C4,
+          QA 2026-10-11). Shown by loadDetectionCandidates. -#}
+      <p class="rotate-prominent" id="rotateProminent" hidden><span>WarriorIQ found nobody standing in this picture. If the fighters are lying on their side, the video was filmed sideways.</span> <button class="btn secondary" id="rotateFrameTop" type="button">Rotate 90°</button></p>
       <div class="select-stage" id="stage"><img id="frame" src="/selection-image/{{job_id}}?turn={{ job.rotate_clockwise|default(0, true) }}" alt="Selected fight frame for drawing Fighter A and Fighter B boxes"><canvas id="canvas" aria-label="Draw a full-body box around Fighter A, followed by Fighter B"></canvas></div>
       <div class="selection-edit-actions" aria-label="Correct fighter selections">
         <button class="selection-edit-button" id="redrawA" type="button">Start over</button>
@@ -36,7 +41,7 @@
           empty area under it (QA, 2026-10-04). Choosing a person from the list
           also belongs next to the picture of them. -#}
       <div class="stage-extras">
-      <p class="selection-reassurance"><span aria-hidden="true">✓</span> You only do this once. WarriorIQ follows both fighters through the whole video.</p>
+      <p class="selection-reassurance"><span aria-hidden="true">✓</span> {% if reselecting %}Point them out again here and WarriorIQ follows both fighters through the whole video from this answer.{% else %}One picture is enough: WarriorIQ follows both fighters through the whole video.{% endif %}</p>
       {#- Everything a first-timer does not need, folded away but one tap
           from anyone who does: turning a sideways video, another moment,
           choosing from a list (the keyboard and screen-reader path), corners
@@ -100,20 +105,26 @@
 {% endblock %}
 {% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
 (function(){
-  const button=document.getElementById('rotateFrame'),status=document.getElementById('rotateStatus');
-  if(!button)return;
-  button.addEventListener('click',async()=>{
-    button.disabled=true;status.textContent='Turning the video…';
+  const buttons=[document.getElementById('rotateFrame'),document.getElementById('rotateFrameTop')].filter(Boolean),status=document.getElementById('rotateStatus');
+  buttons.forEach(button=>button.addEventListener('click',async()=>{
+    buttons.forEach(b=>{b.disabled=true});status.textContent='Turning the video…';
     try{
-      const response=await fetch(`/api/selection-frame/${{ job_id|tojson }}/rotate`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({clockwise:90})});
+      {#- The id comes from the same jobId every other request on this page
+          uses. Interpolating {{ job_id|tojson }} straight into the template
+          literal sent /api/selection-frame/$"<id>"/rotate and got 404
+          (QA, 2026-10-11). -#}
+      const response=await fetch(`/api/selection-frame/${encodeURIComponent(jobId)}/rotate`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({clockwise:90})});
       const data=await response.json().catch(()=>({}));
-      if(!response.ok){status.textContent=(data&&data.detail)||'The video could not be turned. Try again.';button.disabled=false;return}
+      if(!response.ok){status.textContent=(data&&data.detail)||'The video could not be turned. Try again.';buttons.forEach(b=>{b.disabled=false});window.wiqToast?.(status.textContent,'error');return}
       // Boxes drawn on the old frame no longer match it, so the page is
       // reloaded on the turned frame with its warnings re-read.
       window.location.reload();
-    }catch(error){status.textContent='The video could not be turned. Check the connection and try again.';button.disabled=false}
-  });
+    }catch(error){status.textContent='The video could not be turned. Check the connection and try again.';buttons.forEach(b=>{b.disabled=false});window.wiqToast?.(status.textContent,'error')}
+  }));
 })();
+// Desktop: Start moves into the side column so it is on screen beside the
+// picture (D6). Without this script it stays under the picture, as on phones.
+(()=>{const choice=document.querySelector('.analysis-choice'),guide=document.querySelector('.fighter-lock-guide');if(choice&&guide&&window.matchMedia&&matchMedia('(min-width: 921px)').matches)guide.prepend(choice)})();
 const jobId={{job_id|tojson}},videoWidth={{job.video_width}},videoHeight={{job.video_height}};
 const image=document.getElementById('frame'),stage=document.getElementById('stage'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
 const keyA=document.getElementById('keyA'),keyB=document.getElementById('keyB'),keyNameA=document.querySelector('.fighter-key-item.fighter-a strong'),keyNameB=document.querySelector('#keyItemB strong'),pairWarning=document.getElementById('pairWarning');
@@ -243,7 +254,7 @@ function draw(){
   keyA.textContent=boxA?'Chosen':solo?'Tap the person training':'Tap first';
   keyB.textContent=boxB?'Chosen':boxA?'Tap now':'Tap second';
   keyNameA.textContent=solo?'Person training':tagFor('A');keyNameB.textContent=tagFor('B');
-  if(starting)statusBox.textContent='Starting analysis…';else if(solo&&!scanning)statusBox.textContent=boxA?'Got it. Press Start when ready.':detections.length?'Tap the person training, or drag a box around them.':'Drag a box around the person training, head to feet.';else if(scanning&&mode==='A_DRAW')statusBox.textContent='Finding the clearest moment in your fight…';else if(mode==='A_DRAW')statusBox.textContent=detections.length>=2?`Tap ${who('A')}.`:`Drag a box around ${who('A')}, head to feet.`;else if(mode==='B_DRAW')statusBox.textContent=detections.length>=2?`Got it. Now tap ${who('B')}.`:`Got it. Now drag a box around ${who('B')}, head to feet.`;else if(boxA&&boxB&&!valid)statusBox.textContent=`The boxes cover too much of the same person. Redraw ${who('B')} on their own.`;else if(valid&&!pairWarning.hidden)statusBox.textContent='Both chosen, but these two look alike. Read the warning below before starting.';else statusBox.textContent=valid?'Done. Check the names on the picture, then press Start.':'Choose both fighters.';
+  if(starting)statusBox.textContent='Starting analysis…';else if(solo&&!scanning)statusBox.textContent=boxA?'Got it. Press Start when ready.':detections.length?'Tap the person training, or drag a box around them.':'Drag a box around the person training, head to feet.';else if(scanning&&mode==='A_DRAW')statusBox.textContent='Finding the clearest moment in your fight…';else if(mode==='A_DRAW')statusBox.textContent=detections.length>=2?`Tap ${who('A')}.`:`Drag a box around ${who('A')}, head to feet.`;else if(mode==='B_DRAW')statusBox.textContent=detections.length>=2?`Got it. Now tap ${who('B')}.`:`Got it. Now drag a box around ${who('B')}, head to feet.`;else if(boxA&&boxB&&!valid)statusBox.textContent=`The boxes cover too much of the same person. Redraw ${who('B')} on their own.`;else if(valid&&!pairWarning.hidden)statusBox.textContent='Both chosen. Read the warning above the picture before starting.';else statusBox.textContent=valid?'Done. Check the names on the picture, then press Start.':'Choose both fighters.';
   stage.dataset.selectionState=valid?'ready':mode.endsWith('_DRAW')?'drawing':'warning';stage.dataset.scanning=scanning?'true':'false';statusBox.dataset.state=valid?'ready':boxA&&boxB?'warning':'drawing';
 }
 function pointFromEvent(event,clampToImage=false){const rect=canvas.getBoundingClientRect(),view=imageViewport();let x=event.clientX-rect.left,y=event.clientY-rect.top;const inside=x>=view.left&&x<=view.left+view.width&&y>=view.top&&y<=view.top+view.height;if(!inside&&!clampToImage)return null;x=Math.max(view.left,Math.min(view.left+view.width,x));y=Math.max(view.top,Math.min(view.top+view.height,y));return[x,y]}
@@ -265,8 +276,10 @@ async function checkPair(){
     const response=await fetch(`/api/pair-check/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({fighter_a_box:boxA,fighter_b_box:boxB})});
     if(!response.ok||token!==pairCheckToken)return;
     const data=await response.json();
-    if(token!==pairCheckToken||!data.looks_alike)return;
-    pairWarning.textContent=`${data.message} Choosing another frame now is quicker than finding out after the analysis.`;
+    if(token!==pairCheckToken||!(data.looks_alike||data.faint_message))return;
+    // A box the detector barely saw a person in is said here, before Start:
+    // the analysis's own check is stricter (B12, QA 2026-10-11).
+    pairWarning.textContent=[data.looks_alike?data.message:'',data.faint_message||''].filter(Boolean).join(' ')+' Choosing another frame now is quicker than finding out after the analysis.';
     pairWarning.hidden=false;draw();
   }catch(error){}
 }
@@ -280,6 +293,8 @@ async function loadDetectionCandidates(){
       fit();
     }
     detections=data.people||[];buildPickList();describeFrame(data);
+    // Nobody found at all: offer the turn up front (C4).
+    if(data.availability==='candidates_ready'&&!detections.length&&!soloInput.checked){const top=document.getElementById('rotateProminent');if(top)top.hidden=false}
   }catch(error){detections=[]}
   finally{scanning=false;draw()}
 }

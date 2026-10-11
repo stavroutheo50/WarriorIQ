@@ -20,6 +20,7 @@ check is noise.
 
 from __future__ import annotations
 
+from core.quality_guardian import LOW_LIGHT_BRIGHTNESS
 from core.preflight import (
     MAX_INFERENCE_SIZE,
     MIN_INFERENCE_SIZE,
@@ -99,6 +100,9 @@ def client_thresholds() -> dict:
         "reference_subject_px": list(REFERENCE_SUBJECT_PX),
         "max_motion_share": MAX_TRUSTWORTHY_MOTION_SHARE,
         "min_motion_share": MIN_TRUSTWORTHY_MOTION_SHARE,
+        # The server's own low-light line, so the device and the analysis
+        # agree on what "too dark" means (D11, 2026-10-11).
+        "low_light_brightness": LOW_LIGHT_BRIGHTNESS,
     }
 
 

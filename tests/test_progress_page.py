@@ -18,7 +18,9 @@ def _record(job_id, created, guard, focus="A", identity=None, fighter_id=1):
     report = {
         "video": {"analysis_target": focus, "focus_fighter": focus},
         "setup": {"ruleset": "K1"},
-        "metrics": {focus: {"pose_coverage": .85, "guard_index": guard}},
+        # Current reports carry the guard's definition; only figures measured
+        # the same way are compared across fights (core/guard.py).
+        "metrics": {focus: {"pose_coverage": .85, "guard_index": guard, "guard_definition": "hands_up_share/2"}},
         "coaching": {}, "training_plan": {},
     }
     if identity is not None:
@@ -201,7 +203,7 @@ class ComparePageTests(unittest.TestCase):
             "scorecard": {"sport": sport},
             "integrity": integrity or {},
             "tracking": {"fighter_A_coverage": .95, "fighter_B_coverage": .95, **(tracking or {})},
-            "metrics": {focus: dict(metrics)},
+            "metrics": {focus: {"guard_definition": "hands_up_share/2", **metrics}},
         }
 
     def test_only_guard_and_balance_are_called_better_when_higher(self):
@@ -443,7 +445,10 @@ class HandheldCameraIdentityTests(unittest.TestCase):
         self.assertFalse(_identity_lost_to_camera({"tracking": self._tracking(None)}))
         page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(
             encoding="utf-8")
-        self.assertIn("{% if identity_failed and not camera_lost %}<a class=\"btn\" href=\"/select/", page)
+        # The who-is-who button only for an identity failure, never a camera one
+        # (the failure variable is decided once at the top of the template).
+        self.assertIn("{% if failure == 'identity' %}<a class=\"btn\" href=\"/select/", page)
+        self.assertIn("('camera' if identity_failed and camera_lost", page)
         for repick in ("<a class=\"text-link\" href=\"/select/{{job_id}}\">Show me who is who</a>",
                        "Choose the fighters again at the top of this page"):
             before = page[:page.index(repick)]

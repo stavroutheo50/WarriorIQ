@@ -157,14 +157,54 @@ LEGACY_PARTIAL_NOTE = ("This report was made by {engine}, before the guard was m
 LEGACY_SHORT_NOTE = "made by {engine} — re-run to measure"
 
 
+# The same notes for a fight whose video is gone (removed after the retention
+# period, or deleted by its owner): "Re-run the analysis" is impossible without
+# it, so the notes do not offer it (QA, 2026-10-11).
+NO_VIDEO_NOTE = ("Not measured in this report: it was made by {engine}, before the guard was measured "
+                 "consistently (engine v{current}). The video for this fight has been removed, so it "
+                 "cannot be measured again.")
+NO_VIDEO_PARTIAL_NOTE = ("This report was made by {engine}, before the guard was measured consistently "
+                         "(engine v{current}), so only the share of time with hands up is shown. The video "
+                         "for this fight has been removed, so the rest cannot be measured again.")
+NO_VIDEO_SHORT_NOTE = "made by {engine} — not measured"
+
+
+def comparable_guard(own: dict | None) -> float | None:
+    """This fighter's guard figure, only when it was measured the current way.
+
+    For comparing fights. The guard has been measured three different ways
+    (legacy averages, /1 a body-length reading, /2 wrist-to-chin), and a trend
+    across them printed 59%, 13.6%, 7%, 2% for similar footage (QA,
+    2026-10-11): the change was the ruler, not the fighter. A figure from an
+    older definition stays on its own report but is left out of trends,
+    comparisons and "since your last fight".
+    """
+    own = own or {}
+    value = own.get("guard_index")
+    if value is None or own.get("guard_definition") != GUARD_DEFINITION:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def legacy_notes(report: dict) -> tuple[str, str, str]:
-    """(full note, partial note, short note) naming the engine that made ``report``."""
+    """(full note, partial note, short note) naming the engine that made ``report``.
+
+    ``report["video_removed"]`` (set where the report is rendered) drops the
+    advice to re-run, which needs the video.
+    """
     from core.build_info import engine_name
 
     engine = engine_name(report)
     fill = {"engine": engine, "current": GUARD_ENGINE_VERSION}
+    short_engine = engine.replace("analysis engine", "engine")
+    if report.get("video_removed"):
+        return (NO_VIDEO_NOTE.format(**fill), NO_VIDEO_PARTIAL_NOTE.format(**fill),
+                NO_VIDEO_SHORT_NOTE.format(engine=short_engine))
     return (LEGACY_NOTE.format(**fill), LEGACY_PARTIAL_NOTE.format(**fill),
-            LEGACY_SHORT_NOTE.format(engine=engine.replace("analysis engine", "engine")))
+            LEGACY_SHORT_NOTE.format(engine=short_engine))
 
 
 def is_up(reading) -> bool | None:

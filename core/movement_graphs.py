@@ -47,27 +47,71 @@ def _split(numbers: dict | None, parts, source=None) -> list[dict] | None:
 
 
 def _lines(series_by_side: dict[str, dict | None], value: str, top: float, start: float, span: float):
-    """SVG polylines per side, broken wherever a point was not measured."""
+    """SVG polylines per side, broken wherever a point was not measured.
+
+    A measured point with no measured neighbour is drawn as a short flat line
+    across its own step. It used to be dropped - a run needed two points - so
+    the graph showed a gap exactly where the text below it named a moment
+    ("quietest at 1:05", QA 2026-10-11): the graph was hiding data it had.
+    """
     out = {}
     for side, series in series_by_side.items():
         if not series:
             continue
         step = float(series["step_seconds"])
         segments, current = [], []
+
+        def close(run):
+            if len(run) >= 2:
+                segments.append([f"{x:.1f},{y:.1f}" for x, y, _ in run])
+            elif len(run) == 1:
+                _x, y, t = run[0]
+                left = (t - start) / span * WIDTH
+                right = (t + step - start) / span * WIDTH
+                segments.append([f"{left:.1f},{y:.1f}", f"{right:.1f},{y:.1f}"])
+
         for point in series["points"]:
             reading = point.get(value)
             if reading is None:
-                if len(current) >= 2:
-                    segments.append(current)
+                close(current)
                 current = []
                 continue
             x = (float(point["t"]) + step / 2.0 - start) / span * WIDTH
             y = HEIGHT - min(1.0, float(reading) / top) * HEIGHT
-            current.append("%.1f,%.1f" % (x, y))
-        if len(current) >= 2:
-            segments.append(current)
+            current.append((x, y, float(point["t"])))
+        close(current)
         if segments:
             out[side] = [" ".join(segment) for segment in segments]
+    return out
+
+
+def _in_fight_footage(start: float, end: float, segments) -> bool:
+    """Whether any of [start, end) is fight footage (core/fight_presence.py)."""
+    return any(float(a) < end and float(b) > start for a, b in segments)
+
+
+def _gaps(series: dict | None, value: str, report: dict) -> list[dict]:
+    """Each stretch with no reading, and why: left out as not fight footage,
+    or the fighter was not seen. The hint under the graph used to blame every
+    gap on not being seen, beside "Seen 93%" - which is a share of the fight
+    footage only, so a stretch left out of the footage is not "not seen"."""
+    if not series:
+        return []
+    step = float(series["step_seconds"])
+    footage = ((report.get("video") or {}).get("fight_footage") or {})
+    segments = footage.get("segments") if isinstance(footage.get("segments"), list) else None
+    out, run = [], []
+    for point in series["points"] + [None]:
+        if point is not None and point.get(value) is None:
+            run.append(float(point["t"]))
+            continue
+        if run:
+            first, last = run[0], run[-1] + step
+            left_out = segments is not None and not _in_fight_footage(first, last, segments)
+            out.append({"from": _clock(first), "to": _clock(last),
+                        "reason": ("left out: not fight footage" if left_out
+                                   else "too little of you seen to measure")})
+            run = []
     return out
 
 
@@ -81,8 +125,9 @@ def build(report: dict, focus: str = "A") -> dict | None:
         return None
 
     moved = {side: _split(numbers, MOVED) for side, numbers in ((focus, mine), (other, theirs))}
-    ranges = {side: _split(numbers, RANGES, (numbers or {}).get("range_seconds") or {})
-              for side, numbers in ((focus, mine), (other, theirs))}
+    # The distance between the two is one shared measure: drawn once. A bar
+    # each showed the same distance as two slightly different numbers.
+    ranges = {focus: _split(mine, RANGES, mine.get("range_seconds") or {}), other: None}
 
     series = {focus: mine.get("series"), other: (theirs or {}).get("series")}
     drawn = [s for s in series.values() if s and s.get("points")]
@@ -97,7 +142,8 @@ def build(report: dict, focus: str = "A") -> dict | None:
             lines = _lines(series, "speed", top, start, span)
             if focus in lines:
                 energy = {"lines": lines, "top": round(top, 1),
-                          "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)]}
+                          "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)],
+                          "gaps": _gaps(series[focus], "speed", report)}
         own = series[focus]
         if own and any(p.get("hands_up") is not None for p in own["points"]):
             step = float(own["step_seconds"])
@@ -107,7 +153,8 @@ def build(report: dict, focus: str = "A") -> dict | None:
                      "share": round(float(p["hands_up"]) * 100),
                      "clock": _clock(float(p["t"]))}
                     for p in own["points"] if p.get("hands_up") is not None]
-            guard = {"bars": bars, "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)]}
+            guard = {"bars": bars, "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)],
+                     "gaps": _gaps(own, "hands_up", report)}
 
     facts = []
     if mine.get("distance_body_lengths") is not None:
@@ -173,10 +220,17 @@ def _energy_read(mine: dict | None, theirs: dict | None) -> str | None:
     points = [p for p in ((mine or {}).get("points") or []) if p.get("speed") is not None]
     if not points:
         return None
+    step = float((mine or {}).get("step_seconds") or 0.0)
     busiest = max(points, key=lambda p: p["speed"])
     quietest = min(points, key=lambda p: p["speed"])
-    text = (f"You were busiest at {_clock(busiest['t'])} ({busiest['speed']:.1f} body lengths a second) "
-            f"and quietest at {_clock(quietest['t'])} ({quietest['speed']:.1f}).")
+
+    def when(point) -> str:
+        # The stretch the point stands for, as drawn: one moment named for a
+        # five-second average read as a precise time the graph did not show.
+        return (f"between {_clock(point['t'])} and {_clock(float(point['t']) + step)}" if step
+                else f"at {_clock(point['t'])}")
+    text = (f"You were busiest {when(busiest)} ({busiest['speed']:.1f} body lengths a second) "
+            f"and quietest {when(quietest)} ({quietest['speed']:.1f}).")
     yours, other = _mean_speed(mine), _mean_speed(theirs)
     if other is not None:
         text += f" On average you moved {yours:.1f} body lengths a second, your opponent {other:.1f}."

@@ -431,6 +431,9 @@
 .key-dot.mine{background:var(--mine)}
 .key-dot.theirs{background:var(--theirs)}
 .key-dot.guard{width:2px;height:11px;border-radius:1px;background:var(--wiq-warning)}
+/* Stretches with the hands mostly down (B5, 2026-10-11). */
+.tl-guard-band{position:absolute;bottom:3px;height:11px;border-radius:2px;background:color-mix(in srgb,var(--wiq-warning) 35%,transparent)}
+.key-dot.guard-band{width:12px;height:8px;border-radius:2px;background:color-mix(in srgb,var(--wiq-warning) 35%,transparent)}
 
 .visual-split{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:6px}
 .defence-mix,.chain-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:7px}
@@ -650,6 +653,7 @@
 .fight-numbers-group [role=cell]{text-align:right;font-size:17px}
 .fight-numbers-group [role=cell]+[role=cell]{color:#9aa8c2}
 .fight-numbers-group .fight-numbers-head{padding:0 0 4px;border-top:0}
+.fight-numbers-group [role=row].shared-row{grid-template-columns:1fr 176px}
 .fight-numbers-head [role=columnheader]{font-size:12px;font-weight:600;color:#98a2b3;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 /* The label column needs a header for screen readers only. */
 .fight-numbers-head .fn-measure{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
@@ -867,3 +871,12 @@
 .graph-read{margin:2px 0 6px;font-size:16px;line-height:1.45;color:#eef3ff}
 .stack-part{position:relative;overflow:hidden}
 .stack-part span{position:absolute;inset:0;display:flex;font-style:normal;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#0b0f17}
+/* Sections folded on phones (D12). On a wide screen the summary row is hidden
+   and the section reads as before. */
+.phone-fold>summary{cursor:pointer;margin:6px 0 10px;color:#9fd8ff;font-weight:750;font-size:14px}
+@media(min-width:701px){.phone-fold>summary{display:none}}
+/* One size for every section heading on the report (D13, QA 2026-10-11):
+   they ranged from 29px to 68px - a .section-title h2 inside a card took the
+   page-title size. The page's own h1 ("Fight report") is unaffected. */
+main:has(.result-title) section h2,
+main:has(.result-title) .section-title h2{font-size:clamp(22px,2.4vw,30px);line-height:1.15;letter-spacing:-.02em}

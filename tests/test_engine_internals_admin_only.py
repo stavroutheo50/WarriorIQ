@@ -50,7 +50,8 @@ class AdminOnlyTests(unittest.TestCase):
         self.assertNotIn("abc123def456", page)
         self.assertNotIn("build unknown", page)
         # What a fighter can act on stays.
-        self.assertIn("first-frame identity gate", page)
+        # Plain words since QA 2026-10-11 ("first-frame identity gate" was internal).
+        self.assertIn("Found where you pointed them out", page)
         self.assertIn(f"Analysis engine v{build_info.ANALYSIS_VERSION}", page)
 
     def test_an_admin_still_has_them(self):

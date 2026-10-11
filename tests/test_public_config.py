@@ -28,7 +28,7 @@ def test_the_transport_is_never_printed_as_the_email_company():
     sections = _sections(email_provider="smtp", email_provider_name="")
     text = " ".join(list(sections) + list(sections.values()))
     assert "smtp" not in text.lower()
-    assert "Email delivery" in sections
+    assert "Email delivery (provider not yet named)" in sections
 
 
 def test_the_configured_company_names_are_printed():
@@ -48,7 +48,7 @@ def test_placeholders_are_problems():
                           ({"email_provider_name": ""}, "WARRIORIQ_EMAIL_PROVIDER_NAME"),
                           ({"hosting_provider": "server"}, "not a company name"),
                           ({"hosting_provider": ""}, "cannot name the host"),
-                          ({"support_email": "warrioriq@gmail.com"}, "gmail.com address"),
+                          ({"support_email": "warrioriq@gmail.com"}, "not an address on @warrioriq.eu"),
                           ({"privacy_email": ""}, "placeholder")):
         problems = legal.public_config_problems(dataclasses.replace(good, **change))
         assert any(words in problem for problem in problems), (change, problems)
