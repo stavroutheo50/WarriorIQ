@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WarriorIQ drill caller</title>
+<!-- Plays the pad drill that tools/exam_drill.py checks. The schedule below is
+     generated from exam_drill.schedule(); tests/test_exam_drill.py fails if
+     the two differ, so edit the plan there, never here. -->
+<style>
+  :root { --bg: #0d0f12; --fg: #f4f4f2; --muted: #9aa0a6; --accent: #ffb000; --rest: #3fb68b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--fg);
+         font: 18px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+         display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; text-align: center; }
+  h1 { font-size: 22px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+  #now { font-size: clamp(36px, 9vw, 96px); font-weight: 800; margin: 12px 0; }
+  #now.rest { color: var(--rest); }
+  #now.strike { color: var(--accent); }
+  #next, #count { color: var(--muted); font-size: 20px; min-height: 1.4em; }
+  ol { text-align: left; max-width: 34em; color: var(--muted); }
+  button { font: inherit; font-size: 24px; font-weight: 700; padding: 16px 40px; border: 0; border-radius: 12px;
+           background: var(--accent); color: #111; cursor: pointer; margin-top: 16px; }
+  button[hidden], ol[hidden] { display: none; }
+</style>
+</head>
+<body>
+<h1>WarriorIQ pad drill · about 7 minutes · 84 strikes</h1>
+<ol id="how">
+  <li>Partner holds pads. Film both of you from the side, whole bodies in view.</li>
+  <li>Put this laptop where the phone can hear it. Volume up.</li>
+  <li>Start filming first. Then press Start. Don't stop the phone until it says "Finished".</li>
+  <li>Three high beeps start the drill. Then throw <strong>one strike on every low beep</strong>.
+      In rest blocks, move and keep your guard up, but don't strike.</li>
+</ol>
+<div id="now">Ready</div>
+<div id="count"></div>
+<div id="next"></div>
+<button id="go" type="button">Start</button>
+<script id="schedule" type="application/json">{"start_beeps":[0.0,0.6,1.2],"start_hz":1800.0,"strike_hz":1000.0,"blocks":[{"kind":"rest","start":4.0,"end":34.0,"say":"Move around. Guard up. No strikes."},{"kind":"strike","start":34.0,"end":77.0,"say":"Jabs. One on every beep.","technique":"jab","family":"punch"},{"kind":"rest","start":77.0,"end":97.0,"say":"Move. Guard up. No strikes."},{"kind":"strike","start":97.0,"end":140.0,"say":"Crosses. One on every beep.","technique":"cross","family":"punch"},{"kind":"rest","start":140.0,"end":160.0,"say":"Move. Guard up. No strikes."},{"kind":"strike","start":160.0,"end":193.0,"say":"Hooks. Either hand. One on every beep.","technique":"hook","family":"punch"},{"kind":"rest","start":193.0,"end":213.0,"say":"Move. Guard up. No strikes."},{"kind":"strike","start":213.0,"end":246.0,"say":"Uppercuts. Either hand. One on every beep.","technique":"uppercut","family":"punch"},{"kind":"rest","start":246.0,"end":266.0,"say":"Move. Guard up. No strikes."},{"kind":"strike","start":266.0,"end":299.0,"say":"Round kicks. Either leg. One on every beep.","technique":"round_kick","family":"kick"},{"kind":"rest","start":299.0,"end":319.0,"say":"Move. Guard up. No strikes."},{"kind":"strike","start":319.0,"end":342.0,"say":"Teeps. Push kicks. One on every beep.","technique":"push_kick","family":"kick"},{"kind":"rest","start":342.0,"end":362.0,"say":"Move. Guard up. No strikes."},{"kind":"strike","start":362.0,"end":385.0,"say":"Knees. One on every beep.","technique":"knee","family":"knee"},{"kind":"rest","start":385.0,"end":415.0,"say":"Last rest. Move. Guard up. No strikes."}],"strikes":[{"time":37.0,"block":1,"technique":"jab","family":"punch"},{"time":39.5,"block":1,"technique":"jab","family":"punch"},{"time":42.0,"block":1,"technique":"jab","family":"punch"},{"time":44.5,"block":1,"technique":"jab","family":"punch"},{"time":47.0,"block":1,"technique":"jab","family":"punch"},{"time":49.5,"block":1,"technique":"jab","family":"punch"},{"time":52.0,"block":1,"technique":"jab","family":"punch"},{"time":54.5,"block":1,"technique":"jab","family":"punch"},{"time":57.0,"block":1,"technique":"jab","family":"punch"},{"time":59.5,"block":1,"technique":"jab","family":"punch"},{"time":62.0,"block":1,"technique":"jab","family":"punch"},{"time":64.5,"block":1,"technique":"jab","family":"punch"},{"time":67.0,"block":1,"technique":"jab","family":"punch"},{"time":69.5,"block":1,"technique":"jab","family":"punch"},{"time":72.0,"block":1,"technique":"jab","family":"punch"},{"time":74.5,"block":1,"technique":"jab","family":"punch"},{"time":100.0,"block":3,"technique":"cross","family":"punch"},{"time":102.5,"block":3,"technique":"cross","family":"punch"},{"time":105.0,"block":3,"technique":"cross","family":"punch"},{"time":107.5,"block":3,"technique":"cross","family":"punch"},{"time":110.0,"block":3,"technique":"cross","family":"punch"},{"time":112.5,"block":3,"technique":"cross","family":"punch"},{"time":115.0,"block":3,"technique":"cross","family":"punch"},{"time":117.5,"block":3,"technique":"cross","family":"punch"},{"time":120.0,"block":3,"technique":"cross","family":"punch"},{"time":122.5,"block":3,"technique":"cross","family":"punch"},{"time":125.0,"block":3,"technique":"cross","family":"punch"},{"time":127.5,"block":3,"technique":"cross","family":"punch"},{"time":130.0,"block":3,"technique":"cross","family":"punch"},{"time":132.5,"block":3,"technique":"cross","family":"punch"},{"time":135.0,"block":3,"technique":"cross","family":"punch"},{"time":137.5,"block":3,"technique":"cross","family":"punch"},{"time":163.0,"block":5,"technique":"hook","family":"punch"},{"time":165.5,"block":5,"technique":"hook","family":"punch"},{"time":168.0,"block":5,"technique":"hook","family":"punch"},{"time":170.5,"block":5,"technique":"hook","family":"punch"},{"time":173.0,"block":5,"technique":"hook","family":"punch"},{"time":175.5,"block":5,"technique":"hook","family":"punch"},{"time":178.0,"block":5,"technique":"hook","family":"punch"},{"time":180.5,"block":5,"technique":"hook","family":"punch"},{"time":183.0,"block":5,"technique":"hook","family":"punch"},{"time":185.5,"block":5,"technique":"hook","family":"punch"},{"time":188.0,"block":5,"technique":"hook","family":"punch"},{"time":190.5,"block":5,"technique":"hook","family":"punch"},{"time":216.0,"block":7,"technique":"uppercut","family":"punch"},{"time":218.5,"block":7,"technique":"uppercut","family":"punch"},{"time":221.0,"block":7,"technique":"uppercut","family":"punch"},{"time":223.5,"block":7,"technique":"uppercut","family":"punch"},{"time":226.0,"block":7,"technique":"uppercut","family":"punch"},{"time":228.5,"block":7,"technique":"uppercut","family":"punch"},{"time":231.0,"block":7,"technique":"uppercut","family":"punch"},{"time":233.5,"block":7,"technique":"uppercut","family":"punch"},{"time":236.0,"block":7,"technique":"uppercut","family":"punch"},{"time":238.5,"block":7,"technique":"uppercut","family":"punch"},{"time":241.0,"block":7,"technique":"uppercut","family":"punch"},{"time":243.5,"block":7,"technique":"uppercut","family":"punch"},{"time":269.0,"block":9,"technique":"round_kick","family":"kick"},{"time":271.5,"block":9,"technique":"round_kick","family":"kick"},{"time":274.0,"block":9,"technique":"round_kick","family":"kick"},{"time":276.5,"block":9,"technique":"round_kick","family":"kick"},{"time":279.0,"block":9,"technique":"round_kick","family":"kick"},{"time":281.5,"block":9,"technique":"round_kick","family":"kick"},{"time":284.0,"block":9,"technique":"round_kick","family":"kick"},{"time":286.5,"block":9,"technique":"round_kick","family":"kick"},{"time":289.0,"block":9,"technique":"round_kick","family":"kick"},{"time":291.5,"block":9,"technique":"round_kick","family":"kick"},{"time":294.0,"block":9,"technique":"round_kick","family":"kick"},{"time":296.5,"block":9,"technique":"round_kick","family":"kick"},{"time":322.0,"block":11,"technique":"push_kick","family":"kick"},{"time":324.5,"block":11,"technique":"push_kick","family":"kick"},{"time":327.0,"block":11,"technique":"push_kick","family":"kick"},{"time":329.5,"block":11,"technique":"push_kick","family":"kick"},{"time":332.0,"block":11,"technique":"push_kick","family":"kick"},{"time":334.5,"block":11,"technique":"push_kick","family":"kick"},{"time":337.0,"block":11,"technique":"push_kick","family":"kick"},{"time":339.5,"block":11,"technique":"push_kick","family":"kick"},{"time":365.0,"block":13,"technique":"knee","family":"knee"},{"time":367.5,"block":13,"technique":"knee","family":"knee"},{"time":370.0,"block":13,"technique":"knee","family":"knee"},{"time":372.5,"block":13,"technique":"knee","family":"knee"},{"time":375.0,"block":13,"technique":"knee","family":"knee"},{"time":377.5,"block":13,"technique":"knee","family":"knee"},{"time":380.0,"block":13,"technique":"knee","family":"knee"},{"time":382.5,"block":13,"technique":"knee","family":"knee"}],"finished":415.0}</script>
+<script>
+(function () {
+  "use strict";
+  var plan = JSON.parse(document.getElementById("schedule").textContent);
+  var now = document.getElementById("now"), count = document.getElementById("count"),
+      next = document.getElementById("next"), go = document.getElementById("go"), how = document.getElementById("how");
+
+  function say(text) {
+    try {
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = "en-GB"; u.rate = 1.05;
+      window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+    } catch (e) { /* the words are on screen as well */ }
+  }
+  function beep(ctx, at, hz, length) {
+    var osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.frequency.value = hz; osc.type = "sine";
+    gain.gain.setValueAtTime(0, at);
+    gain.gain.linearRampToValueAtTime(0.9, at + 0.01);
+    gain.gain.setValueAtTime(0.9, at + length - 0.01);
+    gain.gain.linearRampToValueAtTime(0, at + length);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(at); osc.stop(at + length + 0.02);
+  }
+  function show(text, kind, sub) { now.textContent = text; now.className = kind || ""; next.textContent = sub || ""; }
+
+  go.addEventListener("click", function () {
+    go.hidden = true; how.hidden = true;
+    try { navigator.wakeLock && navigator.wakeLock.request("screen"); } catch (e) { /* optional */ }
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var t0 = ctx.currentTime + 1.0;
+    plan.start_beeps.forEach(function (s) { beep(ctx, t0 + s, plan.start_hz, 0.25); });
+    plan.strikes.forEach(function (s) { beep(ctx, t0 + s.time, plan.strike_hz, 0.12); });
+    function at(seconds, fn) { setTimeout(fn, Math.max(0, (t0 + seconds - ctx.currentTime) * 1000)); }
+    show("Get ready", "", "Three high beeps, then the first block.");
+    plan.blocks.forEach(function (b, i) {
+      var after = plan.blocks[i + 1];
+      var sub = after ? "Next: " + (after.kind === "rest" ? "rest" : after.technique.replace("_", " ")) : "Then finished.";
+      at(b.start, function () {
+        show(b.kind === "rest" ? "Rest" : b.technique.replace("_", " "), b.kind, sub);
+        count.textContent = b.kind === "rest" ? "No strikes" : "";
+        say(b.say);
+      });
+    });
+    var done = 0, total = plan.strikes.length;
+    plan.strikes.forEach(function (s) {
+      at(s.time, function () { done += 1; count.textContent = done + " of " + total + " strikes"; });
+    });
+    at(plan.finished, function () { show("Finished", "", "Stop filming now."); count.textContent = ""; say("Finished. Stop filming."); });
+  });
+})();
+</script>
+</body>
+</html>
