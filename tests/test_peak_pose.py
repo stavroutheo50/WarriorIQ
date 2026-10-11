@@ -178,6 +178,18 @@ class ImportTests(unittest.TestCase):
         peak[-1, 0] = 1.0
         self.assertEqual(own._peak_predict(Fixed(), [quiet, peak]), {"none": 1, "punch": 1})
 
+    def test_own_footage_check_counts_only_sure_strikes(self):
+        import test_model_on_own_footage as own
+
+        class Fixed:
+            def probabilities(self, x):
+                return np.asarray([[0.05, 0.9, 0.05] if row[0] > 0 else [0.6, 0.3, 0.1] for row in x])
+
+        quiet, peak = np.zeros((12, 102), np.float32), np.zeros((12, 102), np.float32)
+        peak[-1, 0] = 1.0
+        self.assertEqual(own._peak_sure(Fixed(), [quiet, peak], 0.9), 0.5)   # 0.95 sure vs 0.4
+        self.assertEqual(own._peak_sure(Fixed(), [quiet, peak], 0.97), 0.0)
+
     def test_exam_videos_are_gym_videos(self):
         self.assertTrue(set(importer.EXAM_SOURCES) < set(importer.GYM_SOURCES))
 
