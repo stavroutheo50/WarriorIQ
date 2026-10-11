@@ -61,6 +61,53 @@ def _overlap_share(a, b) -> float:
     return ix * iy / smaller if smaller > 0 else 0.0
 
 
+def both_standing(record: dict) -> bool:
+    """Both fighters seen, each upright with hips and shoulders visible.
+
+    Measured on UFC 326 Holloway vs Oliveira 2, round 1 (official stats as
+    the answer, nobody labelling): in the opening 30 seconds of stand-up this
+    held on 136 of 148 frames where both fighters were seen; through the
+    grappling that followed it almost never did - the pose model cannot pull
+    two tangled bodies apart, so at least one has no readable hips or
+    shoulders, or is down.
+    """
+    observations = [(record.get(key) or {}).get("observation") for key in ("fighter_A", "fighter_B")]
+    for observation in observations:
+        if not observation or _mid(observation, _HIPS) is None or _mid(observation, _SHOULDERS) is None:
+            return False
+        if pose_down(observation.get("keypoints"), observation.get("keypoint_conf")) is not None:
+            return False
+    return True
+
+
+def standing_seconds(records) -> set[int]:
+    """Whole seconds in which most analysed frames show both fighters standing."""
+    frames: dict[int, list[bool]] = defaultdict(list)
+    for record in records:
+        if record.get("selected_round") is False:
+            continue
+        frames[int(float(record.get("time_seconds") or 0.0))].append(both_standing(record))
+    return {second for second, flags in frames.items()
+            if len(flags) >= MIN_FRAMES_PER_SECOND and sum(flags) > len(flags) / 2}
+
+
+def strikes_while_standing(events, records) -> list:
+    """The strike events thrown in a second when both fighters were standing.
+
+    The standing-strike detector reads arm and leg motion from upright poses;
+    through grappling it turns scrambles, grips and position changes into
+    punches (149 strikes on a round with 41 officially, 21 of them at
+    distance). This keeps only the ones thrown standing.
+    """
+    standing = standing_seconds(records)
+    kept = []
+    for event in events:
+        peak = event.get("peak_time") if isinstance(event, dict) else getattr(event, "peak_time", None)
+        if peak is not None and int(float(peak)) in standing:
+            kept.append(event)
+    return kept
+
+
 def frame_position(record: dict) -> dict | None:
     """{"ground": bool, "top": "A" | "B" | None}, or None when it cannot be read.
 

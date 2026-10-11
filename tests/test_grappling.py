@@ -100,3 +100,17 @@ def test_official_control_time_is_read_in_seconds():
     assert line.control_seconds == 174
     assert line.takedowns.landed == 1
     assert line.by_position["distance"].attempted == 8
+
+
+def test_strikes_count_only_in_seconds_both_fighters_stand():
+    from core.grappling import standing_seconds, strikes_while_standing
+    records = _second(3, STANDING_A, STANDING_B) + _second(8, A_FLAT, B_ON_TOP)
+    assert standing_seconds(records) == {3}
+    events = [{"peak_time": 3.4, "fighter": "A"}, {"peak_time": 8.2, "fighter": "B"},
+              {"peak_time": 12.0, "fighter": "A"}]
+    assert strikes_while_standing(events, records) == [events[0]]
+
+
+def test_one_fighter_unseen_is_not_standing():
+    from core.grappling import standing_seconds
+    assert standing_seconds(_second(3, STANDING_A, None)) == set()
