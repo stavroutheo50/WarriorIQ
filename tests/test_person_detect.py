@@ -232,3 +232,35 @@ class AutoFrameRouteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DrawnBoxBarTests(unittest.TestCase):
+    """2026-10-11: a fighter the detector was 30% sure of was not offered, and
+    then his own hand-drawn box was refused, so the fight could not start."""
+
+    def test_detector_threshold_and_limit_are_the_callers(self):
+        from core import person_detect as pd
+
+        frame = np.zeros((100, 200, 3), np.uint8)
+        # In the 416-pixel square the detector sees: the frame sits at y 104-312.
+        found = [([10.0 * i, 150.0, 10.0 * i + 5, 300.0], 0.3) for i in range(12)]
+        fake_net = type("Net", (), {"setInput": lambda self, blob: None,
+                                     "forward": lambda self, names: [],
+                                     "getUnconnectedOutLayersNames": lambda self: []})()
+        with patch.object(pd, "_load", return_value=fake_net), \
+                patch.object(pd, "_decode", return_value=found) as decode:
+            self.assertEqual(len(pd.detect_people(frame)), pd.MAX_CANDIDATES)
+            self.assertEqual(decode.call_args.args[1], pd.MIN_CONFIDENCE)
+            self.assertEqual(len(pd.detect_people(frame, min_confidence=0.2, limit=50)), 12)
+            self.assertEqual(decode.call_args.args[1], 0.2)
+
+    def test_a_drawn_box_is_checked_against_the_lower_bar(self):
+        import app.main as webapp
+
+        frame = np.zeros((100, 200, 3), np.uint8)
+        person = [{"box": [20.0, 10.0, 60.0, 95.0], "confidence": 0.3}]
+        with patch.object(webapp, "detect_people_in_frame", return_value=person) as detect:
+            self.assertEqual(webapp._boxes_without_a_person(frame, {"Fighter A": [15, 5, 65, 98]}, 200, 100), [])
+        self.assertEqual(detect.call_args.kwargs["min_confidence"], webapp.DRAWN_BOX_CONFIDENCE)
+        from core.person_detect import MIN_CONFIDENCE
+        self.assertLess(webapp.DRAWN_BOX_CONFIDENCE, MIN_CONFIDENCE)
