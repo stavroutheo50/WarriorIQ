@@ -804,3 +804,39 @@
 .trust-next ul{margin:6px 0 0;padding-left:20px}
 .trust-next li{margin:4px 0;font-size:16px}
 .rough-numbers>summary small{display:block}
+
+/* Your fight in graphs (result.html #report-graphs, core/movement_graphs.py).
+   Same colours as "You vs your opponent": red is you, blue the opponent. */
+.fight-graphs{--mine:#d9545e;--theirs:#5b8ff0;--fwd:#d9545e;--back:#5b8ff0;--circ:#e0a43a;--still:#55657e;--close:#d9545e;--mid:#e0a43a;--far:#5b8ff0}
+.fight-graphs h2{margin:4px 0 6px}
+.graph-block{margin-top:22px}
+.graph-block h3{margin:0 0 2px;font-size:16px}
+.graph-hint{margin:0 0 10px;color:#9aa8bd;font-size:14px}
+.stack-row{display:grid;grid-template-columns:minmax(64px,110px) 1fr;align-items:center;gap:10px;margin:6px 0}
+.stack-who{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stack-bar{display:flex;height:22px;border-radius:6px;overflow:hidden;background:rgba(255,255,255,.06)}
+.stack-part{display:block;width:var(--w);height:100%}
+.stack-key{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0 0;font-size:13px;color:#c5cfdd}
+.stack-key li{display:flex;align-items:center;gap:6px}
+.stack-key i{display:inline-block;width:10px;height:10px;border-radius:3px}
+.part-forward_seconds{background:var(--fwd)}.part-backward_seconds{background:var(--back)}
+.part-circling_seconds{background:var(--circ)}.part-standing_seconds{background:var(--still)}
+.part-close{background:var(--close)}.part-middle{background:var(--mid)}.part-long{background:var(--far)}
+.key-mine{background:var(--mine)}.key-theirs{background:var(--theirs)}
+.line-graph,.bar-graph{display:block;width:100%;height:130px;overflow:visible}
+.graph-base{stroke:rgba(255,255,255,.18);stroke-width:1;vector-effect:non-scaling-stroke}
+.graph-line{fill:none;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.graph-line.mine{stroke:var(--mine)}.graph-line.theirs{stroke:var(--theirs);opacity:.75}
+.guard-bar{fill:#3fb68b}.guard-track{fill:rgba(255,255,255,.07)}
+.graph-axis{display:flex;justify-content:space-between;margin-top:4px;color:#8595b1;font-size:12px}
+.graph-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:22px}
+.graph-facts article{padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:12px}
+.graph-facts b{display:block;font-size:26px}
+.graph-facts span{display:block;font-weight:700;font-size:13px}
+.graph-facts small{display:block;margin-top:4px;color:#9aa8bd;font-size:13px}
+@media(min-width:900px){.graph-facts{grid-template-columns:repeat(4,minmax(0,1fr))}}
+/* "Every number" on a phone ran 290px past the screen: the grid column took
+   the width of its widest row. Measured at 390px, 2026-10-11. */
+.fight-numbers{grid-template-columns:minmax(0,1fr)}
+.fight-numbers .numbers-section-heading{flex-wrap:wrap}
+.stack-key li,.fight-graphs .stack-key li{border:0;padding:0}

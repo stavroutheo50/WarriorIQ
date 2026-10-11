@@ -944,6 +944,8 @@ def withhold_pose_figures(report: dict, note: str, short: str) -> None:
         if isinstance(numbers, dict):
             numbers.update({"hands_up_share": None, "longest_hands_down_seconds": None,
                             "off_balance_count": None})
+            for point in ((numbers.get("series") or {}).get("points") or []):
+                point["hands_up"] = None
         for key in ("moments", "spread"):
             if isinstance(own.get(key), dict):
                 own[key].pop("guard_index", None)
