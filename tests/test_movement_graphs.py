@@ -135,6 +135,21 @@ class PageTests(unittest.TestCase):
         self.assertIn('class="graph-line mine"', page)
         self.assertIn("You moved 12% slower in the second half", page)
 
+    def test_numbers_count_up_and_graphs_draw_in_but_never_against_reduced_motion(self):
+        import re
+
+        page = self._render(True)
+        vitals = page[page.index('class="fight-vitals"'):page.index('id="report-graphs"')]
+        self.assertEqual(vitals.count("data-count-up"), 6)
+        self.assertIn('pathLength="1"', page)
+        self.assertEqual(page.count('class="stack-part'), len(re.findall(r'class="stack-part[^"]*" style="--w:', page)),
+                         "one style attribute per bar part, carrying its width")
+        css = (Path(__file__).resolve().parents[1] / "app" / "static" / "components.css").read_text(encoding="utf-8")
+        motion = css[css.index("The graphs build themselves"):]
+        self.assertIn("@media (prefers-reduced-motion:no-preference)", motion)
+        # Hidden only while motion.js has marked it and it is not yet in view.
+        self.assertIn(".fight-graphs.wiq-reveal:not(.is-visible) .stack-part{width:0}", motion)
+
     def test_no_graphs_when_the_fighters_could_not_be_followed(self):
         self.assertNotIn('id="report-graphs"', self._render(False))
 
