@@ -129,9 +129,68 @@ def build(report: dict, focus: str = "A") -> dict | None:
 
     if not any([moved[focus], ranges[focus], energy, guard, facts]):
         return None
+    reads = {"moved": _moved_read(moved[focus], moved[other]),
+             "ranges": _ranges_read(ranges[focus]),
+             "energy": _energy_read(series[focus], series[other]) if energy else None,
+             "guard": _guard_read(series[focus], mine.get("hands_up_share")) if guard else None}
     return {"focus": focus, "opponent": other, "moved": moved, "ranges": ranges,
-            "energy": energy, "guard": guard, "facts": facts,
+            "energy": energy, "guard": guard, "facts": facts, "reads": reads,
             "width": WIDTH, "height": HEIGHT}
+
+
+# What each graph says, in a sentence with its numbers (2026-10-11: a
+# fighter liked the graphs but could not tell what they showed). Each is
+# read straight off the same figures the graph draws.
+
+def _pct(parts: list[dict] | None, key: str) -> int:
+    return int(round(next((p["share"] for p in parts or [] if p["key"] == key), 0.0)))
+
+
+def _moved_read(mine: list[dict] | None, theirs: list[dict] | None) -> str | None:
+    if not mine:
+        return None
+    text = (f"You went forward {_pct(mine, 'forward_seconds')}% of the time, backed up "
+            f"{_pct(mine, 'backward_seconds')}%, circled {_pct(mine, 'circling_seconds')}% and stood still "
+            f"{_pct(mine, 'standing_seconds')}%.")
+    if theirs:
+        text += f" Your opponent went forward {_pct(theirs, 'forward_seconds')}% of the time."
+    return text
+
+
+def _ranges_read(mine: list[dict] | None) -> str | None:
+    if not mine:
+        return None
+    return (f"You were close to your opponent {_pct(mine, 'close')}% of the time, at middle distance "
+            f"{_pct(mine, 'middle')}% and far apart {_pct(mine, 'long')}%.")
+
+
+def _mean_speed(series: dict | None) -> float | None:
+    speeds = [float(p["speed"]) for p in ((series or {}).get("points") or []) if p.get("speed") is not None]
+    return sum(speeds) / len(speeds) if speeds else None
+
+
+def _energy_read(mine: dict | None, theirs: dict | None) -> str | None:
+    points = [p for p in ((mine or {}).get("points") or []) if p.get("speed") is not None]
+    if not points:
+        return None
+    busiest = max(points, key=lambda p: p["speed"])
+    quietest = min(points, key=lambda p: p["speed"])
+    text = (f"You were busiest at {_clock(busiest['t'])} ({busiest['speed']:.1f} body lengths a second) "
+            f"and quietest at {_clock(quietest['t'])} ({quietest['speed']:.1f}).")
+    yours, other = _mean_speed(mine), _mean_speed(theirs)
+    if other is not None:
+        text += f" On average you moved {yours:.1f} body lengths a second, your opponent {other:.1f}."
+    return text
+
+
+def _guard_read(mine: dict | None, overall: float | None) -> str | None:
+    points = [p for p in ((mine or {}).get("points") or []) if p.get("hands_up") is not None]
+    if not points:
+        return None
+    lowest = min(points, key=lambda p: p["hands_up"])
+    text = f"Your hands were up {round(overall * 100)}% of the time. " if overall is not None else ""
+    return text + (f"They were lowest at {_clock(lowest['t'])}: up {round(lowest['hands_up'] * 100)}% "
+                   "of those few seconds.")
 
 
 def _energy_chart(report: dict, focus: str, top: float) -> dict | None:
