@@ -156,3 +156,47 @@ class PageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompareTests(unittest.TestCase):
+    def _two(self):
+        first, second = _report(), _report()
+        # A busier second fight: every speed doubled.
+        for point in second["metrics"]["A"]["numbers"]["series"]["points"]:
+            point["speed"] = point["speed"] * 2
+        return [first, second]
+
+    def test_fight_1_against_fight_2_on_one_scale(self):
+        graphs = movement_graphs.compare(self._two(), ["A", "A"], [False, False])
+        self.assertEqual(graphs["labels"], ["Fight 1", "Fight 2"])
+        self.assertEqual([row["label"] for row in graphs["moved"]], ["Fight 1", "Fight 2"])
+        self.assertEqual(graphs["energy_top"], 3.0)
+        # Same scale: the first fight's line sits at half height (y = 55 of 110).
+        first_y = {float(pair.split(",")[1]) for pair in graphs["energy"][0]["lines"][0].split()}
+        self.assertEqual(first_y, {55.0})
+        self.assertEqual(len(graphs["guard"]), 2)
+        pace = next(row for row in graphs["facts"] if row["label"] == "pace, second half")
+        self.assertEqual(pace["values"], ["-12%", "-12%"])
+
+    def test_a_fight_that_could_not_be_followed_is_left_out_with_a_reason(self):
+        graphs = movement_graphs.compare(self._two(), ["A", "A"], [False, True])
+        self.assertEqual([row["label"] for row in graphs["moved"]], ["Fight 1"])
+        self.assertEqual(graphs["notes"], ["Fight 2's fighters could not be followed, so it has no graphs."])
+        self.assertEqual(graphs["facts"][0]["values"][1], "—")
+
+    def test_nothing_to_compare(self):
+        self.assertIsNone(movement_graphs.compare(self._two(), ["A", "A"], [True, True]))
+
+    def test_the_compare_page_shows_them_after_the_movement_table(self):
+        from tests_support import render
+
+        reports = self._two()
+        page = render("compare.html", signed_in=True, fights=[{"job_id": "a"}, {"job_id": "b"}],
+                      a="a", b="b", reports=reports, picked=None, solo_picked=False,
+                      movement={"available": True, "rows": [], "identity_failed": [False, False],
+                                "untrusted": [False, False], "coverage": [1, 1]},
+                      compare_graphs=movement_graphs.compare(reports, ["A", "A"], [False, False]))
+        self.assertIn('id="compare-graphs"', page)
+        self.assertLess(page.index('id="movement-comparison"'), page.index('id="compare-graphs"'))
+        self.assertIn("/static/components.css", page)
+        self.assertIn("Energy through each fight", page)

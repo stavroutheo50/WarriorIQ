@@ -853,3 +853,12 @@
   .fight-graphs .guard-bar{transform-box:fill-box;transform-origin:50% 100%;transition:transform .45s cubic-bezier(.2,.7,.2,1) calc(var(--i,0)*18ms)}
   .fight-graphs.wiq-reveal:not(.is-visible) .guard-bar{transform:scaleY(0)}
 }
+
+/* The two fights in graphs (compare.html #compare-graphs). */
+.compare-graph-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.compare-graph-pair h4{margin:0 0 6px;font-size:13px;color:#c5cfdd}
+.compare-facts{width:100%;border-collapse:collapse;font-size:14px}
+.compare-facts th,.compare-facts td{padding:8px 6px;border-top:1px solid rgba(255,255,255,.07);text-align:right}
+.compare-facts th[scope=row]{text-align:left;font-weight:600;color:#dbe3f0}
+.compare-facts thead th{border-top:0;color:#98a2b3;font-size:12px}
+@media(max-width:620px){.compare-graph-pair{grid-template-columns:minmax(0,1fr)}}
