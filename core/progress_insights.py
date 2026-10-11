@@ -144,6 +144,11 @@ def build_progress(records: list[dict], fighter: str) -> dict:
         # explains itself instead of looking like lost data.
         "identity_failed_count": sum(
             identity_failed(record, followed_side(record, fighter)) for record in ordered),
+        # Each fight left out, newest first, so the page can link it to the
+        # who-is-who step instead of only counting it (C5, QA 2026-10-11).
+        "identity_failed_fights": [
+            {"job_id": record.get("job_id"), "created_at": record.get("created_at", "")}
+            for record in reversed(ordered) if identity_failed(record, followed_side(record, fighter))],
         "points": points,
         "latest": latest,
         "trends": trends,

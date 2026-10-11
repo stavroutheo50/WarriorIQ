@@ -1265,9 +1265,60 @@ def _full_progress_report(path: Path) -> dict | None:
     return report
 
 
+def _previous_fights_excluding_copies(profile_id: int, job_id: str) -> list[dict]:
+    """Every saved fight except other analyses of this same video."""
+    fights = list_fights(profile_id)
+    current = next((fight for fight in fights if fight.get("job_id") == job_id), None)
+    digest = _fight_digest(current) if current else (get_job(job_id) or {}).get("source_video_sha256")
+    return _without_duplicate_videos([fight for fight in fights if fight.get("job_id") == job_id
+                                      or not digest or _fight_digest(fight) != digest])
+
+
+def _same_video_elsewhere(request: Request, job_id: str, job: dict) -> dict | None:
+    """An earlier saved fight made from this exact file, for the selection page."""
+    digest = job.get("source_video_sha256")
+    profile_id = _profile_id(request)
+    if not digest or profile_id is None:
+        return None
+    for fight in list_fights(profile_id):
+        if fight.get("job_id") != job_id and _fight_digest(fight) == digest:
+            return {"job_id": fight["job_id"], "created_at": fight.get("created_at"),
+                    "report_available": _report_available(fight["job_id"])}
+    return None
+
+
+def _fight_digest(fight: dict) -> str | None:
+    """The SHA-256 of the video a saved fight was made from, when known.
+
+    Stored in the fight's summary since 2026-10-11; older fights still have it
+    on their job session, which upload has always written."""
+    digest = (fight.get("summary") or {}).get("source_video_sha256")
+    if not digest:
+        digest = (get_job(str(fight.get("job_id") or "")) or {}).get("source_video_sha256")
+    return str(digest) if digest else None
+
+
+def _without_duplicate_videos(fights: list[dict]) -> list[dict]:
+    """Newest-first fights with later copies of the same video dropped.
+
+    The same file uploaded three times was compared against itself under
+    "Since your last fight" and counted three times in progress (C6, QA
+    2026-10-11). The newest analysis of a video stands for it."""
+    seen: set[str] = set()
+    kept = []
+    for fight in fights:
+        digest = _fight_digest(fight)
+        if digest and digest in seen:
+            continue
+        if digest:
+            seen.add(digest)
+        kept.append(fight)
+    return kept
+
+
 def _reports_for_profile(profile_id: int) -> list[dict]:
     records = []
-    fights = list_fights(profile_id)
+    fights = _without_duplicate_videos(list_fights(profile_id))
     newest_legacy_ids = {fight["job_id"] for fight in fights[:2]}
     for fight in reversed(fights):
         base = {"job_id": fight["job_id"], "created_at": fight["created_at"],
@@ -4154,6 +4205,8 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
                  # to stay pending and two of them locked uploads out with 429
                  # (QA, 2026-10-11). Re-selection on a saved fight keeps it.
                  "can_discard_upload": job.get("status") == "selecting" and not get_fight(job_id),
+                 # The same file was analysed before (C6): said before analysing.
+                 "duplicate_of": _same_video_elsewhere(request, job_id, job),
                  "reselecting": bool(get_fight(job_id)) or seconds is not None,
                  "back_url": f"/analyze/{_job_sport(job)}" if _job_sport(job) in SPORTS else "/analyze",
                  "default_corner": job.get("fighter_a_corner") or ""})
@@ -5739,10 +5792,12 @@ def result_page(request: Request, job_id: str):
     # coach's squad view. See core/squad.py.
     _profile = _profile_id(request)
     progress_since_last = (
-        compare_with_previous(report, list_fights(_profile), job_id)
+        compare_with_previous(report, _previous_fights_excluding_copies(_profile, job_id), job_id)
         if _profile is not None else {"available": False}
     )
-    can_share = bool(_account(request) and report_access.get("can_share"))
+    # No coach link for a report that did not work (C3, QA 2026-10-11).
+    can_share = bool(_account(request) and report_access.get("can_share")
+                     and _numbers_state(report)["state"] not in FAILED_NUMBER_STATES)
     # Every per-fighter strike block is an attribution. When identity failed
     # the page has already said it cannot tell whose strikes were whose, so
     # the per-fighter kick cards, the "You hit / You got hit" visuals and the
@@ -7052,6 +7107,21 @@ _LIBRARY_CARD_CACHE: dict[str, tuple[float, dict]] = {}
 FAILED_NUMBER_STATES = frozenset({"no_fight", "unverified", "movement_only"})
 
 
+def _report_failed(job_id: str) -> bool:
+    """Whether the saved report is one that did not work, read through the same
+    gates as the report page (attach_plausibility, then the identity gate)."""
+    try:
+        path = _require_completed_artifact(job_id, "report.json")
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:                                                # noqa: BLE001
+        return False
+    if report.get("mode") == "solo":
+        return False
+    attach_plausibility(report, path.parent / "tracking.jsonl")
+    _score_and_identity_as_shown(report)
+    return _numbers_state(report)["state"] in FAILED_NUMBER_STATES
+
+
 def _library_card(job_id: str) -> dict:
     """What a library card may say about a saved report: its state, its format
     and a score only when the report page itself would show one."""
@@ -7297,6 +7367,11 @@ def compare_page(request: Request, a: str = "", b: str = ""):
             # Each card is headed with its fight, not "Fight analysis 1" - and
             # the page can say when the two are different fighters.
             "picked": [next((f for f in fights if f["job_id"] == job_id), None) for job_id in (a, b)],
+            # Two analyses of the one video file (C6): said, not presented as two fights.
+            "same_video": bool(a and b and a != b and a in allowed and b in allowed
+                               and _fight_digest(next(f for f in fights if f["job_id"] == a))
+                               and _fight_digest(next(f for f in fights if f["job_id"] == a))
+                               == _fight_digest(next(f for f in fights if f["job_id"] == b))),
             "signed_in": profile_id is not None,
             "solo_picked": bool(solo_ids),
             # The page promised a movement comparison "below" and rendered
@@ -7346,6 +7421,12 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
                if athlete_id is None or record.get("fighter_id") in (None, athlete_id)]
     default_fighter = profile.get("default_fighter", "A")
     progress = build_progress(records, default_fighter)
+    # Whether each left-out fight can still be fixed: choosing the fighters
+    # again needs the video, which is removed after the retention period.
+    for item in progress.get("identity_failed_fights") or []:
+        item["fixable"] = not _video_removed(str(item.get("job_id") or ""))
+        fight = next((f for f in fights if f.get("job_id") == item.get("job_id")), None)
+        item["label"] = (fight or {}).get("choice_label") or "Fight"
     other_fights = sum(1 for fight in fights
                        if athlete_id is not None and fight.get("fighter_id") not in (None, athlete_id))
     assignments = list_assignments(profile_id)
@@ -7379,6 +7460,7 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
         request=request, name="camp.html",
         context={
             "request": request, "profile": profile, "signed_in": True, "progress": progress,
+            "video_retention_days": SETTINGS.saved_video_retention_days,
             "athlete_name": _athlete_name(profile, fights),
             "other_fighter_fights": other_fights,
             "assignments": assignments,
@@ -8563,6 +8645,11 @@ def share_report(request: Request, job_id: str):
         raise HTTPException(403, "Private report sharing is available on Athlete, Pro, Coach and Gym plans.")
     if not fight or int(fight["profile_id"]) != profile_id:
         raise HTTPException(404)
+    # A report that did not work is not sent to a coach (C3, QA 2026-10-11):
+    # the button was offered on a failed analysis.
+    if _report_failed(job_id):
+        raise HTTPException(409, "This analysis did not work, so there is nothing to send to a coach. "
+                                 "Fix it or analyse another video first.")
     token = session_token()
     expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     save_report_share(job_id, profile_id, token_digest(token), expires)

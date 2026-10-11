@@ -552,3 +552,118 @@ def test_b12_a_box_the_detector_barely_sees_is_warned_before_start():
     analyze = (TEMPLATES / "analyze.html").read_text(encoding="utf-8")
     assert ":'This recording looks usable'" not in analyze
     assert "This check cannot see people" in analyze
+
+
+# --- C1 / C3 -----------------------------------------------------------------
+
+def _failed_render(numbers_state, identity_trusted, camera_lost=False, can_share=True):
+    from tests_support import render_result
+
+    report = json.loads((ROOT / "tests" / "fixtures" / "report_sample.json").read_text(encoding="utf-8"))
+    report.setdefault("integrity", {})["identity_evidence_trusted"] = identity_trusted
+    numbers = {"state": numbers_state, "message": "Only 0:03 of footage was analysed.", "share_reason": "x"}
+    return render_result(report=report, numbers=numbers, camera_lost=camera_lost, can_share=can_share)
+
+
+def test_c1_nobody_in_shot_gets_one_message_not_two():
+    page = _failed_render("no_fight", identity_trusted=False)
+    assert "Too little fight footage to measure" in page
+    assert "Show me who is who" not in page
+    assert "Fix it in a few seconds" not in page
+    assert "rely on" not in page                          # no numbers are shown
+
+
+def test_c1_identity_failure_alone_offers_the_who_is_who_step():
+    page = _failed_render("unverified", identity_trusted=False)
+    assert "Show me who is who" in page and "Fix it in a few seconds" in page
+    assert "Too little fight footage to measure" not in page
+
+
+def test_c3_no_coach_link_on_a_failed_report():
+    assert web.FAILED_NUMBER_STATES >= {"no_fight", "unverified", "movement_only"}
+    created, client = _signed_in("athlete")
+    job = "qa1011shr" + uuid.uuid4().hex[:5]
+    db.save_fight(job, int(created["profile_id"]), "a.mp4", "", "", "sparring", "K1", "A", {},
+                  "2999-01-01T00:00:00+00:00")
+    with patch.object(web, "_report_failed", return_value=True):
+        response = client.post(f"/share/{job}", follow_redirects=False)
+    assert response.status_code == 409
+    source = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
+    assert '_numbers_state(report)["state"] not in FAILED_NUMBER_STATES' in source
+
+
+# --- C2 ----------------------------------------------------------------------
+
+def test_c2_failed_analyses_say_needs_attention_in_the_library():
+    created, client = _signed_in()
+    job = "qa1011fail" + uuid.uuid4().hex[:5]
+    db.save_fight(job, int(created["profile_id"]), "a.mp4", "", "", "sparring", "K1", "A", {},
+                  "2999-01-01T00:00:00+00:00")
+    with patch.object(web, "_library_card", return_value={"available": True, "failed": True,
+                                                           "format": None, "score": None}):
+        page = client.get("/history").text
+    assert "Needs attention" in page
+    assert "Score state" not in page
+
+
+# --- C4 ----------------------------------------------------------------------
+
+def test_c4_rotate_is_offered_up_front_when_nobody_is_found():
+    page = (TEMPLATES / "select.html").read_text(encoding="utf-8")
+    assert 'id="rotateProminent"' in page and 'id="rotateFrameTop"' in page
+    assert "data.availability==='candidates_ready'&&!detections.length" in page
+
+
+# --- C5 ----------------------------------------------------------------------
+
+def test_c5_each_left_out_fight_gets_a_fix_link():
+    from core.progress_insights import build_progress
+
+    def record(job_id, trusted):
+        return {"job_id": job_id, "created_at": "2026-10-0%s" % job_id[-1], "report": {
+            "video": {"analysis_target": "A", "focus_fighter": "A"}, "setup": {"ruleset": "K1"},
+            "integrity": {"identity_evidence_trusted": trusted},
+            "metrics": {"A": {"pose_coverage": .8}}, "coaching": {}, "training_plan": {}}}
+
+    progress = build_progress([record("f1", True), record("f2", False), record("f3", False)], "A")
+    assert [item["job_id"] for item in progress["identity_failed_fights"]] == ["f3", "f2"]
+    page = (TEMPLATES / "camp.html").read_text(encoding="utf-8")
+    assert 'id="left-out"' in page and 'href="/select/{{ item.job_id }}"' in page
+
+
+# --- C6 ----------------------------------------------------------------------
+
+def test_c6_the_same_video_is_never_compared_with_itself():
+    created, client = _signed_in()
+    profile = int(created["profile_id"])
+    digest = "ab" * 32
+    ids = []
+    for index in range(3):
+        job = f"qa1011dup{index}" + uuid.uuid4().hex[:4]
+        db.save_fight(job, profile, "same.mp4", "", "", "sparring", "K1", "A",
+                      {"source_video_sha256": digest}, f"2999-01-0{index + 1}T00:00:00+00:00")
+        ids.append(job)
+    other = "qa1011other" + uuid.uuid4().hex[:4]
+    db.save_fight(other, profile, "other.mp4", "", "", "sparring", "K1", "A",
+                  {"source_video_sha256": "cd" * 32}, "2998-01-01T00:00:00+00:00")
+    previous = web._previous_fights_excluding_copies(profile, ids[-1])
+    kept = [fight["job_id"] for fight in previous]
+    assert ids[-1] in kept and other in kept
+    assert ids[0] not in kept and ids[1] not in kept
+    assert len(web._without_duplicate_videos(db.list_fights(profile))) == 2
+
+
+def test_c6_selection_page_warns_before_analysing_the_same_file_again():
+    created, client = _signed_in()
+    digest = "ef" * 32
+    saved = "qa1011old" + uuid.uuid4().hex[:4]
+    db.save_fight(saved, int(created["profile_id"]), "same.mp4", "", "", "sparring", "K1", "A",
+                  {"source_video_sha256": digest}, "2999-01-01T00:00:00+00:00")
+    job = _selecting_job(created)
+    state.update_job(job, {"source_video_sha256": digest})
+    try:
+        page = client.get(f"/select/{job}").text
+        assert 'id="duplicateWarning"' in page
+        assert "You already analysed this exact video" in page
+    finally:
+        state.delete_job(job)

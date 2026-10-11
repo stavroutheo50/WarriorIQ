@@ -445,7 +445,10 @@ class HandheldCameraIdentityTests(unittest.TestCase):
         self.assertFalse(_identity_lost_to_camera({"tracking": self._tracking(None)}))
         page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "result.html").read_text(
             encoding="utf-8")
-        self.assertIn("{% if identity_failed and not camera_lost %}<a class=\"btn\" href=\"/select/", page)
+        # The who-is-who button only for an identity failure, never a camera one
+        # (the failure variable is decided once at the top of the template).
+        self.assertIn("{% if failure == 'identity' %}<a class=\"btn\" href=\"/select/", page)
+        self.assertIn("('camera' if identity_failed and camera_lost", page)
         for repick in ("<a class=\"text-link\" href=\"/select/{{job_id}}\">Show me who is who</a>",
                        "Choose the fighters again at the top of this page"):
             before = page[:page.index(repick)]

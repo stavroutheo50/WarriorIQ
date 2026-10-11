@@ -12,9 +12,14 @@
    the page "Analysis complete" and putting the one action that fixes it two
    thousand pixels down was telling the reader the opposite of the truth. #}
 {% set identity_failed = not report.integrity.identity_evidence_trusted|default(true) %}
+{#- One cause, one message (C1, QA 2026-10-11): a report where nobody was in
+    shot said both "press Show me who is who" and "upload a clip where the two
+    fighters are in shot". Too little footage outranks identity - choosing the
+    fighters again cannot add footage. -#}
+{% set failure = 'no_fight' if numbers.state == 'no_fight' else ('camera' if identity_failed and camera_lost else ('identity' if identity_failed else ('not_a_fight' if numbers.state == 'movement_only' else none))) %}
 <div class="section-title result-hero" data-reveal>
-  <div><div class="eyebrow">{% if identity_failed and camera_lost %}Needs different footage{% elif identity_failed %}Needs one quick step{% else %}Analysis complete{% endif %}</div>{#- The one page heading. "Your fight in numbers." further down was a second, larger h1 competing with this one. -#}<h1 class="result-title">Fight report</h1></div>
-  <div class="selection-tools">{% if identity_failed and not camera_lost %}<a class="btn" href="/select/{{job_id}}" data-motion-primary>Show me who is who</a>{% endif %}{#- The skeleton replay was one link at the very bottom of the report. Up here,
+  <div><div class="eyebrow">{% if failure in ['no_fight', 'camera'] %}Needs different footage{% elif failure == 'identity' %}Needs one quick step{% elif failure == 'not_a_fight' %}Needs attention{% else %}Analysis complete{% endif %}</div>{#- The one page heading. "Your fight in numbers." further down was a second, larger h1 competing with this one. -#}<h1 class="result-title">Fight report</h1></div>
+  <div class="selection-tools">{% if failure == 'identity' %}<a class="btn" href="/select/{{job_id}}" data-motion-primary>Show me who is who</a>{% endif %}{#- The skeleton replay was one link at the very bottom of the report. Up here,
     with the coaching moments it opens on (core.report.coaching_moments). -#}{% if not identity_failed %}<a class="btn secondary" href="/replay/{{job_id}}{% if moment_count %}#moments{% endif %}">▶ Watch with skeleton{% if moment_count %} · {{moment_count}} key moment{{'' if moment_count == 1 else 's'}}{% endif %}</a>{% endif %}{% if share_card %}<button class="btn" type="button" data-share-card-open>Share to story</button>{% else %}{#- A real button, shown disabled, with the reason one tap away. It
     was a <details> summary styled as a button, so it looked live, behaved
     unlike every other control and said nothing to a screen reader about
@@ -25,11 +30,11 @@
     fighter read the old page - the same advice three times, technical words,
     numbers right after "not safe to use" - and could not tell what it meant).
     The numbers fold away below under "Rough numbers". -#}
-{% if identity_failed %}
+{% if failure in ['identity', 'camera'] %}
 <section class="card trust-card" id="trustCard" role="alert" aria-labelledby="trustCardTitle">
   <div class="eyebrow">This video did not work</div>
   <h2 id="trustCardTitle">{% if camera_lost %}We couldn&rsquo;t follow you properly in this video{% else %}We weren&rsquo;t sure which fighter was which{% endif %}</h2>
-  <p>{% if camera_lost %}The camera moved a lot, so we kept losing track of you.{% else %}So the numbers may belong to the wrong person.{% endif %} Don&rsquo;t rely on the numbers from this video.</p>
+  <p>{% if camera_lost %}The camera moved a lot, so we kept losing track of you.{% else %}So the numbers may belong to the wrong person.{% endif %}{% if numbers.state == 'unverified' %} The rough numbers further down are shown greyed out; don&rsquo;t rely on them.{% endif %}</p>
   {% if camera_lost %}
   <div class="trust-next"><strong>Next time</strong><ul>
     <li>Put the phone on a tripod, or keep it completely still.</li>
@@ -79,7 +84,7 @@
 {#- What was wrong with the recording, measured before the analysis and at
     upload (app.main._recording_warnings). It was only in the download. -#}
 {% if recording_warnings and not identity_failed %}<div class="notice" role="note" id="recordingWarnings"><strong>About this recording.</strong><ul class="list-clean">{% for text in recording_warnings %}<li>{{ text }}</li>{% endfor %}</ul></div>{% endif %}
-{% if numbers.state == 'no_fight' %}<div class="notice bad" role="alert"><strong>Too little fight footage to measure.</strong> {{ numbers.message }} Upload a clip where the two fighters are in shot and fighting for most of it, and pick a frame where both are clearly visible.</div>
+{% if failure == 'no_fight' %}<div class="notice bad" role="alert" id="noFightNotice"><strong>Too little fight footage to measure.</strong> {{ numbers.message }} Upload a clip where the two fighters are in shot and fighting for most of it, and pick a frame where both are clearly visible.</div>
 {% elif numbers.state == 'movement_only' %}<div class="notice bad" role="alert" id="notAFightNotice"><strong>Not recognised as a fight.</strong> {{ numbers.message }} If this is a real fight, upload a clip where both fighters are in full view and exchanging.</div>
 {% elif fight_footage and fight_footage.note %}<p class="analysed-span-note" role="note">{{ fight_footage.note }}</p>{% endif %}
 {#- Fix this first (core.report.fix_first): the one measured fault, the moment

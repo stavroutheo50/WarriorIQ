@@ -1746,6 +1746,9 @@ def save_completed_analysis(job_id: str, job: dict, report: dict, report_path: s
     summary = {
         "winner_estimate": scorecard.get("winner_estimate"),
         "score_totals": scorecard.get("totals", {"A": None, "B": None}),
+        # The uploaded file's SHA-256, so the same video uploaded twice is
+        # recognised and never compared with itself (C6, QA 2026-10-11).
+        "source_video_sha256": job.get("source_video_sha256"),
         "analysis_seconds": performance.get("analysis_seconds"),
         "video_seconds": performance.get("segment_duration_seconds"),
         "within_budget": performance.get("within_video_length_budget"),
