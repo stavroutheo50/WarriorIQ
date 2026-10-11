@@ -1382,6 +1382,9 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("160x90", header)
 
     def _render_identity(self, trusted):
+        return self._render_identity_context(trusted)
+
+    def _render_identity_context(self, trusted, **extra):
         from jinja2 import ChainableUndefined, Environment, FileSystemLoader
 
         from app.main import _analysis_quality_summary, sport_identity
@@ -1410,6 +1413,7 @@ class PublicPageTests(unittest.TestCase):
             # As result_page builds it: one unattributed total, only on failure.
             kick_total=None if trusted else unattributed_kick_total(report),
             strike_counts_published=STRIKE_COUNTS_PUBLISHED,
+            **extra,
         )
 
     def test_the_identity_fix_is_the_first_thing_on_a_failed_report(self):
@@ -1426,10 +1430,17 @@ class PublicPageTests(unittest.TestCase):
 
         # Above the fold means above the body, not merely present.
         action = page.index('href="/select/abc"')
-        self.assertLess(action, page.index("Fighter identity check failed"),
-                        "the fix must come before the notice explaining it")
+        self.assertLess(action, page.index('id="trustCard"'),
+                        "the fix must come before the card explaining it")
         self.assertLess(action, 6000,
                         "the fix belongs in the header block, not partway down the report")
+        # Said once, in plain words, above numbers folded away as rough
+        # (2026-10-11). The old notice repeated the card's message.
+        self.assertLess(page.index('id="trustCard"'), page.index('id="roughNumbers"'))
+        self.assertLess(page.index('id="roughNumbers"'), page.index('class="fight-vitals"'))
+        self.assertIn("We weren&rsquo;t sure which fighter was which", page)
+        self.assertNotIn("Fighter identity check failed", page)
+        self.assertNotIn('class="numbers-score"', page)
 
     # The kicks-only path, still reachable with the publish switch off.
     @unittest.mock.patch("core.report.STRIKE_COUNTS_PUBLISHED", False)
@@ -1483,6 +1494,34 @@ class PublicPageTests(unittest.TestCase):
             page = self._render_identity(trusted=trusted)
             with self.subTest(trusted=trusted):
                 self.assertNotIn("Punch and kick counting is switched off", page)
+
+    def test_a_camera_that_lost_the_fighters_says_so_once_with_what_to_do(self):
+        """A fighter could not understand the old page (2026-10-11): "film from
+        one fixed spot" three times, "identity check failed", "unverified"."""
+        import re
+
+        page = self._render_identity_context(trusted=False, camera_lost=True,
+                                             recording_warnings=["The camera moves a lot between shots of the round."])
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
+        self.assertIn("We couldn&rsquo;t follow you properly in this video", page)
+        self.assertIn("Put the phone on a tripod", text)
+        self.assertEqual(text.count("tripod"), 1, "the filming advice is given once")
+        self.assertIn('href="/analyze">Upload a new video', page)
+        self.assertNotIn('href="/select/abc"', page)
+        # The recording note moves inside the folded numbers.
+        self.assertLess(page.index('id="roughNumbers"'), page.index('id="recordingWarnings"'))
+
+    def test_each_number_is_said_in_a_plain_sentence(self):
+        page = self._render_identity(trusted=True)
+        report = json.loads((Path(__file__).resolve().parent / "fixtures" / "report_sample.json").read_text(encoding="utf-8"))
+        m = report["metrics"]["A"]
+        if m.get("guard_index") is not None:
+            self.assertIn(f"Your hands were up by the face {round(m['guard_index'] * 100)}% of the time you were seen", page)
+        if m.get("balance_index") is not None:
+            self.assertIn(f"You stood balanced {round(m['balance_index'] * 100)}% of the time", page)
+        if m.get("pressure_index") is not None:
+            self.assertIn("50 is even.", page)
+        self.assertNotIn("show-note", page)
 
     def test_a_healthy_report_is_not_told_it_needs_a_step(self):
         page = self._render_identity(trusted=True)
