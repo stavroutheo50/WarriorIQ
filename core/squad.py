@@ -120,6 +120,11 @@ def fight_choice_label(ruleset: str | None, created_at: str | None,
 
 def _metric(report: dict, fighter: str, key: str) -> float | None:
     block = ((report.get("metrics") or {}).get(fighter) or {})
+    if key == "guard_index":
+        # Only guard figures measured the same way are compared (core/guard.py).
+        from core.guard import comparable_guard
+
+        return comparable_guard(block)
     value = block.get(key)
     if value is None:
         value = (block.get("baselines") or {}).get(key)
@@ -483,7 +488,10 @@ def compare_movement(reports: list) -> dict:
         second_text, second_shown = _display_value(key, second)
         delta_text, leader = "—", "level"
         if first_shown is not None and second_shown is not None:
-            gap = second_shown - first_shown
+            # From the numbers as shown: "41% vs 47% -> +5" was worked out
+            # from the unrounded values (QA, 2026-10-11).
+            digits = 1 if key == "footwork_body_lengths_per_second" else 0
+            gap = round(round(second_shown, digits) - round(first_shown, digits), digits)
             # The same noise floor the trend uses, read on the displayed scale
             # so a 5% band means 5 points of what the reader can actually see.
             floor = _MEANINGFUL_CHANGE * (1.0 if key == "footwork_body_lengths_per_second" else 100.0)
@@ -491,9 +499,11 @@ def compare_movement(reports: list) -> dict:
                 delta_text, leader = "level", "level"
             else:
                 leader = "b" if gap > 0 else "a"
-                sign = "+" if gap > 0 else "−"
-                digits = 1 if key == "footwork_body_lengths_per_second" else 0
-                delta_text = f"{sign}{abs(gap):.{digits}f}"
+                unit = " points" if key != "footwork_body_lengths_per_second" else ""
+                # Which way it runs, in words: a bare "+5" did not say which
+                # fight was higher.
+                delta_text = (f"Fight {'2' if gap > 0 else '1'} higher by "
+                              f"{abs(gap):.{digits}f}{unit}")
         rows.append({
             "key": key, "label": label,
             "a": first_text, "b": second_text,

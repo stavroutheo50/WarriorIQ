@@ -431,6 +431,9 @@
 .key-dot.mine{background:var(--mine)}
 .key-dot.theirs{background:var(--theirs)}
 .key-dot.guard{width:2px;height:11px;border-radius:1px;background:var(--wiq-warning)}
+/* Stretches with the hands mostly down (B5, 2026-10-11). */
+.tl-guard-band{position:absolute;bottom:3px;height:11px;border-radius:2px;background:color-mix(in srgb,var(--wiq-warning) 35%,transparent)}
+.key-dot.guard-band{width:12px;height:8px;border-radius:2px;background:color-mix(in srgb,var(--wiq-warning) 35%,transparent)}
 
 .visual-split{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:6px}
 .defence-mix,.chain-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:7px}
@@ -650,6 +653,7 @@
 .fight-numbers-group [role=cell]{text-align:right;font-size:17px}
 .fight-numbers-group [role=cell]+[role=cell]{color:#9aa8c2}
 .fight-numbers-group .fight-numbers-head{padding:0 0 4px;border-top:0}
+.fight-numbers-group [role=row].shared-row{grid-template-columns:1fr 176px}
 .fight-numbers-head [role=columnheader]{font-size:12px;font-weight:600;color:#98a2b3;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 /* The label column needs a header for screen readers only. */
 .fight-numbers-head .fn-measure{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}

@@ -34,12 +34,17 @@ class NumbersHeaderTests(unittest.TestCase):
         self.section = section[:section.index("</section>")]
 
     def test_every_group_has_a_header_row(self):
-        groups = re.findall(r'<div class="fight-numbers-group" role="table".*?(?=<div class="fight-numbers-group"|$)',
+        groups = re.findall(r'<div class="fight-numbers-group" role="table".*?(?=<div class="fight-numbers-group|$)',
                             self.section, flags=re.S)
-        self.assertGreaterEqual(len(groups), 4)
+        self.assertGreaterEqual(len(groups), 3)
         for group in groups:
             headers = re.findall(r'role="columnheader"[^>]*>([^<]*)<', group)
             self.assertEqual(headers, ["Measure", "Alex Kicks", "Opponent"], group[:80])
+        # The distance between the two is one shared measure, so one column
+        # (QA, 2026-10-11: 16 s against 15 s for the same distance).
+        shared = self.section[self.section.index('fight-numbers-shared'):]
+        shared = shared[:shared.index('</div>\n')] if '</div>\n' in shared else shared
+        self.assertEqual(re.findall(r'role="columnheader"[^>]*>([^<]*)<', shared)[:2], ["Measure", "Both of you"])
 
     def test_long_names_carry_a_title(self):
         self.assertIn('role="columnheader" title="Alex Kicks"', self.section)

@@ -575,6 +575,10 @@ p { max-width: 68ch; }
   padding: clamp(34px, 6vh, 70px) 0 clamp(48px, 8vh, 92px);
 }
 
+/* The sticky heading sticks inside .setup-aside (row 1, stretched to the
+   upload card's height), not inside the whole grid: .setup-notes sits in row 2
+   of the same column and the heading used to slide over it (2026-10-11). */
+.setup-aside { grid-row: 1; align-self: stretch; min-width: 0; }
 .setup-head { position: sticky; top: 104px; }
 .setup-head .quiet-back { display: inline-block; margin-bottom: 16px; }
 .setup-head h1 { margin: 10px 0 18px; font-size: clamp(32px, 3.9vw, 50px); line-height: 1; }

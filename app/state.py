@@ -288,6 +288,10 @@ def prepare_job_run(job_id: str, patch: dict) -> str:
         "message": "Queued for fight analysis",
         "stage": "queued",
         "elapsed_seconds": 0.0,
+        # When Start was pressed. The page's clock runs from here, so the wait
+        # for the analysis computer to start is counted rather than shown as
+        # "0s" for a minute (QA, 2026-10-11).
+        "queued_at_epoch": time.time(),
         "eta_seconds": None,
         "processed_video_seconds": 0.0,
         "fighter_a_confidence": 0.0,

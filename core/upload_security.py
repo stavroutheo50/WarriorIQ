@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse
 
 from core.config import OUTPUTS, UPLOADS, SETTINGS
 from core.db import connection
+from core.payments import effective_plan_key, plan_for_key
 
 
 class UploadCapacityError(RuntimeError):
@@ -154,6 +155,40 @@ class UploadBodyLimitMiddleware:
 PENDING_JOB_STATUSES = frozenset({"selecting", "queued", "running", "preparing"})
 
 
+def _pending_limit_for(con, account_id: int) -> int | None:
+    """How many fights this account may have waiting at once; None is no cap.
+
+    The Gym plan is sold as unlimited, and a cap of two waiting fights refused
+    its third upload with 429 (QA, 2026-10-11). Every other plan keeps the
+    configured ceiling.
+    """
+    row = con.execute("SELECT plan,plan_override,email FROM accounts WHERE id=?", (account_id,)).fetchone()
+    if row is not None and plan_for_key(effective_plan_key(row["plan"], row["plan_override"], row["email"])).get("unlimited"):
+        return None
+    return SETTINGS.max_pending_uploads
+
+
+def _pending_job_ids(account_id: int) -> set[str]:
+    pending = set()
+    for session in OUTPUTS.glob("*/analysis-session.json"):
+        try:
+            job = json.loads(session.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(job, dict) and job.get("account_id") == account_id and job.get("status") in PENDING_JOB_STATUSES:
+            pending.add(session.parent.name)
+    return pending
+
+
+def pending_upload_status(account_id: int) -> dict:
+    """The waiting-fight count and its ceiling, for the upload page to show
+    before a file is picked rather than only after the upload is refused."""
+    with connection() as con:
+        limit = _pending_limit_for(con, int(account_id))
+    count = len(_pending_job_ids(int(account_id)))
+    return {"count": count, "limit": limit, "full": limit is not None and count >= limit}
+
+
 def reserve_upload_storage(account_id: int, job_id: str, byte_limit: int) -> None:
     """Serialize admission across processes before receiving or copying a video."""
     now = time.time()
@@ -194,10 +229,12 @@ def reserve_upload_storage(account_id: int, job_id: str, byte_limit: int) -> Non
         # flight, and one whose owner gave up is reclaimed above; counting them
         # made a closed tab indistinguishable from a fight waiting for its
         # fighters. Storage below still accounts for every lease.
-        if len(pending) >= SETTINGS.max_pending_uploads:
+        pending_limit = _pending_limit_for(con, account_id)
+        if pending_limit is not None and len(pending) >= pending_limit:
             raise UploadCapacityError(
                 429,
-                f"You already have {len(pending)} fight{'s' if len(pending) != 1 else ''} waiting - "
+                f"You already have {len(pending)} fight{'s' if len(pending) != 1 else ''} waiting, "
+                f"and your plan allows {pending_limit} at a time - "
                 "uploaded and waiting for you to pick the fighters, or being analysed. "
                 "Finish or cancel one in your fight library (Pending), then upload this video.")
         used = 0

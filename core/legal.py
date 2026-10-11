@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.config import SETTINGS
+from core.features import is_on as feature_on
 
 
 REQUIRED_LAUNCH_FIELDS = {
@@ -47,7 +48,7 @@ LEGAL_DOCUMENTS = {
         "sections": [
             ("Who may use WarriorIQ", f"People of any age may create an account. Under {SETTINGS.minimum_account_age}, a parent or guardian must approve the account through a link WarriorIQ emails to them, and the account cannot upload fight footage until they do; by approving, they accept these Terms on the young person's behalf. Fight footage may show other junior athletes only when the uploader has every required right and appropriate parent or guardian permission."),
             ("Your footage and permissions", "You keep ownership of your footage. You give the operator a limited licence to store, decode, process, display and delete it only as needed to provide the service. Before uploading, you must have the rights to the recording and an appropriate legal basis or permission for every identifiable person shown. A checkbox does not replace consent or another legal basis required by local law."),
-            ("Analysis limitations", "WarriorIQ produces training and coaching support, not an official judging decision, medical assessment, safety guarantee or substitute for a qualified coach. Automated labels, identities and estimated scorecards can be wrong. Confidence labels and evidence replay must be considered before acting on a result."),
+            ("Analysis limitations", "WarriorIQ produces training and coaching support, not an official judging decision, medical assessment, safety guarantee or substitute for a qualified coach. " + ("Automated labels, identities and estimated scores can be wrong." if feature_on("scoring") else "Automated measurements, labels and fighter identities can be wrong; WarriorIQ does not score fights yet.") + " Confidence labels and evidence replay must be considered before acting on a result."),
             ("Accounts and security", "Provide accurate account information, protect your password, and tell support about suspected unauthorised access. A parent or legal guardian managing a child's workspace is responsible for its settings, uploads and sharing choices unless the law says otherwise."),
             ("Plans, billing and cancellation", "Paid plans renew for the period shown at checkout until cancelled. The price, taxes, analysis allowance, report depth and renewal terms must be presented before payment. Cancellation stops future renewal and does not erase legal refund or withdrawal rights. The Refund and Cancellation Policy forms part of these Terms."),
             ("Acceptable use", "Do not upload unlawful, stolen, abusive or secretly recorded content; identify or harass people; bypass access controls or allowances; scrape the service; reverse engineer protected components; distribute malware; or use the service to make high-impact decisions about another person. The Acceptable Use Policy gives more detail."),
@@ -86,7 +87,7 @@ LEGAL_DOCUMENTS = {
         "description": "Training purpose and important health limits of WarriorIQ analysis.",
         "intro": "WarriorIQ is an AI-assisted combat-sports training and performance analytics platform.",
         "sections": [
-            ("Training purpose", "Results are intended for training and educational review with a qualified coach. WarriorIQ is not an official fight judging authority and scores or statistics are estimates."),
+            ("Training purpose", "Results are intended for training and educational review with a qualified coach. WarriorIQ is not an official fight judging authority" + (", and its scores and statistics are estimates." if feature_on("scoring") else "; its measurements are estimates, and it does not score fights yet.") + ""),
             ("No medical advice", "WarriorIQ does not provide medical advice, diagnose concussion or injury, estimate brain damage or medical conditions, or determine whether an athlete is medically safe to continue fighting."),
             ("Seek qualified care", "Stop training and seek an appropriately qualified healthcare professional or emergency service for possible concussion, injury, severe symptoms or any health concern. Do not rely on a WarriorIQ report for a medical decision."),
             ("No diagnosis features", "Health-diagnosis features must not be added without separate medical, legal, privacy, safety and regulatory review."),
@@ -154,7 +155,7 @@ LEGAL_DOCUMENTS = {
         "sections": [
             ("What the AI does", "Local models estimate person boxes, pose, identity continuity, motion and action candidates. Ruleset logic filters legal techniques and an evidence layer decides what may be shown. Optional OpenAI identity recovery sends selected frames only after explicit upload-time opt-in and only when configured."),
             ("What the AI does not do", "It does not provide an official WAKO result, biometric identification of a real-world identity, medical advice, or a decision with legal or similarly significant effects. It can confuse fighters, limbs, techniques, timing, contact or ruleset outcomes."),
-            ("User control", "Users choose Fighter A and Fighter B once, then the performance report runs automatically. No scorecard labelling or correction work is required. Users can replay supported evidence, and unsupported measurements remain hidden or clearly unavailable. Preliminary estimates never become verified facts merely because tracking coverage is high."),
+            ("User control", "Users choose Fighter A and Fighter B once, then the performance report runs automatically. No labelling or correction work is required. Users can replay supported evidence, and unsupported measurements remain hidden or clearly unavailable. Preliminary estimates never become verified facts merely because tracking coverage is high."),
             ("Quality and complaints", "Tracking coverage is a system observation metric, not a guarantee of correctness. Report material errors through support and include the analysis identifier rather than sending the original filename in public channels."),
             # Attribution these datasets' licences ask for (dataset/EXTERNAL_SOURCES.md).
             # Only keypoints and labels are used, never their videos.
@@ -163,7 +164,7 @@ LEGAL_DOCUMENTS = {
              "TKD-Kick3 (Zenodo, doi:10.5281/zenodo.20390892), CC BY 4.0; "
              "Combat Sports Dataset by Evan Quinn (Zenodo, doi:10.5281/zenodo.15349809), CC BY 4.0, gym recordings only; "
              "StrikeMetrics by sswhitehat (github.com/sswhitehat/StrikeMetrics---Kickboxing-AI-Tool), MIT licence. "
-             "Strike counts are checked against official UFC statistics (ufcstats.com) before they are shown."),
+             + ("Strike counts are checked against official UFC statistics (ufcstats.com) before they are shown." if feature_on("strike_counts") else "Strike counts are not shown yet; before they are, they will be checked against official UFC statistics (ufcstats.com).")),
         ],
     },
     "security": {

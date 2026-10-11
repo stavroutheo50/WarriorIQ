@@ -143,3 +143,18 @@
   .workflow-heading .eyebrow,#selectIntro,#frameNote:not([data-found="none"]){display:none}
   .workflow-heading h1{font-size:30px;margin:4px 0 0}
 }
+
+/* "Upload a different video" is a form (it discards the pending upload), so
+   the button looks like the link it replaced (QA, 2026-10-11). */
+.quiet-back-form{margin:0}
+.quiet-back.link-button{border:0;background:none;cursor:pointer;font:inherit;font-size:12px;font-weight:800}
+/* Solo hides Fighter B's card with [hidden]; .fighter-key-item's display:flex
+   overrode it, so "B · Opponent - Tap now" stayed on screen (QA, 2026-10-11). */
+.fighter-key-item[hidden],.corner-pick[hidden],.focus-pick[hidden],.pick-fighter[hidden]{display:none!important}
+/* Start stays on screen on desktop: it sat below the fold under the picture. */
+@media(min-width:701px){
+  .fighter-workflow .analysis-choice{position:sticky;bottom:12px;z-index:5;box-shadow:0 -10px 30px #02050acc}
+}
+/* No people found on the frame: turning it is offered up front (C4). */
+.rotate-prominent{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0 0;padding:12px 14px;border:1px solid #62502d;border-radius:10px;background:#1d1708}
+.rotate-prominent[hidden]{display:none}

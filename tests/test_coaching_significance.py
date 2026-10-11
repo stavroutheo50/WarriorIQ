@@ -22,12 +22,25 @@ def _fighter(guard, balance, guard_error=None, balance_error=None):
 
 
 def test_a_one_point_gap_is_not_a_weakness():
-    coaching = build_pose_coaching("A", _fighter(0.07, 0.70), _fighter(0.08, 0.70))
+    # Above the level the report flags (guard 42%, core/metric_catalog.py), a
+    # one-point gap is noise and nothing is named.
+    coaching = build_pose_coaching("A", _fighter(0.50, 0.70), _fighter(0.51, 0.70))
     titles = [item["title"] for item in coaching["improvements"]]
     assert not any(title.startswith("Work on") for title in titles), titles
     assert titles == ["Nothing behind your opponent"]
     assert coaching["drills"] == []
     assert "behind your opponent" not in " ".join(item["detail"] for item in coaching["improvements"])
+
+
+def test_a_one_point_gap_under_the_stated_threshold_is_worked_on_but_not_called_behind():
+    """QA, 2026-10-11: Guard 7% got "Nothing behind your opponent" and no drill
+    while the same report said under 42% is worth training."""
+    coaching = build_pose_coaching("A", _fighter(0.07, 0.70), _fighter(0.08, 0.70))
+    first = coaching["improvements"][0]
+    assert first["title"] == "Work on: Guard 7%"
+    assert "no clear difference from your opponent" in first["detail"]
+    assert "Under 42%" in first["detail"]
+    assert coaching["drills"]
 
 
 def test_a_large_gap_is_named_and_drilled():
@@ -39,10 +52,10 @@ def test_a_large_gap_is_named_and_drilled():
 
 def test_a_gap_inside_the_noise_is_not_named():
     """Ten points apart, but each average is uncertain by eight."""
-    noisy = build_pose_coaching("A", _fighter(0.10, 0.70, 0.08, 0.01), _fighter(0.20, 0.70, 0.08, 0.01))
+    noisy = build_pose_coaching("A", _fighter(0.50, 0.70, 0.08, 0.01), _fighter(0.60, 0.70, 0.08, 0.01))
     assert [item["title"] for item in noisy["improvements"]] == ["Nothing behind your opponent"]
-    steady = build_pose_coaching("A", _fighter(0.10, 0.70, 0.01, 0.01), _fighter(0.20, 0.70, 0.01, 0.01))
-    assert steady["improvements"][0]["title"] == "Work on: Guard 10%"
+    steady = build_pose_coaching("A", _fighter(0.50, 0.70, 0.01, 0.01), _fighter(0.60, 0.70, 0.01, 0.01))
+    assert steady["improvements"][0]["title"] == "Work on: Guard 50%"
 
 
 def test_clear_difference_needs_both_size_and_certainty():
@@ -53,10 +66,14 @@ def test_clear_difference_needs_both_size_and_certainty():
 
 
 def test_a_strength_needs_a_real_lead():
-    level = build_pose_coaching("A", _fighter(0.21, 0.70), _fighter(0.20, 0.70))
+    level = build_pose_coaching("A", _fighter(0.51, 0.70), _fighter(0.50, 0.70))
     assert level["strengths"] == []
-    ahead = build_pose_coaching("A", _fighter(0.30, 0.70), _fighter(0.20, 0.70))
+    ahead = build_pose_coaching("A", _fighter(0.60, 0.70), _fighter(0.50, 0.70))
     assert ahead["strengths"][0]["title"] == "Guard: ahead of your opponent"
+    # Ahead, but under the level WarriorIQ flags: a thing to work on, never a strength.
+    flagged = build_pose_coaching("A", _fighter(0.30, 0.70), _fighter(0.20, 0.70))
+    assert flagged["strengths"] == []
+    assert flagged["improvements"][0]["title"] == "Work on: Guard 30%"
 
 
 def test_taekwondo_guard_is_style_not_a_fault():
@@ -73,7 +90,7 @@ def test_taekwondo_guard_is_style_not_a_fault():
 
 
 def test_one_fighter_is_only_told_about_numbers_well_outside_the_usual_range():
-    ordinary = build_pose_coaching("A", _fighter(0.15, 0.70))
+    ordinary = build_pose_coaching("A", _fighter(0.50, 0.70))
     assert ordinary["improvements"][0]["title"] == "Nothing clearly below the usual range"
     assert ordinary["drills"] == []
     low = build_pose_coaching("A", _fighter(0.02, 0.70))

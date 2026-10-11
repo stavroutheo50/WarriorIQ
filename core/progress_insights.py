@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+from core.guard import comparable_guard
 from core.config import RULESET_LABELS
 
 
@@ -74,7 +75,8 @@ def _point(record: dict, fighter: str) -> dict | None:
         "activity": _number(dashboard.get("activity_attempts_per_minute")) if action_trusted else None,
         "combinations": _number(dashboard.get("combinations_per_minute")) if action_trusted else None,
         "coverage": _number(metrics.get("pose_coverage")),
-        "guard": _number(metrics.get("guard_index")),
+        # Only a guard measured the current way joins a trend (core/guard.py).
+        "guard": _number(comparable_guard(metrics)),
         "balance": _number(metrics.get("balance_index")),
         "center": _number(metrics.get("ring_center_control")),
         "footwork": _number(metrics.get("footwork_body_lengths_per_second")),

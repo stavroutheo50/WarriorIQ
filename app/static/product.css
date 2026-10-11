@@ -399,3 +399,7 @@ body[data-page=home] main > .hero{padding-bottom:clamp(32px,5vh,56px)}
 /* Phone menu: three main links, then the rest smaller under "More" (base.html). */
 .mobile-menu-label{display:block;margin:8px 13px 0;padding-top:10px;border-top:1px solid var(--line,#2d4268);color:#7f90aa;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.8px}
 .mobile-menu a.mobile-menu-minor{padding:9px 13px;min-height:38px;color:#aebdd3;font-size:14px}
+/* Settings: change password / change email (2026-10-11). */
+.settings-form{display:grid;gap:10px;align-content:start}.settings-form h3{margin:0}.settings-form label{display:grid;gap:5px;font-size:13px}.settings-form .btn{justify-self:start}
+/* A saved analysis that did not produce a usable report (C2, 2026-10-11). */
+.fight-state.fight-state-attention{color:#f1b84b}.fight-state.fight-state-attention i{background:#f1b84b}

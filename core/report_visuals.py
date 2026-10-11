@@ -188,6 +188,13 @@ def build(report: dict, focus: str = "A", outcomes_counted: bool = True) -> dict
     guard_low = [round(float(t), 1) for t in (moments.get("low") or [])
                  if span > 0 and 0.0 <= float(t) <= span]
     timeline = [mark for mark in timeline if span > 0 and 0.0 <= mark["at"] <= span]
+    # The stretches the hands were mostly down, from the same per-step guard
+    # readings as the hands-up share. Four "guard dropped" marks on a fight
+    # with the guard down 93% of the time read as four drops (QA,
+    # 2026-10-11); the marks are the clearest examples, the bands are the time.
+    guard_down = _guard_down_stretches(mine, span)
+    numbers = mine.get("numbers") or {}
+    share = numbers.get("hands_up_share")
 
     defences = {k: int(v) for k, v in (mine.get("defenses") or {}).items() if v} if action_ready else {}
 
@@ -210,6 +217,8 @@ def build(report: dict, focus: str = "A", outcomes_counted: bool = True) -> dict
         "chain_longest": int(combinations.get("max_length") or (chains[0] if chains else 0)),
         "timeline": timeline,
         "guard_low": guard_low,
+        "guard_down": guard_down,
+        "hands_down_percent": None if share is None else round((1.0 - float(share)) * 100),
         "span_seconds": round(span, 1) if span > 0 else 0.0,
         # Said once, in one place, so every section below inherits it rather
         # than repeating a disclaimer five times.
@@ -217,3 +226,26 @@ def build(report: dict, focus: str = "A", outcomes_counted: bool = True) -> dict
                    "Movement only. Whether strikes landed is not counted yet, so nothing "
                    "here says who landed what."),
     }
+
+
+def _guard_down_stretches(own: dict, span: float) -> list[dict]:
+    """Merged stretches (seconds) in which the hands were down more than up,
+    read from the guard series core/fight_numbers.py stores."""
+    series = ((own.get("numbers") or {}).get("series") or {})
+    step = float(series.get("step_seconds") or 0.0)
+    if step <= 0 or span <= 0:
+        return []
+    out: list[dict] = []
+    for point in series.get("points") or []:
+        up = point.get("hands_up")
+        if up is None or float(up) >= 0.5:
+            continue
+        start = max(0.0, float(point["t"]))
+        end = min(span, start + step)
+        if end <= start:
+            continue
+        if out and abs(out[-1]["end"] - start) < 1e-6:
+            out[-1]["end"] = end
+        else:
+            out.append({"start": start, "end": end})
+    return [{"start": round(item["start"], 1), "end": round(item["end"], 1)} for item in out]

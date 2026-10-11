@@ -8,6 +8,11 @@ import numpy as np
 from core.types import VideoInfo
 
 
+# Below this mean brightness (0-255) the picture is too dark to separate limbs.
+# The browser's pre-upload check uses the same line (core/preflight_client.py).
+LOW_LIGHT_BRIGHTNESS = 38
+
+
 def quality_summary(width: int, height: int, fps: float, brightness: float, sharpness: float) -> dict:
     score = 100
     notes: list[str] = []
@@ -23,7 +28,7 @@ def quality_summary(width: int, height: int, fps: float, brightness: float, shar
     elif fps < 24:
         score -= 8
         notes.append("A higher frame rate would improve fast-motion timing.")
-    if brightness < 38:
+    if brightness < LOW_LIGHT_BRIGHTNESS:
         score -= 24
         notes.append("Low light may make fighters and limbs difficult to separate.")
     elif brightness > 218:

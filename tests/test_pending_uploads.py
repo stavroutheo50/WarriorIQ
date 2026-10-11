@@ -40,8 +40,10 @@ def settings():
 def account(settings):
     settings(chunked_upload_enabled=True, public_base_url="", max_pending_uploads=2)
     created = db.create_account(f"pending-{uuid.uuid4().hex}@example.test", "not-a-login-hash")
-    # Unlimited analyses, so the allowance is not what refuses a third upload.
-    db.set_plan_override(int(created["id"]), "gym")
+    # A large daily allowance, so the allowance is not what refuses a third
+    # upload. Not Gym: Gym is sold as unlimited and has no pending cap at all
+    # (QA, 2026-10-11; tests/test_qa_2026_10_11.py).
+    db.set_plan_override(int(created["id"]), "coach_30")
     client = BrowserClient(web.app)
     client.cookies.set(web.SESSION_COOKIE, issue_session(created["id"]))
     web._rate_windows.clear()
