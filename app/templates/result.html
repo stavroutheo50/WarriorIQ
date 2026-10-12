@@ -275,8 +275,49 @@
     <p class="graph-hint">Left to right is the fight from start to end. Each bar is a few seconds. A full bar means your hands were up by the face the whole time; an empty one, down the whole time.{% if graphs.guard.gaps %} No bar {% for gap in graphs.guard.gaps %}{{ gap.from }}&ndash;{{ gap.to }} ({{ gap.reason }}){{ '; ' if not loop.last else '.' }}{% endfor %}{% endif %}</p>
     <svg class="bar-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int }}" preserveAspectRatio="none" role="img" aria-label="Hands up through the fight, {{ g_you }}">
       {% for bar in graphs.guard.bars %}<rect class="guard-track" x="{{ bar.x }}" y="0" width="{{ bar.width }}" height="{{ graphs.height }}"/><rect class="guard-bar" style="--i:{{ loop.index0 }}" x="{{ bar.x }}" y="{{ graphs.height - bar.height }}" width="{{ bar.width }}" height="{{ bar.height }}"><title>{{ bar.clock }}: hands up {{ bar.share }}%</title></rect>{% endfor %}
+      {% for line in graphs.guard.theirs %}<polyline class="graph-line theirs" pathLength="1" points="{{ line }}"/>{% endfor %}
     </svg>
     <div class="graph-axis"><span>{{ graphs.guard.axis[0] }}</span><span>{{ graphs.guard.axis[1] }}</span><span>{{ graphs.guard.axis[2] }}</span></div>
+    {% if graphs.guard.theirs %}<ul class="stack-key list-clean"><li><i class="key-guard" aria-hidden="true"></i>{{ g_you }}: hands up</li><li><i class="key-theirs" aria-hidden="true"></i>{{ g_them }}: hands up</li></ul>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if graphs.by_round %}
+  <div class="graph-block">
+    <h3>Round by round: the centre of the ring</h3>
+    <p class="graph-read">{{ graphs.by_round.read }}</p>
+    <p class="graph-hint">How much of each round each fighter spent in the middle of the ring, out of the time they were seen. A round with too little of a fighter seen has no bar.</p>
+    {% for row in graphs.by_round.rows %}
+    <div class="round-row"><span class="stack-who">Round {{ row.number }}</span>
+      <div class="round-bars">
+        {% for side, label, cls in [(graphs.focus, g_you, 'mine'), (graphs.opponent, g_them, 'theirs')] %}
+        <div class="round-bar" role="img" aria-label="{{ label }}, round {{ row.number }}: {% if row[side] is not none %}centre {{ row[side] }}%{% else %}not seen enough{% endif %}">{% if row[side] is not none %}<i class="round-fill {{ cls }}" style="--w:{{ row[side] }}%;--i:{{ loop.index0 }}"></i><b>{{ row[side] }}%</b>{% else %}<small class="muted">not seen enough</small>{% endif %}</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+    <ul class="stack-key list-clean"><li><i class="key-mine" aria-hidden="true"></i>{{ g_you }}</li><li><i class="key-theirs" aria-hidden="true"></i>{{ g_them }}</li></ul>
+  </div>
+  {% endif %}
+
+  {% if graphs.highlights %}
+  {% set hl = graphs.highlights %}
+  <div class="graph-block">
+    <h3>Your fight on one line</h3>
+    <p class="graph-read">{{ hl.good }} clear moment{{ '' if hl.good == 1 else 's' }} at your best and {{ hl.bad }} at your weakest{% if hl.down %}, and {{ hl.down|length }} time{{ '' if hl.down|length == 1 else 's' }} someone went down{% endif %}. Tap any mark to watch it.</p>
+    <p class="graph-hint">Left to right is the fight, 0:00 to {{ hl.span_clock }}. Green marks above the line are your best seconds, orange below are your weakest.{% if hl.rounds %} Shaded blocks are the rounds.{% endif %}</p>
+    <div class="moment-tl">
+      {% for band in hl.rounds %}<span class="moment-round" style="left:{{ band.left }}%;width:{{ band.width }}%" title="Round {{ band.number }}, {{ band.clock }}">R{{ band.number }}</span>{% endfor %}
+      <i class="moment-mid" aria-hidden="true"></i>
+      {% for mark in hl.marks %}<a class="moment-mark {{ 'good' if mark.good else 'bad' }}" style="left:{{ mark.left }}%;--i:{{ loop.index0 }}" href="/replay/{{ job_id }}?t={{ '%.2f'|format([mark.at - 1, 0]|max) }}" title="{{ mark.clock }}: {{ mark.label }}" aria-label="{{ mark.label }} at {{ mark.clock }}, watch it"></a>{% endfor %}
+      {% for d in hl.down %}<a class="moment-down" style="left:{{ d.left }}%" href="/replay/{{ job_id }}?t={{ '%.2f'|format([d.at - 1, 0]|max) }}" title="{{ d.clock }}: someone went down ({{ d.seconds }}s)" aria-label="Someone went down at {{ d.clock }}, watch it">&#9660;</a>{% endfor %}
+    </div>
+    <div class="graph-axis"><span>0:00</span><span>{{ hl.mid_clock }}</span><span>{{ hl.span_clock }}</span></div>
+    <details class="moment-all"><summary>All {{ hl.marks|length }} moments, in order</summary>
+    <ul class="moment-list list-clean">
+      {% for mark in hl.marks %}<li><a class="moment-chip {{ 'good' if mark.good else 'bad' }}" href="/replay/{{ job_id }}?t={{ '%.2f'|format([mark.at - 1, 0]|max) }}"><b class="wiq-num">{{ mark.clock }}</b> {{ mark.label }}</a></li>{% endfor %}
+    </ul>
+    </details>
   </div>
   {% endif %}
 
@@ -323,7 +364,7 @@
     {% for r in movement.rounds %}
       <tr>
         <td>{{r.number}}</td>{% if movement.scores %}<td>{{r.score.A}}</td><td>{{r.score.B}}</td>{% endif %}
-        {% for column in movement.columns %}{% set share = r.shares[column.key] %}<td>{% if share %}{{'%.0f'|format(share.A*100)}}% / {{'%.0f'|format(share.B*100)}}%{% else %}—{% endif %}</td>{% endfor %}
+        {% for column in movement.columns %}{% set share = r.shares[column.key] %}<td>{% if share %}<span class="split-bar" role="img" aria-label="{{ names.A }} {{'%.0f'|format(share.A*100)}}%, {{ names.B }} {{'%.0f'|format(share.B*100)}}%"><i style="--a:{{'%.1f'|format(share.A*100)}}%"></i></span>{{'%.0f'|format(share.A*100)}}% / {{'%.0f'|format(share.B*100)}}%{% else %}—{% endif %}</td>{% endfor %}
         <td class="small">{{r.read}}</td>
       </tr>
     {% endfor %}

@@ -211,3 +211,55 @@ class CompareTests(unittest.TestCase):
         self.assertLess(page.index('id="movement-comparison"'), page.index('id="compare-graphs"'))
         self.assertIn("/static/components.css", page)
         self.assertIn("Energy through each fight", page)
+
+
+class RicherReportTests(unittest.TestCase):
+    """Rounds, the moments line and the opponent's guard (2026-10-12)."""
+
+    def _with_moments(self):
+        report = _report()
+        report["rounds"] = [{"number": 1, "start_seconds": 0.0, "end_seconds": 60.0, "selected": True},
+                            {"number": 2, "start_seconds": 60.0, "end_seconds": 120.0, "selected": True}]
+        report["metrics"]["A"]["moments"] = {
+            "guard_index": {"low": [12.0], "high": [40.0]},
+            "balance_index": {"low": [200.0], "high": []},          # past the end: not drawn
+        }
+        report["went_down"] = {"moments": [{"seconds": 75.0, "round": 2, "down_seconds": 4}]}
+        return report
+
+    def test_moments_line_names_best_and_weakest_seconds_and_links_them(self):
+        hl = movement_graphs.build(self._with_moments(), "A")["highlights"]
+        self.assertEqual([(m["clock"], m["label"], m["good"]) for m in hl["marks"]],
+                         [("0:12", "Guard dropped", False), ("0:40", "Guard up tight", True)])
+        self.assertEqual((hl["good"], hl["bad"]), (1, 1))
+        self.assertEqual(hl["down"][0]["clock"], "1:15")
+        self.assertEqual([b["number"] for b in hl["rounds"]], [1, 2])
+        self.assertEqual(hl["marks"][0]["left"], 10.0)
+
+    def test_no_moments_no_line(self):
+        report = _report()
+        report["rounds"] = [{"number": 1, "start_seconds": 0.0, "end_seconds": 60.0}]
+        self.assertIsNone(movement_graphs.build(report, "A")["highlights"])
+
+    def test_no_rounds_no_line(self):
+        report = self._with_moments()
+        report["rounds"] = []
+        self.assertIsNone(movement_graphs.highlights(report, "A"))
+
+    def test_round_by_round_centre_share_needs_two_rounds_and_ten_seen_seconds(self):
+        report = _report()
+        report["metrics"]["A"]["numbers"]["rounds"] = {"1": {"seen_seconds": 100.0, "centre_seconds": 60.0},
+                                                       "2": {"seen_seconds": 80.0, "centre_seconds": 20.0}}
+        report["metrics"]["B"]["numbers"]["rounds"] = {"1": {"seen_seconds": 5.0, "centre_seconds": 5.0},
+                                                       "2": {"seen_seconds": 90.0, "centre_seconds": 45.0}}
+        rounds = movement_graphs.build(report, "A")["by_round"]
+        self.assertEqual([(r["number"], r["A"], r["B"]) for r in rounds["rows"]], [(1, 60, None), (2, 25, 50)])
+        self.assertEqual(rounds["read"], "You held the centre most in round 1 (60% of the time you were seen) "
+                                         "and least in round 2 (25%).")
+        report["metrics"]["A"]["numbers"]["rounds"] = {"1": {"seen_seconds": 100.0, "centre_seconds": 60.0}}
+        report["metrics"]["B"]["numbers"]["rounds"] = {}
+        self.assertIsNone(movement_graphs.build(report, "A")["by_round"])
+
+    def test_the_opponents_guard_is_drawn_over_yours(self):
+        guard = movement_graphs.build(_report(), "A")["guard"]
+        self.assertTrue(guard["theirs"])

@@ -115,6 +115,100 @@ def _gaps(series: dict | None, value: str, report: dict) -> list[dict]:
     return out
 
 
+# The moments core/metrics.py keeps for each fighter (up to four spread-out
+# seconds at the top and the bottom of each measure), named for a fighter.
+# Which end is the good one is part of the name, not a judgement added here:
+# hands up, balanced and moving are what a coach asks for.
+HIGHLIGHTS = (
+    ("guard_index", "high", "Guard up tight", True),
+    ("guard_index", "low", "Guard dropped", False),
+    ("balance_index", "high", "Well balanced", True),
+    ("balance_index", "low", "Off balance", False),
+    ("pressure_index", "high", "Pressing forward", True),
+    ("pressure_index", "low", "Backing off", False),
+    ("footwork_body_lengths_per_second", "high", "Busiest feet", True),
+    ("footwork_body_lengths_per_second", "low", "Flat-footed", False),
+)
+
+
+def _span(report: dict) -> float:
+    rounds = report.get("rounds") or []
+    return max((float(r.get("end_seconds") or 0) for r in rounds), default=0.0)
+
+
+def highlights(report: dict, focus: str = "A") -> dict | None:
+    """The fighter's clearest moments on one line: rounds, best and worst seconds, anyone going down.
+
+    Every mark is a second the analysis already picked (``metrics[side].moments``)
+    or found (``went_down``); each links to the replay at that second. Moments
+    the report withheld (guard and balance on a sideways video) are simply
+    absent from ``moments`` and so from here.
+    """
+    span = _span(report)
+    if span <= 0:
+        return None
+    moments = (((report.get("metrics") or {}).get(focus) or {}).get("moments") or {})
+    marks = []
+    for metric, end, label, good in HIGHLIGHTS:
+        for t in ((moments.get(metric) or {}).get(end) or []):
+            t = float(t)
+            if 0.0 <= t <= span:
+                marks.append({"at": round(t, 1), "clock": _clock(t), "label": label, "good": good,
+                              "left": round(t / span * 100.0, 2)})
+    down = []
+    for moment in ((report.get("went_down") or {}).get("moments") or []):
+        t = float(moment.get("seconds") or 0.0)
+        if 0.0 <= t <= span:
+            down.append({"at": round(t, 1), "clock": _clock(t), "left": round(t / span * 100.0, 2),
+                         "seconds": int(moment.get("down_seconds") or 0)})
+    bands = []
+    for index, item in enumerate(report.get("rounds") or []):
+        start, end = float(item.get("start_seconds") or 0.0), float(item.get("end_seconds") or 0.0)
+        if end > start and item.get("selected", True):
+            bands.append({"number": item.get("number") or index + 1,
+                          "left": round(start / span * 100.0, 2),
+                          "width": round((min(end, span) - start) / span * 100.0, 2),
+                          "clock": f"{_clock(start)}\u2013{_clock(end)}"})
+    if not marks and not down:
+        return None
+    marks.sort(key=lambda m: m["at"])
+    good = sum(1 for m in marks if m["good"])
+    return {"marks": marks, "down": down, "rounds": bands if len(bands) > 1 else [],
+            "span_clock": _clock(span), "mid_clock": _clock(span / 2.0), "good": good, "bad": len(marks) - good}
+
+
+def by_round(report: dict, focus: str = "A") -> dict | None:
+    """Each round: how much of it each fighter held the centre of the ring, and was seen.
+
+    From ``numbers.rounds`` (centre and seen seconds per round). A round needs
+    ten seen seconds for a fighter to get a share; fewer is not a share of
+    anything.
+    """
+    metrics = report.get("metrics") or {}
+    other = "B" if focus == "A" else "A"
+    per_side = {side: ((metrics.get(side) or {}).get("numbers") or {}).get("rounds") or {} for side in (focus, other)}
+    numbers = sorted({int(n) for rounds in per_side.values() for n in rounds if str(n).isdigit()})
+    if len(numbers) < 2:
+        return None
+    rows = []
+    for n in numbers:
+        row = {"number": n}
+        for side in (focus, other):
+            item = per_side[side].get(str(n)) or per_side[side].get(n) or {}
+            seen, centre = float(item.get("seen_seconds") or 0.0), float(item.get("centre_seconds") or 0.0)
+            row[side] = round(centre / seen * 100.0) if seen >= 10.0 else None
+            row[side + "_seen"] = _clock(seen)
+        rows.append(row)
+    shown = [r for r in rows if r[focus] is not None]
+    if not shown:
+        return None
+    best = max(shown, key=lambda r: r[focus])
+    worst = min(shown, key=lambda r: r[focus])
+    read = (f"You held the centre most in round {best['number']} ({best[focus]}% of the time you were seen)"
+            + (f" and least in round {worst['number']} ({worst[focus]}%)." if worst is not best else "."))
+    return {"rows": rows, "read": read}
+
+
 def build(report: dict, focus: str = "A") -> dict | None:
     """Everything the graphs section needs for ``focus``, or None when there is nothing to draw."""
     metrics = report.get("metrics") or {}
@@ -154,7 +248,10 @@ def build(report: dict, focus: str = "A") -> dict | None:
                      "clock": _clock(float(p["t"]))}
                     for p in own["points"] if p.get("hands_up") is not None]
             guard = {"bars": bars, "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)],
-                     "gaps": _gaps(own, "hands_up", report)}
+                     "gaps": _gaps(own, "hands_up", report),
+                     # The opponent's guard as a line over your bars: the
+                     # only fair benchmark is the other fighter in the same fight.
+                     "theirs": _lines({other: series[other]}, "hands_up", 1.0, start, span).get(other, [])}
 
     facts = []
     if mine.get("distance_body_lengths") is not None:
@@ -182,6 +279,7 @@ def build(report: dict, focus: str = "A") -> dict | None:
              "guard": _guard_read(series[focus], mine.get("hands_up_share")) if guard else None}
     return {"focus": focus, "opponent": other, "moved": moved, "ranges": ranges,
             "energy": energy, "guard": guard, "facts": facts, "reads": reads,
+            "highlights": highlights(report, focus), "by_round": by_round(report, focus),
             "width": WIDTH, "height": HEIGHT}
 
 
