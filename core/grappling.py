@@ -21,11 +21,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
-from core.ground import pose_down
-
-_HIPS = (11, 12)
-_SHOULDERS = (5, 6)
-_JOINT_CONFIDENCE = 0.4
+from core.ground import _HIPS, _SHOULDERS, _joint, pose_down
 # Tangled: the overlap covers this share of the smaller fighter's box.
 MIN_OVERLAP_SHARE = 0.2
 # On top: hips higher than the other fighter's by this share of the top
@@ -43,14 +39,11 @@ SWITCH_WINDOW = 4
 
 
 def _mid(observation: dict, pair: tuple[int, int]):
+    """Midpoint of two joints, by core/ground.py's own confidence rule; None when either is not seen."""
     keypoints, conf = observation.get("keypoints"), observation.get("keypoint_conf")
-    if not keypoints or not conf:
+    points = [_joint(keypoints, conf, index) for index in pair]
+    if None in points:
         return None
-    points = []
-    for index in pair:
-        if index >= len(keypoints) or float(conf[index]) <= _JOINT_CONFIDENCE:
-            return None
-        points.append(keypoints[index])
     return (points[0][0] + points[1][0]) / 2.0, (points[0][1] + points[1][1]) / 2.0
 
 
@@ -189,8 +182,8 @@ def takedowns(seconds: dict[int, dict]) -> list[dict]:
         state = seconds[second]
         if not state["top"] or second - last_credit < STANDING_BEFORE + MIN_GROUND_AFTER:
             continue
-        before = [seconds.get(s) for s in range(second - SWITCH_WINDOW - STANDING_BEFORE, second - SWITCH_WINDOW + 1)]
-        if not all(b is not None and not b["ground"] for b in before[:STANDING_BEFORE]):
+        before = [seconds.get(s) for s in range(second - SWITCH_WINDOW - STANDING_BEFORE, second - SWITCH_WINDOW)]
+        if not all(b is not None and not b["ground"] for b in before):
             continue
         after = [seconds.get(s) for s in range(second, second + MIN_GROUND_AFTER)]
         if all(a is not None and a["top"] == state["top"] for a in after):

@@ -20,6 +20,8 @@ here is a claim about one named fighter.
 
 from __future__ import annotations
 
+from core.fight_numbers import CLOSE_RANGE
+
 # The energy and guard graphs are drawn in a viewBox this size.
 WIDTH, HEIGHT = 320.0, 110.0
 
@@ -195,8 +197,10 @@ def by_round(report: dict, focus: str = "A") -> dict | None:
         row = {"number": n}
         for side in (focus, other):
             item = per_side[side].get(str(n)) or per_side[side].get(n) or {}
-            seen, centre = float(item.get("seen_seconds") or 0.0), float(item.get("centre_seconds") or 0.0)
-            row[side] = round(centre / seen * 100.0) if seen >= 10.0 else None
+            seen = float(item.get("seen_seconds") or 0.0)
+            centre = item.get("centre_seconds")
+            # None when the middle of the ring was not found: no share, not 0%.
+            row[side] = round(float(centre) / seen * 100.0) if centre is not None and seen >= 10.0 else None
             row[side + "_seen"] = _clock(seen)
         rows.append(row)
     shown = [r for r in rows if r[focus] is not None]
@@ -246,7 +250,8 @@ def pressure_and_distance(series_by_side: dict, focus: str, other: str, start: f
             closest = min((p for p in own["points"] if p.get("distance") is not None), key=lambda p: p["distance"])
             farthest = max((p for p in own["points"] if p.get("distance") is not None), key=lambda p: p["distance"])
             distance = {"lines": lines[focus], "top": round(top, 1),
-                        "close_y": round(HEIGHT - min(1.0, 1.0 / top) * HEIGHT, 1),
+                        "close_y": round(HEIGHT - min(1.0, CLOSE_RANGE / top) * HEIGHT, 1),
+                        "close_range": CLOSE_RANGE,
                         "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)],
                         "read": (f"You were closest around {_clock(closest['t'])} ({closest['distance']:.1f} body "
                                  f"lengths apart) and farthest around {_clock(farthest['t'])} "

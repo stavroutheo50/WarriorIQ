@@ -299,3 +299,25 @@ class PressureAndDistanceTests(unittest.TestCase):
         graphs = movement_graphs.build(report, "A")
         self.assertIsNone(graphs["pressure"])
         self.assertIsNone(graphs["distance"])
+
+
+class ReviewFixTests(unittest.TestCase):
+    """Fixes from the 2026-10-12 review."""
+
+    def test_an_unmeasured_centre_is_no_bar_not_zero_percent(self):
+        report = _report()
+        for side in ("A", "B"):
+            report["metrics"][side]["numbers"]["rounds"] = {
+                "1": {"seen_seconds": 100.0, "centre_seconds": None},
+                "2": {"seen_seconds": 80.0, "centre_seconds": None}}
+        self.assertIsNone(movement_graphs.build(report, "A")["by_round"])
+
+    def test_pressure_ignores_a_fighter_standing_still(self):
+        samples = _samples(30, speed=lambda t: 0.05)       # jitter, not movement
+        points = over_time(samples, [0.2] * len(samples))["points"]
+        self.assertEqual({p["pressure"] for p in points}, {None})
+
+    def test_the_range_line_is_the_reports_own_close_distance(self):
+        from core.fight_numbers import CLOSE_RANGE
+        distance = movement_graphs.build(_report(), "A")["distance"]
+        self.assertEqual(distance["close_range"], CLOSE_RANGE)

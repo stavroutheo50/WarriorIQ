@@ -287,7 +287,7 @@
   <div class="graph-block">
     <h3>Distance between you, over time</h3>
     <p class="graph-read">{{ graphs.distance.read }}</p>
-    <p class="graph-hint">The higher the line, the further apart you were. The dashed line is 1 body length: below it you were in range of each other.</p>
+    <p class="graph-hint">The higher the line, the further apart you were. The dashed line is {{ graphs.distance.close_range }} body lengths, the report's "close" distance: below it you were in range of each other.</p>
     <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Distance between the fighters through the fight">
       <line class="graph-base" x1="0" y1="{{ graphs.height }}" x2="{{ graphs.width }}" y2="{{ graphs.height }}"/>
       <line class="graph-range" x1="0" y1="{{ graphs.distance.close_y }}" x2="{{ graphs.width }}" y2="{{ graphs.distance.close_y }}"/>

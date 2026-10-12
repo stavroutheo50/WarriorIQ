@@ -670,7 +670,8 @@ class PoseTracker:
             for person, vector, verdict in zip(people, vectors, verdicts, strict=True):
                 person.reid = vector
                 person.referee_prob = verdict
-                person.torso_skin = torso_skin_share(frame, person.box)
+                if SETTINGS.clothed_official_filter_enabled:
+                    person.torso_skin = torso_skin_share(frame, person.box)
         self.timing["appearance"] += time.perf_counter() - appearance_started
         return people
 

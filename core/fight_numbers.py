@@ -188,9 +188,13 @@ def over_time(samples: list[dict], weights: list[float], guard_measured: bool = 
     ``distance`` is the average gap to the opponent in body lengths and
     ``pressure`` the average of how directly the fighter moved toward them
     (-1 straight away, 1 straight at them), each with the same
-    SERIES_MIN_READINGS rule. Both are measured between the two fighters, so
-    a panning or zooming camera does not move them. Added 2026-10-12; older
-    reports have no such keys and the graphs simply leave them out.
+    SERIES_MIN_READINGS rule. Pressure counts only readings taken while the
+    fighter was actually moving (MOVING_SPEED, the same gate as the movement
+    split): the direction of a fighter standing still is pixel jitter. The
+    gap is a ratio of body lengths, so zoom does not change it; the direction
+    of movement is read in the picture, so a camera panning during a stretch
+    does colour that stretch's pressure. Added 2026-10-12; older reports have
+    no such keys and the graphs simply leave them out.
     """
     if len(samples) < 2:
         return None
@@ -209,7 +213,7 @@ def over_time(samples: list[dict], weights: list[float], guard_measured: bool = 
             bucket["speed"].append(float(item["speed"]))
         if item.get("gap") is not None:
             bucket["gap"].append(float(item["gap"]))
-        if item.get("toward") is not None:
+        if item.get("toward") is not None and item.get("speed") is not None and item["speed"] >= MOVING_SPEED:
             bucket["toward"].append(float(item["toward"]))
         up = guard_measure.is_up(item.get("guard")) if guard_measured else None
         if up is not None:

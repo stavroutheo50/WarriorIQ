@@ -152,7 +152,7 @@ def ema(old: np.ndarray | None, new: np.ndarray | None, alpha: float) -> np.ndar
 
 # Refusals that say who a candidate is, not where or how they moved, so the
 # propagated fighter mask may not overrule them (IdentityManager.update).
-NOT_REOPENED_BY_THE_MASK = frozenset({"looks_like_a_known_bystander", "clothed_official"})
+NOT_REOPENED_BY_THE_MASK = frozenset({"looks_like_a_known_bystander"})
 
 
 class IdentityManager:

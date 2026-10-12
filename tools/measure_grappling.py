@@ -41,6 +41,10 @@ def standing_strikes(events: list[dict], records: list[dict], official: dict, an
     distance are in TOTAL STR. but not split by position, so the official
     distance number is a floor, not an exact answer.
     """
+    missing = [letter for letter in ("A", "B") if "distance" not in official[letter].by_position]
+    if missing:
+        raise SystemExit("The official statistics file has no DISTANCE column, so strikes thrown standing "
+                         "cannot be compared with it.")
     strikes = [e for e in events if e.get("family") in STRIKE_FAMILIES and e.get("round_number") == analysis_round]
     kept = strikes_while_standing(strikes, records)
     return {letter: {"all_detected": sum(e.get("fighter") == letter for e in strikes),

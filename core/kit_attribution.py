@@ -69,11 +69,18 @@ def shorts_dark_share(frame: np.ndarray | None, keypoints, keypoint_conf) -> flo
     hip_l, hip_r = np.asarray(keypoints[11], float)[:2], np.asarray(keypoints[12], float)[:2]
     knee_l, knee_r = np.asarray(keypoints[13], float)[:2], np.asarray(keypoints[14], float)[:2]
     band = np.array([hip_l, hip_r, hip_r + 0.45 * (knee_r - hip_r), hip_l + 0.45 * (knee_l - hip_l)], np.int32)
-    mask = np.zeros(frame.shape[:2], np.uint8)
-    cv2.fillPoly(mask, [band], 1)
+    # Only the band's own rectangle is converted, not the frame: this runs for
+    # both fighters on every analysed frame.
+    height, width = frame.shape[:2]
+    x1, y1 = max(0, int(band[:, 0].min())), max(0, int(band[:, 1].min()))
+    x2, y2 = min(width, int(band[:, 0].max()) + 1), min(height, int(band[:, 1].max()) + 1)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    mask = np.zeros((y2 - y1, x2 - x1), np.uint8)
+    cv2.fillPoly(mask, [band - np.array([x1, y1], np.int32)], 1)
     if int(mask.sum()) < MIN_PIXELS:
         return None
-    lightness = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)[..., 0][mask > 0]
+    lightness = cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2LAB)[..., 0][mask > 0]
     return float((lightness < DARK_L).mean())
 
 
@@ -149,8 +156,11 @@ class KitAttribution:
         k = min(bisect.bisect_left(self._times, seconds), len(self._times) - 1)
         shot = self._shots[k]
         score = 0
-        for j in range(len(self._times)):
-            if self._shots[j] != shot or abs(self._times[j] - seconds) > WINDOW_SECONDS:
+        # Frames arrive in time order, so the window is one slice.
+        lo = bisect.bisect_left(self._times, seconds - WINDOW_SECONDS)
+        hi = bisect.bisect_right(self._times, seconds + WINDOW_SECONDS)
+        for j in range(lo, hi):
+            if self._shots[j] != shot:
                 continue
             vote = _darker(*self._shares[j])
             score += 1 if vote == "A" else -1 if vote == "B" else 0
