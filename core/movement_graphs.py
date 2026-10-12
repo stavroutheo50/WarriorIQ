@@ -452,6 +452,31 @@ def compare(reports: list[dict | None], focuses: list[str], failed: list[bool]) 
             if chart:
                 energy.append({"label": fight["label"], **chart})
     guard = [{"label": fight["label"], **fight["graphs"]["guard"]} for fight in usable if fight["graphs"]["guard"]]
+    # Pressure is on a fixed -1..1 scale already; only the fighter each fight is about.
+    pressure = [{"label": fight["label"], "lines": fight["graphs"]["pressure"]["lines"][fight["focus"]],
+                 "axis": fight["graphs"]["pressure"]["axis"], "mid": fight["graphs"]["pressure"]["mid"]}
+                for fight in usable if fight["graphs"].get("pressure")]
+    # Distance on one scale for both fights, so a higher line really is further apart.
+    gaps = []
+    for fight in usable:
+        numbers = ((fight["report"].get("metrics") or {}).get(fight["focus"]) or {}).get("numbers") or {}
+        gaps += [float(p["distance"]) for p in ((numbers.get("series") or {}).get("points") or [])
+                 if p.get("distance") is not None]
+    distance, distance_top = [], None
+    if gaps:
+        distance_top = max(2.5, max(gaps))
+        for fight in usable:
+            numbers = ((fight["report"].get("metrics") or {}).get(fight["focus"]) or {}).get("numbers") or {}
+            series = numbers.get("series")
+            if not series or not series.get("points"):
+                continue
+            start = float(series["points"][0]["t"])
+            end = float(series["points"][-1]["t"]) + float(series["step_seconds"])
+            span = max(1.0, end - start)
+            lines = _lines({fight["focus"]: series}, "distance", distance_top, start, span).get(fight["focus"])
+            if lines:
+                distance.append({"label": fight["label"], "lines": lines,
+                                 "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)]})
 
     by_label: dict[str, dict] = {}
     for fight in usable:
@@ -465,4 +490,8 @@ def compare(reports: list[dict | None], focuses: list[str], failed: list[bool]) 
     return {"labels": labels, "notes": [fight["why"] for fight in fights if fight["why"]],
             "moved": rows("moved"), "ranges": rows("ranges"),
             "energy": energy, "energy_top": round(top, 1) if top is not None else None,
-            "guard": guard, "facts": facts, "width": WIDTH, "height": HEIGHT}
+            "guard": guard, "pressure": pressure, "distance": distance,
+            "distance_top": round(distance_top, 1) if distance_top is not None else None,
+            "close_y": round(HEIGHT - min(1.0, CLOSE_RANGE / distance_top) * HEIGHT, 1) if distance_top else None,
+            "close_range": CLOSE_RANGE,
+            "facts": facts, "width": WIDTH, "height": HEIGHT}

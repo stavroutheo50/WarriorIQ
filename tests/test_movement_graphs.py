@@ -321,3 +321,23 @@ class ReviewFixTests(unittest.TestCase):
         from core.fight_numbers import CLOSE_RANGE
         distance = movement_graphs.build(_report(), "A")["distance"]
         self.assertEqual(distance["close_range"], CLOSE_RANGE)
+
+
+class CompareNewGraphsTests(unittest.TestCase):
+    def test_pressure_and_distance_side_by_side_on_one_distance_scale(self):
+        first, second = _report(), _report()
+        for point in second["metrics"]["A"]["numbers"]["series"]["points"]:
+            point["distance"] = 3.0
+        cg = movement_graphs.compare([first, second], ["A", "A"], [False, False])
+        self.assertEqual([c["label"] for c in cg["pressure"]], ["Fight 1", "Fight 2"])
+        self.assertEqual([c["label"] for c in cg["distance"]], ["Fight 1", "Fight 2"])
+        self.assertEqual(cg["distance_top"], 3.0)      # shared: the larger of the two
+
+    def test_older_reports_without_the_series_keys_show_neither(self):
+        reports = [_report(), _report()]
+        for report in reports:
+            for point in report["metrics"]["A"]["numbers"]["series"]["points"]:
+                point.pop("distance", None)
+                point.pop("pressure", None)
+        cg = movement_graphs.compare(reports, ["A", "A"], [False, False])
+        self.assertEqual((cg["pressure"], cg["distance"]), ([], []))

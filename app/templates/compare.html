@@ -59,6 +59,31 @@
       <div class="graph-axis"><span>{{ chart.axis[0] }}</span><span>{{ chart.axis[1] }}</span><span>{{ chart.axis[2] }}</span></div></div>{% endfor %}</div>
   </div>
   {% endif %}
+  {% if cg.pressure %}
+  <div class="graph-block">
+    <h3>Pressure through each fight</h3>
+    <p class="graph-hint">Above the middle line you were moving toward your opponent; below it, backing away.</p>
+    <div class="compare-graph-pair">{% for chart in cg.pressure %}<div><h4>{{ chart.label }}</h4>
+      <svg class="line-graph" viewBox="0 0 {{ cg.width|int }} {{ cg.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Pressure through {{ chart.label }}">
+        <line class="graph-base" x1="0" y1="{{ chart.mid }}" x2="{{ cg.width }}" y2="{{ chart.mid }}"/>
+        {% for line in chart.lines %}<polyline class="graph-line mine" pathLength="1" points="{{ line }}"/>{% endfor %}
+      </svg>
+      <div class="graph-axis"><span>{{ chart.axis[0] }}</span><span>{{ chart.axis[1] }}</span><span>{{ chart.axis[2] }}</span></div></div>{% endfor %}</div>
+  </div>
+  {% endif %}
+  {% if cg.distance %}
+  <div class="graph-block">
+    <h3>Distance through each fight</h3>
+    <p class="graph-hint">How far apart you were. Both graphs use the same scale (top: {{ cg.distance_top }} body lengths); the dashed line is {{ cg.close_range }} body lengths, close range.</p>
+    <div class="compare-graph-pair">{% for chart in cg.distance %}<div><h4>{{ chart.label }}</h4>
+      <svg class="line-graph" viewBox="0 0 {{ cg.width|int }} {{ cg.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Distance through {{ chart.label }}">
+        <line class="graph-base" x1="0" y1="{{ cg.height }}" x2="{{ cg.width }}" y2="{{ cg.height }}"/>
+        <line class="graph-range" x1="0" y1="{{ cg.close_y }}" x2="{{ cg.width }}" y2="{{ cg.close_y }}"/>
+        {% for line in chart.lines %}<polyline class="graph-line distance" pathLength="1" points="{{ line }}"/>{% endfor %}
+      </svg>
+      <div class="graph-axis"><span>{{ chart.axis[0] }}</span><span>{{ chart.axis[1] }}</span><span>{{ chart.axis[2] }}</span></div></div>{% endfor %}</div>
+  </div>
+  {% endif %}
   {% if cg.facts %}
   <div class="graph-block"><h3>In numbers</h3>
     <table class="compare-facts"><thead><tr><th scope="col"></th>{% for label in cg.labels %}<th scope="col">{{ label }}</th>{% endfor %}</tr></thead>
