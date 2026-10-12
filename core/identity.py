@@ -993,6 +993,13 @@ class IdentityManager:
                         "appearance", "pose_signature", "identity_confidence", "missing_frames",
                         "last_seen_source_frame")
 
+    def decide_clothed_official_filter(self, skin_a: float | None, skin_b: float | None) -> None:
+        """Set the clothed-official filter from the torso skin measured where the fighters were picked."""
+        self.clothed_official_filter = bool(
+            SETTINGS.clothed_official_filter_enabled
+            and skin_a is not None and skin_b is not None
+            and skin_a >= BARE_TORSO_MIN and skin_b >= BARE_TORSO_MIN)
+
     def _correct_swap(self, a_obs: PersonObservation | None,
                       b_obs: PersonObservation | None) -> tuple[PersonObservation | None, PersonObservation | None]:
         """Swap A and B back when each looks like the other's selection.

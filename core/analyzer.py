@@ -27,6 +27,7 @@ from core.generalship import judge_fight
 from core.fight_presence import FightPresence
 from core.kit import kit_similarity
 from core.kit_attribution import KitAttribution
+from core.referee import torso_skin_share
 from core.ground import DownWatch
 from core.round_detect import RoundDetector
 from core.contact import (
@@ -702,14 +703,24 @@ def _for_metrics(obs: PersonObservation | None) -> PersonObservation | None:
 
 
 def _seed_frame_kit(video_path: str, frame_index: int, box_a, box_b) -> dict | None:
-    """Kit similarity on the frame the person chose, with their boxes."""
+    """Kit similarity on the frame the person chose, with their boxes.
+
+    Also each fighter's torso skin there (core/referee.py), because whether
+    both fighters are bare-chested has to be judged where the boxes are known
+    to be right: the frame the analysis starts on can hold a box that missed.
+    """
     capture = open_capture(video_path)
     try:
         capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ok, frame = capture.read()
     finally:
         capture.release()
-    return kit_similarity(frame, box_a, box_b) if ok and frame is not None else None
+    if not ok or frame is None:
+        return None
+    kit = kit_similarity(frame, box_a, box_b)
+    if kit is not None:
+        kit["torso_skin"] = {"A": torso_skin_share(frame, box_a), "B": torso_skin_share(frame, box_b)}
+    return kit
 
 
 def _measure_footage(video_path: str, pose_tracker, start_seconds: float, end_seconds: float | None):
@@ -1155,6 +1166,14 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         first_frame,
     )
     manager = IdentityManager(initial_a, initial_b, start_frame, source_fps=info.fps)
+    # Bare-chested or not is decided on the frame the person picked the
+    # fighters on, where their boxes are right by definition. Measured on a
+    # UFC round: the backward pass stopped short, the analysis started on a
+    # frame where A's box was on somebody in a shirt, and the filter never
+    # switched on. See core/referee.py.
+    seed_skin = (seed_kit or {}).get("torso_skin") if seed_kit else None
+    if seed_skin:
+        manager.decide_clothed_official_filter(seed_skin.get("A"), seed_skin.get("B"))
     if seed_pair is not None:
         # Seeded earlier than the frame the person chose, after following the
         # fighters back from it. The identity anchors are still taken from the

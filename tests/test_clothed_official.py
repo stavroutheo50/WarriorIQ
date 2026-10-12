@@ -63,3 +63,16 @@ def test_torso_skin_share_reads_skin_and_not_a_black_shirt():
     frame[:, :] = (15, 15, 15)          # black shirt
     assert torso_skin_share(frame, [20, 0, 80, 100]) < 0.05
     assert torso_skin_share(None, [20, 0, 80, 100]) is None
+
+
+def test_the_selection_frame_decides_not_the_start_frame():
+    # Measured: the analysis started where A's box had missed onto somebody in
+    # a shirt, so the filter judged from the start frame never switched on.
+    manager = IdentityManager(_person(1, 0.0), _person(2, 0.7), 0, source_fps=30.0)
+    assert manager.clothed_official_filter is False
+    manager.decide_clothed_official_filter(0.63, 0.85)      # where the fighters were picked
+    assert manager.clothed_official_filter is True
+    manager.decide_clothed_official_filter(0.63, 0.2)       # a fighter in a top
+    assert manager.clothed_official_filter is False
+    manager.decide_clothed_official_filter(None, 0.85)
+    assert manager.clothed_official_filter is False
