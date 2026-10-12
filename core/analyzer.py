@@ -26,6 +26,7 @@ from core.frame_feed import FrameFeed
 from core.generalship import judge_fight
 from core.fight_presence import FightPresence
 from core.kit import kit_similarity
+from core.kit_attribution import KitAttribution
 from core.ground import DownWatch
 from core.round_detect import RoundDetector
 from core.contact import (
@@ -1271,6 +1272,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # below; metrics and strike counts are then taken from fight footage only.
     # See core/fight_presence.py.
     presence = FightPresence(req.start_seconds, segment_end_seconds)
+    # A second opinion on who threw each strike, from the shorts. Shadow mode:
+    # it records what it would re-credit and changes nothing. See
+    # core/kit_attribution.py.
+    kit_attribution = KitAttribution(seed_seconds)
     metric_frames: list[tuple[float, int | None, PersonObservation | None, PersonObservation | None]] = []
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
     # Decoding runs a step ahead on a helper thread; see core/frame_feed.py.
@@ -1548,6 +1553,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             fighter_finder.observe_selected(fighter_a, fighter_b)
             down_watch.observe(seconds, people, fighter_a, fighter_b)
             round_detector.observe(seconds, _pair_separation(fighter_a, fighter_b))
+            kit_attribution.observe(seconds, frame, fighter_a, fighter_b)
 
             if tracking_file is not None:
                 record = {
@@ -1700,6 +1706,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # Both fighters move when one of them is hit. Decide which of the two was
     # the aggressor before anything downstream counts, scores or reports them.
     events, defender_actions = resolve_simultaneous_attribution(events)
+    kit_proposals = kit_attribution.proposals(events)
 
     detected_round_spans = round_detector.rounds()
     rounds_from_footage = bool(detected_round_spans) and all(spec.selected for spec in rounds)
@@ -1833,6 +1840,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "fighter_B_suspicious_handoffs_per_minute": round(
             manager.suspicious_handoffs["B"] / (segment_duration / 60.0), 2),
         "identity_swaps_corrected": int(manager.swaps_corrected),
+        "kit_attribution": kit_proposals,
+        "clothed_official_filter": bool(manager.clothed_official_filter),
         "fighter_A_sam_recoveries": manager.a.sam_recovery_count,
         "fighter_B_sam_recoveries": manager.b.sam_recovery_count,
         "sam_continuous_enabled": SETTINGS.sam_continuous_enabled,

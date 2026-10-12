@@ -362,6 +362,11 @@ class Settings:
     # separates him is what he is wearing. See core/referee.py for why this
     # feature is deliberately four numbers wide and per-federation.
     referee_filter_enabled: bool = env_bool("WARRIORIQ_REFEREE_FILTER", True)
+    # Refuse an upright, clothed person as a fighter when both selected
+    # fighters are bare-chested (an official in black, as in the UFC, whom the
+    # uniform probe cannot recognise). Stands down by itself otherwise. See
+    # core/referee.py looks_like_a_clothed_official.
+    clothed_official_filter_enabled: bool = env_bool("WARRIORIQ_CLOTHED_OFFICIAL_FILTER", True)
     referee_probe_path: str = os.getenv(
         "WARRIORIQ_REFEREE_PROBE", "models/referee_probe.npz").strip()
     # Was 0.50, on the reasoning that "the official scores 0.56 to 0.997 and

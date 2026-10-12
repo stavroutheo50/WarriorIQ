@@ -13,7 +13,7 @@ from core.preflight import TARGET_SUBJECT_PX
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
 from core.identity import appearance_hist, pose_signature
-from core.referee import referee_probabilities
+from core.referee import referee_probabilities, torso_skin_share
 from core.reid import embed
 from core.types import PersonObservation
 
@@ -670,6 +670,7 @@ class PoseTracker:
             for person, vector, verdict in zip(people, vectors, verdicts, strict=True):
                 person.reid = vector
                 person.referee_prob = verdict
+                person.torso_skin = torso_skin_share(frame, person.box)
         self.timing["appearance"] += time.perf_counter() - appearance_started
         return people
 
@@ -751,6 +752,7 @@ class PoseTracker:
                 # it: on a real bout A's stand-in was the referee, standing
                 # where A had been expected.
                 best.referee_prob = (referee_probabilities(frame, best.box.reshape(1, 4)) or [None])[0]
+                best.torso_skin = torso_skin_share(frame, best.box)
                 recovered.append(best)
         return recovered
 
@@ -840,6 +842,7 @@ def find_initial_people(manual_a, manual_b, people: list[PersonObservation], fra
             referee_prob=(
                 referee_probabilities(frame, box.reshape(1, 4)) or [None]
             )[0] if frame is not None else None,
+            torso_skin=torso_skin_share(frame, box),
             pose_signature=None,
         )
 
