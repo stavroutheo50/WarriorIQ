@@ -184,6 +184,13 @@ def over_time(samples: list[dict], weights: list[float], guard_measured: bool = 
     SERIES_MIN_READINGS readings - a gap, not a zero. ``seen`` is the seconds
     the fighter was seen in the step. Hands-up is left out altogether when
     core/guard.py withheld the guard for the fight (``guard_measured``).
+
+    ``distance`` is the average gap to the opponent in body lengths and
+    ``pressure`` the average of how directly the fighter moved toward them
+    (-1 straight away, 1 straight at them), each with the same
+    SERIES_MIN_READINGS rule. Both are measured between the two fighters, so
+    a panning or zooming camera does not move them. Added 2026-10-12; older
+    reports have no such keys and the graphs simply leave them out.
     """
     if len(samples) < 2:
         return None
@@ -194,12 +201,16 @@ def over_time(samples: list[dict], weights: list[float], guard_measured: bool = 
     step = max(SERIES_MIN_STEP, SERIES_MIN_STEP * float(np.ceil(span / (SERIES_MIN_STEP * SERIES_POINTS))))
     start = float(np.floor(first / step) * step)
     count = int(np.floor((last - start) / step)) + 1
-    buckets = [{"seen": 0.0, "speed": [], "up": []} for _ in range(count)]
+    buckets = [{"seen": 0.0, "speed": [], "up": [], "gap": [], "toward": []} for _ in range(count)]
     for item, weight in zip(samples, weights):
         bucket = buckets[min(count - 1, int((float(item["t"]) - start) // step))]
         bucket["seen"] += weight
         if item.get("speed") is not None:
             bucket["speed"].append(float(item["speed"]))
+        if item.get("gap") is not None:
+            bucket["gap"].append(float(item["gap"]))
+        if item.get("toward") is not None:
+            bucket["toward"].append(float(item["toward"]))
         up = guard_measure.is_up(item.get("guard")) if guard_measured else None
         if up is not None:
             bucket["up"].append(up)
@@ -212,6 +223,10 @@ def over_time(samples: list[dict], weights: list[float], guard_measured: bool = 
             "speed": round(float(np.mean(speeds)), 2) if len(speeds) >= SERIES_MIN_READINGS else None,
             "hands_up": (round(sum(ups) / len(ups), 2) if guard_measured and len(ups) >= SERIES_MIN_READINGS
                          else None),
+            "distance": (round(float(np.mean(bucket["gap"])), 2) if len(bucket["gap"]) >= SERIES_MIN_READINGS
+                         else None),
+            "pressure": (round(float(np.mean(bucket["toward"])), 2)
+                         if len(bucket["toward"]) >= SERIES_MIN_READINGS else None),
         })
     return {"step_seconds": step, "points": points}
 

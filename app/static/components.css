@@ -831,6 +831,8 @@
 .graph-base{stroke:rgba(255,255,255,.18);stroke-width:1;vector-effect:non-scaling-stroke}
 .graph-line{fill:none;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .graph-line.mine{stroke:var(--mine)}.graph-line.theirs{stroke:var(--theirs);opacity:.75}
+.graph-line.distance{stroke:#e0a43a}
+.graph-range{stroke:rgba(255,255,255,.35);stroke-width:1;stroke-dasharray:4 4;vector-effect:non-scaling-stroke}
 .guard-bar{fill:#3fb68b}.guard-track{fill:rgba(255,255,255,.07)}
 .graph-axis{display:flex;justify-content:space-between;margin-top:4px;color:#8595b1;font-size:12px}
 .graph-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:22px}

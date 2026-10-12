@@ -263,3 +263,39 @@ class RicherReportTests(unittest.TestCase):
     def test_the_opponents_guard_is_drawn_over_yours(self):
         guard = movement_graphs.build(_report(), "A")["guard"]
         self.assertTrue(guard["theirs"])
+
+
+class PressureAndDistanceTests(unittest.TestCase):
+    """Pressure and distance over time (2026-10-12)."""
+
+    def test_series_stores_distance_and_pressure_per_point(self):
+        points = over_time(_samples(30), [0.2] * 150)["points"]
+        self.assertEqual({p["distance"] for p in points}, {1.2})
+        self.assertEqual({p["pressure"] for p in points}, {0.9})
+
+    def test_a_point_with_too_few_readings_is_a_gap(self):
+        samples = _samples(30)
+        for item in samples[:30]:
+            item["gap"] = None
+            item["toward"] = None
+        points = over_time(samples, [0.2] * len(samples))["points"]
+        self.assertIsNone(points[0]["distance"])
+        self.assertIsNone(points[0]["pressure"])
+
+    def test_graphs_for_both_pressures_and_the_shared_distance(self):
+        graphs = movement_graphs.build(_report(), "A")
+        self.assertEqual(set(graphs["pressure"]["lines"]), {"A", "B"})
+        self.assertIn("walking your opponent down in 100%", graphs["pressure"]["read"])
+        self.assertTrue(graphs["distance"]["lines"])
+        self.assertEqual(graphs["distance"]["top"], 2.5)
+        self.assertIn("1.2 body lengths apart", graphs["distance"]["read"])
+
+    def test_an_older_report_without_the_new_keys_draws_neither(self):
+        report = _report()
+        for side in ("A", "B"):
+            for point in report["metrics"][side]["numbers"]["series"]["points"]:
+                point.pop("distance", None)
+                point.pop("pressure", None)
+        graphs = movement_graphs.build(report, "A")
+        self.assertIsNone(graphs["pressure"])
+        self.assertIsNone(graphs["distance"])

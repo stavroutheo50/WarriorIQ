@@ -268,6 +268,36 @@
   </div>
   {% endif %}
 
+  {% if graphs.pressure %}
+  <div class="graph-block">
+    <h3>Who was pressing</h3>
+    <p class="graph-read">{{ graphs.pressure.read }}</p>
+    <p class="graph-hint">Above the middle line a fighter was moving toward the other; below it, backing away. The higher the line, the more directly they walked forward.</p>
+    <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Pressure through the fight, {{ g_you }}{% if graphs.pressure.lines[graphs.opponent] %} and {{ g_them }}{% endif %}">
+      <line class="graph-base" x1="0" y1="{{ graphs.pressure.mid }}" x2="{{ graphs.width }}" y2="{{ graphs.pressure.mid }}"/>
+      {% for line in graphs.pressure.lines.get(graphs.opponent, []) %}<polyline class="graph-line theirs" pathLength="1" points="{{ line }}"/>{% endfor %}
+      {% for line in graphs.pressure.lines[graphs.focus] %}<polyline class="graph-line mine" pathLength="1" points="{{ line }}"/>{% endfor %}
+    </svg>
+    <div class="graph-axis"><span>{{ graphs.pressure.axis[0] }}</span><span>{{ graphs.pressure.axis[1] }}</span><span>{{ graphs.pressure.axis[2] }}</span></div>
+    <ul class="stack-key list-clean"><li><i class="key-mine" aria-hidden="true"></i>{{ g_you }}</li>{% if graphs.pressure.lines[graphs.opponent] %}<li><i class="key-theirs" aria-hidden="true"></i>{{ g_them }}</li>{% endif %}</ul>
+  </div>
+  {% endif %}
+
+  {% if graphs.distance %}
+  <div class="graph-block">
+    <h3>Distance between you, over time</h3>
+    <p class="graph-read">{{ graphs.distance.read }}</p>
+    <p class="graph-hint">The higher the line, the further apart you were. The dashed line is 1 body length: below it you were in range of each other.</p>
+    <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Distance between the fighters through the fight">
+      <line class="graph-base" x1="0" y1="{{ graphs.height }}" x2="{{ graphs.width }}" y2="{{ graphs.height }}"/>
+      <line class="graph-range" x1="0" y1="{{ graphs.distance.close_y }}" x2="{{ graphs.width }}" y2="{{ graphs.distance.close_y }}"/>
+      {% for line in graphs.distance.lines %}<polyline class="graph-line distance" pathLength="1" points="{{ line }}"/>{% endfor %}
+    </svg>
+    <div class="graph-axis"><span>{{ graphs.distance.axis[0] }}</span><span>{{ graphs.distance.axis[1] }}</span><span>{{ graphs.distance.axis[2] }}</span></div>
+    <ul class="stack-key list-clean"><li class="muted">Top of the graph: {{ graphs.distance.top }} body lengths apart</li></ul>
+  </div>
+  {% endif %}
+
   {% if graphs.guard %}
   <div class="graph-block">
     <h3>Your guard through the fight</h3>

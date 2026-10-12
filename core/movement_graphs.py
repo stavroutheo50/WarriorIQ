@@ -209,6 +209,51 @@ def by_round(report: dict, focus: str = "A") -> dict | None:
     return {"rows": rows, "read": read}
 
 
+def _shifted(series: dict | None, value: str, shift: float, scale: float) -> dict | None:
+    """The series with ``value`` mapped to (reading + shift) / scale, so _lines can draw it 0..1."""
+    if not series:
+        return None
+    points = [dict(p, _v=None if p.get(value) is None else (float(p[value]) + shift) / scale)
+              for p in series.get("points") or []]
+    return {"step_seconds": series["step_seconds"], "points": points}
+
+
+def pressure_and_distance(series_by_side: dict, focus: str, other: str, start: float, span: float, end: float):
+    """Pressure for both fighters (-1 backing straight off, 1 walking straight in) and the gap between them.
+
+    Only from analyses that stored them (2026-10-12 on); None otherwise.
+    """
+    pressure = distance = None
+    if any(p.get("pressure") is not None for s in series_by_side.values() if s for p in s.get("points") or []):
+        lines = _lines({side: _shifted(series_by_side[side], "pressure", 1.0, 2.0) for side in series_by_side},
+                       "_v", 1.0, start, span)
+        if focus in lines:
+            mine = [float(p["pressure"]) for p in series_by_side[focus]["points"] if p.get("pressure") is not None]
+            theirs = [float(p["pressure"]) for p in ((series_by_side.get(other) or {}).get("points") or [])
+                      if p.get("pressure") is not None]
+            share = round(sum(1 for v in mine if v > 0.2) / len(mine) * 100)
+            read = f"You were walking your opponent down in {share}% of the stretches measured"
+            if theirs:
+                read += f"; your opponent in {round(sum(1 for v in theirs if v > 0.2) / len(theirs) * 100)}%"
+            pressure = {"lines": lines, "mid": HEIGHT / 2.0,
+                        "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)], "read": read + "."}
+    own = series_by_side.get(focus)
+    gaps = [float(p["distance"]) for p in ((own or {}).get("points") or []) if p.get("distance") is not None]
+    if gaps:
+        top = max(2.5, max(gaps))
+        lines = _lines({focus: own}, "distance", top, start, span)
+        if focus in lines:
+            closest = min((p for p in own["points"] if p.get("distance") is not None), key=lambda p: p["distance"])
+            farthest = max((p for p in own["points"] if p.get("distance") is not None), key=lambda p: p["distance"])
+            distance = {"lines": lines[focus], "top": round(top, 1),
+                        "close_y": round(HEIGHT - min(1.0, 1.0 / top) * HEIGHT, 1),
+                        "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)],
+                        "read": (f"You were closest around {_clock(closest['t'])} ({closest['distance']:.1f} body "
+                                 f"lengths apart) and farthest around {_clock(farthest['t'])} "
+                                 f"({farthest['distance']:.1f}).")}
+    return pressure, distance
+
+
 def build(report: dict, focus: str = "A") -> dict | None:
     """Everything the graphs section needs for ``focus``, or None when there is nothing to draw."""
     metrics = report.get("metrics") or {}
@@ -225,7 +270,7 @@ def build(report: dict, focus: str = "A") -> dict | None:
 
     series = {focus: mine.get("series"), other: (theirs or {}).get("series")}
     drawn = [s for s in series.values() if s and s.get("points")]
-    energy = guard = None
+    energy = guard = pressure = distance = None
     if drawn:
         start = min(float(s["points"][0]["t"]) for s in drawn)
         end = max(float(s["points"][-1]["t"]) + float(s["step_seconds"]) for s in drawn)
@@ -252,6 +297,8 @@ def build(report: dict, focus: str = "A") -> dict | None:
                      # The opponent's guard as a line over your bars: the
                      # only fair benchmark is the other fighter in the same fight.
                      "theirs": _lines({other: series[other]}, "hands_up", 1.0, start, span).get(other, [])}
+
+        pressure, distance = pressure_and_distance(series, focus, other, start, span, end)
 
     facts = []
     if mine.get("distance_body_lengths") is not None:
@@ -280,6 +327,7 @@ def build(report: dict, focus: str = "A") -> dict | None:
     return {"focus": focus, "opponent": other, "moved": moved, "ranges": ranges,
             "energy": energy, "guard": guard, "facts": facts, "reads": reads,
             "highlights": highlights(report, focus), "by_round": by_round(report, focus),
+            "pressure": pressure, "distance": distance,
             "width": WIDTH, "height": HEIGHT}
 
 
