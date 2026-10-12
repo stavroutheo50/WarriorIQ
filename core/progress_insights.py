@@ -38,6 +38,14 @@ def followed_side(record: dict, fighter: str) -> str:
     return focus if focus in {"A", "B"} else fighter
 
 
+def _share(numbers: dict, key: str, parts) -> float | None:
+    """``key``'s share of the seconds in ``parts``, or None when none were measured."""
+    values = [numbers.get(part) for part in parts]
+    if any(not isinstance(v, (int, float)) for v in values) or sum(values) <= 0:
+        return None
+    return float(numbers.get(key) or 0.0) / float(sum(values))
+
+
 def _point(record: dict, fighter: str) -> dict | None:
     report = record.get("report") or {}
     fighter = followed_side(record, fighter)
@@ -80,6 +88,14 @@ def _point(record: dict, fighter: str) -> dict | None:
         "balance": _number(metrics.get("balance_index")),
         "center": _number(metrics.get("ring_center_control")),
         "footwork": _number(metrics.get("footwork_body_lengths_per_second")),
+        # Pose-only, like guard and balance: how directly the fighter walked
+        # forward (-1..1), and shares of the fight going forward and at close
+        # range (core/fight_numbers.py).
+        "pressure": _number(metrics.get("pressure_index")),
+        "forward": _number(_share(metrics.get("numbers") or {}, "forward_seconds",
+                                  ("forward_seconds", "backward_seconds", "circling_seconds", "standing_seconds"))),
+        "close": _number(_share((metrics.get("numbers") or {}).get("range_seconds") or {}, "close",
+                                ("close", "middle", "long"))),
     }
 
 
@@ -88,6 +104,72 @@ def _difference(latest: dict, previous: dict, key: str):
     if current is None or old is None:
         return None
     return round(float(current) - float(old), 4)
+
+
+# Each measure the "every measure" grid can chart, how its values read, and
+# which way is up for the arrow. None: no direction is "better" (pressure,
+# going forward and being close are style, not quality).
+TREND_CARDS = (
+    ("guard", "Guard up", "percent", True),
+    ("balance", "Balance", "percent", True),
+    ("center", "Ring centre", "percent", None),
+    ("footwork", "Footwork", "speed", None),
+    ("pressure", "Pressure", "pressure", None),
+    ("forward", "Going forward", "percent", None),
+    ("close", "At close range", "percent", None),
+)
+CARD_WIDTH, CARD_HEIGHT = 120.0, 36.0
+
+
+def _card_value(value: float, unit: str) -> str:
+    """In the units every other page uses (core/squad.movement_value): pressure
+    out of 100, footwork to one decimal."""
+    if unit == "percent":
+        return "%.0f%%" % (value * 100)
+    if unit == "speed":
+        return "%.1f" % value
+    return "%.0f" % ((value + 1) / 2 * 100)
+
+
+def trend_cards(points: list[dict]) -> list[dict]:
+    """A small line per measure across the athlete's fights, with first-to-latest change.
+
+    Only measures with at least two fights measured; the first and the latest
+    are the fights that have the measure, each named by date.
+    """
+    cards = []
+    for key, label, unit, higher_is_better in TREND_CARDS:
+        series = [(p["created_at"], float(p[key])) for p in points if p.get(key) is not None]
+        if len(series) < 2:
+            continue
+        values = [v for _, v in series]
+        low, high = min(values), max(values)
+        spread = high - low or 1.0
+        step = CARD_WIDTH / (len(values) - 1)
+        line = " ".join(f"{i * step:.1f},{CARD_HEIGHT - 3 - (v - low) / spread * (CARD_HEIGHT - 6):.1f}"
+                        for i, v in enumerate(values))
+        first, latest = values[0], values[-1]
+        change = latest - first
+        # From the figures the card prints, so "55 ... 62" reads "+7", never "+8".
+        def printed(value):
+            return float(_card_value(value, unit).rstrip("%"))
+        shown = printed(latest) - printed(first)
+        shown = int(shown) if unit in ("percent", "pressure") else round(shown, 1)
+        if shown == 0:
+            direction = "flat"
+        elif higher_is_better is None:
+            direction = "neutral"
+        else:
+            direction = "up" if (change > 0) == higher_is_better else "down"
+        change_text = ((("%+d pts" % shown) if unit in ("percent", "pressure") else ("%+.1f" % shown))
+                       if shown else "no change")
+        cards.append({"key": key, "label": label, "line": line, "fights": len(values),
+                      "latest": _card_value(latest, unit), "first": _card_value(first, unit),
+                      "first_at": series[0][0], "latest_at": series[-1][0],
+                      "change": change_text, "direction": direction,
+                      "last_x": round((len(values) - 1) * step, 1),
+                      "last_y": round(CARD_HEIGHT - 3 - (latest - low) / spread * (CARD_HEIGHT - 6), 1)})
+    return cards
 
 
 def build_progress(records: list[dict], fighter: str) -> dict:
@@ -161,4 +243,6 @@ def build_progress(records: list[dict], fighter: str) -> dict:
         "recent": recent,
         "headline_key": headline_key,
         "headline_label": trend_labels[headline_key],
+        "cards": trend_cards(points),
+        "card_width": CARD_WIDTH, "card_height": CARD_HEIGHT,
     }
