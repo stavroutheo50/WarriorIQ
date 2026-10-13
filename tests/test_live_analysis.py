@@ -277,11 +277,12 @@ class DurableAnalysisStateTests(TestCase):
 
                     unauthorized = client.post("/api/worker/claim", json={"worker_id": "gpu-test"})
                     self.assertEqual(unauthorized.status_code, 401)
-                    from core.build_info import ANALYSIS_VERSION, stamp
+                    from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, stamp
 
                     claimed = client.post(
                         "/api/worker/claim", headers=headers,
-                        json={"worker_id": "gpu-test", "analysis_version": ANALYSIS_VERSION},
+                        json={"worker_id": "gpu-test", "analysis_version": ANALYSIS_VERSION,
+                              "analysis_fingerprint": analysis_fingerprint()},
                     )
                     self.assertEqual(claimed.status_code, 200)
                     job = claimed.json()["job"]

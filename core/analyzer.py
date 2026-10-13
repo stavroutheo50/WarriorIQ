@@ -27,6 +27,7 @@ from core.generalship import judge_fight
 from core.fight_presence import FightPresence
 from core.kit import kit_similarity
 from core.kit_attribution import KitAttribution, box_shorts_dark_share, darker_at_selection_boxes
+from core.slow_watch import SlowRunWatch
 from core.kit_attribution import active as kit_attribution_active
 from core.referee import torso_skin_share
 from core.ground import DownWatch
@@ -1309,6 +1310,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # A second opinion on who threw each strike, from the shorts: re-credits a
     # strike when the frames around it say the boxes were the other way round.
     # See core/kit_attribution.py.
+    # Reads the machine once if the frame pass slows far below its own start
+    # (core/slow_watch.py), so a slow report can say why.
+    slow_watch = SlowRunWatch()
     kit_attribution = KitAttribution(
         seed_seconds, darker_at_selection_boxes(shorts_dark.get("A"), shorts_dark.get("B")))
     metric_frames: list[tuple[float, int | None, PersonObservation | None, PersonObservation | None]] = []
@@ -1618,6 +1622,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 }
                 tracking_file.write(json.dumps(record) + "\n")
             step_seconds["tracking_file"] += time.perf_counter() - file_started
+            slow_watch.frame(time.perf_counter(), seconds)
 
             processed_seconds = min(segment_duration, max(0.0, seconds - req.start_seconds))
             elapsed = time.perf_counter() - wall_start
@@ -1995,6 +2000,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # frame. Loading models and building the report are the rest of
         # analysis_seconds.
         "sam_sweep_seconds": round(sam_sweep_seconds, 2),
+        # Set when the frame pass ran SLOW_FACTOR times slower than its start:
+        # what the machine was doing then, and the reason in words.
+        "slowdown": slow_watch.summary(),
         # Inside the sweep (core/sam_recovery.py SamRecovery.sweep_seconds), and
         # how many frames it sampled, so seconds per SAM frame can be read off.
         "sam_sweep_breakdown": {key: round(value, 2) for key, value in sam_sweep_breakdown.items()},

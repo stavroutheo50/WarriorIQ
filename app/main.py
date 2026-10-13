@@ -43,6 +43,7 @@ from app.state import (
     AnalysisRunLost, AnalysisStateNotPersisted, claim_next_job, create_job, delete_job,
     analysis_run_directory, completed_artifact_directory, persist_completed_job,
     finalize_job_from_worker, get_job, list_jobs, prepare_job_run, record_worker_heartbeat,
+    record_worker_refusal, recent_worker_refusal, clear_worker_refusal,
     start_job_run, state_generation, update_job, update_job_for_worker, wake_status, worker_status,
     worker_status_heartbeat_age,
 )
@@ -143,7 +144,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.build_info import ANALYSIS_VERSION, engine_name, result_check
+from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, engine_name, result_check
 from core.orientation import needed_turn, tag_rotation
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
@@ -677,6 +678,9 @@ class WorkerIdentityPayload(BaseModel):
     # core/build_info.ANALYSIS_VERSION of the worker's code. Absent from
     # workers built before it existed, which are older by definition.
     analysis_version: int | None = None
+    # core/build_info.analysis_fingerprint of the worker's code: must equal the
+    # web app's. Absent from workers built before it, which are refused.
+    analysis_fingerprint: str | None = None
 
 
 class WorkerProgressPayload(WorkerIdentityPayload):
@@ -4762,7 +4766,20 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
             "worker_outdated worker_id=%s analysis_version=%s required=%s - redeploy the worker "
             "(modal deploy deploy/modal_worker.py, or restart a local worker on the current code)",
             worker_id, payload.analysis_version, ANALYSIS_VERSION)
+        record_worker_refusal(worker_id, "worker_outdated")
         return {"job": None, "refused": "worker_outdated", "required_analysis_version": ANALYSIS_VERSION}
+    if payload.analysis_fingerprint != analysis_fingerprint():
+        # Same version number, different code: the check above cannot see it,
+        # and a worker run from a stale copy produced reports for days that way
+        # (2026-10-13). The fight stays queued until both run the same code.
+        LOGGER.error(
+            "worker_code_differs worker_id=%s worker_fingerprint=%s web_fingerprint=%s - update the worker "
+            "and the website to the same commit", worker_id, payload.analysis_fingerprint,
+            analysis_fingerprint())
+        record_worker_refusal(worker_id, "worker_code_differs")
+        return {"job": None, "refused": "worker_code_differs",
+                "required_analysis_version": ANALYSIS_VERSION, "required_fingerprint": analysis_fingerprint()}
+    clear_worker_refusal()
     claimed = claim_next_job(worker_id)
     if not claimed:
         return {"job": None}
@@ -5279,6 +5296,12 @@ def _public_job_status(job_id: str, job: dict) -> dict:
     # Before the first frame is analysed the analysis computer is starting:
     # loading models on a machine that was asleep. Said as that, not as an
     # analysis "running" at 0.9% with an ETA "calculating" (QA, 2026-10-11).
+    # The worker is there but refused for running other code than this site:
+    # the fight waits until both are updated, and the page says so.
+    payload["worker_refused"] = (
+        "The analysis computer is running a different version of WarriorIQ from this website, so it "
+        "will not analyse fights until both are updated. Your fight is saved and waiting."
+        if job.get("status") == "queued" and recent_worker_refusal() else None)
     payload["warming_up"] = bool(job.get("status") in {"queued", "running"}
                                  and job.get("stage") in {None, "queued", "preparing", "loading", "models"}
                                  and not float(job.get("processed_video_seconds") or 0.0))
@@ -5302,7 +5325,7 @@ def status(request: Request, response: Response, job_id: str):
         # Someone is waiting on this fight right now: if no worker is there to
         # take it, tell the owner (core/worker_alerts.py).
         worker_alerts.check_waiting_fight(
-            job, worker_online=_worker_connected(), outputs=OUTPUTS,
+            job, worker_online=_worker_connected() and not recent_worker_refusal(), outputs=OUTPUTS,
             recipients=SETTINGS.admin_emails, threshold_seconds=SETTINGS.worker_alert_seconds,
             send=send_transactional_email)
     if job.get("status") == "complete":
