@@ -133,6 +133,26 @@ HIGHLIGHTS = (
 )
 
 
+def ticks(start: float, end: float) -> list[dict]:
+    """Clock marks along the bottom of a graph: every minute, or closer on a short clip.
+
+    Three labels (start, middle, end) left a fighter counting along a five
+    minute line to find 2:00 (2026-10-13). ``pct`` is the distance from the
+    left edge as a percentage of the drawn span.
+    """
+    span = max(1.0, end - start)
+    step = next((s for s in (15.0, 30.0, 60.0, 120.0, 300.0, 600.0) if span / s <= 6), 900.0)
+    marks = [start]
+    t = (int(start // step) + 1) * step
+    if t - start < step * 0.4:      # too close to the first label to read
+        t += step
+    while t < end - step * 0.4:
+        marks.append(t)
+        t += step
+    marks.append(end)
+    return [{"pct": round((m - start) / span * 100.0, 2), "clock": _clock(m)} for m in marks]
+
+
 def _span(report: dict) -> float:
     rounds = report.get("rounds") or []
     return max((float(r.get("end_seconds") or 0) for r in rounds), default=0.0)
@@ -252,6 +272,8 @@ def pressure_and_distance(series_by_side: dict, focus: str, other: str, start: f
             distance = {"lines": lines[focus], "top": round(top, 1),
                         "close_y": round(HEIGHT - min(1.0, CLOSE_RANGE / top) * HEIGHT, 1),
                         "close_range": CLOSE_RANGE,
+                        "close_pct": round(min(1.0, CLOSE_RANGE / top) * 100.0, 1),
+                        "half": round(top / 2.0, 1),
                         "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)],
                         "read": (f"You were closest around {_clock(closest['t'])} ({closest['distance']:.1f} body "
                                  f"lengths apart) and farthest around {_clock(farthest['t'])} "
@@ -285,7 +307,7 @@ def build(report: dict, focus: str = "A") -> dict | None:
             top = max(0.5, max(speeds))
             lines = _lines(series, "speed", top, start, span)
             if focus in lines:
-                energy = {"lines": lines, "top": round(top, 1),
+                energy = {"lines": lines, "top": round(top, 1), "half": round(top / 2.0, 1),
                           "axis": [_clock(start), _clock(start + span / 2.0), _clock(end)],
                           "gaps": _gaps(series[focus], "speed", report)}
         own = series[focus]
@@ -333,6 +355,7 @@ def build(report: dict, focus: str = "A") -> dict | None:
             "energy": energy, "guard": guard, "facts": facts, "reads": reads,
             "highlights": highlights(report, focus), "by_round": by_round(report, focus),
             "pressure": pressure, "distance": distance,
+            "ticks": ticks(start, end) if drawn else [],
             "width": WIDTH, "height": HEIGHT}
 
 

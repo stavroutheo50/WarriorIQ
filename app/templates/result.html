@@ -80,19 +80,32 @@
 </section>
 {% endif %}
 {% endif %}
-{% if analysed_span and analysed_span.note %}<p class="analysed-span-note" role="note">{{analysed_span.note}}</p>{% endif %}
+{#- The six numbers lead (2026-10-13): opening a report showed notes about
+    the recording, "Fix this first" and the fight details, and the first
+    number was two screens down on a phone. When the numbers can be shown,
+    the notes fold into one row under them and the answer and details
+    follow; otherwise (no fight footage, identity failed) the order is as
+    before. Each block is rendered once here and placed below. -#}
+{% set lead_with_numbers = numbers.state != 'no_fight' and not (identity_failed and numbers.state != 'movement_only') %}
+{#- A missing start ("The first 0:30 ... is not in this report") stays in view:
+    every number describes less than the fight. A missing tail folds with the
+    other notes when the numbers lead. -#}
+{% set span_note_folds = lead_with_numbers and analysed_span and analysed_span.note and analysed_span.start_seconds < 1.0 %}
+{% if analysed_span and analysed_span.note and not span_note_folds %}<p class="analysed-span-note" role="note">{{analysed_span.note}}</p>{% endif %}
 {#- What was wrong with the recording, measured before the analysis and at
     upload (app.main._recording_warnings). It was only in the download. -#}
-{% if recording_warnings and not identity_failed %}<div class="notice" role="note" id="recordingWarnings"><strong>About this recording.</strong><ul class="list-clean">{% for text in recording_warnings %}<li>{{ text }}</li>{% endfor %}</ul></div>{% endif %}
+{% set notes_html %}{% if span_note_folds %}<p class="analysed-span-note" role="note">{{analysed_span.note}}</p>{% endif %}{% if recording_warnings and not identity_failed %}<div class="notice" role="note" id="recordingWarnings"><strong>About this recording.</strong><ul class="list-clean">{% for text in recording_warnings %}<li>{{ text }}</li>{% endfor %}</ul></div>{% endif %}{% if failure != 'no_fight' and numbers.state != 'movement_only' and fight_footage and fight_footage.note %}<p class="analysed-span-note" role="note">{{ fight_footage.note }}</p>{% endif %}{% endset %}
+{% set notes_count = (1 if span_note_folds else 0) + (recording_warnings|length if recording_warnings and not identity_failed else 0) + (1 if failure != 'no_fight' and numbers.state != 'movement_only' and fight_footage and fight_footage.note else 0) %}
+{% if not lead_with_numbers %}{{ notes_html }}{% endif %}
 {% if failure == 'no_fight' %}<div class="notice bad" role="alert" id="noFightNotice"><strong>Too little fight footage to measure.</strong> {{ numbers.message }} Upload a clip where the two fighters are in shot and fighting for most of it, and pick a frame where both are clearly visible.</div>
-{% elif numbers.state == 'movement_only' %}<div class="notice bad" role="alert" id="notAFightNotice"><strong>Not recognised as a fight.</strong> {{ numbers.message }} If this is a real fight, upload a clip where both fighters are in full view and exchanging.</div>
-{% elif fight_footage and fight_footage.note %}<p class="analysed-span-note" role="note">{{ fight_footage.note }}</p>{% endif %}
+{% elif numbers.state == 'movement_only' %}<div class="notice bad" role="alert" id="notAFightNotice"><strong>Not recognised as a fight.</strong> {{ numbers.message }} If this is a real fight, upload a clip where both fighters are in full view and exchanging.</div>{% endif %}
 {#- Fix this first (core.report.fix_first): the one measured fault, the moment
     it happened on the skeleton replay, and its drill - the shape of
     mmagpt.app's report, built only from what this analysis measured. Not
     shown when there is no fault to name, or the coaching is withheld. -#}
 {% set ff_focus = report.video.focus_fighter|default(report.video.analysis_target, true) %}
 {% set ff = fix_first(report, ff_focus if ff_focus in ['A', 'B'] else 'A', training_items=report_access.training_items) if not identity_failed and numbers.state not in ('movement_only', 'no_fight') else none %}
+{% set fix_html %}
 {% if ff %}
 <section class="card fix-first" id="fix-first" aria-labelledby="fixFirstTitle" data-reveal>
   <div class="eyebrow">Fix this first</div>
@@ -114,6 +127,9 @@
 </section>
 {% endif %}
 {% endif %}
+{% endset %}
+{% if not lead_with_numbers %}{{ fix_html }}{% endif %}
+{% set overview_html %}
 {#- The fight's details after its answer (2026-10-09): on a phone the
     ruleset, format, focus and score-coming lines filled the first screen and
     "Fix this first" started under the fold. When there is no such card the
@@ -191,6 +207,8 @@
   <a class="text-link" href="#report-progress">Details</a>{% if since.previous_job_id %} · <a class="text-link" href="/compare?a={{ since.previous_job_id }}&amp;b={{ job_id }}">Side by side</a>{% endif %}
 </nav>
 {% endif %}
+{% endset %}
+{% if not lead_with_numbers %}{{ overview_html }}{% endif %}
 {#- No numbers at all when too little of the video was fight footage
     (core/fight_presence.py): the notice above says so instead. -#}
 {% if numbers.state != 'no_fight' %}
@@ -228,15 +246,31 @@
   {% if seen and seen.measured_frames %}
   <p class="vitals-basis small muted">Measured across {{'{:,}'.format(seen.measured_frames)}} of {{'{:,}'.format(seen.analyzed_frames)}} analysed frames{% if not seen.confident %} &mdash; just over {{'%.0f'|format(seen.share * 100)}}% of the fight, so read these as the part of the round WarriorIQ could see rather than the whole of it{% endif %}.</p>
   {% endif %}
+{% if lead_with_numbers %}
+{% if notes_count %}<details class="recording-notes" id="recordingNotes"><summary>About this recording &middot; {{ notes_count }} note{{ '' if notes_count == 1 else 's' }}</summary>{{ notes_html }}</details>{% endif %}
+{{ fix_html }}
+{{ overview_html }}
+{% endif %}
 {#- Your fight in graphs (core/movement_graphs.py, 2026-10-11): the same
     measurements as "Every number" further down, as shapes a fighter reads
     at a glance. Only on a report whose identity check held. -#}
+{#- A graph with its scale on the left and minute marks along the bottom
+    (2026-10-13: "the graphs need to be bigger and a lot more
+    understandable" - three clock labels and no scale left the reader to
+    guess what a height meant). `scale` is top, middle, bottom. -#}
+{% macro graph_frame(scale, ticks, unit=none, marker=none) -%}
+<div class="graph-frame">{% if unit %}<p class="graph-unit">{{ unit }}</p>{% endif %}<div class="graph-y" aria-hidden="true">{% for label in scale %}<span>{{ label }}</span>{% endfor %}</div><div class="graph-plot">{{ caller() }}{% if marker %}<span class="graph-marker" style="--y:{{ marker.pct }}%" aria-hidden="true">{{ marker.label }}</span>{% endif %}<div class="graph-ticks" aria-hidden="true">{% for t in ticks %}<span style="--x:{{ t.pct }}%">{{ t.clock }}</span>{% endfor %}</div></div></div>
+{%- endmacro %}
+{% macro grid(width, height) -%}
+<line class="graph-grid" x1="0" y1="0" x2="{{ width }}" y2="0"/><line class="graph-grid" x1="0" y1="{{ height / 2 }}" x2="{{ width }}" y2="{{ height / 2 }}"/>
+{%- endmacro %}
 {% if graphs and not identity_failed %}
 {% set g_you = names.get(graphs.focus, 'Fighter ' ~ graphs.focus) %}{% set g_them = names.get(graphs.opponent, 'Fighter ' ~ graphs.opponent) %}
 <section class="card fight-graphs" id="report-graphs" aria-labelledby="fightGraphsTitle" data-reveal>
   <div class="eyebrow">Your fight in graphs</div>
   <h2 id="fightGraphsTitle">How you moved</h2>
-  <details class="phone-fold" data-phone-fold open><summary>Show the graphs</summary>
+  {#- Open on phones too (2026-10-13): folded, a fighter on a phone never saw them. -#}
+  <details class="phone-fold" open><summary>Show the graphs</summary>
   {% for title, rows, hint, read in [('Where you were going', graphs.moved, 'Each bar is the whole fight. The colours show how much of it you spent going forward, backing up, circling or standing still.', graphs.reads.moved), ('Distance between you', graphs.ranges, 'Each bar is the whole fight. Close is under 1 body length apart, far is over 2.', graphs.reads.ranges)] %}
   {% if rows[graphs.focus] %}
   <div class="graph-block">
@@ -258,13 +292,14 @@
     <h3>Your energy through the fight</h3>
     {% if graphs.reads.energy %}<p class="graph-read">{{ graphs.reads.energy }}</p>{% endif %}
     <p class="graph-hint">Left to right is the fight from start to end. The higher the line, the faster you were moving at that moment.{% if graphs.energy.gaps %} No line {% for gap in graphs.energy.gaps %}{{ gap.from }}&ndash;{{ gap.to }} ({{ gap.reason }}){{ '; ' if not loop.last else '.' }}{% endfor %}{% endif %}</p>
-    <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Speed through the fight, {{ g_you }}{% if graphs.energy.lines[graphs.opponent] %} and {{ g_them }}{% endif %}">
+    {% call graph_frame([graphs.energy.top, graphs.energy.half, 0], graphs.ticks, 'Speed, body lengths a second') %}
+    <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Speed through the fight, {{ g_you }}{% if graphs.energy.lines[graphs.opponent] %} and {{ g_them }}{% endif %}">{{ grid(graphs.width, graphs.height) }}
       <line class="graph-base" x1="0" y1="{{ graphs.height }}" x2="{{ graphs.width }}" y2="{{ graphs.height }}"/>
       {% for line in graphs.energy.lines.get(graphs.opponent, []) %}<polyline class="graph-line theirs" pathLength="1" points="{{ line }}"/>{% endfor %}
       {% for line in graphs.energy.lines[graphs.focus] %}<polyline class="graph-line mine" pathLength="1" points="{{ line }}"/>{% endfor %}
     </svg>
-    <div class="graph-axis"><span>{{ graphs.energy.axis[0] }}</span><span>{{ graphs.energy.axis[1] }}</span><span>{{ graphs.energy.axis[2] }}</span></div>
-    <ul class="stack-key list-clean"><li><i class="key-mine" aria-hidden="true"></i>{{ g_you }}</li>{% if graphs.energy.lines[graphs.opponent] %}<li><i class="key-theirs" aria-hidden="true"></i>{{ g_them }}</li>{% endif %}<li class="muted">Top of the graph: {{ graphs.energy.top }} body lengths a second</li></ul>
+    {% endcall %}
+    <ul class="stack-key list-clean"><li><i class="key-mine" aria-hidden="true"></i>{{ g_you }}</li>{% if graphs.energy.lines[graphs.opponent] %}<li><i class="key-theirs" aria-hidden="true"></i>{{ g_them }}</li>{% endif %}</ul>
   </div>
   {% endif %}
 
@@ -273,12 +308,13 @@
     <h3>Who was pressing</h3>
     <p class="graph-read">{{ graphs.pressure.read }}</p>
     <p class="graph-hint">Above the middle line a fighter was moving toward the other; below it, backing away. The higher the line, the more directly they walked forward.</p>
-    <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Pressure through the fight, {{ g_you }}{% if graphs.pressure.lines[graphs.opponent] %} and {{ g_them }}{% endif %}">
+    {% call graph_frame(['Walking in', 'Even', 'Backing off'], graphs.ticks) %}
+    <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Pressure through the fight, {{ g_you }}{% if graphs.pressure.lines[graphs.opponent] %} and {{ g_them }}{% endif %}">{{ grid(graphs.width, graphs.height) }}
       <line class="graph-base" x1="0" y1="{{ graphs.pressure.mid }}" x2="{{ graphs.width }}" y2="{{ graphs.pressure.mid }}"/>
       {% for line in graphs.pressure.lines.get(graphs.opponent, []) %}<polyline class="graph-line theirs" pathLength="1" points="{{ line }}"/>{% endfor %}
       {% for line in graphs.pressure.lines[graphs.focus] %}<polyline class="graph-line mine" pathLength="1" points="{{ line }}"/>{% endfor %}
     </svg>
-    <div class="graph-axis"><span>{{ graphs.pressure.axis[0] }}</span><span>{{ graphs.pressure.axis[1] }}</span><span>{{ graphs.pressure.axis[2] }}</span></div>
+    {% endcall %}
     <ul class="stack-key list-clean"><li><i class="key-mine" aria-hidden="true"></i>{{ g_you }}</li>{% if graphs.pressure.lines[graphs.opponent] %}<li><i class="key-theirs" aria-hidden="true"></i>{{ g_them }}</li>{% endif %}</ul>
   </div>
   {% endif %}
@@ -288,13 +324,13 @@
     <h3>Distance between you, over time</h3>
     <p class="graph-read">{{ graphs.distance.read }}</p>
     <p class="graph-hint">The higher the line, the further apart you were. The dashed line is {{ graphs.distance.close_range }} body lengths, the report's "close" distance: below it you were in range of each other.</p>
-    <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Distance between the fighters through the fight">
+    {% call graph_frame([graphs.distance.top, graphs.distance.half, 0], graphs.ticks, 'Gap between you, body lengths', {'pct': graphs.distance.close_pct, 'label': 'close range'} if graphs.distance.close_pct is defined else none) %}
+    <svg class="line-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int + 2 }}" preserveAspectRatio="none" role="img" aria-label="Distance between the fighters through the fight">{{ grid(graphs.width, graphs.height) }}
       <line class="graph-base" x1="0" y1="{{ graphs.height }}" x2="{{ graphs.width }}" y2="{{ graphs.height }}"/>
       <line class="graph-range" x1="0" y1="{{ graphs.distance.close_y }}" x2="{{ graphs.width }}" y2="{{ graphs.distance.close_y }}"/>
       {% for line in graphs.distance.lines %}<polyline class="graph-line distance" pathLength="1" points="{{ line }}"/>{% endfor %}
     </svg>
-    <div class="graph-axis"><span>{{ graphs.distance.axis[0] }}</span><span>{{ graphs.distance.axis[1] }}</span><span>{{ graphs.distance.axis[2] }}</span></div>
-    <ul class="stack-key list-clean"><li class="muted">Top of the graph: {{ graphs.distance.top }} body lengths apart</li></ul>
+    {% endcall %}
   </div>
   {% endif %}
 
@@ -303,11 +339,12 @@
     <h3>Your guard through the fight</h3>
     {% if graphs.reads.guard %}<p class="graph-read">{{ graphs.reads.guard }}</p>{% endif %}
     <p class="graph-hint">Left to right is the fight from start to end. Each bar is a few seconds. A full bar means your hands were up by the face the whole time; an empty one, down the whole time.{% if graphs.guard.gaps %} No bar {% for gap in graphs.guard.gaps %}{{ gap.from }}&ndash;{{ gap.to }} ({{ gap.reason }}){{ '; ' if not loop.last else '.' }}{% endfor %}{% endif %}</p>
+    {% call graph_frame(['100%', '50%', '0%'], graphs.ticks, 'Hands up by the face') %}
     <svg class="bar-graph" viewBox="0 0 {{ graphs.width|int }} {{ graphs.height|int }}" preserveAspectRatio="none" role="img" aria-label="Hands up through the fight, {{ g_you }}">
       {% for bar in graphs.guard.bars %}<rect class="guard-track" x="{{ bar.x }}" y="0" width="{{ bar.width }}" height="{{ graphs.height }}"/><rect class="guard-bar" style="--i:{{ loop.index0 }}" x="{{ bar.x }}" y="{{ graphs.height - bar.height }}" width="{{ bar.width }}" height="{{ bar.height }}"><title>{{ bar.clock }}: hands up {{ bar.share }}%</title></rect>{% endfor %}
       {% for line in graphs.guard.theirs %}<polyline class="graph-line theirs" pathLength="1" points="{{ line }}"/>{% endfor %}
     </svg>
-    <div class="graph-axis"><span>{{ graphs.guard.axis[0] }}</span><span>{{ graphs.guard.axis[1] }}</span><span>{{ graphs.guard.axis[2] }}</span></div>
+    {% endcall %}
     {% if graphs.guard.theirs %}<ul class="stack-key list-clean"><li><i class="key-guard" aria-hidden="true"></i>{{ g_you }}: hands up</li><li><i class="key-theirs" aria-hidden="true"></i>{{ g_them }}: hands up</li></ul>{% endif %}
   </div>
   {% endif %}

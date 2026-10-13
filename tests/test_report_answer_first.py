@@ -82,3 +82,36 @@ class PageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NumbersLeadTests(unittest.TestCase):
+    """2026-10-13: opening a report showed notes, "Fix this first" and the
+    fight details before any number; the six numbers now lead."""
+
+    def _page(self, extra, **context):
+        from tests_support import render_result
+
+        report = json.loads((ROOT / "tests" / "fixtures" / "report_sample.json").read_text(encoding="utf-8"))
+        report.update(extra)
+        return render_result(report=report, numbers={"state": "ok"}, job_id="abc", **context)
+
+    def test_the_six_numbers_come_first(self):
+        page = self._page(_report(), recording_warnings=["The fighters are small."])
+        vitals = page.index('class="fight-vitals"')
+        self.assertLess(vitals, page.index('id="fix-first"'))
+        self.assertLess(vitals, page.index('class="result-overview"'))
+        self.assertLess(vitals, page.index('id="recordingWarnings"'))
+        self.assertIn("About this recording &middot; 1 note", page)
+        self.assertEqual(page.count('id="fix-first"'), 1)
+        self.assertEqual(page.count('class="result-overview"'), 1)
+
+    def test_a_missing_start_stays_in_view(self):
+        span = {"label": "0:30–1:56 of 1:56", "note": "The first 0:30 of the video is not in this report.",
+                "start_seconds": 30.0, "end_seconds": 116.0, "duration_seconds": 116.0}
+        page = self._page(_report(), analysed_span=span)
+        self.assertLess(page.index("The first 0:30"), page.index('class="fight-vitals"'))
+
+    def test_a_number_is_not_shrunk_by_the_label_style(self):
+        css = (ROOT / "app" / "static" / "redesign.css").read_text(encoding="utf-8")
+        self.assertNotIn(".fight-vitals span {", css)
+        self.assertIn(".fight-vitals article > span {", css)

@@ -598,7 +598,9 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
   margin-left: .04em;
 }
 
-.fight-vitals span {
+/* `> span`: the label only. The figure's own count-up <span> inside <b>
+   matched a plain `.fight-vitals span` and printed every number at 13px. */
+.fight-vitals article > span {
   margin-top: 6px;
   color: var(--wiq-text);
   font-size: var(--wiq-text-sm);
