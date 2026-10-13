@@ -247,6 +247,19 @@
   <p class="vitals-basis small muted">Measured across {{'{:,}'.format(seen.measured_frames)}} of {{'{:,}'.format(seen.analyzed_frames)}} analysed frames{% if not seen.confident %} &mdash; just over {{'%.0f'|format(seen.share * 100)}}% of the fight, so read these as the part of the round WarriorIQ could see rather than the whole of it{% endif %}.</p>
   {% endif %}
 {% if lead_with_numbers %}
+{#- Strike counts up top (2026-10-13, owner request), beside the six numbers:
+    each fighter's attempts by family, from the same statistics block as every
+    other count on this page, labelled as estimates. Only when the counts are
+    published for this sport and the fighters were told apart. -#}
+{% set strip_stats = (report.statistics|default({}, true)).fighters|default({}, true) %}
+{% if strike_counts_published and families_shown and numbers.state == 'ok' and strip_stats %}
+<section class="strike-strip" id="strikeStrip" aria-label="Strikes thrown, estimated">
+  {% for who in ['A', 'B'] %}{% set st = strip_stats.get(who, {}) %}{% set total = namespace(n=0) %}{% for family in families_shown %}{% set total.n = total.n + (st.get(family ~ '_attempts')|default(0, true)) %}{% endfor %}
+  <article><span class="strike-strip-who">{{ names.get(who, 'Fighter ' ~ who) }}</span><b class="wiq-num"><span data-count-up>{{ total.n }}</span></b><span>strike{{ '' if total.n == 1 else 's' }} thrown</span><small>{% for family in families_shown %}{{ ' &middot; '|safe if not loop.first }}{{ st.get(family ~ '_attempts')|default(0, true) }} {{ family }}{{ '' if st.get(family ~ '_attempts')|default(0, true) == 1 else ('es' if family == 'punch' else 's') }}{% endfor %}</small></article>
+  {% endfor %}
+  <p class="strike-strip-note">Estimates, counted automatically and not checked by a person. In grappling they can run well over the real number.</p>
+</section>
+{% endif %}
 {% if notes_count %}<details class="recording-notes" id="recordingNotes"><summary>About this recording &middot; {{ notes_count }} note{{ '' if notes_count == 1 else 's' }}</summary>{{ notes_html }}</details>{% endif %}
 {{ fix_html }}
 {{ overview_html }}
