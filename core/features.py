@@ -41,7 +41,9 @@ def _env_on(name: str, default: str) -> bool:
 
 
 def _load() -> dict[str, Feature]:
-    counts = _env_on("WARRIORIQ_PUBLISH_STRIKE_COUNTS", "0")
+    # On by default since 2026-10-13 (owner decision): counts show as labelled
+    # estimates. WARRIORIQ_PUBLISH_STRIKE_COUNTS=0 switches them off again.
+    counts = _env_on("WARRIORIQ_PUBLISH_STRIKE_COUNTS", "1")
 
     def built_on_counts(key: str) -> bool:
         return counts and _env_on(f"WARRIORIQ_FEATURE_{key.upper()}", "1")

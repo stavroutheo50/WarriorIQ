@@ -420,6 +420,14 @@ STRIKE_COUNTS_PRECISION_VALIDATED = False
 # show them again once strike classification meets the release targets on
 # /validation.
 #
+# Switched on by default again on 2026-10-13, owner decision: "we MUST switch
+# counts on". Measured just before, against ufcstats.com on UFC 326 rounds 1,
+# 3 and 4 (480x220 screen recordings): while both fighters stand the counts
+# are near the official ones (29 vs 21, 36 vs 12, 20 vs 17 strikes thrown),
+# but during grappling they run three to six times over (123 vs 41, 157 vs 36,
+# 314 vs 49 in all). So they stay labelled as estimates, and the
+# plausibility check still withholds impossible ones. =0 turns them off.
+#
 # Read through core/features.py, which every page's copy reads as well, so the
 # report and the marketing cannot disagree about what is switched on.
 STRIKE_COUNTS_PUBLISHED = feature_on("strike_counts")

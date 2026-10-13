@@ -115,3 +115,33 @@ class NumbersLeadTests(unittest.TestCase):
         css = (ROOT / "app" / "static" / "redesign.css").read_text(encoding="utf-8")
         self.assertNotIn(".fight-vitals span {", css)
         self.assertIn(".fight-vitals article > span {", css)
+
+
+class StrikeStripTests(unittest.TestCase):
+    """2026-10-13: the counts go up top, under the six numbers, as estimates."""
+
+    def _page(self, **context):
+        from tests_support import render_result
+
+        report = json.loads((ROOT / "tests" / "fixtures" / "report_sample.json").read_text(encoding="utf-8"))
+        report.update(_report())
+        report["statistics"] = {"fighters": {
+            "A": {"attempts": 14, "punch_attempts": 11, "kick_attempts": 3, "knee_attempts": 0},
+            "B": {"attempts": 9, "punch_attempts": 9, "kick_attempts": 0, "knee_attempts": 0}}}
+        base = {"report": report, "numbers": {"state": "ok"}, "job_id": "abc",
+                "strike_counts_published": True, "families_shown": ("punch", "kick")}
+        base.update(context)
+        return render_result(**base)
+
+    def test_counts_sit_under_the_six_numbers(self):
+        page = self._page()
+        strip = page.index('id="strikeStrip"')
+        self.assertLess(page.index('class="fight-vitals"'), strip)
+        self.assertLess(strip, page.index('id="fix-first"'))
+        self.assertIn("11 punches &middot; 3 kicks", page)
+        self.assertIn("Estimates, counted automatically", page)
+        self.assertNotIn("knee", page[strip:page.index('id="fix-first"')])
+
+    def test_no_strip_when_counts_are_not_published_or_unverified(self):
+        self.assertNotIn('id="strikeStrip"', self._page(strike_counts_published=False))
+        self.assertNotIn('id="strikeStrip"', self._page(numbers={"state": "unverified"}))

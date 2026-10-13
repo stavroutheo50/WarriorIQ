@@ -1,12 +1,11 @@
-"""Strike counts switched off: the production default since 2026-10-04.
+"""Strike counts switched off with WARRIORIQ_PUBLISH_STRIKE_COUNTS=0.
 
-QA found a waist-up boxing clip counted as 33 kicks and 14 knees, and the
-Accuracy Lab shows 10 real of 26 counted strikes. Until classification meets
-the release targets on /validation, WARRIORIQ_PUBLISH_STRIKE_COUNTS stays
-unset and no punch, kick or knee count reaches the report summary, the live
-progress page, the replay chapter list or the story card. The rest of the
-suite runs with the flag on (tests/conftest.py); this file switches it off
-where it is read.
+They were off by default from 2026-10-04 (QA: a waist-up boxing clip counted
+33 kicks and 14 knees; the Accuracy Lab showed 10 real of 26 counted) and are
+on by default again since 2026-10-13, owner decision, as labelled estimates
+(core/report.py). Switched off, no punch, kick or knee count reaches the
+report summary, the live progress page, the replay chapter list or the story
+card. This file switches it off where it is read.
 """
 
 from __future__ import annotations
@@ -38,12 +37,19 @@ STRIKE_CLAIMS = (r"\d+\s*(punches|kicks|knees|strikes)\b", r"(kicks|strikes|punc
                  r"Kick attempts", r"Strikes we counted", r"Watch every counted strike")
 
 
-def test_the_default_is_off():
-    env = {key: value for key, value in os.environ.items() if key != "WARRIORIQ_PUBLISH_STRIKE_COUNTS"}
+def _published_with(value):
+    env = {key: v for key, v in os.environ.items() if key != "WARRIORIQ_PUBLISH_STRIKE_COUNTS"}
+    if value is not None:
+        env["WARRIORIQ_PUBLISH_STRIKE_COUNTS"] = value
     out = subprocess.run(
         [sys.executable, "-c", "from core.report import STRIKE_COUNTS_PUBLISHED as p; print(p)"],
         env=env, capture_output=True, text=True, check=True, cwd=os.getcwd())
-    assert out.stdout.strip() == "False"
+    return out.stdout.strip()
+
+
+def test_the_default_is_on_and_zero_switches_it_off():
+    assert _published_with(None) == "True"
+    assert _published_with("0") == "False"
 
 
 @pytest.mark.parametrize("sport", ["kickboxing", "boxing", "muay_thai", "taekwondo", "mma"])

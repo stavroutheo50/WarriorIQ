@@ -26,7 +26,8 @@ from core.frame_feed import FrameFeed
 from core.generalship import judge_fight
 from core.fight_presence import FightPresence
 from core.kit import kit_similarity
-from core.kit_attribution import KitAttribution
+from core.kit_attribution import KitAttribution, box_shorts_dark_share, darker_at_selection_boxes
+from core.kit_attribution import active as kit_attribution_active
 from core.referee import torso_skin_share
 from core.ground import DownWatch
 from core.round_detect import RoundDetector
@@ -720,6 +721,9 @@ def _seed_frame_kit(video_path: str, frame_index: int, box_a, box_b) -> dict | N
     kit = kit_similarity(frame, box_a, box_b)
     if kit is not None:
         kit["torso_skin"] = {"A": torso_skin_share(frame, box_a), "B": torso_skin_share(frame, box_b)}
+        # Whose shorts are darker, read where the boxes are known to be right
+        # (core/kit_attribution.py).
+        kit["shorts_dark"] = {"A": box_shorts_dark_share(frame, box_a), "B": box_shorts_dark_share(frame, box_b)}
     return kit
 
 
@@ -1192,6 +1196,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # the report cannot disagree with the warning. See core/kit.py.
     kit = seed_kit if seed_kit is not None else kit_similarity(
         first_frame, req.fighter_a_box, req.fighter_b_box)
+    # Without a backward pass the first frame is the one the person chose.
+    shorts_dark = (seed_kit or {}).get("shorts_dark") if seed_kit is not None else {
+        "A": box_shorts_dark_share(first_frame, req.fighter_a_box),
+        "B": box_shorts_dark_share(first_frame, req.fighter_b_box)}
+    shorts_dark = shorts_dark or {}
     histogram_similarity = fighter_pair_similarity(*(seed_pair or (initial_a, initial_b)))
     pair_similarity = kit["similarity"] if kit is not None else histogram_similarity
     manager.prime_track_history(warm_samples)
@@ -1291,10 +1300,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # below; metrics and strike counts are then taken from fight footage only.
     # See core/fight_presence.py.
     presence = FightPresence(req.start_seconds, segment_end_seconds)
-    # A second opinion on who threw each strike, from the shorts. Shadow mode:
-    # it records what it would re-credit and changes nothing. See
-    # core/kit_attribution.py.
-    kit_attribution = KitAttribution(seed_seconds)
+    # A second opinion on who threw each strike, from the shorts: re-credits a
+    # strike when the frames around it say the boxes were the other way round.
+    # See core/kit_attribution.py.
+    kit_attribution = KitAttribution(
+        seed_seconds, darker_at_selection_boxes(shorts_dark.get("A"), shorts_dark.get("B")))
     metric_frames: list[tuple[float, int | None, PersonObservation | None, PersonObservation | None]] = []
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
     # Decoding runs a step ahead on a helper thread; see core/frame_feed.py.
@@ -1725,7 +1735,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # Both fighters move when one of them is hit. Decide which of the two was
     # the aggressor before anything downstream counts, scores or reports them.
     events, defender_actions = resolve_simultaneous_attribution(events)
-    kit_proposals = kit_attribution.proposals(events)
+    kit_proposals = kit_attribution.proposals(events, apply=kit_attribution_active())
 
     detected_round_spans = round_detector.rounds()
     rounds_from_footage = bool(detected_round_spans) and all(spec.selected for spec in rounds)
