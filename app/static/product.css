@@ -369,8 +369,11 @@ body[data-page=home] main > .hero{padding-bottom:clamp(32px,5vh,56px)}
 
 /* The header links held their place only while the account side kept its
    width: the "Analyzing" pill widened it and the links slid sideways
-   (QA, 2026-10-04). Equal side columns keep the links where they are. */
-.nav{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center}.nav>.brand{justify-self:start}.nav>.account-nav{justify-self:end}
+   (QA, 2026-10-04). Equal side columns keep the links where they are.
+   Never narrower than their content, though (2026-10-13): at 1200-1440px the
+   pill plus the account email were wider than a side column and the pill
+   was drawn over "Plans". When they no longer fit, the links move over. */
+.nav{display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(max-content,1fr);column-gap:12px;align-items:center}.nav>.brand{justify-self:start}.nav>.account-nav{justify-self:end}
 @media(max-width:900px){.nav{display:flex}}
 
 /* Upload problems read as problems: the file line under the picker had no

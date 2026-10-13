@@ -122,3 +122,14 @@ def test_box_band_reads_the_shorts_of_an_upright_fighter():
     frame[100:140, 40:160] = 220
     assert box_shorts_dark_share(frame, [40, 0, 160, 200]) < 0.1
     assert box_shorts_dark_share(None, [40, 0, 160, 200]) is None
+
+
+def test_without_a_drawn_box_reading_nothing_is_moved():
+    # The tracked-box fallback read a real round backwards; it only records.
+    frames = _steady(0, 10, 0.05, 0.8) + _steady(10, 12, 0.8, 0.05, shot=1) + _steady(12, 20, 0.05, 0.8, shot=2)
+    events = [_strike("A", 11.0)]
+    result = _watch(2.0, frames).proposals(events, apply=True)
+    assert result["selection_reading"] == "tracked_boxes"
+    assert result["mode"] == "shadow" and result["recredited"] == 0
+    assert len(result["would_recredit"]) == 1
+    assert events[0].fighter == "A"
