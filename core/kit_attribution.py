@@ -1,9 +1,24 @@
 """Was each strike credited to the right fighter? A second opinion from the shorts.
 
-Shadow mode: this records what it *would* change and changes nothing. A
-strike's fighter is still whoever the identity manager says; the report
-carries this module's proposals under ``tracking.kit_attribution`` so they
-can be checked on real uploads before anything acts on them.
+Active since 2026-10-13 (``WARRIORIQ_KIT_ATTRIBUTION``, default on; 0 puts
+it back in shadow mode, recording what it would change and changing
+nothing). A strike it flags is re-credited to the other fighter, and the
+report lists every change under ``tracking.kit_attribution``.
+
+Which fighter wears the darker shorts is now read from the boxes the person
+drew on the selection frame (``box_shorts_dark_share``), the one place the
+identities are known to be right. It acts only when one pair of shorts is
+clearly dark and the other clearly light there. Measured on UFC 326 rounds 1
+and 4 (every re-credited strike checked by eye): 43 strikes re-credited, 24
+fixed, none made wrong, 19 in grappling piles where no one could say who
+threw what. Silent on round 3 (shorts too close at selection) and on both
+amateur benchmark clips (both fighters in dark shorts, or a box on a shirt).
+
+The earlier rule below - the tracker's own boxes around the selection frame,
+agreeing with the whole-video majority - is kept only for analyses without a
+selection-frame reading. It read round 1 the wrong way round on a rerun: the
+tracker had the boxes swapped around the selection frame and on most frames
+of the round, and it would have moved 18 correctly credited strikes.
 
 Why the shorts. In bare-chested sports the identity manager's colour check
 (core/identity.py appearance_hist) looks at the torso, in hue and saturation
@@ -35,6 +50,7 @@ is not enough to act on, hence shadow mode.
 from __future__ import annotations
 
 import bisect
+import os
 
 import cv2
 import numpy as np
@@ -56,6 +72,44 @@ MIN_SELECTION_DIFFERENCE = 0.25
 # analysed frame starts a new camera shot.
 CUT_CORRELATION = 0.6
 MIN_PIXELS = 10
+# The selection-frame reading from the drawn boxes: one pair of shorts must be
+# at least this dark and the other at most this light. Measured there: UFC 326
+# 0.73/0.05 and 0.63/0.00; both-dark amateur bout 0.97/0.62 (silent).
+SELECTION_DARK_MIN = 0.50
+SELECTION_LIGHT_MAX = 0.20
+# The shorts band inside a drawn box: an upright fighter's hips to mid-thigh.
+BOX_BAND_TOP, BOX_BAND_BOTTOM, BOX_BAND_SIDE = 0.50, 0.68, 0.20
+
+
+def active() -> bool:
+    return os.getenv("WARRIORIQ_KIT_ATTRIBUTION", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def box_shorts_dark_share(frame: np.ndarray | None, box) -> float | None:
+    """Share of near-black pixels in the shorts band of a box drawn around an upright fighter."""
+    if frame is None or box is None:
+        return None
+    x1, y1, x2, y2 = (float(v) for v in box)
+    width, height = x2 - x1, y2 - y1
+    if width <= 0 or height <= 0:
+        return None
+    top, bottom = int(y1 + BOX_BAND_TOP * height), int(y1 + BOX_BAND_BOTTOM * height)
+    left, right = int(x1 + BOX_BAND_SIDE * width), int(x2 - BOX_BAND_SIDE * width)
+    crop = frame[max(0, top):max(0, bottom), max(0, left):max(0, right)]
+    if crop.size == 0 or crop.shape[0] * crop.shape[1] < MIN_PIXELS:
+        return None
+    return float((cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)[..., 0] < DARK_L).mean())
+
+
+def darker_at_selection_boxes(share_a: float | None, share_b: float | None) -> str | None:
+    """"A"/"B" when one drawn fighter's shorts are clearly dark and the other's clearly light."""
+    if share_a is None or share_b is None:
+        return None
+    if share_a >= SELECTION_DARK_MIN and share_b <= SELECTION_LIGHT_MAX:
+        return "A"
+    if share_b >= SELECTION_DARK_MIN and share_a <= SELECTION_LIGHT_MAX:
+        return "B"
+    return None
 
 
 def shorts_dark_share(frame: np.ndarray | None, keypoints, keypoint_conf) -> float | None:
@@ -101,8 +155,10 @@ def _darker(a: float | None, b: float | None) -> str | None:
 class KitAttribution:
     """Fed every analysed frame; at the end, proposes which strikes were miscredited."""
 
-    def __init__(self, selection_seconds: float | None) -> None:
+    def __init__(self, selection_seconds: float | None, selection_darker: str | None = None) -> None:
         self.selection_seconds = selection_seconds
+        # From the drawn boxes (darker_at_selection_boxes); decides alone when set.
+        self.selection_darker = selection_darker
         self._times: list[float] = []
         self._shots: list[int] = []
         self._shares: list[tuple[float | None, float | None]] = []
@@ -166,11 +222,17 @@ class KitAttribution:
             score += 1 if vote == "A" else -1 if vote == "B" else 0
         return "A" if score > 0 else "B" if score < 0 else None
 
-    def proposals(self, events) -> dict:
-        """What this would change, without changing it."""
-        at_selection, by_majority = self._darker_at_selection(), self._darker_by_majority()
-        agreed = at_selection is not None and at_selection == by_majority
-        flagged = []
+    def proposals(self, events, apply: bool = False) -> dict:
+        """Which strikes were credited to the wrong fighter; with ``apply``, re-credit them."""
+        events = list(events)
+        by_majority = self._darker_by_majority()
+        if self.selection_darker is not None:
+            at_selection, source = self.selection_darker, "drawn_boxes"
+            agreed = True
+        else:
+            at_selection, source = self._darker_at_selection(), "tracked_boxes"
+            agreed = at_selection is not None and at_selection == by_majority
+        flagged, changed = [], []
         if agreed:
             for event in events:
                 fighter = getattr(event, "fighter", None)
@@ -182,11 +244,19 @@ class KitAttribution:
                     flagged.append({"seconds": round(float(peak), 3), "credited": fighter,
                                     "proposed": "B" if fighter == "A" else "A",
                                     "technique": getattr(event, "technique", None)})
+                    changed.append(event)
+        if apply:
+            for event in changed:
+                event.fighter, event.opponent = event.opponent, event.fighter
+                if isinstance(getattr(event, "evidence", None), dict):
+                    event.evidence["recredited_by_shorts"] = True
         return {
-            "mode": "shadow",
+            "mode": "active" if apply else "shadow",
+            "selection_reading": source,
             "darker_shorts_at_selection": at_selection,
             "darker_shorts_by_majority": by_majority,
             "active": agreed,
-            "strikes_checked": len(list(events)) if agreed else 0,
+            "strikes_checked": len(events) if agreed else 0,
             "would_recredit": flagged,
+            "recredited": len(changed) if apply else 0,
         }
