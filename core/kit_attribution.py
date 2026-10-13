@@ -15,8 +15,8 @@ threw what. Silent on round 3 (shorts too close at selection) and on both
 amateur benchmark clips (both fighters in dark shorts, or a box on a shirt).
 
 The earlier rule below - the tracker's own boxes around the selection frame,
-agreeing with the whole-video majority - is kept only for analyses without a
-selection-frame reading. It read round 1 the wrong way round on a rerun: the
+agreeing with the whole-video majority - is kept only as a record for
+analyses without a drawn-box reading, and never moves a strike. It read round 1 the wrong way round on a rerun: the
 tracker had the boxes swapped around the selection frame and on most frames
 of the round, and it would have moved 18 correctly credited strikes.
 
@@ -245,6 +245,10 @@ class KitAttribution:
                                     "proposed": "B" if fighter == "A" else "A",
                                     "technique": getattr(event, "technique", None)})
                     changed.append(event)
+        # Only the drawn-box reading may move a strike. The tracked-box reading
+        # read a real round backwards (module docstring), so without a drawn-box
+        # reading this stays a record of what it would have done.
+        apply = apply and source == "drawn_boxes"
         if apply:
             for event in changed:
                 event.fighter, event.opponent = event.opponent, event.fighter
