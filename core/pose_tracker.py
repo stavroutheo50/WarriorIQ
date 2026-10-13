@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 
 import logging
@@ -395,6 +396,13 @@ def _own_engine_besides(rejected: str | Path) -> Path | None:
     return None
 
 
+# Look for a missing fighter even when the opponent stands in the way
+# (2026-10-13). Kick Light, Stavrou vs Ceschia: the kicking fighter was not
+# detected on the frames of a kick and the search was skipped because the
+# opponent overlapped where they were expected.
+SEARCH_BESIDE_OPPONENT = os.getenv("WARRIORIQ_SEARCH_BESIDE_OPPONENT", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 class PoseTracker:
     def __init__(self):
         requested = str(SETTINGS.device).strip().lower()
@@ -687,10 +695,15 @@ class PoseTracker:
         from core.identity import box_iou
 
         height, width = frame.shape[:2]
+        # How much an existing detection must overlap the expected box for the
+        # fighter to count as already found. 0.12 skipped every fighter standing
+        # next to the opponent - in an exchange, always - and a kicking fighter
+        # is exactly the one the detector misses (see SEARCH_BESIDE_OPPONENT).
+        found_iou = 0.50 if SEARCH_BESIDE_OPPONENT else 0.12
         requests: list[tuple[str, np.ndarray, int, int, np.ndarray]] = []
         for name in ("A", "B"):
             guide = guidance.get(name)
-            if guide is None or any(box_iou(guide, person.box) >= 0.12 for person in existing):
+            if guide is None or any(box_iou(guide, person.box) >= found_iou for person in existing):
                 continue
             x1, y1, x2, y2 = map(float, guide)
             bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
@@ -742,6 +755,10 @@ class PoseTracker:
                     valid = (candidate.keypoints[:, 0] > 0) & (candidate.keypoints[:, 1] > 0)
                     candidate.keypoints[valid, 0] += offset_x
                     candidate.keypoints[valid, 1] += offset_y
+                # The crop now reaches the opponent too. Somebody the whole-frame
+                # pass already found is never offered as the missing fighter.
+                if SEARCH_BESIDE_OPPONENT and any(box_iou(candidate.box, person.box) >= 0.50 for person in existing):
+                    continue
                 score = 0.75 * box_iou(guide, candidate.box) + 0.25 * candidate.confidence
                 if score > best_score:
                     best, best_score = candidate, score
