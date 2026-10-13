@@ -233,6 +233,12 @@
     });
     open.addEventListener("click", function () {
       render();
+      // The dialog is written inside "See all the details", which is folded
+      // shut when "Fix this first" leads the report. Inside a closed fold it
+      // has no size, so the modal opened invisible and blocked every button on
+      // the page (2026-10-13). It is moved out of the fold before it opens.
+      if (dialog.parentElement !== document.body) document.body.appendChild(dialog);
+      dialog.classList.remove("wiq-reveal");
       dialog.showModal();
       // showModal focuses the first control, which sits below the card, so
       // the dialog opened scrolled ~400px down with its top cut off on a
