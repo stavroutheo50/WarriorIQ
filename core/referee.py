@@ -191,6 +191,62 @@ def uniform_feature(frame: np.ndarray, box, room: float | None = None) -> np.nda
     ], dtype=np.float32)
 
 
+# An official dressed head to toe, in sports whose fighters are bare.
+#
+# The uniform probe above knows one dress code, white over black. UFC
+# referees wear black, so on UFC 326 (Holloway vs Oliveira 2, 480x220 screen
+# recordings) the probe never recognised the official and fighter boxes
+# drifted onto him: 1 of 24 counted strikes in round 1, and 2 of 16 sampled
+# standing frames in round 3. What does separate him there is categorical:
+# the fighters are bare-chested and he is not.
+#
+# Measured on 403 people detected on 209 frames of rounds 1, 3 and 4, every
+# one checked by eye: the official scored 0.00-0.29 torso skin; standing
+# fighters never below 0.46. Upright people (box at least UPRIGHT_ASPECT
+# times taller than wide) under CLOTHED_TORSO_MAX were 55 crops - the official
+# and spectators behind the cage, no fighter. Fighters tangled on the ground
+# do score low (0.13-0.26, the crop is mostly canvas or the other man), which
+# is why the rule only applies to upright people.
+#
+# Only switched on when both selected fighters were bare at selection
+# (BARE_TORSO_MIN), so singlets, sports bras, doboks and gis leave it off and
+# those sports behave exactly as before. On the three UFC selections the
+# fighters scored 0.57-0.95.
+BARE_TORSO_MIN = 0.50
+CLOTHED_TORSO_MAX = 0.30
+UPRIGHT_ASPECT = 1.4
+
+
+def torso_skin_share(frame: np.ndarray | None, box) -> float | None:
+    """Share of skin-coloured pixels on the torso: the centre of the box, 18-48% down.
+
+    Skin by the usual YCrCb bounds (Cr 135-180, Cb 85-135), which hold across
+    skin tones because they bound chroma, not brightness.
+    """
+    if frame is None or box is None:
+        return None
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = map(float, box)
+    bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
+    torso = frame[int(max(0, y1 + 0.18 * bh)):int(min(h, y1 + 0.48 * bh)),
+                  int(max(0, x1 + 0.25 * bw)):int(min(w, x2 - 0.25 * bw))]
+    if torso.size == 0:
+        return None
+    ycrcb = cv2.cvtColor(torso, cv2.COLOR_BGR2YCrCb).reshape(-1, 3)
+    skin = (ycrcb[:, 1] >= 135) & (ycrcb[:, 1] <= 180) & (ycrcb[:, 2] >= 85) & (ycrcb[:, 2] <= 135)
+    return float(skin.mean())
+
+
+def looks_like_a_clothed_official(candidate) -> bool:
+    """Upright and covered: an official, in a sport whose fighters are bare."""
+    skin = getattr(candidate, "torso_skin", None)
+    box = getattr(candidate, "box", None)
+    if skin is None or box is None:
+        return False
+    width, height = float(box[2]) - float(box[0]), float(box[3]) - float(box[1])
+    return width > 0 and height / width >= UPRIGHT_ASPECT and skin < CLOTHED_TORSO_MAX
+
+
 def _load() -> dict | None:
     """Read the trained weights once; stay silent and off if they are missing."""
     global _probe, _unavailable

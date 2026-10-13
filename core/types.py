@@ -84,6 +84,9 @@ class PersonObservation:
     # the frame where the pixels are so the identity manager never needs it.
     # See core/referee.py.
     referee_prob: float | None = None
+    # Share of skin on the torso, for telling a clothed official from bare
+    # fighters. See core/referee.py torso_skin_share.
+    torso_skin: float | None = None
     pose_signature: np.ndarray | None = None
 
 

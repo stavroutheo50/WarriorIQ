@@ -211,3 +211,133 @@ class CompareTests(unittest.TestCase):
         self.assertLess(page.index('id="movement-comparison"'), page.index('id="compare-graphs"'))
         self.assertIn("/static/components.css", page)
         self.assertIn("Energy through each fight", page)
+
+
+class RicherReportTests(unittest.TestCase):
+    """Rounds, the moments line and the opponent's guard (2026-10-12)."""
+
+    def _with_moments(self):
+        report = _report()
+        report["rounds"] = [{"number": 1, "start_seconds": 0.0, "end_seconds": 60.0, "selected": True},
+                            {"number": 2, "start_seconds": 60.0, "end_seconds": 120.0, "selected": True}]
+        report["metrics"]["A"]["moments"] = {
+            "guard_index": {"low": [12.0], "high": [40.0]},
+            "balance_index": {"low": [200.0], "high": []},          # past the end: not drawn
+        }
+        report["went_down"] = {"moments": [{"seconds": 75.0, "round": 2, "down_seconds": 4}]}
+        return report
+
+    def test_moments_line_names_best_and_weakest_seconds_and_links_them(self):
+        hl = movement_graphs.build(self._with_moments(), "A")["highlights"]
+        self.assertEqual([(m["clock"], m["label"], m["good"]) for m in hl["marks"]],
+                         [("0:12", "Guard dropped", False), ("0:40", "Guard up tight", True)])
+        self.assertEqual((hl["good"], hl["bad"]), (1, 1))
+        self.assertEqual(hl["down"][0]["clock"], "1:15")
+        self.assertEqual([b["number"] for b in hl["rounds"]], [1, 2])
+        self.assertEqual(hl["marks"][0]["left"], 10.0)
+
+    def test_no_moments_no_line(self):
+        report = _report()
+        report["rounds"] = [{"number": 1, "start_seconds": 0.0, "end_seconds": 60.0}]
+        self.assertIsNone(movement_graphs.build(report, "A")["highlights"])
+
+    def test_no_rounds_no_line(self):
+        report = self._with_moments()
+        report["rounds"] = []
+        self.assertIsNone(movement_graphs.highlights(report, "A"))
+
+    def test_round_by_round_centre_share_needs_two_rounds_and_ten_seen_seconds(self):
+        report = _report()
+        report["metrics"]["A"]["numbers"]["rounds"] = {"1": {"seen_seconds": 100.0, "centre_seconds": 60.0},
+                                                       "2": {"seen_seconds": 80.0, "centre_seconds": 20.0}}
+        report["metrics"]["B"]["numbers"]["rounds"] = {"1": {"seen_seconds": 5.0, "centre_seconds": 5.0},
+                                                       "2": {"seen_seconds": 90.0, "centre_seconds": 45.0}}
+        rounds = movement_graphs.build(report, "A")["by_round"]
+        self.assertEqual([(r["number"], r["A"], r["B"]) for r in rounds["rows"]], [(1, 60, None), (2, 25, 50)])
+        self.assertEqual(rounds["read"], "You held the centre most in round 1 (60% of the time you were seen) "
+                                         "and least in round 2 (25%).")
+        report["metrics"]["A"]["numbers"]["rounds"] = {"1": {"seen_seconds": 100.0, "centre_seconds": 60.0}}
+        report["metrics"]["B"]["numbers"]["rounds"] = {}
+        self.assertIsNone(movement_graphs.build(report, "A")["by_round"])
+
+    def test_the_opponents_guard_is_drawn_over_yours(self):
+        guard = movement_graphs.build(_report(), "A")["guard"]
+        self.assertTrue(guard["theirs"])
+
+
+class PressureAndDistanceTests(unittest.TestCase):
+    """Pressure and distance over time (2026-10-12)."""
+
+    def test_series_stores_distance_and_pressure_per_point(self):
+        points = over_time(_samples(30), [0.2] * 150)["points"]
+        self.assertEqual({p["distance"] for p in points}, {1.2})
+        self.assertEqual({p["pressure"] for p in points}, {0.9})
+
+    def test_a_point_with_too_few_readings_is_a_gap(self):
+        samples = _samples(30)
+        for item in samples[:30]:
+            item["gap"] = None
+            item["toward"] = None
+        points = over_time(samples, [0.2] * len(samples))["points"]
+        self.assertIsNone(points[0]["distance"])
+        self.assertIsNone(points[0]["pressure"])
+
+    def test_graphs_for_both_pressures_and_the_shared_distance(self):
+        graphs = movement_graphs.build(_report(), "A")
+        self.assertEqual(set(graphs["pressure"]["lines"]), {"A", "B"})
+        self.assertIn("walking your opponent down in 100%", graphs["pressure"]["read"])
+        self.assertTrue(graphs["distance"]["lines"])
+        self.assertEqual(graphs["distance"]["top"], 2.5)
+        self.assertIn("1.2 body lengths apart", graphs["distance"]["read"])
+
+    def test_an_older_report_without_the_new_keys_draws_neither(self):
+        report = _report()
+        for side in ("A", "B"):
+            for point in report["metrics"][side]["numbers"]["series"]["points"]:
+                point.pop("distance", None)
+                point.pop("pressure", None)
+        graphs = movement_graphs.build(report, "A")
+        self.assertIsNone(graphs["pressure"])
+        self.assertIsNone(graphs["distance"])
+
+
+class ReviewFixTests(unittest.TestCase):
+    """Fixes from the 2026-10-12 review."""
+
+    def test_an_unmeasured_centre_is_no_bar_not_zero_percent(self):
+        report = _report()
+        for side in ("A", "B"):
+            report["metrics"][side]["numbers"]["rounds"] = {
+                "1": {"seen_seconds": 100.0, "centre_seconds": None},
+                "2": {"seen_seconds": 80.0, "centre_seconds": None}}
+        self.assertIsNone(movement_graphs.build(report, "A")["by_round"])
+
+    def test_pressure_ignores_a_fighter_standing_still(self):
+        samples = _samples(30, speed=lambda t: 0.05)       # jitter, not movement
+        points = over_time(samples, [0.2] * len(samples))["points"]
+        self.assertEqual({p["pressure"] for p in points}, {None})
+
+    def test_the_range_line_is_the_reports_own_close_distance(self):
+        from core.fight_numbers import CLOSE_RANGE
+        distance = movement_graphs.build(_report(), "A")["distance"]
+        self.assertEqual(distance["close_range"], CLOSE_RANGE)
+
+
+class CompareNewGraphsTests(unittest.TestCase):
+    def test_pressure_and_distance_side_by_side_on_one_distance_scale(self):
+        first, second = _report(), _report()
+        for point in second["metrics"]["A"]["numbers"]["series"]["points"]:
+            point["distance"] = 3.0
+        cg = movement_graphs.compare([first, second], ["A", "A"], [False, False])
+        self.assertEqual([c["label"] for c in cg["pressure"]], ["Fight 1", "Fight 2"])
+        self.assertEqual([c["label"] for c in cg["distance"]], ["Fight 1", "Fight 2"])
+        self.assertEqual(cg["distance_top"], 3.0)      # shared: the larger of the two
+
+    def test_older_reports_without_the_series_keys_show_neither(self):
+        reports = [_report(), _report()]
+        for report in reports:
+            for point in report["metrics"]["A"]["numbers"]["series"]["points"]:
+                point.pop("distance", None)
+                point.pop("pressure", None)
+        cg = movement_graphs.compare(reports, ["A", "A"], [False, False])
+        self.assertEqual((cg["pressure"], cg["distance"]), ([], []))

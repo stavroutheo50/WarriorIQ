@@ -117,6 +117,13 @@ class Settings:
     # 1920 is worse, not better: the peaks do not improve and it adds a tail of
     # 0.12 to 0.19 detections for the tracker to trip over.
     low_resolution_imgsz: int = int(os.getenv("WARRIORIQ_LOW_RES_IMGSZ", "1600"))
+    # Measured 2026-10-12, UFC 326 round 1 (480x220, imgsz 1600, stride
+    # pinned): lowering this to BoT-SORT's own track_low_thresh (0.08), so
+    # the tracker could keep a fighter through a tangle on low-confidence
+    # boxes, did not add a single frame with both fighters boxed (722 -> 723),
+    # found no more ground control, and put fighter A's box on somebody in a
+    # shirt - the referee or the crowd - 15.2% of the time instead of 8.5%.
+    # Kept at 0.20.
     detection_conf: float = float(os.getenv("WARRIORIQ_DET_CONF", "0.20"))
     # Refuse joint positions no body could reach between two sampled frames.
     # The pose model fails by returning a confident wrong skeleton rather than
@@ -362,6 +369,11 @@ class Settings:
     # separates him is what he is wearing. See core/referee.py for why this
     # feature is deliberately four numbers wide and per-federation.
     referee_filter_enabled: bool = env_bool("WARRIORIQ_REFEREE_FILTER", True)
+    # Refuse an upright, clothed person as a fighter when both selected
+    # fighters are bare-chested (an official in black, as in the UFC, whom the
+    # uniform probe cannot recognise). Stands down by itself otherwise. See
+    # core/referee.py looks_like_a_clothed_official.
+    clothed_official_filter_enabled: bool = env_bool("WARRIORIQ_CLOTHED_OFFICIAL_FILTER", True)
     referee_probe_path: str = os.getenv(
         "WARRIORIQ_REFEREE_PROBE", "models/referee_probe.npz").strip()
     # Was 0.50, on the reasoning that "the official scores 0.56 to 0.997 and

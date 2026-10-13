@@ -8,6 +8,7 @@ import numpy as np
 from core.config import SETTINGS
 from core.reid import pool as reid_pool
 from core.reid import similarity as reid_similarity
+from core.referee import BARE_TORSO_MIN, looks_like_a_clothed_official
 from core.types import FighterState, PersonObservation
 
 
@@ -240,6 +241,11 @@ class IdentityManager:
         # changed or the box jumped. See SETTINGS.max_suspicious_handoffs_per_minute.
         self.suspicious_handoffs = {"A": 0, "B": 0}
         self._last_real_obs: dict[str, tuple | None] = {"A": None, "B": None}
+        # Both fighters bare-chested at selection, so an upright clothed
+        # person is the official. See core/referee.py.
+        self.clothed_official_filter = bool(
+            SETTINGS.clothed_official_filter_enabled
+            and all(o.torso_skin is not None and o.torso_skin >= BARE_TORSO_MIN for o in (initial_a, initial_b)))
         # A and B put back the right way round. See _correct_swap.
         self.swaps_corrected = 0
         self._cross_match = 0.0
@@ -534,6 +540,11 @@ class IdentityManager:
                 and candidate.referee_prob is not None
                 and candidate.referee_prob >= SETTINGS.min_referee_probability):
             return self._refuse(state, "referee")
+        # An official the uniform probe does not know - the UFC dresses them
+        # in black - is still the only upright person on the canvas wearing a
+        # shirt when both fighters are bare-chested.
+        if self.clothed_official_filter and looks_like_a_clothed_official(candidate):
+            return self._refuse(state, "clothed_official")
         # The same question for an official in no recognisable uniform: is this
         # somebody already seen standing beside the two fighters?
         if SETTINGS.bystander_memory and self._looks_like_a_bystander(state, candidate, anchor):
@@ -981,6 +992,13 @@ class IdentityManager:
     _FOLLOWED_FIELDS = ("current_track_id", "last_box", "prev_box", "velocity", "last_keypoints",
                         "appearance", "pose_signature", "identity_confidence", "missing_frames",
                         "last_seen_source_frame")
+
+    def decide_clothed_official_filter(self, skin_a: float | None, skin_b: float | None) -> None:
+        """Set the clothed-official filter from the torso skin measured where the fighters were picked."""
+        self.clothed_official_filter = bool(
+            SETTINGS.clothed_official_filter_enabled
+            and skin_a is not None and skin_b is not None
+            and skin_a >= BARE_TORSO_MIN and skin_b >= BARE_TORSO_MIN)
 
     def _correct_swap(self, a_obs: PersonObservation | None,
                       b_obs: PersonObservation | None) -> tuple[PersonObservation | None, PersonObservation | None]:

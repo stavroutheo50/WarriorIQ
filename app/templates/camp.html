@@ -232,6 +232,24 @@
 
 <section class="card progress-trend"><div class="eyebrow">Your movement</div><h2>{{progress.trend_label}} trend</h2><svg class="progress-chart" id="movementChart" viewBox="0 0 640 230" role="img" aria-label="{{progress.trend_label}} across saved fights"></svg><div class="chart-legend"><span><i class="legend-dot"></i>{{progress.trend_label}}</span><span>{% if progress.trend_key == 'coverage' %}How clearly you were seen, not how well you fought{% else %}Only supported measurements are plotted{% endif %}</span></div></section>
 
+{% if progress.cards %}
+<section class="card trend-cards-card" data-reveal>
+  <div class="eyebrow">Every measure, fight by fight</div>
+  <h2>How you are changing</h2>
+  <p class="muted small">Each line is one measure across your fights, oldest on the left. The number is your latest fight; the change is since your first fight with that measure. Only fights where WarriorIQ could tell who was who count.</p>
+  <div class="trend-cards">
+    {% for card in progress.cards %}
+    <article class="trend-card" data-direction="{{ card.direction }}">
+      <header><span>{{ card.label }}</span><b class="wiq-num">{{ card.latest }}</b></header>
+      <svg viewBox="0 0 {{ progress.card_width|int }} {{ progress.card_height|int }}" preserveAspectRatio="none" role="img" aria-label="{{ card.label }} across {{ card.fights }} fights: from {{ card.first }} to {{ card.latest }}"><polyline points="{{ card.line }}" pathLength="1"/><circle cx="{{ card.last_x }}" cy="{{ card.last_y }}" r="2.5"/></svg>
+      <footer><i class="trend-change">{{ card.change }}</i><small>{{ card.fights }} fights &middot; from {{ card.first }}</small></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% if progress.cards|selectattr('key', 'equalto', 'pressure')|list %}<p class="muted small">Pressure is out of 100: 0 is always backing straight off, 50 is neither, 100 is always walking straight in. Footwork is body lengths a second. Pressure, going forward and close range are style, so they get no green or red: only you and your coach know which way you want them to move.</p>{% endif %}
+</section>
+{% endif %}
+
 {# Recent fights as something you can scan and open. Every fight, with all
    its numbers, is in the library. #}
 <section class="card recent-fights">

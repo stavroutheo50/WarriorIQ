@@ -831,6 +831,8 @@
 .graph-base{stroke:rgba(255,255,255,.18);stroke-width:1;vector-effect:non-scaling-stroke}
 .graph-line{fill:none;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .graph-line.mine{stroke:var(--mine)}.graph-line.theirs{stroke:var(--theirs);opacity:.75}
+.graph-line.distance{stroke:#e0a43a}
+.graph-range{stroke:rgba(255,255,255,.35);stroke-width:1;stroke-dasharray:4 4;vector-effect:non-scaling-stroke}
 .guard-bar{fill:#3fb68b}.guard-track{fill:rgba(255,255,255,.07)}
 .graph-axis{display:flex;justify-content:space-between;margin-top:4px;color:#8595b1;font-size:12px}
 .graph-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:22px}
@@ -844,6 +846,33 @@
 .fight-numbers{grid-template-columns:minmax(0,1fr)}
 .fight-numbers .numbers-section-heading{flex-wrap:wrap}
 .stack-key li,.fight-graphs .stack-key li{border:0;padding:0}
+.key-guard{background:#3fb68b}
+/* Round by round (core/movement_graphs.by_round). */
+.round-row{display:grid;grid-template-columns:minmax(64px,110px) 1fr;align-items:center;gap:10px;margin:8px 0}
+.round-bars{display:grid;gap:4px}
+.round-bar{position:relative;display:flex;align-items:center;height:18px;border-radius:5px;background:rgba(255,255,255,.06);overflow:hidden}
+.round-bar b{position:relative;margin-left:8px;font-size:12px;font-weight:700}
+.round-bar small{margin-left:8px;font-size:12px}
+.round-fill{position:absolute;inset:0 auto 0 0;width:var(--w)}
+.round-fill.mine{background:color-mix(in srgb,var(--mine) 80%,transparent)}
+.round-fill.theirs{background:color-mix(in srgb,var(--theirs) 80%,transparent)}
+/* Your fight on one line (core/movement_graphs.highlights). */
+.moment-tl{position:relative;height:84px;margin-top:6px;border:1px solid var(--wiq-edge);border-radius:12px;background:rgba(255,255,255,.015);overflow:hidden}
+.moment-mid{position:absolute;left:0;right:0;top:50%;height:1px;background:var(--wiq-edge-strong)}
+.moment-round{position:absolute;top:0;bottom:0;border-right:1px dashed var(--wiq-edge-strong);background:rgba(255,255,255,.02);font-size:12px;color:var(--wiq-text-tertiary);padding:3px 4px}
+.moment-mark{position:absolute;width:9px;height:22px;border-radius:4px;transform:translateX(-50%)}
+.moment-mark.good{top:12px;background:#3fb68b}
+.moment-mark.bad{bottom:12px;background:#e0a43a}
+.moment-mark:hover,.moment-mark:focus-visible{outline:2px solid #fff;outline-offset:1px}
+.moment-down{position:absolute;top:50%;transform:translate(-50%,-50%);color:#fff;font-size:13px;line-height:1;text-decoration:none}
+.moment-list{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0;padding:0;list-style:none}
+.moment-list li{border:0;padding:0}
+.moment-all{margin-top:10px}
+.moment-all summary{cursor:pointer;font-size:13px;color:#9aa8bd}
+.moment-chip{display:inline-flex;gap:6px;align-items:center;padding:5px 9px;border-radius:999px;border:1px solid var(--wiq-edge);font-size:12px;text-decoration:none;color:inherit}
+.moment-chip.good{border-color:color-mix(in srgb,#3fb68b 55%,transparent)}
+.moment-chip.bad{border-color:color-mix(in srgb,#e0a43a 55%,transparent)}
+.moment-chip b{font-size:12px}
 
 /* The graphs build themselves as they scroll into view (2026-10-11): bars
    grow, lines draw, guard bars rise. motion.js marks the section
@@ -856,6 +885,10 @@
   .fight-graphs.wiq-reveal:not(.is-visible) .graph-line{stroke-dashoffset:1}
   .fight-graphs .guard-bar{transform-box:fill-box;transform-origin:50% 100%;transition:transform .45s cubic-bezier(.2,.7,.2,1) calc(var(--i,0)*18ms)}
   .fight-graphs.wiq-reveal:not(.is-visible) .guard-bar{transform:scaleY(0)}
+  .fight-graphs .round-fill{transition:width .6s cubic-bezier(.2,.7,.2,1) calc(var(--i,0)*90ms)}
+  .fight-graphs.wiq-reveal:not(.is-visible) .round-fill{width:0}
+  .fight-graphs .moment-mark{transition:transform .35s cubic-bezier(.2,.7,.2,1) calc(var(--i,0)*25ms),opacity .35s ease calc(var(--i,0)*25ms)}
+  .fight-graphs.wiq-reveal:not(.is-visible) .moment-mark{transform:translateX(-50%) scaleY(0);opacity:0}
 }
 
 /* The two fights in graphs (compare.html #compare-graphs). */
@@ -880,3 +913,28 @@
    page-title size. The page's own h1 ("Fight report") is unaffected. */
 main:has(.result-title) section h2,
 main:has(.result-title) .section-title h2{font-size:clamp(22px,2.4vw,30px);line-height:1.15;letter-spacing:-.02em}
+
+/* Movement scorecard: who had more of each round, as a split bar above the
+   numbers (fighter A red from the left, fighter B blue). */
+.split-bar{display:block;width:100%;min-width:72px;height:8px;margin:2px 0 4px;border-radius:4px;background:#5b8ff0;overflow:hidden}
+.split-bar i{display:block;height:100%;width:var(--a);background:#d9545e}
+
+/* Fight Camp: every measure, fight by fight (core/progress_insights.trend_cards). */
+.trend-cards-card{margin-top:16px}
+.trend-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+@media(min-width:900px){.trend-cards{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.trend-card{padding:12px;border:1px solid var(--wiq-edge);border-radius:12px;background:rgba(255,255,255,.02)}
+.trend-card header{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.trend-card header span{font-size:13px;font-weight:700}
+.trend-card header b{font-size:20px}
+.trend-card svg{display:block;width:100%;height:40px;margin:6px 0;overflow:visible}
+.trend-card polyline{fill:none;stroke:#7fb1ff;stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.trend-card circle{fill:#7fb1ff}
+.trend-card footer{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--wiq-text-tertiary)}
+.trend-change{font-style:normal;font-weight:700;color:var(--wiq-text-secondary)}
+.trend-card[data-direction="up"] .trend-change{color:var(--wiq-success)}
+.trend-card[data-direction="down"] .trend-change{color:var(--wiq-warning)}
+@media (prefers-reduced-motion:no-preference){
+  .trend-cards-card polyline{stroke-dasharray:1;stroke-dashoffset:0;transition:stroke-dashoffset .9s ease-out .1s}
+  .trend-cards-card.wiq-reveal:not(.is-visible) polyline{stroke-dashoffset:1}
+}
