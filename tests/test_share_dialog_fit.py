@@ -24,3 +24,16 @@ def test_it_opens_at_the_top_on_its_title():
     assert "dialog.showModal();" in opener
     assert opener.index("dialog.showModal();") < opener.index("dialog.scrollTop = 0;")
     assert 'title.focus({ preventScroll: true })' in opener
+
+
+def test_it_opens_outside_the_closed_fold_and_is_never_faded_out():
+    # 2026-10-13: the dialog sat inside the folded "See all the details" and
+    # was faded out by the scroll reveal; opened as a modal it was invisible
+    # (0x0, opacity 0) and froze every button on the report. Measured after:
+    # 420x868 at 1280, opacity 1, and the page clickable again after Close.
+    js = (STATIC / "share_card.js").read_text(encoding="utf-8")
+    opener = js.split('open.addEventListener("click", function () {', 1)[1].split("dialog.showModal();", 1)[0]
+    assert "document.body.appendChild(dialog)" in opener
+    assert 'dialog.classList.remove("wiq-reveal")' in opener
+    motion = (STATIC / "motion.js").read_text(encoding="utf-8")
+    assert "element.tagName!=='DIALOG'" in motion

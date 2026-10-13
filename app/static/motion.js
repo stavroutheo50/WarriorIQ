@@ -19,7 +19,9 @@
 
   const revealTargets=[...document.querySelectorAll('[data-reveal],.trust-panel,.analysis-quality,.performance-card,#report-scorecard,#report-coaching>*,#report-training>*,.replay-callout,.fighter-comparison,.tactical-performance,.outcome-evidence,.simple-rounds')];
   document.querySelectorAll('[data-motion-sequence]').forEach(sequence=>{
-    [...sequence.children].forEach((element,index)=>{
+    // Not dialogs: a pop-up never scrolls into view, so it stayed at opacity 0
+    // and, opened as a modal, froze every button on the report (2026-10-13).
+    [...sequence.children].filter(element=>element.tagName!=='DIALOG').forEach((element,index)=>{
       element.dataset.motionSequenceItem='true';
       element.style.setProperty('--wiq-reveal-order',String(Math.min(index,4)));
       revealTargets.push(element);

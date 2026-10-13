@@ -230,6 +230,11 @@ class SamRecovery:
         self.failure_reason = None
         self.continuous_frames = 0
         self.continuous_failure_reason = None
+        # Where the sweep's time goes (2026-10-13): on an RTX 5060 it took
+        # 0.23 s a frame, more than the 0.173 s the stride planner assumes,
+        # and the report could not say whether decoding, SAM2's own frame
+        # loading, the propagation or copying masks back was the cost.
+        self.sweep_seconds = {"decoding": 0.0, "loading_frames": 0.0, "propagation": 0.0, "mask_to_box": 0.0}
         # Seconds spent getting a predictor onto the card this run, every
         # load included (core/analyzer.py stage_seconds).
         self.load_seconds = 0.0
@@ -333,12 +338,17 @@ class SamRecovery:
     def _propagate_clip(self, clip, source_frames, seeds, tracks,
                         progress_callback, completed, total) -> None:
         """Run one chunk and carry its last good boxes forward as the next seed."""
+        timing = self.sweep_seconds
+        loading_started = time.perf_counter()
         state = self.predictor.init_state(
             video_path=clip,
             offload_video_to_cpu=True,
             offload_state_to_cpu=False,
             async_loading_frames=False,
         )
+        timing["loading_frames"] += time.perf_counter() - loading_started
+        propagation_started = time.perf_counter()
+        boxing = 0.0
         try:
             self.predictor.reset_state(state)
             for object_id, name in ((1, "A"), (2, "B")):
@@ -354,10 +364,12 @@ class SamRecovery:
                     if not (0 <= int(frame_index) < len(source_frames)):
                         continue
                     guided: dict[str, np.ndarray] = {}
+                    boxing_started = time.perf_counter()
                     for j, object_id in enumerate(object_ids):
                         box = self._mask_to_box((mask_logits[j] > 0.0).detach().cpu().numpy())
                         if box is not None:
                             guided["A" if int(object_id) == 1 else "B"] = box
+                    boxing += time.perf_counter() - boxing_started
                     if guided:
                         tracks[source_frames[int(frame_index)]] = guided
                         last_guided = guided
@@ -367,6 +379,10 @@ class SamRecovery:
                 if name in last_guided:
                     seeds[name] = last_guided[name]
         finally:
+            # The first .cpu() of a frame waits for the GPU, so "mask_to_box"
+            # includes that frame's GPU work; "propagation" is the rest.
+            timing["mask_to_box"] += boxing
+            timing["propagation"] += time.perf_counter() - propagation_started - boxing
             try:
                 self.predictor.reset_state(state)
             except Exception:
@@ -400,6 +416,7 @@ class SamRecovery:
             return {}
         _install_in_memory_loader()
         _silence_progress_bar()
+        self.sweep_seconds = {key: 0.0 for key in self.sweep_seconds}
         start_frame, end_frame = int(start_frame), int(end_frame)
         stride = sam_sampling_stride(source_fps, end_frame - start_frame)
         chunk_frames = max(1, SETTINGS.sam_continuous_chunk_frames)
@@ -423,6 +440,7 @@ class SamRecovery:
             clip = None
             chunk_sources: list[int] = []
             while source < end_frame:
+                decoding_started = time.perf_counter()
                 ok, frame = cap.read()
                 if not ok or frame is None:
                     break
@@ -435,6 +453,8 @@ class SamRecovery:
                     clip.add(frame)
                     chunk_sources.append(source)
                     saved += 1
+                self.sweep_seconds["decoding"] += time.perf_counter() - decoding_started
+                if (source - start_frame) % stride == 0:
                     if clip.full:
                         self._propagate_clip(clip, chunk_sources, seeds, tracks,
                                              progress_callback, completed, expected)
