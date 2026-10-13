@@ -1229,6 +1229,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         ),
     )
     sam_was_available = sam_recovery.available
+    sam_sweep_breakdown = dict(getattr(sam_recovery, "sweep_seconds", {}) or {})
+    sam_sweep_frames = int(getattr(sam_recovery, "continuous_frames", 0) or 0)
     sam_recovery.release()
     sam_sweep_seconds = time.perf_counter() - sweep_start
     # The bar reserves 0-35% for SAM2. Without a GPU SAM2 is skipped at once,
@@ -1245,8 +1247,12 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # inside PoseTracker.track; "other" is whatever the named steps leave.
     pose_tracker.timing = {"pose_model": 0.0, "appearance": 0.0}
     pose_tracker.prepared_seconds_used = 0.0
+    # The last three were "other" until 2026-10-13: on an RTX 5060 "other" was
+    # 0.027-0.049 s of a 0.093 s frame, against 0.004 s on a CPU worker, and
+    # nothing said which part of the loop it was.
     step_seconds = {"reading_video": 0.0, "missing_fighter_search": 0.0,
-                    "identity": 0.0, "joint_refinement": 0.0}
+                    "identity": 0.0, "joint_refinement": 0.0,
+                    "pose_measures": 0.0, "strike_detection": 0.0, "tracking_file": 0.0}
 
     fallback_buffer_enabled = _fallback_buffer_needed(sam_tracks, sam_was_available)
     frame_buffer: deque[tuple[int, np.ndarray]] = deque(maxlen=max(SETTINGS.sam_buffer_frames + 4, 24))
@@ -1516,6 +1522,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             # one collapsed skeleton corrupts guard, balance, centre and travel
             # at once; identity above keeps the raw observation, because its
             # job is deciding who this is rather than measuring them.
+            measures_started = time.perf_counter()
             if joint_gate is not None:
                 joint_gate.apply("A", seconds, fighter_a)
                 joint_gate.apply("B", seconds, fighter_b)
@@ -1524,6 +1531,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             defense_engine.update_pose("B", source_frame, seconds, fighter_b)
 
             presence.observe(seconds, fighter_a, fighter_b, people)
+            strikes_started = time.perf_counter()
+            step_seconds["pose_measures"] += strikes_started - measures_started
             if active_selected_round:
                 active_analyzed_frames += 1
                 # Measured once the whole fight is classified, so footage that
@@ -1564,6 +1573,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 action_engine.interrupt("A")
                 action_engine.interrupt("B")
 
+            measures_started = time.perf_counter()
+            step_seconds["strike_detection"] += measures_started - strikes_started
             if live_action_trusted and not action_engine.temporal.available:
                 live_action_trusted = False
                 classifier["custom_temporal_checkpoint_loaded"] = False
@@ -1583,6 +1594,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             down_watch.observe(seconds, people, fighter_a, fighter_b)
             round_detector.observe(seconds, _pair_separation(fighter_a, fighter_b))
             kit_attribution.observe(seconds, frame, fighter_a, fighter_b)
+            file_started = time.perf_counter()
+            step_seconds["pose_measures"] += file_started - measures_started
 
             if tracking_file is not None:
                 record = {
@@ -1604,6 +1617,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                     },
                 }
                 tracking_file.write(json.dumps(record) + "\n")
+            step_seconds["tracking_file"] += time.perf_counter() - file_started
 
             processed_seconds = min(segment_duration, max(0.0, seconds - req.start_seconds))
             elapsed = time.perf_counter() - wall_start
@@ -1981,6 +1995,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # frame. Loading models and building the report are the rest of
         # analysis_seconds.
         "sam_sweep_seconds": round(sam_sweep_seconds, 2),
+        # Inside the sweep (core/sam_recovery.py SamRecovery.sweep_seconds), and
+        # how many frames it sampled, so seconds per SAM frame can be read off.
+        "sam_sweep_breakdown": {key: round(value, 2) for key, value in sam_sweep_breakdown.items()},
+        "sam_sweep_frames": sam_sweep_frames,
         "frame_pass_seconds": round(frame_pass_seconds, 2),
         "frame_pass_seconds_per_frame": (round(frame_pass_seconds / analyzed_frames, 4)
                                          if analyzed_frames else None),
