@@ -585,6 +585,40 @@ def record_worker_heartbeat(worker_id: str, current_job_id: str | None = None) -
         LOGGER.error("worker_heartbeat_write_failed worker_id=%s error=%s", worker_id, type(exc).__name__)
 
 
+_WORKER_REFUSAL_FILE = "worker_refusal.json"
+
+
+def record_worker_refusal(worker_id: str, reason: str) -> None:
+    """A worker asked for a fight and was turned away for running other code."""
+    try:
+        (OUTPUTS / _WORKER_REFUSAL_FILE).write_text(json.dumps(
+            {"worker_id": worker_id, "reason": reason, "at_epoch": time.time()}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def recent_worker_refusal(max_age_seconds: float = 120.0) -> dict | None:
+    """The last refusal, if a worker was turned away in the last two minutes.
+
+    A refused worker still heartbeats, so without this a fight waiting on it
+    looked like a fight with a worker about to start it, and the owner's
+    "no worker" alert never fired.
+    """
+    try:
+        payload = json.loads((OUTPUTS / _WORKER_REFUSAL_FILE).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    at = float(payload.get("at_epoch", 0.0) or 0.0)
+    return payload if at and time.time() - at <= max_age_seconds else None
+
+
+def clear_worker_refusal() -> None:
+    try:
+        (OUTPUTS / _WORKER_REFUSAL_FILE).unlink()
+    except OSError:
+        pass
+
+
 def worker_status_heartbeat_age() -> float | None:
     """Seconds since the last worker heartbeat, or None when there has been none."""
     try:

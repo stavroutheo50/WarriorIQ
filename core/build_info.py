@@ -65,8 +65,33 @@ def build_commit() -> str:
     return commit if result.returncode == 0 and commit else "unknown"
 
 
+@lru_cache(maxsize=1)
+def analysis_fingerprint() -> str:
+    """A hash of the analysis code itself: every file in core/.
+
+    ANALYSIS_VERSION only moves when somebody remembers to raise it, and it was
+    not raised through a week of changes to what an analysis measures - strike
+    counts, re-crediting by shorts, timing - so a worker running a copy of the
+    code from before them passed the check (2026-10-13: a worker run from a
+    separate folder, reporting "commit unknown"). The fingerprint needs nobody
+    to remember: any difference in core/ between the web app and the worker
+    and the worker gets no fights until both run the same code.
+
+    Line endings are normalised, so a Windows checkout and a Linux host of the
+    same commit agree.
+    """
+    import hashlib
+
+    digest = hashlib.sha256()
+    for path in sorted((ROOT / "core").glob("*.py")):
+        digest.update(path.name.encode("utf-8") + b"\0")
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n") + b"\0")
+    return digest.hexdigest()[:16]
+
+
 def stamp() -> dict:
-    return {"analysis_version": ANALYSIS_VERSION, "commit": build_commit()}
+    return {"analysis_version": ANALYSIS_VERSION, "commit": build_commit(),
+            "fingerprint": analysis_fingerprint()}
 
 
 def engine_name(report: dict | None) -> str:
