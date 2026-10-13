@@ -827,9 +827,22 @@
 .part-circling_seconds{background:var(--circ)}.part-standing_seconds{background:var(--still)}
 .part-close{background:var(--close)}.part-middle{background:var(--mid)}.part-long{background:var(--far)}
 .key-mine{background:var(--mine)}.key-theirs{background:var(--theirs)}
-.line-graph,.bar-graph{display:block;width:100%;height:130px;overflow:visible}
+.line-graph,.bar-graph{display:block;width:100%;height:200px;overflow:visible}
+@media(max-width:620px){.line-graph,.bar-graph{height:170px}}
+/* Scale on the left, minute marks underneath (2026-10-13). */
+.graph-frame{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;margin-top:6px}
+.graph-unit{grid-column:1/-1;margin:0 0 6px;color:#9aa8bd;font-size:12px;font-weight:700;letter-spacing:.02em}
+.graph-y{display:flex;flex-direction:column;justify-content:space-between;height:200px;min-width:28px;color:#8595b1;font-size:12px;text-align:right;line-height:1}
+.graph-y span:first-child{transform:translateY(-2px)}.graph-y span:last-child{transform:translateY(2px)}
+@media(max-width:620px){.graph-y{height:170px}}
+.graph-plot{position:relative;padding-bottom:22px}
+.graph-grid{stroke:rgba(255,255,255,.08);stroke-width:1;vector-effect:non-scaling-stroke}
+.graph-ticks{position:absolute;left:0;right:0;bottom:0;height:18px;color:#8595b1;font-size:12px}
+.graph-ticks span{position:absolute;left:var(--x);transform:translateX(-50%);white-space:nowrap}
+.graph-ticks span:first-child{transform:none}.graph-ticks span:last-child{transform:translateX(-100%)}
+.graph-marker{position:absolute;right:4px;bottom:calc(22px + (100% - 22px) * var(--y) / 100);color:#c5cfdd;font-size:12px;background:rgba(10,14,22,.7);padding:0 4px;border-radius:3px;transform:translateY(-2px)}
 .graph-base{stroke:rgba(255,255,255,.18);stroke-width:1;vector-effect:non-scaling-stroke}
-.graph-line{fill:none;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.graph-line{fill:none;stroke-width:3;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .graph-line.mine{stroke:var(--mine)}.graph-line.theirs{stroke:var(--theirs);opacity:.75}
 .graph-line.distance{stroke:#e0a43a}
 .graph-range{stroke:rgba(255,255,255,.35);stroke-width:1;stroke-dasharray:4 4;vector-effect:non-scaling-stroke}
@@ -938,3 +951,7 @@ main:has(.result-title) .section-title h2{font-size:clamp(22px,2.4vw,30px);line-
   .trend-cards-card polyline{stroke-dasharray:1;stroke-dashoffset:0;transition:stroke-dashoffset .9s ease-out .1s}
   .trend-cards-card.wiq-reveal:not(.is-visible) polyline{stroke-dashoffset:1}
 }
+/* The recording notes, folded under the six numbers (2026-10-13). */
+.recording-notes{margin:12px 0 4px}
+.recording-notes summary{cursor:pointer;color:#c5cfdd;font-size:14px;font-weight:600}
+.recording-notes[open] summary{margin-bottom:8px}

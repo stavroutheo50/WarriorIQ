@@ -341,3 +341,18 @@ class CompareNewGraphsTests(unittest.TestCase):
                 point.pop("pressure", None)
         cg = movement_graphs.compare(reports, ["A", "A"], [False, False])
         self.assertEqual((cg["pressure"], cg["distance"]), ([], []))
+
+
+class TicksTests(unittest.TestCase):
+    def test_every_minute_on_a_five_minute_round(self):
+        from core.movement_graphs import ticks
+
+        marks = ticks(0.0, 300.0)
+        self.assertEqual([m["clock"] for m in marks], ["0:00", "1:00", "2:00", "3:00", "4:00", "5:00"])
+        self.assertEqual(marks[2]["pct"], 40.0)
+
+    def test_closer_marks_on_a_short_clip_and_no_crowding_at_the_end(self):
+        from core.movement_graphs import ticks
+
+        self.assertEqual([m["clock"] for m in ticks(0.0, 94.0)], ["0:00", "0:30", "1:00", "1:34"])
+        self.assertEqual([m["clock"] for m in ticks(10.0, 70.0)], ["0:10", "0:30", "0:45", "1:00", "1:10"])

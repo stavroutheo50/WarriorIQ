@@ -816,7 +816,9 @@ def test_d11_precheck_warns_about_low_light_and_same_kit():
 
 def test_d12_secondary_report_sections_fold_on_phones_and_settings_pages():
     page = (TEMPLATES / "result.html").read_text(encoding="utf-8")
-    assert page.count("data-phone-fold open") >= 3
+    # The graphs stay open on phones since 2026-10-13; the comparison and
+    # every number still fold.
+    assert page.count("data-phone-fold open") >= 2
     assert "matchMedia('(max-width: 700px)')" in page
     settings = (TEMPLATES / "settings.html").read_text(encoding="utf-8")
     assert 'data-page-size="10"' in settings
