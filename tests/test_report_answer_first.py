@@ -142,6 +142,26 @@ class StrikeStripTests(unittest.TestCase):
         self.assertIn("Estimates, counted automatically", page)
         self.assertNotIn("knee", page[strip:page.index('id="fix-first"')])
 
+    def test_estimated_outcomes_show_with_the_unclear_count(self):
+        """2026-10-14 (owner request): landed/missed/blocked as estimates, never accuracy."""
+        from tests_support import render_result
+
+        report = json.loads((ROOT / "tests" / "fixtures" / "report_sample.json").read_text(encoding="utf-8"))
+        report.update(_report())
+        estimated = {"landed": 15, "missed": 21, "blocked": 2, "evaded": 0, "uncertain": 15}
+        report["statistics"] = {"fighters": {
+            "A": {"attempts": 53, "punch_attempts": 37, "kick_attempts": 14, "estimated": estimated},
+            "B": {"attempts": 56, "punch_attempts": 36, "kick_attempts": 18, "estimated": estimated}}}
+        page = render_result(report=report, numbers={"state": "ok"}, job_id="abc",
+                             strike_counts_published=True, families_shown=("punch", "kick"))
+        strip = page[page.index('id="strikeStrip"'):page.index('id="fix-first"')]
+        self.assertIn("~15 landed &middot; 21 missed &middot; 2 blocked &middot; 15 unclear", strip)
+        self.assertNotIn("evaded", strip)
+        self.assertIn("no accuracy is given", strip)
+
+    def test_no_estimated_outcomes_on_older_reports(self):
+        self.assertNotIn("unclear", self._page()[:self._page().index('id="fix-first"')])
+
     def test_no_strip_when_counts_are_not_published_or_unverified(self):
         self.assertNotIn('id="strikeStrip"', self._page(strike_counts_published=False))
         self.assertNotIn('id="strikeStrip"', self._page(numbers={"state": "unverified"}))

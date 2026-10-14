@@ -105,6 +105,19 @@ def _combination_sequences(events: list[dict]) -> dict[str, list[dict]]:
     return sequences
 
 
+def _estimated_outcomes(events: list[dict]) -> dict[str, int] | None:
+    """The detector's unchecked landed/missed/blocked/evaded calls, counted.
+
+    Shown as estimates beside the strikes it could not call ("uncertain"),
+    never as accuracy and never in the landed/missed fields, which stay for
+    validated outcomes. None for reports made before strikes carried it.
+    """
+    if not events or not all("estimated_outcome" in item for item in events):
+        return None
+    counts = Counter(normalize_outcome(item.get("estimated_outcome")) for item in events)
+    return {outcome: int(counts[outcome]) for outcome in OUTCOMES}
+
+
 def _family_summary(events: list[dict], trusted: bool) -> dict:
     counts = Counter(normalize_outcome(item.get("outcome")) for item in events)
     attempts = len(events)
@@ -133,6 +146,7 @@ def _family_summary(events: list[dict], trusted: bool) -> dict:
             "uncertain": None,
             "accuracy": None,
             "evidence": {},
+            "estimated": _estimated_outcomes(events),
         }
     return {
         "attempts": attempts,
@@ -240,6 +254,7 @@ def summarize_fight_events(
             "observation_coverage": coverage[fighter],
             "families": {"punch": punch, "kick": kick, "knee": knee},
             "evidence": overall["evidence"],
+            "estimated": overall.get("estimated"),
             # Compatibility names used by the earlier report surfaces.
             "clean": overall["landed"],
             "blocked_or_checked": overall["blocked"],

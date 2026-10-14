@@ -872,6 +872,23 @@ class Settings:
     max_suspicious_handoffs_per_minute: float = float(
         os.getenv("WARRIORIQ_MAX_SUSPICIOUS_HANDOFFS_PER_MINUTE", "12")
     )
+    # Above that limit, but not far above it, a fighter still passes - marked
+    # lower confidence - when the analysis can show it stayed on the people
+    # who fought: the boxes sat on each of the two people who moved like
+    # fighters (core/fighter_suggest.py followed_share) at least this share
+    # of the time. Hand-offs land a track on spectators; this measures exactly
+    # that, independently of the hand-off count.
+    #
+    # 2026-10-14, Athens hall, handheld phone, 3:17: B read 14.9 suspicious
+    # hand-offs a minute and was withheld, yet followed_share was 0.978 /
+    # 0.964 and 28 of 32 strikes checked by eye had their boxes on the right
+    # fighter. The wrong fights above read 20.1 and more; 18 stays below them.
+    max_corroborated_handoffs_per_minute: float = float(
+        os.getenv("WARRIORIQ_MAX_CORROBORATED_HANDOFFS_PER_MINUTE", "18")
+    )
+    min_corroborating_followed_share: float = float(
+        os.getenv("WARRIORIQ_MIN_CORROBORATING_FOLLOWED_SHARE", "0.9")
+    )
     # Putting A and B back the right way round after the tracker swapped them.
     #
     # When a fighter is lost for a moment - a clinch, the phone swinging past -

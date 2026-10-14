@@ -337,11 +337,48 @@ def identity_failure(tracking: dict, required: tuple[str, ...] = ("A", "B")) -> 
             "advice": "Pick both fighters again on a clearer frame, then analyse it again."}
 
 
+def identity_low_confidence(tracking: dict) -> dict[str, bool]:
+    """Fighters over the hand-off limit who pass on corroboration, per fighter.
+
+    Over SETTINGS.max_suspicious_handoffs_per_minute but within
+    SETTINGS.max_corroborated_handoffs_per_minute, and the analysed boxes were
+    on both people who fought for at least
+    SETTINGS.min_corroborating_followed_share of the fight. Such a fighter
+    passes the identity gate and everything credited to them is labelled
+    lower confidence. Reports without followed_share are judged as before.
+    """
+    followed = tracking.get("followed_share")
+    try:
+        followed_ok = (followed is not None and len(followed) == 2
+                       and min(float(share) for share in followed) >= SETTINGS.min_corroborating_followed_share)
+    except (TypeError, ValueError):
+        followed_ok = False
+    result = {}
+    for fighter in ("A", "B"):
+        rate, over = churn_rate(tracking, fighter)
+        result[fighter] = bool(over and followed_ok and rate <= SETTINGS.max_corroborated_handoffs_per_minute)
+    return result
+
+
+def label_low_confidence(scorecard: dict, tracking: dict) -> None:
+    """Say on the scorecard when it rests on a lower-confidence identity pass."""
+    low = [fighter for fighter, flag in identity_low_confidence(tracking).items() if flag]
+    if not low or not scorecard.get("available"):
+        return
+    who = " and ".join(f"Fighter {fighter}" for fighter in low)
+    scorecard["confidence"] = "low"
+    scorecard["confidence_note"] = (
+        f"Lower confidence: the camera moved a lot, so WarriorIQ had to find {who} again often. "
+        "It checked that its boxes stayed on the two people fighting, but some strikes may be "
+        "credited to the wrong fighter.")
+
+
 def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
     """The identity gate, per fighter. The one definition build_report and
     refresh_identity_integrity both use: two copies drifted apart once, and
     the page then disowned a fight the saved report called trusted."""
     churned = identity_churned(tracking)
+    corroborated = identity_low_confidence(tracking)
     alike_blocks = lookalike_blocks_identity(tracking)
     # The forward pass starts at the beginning of the video even when the
     # fighters could not be followed back from the chosen frame; arriving there
@@ -354,7 +391,7 @@ def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
             and _identity_seed_safe(tracking, fighter)
             and float(tracking.get(f"fighter_{fighter}_coverage", 0.0)) >= 0.45
             and not alike_blocks
-            and not churned[fighter]
+            and (not churned[fighter] or corroborated[fighter])
         )
         for fighter in ("A", "B")
     }
@@ -369,7 +406,7 @@ IDENTITY_TRACKING_KEYS = (
     "pair_similarity_method", "kit_check_attempted", "identity_confusions_per_minute",
     "identity_confusions", "fighter_A_handoffs_per_minute", "fighter_B_handoffs_per_minute",
     "fighter_A_suspicious_handoffs_per_minute", "fighter_B_suspicious_handoffs_per_minute",
-    "identity_seed_confirmed",
+    "identity_seed_confirmed", "followed_share",
 )
 
 
@@ -1275,6 +1312,7 @@ def build_report(
                     "Return to fighter selection and analyse again; person coverage alone cannot prove identity."
                 ),
             })
+    label_low_confidence(scorecard, tracking)
     if req.analysis_target != "BOTH":
         scorecard["available"] = False
         scorecard["totals"] = {"A": None, "B": None}

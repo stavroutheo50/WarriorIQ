@@ -962,4 +962,9 @@ main:has(.result-title) .section-title h2{font-size:clamp(22px,2.4vw,30px);line-
 .strike-strip article>span{font-size:13px;font-weight:700}
 .strike-strip article>.strike-strip-who{color:#9aa8bd;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
 .strike-strip small{color:#9aa8bd;font-size:12px}
+.strike-strip .strike-strip-outcomes{color:#c8d3e2;font-weight:600}
 .strike-strip-note{grid-column:1/-1;margin:0;max-width:none;padding:10px 14px;background:var(--wiq-canvas-raised,#15181f);color:#9aa8bd;font-size:12px}
+
+/* Scorecard built on a lower-confidence identity pass (core/report.py
+   label_low_confidence): said beside the score, never in place of it. */
+.score-confidence{display:block;margin-top:2px;color:var(--wiq-warning,#e2a84b);font-size:12px;font-weight:700}

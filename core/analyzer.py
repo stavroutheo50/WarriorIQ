@@ -344,6 +344,10 @@ def _live_event_payload(events: list, ruleset: str, trusted: bool, limit: int | 
             "limb": event.limb if action_accepted else None,
             "target": event.target if outcome_reliable else None,
             "outcome": outcome if action_accepted else "unclassified",
+            # The rule engine's own call, kept apart from "outcome" so nothing
+            # reads it as checked. The report shows it as an estimate with the
+            # number it could not call (core/fight_stats.py "estimated").
+            "estimated_outcome": outcome if outcome_reliable else normalize_outcome(event.outcome),
             "confidence": float(
                 min(event.confidence, event.contact_confidence) if outcome_reliable else event.confidence
             ),
@@ -2032,6 +2036,12 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         observation=_latest_observation(seconds, info.width, info.height, fighter_a, fighter_b, manager),
     )
     original_name = req.original_name or Path(req.video_path).name
+    # Whether the boxes stayed on the two people who fought. The identity
+    # gate reads it to tell a camera that kept losing the fighters from one
+    # that lost them to spectators (core/report.py identity_low_confidence).
+    observed_fighters = _observed_fighter_mismatch(fighter_finder)
+    if observed_fighters and observed_fighters.get("followed_share"):
+        tracking["followed_share"] = [float(share) for share in observed_fighters["followed_share"]]
     report = build_report(
         req=req,
         original_name=original_name,
@@ -2090,7 +2100,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         travel_per_minute={
             fighter: travel[fighter].body_lengths_per_minute() for fighter in ("A", "B")
         },
-        observed_fighters=_observed_fighter_mismatch(fighter_finder),
+        observed_fighters=observed_fighters,
     )
     # Moments someone went down, against the rounds as finally found. Not
     # attributed to a fighter and not scored; see core/ground.py.
