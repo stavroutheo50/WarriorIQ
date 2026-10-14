@@ -8608,7 +8608,11 @@ def health_check(request: Request):
     files on disk are newer than the process serving them, which means a deploy
     copied its files without restarting the application.
     """
-    payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT}
+    # "fingerprint" is the analysis code's (core/build_info.py): a worker must
+    # report the same one or it gets no fights, so it can be checked from
+    # outside without a worker token. A hash says nothing about the code.
+    payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT,
+               "fingerprint": analysis_fingerprint()}
     # The probe skips the per-visitor context (see _is_lightweight_request), so
     # the session is read here, and only when there is one to read.
     if not hasattr(request.state, "account") and request.cookies.get(SESSION_COOKIE):

@@ -194,3 +194,14 @@ def test_the_worker_window_names_the_files_that_differ():
         with pytest.raises(RemoteWorkerError, match="different here: analyzer.py; missing here: slow_watch.py"):
             client.claim()
     assert sent[0]["analysis_files"] == build_info.analysis_file_hashes()
+
+
+def test_health_shows_the_analysis_fingerprint_and_deploy_replaces_core_whole():
+    """2026-10-14: refused workers could not be told apart from a website keeping a stale core file."""
+    from pathlib import Path
+
+    web, client = _client()
+    assert client.get("/health").json()["fingerprint"] == build_info.analysis_fingerprint()
+    deploy = (Path(__file__).resolve().parents[1] / ".cpanel.yml").read_text(encoding="utf-8")
+    assert "/bin/rm -rf $DEPLOYPATH/core\n" in deploy
+    assert deploy.index("cp -R core $DEPLOYPATH/core.new") < deploy.index("mv $DEPLOYPATH/core.new $DEPLOYPATH/core")

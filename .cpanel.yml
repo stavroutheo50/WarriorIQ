@@ -3,7 +3,15 @@ deployment:
   tasks:
     - export DEPLOYPATH=/home/dchoodxm/warrioriq
     - /bin/mkdir -p $DEPLOYPATH
-    - /bin/cp -R app core dataset tests tools $DEPLOYPATH
+    # core/ is replaced whole, not copied over: cp never deletes, so a file
+    # left behind in it would stay forever and change the analysis-code
+    # fingerprint (core/build_info.py), and the website would refuse every
+    # worker, however up to date (2026-10-14). Built beside it, then swapped.
+    - /bin/rm -rf $DEPLOYPATH/core.new
+    - /bin/cp -R core $DEPLOYPATH/core.new
+    - /bin/rm -rf $DEPLOYPATH/core
+    - /bin/mv $DEPLOYPATH/core.new $DEPLOYPATH/core
+    - /bin/cp -R app dataset tests tools $DEPLOYPATH
     - /bin/cp .env.example .gitignore .wakatime-project COMPLIANCE_OPERATIONS.md PRODUCTION_LAUNCH_CHECKLIST.md README.md install_web_dependencies.py passenger_wsgi.py warrioriq_wsgi.py render.yaml requirements.txt requirements-web.txt run.py run_cli.py worker.py $DEPLOYPATH
     # Stamp the deployed commit so /health can prove which code is live. Code
     # and environment variables deploy separately, so a restart can pick up new

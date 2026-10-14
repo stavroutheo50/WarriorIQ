@@ -583,8 +583,10 @@ class PublicPageTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["service"], "WarriorIQ")
         # The deployed commit makes a settings-only deploy visible, but the probe
-        # must stay minimal: no account, model, path or worker detail.
-        self.assertEqual(set(payload), {"status", "service", "commit"})
+        # must stay minimal: no account, model, path or worker detail. The
+        # analysis-code fingerprint is a bare hash a worker must match.
+        self.assertEqual(set(payload), {"status", "service", "commit", "fingerprint"})
+        self.assertRegex(payload["fingerprint"], r"^[0-9a-f]{16}$")
         self.assertNotIn("/", payload["commit"])
         self.assertLessEqual(len(payload["commit"]), 40)
         self.assertTrue(response.headers.get("x-request-id"))
@@ -679,7 +681,8 @@ class PublicPageTests(unittest.TestCase):
         deployment = (Path(__file__).resolve().parents[1] / ".cpanel.yml").read_text(encoding="utf-8")
 
         self.assertIn("DEPLOYPATH=/home/dchoodxm/warrioriq", deployment)
-        self.assertIn("/bin/cp -R app core dataset tests tools $DEPLOYPATH", deployment)
+        self.assertIn("/bin/cp -R app dataset tests tools $DEPLOYPATH", deployment)
+        self.assertIn("/bin/cp -R core $DEPLOYPATH/core.new", deployment)
         self.assertIn("passenger_wsgi.py", deployment)
         self.assertIn("warrioriq_wsgi.py", deployment)
         self.assertIn("requirements-web.txt", deployment)
