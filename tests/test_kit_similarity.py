@@ -187,3 +187,28 @@ def test_pair_check_uses_the_kit_measure_and_names_black_and_white(monkeypatch, 
     assert answer["cause"] == "black_and_white"
     assert "no colour" in answer["message"]
     assert "busy hall" not in answer["message"]
+
+
+def test_pair_check_warns_about_a_box_on_the_referee_before_start(tmp_path, monkeypatch):
+    """2026-10-13: the official warning only came after Start, as a passing
+    toast; the page that warns about look-alike kit before Start said nothing."""
+    from pathlib import Path
+
+    import cv2
+
+    import app.main as web
+    from browser_client import BrowserClient
+
+    job_dir = web.OUTPUTS / "kitpaircheck2"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(job_dir / "selection.jpg"), np.full((520, 640, 3), 120, np.uint8))
+    monkeypatch.setattr(web, "_authorized_job", lambda request, job_id: {"video_width": 640, "video_height": 520})
+    monkeypatch.setattr(web, "_seed_official_warning", lambda frame, a, b: {
+        "fighters": ["A"], "probability": 0.9, "message": "The box drawn for Fighter A looks like an official"})
+    with BrowserClient(web.app) as client:
+        answer = client.post("/api/pair-check/kitpaircheck2",
+                             json={"fighter_a_box": BOX_A, "fighter_b_box": BOX_B}).json()
+    assert answer["official"] == ["A"]
+    assert "official" in answer["official_message"]
+    page = Path("app/templates/select.html").read_text(encoding="utf-8")
+    assert "data.official_message" in page

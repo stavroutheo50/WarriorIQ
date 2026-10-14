@@ -3532,6 +3532,24 @@ class FighterSeparabilityTests(unittest.TestCase):
             self.assertIsNone(_seed_official_warning(frame, a_box, b_box))
         self.assertIsNone(_seed_official_warning(None, a_box, b_box))
 
+    def test_a_loose_box_on_the_referee_is_still_caught_by_the_person_it_is_around(self):
+        """2026-10-13, Light Contact in Athens: Fighter A's box was drawn on the
+        referee, slightly low and narrow, so it cut off the white shirt the
+        probe reads - 0.20 on the drawn box, 0.79 on the detector's box around
+        the same man - and the report followed the referee for 3:17."""
+        from app.main import _seed_official_warning
+
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        a_box, b_box = [209.0, 124.0, 262.0, 203.0], [290.0, 135.0, 354.0, 206.0]
+        people = [{"box": [209.0, 115.0, 283.0, 203.0], "confidence": 0.9},
+                  {"box": [290.0, 127.0, 320.0, 205.0], "confidence": 0.9}]
+        readings = iter([[0.20, 0.01], [0.79, 0.04]])
+        with mock.patch("app.main.detect_people_in_frame", return_value=people), \
+                mock.patch("core.referee.referee_probabilities", side_effect=lambda *a, **k: next(readings)):
+            warning = _seed_official_warning(frame, a_box, b_box)
+        self.assertEqual(warning["fighters"], ["A"])
+        self.assertAlmostEqual(warning["probability"], 0.79)
+
 
     def test_the_referee_classifier_abstains_on_a_greyscale_source(self):
         """Saying nothing beats saying something confident and wrong.
