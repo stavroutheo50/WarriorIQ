@@ -41,8 +41,10 @@ def test_the_frame_picker_uses_the_four_step_bar_only():
 def test_the_progress_percent_says_what_it_measures():
     page = _page("progress.html")
     assert "Real pipeline progress" not in page
-    assert "Of the whole job" in page
-    assert "Video analysed through" in page
+    # Since the audit of 14 Oct 2026 (#21) the number is the current stage's,
+    # labelled with the stage (core/progress_view.py), not the whole job's.
+    assert "Of the whole job" not in page
+    assert "stageCaption" in page
     assert "SAM2 follows" not in page
 
 

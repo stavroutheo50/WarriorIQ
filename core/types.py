@@ -235,6 +235,14 @@ class AnalysisProgress:
     # frontier at this plus processed_video_seconds, so it has to be the start
     # actually used rather than the one requested.
     analysed_from_seconds: float = 0.0
+    # How far through the *current* stage the run is (0-1), and how much video
+    # the identity pass has covered. The live page shows one stage at a time
+    # (core/progress_view.py), so these have to come from the stage itself.
+    stage_fraction: float | None = None
+    tracked_video_seconds: float | None = None
+    # "stage" when eta_seconds covers only the pass that is running (a later
+    # pass has not measured its own speed yet), "job" when it covers the rest.
+    eta_scope: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

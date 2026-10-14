@@ -44,6 +44,7 @@ from typing import Callable, Iterable, Iterator
 import cv2
 import numpy as np
 
+from core.config import SETTINGS
 from core.identity import box_iou
 from core.reid import pool as reid_pool
 from core.reid import similarity as reid_similarity
@@ -322,16 +323,35 @@ def backtrack(
     try:
         total = len(frames)
         prepared = 0
+        # Samples wait here until a batch is full, then go through the pose
+        # model in one call (PoseTracker.prepare_detections_batch).
+        waiting: list[tuple[int, np.ndarray]] = []
+        batch_size = max(1, int(getattr(SETTINGS, "pose_batch_size", 1)))
 
-        def prepare(index: int, image: np.ndarray) -> None:
-            # The model run is most of this pass's time, so progress follows it.
+        def flush() -> None:
             nonlocal prepared
-            pose_tracker.prepare_detections(image, index, imgsz)
-            prepared += 1
+            if not waiting:
+                return
+            batch = getattr(pose_tracker, "prepare_detections_batch", None)
+            if batch is not None and len(waiting) > 1:
+                batch(list(waiting), imgsz)
+            else:
+                for index, image in waiting:
+                    pose_tracker.prepare_detections(image, index, imgsz)
+            prepared += len(waiting)
+            waiting.clear()
+            # The model run is most of this pass's time, so progress follows it.
             if progress is not None:
                 progress(0.9 * prepared / max(1, total))
 
+        def prepare(index: int, image: np.ndarray) -> None:
+            # A copy: the decoder may reuse the buffer for the next sample.
+            waiting.append((index, image.copy() if batch_size > 1 else image))
+            if len(waiting) >= batch_size:
+                flush()
+
         stored, cuts = _buffer_samples(video_path, frames, scratch, lambda: True, on_frame=prepare)
+        flush()
         if seed_frame not in stored:
             return Handoff(seed_frame=seed_frame, requested_start_frame=requested_start_frame,
                            frame=seed_frame, reason="not_detected_at_seed")

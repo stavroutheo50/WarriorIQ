@@ -152,6 +152,12 @@ class Settings:
     # strike timing starts being measured rather than estimated.
     min_tracking_fps: float = float(os.getenv("WARRIORIQ_MIN_FPS", "6"))
     max_tracking_fps: float = float(os.getenv("WARRIORIQ_MAX_FPS", "30"))
+    # Frames handed to the pose model in one call where the frames are known
+    # ahead of time (the backward identity pass). One call per frame paid the
+    # GPU's launch and transfer overhead per frame. 1 switches batching off.
+    # A TensorRT engine accepts batches only up to the size it was built for,
+    # so the engine is built for this size too (core/trt_engine.py).
+    pose_batch_size: int = max(1, int(os.getenv("WARRIORIQ_POSE_BATCH", "8")))
     # Hold the analysis to the length of the video by planning the sampling
     # stride once, early, from measured throughput. Until 2026-09-10 this
     # setting was defined here and **read nowhere in the codebase** - a switch

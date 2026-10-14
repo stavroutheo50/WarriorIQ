@@ -105,6 +105,7 @@ from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core import feed, social, worker_alerts
 from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
 from core.progress_insights import build_progress
+from core.progress_view import stage_view
 from core.quality_guardian import inspect_video_quality
 from core.metric_catalog import BY_KEY as METRIC_CATALOG, evidence_limitations, readings as metric_readings
 from core.chunked_upload import (
@@ -144,7 +145,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, result_check
+from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
@@ -4640,6 +4641,7 @@ _WORKER_PROGRESS_FIELDS = {
     "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
     "fighter_b_confidence", "current_round", "quality_mode", "live_event_mode",
     "live_events", "provisional_stats", "latest_observation",
+    "stage_fraction", "tracked_video_seconds", "eta_scope",
 }
 _WORKER_ARCHIVE_FILES = {"report.json", "tracking.jsonl", "events.json"}
 _WORKER_REPORT_KEYS = {
@@ -4770,6 +4772,9 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
             "(modal deploy deploy/modal_worker.py, or restart a local worker on the current code)",
             worker_id, payload.analysis_version, ANALYSIS_VERSION)
         record_worker_refusal(worker_id, "worker_outdated")
+        worker_alerts.note_version_mismatch(outputs=OUTPUTS, recipients=SETTINGS.admin_emails,
+                                            send=send_transactional_email, worker_id=worker_id,
+                                            reason="worker_outdated")
         return {"job": None, "refused": "worker_outdated", "required_analysis_version": ANALYSIS_VERSION}
     differences = code_differences(payload.analysis_files) if payload.analysis_files else None
     # Files only the worker has are strays left in its folder: code that is the
@@ -4786,10 +4791,14 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
             "the worker and the website to the same commit", worker_id, payload.analysis_fingerprint,
             analysis_fingerprint(), differences)
         record_worker_refusal(worker_id, "worker_code_differs")
+        worker_alerts.note_version_mismatch(outputs=OUTPUTS, recipients=SETTINGS.admin_emails,
+                                            send=send_transactional_email, worker_id=worker_id,
+                                            reason="worker_code_differs")
         return {"job": None, "refused": "worker_code_differs",
                 "required_analysis_version": ANALYSIS_VERSION, "required_fingerprint": analysis_fingerprint(),
                 "differences": differences}
     clear_worker_refusal()
+    worker_alerts.clear_version_mismatch(OUTPUTS)
     claimed = claim_next_job(worker_id)
     if not claimed:
         return {"job": None}
@@ -5271,6 +5280,7 @@ def _public_job_status(job_id: str, job: dict) -> dict:
         "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
         "fighter_b_confidence", "current_round", "quality_mode", "live_event_mode",
         "live_events", "provisional_stats", "latest_observation", "focus_fighter", "analysis_run_id",
+        "eta_scope",
     }
     payload = {key: value for key, value in job.items() if key in public_fields}
     if not STRIKE_COUNTS_PUBLISHED:
@@ -5313,13 +5323,20 @@ def _public_job_status(job_id: str, job: dict) -> dict:
     # analysis "running" at 0.9% with an ETA "calculating" (QA, 2026-10-11).
     # The worker is there but refused for running other code than this site:
     # the fight waits until both are updated, and the page says so.
+    # QA, 2026-10-14: this used to sit under "Warming up the analysis
+    # computer" with a timer that kept counting, which promised a start that
+    # was not coming. Now the page says the analysis is paused for an update
+    # and stops counting; the owner has already been alerted (claim route).
+    paused = bool(job.get("status") == "queued" and recent_worker_refusal())
+    payload["paused_for_update"] = paused
     payload["worker_refused"] = (
-        "The analysis computer is running a different version of WarriorIQ from this website, so it "
-        "will not analyse fights until both are updated. Your fight is saved and waiting."
-        if job.get("status") == "queued" and recent_worker_refusal() else None)
-    payload["warming_up"] = bool(job.get("status") in {"queued", "running"}
+        "Analysis is paused for an update. The analysis computer and this website are being "
+        "brought to the same version; your fight is saved and keeps its place in the queue."
+        if paused else None)
+    payload["warming_up"] = bool(not paused and job.get("status") in {"queued", "running"}
                                  and job.get("stage") in {None, "queued", "preparing", "loading", "models"}
                                  and not float(job.get("processed_video_seconds") or 0.0))
+    payload["stage_view"] = stage_view(job, payload["analysis_duration_seconds"], paused=paused)
     return payload
 
 
@@ -8090,6 +8107,9 @@ def admin_page(request: Request, q: str = ""):
             "traffic": page_view_summary(30),
             "email_problem": email_settings_problem(),
             "email_test": request.query_params.get("email_test", "")[:600],
+            # Set while a worker is being refused for running other code.
+            "worker_version_flag": worker_alerts.version_mismatch_flag(OUTPUTS),
+            "release": release_version(),
         },
     )
 
@@ -8612,7 +8632,7 @@ def health_check(request: Request):
     # report the same one or it gets no fights, so it can be checked from
     # outside without a worker token. A hash says nothing about the code.
     payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT,
-               "fingerprint": analysis_fingerprint()}
+               "fingerprint": analysis_fingerprint(), "release": release_version()}
     # The probe skips the per-visitor context (see _is_lightweight_request), so
     # the session is read here, and only when there is one to read.
     if not hasattr(request.state, "account") and request.cookies.get(SESSION_COOKIE):

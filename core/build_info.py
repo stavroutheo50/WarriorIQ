@@ -113,6 +113,18 @@ def code_differences(worker_files: dict[str, str]) -> dict[str, list[str]]:
             "extra_on_worker": sorted(name for name in worker_files if name not in own)}
 
 
+def release_version() -> str:
+    """The one version string the website and the worker must both report.
+
+    QA, 2026-10-14: the two were deployed separately and drifted, and fights
+    waited at "warming up". The string is the analysis version and the code
+    fingerprint together - exactly what the claim route compares - so the two
+    sides agree on this string if and only if the worker will be given fights.
+    deploy/release.py prints it and checks both sides report it.
+    """
+    return f"{ANALYSIS_VERSION}.{analysis_fingerprint()[:12]}"
+
+
 def stamp() -> dict:
     return {"analysis_version": ANALYSIS_VERSION, "commit": build_commit(),
             "fingerprint": analysis_fingerprint()}

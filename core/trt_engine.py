@@ -107,7 +107,17 @@ def engine_path_for(models_dir: str | Path, name: str | None = None, size: int |
     """
     optimum = size or engine_size()
     largest = optimum * max(2, math.ceil(engine_max_size() / optimum))
-    return Path(models_dir) / f"pose_engine_{gpu_slug(name)}_{optimum}_max{largest}.engine"
+    # The largest batch is part of the profile too: an engine built for batch 1
+    # refuses the backward pass's batches (PoseTracker.prepare_detections_batch).
+    # Batch 1 keeps the old name, so an engine already cached stays in use.
+    batch = engine_batch()
+    suffix = f"_b{batch}" if batch > 1 else ""
+    return Path(models_dir) / f"pose_engine_{gpu_slug(name)}_{optimum}_max{largest}{suffix}.engine"
+
+
+def engine_batch() -> int:
+    """The largest batch the engine is built to accept (WARRIORIQ_POSE_BATCH)."""
+    return max(1, int(getattr(SETTINGS, "pose_batch_size", 1)))
 
 
 def build_pose_engine(destination: str | Path, size: int | None = None,
@@ -137,7 +147,7 @@ def build_pose_engine(destination: str | Path, size: int | None = None,
 
     def build(half: bool):
         return model.export(format="engine", device=device, imgsz=size,
-                            half=half, dynamic=True, workspace=multiplier)
+                            half=half, dynamic=True, workspace=multiplier, batch=engine_batch())
 
     try:
         exported = build(half=True)

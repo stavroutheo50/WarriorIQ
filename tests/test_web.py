@@ -585,7 +585,10 @@ class PublicPageTests(unittest.TestCase):
         # The deployed commit makes a settings-only deploy visible, but the probe
         # must stay minimal: no account, model, path or worker detail. The
         # analysis-code fingerprint is a bare hash a worker must match.
-        self.assertEqual(set(payload), {"status", "service", "commit", "fingerprint"})
+        # "release" is the analysis version and that fingerprint together, the
+        # one string the worker and the website must both report (#23).
+        self.assertEqual(set(payload), {"status", "service", "commit", "fingerprint", "release"})
+        self.assertRegex(payload["release"], r"^\d+\.[0-9a-f]{12}$")
         self.assertRegex(payload["fingerprint"], r"^[0-9a-f]{16}$")
         self.assertNotIn("/", payload["commit"])
         self.assertLessEqual(len(payload["commit"]), 40)
