@@ -89,6 +89,30 @@ def analysis_fingerprint() -> str:
     return digest.hexdigest()[:16]
 
 
+@lru_cache(maxsize=1)
+def analysis_file_hashes() -> dict[str, str]:
+    """Each file in core/ with a hash of its own, so a mismatch can name the files.
+
+    2026-10-14: a worker refused for running other code sat refused for twenty
+    minutes after an update, and neither side could say what differed. With
+    these the web app names the files that differ, and tells a stray extra file
+    left in the worker's folder (never imported by code the same as the web
+    app's) apart from code that really is different.
+    """
+    import hashlib
+
+    return {path.name: hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:16]
+            for path in sorted((ROOT / "core").glob("*.py"))}
+
+
+def code_differences(worker_files: dict[str, str]) -> dict[str, list[str]]:
+    """How a worker's core/ differs from this one's, by file name."""
+    own = analysis_file_hashes()
+    return {"changed": sorted(name for name in own if name in worker_files and worker_files[name] != own[name]),
+            "missing_on_worker": sorted(name for name in own if name not in worker_files),
+            "extra_on_worker": sorted(name for name in worker_files if name not in own)}
+
+
 def stamp() -> dict:
     return {"analysis_version": ANALYSIS_VERSION, "commit": build_commit(),
             "fingerprint": analysis_fingerprint()}

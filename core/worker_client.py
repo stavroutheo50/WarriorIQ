@@ -73,16 +73,21 @@ class RemoteWorkerClient:
         self._request("POST", "/api/worker/heartbeat", {"worker_id": self.worker_id})
 
     def claim(self) -> dict | None:
-        from core.build_info import ANALYSIS_VERSION, analysis_fingerprint
+        from core.build_info import ANALYSIS_VERSION, analysis_file_hashes, analysis_fingerprint
 
         response = self._request("POST", "/api/worker/claim", {
             "worker_id": self.worker_id, "analysis_version": ANALYSIS_VERSION,
-            "analysis_fingerprint": analysis_fingerprint()})
+            "analysis_fingerprint": analysis_fingerprint(), "analysis_files": analysis_file_hashes()})
         if response.get("refused") == "worker_code_differs":
+            differences = response.get("differences") or {}
+            named = "; ".join(f"{label}: {', '.join(differences[key])}" for key, label in (
+                ("changed", "different here"), ("missing_on_worker", "missing here"))
+                if differences.get(key))
             raise RemoteWorkerError(
                 "The web app refused this worker: its analysis code is not the same as the "
                 f"website's (worker {analysis_fingerprint()}, website {response.get('required_fingerprint')}). "
-                "Update the worker and the website to the same version from GitHub, then restart the worker.")
+                + (f"Files in this worker's core folder - {named}. " if named else "")
+                + "Update the worker and the website to the same version from GitHub, then restart the worker.")
         if response.get("refused"):
             # The server is newer than this code. Saying so is the only useful
             # thing a stale worker can do; analysing would produce a report

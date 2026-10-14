@@ -148,3 +148,49 @@ def test_the_worker_says_how_to_fix_a_code_mismatch():
                                                        "required_fingerprint": "abc"}):
         with pytest.raises(RemoteWorkerError, match="same version from GitHub"):
             client.claim()
+
+
+def test_a_refusal_names_the_files_and_strays_are_no_reason_to_refuse(monkeypatch, tmp_path):
+    """2026-10-14: a refused worker sat refused for twenty minutes and nothing said which file differed."""
+    web, client = _client()
+    web.app.dependency_overrides[web._require_remote_worker] = lambda: None
+    monkeypatch.setattr(web, "_require_remote_worker", lambda request: None)
+    claimed = []
+    monkeypatch.setattr(web, "claim_next_job", lambda worker_id: claimed.append(worker_id) or None)
+    import app.state as state
+
+    monkeypatch.setattr(state, "OUTPUTS", tmp_path)
+    own = build_info.analysis_file_hashes()
+    first = sorted(own)[0]
+    body = {"worker_id": "gpu-1", "analysis_version": build_info.ANALYSIS_VERSION,
+            "analysis_fingerprint": "0000000000000000"}
+    try:
+        changed = dict(own, **{first: "ffffffffffffffff"})
+        response = client.post("/api/worker/claim", json=dict(body, analysis_files=changed)).json()
+        assert response["refused"] == "worker_code_differs"
+        assert response["differences"] == {"changed": [first], "missing_on_worker": [], "extra_on_worker": []}
+
+        missing = {name: digest for name, digest in own.items() if name != first}
+        response = client.post("/api/worker/claim", json=dict(body, analysis_files=missing)).json()
+        assert response["differences"]["missing_on_worker"] == [first]
+        assert claimed == []
+
+        strays = dict(own, **{"analyzer_backup.py": "1234"})
+        response = client.post("/api/worker/claim", json=dict(body, analysis_files=strays)).json()
+        assert "refused" not in response and claimed == ["gpu-1"]
+    finally:
+        web.app.dependency_overrides.clear()
+
+
+def test_the_worker_window_names_the_files_that_differ():
+    from core.worker_client import RemoteWorkerClient, RemoteWorkerError
+
+    client = RemoteWorkerClient("https://example.invalid", "token", "gpu-1")
+    sent = []
+    refusal = {"job": None, "refused": "worker_code_differs", "required_fingerprint": "abc",
+               "differences": {"changed": ["analyzer.py"], "missing_on_worker": ["slow_watch.py"],
+                               "extra_on_worker": []}}
+    with patch.object(client, "_request", side_effect=lambda method, path, body: sent.append(body) or refusal):
+        with pytest.raises(RemoteWorkerError, match="different here: analyzer.py; missing here: slow_watch.py"):
+            client.claim()
+    assert sent[0]["analysis_files"] == build_info.analysis_file_hashes()
