@@ -276,10 +276,11 @@ async function checkPair(){
     const response=await fetch(`/api/pair-check/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({fighter_a_box:boxA,fighter_b_box:boxB})});
     if(!response.ok||token!==pairCheckToken)return;
     const data=await response.json();
-    if(token!==pairCheckToken||!(data.looks_alike||data.faint_message))return;
+    if(token!==pairCheckToken||!(data.looks_alike||data.faint_message||data.official_message))return;
     // A box the detector barely saw a person in is said here, before Start:
     // the analysis's own check is stricter (B12, QA 2026-10-11).
-    pairWarning.textContent=[data.looks_alike?data.message:'',data.faint_message||''].filter(Boolean).join(' ')+' Choosing another frame now is quicker than finding out after the analysis.';
+    // A box on the referee is said first: the whole report would follow them.
+    pairWarning.textContent=[data.official_message||'',data.looks_alike?data.message:'',data.faint_message||''].filter(Boolean).join(' ')+' Choosing again now is quicker than finding out after the analysis.';
     pairWarning.hidden=false;draw();
   }catch(error){}
 }

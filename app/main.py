@@ -5016,13 +5016,18 @@ def pair_check(request: Request, job_id: str, payload: PairCheckPayload):
                          "The analysis uses a stronger check and may not find them at all, which would "
                          "leave the report empty. A moment where the fighters are bigger, sharper and "
                          "better lit is much more likely to work.")
+    # Asked here too, not only after Start: a box on the referee has to be
+    # caught while the person who drew it is still looking at the frame.
+    on_official = _seed_official_warning(chosen_frame, fighter_a_box, fighter_b_box)
+    official = {"official": on_official["fighters"], "official_message": on_official["message"]} if on_official else {}
     kit = kit_similarity(chosen_frame, fighter_a_box, fighter_b_box)
     if kit is None:
-        return {"checked": bool(faint), "looks_alike": False,
+        return {"checked": bool(faint) or bool(official), "looks_alike": False, **official,
                 **({"faint": sorted(faint), "faint_message": faint_message} if faint else {})}
     alike = kit["similarity"]
     looks_alike = float(alike) >= SETTINGS.max_kit_similarity
     return {
+        **official,
         **({"faint": sorted(faint), "faint_message": faint_message} if faint else {}),
         "checked": True,
         "similarity": round(float(alike), 3),
@@ -5367,6 +5372,20 @@ def active_analysis(request: Request):
     }
 
 
+def _detected_match(people, box) -> list[float] | None:
+    """The detected person a drawn box is around, if one overlaps it well."""
+    from core.identity import box_iou
+
+    import numpy as np
+
+    best, best_iou = None, 0.3
+    for person in people or []:
+        iou = box_iou(np.asarray(person["box"], dtype=np.float32), np.asarray(box, dtype=np.float32))
+        if iou > best_iou:
+            best, best_iou = [float(v) for v in person["box"]], iou
+    return best
+
+
 def _seed_official_warning(image, fighter_a_box, fighter_b_box) -> dict | None:
     """Is either selection on an official rather than on a competitor?
 
@@ -5401,6 +5420,19 @@ def _seed_official_warning(image, fighter_a_box, fighter_b_box) -> dict | None:
     try:
         scores = referee_probabilities(
             image, np.asarray([fighter_a_box, fighter_b_box], dtype=np.float32))
+        # Also read on the detected person each box is around. A hand-drawn box
+        # that starts below the collar cuts off the white shirt the probe reads:
+        # 2026-10-13, Light Contact, Athens - the referee seeded as Fighter A
+        # scored 0.20 on the drawn box and 0.79 on the detector's box around
+        # the same man, and the whole report followed the referee.
+        people = detect_people_in_frame(image, min_confidence=DRAWN_BOX_CONFIDENCE, limit=50) or []
+        matched = [_detected_match(people, box) for box in (fighter_a_box, fighter_b_box)]
+        if any(box is not None for box in matched):
+            again = referee_probabilities(
+                image, np.asarray([box or drawn for box, drawn in zip(matched, (fighter_a_box, fighter_b_box))],
+                                  dtype=np.float32))
+            scores = [max((v for v in (first, second) if v is not None), default=None)
+                      for first, second in zip(list(scores), list(again))]
     except Exception:                                               # noqa: BLE001
         # A seed check must never be the reason a fight cannot be analysed.
         return None
