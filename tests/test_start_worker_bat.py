@@ -33,3 +33,24 @@ def test_update_worker_replaces_core_whole_and_leaves_private_files():
     # Only code is copied: .env, .venv and outputs are never named as targets.
     for private in (".env'", ".venv'", "'outputs'"):
         assert f"Join-Path $root {private}" not in script.replace('"', "'")
+
+
+def test_the_worker_will_not_run_under_another_programs_python(tmp_path, monkeypatch):
+    """2026-10-14: a worker started with another app's Python held the lock, so no fight started."""
+    import sys
+
+    import worker
+
+    (tmp_path / ".venv").mkdir()
+    monkeypatch.setattr(worker, "__file__", str(tmp_path / "worker.py"))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "elsewhere"))
+    assert "start-worker.bat" in worker._foreign_python(windows=True)
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / ".venv"))
+    assert worker._foreign_python(windows=True) is None
+    # Linux hosts and machines without a project .venv are not affected.
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "elsewhere"))
+    assert worker._foreign_python(windows=False) is None
+    (tmp_path / ".venv").rmdir()
+    assert worker._foreign_python(windows=True) is None
+    bat = (ROOT / "start-worker.bat").read_text(encoding="utf-8")
+    assert ".venv\\Scripts\\python.exe" in bat

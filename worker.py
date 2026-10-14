@@ -407,6 +407,26 @@ LOCK_STALE_SECONDS = 90
 EXIT_ANOTHER_WORKER_IS_RUNNING = 3
 
 
+# 2026-10-14: another program on the worker PC (an AI coding app) kept
+# launching worker.py with its own Python. That copy took the single-worker
+# lock, so every proper start said "another worker holds the lock" and the
+# queued fight never started. On a machine set up with the project's .venv,
+# only that Python may run the worker.
+EXIT_WRONG_PYTHON = 4
+
+
+def _foreign_python(windows: bool = os.name == "nt") -> str | None:
+    """Why this interpreter may not run the worker, or None when it may."""
+    venv = Path(__file__).resolve().parent / ".venv"
+    if not windows or not venv.is_dir():
+        return None
+    if Path(sys.prefix).resolve() == venv.resolve():
+        return None
+    return (f"This worker was started with {sys.executable}, not the project's Python in {venv}. "
+            "It would hold the worker lock without being able to analyse fights, so it is not starting. "
+            "Start the worker with start-worker.bat.")
+
+
 def _lock_path() -> Path:
     return Path(__file__).resolve().parent / "worker.lock"
 
@@ -645,6 +665,10 @@ if __name__ == "__main__":
     parser.add_argument("--once", action="store_true", help="Claim at most one queued job and exit")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
+    foreign = _foreign_python()
+    if foreign:
+        LOGGER.error(foreign)
+        raise SystemExit(EXIT_WRONG_PYTHON)
     if not _claim_sole_worker() and not args.once:
         raise SystemExit(EXIT_ANOTHER_WORKER_IS_RUNNING)
     try:
