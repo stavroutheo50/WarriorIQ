@@ -144,7 +144,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, engine_name, result_check
+from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, result_check
 from core.orientation import needed_turn, tag_rotation
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
@@ -681,6 +681,9 @@ class WorkerIdentityPayload(BaseModel):
     # core/build_info.analysis_fingerprint of the worker's code: must equal the
     # web app's. Absent from workers built before it, which are refused.
     analysis_fingerprint: str | None = None
+    # core/build_info.analysis_file_hashes of the worker's code, so a mismatch
+    # names its files. Absent from workers built before it.
+    analysis_files: dict[str, str] | None = None
 
 
 class WorkerProgressPayload(WorkerIdentityPayload):
@@ -4768,17 +4771,24 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
             worker_id, payload.analysis_version, ANALYSIS_VERSION)
         record_worker_refusal(worker_id, "worker_outdated")
         return {"job": None, "refused": "worker_outdated", "required_analysis_version": ANALYSIS_VERSION}
-    if payload.analysis_fingerprint != analysis_fingerprint():
+    differences = code_differences(payload.analysis_files) if payload.analysis_files else None
+    # Files only the worker has are strays left in its folder: code that is the
+    # same as this web app's never imports them, so they are no reason to refuse.
+    same_code = (payload.analysis_fingerprint == analysis_fingerprint()
+                 or (differences is not None and not differences["changed"]
+                     and not differences["missing_on_worker"]))
+    if not same_code:
         # Same version number, different code: the check above cannot see it,
         # and a worker run from a stale copy produced reports for days that way
         # (2026-10-13). The fight stays queued until both run the same code.
         LOGGER.error(
-            "worker_code_differs worker_id=%s worker_fingerprint=%s web_fingerprint=%s - update the worker "
-            "and the website to the same commit", worker_id, payload.analysis_fingerprint,
-            analysis_fingerprint())
+            "worker_code_differs worker_id=%s worker_fingerprint=%s web_fingerprint=%s differences=%s - update "
+            "the worker and the website to the same commit", worker_id, payload.analysis_fingerprint,
+            analysis_fingerprint(), differences)
         record_worker_refusal(worker_id, "worker_code_differs")
         return {"job": None, "refused": "worker_code_differs",
-                "required_analysis_version": ANALYSIS_VERSION, "required_fingerprint": analysis_fingerprint()}
+                "required_analysis_version": ANALYSIS_VERSION, "required_fingerprint": analysis_fingerprint(),
+                "differences": differences}
     clear_worker_refusal()
     claimed = claim_next_job(worker_id)
     if not claimed:
@@ -8598,7 +8608,11 @@ def health_check(request: Request):
     files on disk are newer than the process serving them, which means a deploy
     copied its files without restarting the application.
     """
-    payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT}
+    # "fingerprint" is the analysis code's (core/build_info.py): a worker must
+    # report the same one or it gets no fights, so it can be checked from
+    # outside without a worker token. A hash says nothing about the code.
+    payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT,
+               "fingerprint": analysis_fingerprint()}
     # The probe skips the per-visitor context (see _is_lightweight_request), so
     # the session is read here, and only when there is one to read.
     if not hasattr(request.state, "account") and request.cookies.get(SESSION_COOKIE):
