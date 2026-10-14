@@ -1033,7 +1033,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
                 "focus_fighter": "A",
             })
             self.assertEqual(overlapping.status_code, 400)
-            self.assertIn("separate fighter", overlapping.json()["detail"])
+            # Nearly the same box, neither drawn by hand (core/selection_check.py).
+            self.assertIn("different fighter", overlapping.json()["detail"])
         finally:
             delete_job(job_id)
 

@@ -575,7 +575,8 @@ def test_c1_nobody_in_shot_gets_one_message_not_two():
 
 def test_c1_identity_failure_alone_offers_the_who_is_who_step():
     page = _failed_render("unverified", identity_trusted=False)
-    assert "Show me who is who" in page and "Fix it in a few seconds" in page
+    # Since the audit of 14 Oct 2026 (#24) the fix is named for the cause.
+    assert "Show me who is who" in page and "The fix: re-tap the fighters" in page
     assert "Too little fight footage to measure" not in page
 
 

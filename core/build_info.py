@@ -27,7 +27,11 @@ from pathlib import Path
 #    with the fighter boxes drawn on the turned frame; and guard measured as
 #    wrist-to-chin over shoulder width (core/guard.py). An older worker would
 #    analyse a turned job unturned, with its boxes on the wrong pixels.
-ANALYSIS_VERSION = 4
+# 5: fighters re-identified by appearance after leaving the frame, camera
+#    motion compensated before matching, officials held as a third-person
+#    class, and a fighter followed for 20-45% of the fight reported at low
+#    confidence instead of failing (audit 2026-10-14, #2).
+ANALYSIS_VERSION = 5
 
 ROOT = Path(__file__).resolve().parents[1]
 

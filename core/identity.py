@@ -278,6 +278,18 @@ class IdentityManager:
         # People seen beside the fighters while both were held with confidence,
         # by track: how often, and what they look like. See _learn_bystanders.
         self._bystanders: dict[int, dict] = {}
+        # The frame being resolved, for how long a fighter has been missing.
+        self._current_frame = int(source_frame)
+        # Referee probabilities per track, and the tracks classed as officials:
+        # a third-person class that is never assigned to A or B. See _official_track.
+        self._track_referee: dict[int, deque] = {}
+        self.official_tracks: set[int] = set()
+        # The camera's accumulated translation, so per-track travel is measured
+        # against the ground rather than the picture (core/camera_motion.py).
+        self._camera_offset = np.zeros(2, dtype=np.float64)
+        self.camera_compensations = 0
+        # Fighters re-identified by appearance after leaving the picture.
+        self.reentries = {"A": 0, "B": 0}
 
     def _remember_positions(self, people: list[PersonObservation], source_frame: int) -> None:
         for person in people:
@@ -289,14 +301,80 @@ class IdentityManager:
                 seen = self._track_reid.setdefault(int(person.track_id), deque(
                     maxlen=max(1, SETTINGS.reid_pool_size)))
                 seen.append(np.asarray(person.reid, dtype=np.float32).ravel())
+            if person.referee_prob is not None:
+                verdicts = self._track_referee.setdefault(int(person.track_id), deque(maxlen=12))
+                verdicts.append(float(person.referee_prob))
+                if (len(verdicts) >= SETTINGS.official_track_min_sightings
+                        and float(np.mean(verdicts)) >= SETTINGS.min_referee_probability):
+                    self.official_tracks.add(int(person.track_id))
             history = self._track_history.setdefault(int(person.track_id), deque(maxlen=450))
             box = person.box
+            # In ground coordinates: a pan must not make a still spectator
+            # look like somebody covering the mat.
             history.append((
                 source_frame,
-                float((box[0] + box[2]) / 2.0),
-                float((box[1] + box[3]) / 2.0),
+                float((box[0] + box[2]) / 2.0) - float(self._camera_offset[0]),
+                float((box[1] + box[3]) / 2.0) - float(self._camera_offset[1]),
                 max(1.0, float(box[3] - box[1])),
             ))
+
+    def compensate_camera(self, shift) -> bool:
+        """Move what is remembered about A and B with the camera (core/camera_motion.py).
+
+        Called before update() for each analysed frame. Only the remembered
+        positions move; the fighters' appearance and anchors do not depend on
+        where the camera points. True when a significant shift was applied.
+        """
+        if shift is None or not SETTINGS.camera_motion_compensation or not shift.significant:
+            return False
+        for state in (self.a, self.b):
+            if state.last_box is not None:
+                state.last_box = shift.apply_box(state.last_box)
+            if state.prev_box is not None:
+                state.prev_box = shift.apply_box(state.prev_box)
+        self._camera_offset += np.asarray([shift.dx, shift.dy], dtype=np.float64)
+        self.camera_compensations += 1
+        return True
+
+    def _official_track(self, candidate: PersonObservation) -> bool:
+        """Is this candidate a track already classed as an official?
+
+        The per-frame referee gate refuses frames scored at or above
+        min_referee_probability; an official's score dips on some frames
+        (p10 0.657 on the measured referee, lower when half-hidden), and those
+        were the frames he could be taken for a fighter. Once his track is
+        classed an official it stays refused - unless this frame's score is
+        clearly a fighter's, which is what a track id handed to a fighter
+        after a crossing would look like.
+        """
+        return bool(
+            candidate.track_id is not None
+            and int(candidate.track_id) in self.official_tracks
+            and (candidate.referee_prob is None
+                 or candidate.referee_prob >= SETTINGS.official_track_floor_probability))
+
+    def _missing_seconds(self, state: FighterState) -> float:
+        return max(0, self._current_frame - int(state.last_seen_source_frame)) / self.source_fps
+
+    def _reappears_by_appearance(self, state: FighterState, candidate: PersonObservation) -> bool:
+        """After a long absence, does the candidate look like the fighter the user tapped?
+
+        The pooled ReID embedding against the one captured at selection when
+        there is one, else the kit-colour histogram against the selection's.
+        Either threshold is stricter than the everyday gate, because position
+        no longer helps rule anybody out.
+        """
+        if self._missing_seconds(state) < SETTINGS.reentry_after_seconds:
+            return False
+        learned = reid_similarity(
+            reid_pool(state.anchor_reid_samples) if state.anchor_reid_samples else state.anchor_reid,
+            self._pooled_reid(candidate.track_id))
+        if learned is not None:
+            return learned >= SETTINGS.reentry_min_reid_similarity
+        if state.anchor_appearance is None or candidate.appearance is None:
+            return False
+        return appearance_similarity(state.anchor_appearance, candidate.appearance) >= \
+            SETTINGS.reentry_min_appearance_similarity
 
     def _recent_travel(self, track_id: int | None, fps: float) -> float | None:
         """Body lengths a minute over this track's recent history.
@@ -481,17 +559,25 @@ class IdentityManager:
         return predicted
 
     def _score(self, state: FighterState, candidate: PersonObservation, keep_id_bonus: bool = True) -> float:
+        # An official is a third person, never Fighter A or B.
+        if not state.anchor_is_referee and self._official_track(candidate):
+            return self._refuse(state, "official")
         reference = self._predicted_box(state)
         distance = normalized_distance(reference, candidate.box)
+        reentry = False
         if state.last_box is not None and distance > SETTINGS.max_normalized_jump:
-            # Recorded like every other refusal. Measured on one round, this is
-            # the largest single reason a candidate is turned away - 623 of
-            # them, more than the referee filter - and it was the only refusal
-            # that never appeared in the diagnostics, so it was never looked at
-            # while every other guard was tuned around it.
-            return self._refuse(state, "too_far_to_be_them")
+            # Out of sight long enough to have left the picture or been lost
+            # to the camera turning: wherever they come back, appearance decides.
+            reentry = self._reappears_by_appearance(state, candidate)
+            if not reentry:
+                # Recorded like every other refusal. Measured on one round, this is
+                # the largest single reason a candidate is turned away - 623 of
+                # them, more than the referee filter - and it was the only refusal
+                # that never appeared in the diagnostics, so it was never looked at
+                # while every other guard was tuned around it.
+                return self._refuse(state, "too_far_to_be_them")
         iou = box_iou(reference, candidate.box)
-        if state.last_box is None:
+        if state.last_box is None or reentry:
             # No positional anchor, because one was just discarded as wrong.
             # "Unknown" has to score neutral: the helpers return 999.0 for the
             # distance to nothing, which would make position and size vote
@@ -711,6 +797,9 @@ class IdentityManager:
         return like_fighter - like_bystander < SETTINGS.bystander_margin
 
     def _commit(self, state: FighterState, obs: PersonObservation, source_frame: int, score: float, recovered: bool = False) -> PersonObservation:
+        if (state.last_box is not None and self._missing_seconds(state) >= SETTINGS.reentry_after_seconds
+                and normalized_distance(self._predicted_box(state), obs.box) > SETTINGS.max_normalized_jump):
+            self.reentries[state.name] = self.reentries.get(state.name, 0) + 1
         old_center = box_center(state.last_box) if state.last_box is not None else None
         new_center = box_center(obs.box)
         if old_center is not None:
@@ -840,6 +929,7 @@ class IdentityManager:
         occlude frequently. Joint assignment prioritizes the selected clothing
         appearance plus motion and rejects an ambiguous A/B permutation.
         """
+        self._current_frame = int(source_frame)
         self._remember_positions(people, source_frame)
         if not people:
             self.a.missing_frames += 1
@@ -1123,10 +1213,29 @@ class IdentityManager:
         state.switches_rejected += 1
         return True
 
+    def merged_into_other(self, state: FighterState) -> bool:
+        """Did this fighter vanish into the other fighter's box on this frame?
+
+        In a clinch the detector often returns one box around both fighters:
+        one is "found" in it and the other is missing. Waiting
+        missing_before_recovery frames then loses the start of every clinch,
+        so a merge asks for the SAM2 mask at once (audit 2026-10-14, #2).
+        """
+        other = self.b if state is self.a else self.a
+        if state.missing_frames < 1 or state.last_box is None or other.last_box is None:
+            return False
+        if int(other.last_seen_source_frame) != self._current_frame:
+            return False
+        own = state.last_box
+        inter = (max(0.0, min(own[2], other.last_box[2]) - max(own[0], other.last_box[0]))
+                 * max(0.0, min(own[3], other.last_box[3]) - max(own[1], other.last_box[1])))
+        return inter / max(1.0, box_area(own)) >= 0.6
+
     def needs_recovery(self, state: FighterState, analyzed_index: int) -> bool:
+        waited = state.missing_frames >= SETTINGS.missing_before_recovery or self.merged_into_other(state)
         return (
             SETTINGS.sam_recovery_enabled
-            and state.missing_frames >= SETTINGS.missing_before_recovery
+            and waited
             and analyzed_index - state.last_sam_attempt_analyzed_frame >= SETTINGS.sam_cooldown_analyzed_frames
             and state.last_box is not None
         )

@@ -106,6 +106,7 @@ from core import feed, social, worker_alerts
 from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
 from core.progress_insights import build_progress
 from core.progress_view import stage_view
+from core.selection_check import pair_verdict
 from core.quality_guardian import inspect_video_quality
 from core.metric_catalog import BY_KEY as METRIC_CATALOG, evidence_limitations, readings as metric_readings
 from core.chunked_upload import (
@@ -617,6 +618,13 @@ class StartPayload(BaseModel):
     # Optional so older clients keep working; None means "not said", and the
     # report then names no corner rather than guessing red for A.
     fighter_a_corner: str | None = None
+    # How each box was made: dragged by hand, or a tap on a person the
+    # detector found. A box drawn by hand is never refused for overlapping
+    # the other (core/selection_check.py, audit 2026-10-14 #11). Optional so
+    # older clients keep working.
+    fighter_a_drawn: bool = False
+    fighter_b_drawn: bool = False
+    both_detected: bool = False
 
 
 class PairCheckPayload(BaseModel):
@@ -5081,16 +5089,12 @@ def start(request: Request, job_id: str, payload: StartPayload):
     if payload.fighter_b_box is None:
         raise HTTPException(400, "Draw a box around Fighter B too, or choose a solo session for a video of one person.")
     fighter_b_box = _validated_fighter_box(payload.fighter_b_box, video_width, video_height, "Fighter B")
-    shared = (
-        max(0.0, min(fighter_a_box[2], fighter_b_box[2]) - max(fighter_a_box[0], fighter_b_box[0]))
-        * max(0.0, min(fighter_a_box[3], fighter_b_box[3]) - max(fighter_a_box[1], fighter_b_box[1]))
-    )
-    smallest = min(
-        (fighter_a_box[2] - fighter_a_box[0]) * (fighter_a_box[3] - fighter_a_box[1]),
-        (fighter_b_box[2] - fighter_b_box[0]) * (fighter_b_box[3] - fighter_b_box[1]),
-    )
-    if shared / max(1.0, smallest) >= 0.28:
-        raise HTTPException(400, "Draw a separate fighter in each box; the two selections overlap too much.")
+    # Two close fighters overlap; only two boxes that are nearly the same box
+    # are refused, and never a box drawn by hand (core/selection_check.py).
+    overlap = pair_verdict(fighter_a_box, fighter_b_box, a_drawn=payload.fighter_a_drawn,
+                           b_drawn=payload.fighter_b_drawn, both_detected=payload.both_detected)
+    if overlap["verdict"] == "block":
+        raise HTTPException(400, overlap["message"])
 
     # Asked here, on one frame, in a few milliseconds - because it decides
     # whether anything the analysis says afterwards about *which* fighter did

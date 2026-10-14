@@ -246,7 +246,26 @@ EARLY_ENOUGH = 0.6       # the opening's best, as a share of the whole file's be
 NEAR_BEST = 0.9          # take the earliest moment this close to the window's best
 
 
-def _scan(cap, indices, fps: float) -> list[dict] | None:
+def relaxed_pair_score(people: list[dict], height: int) -> tuple[float, tuple[int, int] | None]:
+    """The two most confidently found people with the least overlap, for when no clear start qualifies.
+
+    Audit 2026-10-14 (#13): when no frame met pair_score's requirements the
+    upload's first frame was kept, and it could show one person. Any frame
+    with two people beats that: score the pair by the weaker detection's
+    confidence times how little they overlap.
+    """
+    best, best_pair = 0.0, None
+    tall = [i for i, p in enumerate(people) if p["box"][3] - p["box"][1] >= 0.08 * height]
+    for n, i in enumerate(tall):
+        for j in tall[n + 1:]:
+            score = min(people[i]["confidence"], people[j]["confidence"]) * (
+                1.0 - min(1.0, _shared(people[i]["box"], people[j]["box"])))
+            if score > best:
+                best, best_pair = score, (i, j)
+    return best, best_pair
+
+
+def _scan(cap, indices, fps: float, relaxed: list | None = None) -> list[dict] | None:
     found = []
     for index in indices:
         cap.set(cv2.CAP_PROP_POS_FRAMES, int(index))
@@ -264,6 +283,11 @@ def _scan(cap, indices, fps: float) -> list[dict] | None:
         if pair is not None:
             found.append({"frame_index": int(index), "seconds": int(index) / fps, "frame": frame,
                           "people": people, "pair": pair, "score": score})
+        elif relaxed is not None:
+            loose, loose_pair = relaxed_pair_score(people, frame.shape[0])
+            if loose_pair is not None:
+                relaxed.append({"frame_index": int(index), "seconds": int(index) / fps, "frame": frame,
+                                "people": people, "pair": loose_pair, "score": loose, "relaxed": True})
     return found
 
 
@@ -287,15 +311,19 @@ def find_clear_moment(video_path: str | Path, samples: int = 12) -> dict | None:
         if total <= 0:
             return None
         early_end = min(total - 1, int(fps * max(EARLY_WINDOW_SECONDS, EARLY_SHARE * total / fps)))
-        early = _scan(cap, np.linspace(0, early_end, samples).astype(int), fps)
+        relaxed: list[dict] = []
+        early = _scan(cap, np.linspace(0, early_end, samples).astype(int), fps, relaxed)
         if early is None:
             return None
-        rest = _scan(cap, (np.linspace(0.03, 0.97, samples) * (total - 1)).astype(int), fps)
+        rest = _scan(cap, (np.linspace(0.03, 0.97, samples) * (total - 1)).astype(int), fps, relaxed)
         if rest is None:
             return None
         everywhere = early + rest
         if not everywhere:
-            return None
+            # No clear start anywhere: the frame with two people found most
+            # confidently and overlapping least, rather than whatever frame
+            # the upload began on.
+            return max(relaxed, key=lambda m: (m["score"], -m["frame_index"])) if relaxed else None
         overall = max(m["score"] for m in everywhere)
         early_best = max((m["score"] for m in early), default=0.0)
         # Stay at the start unless the start is much the worse view: skipping

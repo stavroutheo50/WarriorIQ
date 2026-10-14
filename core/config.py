@@ -434,6 +434,26 @@ class Settings:
     min_reid_score: float = 0.48
     min_reid_margin: float = 0.05
     max_normalized_jump: float = 1.65
+    # A fighter who has been out of sight this long may come back anywhere in
+    # the picture - they left the frame, or the camera turned - so the
+    # distance gate above stops applying and appearance alone decides: the
+    # pooled ReID embedding against the one captured where the user tapped
+    # them must clear reentry_min_reid_similarity (stricter than the ordinary
+    # gate), or without an embedding the kit histogram must clear
+    # reentry_min_appearance_similarity. Audit 2026-10-14, #2.
+    reentry_after_seconds: float = float(os.getenv("WARRIORIQ_REENTRY_AFTER_SECONDS", "1.0"))
+    reentry_min_reid_similarity: float = float(os.getenv("WARRIORIQ_REENTRY_MIN_REID", "0.84"))
+    reentry_min_appearance_similarity: float = float(os.getenv("WARRIORIQ_REENTRY_MIN_APPEARANCE", "0.70"))
+    # Move the remembered boxes with the camera before matching
+    # (core/camera_motion.py). Audit 2026-10-14, #2.
+    camera_motion_compensation: bool = env_bool("WARRIORIQ_CAMERA_MOTION", True)
+    # A track whose referee probability, pooled over its sightings, says
+    # official is held as an official - a third-person class never assigned to
+    # Fighter A or B - and refused even on frames where the per-frame score
+    # dips, as long as that frame is not clearly a fighter's (fighters measured
+    # at most 0.084). Audit 2026-10-14, #2.
+    official_track_min_sightings: int = 3
+    official_track_floor_probability: float = 0.15
     max_missing_analyzed_frames: int = 20
     missing_before_recovery: int = 4
     appearance_ema: float = 0.85

@@ -212,6 +212,7 @@ from core.pose_smoothing import JointGate
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
 from core.report import build_report, identity_tracking, not_a_fight, withhold_for_not_a_fight, write_report
 from core.progress_eta import StageEta
+from core.camera_motion import GlobalMotion
 from core.rtm_pose import refine as refine_fighter_pose
 from core.edgetam_recovery import build_recovery
 from core.sam_recovery import nearest_guidance, sam_sampling_stride
@@ -1279,6 +1280,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                     "identity": 0.0, "joint_refinement": 0.0,
                     "pose_measures": 0.0, "strike_detection": 0.0, "tracking_file": 0.0}
 
+    # The camera's move between analysed frames (core/camera_motion.py), seeded
+    # with the selection frame the identities start from.
+    camera_motion = GlobalMotion() if SETTINGS.camera_motion_compensation else None
+    if camera_motion is not None:
+        camera_motion.update(first_frame, [p.box for p in first_people])
     fallback_buffer_enabled = _fallback_buffer_needed(sam_tracks, sam_was_available)
     frame_buffer: deque[tuple[int, np.ndarray]] = deque(maxlen=max(SETTINGS.sam_buffer_frames + 4, 24))
     if fallback_buffer_enabled:
@@ -1447,6 +1453,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 people.extend(expected)
                 identity_started = time.perf_counter()
                 step_seconds["missing_fighter_search"] += identity_started - search_started
+                # Move the remembered boxes with the camera before matching, so
+                # a pan does not put the right fighter "too far to be them".
+                if camera_motion is not None:
+                    manager.compensate_camera(camera_motion.update(frame, [p.box for p in people]))
                 fighter_a, fighter_b = manager.update(people, source_frame, sam_guidance=guidance)
                 in_exchange = _fighters_in_range(fighter_a, fighter_b)
                 joints_started = time.perf_counter()
@@ -1913,6 +1923,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "fighter_B_suspicious_handoffs_per_minute": round(
             manager.suspicious_handoffs["B"] / (segment_duration / 60.0), 2),
         "identity_swaps_corrected": int(manager.swaps_corrected),
+        # Audit 2026-10-14, #2: re-identified after leaving the picture, frames
+        # where the camera's move was compensated, and officials held apart.
+        "identity_reentries": dict(manager.reentries),
+        "camera_motion_compensated_frames": int(manager.camera_compensations),
+        "official_tracks": len(manager.official_tracks),
         "kit_attribution": kit_proposals,
         "clothed_official_filter": bool(manager.clothed_official_filter),
         "fighter_A_sam_recoveries": manager.a.sam_recovery_count,

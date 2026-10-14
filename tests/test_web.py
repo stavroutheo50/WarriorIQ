@@ -1518,7 +1518,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("We couldn&rsquo;t follow you properly in this video", page)
         self.assertIn("Put the phone on a tripod", text)
         self.assertEqual(text.count("tripod"), 1, "the filming advice is given once")
-        self.assertIn('href="/analyze">Upload a new video', page)
+        self.assertIn('href="/analyze">Upload a steadier video', page)
         self.assertNotIn('href="/select/abc"', page)
         # The recording note moves inside the folded numbers.
         self.assertLess(page.index('id="roughNumbers"'), page.index('id="recordingWarnings"'))
