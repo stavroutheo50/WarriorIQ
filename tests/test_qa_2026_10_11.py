@@ -744,7 +744,9 @@ def test_d3_coach_forwards_to_fight_camp_and_the_home_page_sells_one_page():
     response = client.get("/coach?x=1", follow_redirects=False)
     assert response.status_code == 308 and response.headers["location"] == "/camp?x=1"
     home = (TEMPLATES / "index.html").read_text(encoding="utf-8")
-    assert 'href="/coach"' not in home and "<span>Fight Camp</span>" in home
+    # The outcomes section with the Fight Camp card left the homepage on
+    # 2026-10-19 (owner: shorter homepage); it must still never link /coach.
+    assert 'href="/coach"' not in home
 
 
 # --- D4 ----------------------------------------------------------------------

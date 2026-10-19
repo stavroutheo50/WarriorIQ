@@ -997,8 +997,10 @@ class PublicPageTests(unittest.TestCase):
     def test_professional_home_has_product_and_trust_sections(self):
         response = self.client.get("/")
         self.assertIn("Four steps. No technical homework.", response.text)
-        self.assertIn("Your next round starts here.", response.text)
-        self.assertIn("Evidence before claims.", response.text)
+        # Shortened on 2026-10-19 (owner): the outcomes and trust panels are gone;
+        # what is measured, plans and the FAQ carry the product and the trust.
+        self.assertIn('id="what-is-measured"', response.text)
+        self.assertIn('class="product-section faq"', response.text)
         self.assertNotIn("V" + "4", self._without_random_tokens(response.text))
 
     def test_the_version_marker_check_is_not_defeated_by_the_masking(self):

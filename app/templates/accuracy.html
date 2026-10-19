@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}How accurate WarriorIQ is · WarriorIQ{% endblock %}
+{% block description %}The checks done so far on WarriorIQ's strike counts and measurements, with the numbers.{% endblock %}
+{% block content %}
+{#- Moved off the homepage (walkthrough 2026-10-19): the same measured figures,
+    on a page of their own, linked from the homepage FAQ and the guides line. -#}
+<section class="product-section accuracy-section" id="accuracy" aria-labelledby="accuracyTitle">
+<div class="section-intro"><div class="eyebrow">Accuracy</div><h1 id="accuracyTitle">How accurate it is, measured.</h1><p>These are the checks done so far, on small sets of footage. They are findings, not validated accuracy figures, and they are why counts are labelled as estimates.</p></div>
+<div class="measured-grid">
+  <article><h3>Flagged actions</h3><p>On 178 clips from three reference fights, checked by hand, <strong>about a third</strong> of the actions the report displayed were real strikes.</p></article>
+  <article><h3>One labelled bout</h3><p>On a Kick Light bout labelled by a competitor, <strong>11 of 16</strong> counted moments were real strikes, and <strong>6</strong> of those had the right type.</p></article>
+  <article><h3>Against official stats</h3><p>On three UFC rounds, strikes thrown while both fighters stood were close to the official numbers (<strong>29 vs 21, 36 vs 12, 20 vs 17</strong>). In grappling the counts ran three to six times too high.</p></article>
+  <article><h3>Guard</h3><p>Not yet checked against hand-labelled clips, so it is marked <strong>experimental</strong> wherever it appears.</p></article>
+</div>
+<p class="small muted">Strike counts are labelled as estimates on every report for this reason. Movement, centre, pressure and balance come from body position and are not affected; guard stays marked experimental until it is checked.</p>
+<div class="hero-actions"><a class="btn" href="/sample-report">See a sample report</a><a class="btn secondary" href="/">Back to the home page</a></div>
+</section>
+{% endblock %}

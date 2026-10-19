@@ -299,7 +299,7 @@
           {% else %}<span class="muted">Not filed</span>{% endif %}
         </td>
         <td data-label="Fight">{{f.label}}</td>
-        <td data-label="Seen">{% if f.unusable_reason == 'identity' %}<small class="muted">Fighters told apart only {{'%.0f'|format(f.coverage*100)}}% of the time</small>{% else %}{{'%.0f'|format(f.coverage*100)}}%{% endif %}{% if f.unusable_reason == 'identity' %} <a class="text-link small" href="/select/{{f.job_id}}" data-retag-rerun>Re-tag and re-run</a>{% elif f.unusable_reason == 'not_a_fight' %} <small class="muted">not recognised as a fight</small>{% elif not f.usable %} <small class="muted">too low to compare</small>{% endif %}</td>
+        <td data-label="Seen">{% if f.unusable_reason == 'no_fight' %}<small class="muted">No fight footage to measure</small>{% elif f.unusable_reason == 'identity' %}<small class="muted">Fighters told apart only {{'%.0f'|format(f.coverage*100)}}% of the time</small>{% else %}{{'%.0f'|format(f.coverage*100)}}%{% endif %}{% if f.unusable_reason == 'identity' %} <a class="text-link small" href="/select/{{f.job_id}}" data-retag-rerun>Re-tag and re-run</a>{% elif f.unusable_reason == 'not_a_fight' %} <small class="muted">not recognised as a fight</small>{% elif f.unusable_reason == 'no_fight' %}{% elif not f.usable %} <small class="muted">too low to compare</small>{% endif %}</td>
         <td class="small{% if not f.movement_verdict %} is-empty{% endif %}" data-label="Movement">{{f.movement_verdict or '—'}}</td>
         <td data-label="Pressure">{{f.pressure|movement_value('pressure')}}</td>
         <td{% if f.centre is none %} class="is-empty"{% endif %} data-label="Centre">{% if f.centre is not none %}{{'%.0f'|format(f.centre*100)}}%{% else %}—{% endif %}</td>

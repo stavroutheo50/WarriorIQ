@@ -60,7 +60,7 @@
     <button class="btn" type="submit">Save profile</button>
   </form>
 </section>
-<section class="card"><div class="eyebrow">Fight library</div><h3>{{fights|length}} saved analyses</h3><ul class="list-clean">{% for f in fights[:8] %}<li><a href="/result/{{f.job_id}}"><strong>Fight analysis</strong></a><br><span class="small muted">{{f.ruleset|ruleset_label}} · <time datetime="{{f.created_at}}" data-local>{{f.created_at|fight_moment}}</time></span></li>{% else %}<li class="muted">No saved fights yet.</li>{% endfor %}</ul><p><a class="btn secondary" href="/history">Open full history</a></p></section>
+<section class="card"><div class="eyebrow">Fight library</div><h3>{{fights|length}} saved analyses</h3><ul class="list-clean">{% for f in fights[:8] %}<li><a href="/result/{{f.job_id}}"><strong>{{ f|fight_title }}{% if f.opponent_name %} · vs {{ f.opponent_name }}{% endif %}</strong></a><br><span class="small muted">{{f.ruleset|ruleset_label}} · <time datetime="{{f.created_at}}" data-local>{{f.created_at|fight_moment}}</time></span></li>{% else %}<li class="muted">No saved fights yet.</li>{% endfor %}</ul><p><a class="btn secondary" href="/history">Open full history</a></p></section>
 </div>
 <section class="card" id="public-profile"><div class="eyebrow">Public profile</div><h3>Let other athletes follow you</h3>
   {% if minor %}
