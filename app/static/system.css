@@ -495,3 +495,5 @@ summary:focus-visible,
 /* GitHub's mark is drawn near-black, which vanished on the dark button. */
 .social-github .social-auth-icon svg path{fill:#e6edf3}
 .social-auth>p.social-auth-legacy{text-transform:none;letter-spacing:0;font-weight:500}
+/* The roster notice now sits once above the plan cards (audit 2026-10-14 #52). */
+.plan-blocked-summary{margin:0 0 18px;font-size:var(--wiq-text-sm,14px)}

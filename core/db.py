@@ -2359,6 +2359,33 @@ def archive_fighter(profile_id: int, fighter_id: int) -> bool:
     return bool(changed)
 
 
+def delete_fighters(profile_id: int, fighter_ids: list[int]) -> list[dict]:
+    """Remove fighters from one workspace for good, with their athlete history.
+
+    Only for an operator's clean-up (tools/delete_qa_test_data.py): the site
+    itself archives. Their fights must be deleted first (delete_fight), so no
+    fight is left pointing at a fighter that is gone. Returns the rows removed.
+    """
+    ids = [int(fighter_id) for fighter_id in fighter_ids]
+    if not ids:
+        return []
+    init_db()
+    marks = ",".join("?" for _ in ids)
+    with connection() as con:
+        rows = [dict(row) for row in con.execute(
+            f"SELECT * FROM fighters WHERE profile_id=? AND id IN ({marks})", (profile_id, *ids))]
+        found = [row["id"] for row in rows]
+        if not found:
+            return []
+        marks = ",".join("?" for _ in found)
+        con.execute(f"UPDATE fights SET fighter_id=NULL WHERE profile_id=? AND fighter_id IN ({marks})",
+                    (profile_id, *found))
+        con.execute(f"DELETE FROM athlete_sessions WHERE fighter_id IN ({marks})", found)
+        con.execute(f"DELETE FROM athlete_ratings WHERE fighter_id IN ({marks})", found)
+        con.execute(f"DELETE FROM fighters WHERE profile_id=? AND id IN ({marks})", (profile_id, *found))
+    return rows
+
+
 def assign_fighter_to_fight(profile_id: int, job_id: str, fighter_id: int | None) -> bool:
     """File an existing fight against a fighter, or unfile it.
 

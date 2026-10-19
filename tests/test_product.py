@@ -2283,12 +2283,14 @@ class DowngradeBlockTests(unittest.TestCase):
     def test_the_pricing_page_says_so_before_the_click(self):
         """Better to see why on the card than to fail after committing."""
         page = self.client.get("/pricing?audience=coach").text
-        self.assertIn("Too small", page)
-        self.assertIn("you have 8 fighters", page)
+        # One notice above the cards, not one per card (audit 2026-10-14 #52).
+        self.assertEqual(page.count('id="rosterTooBig"'), 1)
+        self.assertIn("You have 8 fighters, more than", page)
+        self.assertNotIn("Too small", page)
         # The button says the numbers, not "Not enough room" (QA, 2026-10-07).
         self.assertIn("You have 8 fighters — this plan holds 5", page)
         self.assertNotIn("Not enough room", page)
-        self.assertIn('id="blocked-coach_5"', page)
+        self.assertIn('aria-describedby="rosterTooBig"', page)
 
 
 class AddFighterFromCoachPageTests(unittest.TestCase):

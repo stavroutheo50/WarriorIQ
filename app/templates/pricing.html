@@ -83,14 +83,16 @@
   </table>
 </div>
 
+{#- Plans smaller than the roster are refused rather than sold and reconciled
+    afterwards: making the numbers fit would mean archiving somebody's fighters
+    for them. Said once here, not on every card (audit 2026-10-14 #52). -#}
+{% set small_plans = [] %}{% for key,plan in plans.items() %}{% if plan.roster_limit and roster_held and roster_held > plan.roster_limit %}{% set _ = small_plans.append(plan.label) %}{% endif %}{% endfor %}
+{% if small_plans %}<div class="plan-blocked plan-blocked-summary" id="rosterTooBig" role="note">You have {{ roster_held|count_of('fighter') }}, more than {{ small_plans|join(', ') }} can hold. Archive fighters on the Fight Camp roster first to choose {{ 'that plan' if small_plans|length == 1 else 'one of those plans' }}.</div>{% endif %}
 <div class="pricing-grid">
 {% for key,plan in plans.items() %}
   <section class="card pricing-card {% if key == 'athlete_pro' %}featured{% elif key == 'gym' %}gym-featured{% endif %}" id="plan-{{key}}" data-plan="{{key}}">
     {% if plan.highlight %}<div class="plan-banner">{{plan.highlight}}</div>{% endif %}
     {% set too_small = plan.roster_limit and roster_held and roster_held > plan.roster_limit %}
-    {# Refused rather than sold and reconciled afterwards: making the numbers
-       fit would mean archiving somebody's fighters for them. #}
-    {% if too_small %}<div class="plan-blocked" id="blocked-{{key}}">Too small — you have {{roster_held}} fighters. Archive {{roster_held - plan.roster_limit}} first.</div>{% endif %}
     <div class="plan-card-head">
       <div class="eyebrow">{{plan.label}}</div>
       {% if key == current_plan_key %}<span class="current-plan">Current plan</span>{% endif %}
@@ -137,7 +139,7 @@
     {% elif key == 'free' %}
       {% if account %}<a class="btn secondary" href="/camp">Use Starter</a>{% else %}<a class="btn" href="/signup">Start free</a>{% endif %}
     {% elif too_small %}
-      <button class="btn secondary" type="button" disabled aria-describedby="blocked-{{key}}">You have {{ roster_held|count_of('fighter') }} — this plan holds {{ plan.roster_limit }}</button>
+      <button class="btn secondary" type="button" disabled aria-describedby="rosterTooBig">You have {{ roster_held|count_of('fighter') }} — this plan holds {{ plan.roster_limit }}</button>
     {% elif payments_enabled and plan.stripe_price_id %}
       <form method="post" action="/checkout/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="check billing-check"><input type="checkbox" name="billing_acceptance" value="true" required> I understand {{plan.price}} {{plan.period}}, recurring until cancelled, with {{plan.limit_label|lower}}. I accept the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms</a> and <a class="text-link" href="/refunds" target="_blank" rel="noopener">cancellation policy</a>.</label><button class="btn" type="submit" data-loading-label="Opening secure checkout…">Continue to secure payment</button></form>
     {% elif account %}
