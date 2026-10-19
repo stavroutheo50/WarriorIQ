@@ -217,7 +217,17 @@ def _tracker(model):
     return tracker
 
 
-def test_batched_preparation_keeps_what_one_by_one_would_keep():
+@pytest.fixture
+def batching_on():
+    from core.config import SETTINGS
+
+    previous = SETTINGS.pose_batch_size
+    object.__setattr__(SETTINGS, "pose_batch_size", 8)      # off by default since 2026-10-19
+    yield
+    object.__setattr__(SETTINGS, "pose_batch_size", previous)
+
+
+def test_batched_preparation_keeps_what_one_by_one_would_keep(batching_on):
     frames = [(index, np.full((4, 4, 3), index, dtype=np.uint8)) for index in (10, 12, 14)]
     batched, single = _tracker(_FakeModel()), _tracker(_FakeModel())
     batched.prepare_detections_batch(frames, 640)
@@ -229,7 +239,7 @@ def test_batched_preparation_keeps_what_one_by_one_would_keep():
         assert np.array_equal(batched._prepared[key][0], single._prepared[key][0])
 
 
-def test_an_engine_that_refuses_a_batch_falls_back_frame_by_frame():
+def test_an_engine_that_refuses_a_batch_falls_back_frame_by_frame(batching_on):
     frames = [(index, np.full((4, 4, 3), index, dtype=np.uint8)) for index in (1, 2)]
     tracker = _tracker(_FakeModel(fail_batches=True))
     tracker.prepare_detections_batch(frames, 640)
@@ -246,3 +256,37 @@ def test_benchmark_prints_the_realtime_ratio():
 def test_every_analysis_logs_its_stage_seconds():
     source = (ROOT / "core" / "analyzer.py").read_text(encoding="utf-8")
     assert 'LOGGER.info("analysis_stage_seconds job=%s' in source
+
+
+def test_batching_is_off_by_default_so_the_cached_engine_keeps_its_name():
+    # 2026-10-19: batch 8 renamed the engine file the analysis PC looks for, so it
+    # fell back to the slow PyTorch model on the first fight after the update.
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "WARRIORIQ_POSE_BATCH"}
+    out = subprocess.run([sys.executable, "-c", "from core.config import SETTINGS; print(SETTINGS.pose_batch_size)"],
+                         cwd=ROOT, env=env, capture_output=True, text=True, check=True).stdout.split()[-1]
+    assert out == "1"
+
+
+def test_a_queued_fight_with_no_worker_connected_says_so(monkeypatch):
+    # 2026-10-19: it showed "Warming up ... sleeps between fights" with a timer,
+    # while no analysis computer was connected to take the fight at all.
+    import time as _time
+
+    import app.main as web
+
+    job = {"status": "queued", "stage": "queued", "queued_at_epoch": _time.time() - 200,
+           "processed_video_seconds": 0.0, "video_duration": 60.0}
+    monkeypatch.setattr(web, "recent_worker_refusal", lambda: False)
+    monkeypatch.setattr(web, "_worker_connected", lambda: False)
+    offline = web._public_job_status("x", job)
+    assert offline["worker_offline"] is True and offline["warming_up"] is False
+    monkeypatch.setattr(web, "_worker_connected", lambda: True)
+    online = web._public_job_status("x", job)
+    assert online["worker_offline"] is False and online["warming_up"] is True
+    page = (ROOT / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
+    assert "The analysis computer is not connected right now." in page
+    assert "sleeps between fights" not in page

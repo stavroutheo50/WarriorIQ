@@ -3653,17 +3653,6 @@ def home(request: Request):
     )
 
 
-def _home_demo_clip() -> str | None:
-    """The demo clip's URL when the file is really there (#53), else None."""
-    path = SETTINGS.demo_clip
-    if not path.startswith("/static/"):
-        return None
-    local = (ROOT / "app" / path.lstrip("/")).resolve()
-    if local.is_file() and (ROOT / "app" / "static").resolve() in local.parents:
-        return f"{path}?v={ASSET_VERSION}"
-    return None
-
-
 def _home_sections() -> dict:
     """What the homepage's measured, accuracy and plans sections read (#55)."""
     measured = {}
@@ -3676,7 +3665,7 @@ def _home_sections() -> dict:
                if plan.get("audience") == "athlete"]
     coach_prices = [plan["price"] for plan in PLANS.values() if plan.get("audience") != "athlete"]
     return {"measured": measured, "summary_plans": athlete, "coach_from": coach_prices[0] if coach_prices else None,
-            "payments_enabled": SETTINGS.payments_enabled, "demo_clip": _home_demo_clip()}
+            "payments_enabled": SETTINGS.payments_enabled}
 
 
 def _reported_strike_families(sport: str) -> dict:
@@ -5554,7 +5543,11 @@ def _public_job_status(job_id: str, job: dict) -> dict:
         "Analysis is paused for an update. The analysis computer and this website are being "
         "brought to the same version; your fight is saved and keeps its place in the queue."
         if paused else None)
-    payload["warming_up"] = bool(not paused and job.get("status") in {"queued", "running"}
+    # Queued with no analysis computer connected at all: said as that, rather
+    # than as a warm-up with a timer that has nothing to wait for (2026-10-19).
+    offline = bool(not paused and job.get("status") == "queued" and not _worker_connected())
+    payload["worker_offline"] = offline
+    payload["warming_up"] = bool(not paused and not offline and job.get("status") in {"queued", "running"}
                                  and job.get("stage") in {None, "queued", "preparing", "loading", "models"}
                                  and not float(job.get("processed_video_seconds") or 0.0))
     payload["stage_view"] = stage_view(job, payload["analysis_duration_seconds"], paused=paused)

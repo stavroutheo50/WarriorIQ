@@ -184,16 +184,14 @@
   // Cleared the moment the transfer finishes, one way or the other, so a
   // completed upload never leaves a stray prompt behind.
   let uploadInFlight=false;
-  // The progress strip is position:fixed, but .shell carries an identity
-  // transform, and any transformed ancestor becomes the containing block for
-  // fixed descendants - so pinned to the bottom of the window it sat a
-  // thousand pixels below it instead. Moving the node to <body> the first time
-  // it is shown takes it out of that ancestor without touching a wrapper the
-  // whole site depends on.
-  let progressPinned=false;
+  // The progress bar stays where it is in the form, directly under the
+  // upload button (owner, 2026-10-19). It used to be moved to the end of
+  // <body>, which put it below the footer where nobody saw it. When it first
+  // appears it is scrolled into view, in case the button sat low on screen.
   const showProgress=tone=>{
-    if(!progressPinned){document.body.appendChild(progress);progressPinned=true}
+    const wasHidden=progress.hidden;
     progress.hidden=false;progress.dataset.tone=tone;
+    if(wasHidden){try{progress.scrollIntoView({block:'nearest',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}catch{}}
     // "Keep this tab open... moves you on by itself" is about an upload in
     // flight. Under a failure it promised a move that will not come
     // (QA, 2026-10-07).

@@ -112,7 +112,7 @@ below point to it.
 | # | Change | Files | Verified |
 |---|---|---|---|
 | 51 | The allowance period is set per plan (`allowance_period`) or globally (`WARRIORIQ_ALLOWANCE_PERIOD`): day (the default, with the current limits), month, or video minutes. Usage gains a nullable `video_seconds` column. The pricing copy follows the period. | `core/payments.py`, `core/db.py`, `app/main.py`, `pricing.html`, `analyze.html`, `sports.html` | Phase 10 tests (minutes and monthly counting; defaults unchanged); existing plan-comparison tests still pass |
-| 53 | The A/B boxes are replaced by a demo-clip spot. It plays `WARRIORIQ_DEMO_CLIP` once that file exists; until then a placeholder says the clip is coming. Both link to the sample report. | `index.html`, `app/main.py`, `core/config.py` | Phase 10 tests; browser |
+| 53 | Reverted at the owner's request (2026-10-19): the homepage keeps its original A/B interface preview. The sample report is linked from the FAQ. | `index.html` | Phase 10 tests |
 | 54 | `/sample-report`: public, made-up data, labelled as a sample at the top and beside the numbers. It shows only measurements real reports publish: no score and no counts. | `core/sample_report.py`, `sample_report.html`, `app/main.py` | Phase 10 tests; browser at 1280 and 375 px |
 | 55 | New homepage sections: what's measured per sport (from `sport_policy`), accuracy figures from the recorded measurements, a pricing summary (from plan config), and two new FAQ entries. | `index.html`, `app/main.py`, `system.css` | Phase 10 tests; browser at 1280 and 375 px |
 
