@@ -38,6 +38,10 @@ if "core.config" in sys.modules:                                    # pragma: no
 # The setup page's person detector is fetched from the network on first use;
 # no test should do that. Tests that need it patch it in.
 os.environ["WARRIORIQ_PERSON_DETECTOR"] = "0"
+# Upload tests send a few bytes with a video container's header and stub the
+# decoder; ffprobe would see through that. The probe has its own tests, which
+# switch it on (tests/test_audit_2026_10_14_phase5.py).
+os.environ["WARRIORIQ_UPLOAD_STREAM_PROBE"] = "0"
 # Production ships with strike counts off (core.report.STRIKE_COUNTS_PUBLISHED).
 # Most report tests pin how counts read when they are on, so the suite runs
 # with them on; tests/test_strike_counts_off.py pins the default-off path by

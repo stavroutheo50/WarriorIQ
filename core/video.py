@@ -657,6 +657,36 @@ def _stream_codecs(ffmpeg: str, path: Path) -> tuple[str, str] | None:
     return (video, audio) if video else None
 
 
+def has_video_stream(path: str | Path) -> bool | None:
+    """Does the file really contain a video stream? None when no tool can tell.
+
+    Audit 2026-10-14 (#17): the server checked the container's first bytes
+    (core.upload_security.looks_like_video) and whether OpenCV could open it,
+    and a file can pass both with no picture in it. ffprobe reads the
+    container the way a player does; where only ffmpeg is installed its own
+    stream report answers the same question (_stream_codecs).
+    """
+    import shutil
+
+    probe = shutil.which("ffprobe")
+    if probe:
+        try:
+            result = subprocess.run(
+                [probe, "-v", "error", "-select_streams", "v", "-show_entries", "stream=codec_type",
+                 "-of", "csv=p=0", str(path)],
+                capture_output=True, text=True, timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return "video" in (result.stdout or "")
+    ffmpeg = _ffmpeg_exe()
+    if ffmpeg is None:
+        return None
+    try:
+        return _stream_codecs(ffmpeg, Path(path)) is not None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def moov_after_mdat(path: str | Path) -> bool:
     """Does this MP4 keep its index (moov) after the media data (mdat)?
 

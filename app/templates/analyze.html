@@ -78,13 +78,14 @@
         {% else %}
         <div class="field" data-upload-step="who">
           <label for="fighterPick">Which fighter?</label>
-          {#- No fighter is preselected. The browser picked the first name, so a
-              coach's fights were filed under whoever sorted first unless they
-              noticed (QA, 2026-09). Choosing is one tap, and a wrong file
-              breaks that fighter's progress. -#}
+          {#- The profile's main fighter is pre-selected (audit 2026-10-14,
+              #16) - not the first name the browser sorted, which filed a
+              coach's fights under whoever sorted first (QA, 2026-09) - and the
+              line under the select says so, so a fight about someone else is
+              one change away. With no main fighter, nobody is pre-selected. -#}
           <select id="fighterPick" name="fighter_id" {% if roster %}required{% endif %}>
-            {% if roster %}<option value="" selected disabled>Choose who this fight is about</option>{% endif %}
-            {% for f in roster %}<option value="{{f.id}}">{{f.name}}</option>{% endfor %}
+            {% if roster %}<option value="" {% if not main_fighter_id %}selected{% endif %} disabled>Choose who this fight is about</option>{% endif %}
+            {% for f in roster %}<option value="{{f.id}}" {% if main_fighter_id and f.id == main_fighter_id %}selected{% endif %}>{{f.name}}{% if main_fighter_id and f.id == main_fighter_id %} (your main fighter){% endif %}</option>{% endfor %}
             <option value="new" {% if not roster %}selected{% endif %}>+ Add a new fighter</option>
           </select>
           {#- Label and input are wrapped so they hide together. A visible
@@ -94,7 +95,7 @@
             <input class="field-input" id="fighterName" name="fighter_name" type="text"
                    placeholder="Fighter's name" maxlength="80" autocomplete="off">
           </div>
-          <p class="small muted">Filing each fight against a fighter is what lets WarriorIQ show whether they are improving.</p>
+          <p class="small muted">{% if main_fighter_id %}Your main fighter is chosen for you; change it if this fight is about someone else. {% endif %}Filing each fight against a fighter is what lets WarriorIQ show whether they are improving.</p>
         </div>
         {% endif %}
       {% endif %}
@@ -268,8 +269,16 @@
   // "Ready to upload" only once this device has read a picture from the file
   // (D5, QA 2026-10-11): audio-only files and files that are not really video
   // said "ready" before the server refused them.
-  const checkDuration=(f)=>{const probe=document.createElement('video');probe.preload='metadata';probe.muted=true;const url=URL.createObjectURL(f);let settled=false;
-    const unsure=()=>{if(settled||videoInput.files[0]!==f)return;settled=true;URL.revokeObjectURL(url);fileStatus.textContent=`${fmtMB(f.size)} — this browser cannot preview the file, so WarriorIQ checks it is a video when it arrives.`;fileStatus.dataset.tone='warn'};
+  // Audit 2026-10-14 (#17): a 12-byte file named .mp4 was accepted here.
+  // Under 50 KB is no fight video. A file this browser cannot preview is only
+  // let through when its first bytes are a video container - the same
+  // signatures the server checks (core/upload_security.py) - because phone
+  // video Chrome cannot play (HEVC) is still a real fight.
+  const MIN_VIDEO_BYTES=50*1024;
+  const looksLikeVideo=async(f)=>{try{const b=new Uint8Array(await f.slice(0,16).arrayBuffer()),at=(o,t)=>[...t].every((c,i)=>b[o+i]===(typeof c==='number'?c:c.charCodeAt(0)));return at(4,'ftyp')||at(0,[0x1a,0x45,0xdf,0xa3])||(at(0,'RIFF')&&at(8,'AVI '))||at(0,'OggS')}catch(e){return true}};
+  const checkDuration=(f)=>{if(f.size<MIN_VIDEO_BYTES){rejectFile(`This file is ${Math.max(1,Math.round(f.size/1024))} KB - far too small to be a fight video. Pick the video file of the fight.`);return}
+    const probe=document.createElement('video');probe.preload='metadata';probe.muted=true;const url=URL.createObjectURL(f);let settled=false;
+    const unsure=async()=>{if(settled||videoInput.files[0]!==f)return;settled=true;URL.revokeObjectURL(url);if(!(await looksLikeVideo(f))){if(videoInput.files[0]===f)rejectFile('This file is not a video: its details cannot be read and its contents are not a video format. Pick the video file of the fight.');return}if(videoInput.files[0]!==f)return;fileStatus.textContent=`${fmtMB(f.size)} — this browser cannot preview the file, so WarriorIQ checks it is a video when it arrives.`;fileStatus.dataset.tone='warn'};
     setTimeout(unsure,10000);
     probe.onloadedmetadata=()=>{if(settled)return;settled=true;URL.revokeObjectURL(url);const seconds=probe.duration;
       if(!(probe.videoWidth>0&&probe.videoHeight>0)){rejectFile('This file has no picture — it looks like sound only. Pick the video file of the fight.');return}
@@ -363,7 +372,7 @@
     uploadSubmit.textContent=ready?'Upload video & select fighters →':'Choose a video to continue';
     if(!ready)hidePreflight();
     syncSubmit();
-    if(ready){checkDuration(file);runPreflight(file);runSportCheck(file);window.WarriorIQMotion?.impact(uploadCard);window.wiqToast('Fight video selected. Press upload to send it.','success')}};
+    if(ready){checkDuration(file);runPreflight(file);runSportCheck(file);window.WarriorIQMotion?.impact(uploadCard);/* No toast here: it covered the fighter select below (audit 2026-10-14, #18). The button and the status line under it already say the video is selected. */}};
   /* The pre-upload quality check.
    *
    * Step 01 on the landing page promises this. Until now it read the file's

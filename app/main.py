@@ -161,7 +161,7 @@ from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import (
-    detect_shot_changes, ffmpeg_frame, get_video_info, normalize_container, opencv_decodes,
+    detect_shot_changes, ffmpeg_frame, get_video_info, has_video_stream, normalize_container, opencv_decodes,
     playback_file, probe_upload, quarter_turn, read_frame, remove_derivative, rotate_frame,
     selection_frame,
 )
@@ -642,6 +642,10 @@ class StartPayload(BaseModel):
     fighter_a_drawn: bool = False
     fighter_b_drawn: bool = False
     both_detected: bool = False
+    # Trim before analysis (audit 2026-10-14, #20): analyse only this part of
+    # the video. Either may be left out; None keeps what the upload asked for.
+    trim_start_seconds: float | None = None
+    trim_end_seconds: float | None = None
 
 
 class PairCheckPayload(BaseModel):
@@ -3700,6 +3704,8 @@ def _sport_context(request: Request, sport: str) -> dict:
         # A workspace with one seat has one fighter, so it is told rather than
         # asked which one this fight is about.
         "single_fighter": (_request_plan(request) or {}).get("roster_limit") == 1,
+        # Pre-selected in "Which fighter?" (audit 2026-10-14, #16).
+        "main_fighter_id": _main_fighter_id(request),
         "unobserved": sport_unobserved(sport),
         # Only offered when a provider is configured; see core/sport_check.py.
         "sport_check_enabled": sport_check.provider() is not None,
@@ -3943,6 +3949,16 @@ async def upload(
             "That file is not a video. The name ends in a video extension but the "
             f"contents are not {FIGHT_VIDEO_LABEL}. Pick the clip straight "
             "from your camera roll.",
+        )
+
+    # The real file type, read by ffprobe (core.video.has_video_stream): the
+    # first bytes can look right with no picture behind them. None (no probe
+    # tool on this host) leaves the decision to the checks below.
+    if SETTINGS.upload_stream_probe and await run_in_threadpool(has_video_stream, video_path) is False:
+        video_path.unlink(missing_ok=True)
+        raise HTTPException(
+            400,
+            "That file has no video in it. Pick the clip straight from your camera roll.",
         )
 
     scan = await run_in_threadpool(scan_upload, video_path)
@@ -5150,6 +5166,7 @@ def start(request: Request, job_id: str, payload: StartPayload):
             raise HTTPException(409, "The selected frame is unavailable. Choose another frame.")
         video_height, video_width = selection.shape[:2]
     fighter_a_box = _validated_fighter_box(payload.fighter_a_box, video_width, video_height, "Fighter A")
+    job = _apply_trim(job_id, job, payload.trim_start_seconds, payload.trim_end_seconds)
     if payload.solo:
         return _start_solo(request, job_id, job, fighter_a_box, video_width, video_height, capacity)
     if payload.fighter_b_box is None:
@@ -5234,6 +5251,40 @@ def start(request: Request, job_id: str, payload: StartPayload):
     return _analysis_started_response(request, job_id, capacity["deferred"],
                                       looks_alike=float(alike) if looks_alike else None,
                                       on_official=on_official, kit=kit)
+
+
+def _apply_trim(job_id: str, job: dict, start: float | None, end: float | None) -> dict:
+    """Store the part of the video to analyse, and return the job as updated.
+
+    The analysis already honours requested_start_seconds and end_seconds
+    (core/analyzer.py), in process and on a remote worker alike; until now
+    nothing on the page could set them. The picture the fighters were tapped
+    on has to lie inside the kept part, since identity starts there.
+    """
+    if start is None and end is None:
+        return job
+    duration = float(job.get("video_duration") or 0.0)
+    begin = max(0.0, float(start or 0.0))
+    finish = None if end is None else float(end)
+    if duration > 0:
+        begin = min(begin, max(0.0, duration - 0.001))
+        if finish is not None:
+            finish = min(finish, duration)
+    from core.preflight_client import MIN_USABLE_SECONDS
+
+    # The same minimum the upload page holds a clip to.
+    minimum = float(MIN_USABLE_SECONDS)
+    if finish is not None and finish - begin < minimum:
+        raise HTTPException(400, f"Keep at least {minimum:g} seconds of video: the end has to be after the start.")
+    chosen = float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0)
+    if chosen < begin - 0.05 or (finish is not None and chosen > finish + 0.05):
+        raise HTTPException(400, (
+            f"The picture you tapped the fighters on is at {_clock(chosen)}, outside the part you kept "
+            f"({_clock(begin)}-{_clock(finish if finish is not None else duration)}). Pick a moment inside "
+            "it, or widen the trim."))
+    patch = {"requested_start_seconds": begin, "end_seconds": finish}
+    update_job(job_id, patch)
+    return {**job, **patch}
 
 
 def _start_solo(request: Request, job_id: str, job: dict, fighter_a_box: list[float],
@@ -6068,6 +6119,8 @@ def result_page(request: Request, job_id: str):
         "can_check_strikes": bool(_account(request)),
         "went_down": _went_down(job_id, report),
         "wrong_sport": _wrong_sport(report, job),
+        # Kicks or knees found in a boxing upload: a suggestion only (#19).
+        "kicks_in_boxing": None if _wrong_sport(report, job) else sport_check.kicks_in_boxing(report),
         # Stats-only story card for Instagram, TikTok, WhatsApp and the rest:
         # an image made in the browser, no link and no video, so every plan.
         "share_card": share_card(report) if _account(request) else None,
@@ -7338,6 +7391,27 @@ def _display_name(profile: dict | None, fights: list[dict]) -> str:
     if filed:
         return filed.most_common(1)[0][0]
     return own or SETTINGS.default_profile_name
+
+
+def _main_fighter_id(request: Request) -> int | None:
+    """The profile's main fighter: the roster entry named like the profile, else
+    the one most fights are filed under (the athlete Fight Camp follows)."""
+    account = _account(request)
+    if not account:
+        return None
+    profile_id = int(account["profile_id"])
+    roster = list_fighters(profile_id)
+    if not roster:
+        return None
+    profile = get_profile(profile_id) or {}
+    own = " ".join(str(profile.get("display_name") or "").split()).casefold()
+    named = next((f for f in roster if own and " ".join(str(f.get("name") or "").split()).casefold() == own), None)
+    if named:
+        return int(named["id"])
+    most = _athlete_fighter_id(list_fights(profile_id))
+    if most is not None and any(int(f["id"]) == int(most) for f in roster):
+        return int(most)
+    return int(roster[0]["id"]) if len(roster) == 1 else None
 
 
 def _athlete_fighter_id(fights: list[dict]) -> int | None:

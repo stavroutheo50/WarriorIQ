@@ -447,6 +447,10 @@ class Settings:
     # Move the remembered boxes with the camera before matching
     # (core/camera_motion.py). Audit 2026-10-14, #2.
     camera_motion_compensation: bool = env_bool("WARRIORIQ_CAMERA_MOTION", True)
+    # Read the real file type of every upload with ffprobe (core.video
+    # has_video_stream; audit 2026-10-14, #17). Stands down by itself on a
+    # host with neither ffprobe nor ffmpeg.
+    upload_stream_probe: bool = env_bool("WARRIORIQ_UPLOAD_STREAM_PROBE", True)
     # A track whose referee probability, pooled over its sightings, says
     # official is held as an official - a third-person class never assigned to
     # Fighter A or B - and refused even on frames where the per-frame score

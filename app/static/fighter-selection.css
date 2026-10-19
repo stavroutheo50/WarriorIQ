@@ -124,6 +124,9 @@
 /* Lock rules and the pick list sit under the canvas (select.html). */
 .stage-extras{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px 28px;margin-top:22px;align-items:start}
 .stage-extras .selection-without-drawing{grid-column:1/-1}
+/* Full width: in the grid's second column "More options" opened in a narrow
+   strip beside empty space (audit 2026-10-14, #15). */
+.stage-extras .select-more{grid-column:1/-1}
 
 /* One instruction above the picture (select.html, 2026-10-09). */
 .select-instruction{margin:0 0 12px;padding:14px 16px;border-radius:14px;font-size:clamp(18px,2.4vw,22px);font-weight:800;line-height:1.3;color:#f2f7ff}
@@ -159,10 +162,18 @@
   /* overflow:hidden made the layout its own scroll box, so nothing inside it
      could stick to the window; clip keeps the rounded corners without that. */
   .fighter-lock-layout{overflow:clip}
-  .fighter-lock-guide .analysis-choice{position:sticky;top:96px;z-index:2;margin-top:0;padding:16px;grid-template-columns:1fr}
+  /* Not sticky: pinned to the top of the sidebar it slid over the Opponent
+     (B) card on scroll (audit 2026-10-14, #14). It now follows the A and B
+     cards in the column - tap A, tap B, Start - and covers nothing. */
+  .fighter-lock-guide .analysis-choice{position:static;margin-top:0;padding:16px;grid-template-columns:1fr}
   .fighter-lock-guide .analysis-choice .btn{width:100%;min-width:0}
   .fighter-lock-guide .analysis-choice-actions{flex-direction:column;align-items:stretch}
 }
 /* No people found on the frame: turning it is offered up front (C4). */
 .rotate-prominent{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0 0;padding:12px 14px;border:1px solid #62502d;border-radius:10px;background:#1d1708}
 .rotate-prominent[hidden]{display:none}
+/* Trim before analysis (audit 2026-10-14, #20). */
+.trim-pick{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.trim-pick legend{font-weight:800;margin-bottom:6px}
+.trim-pick p{flex-basis:100%;margin:0 0 4px}
+.trim-pick .field-input{width:6.5em;min-width:0}

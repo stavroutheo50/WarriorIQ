@@ -773,7 +773,11 @@ def test_d6_selection_page_solo_hides_b_and_start_stays_in_view():
     css = (ROOT / "app" / "static" / "fighter-selection.css").read_text(encoding="utf-8")
     assert ".fighter-key-item[hidden]" in css and "display:none!important" in css
     page = (TEMPLATES / "select.html").read_text(encoding="utf-8")
-    assert "guide.prepend(choice)" in page
+    # Since the audit of 14 Oct 2026 (#14): Start follows the A and B cards
+    # rather than sticking above them (where it slid over the Opponent card),
+    # with the solo option after it so Start stays near the top.
+    assert "keys.after(choice)" in page and "choice.after(soloToggle)" in page
+    assert "position:sticky;top:96px" not in css
 
 
 # --- D7 ----------------------------------------------------------------------

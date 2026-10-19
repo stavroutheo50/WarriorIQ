@@ -173,3 +173,31 @@ def verdict(chosen: str, detected: dict | None) -> dict:
     return {"mismatch": detected["confidence"] >= WARN_AT_CONFIDENCE,
             "detected": detected["sport"], "confidence": detected["confidence"],
             "reason": detected["reason"]}
+
+
+# ---- After the analysis: kicks and knees in a boxing upload ----------------
+#
+# Audit 2026-10-14 (#19): nothing checked the sport at all unless a vision
+# provider was configured. The analysis itself can answer one case: boxing has
+# no kicks or knees, so a "boxing" fight in which the detector keeps finding
+# them was probably kickboxing or Muay Thai. The detector's kick precision is
+# low (core/report.py), so this needs several confident ones, says how many it
+# saw, and only ever suggests: it never changes or blocks anything.
+LEG_STRIKES_FOR_SUGGESTION = 4
+LEG_STRIKE_MIN_CONFIDENCE = 0.6
+
+
+def kicks_in_boxing(report: dict | None) -> dict | None:
+    """A suggestion to re-analyse a boxing upload as a kicking sport, or None."""
+    report = report or {}
+    sport = (report.get("scorecard") or {}).get("sport")
+    if sport != "boxing":
+        return None
+    seen = [event for event in (report.get("events") or [])
+            if isinstance(event, dict) and event.get("family") in {"kick", "knee"}
+            and float(event.get("confidence") or 0.0) >= LEG_STRIKE_MIN_CONFIDENCE]
+    if len(seen) < LEG_STRIKES_FOR_SUGGESTION:
+        return None
+    kicks = sum(1 for event in seen if event.get("family") == "kick")
+    return {"kicks": kicks, "knees": len(seen) - kicks, "total": len(seen),
+            "suggested": ["kickboxing", "muay_thai"]}
