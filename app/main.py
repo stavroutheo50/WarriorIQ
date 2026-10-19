@@ -4959,7 +4959,7 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
         # that is current, and the log says exactly what to redeploy.
         LOGGER.error(
             "worker_outdated worker_id=%s analysis_version=%s required=%s - redeploy the worker "
-            "(modal deploy deploy/modal_worker.py, or restart a local worker on the current code)",
+            "(run deploy/update-worker.ps1 on the GPU worker PC to bring it to the current code)",
             worker_id, payload.analysis_version, ANALYSIS_VERSION)
         record_worker_refusal(worker_id, "worker_outdated")
         worker_alerts.note_version_mismatch(outputs=OUTPUTS, recipients=SETTINGS.admin_emails,

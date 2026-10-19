@@ -1,4 +1,4 @@
-"""Deploy the GPU worker and check the website runs the same release.
+"""Check that the website runs the same release as this checkout.
 
 QA, 2026-10-14 (#23): the worker and the website were deployed separately,
 drifted apart, and fights sat at "warming up" because the website refuses work
@@ -7,14 +7,13 @@ core/build_info.release_version() - the analysis version and the analysis code
 fingerprint - which is exactly what the website compares when a worker claims a
 fight. Equal strings mean the worker will be given fights.
 
-    python deploy/release.py                    # print the release, deploy Modal, check the site
-    python deploy/release.py --check-only       # just compare this checkout with the live site
+    python deploy/release.py                    # print the release, wait for the site to match
     python deploy/release.py --site https://warrioriq.eu --wait 900
 
-Order: the website deploys itself from main on Render (render.yaml autoDeploy),
-so push the commit first, run this from the same commit, and it waits until
-the site's /health reports the same release. Run it from a clean checkout:
-an uncommitted change is a different release from what Render builds.
+Order: the website deploys itself from main on Render (render.yaml autoDeploy).
+Update the GPU worker PC to the same main (deploy/update-worker.ps1), then run
+this from that folder: it waits until the site's /health reports the same
+release. An uncommitted change is a different release from what Render builds.
 """
 
 from __future__ import annotations
@@ -44,7 +43,6 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--site", default="https://warrioriq.eu")
-    parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--wait", type=float, default=600.0, help="Seconds to wait for the site to match")
     args = parser.parse_args(argv)
 
@@ -52,14 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"release {release} (commit {build_commit()})")
     dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT,
                            capture_output=True, text=True, check=False).stdout.strip()
-    if dirty and not args.check_only:
-        print("refusing to deploy: uncommitted changes would make the worker a different release")
-        return 2
-    if not args.check_only:
-        deployed = subprocess.run(["modal", "deploy", "deploy/modal_worker.py"], cwd=ROOT, check=False)
-        if deployed.returncode != 0:
-            print("modal deploy failed")
-            return deployed.returncode
+    if dirty:
+        print("warning: uncommitted changes here make this a different release from the site")
     deadline = time.time() + max(0.0, args.wait)
     while True:
         live = site_release(args.site)

@@ -1,4 +1,4 @@
-# TensorRT for the GPU worker image (deploy/modal_worker.py), so the pose model
+# TensorRT for the GPU worker, so the pose model
 # runs as an engine rather than the .pt checkpoint.
 #
 # It was missing until 2026-10-04. Without it Ultralytics tries to pip-install

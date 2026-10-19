@@ -1294,7 +1294,7 @@ class Settings:
     # ------------------------------------------------------------
     # These values intentionally have no made-up defaults. Paid checkout is
     # blocked until the real operator has supplied every launch-critical item.
-    # 2026-10-19: /subprocessors now names Render, Modal, Google and Stripe
+    # 2026-10-19: /subprocessors now names Render, Google and Stripe
     # with purpose, location and data (audit 2026-10-14 #10).
     policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-10-19")
     public_base_url: str = os.getenv("WARRIORIQ_PUBLIC_BASE_URL", "").rstrip("/")
@@ -1437,9 +1437,8 @@ class Settings:
     # (for example the SMTP service's operator). tools/check_public_config.py
     # fails while email is switched on and this is empty or a placeholder.
     email_provider_name: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER_NAME", "").strip()
-    # The company that provides the analysis machine, when it is not detected
-    # (Modal is recognised from WARRIORIQ_WORKER_WAKE_URL). Empty for a
-    # machine run by WarriorIQ itself, which /subprocessors then says.
+    # The company that provides the analysis machine, if a third party does.
+    # Empty for a machine run by WarriorIQ itself, which /subprocessors then says.
     analysis_provider_name: str = os.getenv("WARRIORIQ_ANALYSIS_PROVIDER_NAME", "").strip()
     # Who hosts the website, its database and the uploaded fights, named on
     # /subprocessors. Render sets RENDER on its own services, so a Render

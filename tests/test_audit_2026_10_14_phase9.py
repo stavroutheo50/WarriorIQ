@@ -1,7 +1,7 @@
 """Audit of 14 Oct 2026, phase 9: legal (code side; the rest is in OPS_TODO.md).
 
 #9  the operator's legal identity is one config value read by every legal page
-#10 /subprocessors names Render, Modal, Google and Stripe with purpose,
+#10 /subprocessors names Render, Google and Stripe with purpose,
     location and data processed; the policy version is bumped
 """
 
@@ -71,19 +71,19 @@ def _sections(**settings):
         return dict(legal.resolve_document("subprocessors")["sections"])
 
 
-def test_the_list_names_render_modal_google_and_stripe():
+def test_the_list_names_render_google_and_stripe():
     sections = _sections(hosting_provider="Render", hosting_location="Frankfurt, Germany (EU)",
-                         analysis_worker_mode="remote", worker_wake_url="", analysis_provider_name="Modal",
+                         analysis_worker_mode="remote", worker_wake_url="", analysis_provider_name="",
                          google_client_id="id", google_client_secret="secret", oauth_state_secret="s" * 32,
                          payments_enabled=True)
-    for heading in ("Render (website hosting and storage)", "Modal (fight analysis)", "Google (sign-in)",
+    for heading in ("Render (website hosting and storage)", "Google (sign-in)",
                     "Stripe (payments)"):
         assert heading in sections, heading
         assert "Data processed:" in sections[heading]
         assert "Location:" in sections[heading]
     assert "Frankfurt, Germany (EU)" in sections["Render (website hosting and storage)"]
-    # No location invented for Modal until one is configured.
-    assert "Location: not yet published." in sections["Modal (fight analysis)"]
+    # WarriorIQ's own analysis computer: no third party is named, and no location invented.
+    assert "Location: not yet published." in sections["Analysis computer"]
 
 
 def test_stripe_is_listed_only_when_billing_is_live():
@@ -95,4 +95,4 @@ def test_the_policy_version_is_bumped():
     assert SETTINGS.policy_version >= "2026-10-19" or os.getenv("WARRIORIQ_POLICY_VERSION")
     render = (ROOT / "render.yaml").read_text(encoding="utf-8")
     assert "key: WARRIORIQ_HOSTING_PROVIDER\n        value: Render" in render
-    assert "key: WARRIORIQ_ANALYSIS_PROVIDER_NAME\n        value: Modal" in render
+    assert "WARRIORIQ_ANALYSIS_PROVIDER_NAME" not in render

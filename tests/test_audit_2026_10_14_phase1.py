@@ -1,6 +1,6 @@
 """Audit of 14 Oct 2026, phase 1: analysis speed, live progress, time left, worker versions.
 
-#1  the Modal worker keeps one warm container on an A10/L4 and batches pose frames
+#1  the GPU worker batches pose frames
 #21 the live percentage, stage label and "analysed through" line describe one stage
 #22 time left is estimated once a pass has measured about 50 frames
 #23 a refused worker pauses the analysis honestly and alerts the owner
@@ -171,15 +171,6 @@ def test_claim_from_a_mismatched_worker_raises_the_alert(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------- #1
-def test_modal_worker_keeps_one_warm_container_on_a_supported_gpu():
-    source = (ROOT / "deploy" / "modal_worker.py").read_text(encoding="utf-8")
-    assert 'ALLOWED_GPUS = ("A10", "L4")' in source
-    assert 'MIN_CONTAINERS = int(os.environ.get("WARRIORIQ_MODAL_MIN_CONTAINERS", "1"))' in source
-    assert "min_containers=MIN_CONTAINERS" in source
-    assert "@modal.enter()" in source and "_warm_both_sizes()" in source
-    assert 'gpu="T4"' not in source
-
-
 def test_engine_name_carries_the_batch_it_accepts(monkeypatch):
     from core import trt_engine
     from core.config import SETTINGS

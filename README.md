@@ -200,7 +200,7 @@ Queued jobs remain persisted across web restarts. A worker claims one job at a t
 
 ### Scale-to-zero GPU (analysis without a machine left running)
 
-A fight needs a GPU for the few minutes it is actually being analysed, not for the rest of the day. Serverless GPU platforms (Modal, RunPod Serverless, Beam and similar) bill per second and scale to zero, so the cost of an idle service is nothing.
+A fight needs a GPU for the few minutes it is actually being analysed, not for the rest of the day. Serverless GPU platforms bill per second and scale to zero, so the cost of an idle service is nothing.
 
 Set `WARRIORIQ_WORKER_WAKE_URL` on the web server to the endpoint that starts your worker container. When a fight is queued, the web process pings that URL with the same `WARRIORIQ_WORKER_TOKEN` bearer token, the container starts, runs `python worker.py --once` against `WARRIORIQ_WORKER_REMOTE_URL` until the queue is empty, and exits. Nothing polls a running GPU, so nothing bills idle time.
 

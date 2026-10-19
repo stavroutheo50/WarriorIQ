@@ -349,8 +349,7 @@ def resolve_pose_engine(configured: str | None = None, gpu_name: str | None = No
     directory.
 
     The configured path alone was not enough. WARRIORIQ_POSE_ENGINE pointing at
-    a file that does not exist - the Modal worker once set it to
-    `absent.engine` on purpose, and a stale value can outlive that in a secret
+    a file that does not exist - a stale value can outlive that in a secret
     or an environment - sent every run to the .pt checkpoint while the GPU's
     own engine sat built and cached a directory away. Same model, same answers,
     so falling back to it costs nothing but the minutes it saves.

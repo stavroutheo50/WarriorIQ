@@ -5,14 +5,9 @@ money, hardware or a lawyer. Nothing here has been done to any live service.
 
 ## 1. Speed: deploy and measure on the GPU (#1, #23)
 
-- [ ] **Deploy the worker:** `modal deploy deploy/modal_worker.py`.
-  - Set `WARRIORIQ_MODAL_GPU` to `A10` or `L4`.
-  - Build the engines once per GPU type: `modal run deploy/modal_worker.py::build_engines`.
-- [ ] **Decide on the always-warm container.** `WARRIORIQ_MODAL_MIN_CONTAINERS=1` keeps one GPU container running at all times.
-  - This is a standing Modal bill.
-  - Set it to `0` to accept cold starts instead.
+- [ ] **Update your GPU worker PC:** run `deploy/update-worker.ps1` (or `update-worker.bat`) on it. It brings the worker to the code on `main` and restarts it. The pose engine for your GPU is built and cached the first time it runs.
 - [ ] **Deploy the website and the worker from the same commit.** The release string (`deploy/release.py`, `/health` → `release`) must match. If it doesn't, analyses pause with "Analysis is paused for an update" and the admin page shows a flag.
-- [ ] **Measure the speed promise on the worker GPU:** `python tools/benchmark_realtime.py --lengths 24 60 180`.
+- [ ] **Measure the speed promise on your GPU PC:** `python tools/benchmark_realtime.py --lengths 24 60 180`.
   - Each ratio must be 1.0 or less; the script exits 1 otherwise.
   - The only measurement so far was on a CPU-only build machine (see AUDIT_FIXES.md, Final checks). It says nothing about GPU speed.
 
@@ -48,8 +43,9 @@ money, hardware or a lawyer. Nothing here has been done to any live service.
   - Only after the whole set is reviewed, set `WARRIORIQ_LEGAL_DRAFT=0` to remove the "Draft — not yet reviewed by a lawyer" banner.
   - Don't clear it after a partial review (see the note in `core/config.py`).
 - [ ] **Policy version:** if `WARRIORIQ_POLICY_VERSION` is set in the Render dashboard, update it to `2026-10-19` or remove it so the new default applies. The cookie banner asks visitors again after a policy change; that is intended.
-- [ ] **Pin Modal's region:** pin the region Modal processes in and set `WARRIORIQ_ANALYSIS_PROVIDER_LOCATION`. Until then, /subprocessors says "Location: not yet published" for Modal.
-- [ ] **Data processing agreements** with Render and Modal now. With Stripe before billing opens, when Stripe appears on /subprocessors automatically.
+- [ ] **Analysis computer location:** fights are analysed on your own GPU PC, so /subprocessors lists it as WarriorIQ's own "Analysis computer", not a third party. Set `WARRIORIQ_ANALYSIS_PROVIDER_LOCATION` (e.g. the country it is in) so the page states where it is.
+- [ ] **Render environment:** if `WARRIORIQ_ANALYSIS_PROVIDER_NAME` is set in the Render dashboard (an earlier `render.yaml` set it), delete it, or /subprocessors will keep naming a third-party analysis provider.
+- [ ] **Data processing agreements** with Render now. With Stripe before billing opens, when Stripe appears on /subprocessors automatically.
 
 ## 6. Homepage and pricing (#51, #53, #54, #55)
 
