@@ -1255,6 +1255,16 @@ class Settings:
     # blocked until the real operator has supplied every launch-critical item.
     policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-08-24")
     public_base_url: str = os.getenv("WARRIORIQ_PUBLIC_BASE_URL", "").rstrip("/")
+    # Serve replay video through a CDN (Cloudflare in front of this site, or
+    # any pull CDN). Off unless both are set. /media then redirects to
+    # <media_cdn_base_url>/media-signed/<job>?exp=..&sig=.., a URL that is
+    # unguessable, expires, and may therefore be cached publicly; the CDN pulls
+    # it from this server once. Audit 2026-10-14, #25. See OPS_TODO.md.
+    media_cdn_base_url: str = os.getenv("WARRIORIQ_MEDIA_CDN_BASE_URL", "").rstrip("/")
+    media_signing_key: str = os.getenv("WARRIORIQ_MEDIA_SIGNING_KEY", "")
+    # How long a signed media URL lives. Expiry is rounded up to a whole
+    # period, so one viewer's URL stays the same - and cached - for a while.
+    media_url_seconds: int = int(os.getenv("WARRIORIQ_MEDIA_URL_SECONDS", "3600"))
     allowed_hosts: tuple[str, ...] = tuple(
         value.strip().lower() for value in os.getenv("WARRIORIQ_ALLOWED_HOSTS", "").split(",")
         if value.strip()

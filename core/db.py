@@ -4,6 +4,7 @@ import atexit
 import collections
 import json
 import logging
+import os
 import secrets
 import sqlite3
 import threading
@@ -98,7 +99,39 @@ def _remove_annotation_sequences(con: sqlite3.Connection, job_id: str) -> None:
             path.unlink(missing_ok=True)
 
 
+_schema_ready_for: tuple | None = None
+_schema_lock = threading.Lock()
+
+
+def _database_identity() -> tuple | None:
+    try:
+        stat = os.stat(DB_PATH)
+    except OSError:
+        return None
+    return (str(DB_PATH), stat.st_dev, stat.st_ino)
+
+
 def init_db() -> None:
+    """Create and migrate the schema - once per process per database file.
+
+    Every query function calls this, and it ran the whole schema script and
+    its PRAGMA migration checks on each call: several times per page view
+    (audit 2026-10-14, #4). A database file replaced or deleted since (a new
+    inode) is migrated again.
+    """
+    global _schema_ready_for
+    current = _database_identity()
+    if current is not None and current == _schema_ready_for:
+        return
+    with _schema_lock:
+        current = _database_identity()
+        if current is not None and current == _schema_ready_for:
+            return
+        _init_db_schema()
+        _schema_ready_for = _database_identity()
+
+
+def _init_db_schema() -> None:
     with connection() as con:
         con.executescript(
             """
@@ -512,6 +545,12 @@ def init_db() -> None:
                 FOREIGN KEY(followed_profile_id) REFERENCES profiles(id)
             );
             CREATE INDEX IF NOT EXISTS idx_follows_followed ON follows(followed_profile_id, status);
+            -- Lookups made on most signed-in pages (audit 2026-10-14, #4).
+            CREATE INDEX IF NOT EXISTS idx_fights_profile ON fights(profile_id, id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_points_ledger_profile ON points_ledger(profile_id);
+            CREATE INDEX IF NOT EXISTS idx_camp_missions_profile ON camp_missions(profile_id);
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}

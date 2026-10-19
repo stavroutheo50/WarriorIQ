@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
@@ -656,6 +657,41 @@ def _stream_codecs(ffmpeg: str, path: Path) -> tuple[str, str] | None:
     return (video, audio) if video else None
 
 
+def moov_after_mdat(path: str | Path) -> bool:
+    """Does this MP4 keep its index (moov) after the media data (mdat)?
+
+    A browser cannot start playing such a file until it has fetched the index
+    from the end - a second round trip at best, the whole file at worst - and
+    phone recorders write exactly that layout. Read from the top-level atom
+    headers only, so it costs a few small reads. False when unsure.
+    """
+    try:
+        with open(path, "rb") as handle:
+            size_total = os.fstat(handle.fileno()).st_size
+            offset = 0
+            while offset + 8 <= size_total:
+                handle.seek(offset)
+                header = handle.read(16)
+                if len(header) < 8:
+                    return False
+                size = int.from_bytes(header[:4], "big")
+                kind = header[4:8]
+                if size == 1 and len(header) >= 16:
+                    size = int.from_bytes(header[8:16], "big")
+                elif size == 0:
+                    size = size_total - offset
+                if kind == b"moov":
+                    return False
+                if kind == b"mdat":
+                    return True
+                if size < 8:
+                    return False
+                offset += size
+    except OSError:
+        return False
+    return False
+
+
 def normalize_container(path: str | Path) -> Path | None:
     """Write a browser-friendly MP4 beside `path`, or None if none is needed.
 
@@ -669,7 +705,13 @@ def normalize_container(path: str | Path) -> Path | None:
     replay page falls back to the original, which it now handles out loud.
     """
     source = Path(path)
-    if source.suffix.lower() in _PLAYABLE_CONTAINERS or not source.exists():
+    if not source.exists():
+        return None
+    # A playable container is still rewritten when its index sits at the end:
+    # the replay took 8-10 s to start on such files (audit 2026-10-14, #25).
+    # Same stream copy as below, with the index moved to the front.
+    if source.suffix.lower() in _PLAYABLE_CONTAINERS and not (
+            source.suffix.lower() in {".mp4", ".m4v"} and moov_after_mdat(source)):
         return None
     ffmpeg = _ffmpeg_exe()
     if ffmpeg is None:
@@ -679,7 +721,10 @@ def normalize_container(path: str | Path) -> Path | None:
     if codecs is None:
         return None
     video_codec, audio_codec = codecs
-    if video_codec.lower() not in _COPYABLE_VIDEO:
+    # Already MP4, only the index is in the wrong place: whatever the codec,
+    # copying the streams into a new MP4 with +faststart keeps them as they are.
+    already_mp4 = source.suffix.lower() in {".mp4", ".m4v"}
+    if video_codec.lower() not in _COPYABLE_VIDEO and not already_mp4:
         # ProRes, HEVC and friends. Worth re-encoding, but not here and not
         # synchronously: it is minutes of shared-host CPU on a request that a
         # person is waiting on.
@@ -695,7 +740,7 @@ def normalize_container(path: str | Path) -> Path | None:
         # `mebx` metadata tracks that MP4 will not accept.
         "-map", "0:v:0",
     ]
-    if audio_codec.lower() in _COPYABLE_AUDIO and audio_codec:
+    if audio_codec and (already_mp4 or audio_codec.lower() in _COPYABLE_AUDIO):
         arguments += ["-map", "0:a:0?"]
     arguments += ["-c", "copy", "-movflags", "+faststart", str(target)]
     try:

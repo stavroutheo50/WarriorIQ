@@ -65,3 +65,8 @@ services:
         sync: false
       - key: WARRIORIQ_PUBLIC_BASE_URL
         sync: false
+      # Server processes (run.py worker_count). One process served one slow
+      # request at a time (audit 2026-10-14, #3). SQLite runs in WAL mode with
+      # a busy_timeout, so the processes share the database safely.
+      - key: WEB_CONCURRENCY
+        value: "4"

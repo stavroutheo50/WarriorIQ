@@ -199,11 +199,20 @@ def _session_secret() -> str:
                 return stored
         generated = secrets.token_urlsafe(48)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(generated, encoding="utf-8")
+        # Created exclusively: several server processes start together
+        # (run.py worker_count), and each writing its own key would leave
+        # them signing with different ones. The first wins; the rest read it.
         try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+            descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            for _ in range(50):
+                stored = path.read_text(encoding="utf-8").strip()
+                if stored:
+                    return stored
+                time.sleep(0.02)
+            raise OSError("session secret file stayed empty")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(generated)
         logging.getLogger("warrioriq").warning(
             "WARRIORIQ_OAUTH_STATE_SECRET is not set; generated one at %s. "
             "Set it in the environment instead - a key on disk is fine for a "
@@ -924,7 +933,12 @@ def _analysis_navigation_state(
     active = _owned_job(owner_key, active_job_id, processing_statuses)
     if active is not None and not _is_live_processing_job(active):
         active = None
-    if active is None:
+    # The fallback scans every job on disk. A signed-out visitor without the
+    # active-analysis cookie cannot own a running job - starting one sets that
+    # cookie in this browser - so for them, which is most public page views,
+    # the scan is skipped. It was the bulk of a public page's first byte on a
+    # host with a few hundred fights (audit 2026-10-14, #4).
+    if active is None and (active_job_id or not owner_key.startswith("guest:")):
         active = _active_job_for_owner(owner_key)
 
     completed = _owned_job(owner_key, completed_job_id, {"complete"})
@@ -1880,6 +1894,33 @@ def _schedule_maintenance() -> None:
         raise
 
 
+# Public pages that read the same for every signed-out visitor: the legal
+# pages, the guides and the homepage. Cached in the visitor's own browser for
+# a few minutes (audit 2026-10-14, #4). "private", not "public": each page
+# carries a per-response CSP nonce and the visitor's CSRF token, which a
+# shared cache must never hand to somebody else.
+STATIC_PUBLIC_PAGES = frozenset({
+    "/", "/legal", "/terms", "/cookies", "/acceptable-use", "/refunds", "/video-upload-policy",
+    "/sports-medical-disclaimer", "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
+    "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
+    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
+})
+STATIC_PUBLIC_MAX_AGE = 300
+
+
+def _cacheable_public_page(request: Request, response) -> bool:
+    """A signed-out GET of a static public page, with nothing of the visitor's own on it."""
+    return bool(
+        request.method == "GET"
+        and response.status_code == 200
+        and request.url.path in STATIC_PUBLIC_PAGES
+        and not request.url.query
+        and getattr(request.state, "account", None) is None
+        and not request.cookies.get(ACTIVE_ANALYSIS_COOKIE)
+        and not request.cookies.get(LAST_COMPLETED_ANALYSIS_COOKIE)
+        and response.headers.get("content-type", "").lower().startswith("text/html"))
+
+
 def _apply_response_headers(request: Request, response) -> None:
     """Security and caching headers every response carries, page or asset."""
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -1928,6 +1969,12 @@ def _apply_response_headers(request: Request, response) -> None:
     # recovery line - so github.com is no longer allowed on every page of a
     # site that offers no GitHub sign-up.
     form_action = " ".join(["'self'", *SOCIAL_AUTH.form_action_origins_for(request.url.path)])
+    # The replay CDN, only when one is configured (SETTINGS.media_cdn_base_url).
+    media_src = "'self' blob:"
+    if SETTINGS.media_cdn_base_url and SETTINGS.media_signing_key:
+        cdn = urlsplit(SETTINGS.media_cdn_base_url)
+        if cdn.scheme == "https" and cdn.netloc:
+            media_src += f" https://{cdn.netloc}"
     # blob: in media-src is the fight the visitor just chose, played from their
     # own device while it uploads. A blob: URL names something this page itself
     # created from a file the person picked - it cannot address anything remote
@@ -1936,10 +1983,15 @@ def _apply_response_headers(request: Request, response) -> None:
     response.headers.setdefault(
         "Content-Security-Policy",
         f"default-src 'self' data:; script-src {script_src}; style-src 'self' 'unsafe-inline'; "
-        f"img-src {img_src}; media-src 'self' blob:; connect-src {connect_src}; frame-src {frame_src}; "
+        f"img-src {img_src}; media-src {media_src}; connect-src {connect_src}; frame-src {frame_src}; "
         f"frame-ancestors 'none'; form-action {form_action}",
     )
-    if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/", "/f/")):
+    if _cacheable_public_page(request, response):
+        response.headers.setdefault("Cache-Control", f"private, max-age={STATIC_PUBLIC_MAX_AGE}")
+        # Signing in changes the cookie, and with it which copy may be used.
+        response.headers["Vary"] = ", ".join(
+            filter(None, [response.headers.get("Vary"), "Cookie"]))
+    elif request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/", "/f/")):
         # setdefault, so a route that has already chosen keeps its value.
         # /media/ does exactly that: a fight video is private but not
         # volatile, and re-sending 101 MB on every seek is not privacy.
@@ -2047,7 +2099,9 @@ async def viewer_context(request: Request, call_next):
     )
     if _is_counted_page_view(request, response):
         try:
-            record_page_view(_counted_path(request.url.path))
+            # Off the event loop: the batch flush is a database write, and on
+            # the event loop it held every other request until it finished.
+            await run_in_threadpool(record_page_view, _counted_path(request.url.path))
         except Exception:  # pragma: no cover - counting must never cost a page
             # A visitor came for the page, not for the statistic. If the write
             # fails the page still has to be served, so this swallows rather
@@ -6647,10 +6701,64 @@ def _video_removed(job_id: str) -> bool:
         return True
 
 
+def _media_signature(job_id: str, expires: int) -> str:
+    message = f"{job_id}:{int(expires)}".encode("utf-8")
+    return hmac.new(SETTINGS.media_signing_key.encode("utf-8"), message, hashlib.sha256).hexdigest()[:32]
+
+
+def _signed_media_url(job_id: str, now: float | None = None) -> str | None:
+    """A CDN address for this fight's video, or None when no CDN is configured."""
+    if not (SETTINGS.media_cdn_base_url and SETTINGS.media_signing_key):
+        return None
+    period = max(60, int(SETTINGS.media_url_seconds))
+    now = time.time() if now is None else now
+    # Rounded up to the next whole period, plus one: the URL is the same for
+    # every request in a period (so the CDN copy is reused) and never has less
+    # than one period left to run.
+    expires = (int(now) // period + 2) * period
+    return (f"{SETTINGS.media_cdn_base_url}/media-signed/{quote(job_id)}"
+            f"?exp={expires}&sig={_media_signature(job_id, expires)}")
+
+
+def _media_path(job_id: str) -> Path:
+    job = get_job(job_id)
+    if job:
+        path = Path(job["video_path"])
+    else:
+        fight = get_fight(job_id)
+        path = Path(fight["video_path"]) if fight else Path("missing")
+    if not path.exists():
+        raise HTTPException(404)
+    return playback_file(path)
+
+
+@app.get("/media-signed/{job_id}", include_in_schema=False)
+def media_signed(job_id: str, exp: int = 0, sig: str = ""):
+    """The video behind a signed CDN address (_signed_media_url).
+
+    No session: a CDN pulling it has none. The signature and the expiry are
+    the authorisation, checked in constant time; anything else is a 404, so an
+    address cannot be probed for whether a fight exists.
+    """
+    if not (SETTINGS.media_cdn_base_url and SETTINGS.media_signing_key):
+        raise HTTPException(404)
+    if int(exp) < time.time() or not hmac.compare_digest(str(sig), _media_signature(job_id, int(exp))):
+        raise HTTPException(404)
+    path = _media_path(job_id)
+    # Public, because the address itself is the secret and it expires; the CDN
+    # may keep it until then and serve every seek from its edge.
+    remaining = max(0, int(exp) - int(time.time()))
+    return FileResponse(path, headers={"Cache-Control": f"public, max-age={remaining}, immutable",
+                                       "X-Robots-Tag": "noindex, nofollow"})
+
+
 @app.get("/media/{job_id}")
 def media(request: Request, job_id: str):
     if not _authorized_job(request, job_id):
         raise HTTPException(404)
+    signed = _signed_media_url(job_id)
+    if signed:
+        return RedirectResponse(signed, status_code=302, headers={"Cache-Control": "private, no-store"})
     job = get_job(job_id)
     if job:
         path = Path(job["video_path"])
