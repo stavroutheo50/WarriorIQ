@@ -194,7 +194,15 @@ class Settings:
     # GPU's launch and transfer overhead per frame. 1 switches batching off.
     # A TensorRT engine accepts batches only up to the size it was built for,
     # so the engine is built for this size too (core/trt_engine.py).
-    pose_batch_size: int = max(1, int(os.getenv("WARRIORIQ_POSE_BATCH", "8")))
+    #
+    # Off (1) by default since 2026-10-19: a larger batch changes the cached
+    # engine's file name (_b8), and the analysis PC builds no engine of its
+    # own, so it no longer found the engine it had and fell back to the much
+    # slower PyTorch model on the first fight after the update. To use
+    # batching, build the batch engine on the PC first
+    # (tools/export_pose_tensorrt.py with WARRIORIQ_POSE_BATCH set), then set
+    # WARRIORIQ_POSE_BATCH there.
+    pose_batch_size: int = max(1, int(os.getenv("WARRIORIQ_POSE_BATCH", "1")))
     # Hold the analysis to the length of the video by planning the sampling
     # stride once, early, from measured throughput. Until 2026-09-10 this
     # setting was defined here and **read nowhere in the codebase** - a switch
@@ -1452,11 +1460,6 @@ class Settings:
     email_provider_location: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER_LOCATION", "").strip()
     # The domain WarriorIQ's own support and privacy addresses must be on (E1).
     public_email_domain: str = os.getenv("WARRIORIQ_PUBLIC_EMAIL_DOMAIN", "warrioriq.eu").strip().lower()
-    # The homepage's looping demo clip (audit 2026-10-14, #53): a path under
-    # /static/ to footage WarriorIQ owns or has licensed, with the skeleton
-    # overlay drawn in. Shown only when the file exists; until then the
-    # homepage shows a placeholder that says the clip is coming.
-    demo_clip: str = os.getenv("WARRIORIQ_DEMO_CLIP", "/static/demo/warrioriq-demo.mp4").strip()
     require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 
 

@@ -49,9 +49,6 @@ money, hardware or a lawyer. Nothing here has been done to any live service.
 
 ## 6. Homepage and pricing (#51, #53, #54, #55)
 
-- [ ] **Demo clip (#53):** a 10–15 s looping clip with the skeleton overlay.
-  - Use footage you own or have licensed, with the consent of the people in it.
-  - Put it at `app/static/demo/warrioriq-demo.mp4`, or set `WARRIORIQ_DEMO_CLIP` to another `/static/` path. Until then the homepage shows a placeholder.
 - [ ] **Allowance period (#51):** decide whether plans stay per day.
   - For per-month: add `monthly_limit` to each plan and set `WARRIORIQ_ALLOWANCE_PERIOD=month`.
   - For video minutes: add `monthly_video_minutes` and set `WARRIORIQ_ALLOWANCE_PERIOD=video_minutes`.

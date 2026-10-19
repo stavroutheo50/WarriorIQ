@@ -2650,21 +2650,15 @@ class UploadProgressStripTests(unittest.TestCase):
         self.page = (Path(__file__).resolve().parents[1] / "app" / "templates"
                      / "analyze.html").read_text(encoding="utf-8")
 
-    def test_the_strip_is_moved_out_of_the_transformed_wrapper(self):
-        """position:fixed is not enough on this site.
-
-        .shell carries an identity transform, and a transformed ancestor
-        becomes the containing block for fixed descendants - so the strip
-        pinned to the bottom of the window rendered a thousand pixels below it.
-        It has to be reparented to <body> to escape that.
-        """
-        self.assertIn("document.body.appendChild(progress)", self.page)
-        # Exactly one place unhides it - the helper that reparents first. Any
-        # second one would show the strip while still inside .shell.
-        self.assertEqual(
-            self.page.count("progress.hidden=false;progress.dataset.tone="), 1,
-            "the progress strip is shown somewhere that skips the reparenting",
-        )
+    def test_the_bar_stays_under_the_upload_button(self):
+        """Owner, 2026-10-19: moved to the end of <body>, the bar showed below
+        the footer where nobody saw it. It stays in the form, right after the
+        upload button, and is scrolled into view when it appears."""
+        self.assertNotIn("document.body.appendChild(progress)", self.page)
+        button = self.page.index('id="uploadSubmit"')
+        self.assertLess(button, self.page.index('id="uploadProgress"'))
+        self.assertIn("progress.scrollIntoView(", self.page)
+        self.assertEqual(self.page.count("progress.hidden=false;progress.dataset.tone="), 1)
         self.assertGreaterEqual(self.page.count("showProgress("), 2)
 
     def test_leaving_the_page_mid_upload_is_warned_about(self):

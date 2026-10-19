@@ -2,8 +2,7 @@
 
 #51 the allowance period is configurable per plan (day, month or video
     minutes); the current daily limits stay the default
-#53 the empty A/B "interface preview" becomes a demo clip spot, with a
-    placeholder that says so until a clip exists, and a sample report link
+#53 the original A/B interface preview stays (owner's decision, 2026-10-19)
 #54 a public sample report, made-up data, labelled as a sample
 #55 homepage sections: measured per sport, accuracy, FAQ, pricing summary
 """
@@ -82,28 +81,12 @@ def test_pricing_copy_follows_the_period():
 
 
 # --------------------------------------------------------------------- #53
-def test_the_preview_is_a_demo_clip_spot_never_empty_boxes():
+def test_the_preview_is_the_original_interface_preview():
+    # The owner asked for the original preview back (2026-10-19); no demo-clip placeholder.
     page = BrowserClient(web.app).get("/").text
-    assert '<span class="preview-fighter preview-a">A</span>' not in page
-    assert "Interface preview" not in page
-    assert "Demo clip coming soon" in page and 'href="/sample-report"' in page
-
-
-def test_the_clip_is_shown_once_it_exists(tmp_path, monkeypatch):
-    import dataclasses
-
-    clip = web.ROOT / "app" / "static" / "demo" / f"test-{uuid.uuid4().hex[:6]}.mp4"
-    clip.parent.mkdir(parents=True, exist_ok=True)
-    clip.write_bytes(b"\x00")
-    try:
-        monkeypatch.setattr(web, "SETTINGS", dataclasses.replace(web.SETTINGS, demo_clip=f"/static/demo/{clip.name}"))
-        assert web._home_demo_clip().startswith(f"/static/demo/{clip.name}?v=")
-        monkeypatch.setattr(web, "SETTINGS", dataclasses.replace(web.SETTINGS, demo_clip="/static/demo/missing.mp4"))
-        assert web._home_demo_clip() is None
-        monkeypatch.setattr(web, "SETTINGS", dataclasses.replace(web.SETTINGS, demo_clip="/etc/passwd"))
-        assert web._home_demo_clip() is None
-    finally:
-        clip.unlink(missing_ok=True)
+    assert '<span class="preview-fighter preview-a">A</span>' in page
+    assert "Interface preview" in page
+    assert "Demo clip coming soon" not in page and "goes here" not in page
 
 
 # --------------------------------------------------------------------- #54
