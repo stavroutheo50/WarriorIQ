@@ -539,7 +539,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             follow_redirects=False,
         )
         self.assertEqual(success.status_code, 303)
-        self.assertEqual(success.headers["location"], "/dashboard")
+        # A refused next falls back to Fight Camp at /camp (audit 2026-10-14, #42).
+        self.assertEqual(success.headers["location"], "/camp")
 
     def test_starter_daily_allowance_is_atomic_and_failed_use_is_returned(self):
         account = register("athlete@example.com", "Strong-Local-Password")
@@ -2338,7 +2339,7 @@ class AddFighterFromCoachPageTests(unittest.TestCase):
         # Refused back to the page rather than as a 402 page, so the coach
         # keeps the squad they were looking at and can read why.
         self.assertEqual(second.status_code, 303)
-        self.assertIn("/dashboard?", second.headers["location"])
+        self.assertIn("/camp?", second.headers["location"])
         self.assertIn("all+in+use", second.headers["location"])
         self.assertEqual(len(database.list_fighters(self.profile)), 1)
         self.assertIn("all in use", self.client.get(

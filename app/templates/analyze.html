@@ -100,6 +100,14 @@
         {% endif %}
       {% endif %}
 
+      {% if request.state.account %}
+      {#- Optional, so the library card and the report can use real names
+          rather than the file name (audit 2026-10-14, #30). -#}
+      <details class="upload-names" data-upload-step="who"><summary>Name this fight (optional)</summary>
+        <div class="field"><label for="eventName">Event</label><input class="field-input" id="eventName" name="event_name" type="text" maxlength="80" autocomplete="off" placeholder="e.g. Club championship, sparring night"></div>
+        <div class="field"><label for="opponentName">Opponent's name</label><input class="field-input" id="opponentName" name="opponent_name" type="text" maxlength="80" autocomplete="off" placeholder="Leave blank to call them Opponent"></div>
+      </details>
+      {% endif %}
       <fieldset class="upload-consent card-inset" data-upload-step="check"><legend>Three quick questions</legend><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>This is my video, or I have the right to upload it.</span></label><label class="check"><input type="checkbox" name="people_permissions_confirmed" value="true" required> <span>Everyone in the video is OK with me uploading it.</span></label><fieldset class="minor-permission"><legend id="minorPermissionLabel">Is anyone in the video under 18?</legend><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No, all 18 or over</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes, and a parent or guardian said OK</span></label></fieldset><p class="small muted">TV footage still needs permission. <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
       {#- One question at a time (a newcomer found the full form "rocket
           science", 2026-10-09): the fighter question appears once a video is

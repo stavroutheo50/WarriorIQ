@@ -467,3 +467,14 @@ summary:focus-visible,
 }
 /* A measurement not yet checked against labelled clips (audit 2026-10-14, #5). */
 .badge-experimental{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;border:1px solid rgba(241,184,75,.55);background:rgba(241,184,75,.12);color:#f1c46b;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:none;vertical-align:middle;white-space:nowrap}
+/* Library card naming (audit 2026-10-14, #30). */
+.fight-title{margin:2px 0 0;color:#c9d6ea;font-size:13px}
+.fight-details-edit{font-size:13px}.fight-details-edit summary{cursor:pointer;color:#9fb4d6}
+.fight-details-edit form{display:grid;gap:8px;margin-top:8px}.fight-details-edit label{display:grid;gap:4px}
+.upload-names{margin:0 0 14px}.upload-names summary{cursor:pointer;font-weight:700}
+/* Screen-reader-only text. Used by templates but never defined until now. */
+.visually-hidden,.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+/* Library bulk delete (audit 2026-10-14, #33). */
+.archive-bulk{display:flex;align-items:center;gap:10px;margin:8px 0 14px}
+.fight-select{display:flex;align-items:flex-start;padding:4px}
+.fight-select input{width:20px;height:20px;cursor:pointer}

@@ -350,11 +350,16 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("chooser-head", response.text)
 
     def test_every_workspace_route_answers_a_guest_the_same_way(self):
-        for path in ("/analyze", "/dashboard", "/history", "/profile", "/compare"):
+        for path in ("/analyze", "/camp", "/history", "/profile", "/compare"):
             with self.subTest(path=path):
                 response = self.client.get(path, follow_redirects=False)
                 self.assertEqual(response.status_code, 200, f"{path} still redirects")
                 self.assertIn("empty-workspace", response.text)
+        # /dashboard was the same page at a second address; it moves to /camp
+        # for good (audit 2026-10-14, #42) and lands on the same shell.
+        moved = self.client.get("/dashboard?x=1", follow_redirects=False)
+        self.assertEqual((moved.status_code, moved.headers["location"]), (301, "/camp?x=1"))
+        self.assertIn("empty-workspace", self.client.get("/dashboard").text)
         # /coach is the same page as /dashboard and now forwards there
         # (QA 2026-10-11, D3), landing on the same signed-out shell.
         self.assertEqual(self.client.get("/coach", follow_redirects=False).status_code, 308)
@@ -2126,8 +2131,11 @@ class PublicPageTests(unittest.TestCase):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "compare.html").read_text(encoding="utf-8")
         self.assertIn("fights|length < 2", template)
         self.assertIn("Two fights required", template)
-        self.assertIn('name="{{field}}" required', template)
-        self.assertIn("setCustomValidity", template)
+        # A radio picker since the audit of 14 Oct 2026 (#37): each side is
+        # required, and a missing or duplicate pair stops the submit.
+        self.assertIn('<input type="radio" name="{{field}}"', template)
+        self.assertIn("{% if blocked %}disabled{% endif %} required>", template)
+        self.assertIn("if(!validateComparison())event.preventDefault()", template)
         self.assertIn("Choose two different fights", template)
 
     def test_history_new_analysis_button_targets_the_upload_card(self):
@@ -4701,6 +4709,9 @@ class CookielessTrafficCountTests(unittest.TestCase):
 
         from core import db as database
 
+        # Start from an empty batch: a page view an earlier test left pending
+        # on this worker would otherwise be flushed here too.
+        database.flush_page_views()
         database.record_page_view("/pricing", day="2026-01-02")
         with mock.patch.object(database, "connection", side_effect=OSError("no database")):
             database._flush_page_views_at_exit()   # must not raise

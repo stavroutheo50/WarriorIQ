@@ -41,7 +41,7 @@ def _signup(client, email, **extra):
 def test_an_adult_signs_up_as_before(client):
     email = f"adult-{uuid.uuid4().hex}@example.test"
     response = _signup(client, email, age_group="adult")
-    assert response.status_code == 303 and response.headers["location"] == "/dashboard"
+    assert response.status_code == 303 and response.headers["location"] == "/camp"
     assert db.get_account_by_email(email)["guardian_approval_status"] == "not_applicable"
     # The old checkbox still means an adult.
     legacy = f"legacy-{uuid.uuid4().hex}@example.test"
@@ -104,7 +104,7 @@ def test_a_young_fighter_waits_for_the_guardian_then_can_upload(client):
         assert guardian.get("/guardian/approve/not-a-real-token").status_code == 404
     assert db.get_account_by_email(email)["guardian_approval_status"] == "guardian_approved"
     assert web._guardian_hold(db.get_account_by_email(email)) is None
-    assert client.get("/guardian", follow_redirects=False).headers["location"] == "/dashboard"
+    assert client.get("/guardian", follow_redirects=False).headers["location"] == "/camp"
 
 
 def test_a_declined_account_cannot_upload():

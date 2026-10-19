@@ -535,3 +535,27 @@ def compare_movement(reports: list) -> dict:
         "different_sports": bool(sides[0]["sport"] and sides[1]["sport"]
                                  and sides[0]["sport"] != sides[1]["sport"]),
     }
+
+
+def fight_title(fight: dict) -> str:
+    """A saved fight's title: the event the athlete named, else "Sport · Date".
+
+    Audit 2026-10-14 (#30): the library titled fights by their file name, so a
+    reader picked between "3.mp4" and "IMG_2041.MOV". The file name stays on
+    the card as a detail; it is never the title.
+    """
+    event = " ".join(str(fight.get("event_name") or "").split())
+    if event:
+        return event
+    from core.scoring import RULESETS, normalize_ruleset
+
+    try:
+        sport = RULESETS[normalize_ruleset(fight.get("ruleset") or "K1")].sport_label
+    except (KeyError, ValueError):
+        sport = "Fight"
+    try:
+        moment = datetime.fromisoformat(str(fight.get("created_at")))
+        date = f"{moment.day} {moment:%b %Y}"
+    except (TypeError, ValueError):
+        date = ""
+    return f"{sport} · {date}" if date else sport

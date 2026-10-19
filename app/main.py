@@ -89,7 +89,7 @@ from core.db import (
     set_account_status, set_annotation_sequence,
     page_view_summary, plan_interest_counts, plans_wanted_by, policies_outdated,
     record_page_view, record_plan_interest, record_policy_reacceptance,
-    set_fight_review_status, toggle_assignment, update_cookie_preferences,
+    set_fight_review_status, toggle_assignment, update_cookie_preferences, set_fight_details, clean_fight_name,
     update_marketing_consent, update_password_hash, update_profile,
 )
 from core.evidence_trust import accepted_model_event, report_evidence_trust
@@ -156,7 +156,7 @@ from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_leg
 from core.sport_policy import counting_policy
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.coaching import count_of
-from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label, fight_choice_stamp
+from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label, fight_choice_stamp, fight_title
 from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
@@ -976,7 +976,7 @@ def _analysis_navigation_url(job: dict) -> str:
     return f"/result/{job_id}" if job.get("status") == "complete" else f"/progress/{job_id}"
 
 
-def _safe_next(value: str | None, fallback: str = "/dashboard") -> str:
+def _safe_next(value: str | None, fallback: str = "/camp") -> str:
     r"""Only ever redirect to a path on this site.
 
     "starts with / and not //" is the usual rule and it is not enough. A
@@ -2907,7 +2907,7 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
     return response
 
 
-def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/dashboard"):
+def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/camp"):
     return templates.TemplateResponse(
         request=request,
         name="auth.html",
@@ -2934,7 +2934,7 @@ def _social_auth_error(request: Request, intent: dict | None, message: str):
         request,
         str(intent.get("mode") or "login"),
         message,
-        str(intent.get("next_path") or "/dashboard"),
+        str(intent.get("next_path") or "/camp"),
     )
 
 
@@ -2943,7 +2943,7 @@ async def social_auth_start(
     request: Request,
     provider: str,
     mode: str = Form("login"),
-    next_path: str = Form("/dashboard"),
+    next_path: str = Form("/camp"),
     accept_terms: bool = Form(False),
     age_confirmed: bool = Form(False),
     accept_policies: bool = Form(False),
@@ -3235,7 +3235,7 @@ def _send_guardian_email(request: Request, account: dict, guardian_name: str, gu
 
 
 @app.get("/signup", response_class=HTMLResponse)
-def signup_page(request: Request, next: str = "/dashboard"):
+def signup_page(request: Request, next: str = "/camp"):
     if _account(request):
         return RedirectResponse(_safe_next(next), status_code=303)
     return _auth_page(request, "signup", next_path=next)
@@ -3246,7 +3246,7 @@ def signup(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
-    next_path: str = Form("/dashboard"),
+    next_path: str = Form("/camp"),
     accept_terms: bool = Form(False),
     age_confirmed: bool = Form(False),
     marketing_consent: bool = Form(False),
@@ -3338,7 +3338,7 @@ def guardian_status_page(request: Request, sent: str = ""):
         return RedirectResponse("/login?next=/guardian", status_code=303)
     status = str(account.get("guardian_approval_status") or "not_applicable")
     if status in {"not_applicable", GUARDIAN_APPROVED}:
-        return RedirectResponse("/dashboard", status_code=303)
+        return RedirectResponse("/camp", status_code=303)
     named = _guardian_request(account) or {}
     return templates.TemplateResponse(
         request=request, name="guardian.html",
@@ -3429,7 +3429,7 @@ def guardian_approve(request: Request, token: str, decision: str = Form(""),
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = "/dashboard"):
+def login_page(request: Request, next: str = "/camp"):
     if _account(request):
         return RedirectResponse(_safe_next(next), status_code=303)
     return _auth_page(request, "login", next_path=next)
@@ -3440,7 +3440,7 @@ def login(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
-    next_path: str = Form("/dashboard"),
+    next_path: str = Form("/camp"),
 ):
     """Sign in.
 
@@ -3882,6 +3882,9 @@ async def upload(
     # to go somewhere else first.
     fighter_id: str = Form(""),
     fighter_name: str = Form(""),
+    # Optional names for the library card and the report (audit 2026-10-14, #30).
+    event_name: str = Form(""),
+    opponent_name: str = Form(""),
     rights_confirmed: bool = Form(False),
     people_permissions_confirmed: bool = Form(False),
     minor_permission_status: str = Form(""),
@@ -4206,6 +4209,8 @@ async def upload(
             "openai_identity_recovery": bool(openai_identity_recovery),
             "external_ai_opted_in": bool(openai_identity_recovery),
             "fighter_id": chosen_fighter["id"] if chosen_fighter else None,
+            "event_name": clean_fight_name(event_name),
+            "opponent_name": clean_fight_name(opponent_name),
         },
     )
     acceptance_owner = {"profile_id": int(account["profile_id"])} if account else {"guest_id": request.state.guest_id}
@@ -5836,6 +5841,19 @@ def _fighter_names(request: Request, job: dict, report: dict) -> dict:
     Without a filed fighter, the letters stay.
     """
     names = {"A": "Fighter A", "B": "Fighter B"}
+    video = report.get("video") or {}
+    focus = str(job.get("focus_fighter") or video.get("focus_fighter") or "A")
+    if focus not in names:
+        return names
+    other = "B" if focus == "A" else "A"
+    # The opponent's name when the athlete gave one (audit 2026-10-14, #30/#31),
+    # whether or not the fight was filed against a roster fighter.
+    opponent = job.get("opponent_name")
+    if opponent is None and job.get("job_id"):
+        opponent = (get_fight(str(job["job_id"])) or {}).get("opponent_name")
+    opponent = clean_fight_name(opponent)
+    if opponent:
+        names[other] = opponent
     profile_id = _profile_id(request)
     if profile_id is None or not str(job.get("fighter_id") or "").isdigit():
         return names
@@ -5843,12 +5861,8 @@ def _fighter_names(request: Request, job: dict, report: dict) -> dict:
     name = " ".join(str((fighter or {}).get("name") or "").split())
     if not name:
         return names
-    video = report.get("video") or {}
-    focus = str(job.get("focus_fighter") or video.get("focus_fighter") or "A")
-    if focus not in names:
-        return names
     names[focus] = name
-    names["B" if focus == "A" else "A"] = "Opponent"
+    names[other] = opponent or "Opponent"
     return names
 
 
@@ -7620,19 +7634,59 @@ def _is_solo_fight(fight: dict) -> bool:
 
 
 @app.get("/history", response_class=HTMLResponse)
-def history_page(request: Request, cancelled: str = ""):
+def history_page(request: Request, cancelled: str = "", deleted: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
     for fight in fights:
         fight["card"] = _library_card(fight["job_id"])
         fight["report_available"] = bool(fight["card"].get("available"))
+        # "3.mp4" was the title (audit 2026-10-14, #30): the event the athlete
+        # named, else "Sport · Date".
+        fight["title"] = fight_title(fight)
+        fight["names"] = _library_names(fight)
+        fight["sport"] = _ruleset_sport(fight.get("ruleset"))
     pending = _pending_jobs_for_owner(_owner_key(request)) if profile_id is not None else []
     return templates.TemplateResponse(
         request=request, name="history.html",
         context={"request": request, "fights": fights, "pending": pending,
                  "cancelled_notice": (cancelled == "1" and profile_id is not None),
+                 "deleted_count": int(deleted) if deleted.isdigit() and profile_id is not None else None,
+                 # Library filters (#33): the sports and rulesets actually present.
+                 "filter_rulesets": sorted({f.get("ruleset") for f in fights if f.get("ruleset")}),
+                 "filter_sports": sorted({_ruleset_sport(f.get("ruleset")) for f in fights if f.get("ruleset")}),
                  "signed_in": profile_id is not None},
     )
+
+
+def _ruleset_sport(ruleset: str | None) -> str:
+    from core.scoring import RULESETS, normalize_ruleset
+
+    try:
+        return RULESETS[normalize_ruleset(ruleset or "K1")].sport
+    except (KeyError, ValueError):
+        return "kickboxing"
+
+
+def _library_names(fight: dict) -> dict:
+    """What a library card calls each side: the filed fighter and the named
+    opponent, on the side the fight was analysed for (#31)."""
+    focus = str(fight.get("analysis_target") or "A")
+    focus = focus if focus in ("A", "B") else "A"
+    other = "B" if focus == "A" else "A"
+    opponent = fight.get("opponent_name")
+    if not fight.get("fighter_name"):
+        return {focus: f"Fighter {focus}", other: opponent or f"Fighter {other}", "focus": focus}
+    return {focus: fight["fighter_name"], other: opponent or "Opponent", "focus": focus}
+
+
+@app.post("/fights/{job_id}/details", dependencies=[Depends(require_csrf)])
+def fight_details(request: Request, job_id: str, event_name: str = Form(""), opponent_name: str = Form("")):
+    """Name a saved fight's event and opponent from its library card (#30)."""
+    profile_id = _profile_id(request)
+    if profile_id is None or not set_fight_details(job_id, profile_id, event_name, opponent_name):
+        raise HTTPException(404)
+    _LIBRARY_CARD_CACHE.pop(job_id, None)
+    return RedirectResponse(f"/history#fight-{job_id}", status_code=303)
 
 
 def _remove_fight_files(fight: dict) -> None:
@@ -7653,12 +7707,11 @@ def _remove_profile_file(value: str | None) -> None:
         path.unlink(missing_ok=True)
 
 
-@app.post("/delete/{job_id}", dependencies=[Depends(require_csrf)])
-def delete_fight_route(request: Request, job_id: str):
-    profile_id = _profile_id(request)
+def _delete_own_fight(request: Request, profile_id: int, job_id: str) -> bool:
+    """Delete one of this profile's fights, its files and its video. False when it is not theirs."""
     existing = get_fight(job_id)
-    if profile_id is None or not existing or int(existing["profile_id"]) != profile_id:
-        raise HTTPException(404)
+    if not existing or int(existing["profile_id"]) != profile_id:
+        return False
     fight = delete_fight(job_id)
     if fight:
         _remove_fight_files(fight)
@@ -7667,11 +7720,55 @@ def delete_fight_route(request: Request, job_id: str):
             "fight_analysis_deleted", account_id=int(account["id"]) if account else None,
             resource_type="fight", resource_id=job_id,
         )
+    return True
+
+
+@app.post("/delete/{job_id}", dependencies=[Depends(require_csrf)])
+def delete_fight_route(request: Request, job_id: str):
+    profile_id = _profile_id(request)
+    if profile_id is None or not _delete_own_fight(request, profile_id, job_id):
+        raise HTTPException(404)
     return RedirectResponse("/history", status_code=303)
 
 
+BULK_DELETE_LIMIT = 100
+
+
+@app.post("/history/delete", dependencies=[Depends(require_csrf)])
+async def bulk_delete_fights(request: Request):
+    """Delete several fights at once from the library (audit 2026-10-14, #33).
+
+    The same deletion as one fight, one by one, and only this account's own:
+    an id that is not theirs is skipped without saying whether it exists.
+    """
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        raise HTTPException(404)
+    _enforce_rate_limit(request, "bulk-delete", 10, 600)
+    form = await request.form()
+    job_ids = [str(value) for value in form.getlist("job_id")][:BULK_DELETE_LIMIT]
+    deleted = 0
+    for job_id in dict.fromkeys(job_ids):
+        if await run_in_threadpool(_delete_own_fight, request, profile_id, job_id):
+            deleted += 1
+    return RedirectResponse(f"/history?deleted={deleted}", status_code=303)
+
+
+def _fight_identity_failed(fight: dict) -> bool:
+    """Did this saved fight fail the identity check? Read from its stored
+    summary, so the picker needs no report file opened per fight."""
+    summary = fight.get("summary") or {}
+    if isinstance(summary, str):
+        try:
+            summary = json.loads(summary)
+        except ValueError:
+            summary = {}
+    integrity = ((summary.get("progress_report") or {}).get("integrity") or {})
+    return integrity.get("identity_evidence_trusted") is False
+
+
 @app.get("/compare", response_class=HTMLResponse)
-def compare_page(request: Request, a: str = "", b: str = ""):
+def compare_page(request: Request, a: str = "", b: str = "", include_failed: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
     # Only offer fights that can actually be compared. The row outlives its
@@ -7694,7 +7791,18 @@ def compare_page(request: Request, a: str = "", b: str = ""):
             fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
             fight.get("fighter_name"))
         fight["choice_stamp"] = fight_choice_stamp(fight.get("created_at"))
+        # The picker (audit 2026-10-14, #37): title, thumbnail, score, status.
+        fight["title"] = fight_title(fight)
+        fight["card"] = _library_card(fight["job_id"])
+        # A fight that failed the identity check is marked and left out unless
+        # asked for (#34): its numbers may be the wrong person's.
+        fight["identity_failed"] = _fight_identity_failed(fight) or bool(fight["card"].get("failed"))
     allowed = {fight["job_id"] for fight in fights}
+    failed_picked = [job_id for job_id in (a, b)
+                     if any(f["job_id"] == job_id and f["identity_failed"] for f in fights)]
+    allow_failed = include_failed == "1"
+    if failed_picked and not allow_failed:
+        allowed = allowed - set(failed_picked)
     # A solo session picked by its address (it is not offered in the picker)
     # was answered "Choose two different saved fights", which says the reader
     # did something they did not (QA, 2026-10-07).
@@ -7729,6 +7837,12 @@ def compare_page(request: Request, a: str = "", b: str = ""):
                                == _fight_digest(next(f for f in fights if f["job_id"] == b))),
             "signed_in": profile_id is not None,
             "solo_picked": bool(solo_ids),
+            "failed_picked": failed_picked if not allow_failed else [],
+            "include_failed": allow_failed,
+            # The address of this comparison, to share with the owner's own
+            # devices; it opens only for this account (#36).
+            "share_url": (f"{SETTINGS.public_base_url}/compare?a={quote(a)}&b={quote(b)}"
+                          + ("&include_failed=1" if allow_failed else "")) if a and b else "",
             # The page promised a movement comparison "below" and rendered
             # nothing. These are the numbers that survive the strike gate.
             "movement": compare_movement(reports),
@@ -7747,11 +7861,19 @@ def coach_redirect(request: Request):
     Fight Camp; old links and bookmarks keep working, query string included
     (the browser carries a #squad fragment across the redirect itself)."""
     query = request.url.query
-    return RedirectResponse("/dashboard" + (f"?{query}" if query else ""), status_code=308)
+    return RedirectResponse("/camp" + (f"?{query}" if query else ""), status_code=308)
+
+
+@app.get("/dashboard")
+def dashboard_redirect(request: Request):
+    """/dashboard served the same page as /camp at a second address (audit
+    2026-10-14, #42). It now moves there for good - 301, so bookmarks and
+    search engines update - with the query string kept."""
+    query = request.url.query
+    return RedirectResponse("/camp" + (f"?{query}" if query else ""), status_code=301)
 
 
 @app.get("/camp", response_class=HTMLResponse)
-@app.get("/dashboard", response_class=HTMLResponse)
 def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = "", redeem: str = ""):
     """Fight Camp: missions from the latest fight, progress, and the squad.
 
@@ -7891,11 +8013,11 @@ def _form_refusal(message: str, next_path: str, fallback: str) -> RedirectRespon
 def _roster_refusal(message: str, typed: str) -> RedirectResponse:
     """Send a rejected roster addition back to /coach, message and name intact."""
     query = urlencode({"error": message, "name": " ".join(typed.split())[:80]})
-    return RedirectResponse(f"/dashboard?{query}#squad", status_code=303)
+    return RedirectResponse(f"/camp?{query}#squad", status_code=303)
 
 
 @app.post("/coach/fighters", dependencies=[Depends(require_csrf)])
-def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/dashboard#squad")):
+def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/camp#squad")):
     """Add someone to the roster without having to analyse a fight first.
 
     Filing an old fight needs a fighter to file it against, and until now the
@@ -7923,7 +8045,7 @@ def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = 
                 name,
             )
     create_fighter(profile_id, cleaned)
-    return RedirectResponse(_safe_next(next_path, "/dashboard#squad"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/camp#squad"), status_code=303)
 
 
 @app.post("/coach/fights/{job_id}/fighter", dependencies=[Depends(require_csrf)])
@@ -7931,7 +8053,7 @@ def assign_fight_to_fighter(
     request: Request,
     job_id: str,
     fighter_id: str = Form(""),
-    next_path: str = Form("/dashboard#squad"),
+    next_path: str = Form("/camp#squad"),
 ):
     """File a past fight against a fighter.
 
@@ -7945,7 +8067,7 @@ def assign_fight_to_fighter(
     chosen = int(fighter_id) if fighter_id.strip().isdigit() else None
     if not assign_fighter_to_fight(profile_id, job_id, chosen):
         raise HTTPException(404, "That fight or fighter is not in this workspace.")
-    return RedirectResponse(_safe_next(next_path, "/dashboard#squad"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/camp#squad"), status_code=303)
 
 
 @app.post("/coach/assignments", dependencies=[Depends(require_csrf)])
@@ -8160,7 +8282,7 @@ def save_cookie_preferences(
 
 
 @app.get("/policies", response_class=HTMLResponse)
-def policies_updated(request: Request, next: str = "/dashboard"):
+def policies_updated(request: Request, next: str = "/camp"):
     """Ask an account whose accepted policy version is behind the current one.
 
     Reached only after authentication, so there is an account to compare
@@ -8185,7 +8307,7 @@ def policies_updated(request: Request, next: str = "/dashboard"):
 @app.post("/policies", dependencies=[Depends(require_csrf)])
 def accept_updated_policies(
     request: Request,
-    next_path: str = Form("/dashboard"),
+    next_path: str = Form("/camp"),
     accept_policies: bool = Form(False),
 ):
     account = _account(request)

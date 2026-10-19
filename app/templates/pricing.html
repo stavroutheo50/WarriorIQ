@@ -133,9 +133,9 @@
     {% if key == 'gym' %}<div class="gym-note"><strong>Built to stay out of the way.</strong><span>Run every athlete through the same repeatable review workflow without counting each upload.</span></div>{% endif %}
 
     {% if key == current_plan_key %}
-      <a class="btn secondary" href="{% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Open your workspace</a>
+      <a class="btn secondary" href="/camp">Open your workspace</a>
     {% elif key == 'free' %}
-      {% if account %}<a class="btn secondary" href="/dashboard">Use Starter</a>{% else %}<a class="btn" href="/signup">Start free</a>{% endif %}
+      {% if account %}<a class="btn secondary" href="/camp">Use Starter</a>{% else %}<a class="btn" href="/signup">Start free</a>{% endif %}
     {% elif too_small %}
       <button class="btn secondary" type="button" disabled aria-describedby="blocked-{{key}}">You have {{ roster_held|count_of('fighter') }} — this plan holds {{ plan.roster_limit }}</button>
     {% elif payments_enabled and plan.stripe_price_id %}
@@ -150,7 +150,7 @@
       {% if key in plans_wanted %}<p class="small muted plan-wanted">✓ Noted — you are on the list for {{plan.label}}. We will email you when billing opens.</p>
       {% else %}<form method="post" action="/plan-interest/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="/pricing"><button class="btn" type="submit">Tell us you want {{plan.label}}</button></form>{% endif %}
     {% else %}
-      {% if payments_enabled %}<a class="btn secondary" href="/signup?next={% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Create account first</a>
+      {% if payments_enabled %}<a class="btn secondary" href="/signup?next=/camp">Create account first</a>
       {% else %}<a class="btn secondary" href="/signup?next=/pricing">Create a free account to request {{plan.label}}</a>{% endif %}
     {% endif %}
   </section>

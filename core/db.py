@@ -612,6 +612,13 @@ def _init_db_schema() -> None:
             con.execute("ALTER TABLE fights ADD COLUMN video_delete_after TEXT")
         if "video_deleted_at" not in fight_columns:
             con.execute("ALTER TABLE fights ADD COLUMN video_deleted_at TEXT")
+        # Optional names the athlete gives a fight (audit 2026-10-14, #30):
+        # the library titled fights by their file name ("3.mp4"). Nullable, so
+        # every existing fight keeps working and is titled "Sport · Date".
+        if "event_name" not in fight_columns:
+            con.execute("ALTER TABLE fights ADD COLUMN event_name TEXT")
+        if "opponent_name" not in fight_columns:
+            con.execute("ALTER TABLE fights ADD COLUMN opponent_name TEXT")
         acceptance_columns = {row[1] for row in con.execute("PRAGMA table_info(legal_acceptances)").fetchall()}
         if "current_status" not in acceptance_columns:
             con.execute("ALTER TABLE legal_acceptances ADD COLUMN current_status TEXT NOT NULL DEFAULT 'accepted'")
@@ -674,6 +681,8 @@ def save_fight(
     summary: dict,
     video_delete_after: str | None = None,
     fighter_id: int | None = None,
+    event_name: str | None = None,
+    opponent_name: str | None = None,
 ) -> None:
     init_db()
     now = datetime.now(timezone.utc).isoformat()
@@ -682,11 +691,13 @@ def save_fight(
             """
             INSERT INTO fights(job_id, profile_id, original_name, video_path, report_path,
                                fight_type, ruleset, analysis_target, created_at, summary_json, video_delete_after,
-                               fighter_id)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                               fighter_id, event_name, opponent_name)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(job_id) DO UPDATE SET
                 report_path=excluded.report_path,
-                summary_json=excluded.summary_json
+                summary_json=excluded.summary_json,
+                event_name=COALESCE(fights.event_name, excluded.event_name),
+                opponent_name=COALESCE(fights.opponent_name, excluded.opponent_name)
             """,
             (
                 job_id,
@@ -701,8 +712,29 @@ def save_fight(
                 json.dumps(summary),
                 video_delete_after,
                 fighter_id,
+                clean_fight_name(event_name),
+                clean_fight_name(opponent_name),
             ),
         )
+
+
+FIGHT_NAME_MAX = 80
+
+
+def clean_fight_name(value: str | None) -> str | None:
+    """An event or opponent name as stored: one line, trimmed, or None."""
+    text = " ".join(str(value or "").split())[:FIGHT_NAME_MAX]
+    return text or None
+
+
+def set_fight_details(job_id: str, profile_id: int, event_name: str | None, opponent_name: str | None) -> bool:
+    """Name a saved fight's event and opponent. Only the owner's fight; True when one was updated."""
+    init_db()
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE fights SET event_name=?, opponent_name=? WHERE job_id=? AND profile_id=?",
+            (clean_fight_name(event_name), clean_fight_name(opponent_name), job_id, int(profile_id)))
+        return cursor.rowcount > 0
 
 
 def list_fights(profile_id: int = 1) -> list[dict]:
@@ -1809,6 +1841,7 @@ def save_completed_analysis(job_id: str, job: dict, report: dict, report_path: s
         analysis_target=str(job.get("focus_fighter") or "A"), summary=summary,
         fighter_id=job.get("fighter_id"),
         video_delete_after=(datetime.now(timezone.utc) + timedelta(days=SETTINGS.saved_video_retention_days)).isoformat(),
+        event_name=job.get("event_name"), opponent_name=job.get("opponent_name"),
     )
 
 

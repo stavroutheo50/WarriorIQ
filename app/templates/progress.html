@@ -3,7 +3,7 @@
 {% block content %}
 <section class="analysis-page live-analysis-page" id="analysisPage" aria-labelledby="analysisTitle">
   <div class="live-analysis-toolbar">
-    <a class="analysis-exit" href="/dashboard">← Leave analysis running</a>
+    <a class="analysis-exit" href="/camp">← Leave analysis running</a>
     <div class="analysis-live"><i aria-hidden="true"></i><span id="liveLabel">Connecting to analysis…</span></div>
   </div>
 
@@ -101,7 +101,7 @@
   </section>
 
   <div id="completeTransition" class="analysis-complete-transition" role="status" aria-live="assertive" hidden><strong>Analysis complete ✓</strong><span>Opening this fight’s Performance Report…</span></div>
-  <div id="completeActions" class="analysis-actions" hidden><a class="btn" id="viewResults" data-motion-primary href="/result/{{job_id}}">View completed results →</a><a class="btn secondary" href="/dashboard">Return to progress</a></div>
+  <div id="completeActions" class="analysis-actions" hidden><a class="btn" id="viewResults" data-motion-primary href="/result/{{job_id}}">View completed results →</a><a class="btn secondary" href="/camp">Return to progress</a></div>
   <div id="errorActions" class="analysis-actions" hidden><button class="btn" id="restartAnalysis" type="button" hidden>Restart preserved analysis</button><a class="btn secondary" href="/select/{{job_id}}">Return to fighter selection</a><a class="btn secondary" href="/">Start over</a></div>
 </section>
 {% endblock %}

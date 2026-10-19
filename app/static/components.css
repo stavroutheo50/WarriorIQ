@@ -925,7 +925,7 @@
    they ranged from 29px to 68px - a .section-title h2 inside a card took the
    page-title size. The page's own h1 ("Fight report") is unaffected. */
 main:has(.result-title) section h2,
-main:has(.result-title) .section-title h2{font-size:clamp(22px,2.4vw,30px);line-height:1.15;letter-spacing:-.02em}
+main:has(.result-title) .section-title h2,.section-title h1.page-h1{font-size:clamp(22px,2.4vw,30px);line-height:1.15;letter-spacing:-.02em}
 
 /* Movement scorecard: who had more of each round, as a split bar above the
    numbers (fighter A red from the left, fighter B blue). */
@@ -963,3 +963,15 @@ main:has(.result-title) .section-title h2{font-size:clamp(22px,2.4vw,30px);line-
 .strike-strip article>.strike-strip-who{color:#9aa8bd;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
 .strike-strip small{color:#9aa8bd;font-size:12px}
 .strike-strip-note{grid-column:1/-1;margin:0;max-width:none;padding:10px 14px;background:var(--wiq-canvas-raised,#15181f);color:#9aa8bd;font-size:12px}
+/* Compare picker (audit 2026-10-14, #34 #37). */
+.compare-picker-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:14px}
+.compare-picker{border:1px solid #293a53;border-radius:12px;padding:10px;margin:0;min-width:0}
+.compare-picker legend{padding:0 6px;font-weight:800}
+.compare-options{display:grid;gap:6px;max-height:340px;overflow:auto;padding-right:4px}
+.compare-option{display:grid;grid-template-columns:auto 64px 1fr;gap:10px;align-items:center;padding:8px;border:1px solid #22324a;border-radius:10px;cursor:pointer;background:#0a1423}
+.compare-option:has(input:checked){border-color:#5d79c9;background:#162344}
+.compare-option img{width:64px;height:40px;object-fit:cover;border-radius:6px;background:#02050a}
+.compare-option-text{display:grid;gap:2px;min-width:0}.compare-option-text strong{overflow-wrap:anywhere}
+.compare-option.is-failed{opacity:.6}.compare-option.is-failed .compare-option-status{color:#f1a98b}
+.compare-option:has(input:disabled){cursor:not-allowed}
+.compare-share .share-link-field{width:min(100%,520px)}

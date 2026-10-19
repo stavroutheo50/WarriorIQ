@@ -3959,26 +3959,26 @@ class RedirectSafetyTests(unittest.TestCase):
         """
         from app.main import _safe_next
 
-        self.assertEqual(_safe_next("/" + chr(92) + "evil.example"), "/dashboard")
-        self.assertEqual(_safe_next(chr(92) + chr(92) + "evil.example"), "/dashboard")
+        self.assertEqual(_safe_next("/" + chr(92) + "evil.example"), "/camp")
+        self.assertEqual(_safe_next(chr(92) + chr(92) + "evil.example"), "/camp")
 
     def test_protocol_relative_and_absolute_are_refused(self):
         from app.main import _safe_next
 
-        self.assertEqual(_safe_next("//evil.example"), "/dashboard")
-        self.assertEqual(_safe_next("https://evil.example"), "/dashboard")
+        self.assertEqual(_safe_next("//evil.example"), "/camp")
+        self.assertEqual(_safe_next("https://evil.example"), "/camp")
 
     def test_control_characters_are_refused(self):
         from app.main import _safe_next
 
         for ch in (chr(13), chr(10), chr(9), chr(0), chr(127)):
-            self.assertEqual(_safe_next("/ok" + ch + "x"), "/dashboard")
+            self.assertEqual(_safe_next("/ok" + ch + "x"), "/camp")
 
     def test_nothing_falls_back(self):
         from app.main import _safe_next
 
-        self.assertEqual(_safe_next(None), "/dashboard")
-        self.assertEqual(_safe_next("   "), "/dashboard")
+        self.assertEqual(_safe_next(None), "/camp")
+        self.assertEqual(_safe_next("   "), "/camp")
 
 
 class SessionSecretTests(unittest.TestCase):
