@@ -20,7 +20,7 @@ def _record(job_id, created, guard, focus="A", identity=None, fighter_id=1):
         "setup": {"ruleset": "K1"},
         # Current reports carry the guard's definition; only figures measured
         # the same way are compared across fights (core/guard.py).
-        "metrics": {focus: {"pose_coverage": .85, "guard_index": guard, "guard_definition": "hands_up_share/2"}},
+        "metrics": {focus: {"pose_coverage": .85, "guard_index": guard, "guard_definition": "hands_up_share/3"}},
         "coaching": {}, "training_plan": {},
     }
     if identity is not None:
@@ -203,7 +203,7 @@ class ComparePageTests(unittest.TestCase):
             "scorecard": {"sport": sport},
             "integrity": integrity or {},
             "tracking": {"fighter_A_coverage": .95, "fighter_B_coverage": .95, **(tracking or {})},
-            "metrics": {focus: {"guard_definition": "hands_up_share/2", **metrics}},
+            "metrics": {focus: {"guard_definition": "hands_up_share/3", **metrics}},
         }
 
     def test_only_guard_and_balance_are_called_better_when_higher(self):

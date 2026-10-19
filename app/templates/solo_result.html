@@ -20,7 +20,7 @@
   <div class="metric-grid">
     <div class="metric"><div class="value">{{ '%.0f'|format((m.pose_coverage|default(0, true)) * 100) }}%</div><div class="label">Seen · of the session</div></div>
     <div class="metric"><div class="value">{{ m.footwork_body_lengths_per_second|default(none)|movement_value('footwork') }}</div><div class="label">Movement · body lengths/sec</div></div>
-    <div class="metric"><div class="value">{% if m.guard_index is not none %}{{ '%.0f'|format(m.guard_index * 100) }}%{% else %}&mdash;{% endif %}</div><div class="label">Guard up · of the session</div></div>
+    <div class="metric"><div class="value">{% if m.guard_index is not none %}{{ '%.0f'|format(m.guard_index * 100) }}%{% else %}&mdash;{% endif %}</div><div class="label">Guard up · of the session {{ experimental_badge }}</div></div>
     <div class="metric"><div class="value">{% if m.balance_index is not none %}{{ '%.0f'|format(m.balance_index * 100) }}%{% else %}&mdash;{% endif %}</div><div class="label">Balanced · of the session</div></div>
   </div>
   {% if m.pose_note %}<p class="small muted">{{ m.pose_note }}</p>{% elif m.guard_note %}<p class="small muted">Guard: {{ m.guard_note }}</p>{% elif m.guard_index is none %}<p class="small muted">Guard and balance need more of the body in view than this video gave; a dash means too little was seen to measure, not zero.</p>{% endif %}

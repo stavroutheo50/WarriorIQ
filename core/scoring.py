@@ -904,3 +904,50 @@ def score_fight(events: Iterable[StrikeEvent], ruleset: str, round_numbers: Iter
         else "EVEN"
     )
     return result
+
+
+def score_explanation(scorecard: dict | None, names: dict | None = None) -> list[str]:
+    """"Why this score": what was counted, how it was weighted, and how rounds add up.
+
+    Audit 2026-10-14 (#7): a report showed 14 strikes against 11 and the
+    opponent ahead 9:10. Both were right - the score counts landed strikes
+    only, weights them by the ruleset, and scores each round on its own - but
+    nothing on the page said so. These sentences are built from the scorecard
+    itself, so they cannot describe a different calculation. Empty when no
+    score is shown.
+    """
+    card = scorecard or {}
+    if not card.get("available") or not card.get("rounds"):
+        return []
+    names = names or {"A": "Fighter A", "B": "Fighter B"}
+    try:
+        profile = RULESETS[normalize_ruleset(card.get("ruleset") or "K1")]
+    except (KeyError, ValueError):
+        return []
+    label = card.get("ruleset_label") or profile.label
+    lines = [f"The score counts landed strikes only, not every attempt, under {label} rules - so it can "
+             "differ from the strike totals shown elsewhere on this page."]
+    weights = _weights(profile)
+    if profile.ten_point_must and profile.round_margins:
+        lines.append("Every scoring strike counts the same; the lead in each round decides that round's margin.")
+    elif len(set(weights.values())) > 1:
+        shown = ", ".join(f"a {family} counts {value:g}" for family, value in weights.items())
+        lines.append(f"Strikes are weighted by this ruleset: {shown}.")
+    else:
+        lines.append("Every scoring strike counts the same.")
+    if profile.ten_point_must:
+        won = []
+        for row in card["rounds"]:
+            winner = row.get("winner")
+            who = names.get(winner, f"Fighter {winner}") if winner in ("A", "B") else "neither fighter"
+            detail = ""
+            if row.get("effective_action_A") is not None:
+                detail = f" ({row['effective_action_A']:g} to {row['effective_action_B']:g})"
+            won.append(f"round {row['round']} to {who}{detail}, {row['fighter_A']}-{row['fighter_B']}")
+        lines.append("Each round is scored on its own, 10 to the winner: " + "; ".join(won) + ". "
+                     "A fighter who wins more rounds narrowly can lead with fewer strikes overall.")
+    else:
+        count = len(card["rounds"])
+        lines.append("Points are added up across "
+                     + ("the round." if count == 1 else "both rounds." if count == 2 else f"all {count} rounds."))
+    return lines

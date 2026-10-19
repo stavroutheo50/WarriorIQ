@@ -495,11 +495,18 @@ def compare_movement(reports: list) -> dict:
             # from the unrounded values (QA, 2026-10-11).
             digits = 1 if key == "footwork_body_lengths_per_second" else 0
             gap = round(round(second_shown, digits) - round(first_shown, digits), digits)
-            # The same noise floor the trend uses, read on the displayed scale
-            # so a 5% band means 5 points of what the reader can actually see.
-            floor = _MEANINGFUL_CHANGE * (1.0 if key == "footwork_body_lengths_per_second" else 100.0)
-            if abs(gap) < floor:
-                delta_text, leader = "level", "level"
+            # One rule for every measurement (audit 2026-10-14, #35): the one
+            # coaching uses to call a fighter ahead (core.coaching
+            # clear_difference) - the gap must clear the measurement's own
+            # noise, half its real-footage spread and 1.96 standard errors of
+            # both fights' block-to-block variation. A flat 5% of each
+            # display scale called "52 vs 56" level and "0.8 vs 0.7" higher.
+            from core.coaching import clear_difference
+
+            own = ((sides[1]["report"].get("metrics") or {}).get(sides[1]["focus"]) or {})
+            other = ((sides[0]["report"].get("metrics") or {}).get(sides[0]["focus"]) or {})
+            if gap == 0 or not clear_difference(key, second, first, own, other):
+                delta_text, leader = "level (within measurement noise)", "level"
             else:
                 leader = "b" if gap > 0 else "a"
                 unit = " points" if key != "footwork_body_lengths_per_second" else ""

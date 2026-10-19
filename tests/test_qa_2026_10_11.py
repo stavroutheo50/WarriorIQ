@@ -306,13 +306,15 @@ def test_b1_a_guard_under_the_stated_threshold_always_gets_a_fix_drill_and_targe
     own, opponent = _own(0.07), _own(0.08)
     coaching = build_pose_coaching("A", own, opponent, "kickboxing")
     titles = [item["title"] for item in coaching["improvements"]]
-    assert any(title.startswith("Work on: Guard 7%") for title in titles), titles
+    assert any(title.startswith("Work on: Guard (experimental) 7%") for title in titles), titles
     assert "Nothing behind your opponent" not in titles
     assert "Under 42% is what WarriorIQ flags as worth training." in coaching["improvements"][0]["detail"]
     assert coaching["drills"] and coaching["drills"][0]["metric"] == "guard_index"
     plan = build_training_plan(coaching, "A", own)
-    assert plan and plan[0]["goal"].startswith("Raise guard from 7")
-    assert build_training_progression(coaching, "A", own)
+    # Still drilled, but guard is experimental: no number target, so no
+    # weekly targets either (audit 2026-10-14, #28).
+    assert plan and plan[0]["goal"].startswith("No number target: guard is experimental")
+    assert all(not week["targets"] for week in build_training_progression(coaching, "A", own))
     # Never also a strength.
     assert not any(item["title"].startswith("Guard") for item in coaching["strengths"])
 
@@ -430,10 +432,15 @@ def test_b7_compare_difference_comes_from_the_rounded_numbers_with_a_direction()
         return {"video": {"focus_fighter": "A"}, "tracking": {"fighter_A_coverage": .9, "fighter_B_coverage": .9},
                 "metrics": {"A": {"ring_center_control": centre}}}
 
-    rows = compare_movement([report(0.414), report(0.466)])["rows"]
+    # 41.4 -> 51.6 is 10.2 unrounded and 11 as shown: the shown 11 is used.
+    rows = compare_movement([report(0.414), report(0.516)])["rows"]
     centre = next(row for row in rows if row["key"] == "ring_center_control")
-    assert (centre["a"], centre["b"]) == ("41%", "47%")
-    assert centre["delta"] == "Fight 2 higher by 6 points"
+    assert (centre["a"], centre["b"]) == ("41%", "52%")
+    assert centre["delta"] == "Fight 2 higher by 11 points"
+    # Under the measurement's noise (half its spread, 7.5 points for centre;
+    # audit 2026-10-14, #35) it is level, whatever the scale.
+    rows = compare_movement([report(0.414), report(0.466)])["rows"]
+    assert next(row for row in rows if row["key"] == "ring_center_control")["leader"] == "level"
 
 
 # --- B8 ----------------------------------------------------------------------
@@ -513,12 +520,22 @@ def test_b11_guard_on_fixed_footage_is_repeatable_and_pinned():
     first, second = _track_guard(), _track_guard()
     assert first == second                                  # same frames, same number
     # Pinned to the current definition (core/guard.py GUARD_DEFINITION): a
-    # change to how guard is measured shows up here, not as a trend.
-    assert first == pytest.approx((0.032, 0.021), abs=0.003)
+    # change to how guard is measured shows up here, not as a trend. Under /2
+    # (nearer wrist, line 0.7) this track read 0.032 and 0.021; under /3 (both
+    # wrists, line 0.9; audit 2026-10-14, #5) it reads as below.
+    assert first == pytest.approx((0.122, 0.009), abs=0.003)
+    # Requiring both wrists costs repeatability, measured here: across strides
+    # 2-4 and every offset the figure moves by up to 0.067 (0.06 under /2),
+    # and at strides 5-6 too few frames show both wrists confidently, so it is
+    # withheld ("Not measured") rather than guessed. That noise is why guard
+    # is labelled Experimental (core/metric_catalog.py).
     for stride in (2, 3, 4, 5, 6):
         for offset in range(stride):
             a, b = _track_guard(stride, offset)
-            assert abs(a - first[0]) <= 0.06 and abs(b - first[1]) <= 0.06, (stride, offset, a, b)
+            if stride >= 5:
+                assert a is None or abs(a - first[0]) <= 0.07, (stride, offset, a, b)
+                continue
+            assert abs(a - first[0]) <= 0.07 and abs(b - first[1]) <= 0.07, (stride, offset, a, b)
 
 
 def test_b11_only_the_current_guard_definition_is_compared_across_fights():
@@ -697,7 +714,7 @@ def test_d1_since_last_fight_names_the_fight_not_the_file():
     def report(guard):
         return {"video": {"focus_fighter": "A"}, "tracking": {"fighter_A_coverage": .9, "fighter_B_coverage": .9},
                 "scorecard": {"sport": "boxing", "sport_label": "Boxing"},
-                "metrics": {"A": {"guard_index": guard, "guard_definition": "hands_up_share/2", "balance_index": .7,
+                "metrics": {"A": {"guard_index": guard, "guard_definition": "hands_up_share/3", "balance_index": .7,
                                   "ring_center_control": .5}}}
 
     fights = [{"job_id": "old", "original_name": "2.mp4", "created_at": "2026-10-01T10:00:00+00:00",
@@ -894,14 +911,14 @@ def test_f_an_old_saved_report_is_re_rendered_without_its_stored_false_text():
     report = json.loads((ROOT / "tests" / "fixtures" / "report_sample.json").read_text(encoding="utf-8"))
     report["integrity"]["action_metrics_trusted"] = False
     for side in ("A", "B"):
-        report["metrics"][side].update({"guard_index": 0.07, "guard_definition": "hands_up_share/2"})
+        report["metrics"][side].update({"guard_index": 0.07, "guard_definition": "hands_up_share/3"})
         report["coaching"][side] = {"strengths": [], "drills": [], "improvements": [{
             "title": "Nothing behind your opponent",
             "detail": "watch your counted strikes on the replay and judge them yourself."}]}
     refresh_identity_integrity(report)
     text = json.dumps(report["coaching"])
     assert "counted strikes" not in text
-    assert "Work on: Guard 7%" in text
+    assert "Work on: Guard (experimental) 7%" in text
     assert report["training_plan"]["A"]
 
 

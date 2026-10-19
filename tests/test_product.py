@@ -1615,7 +1615,9 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertIn("Guard-return audit", page)
         self.assertIn("Take on this mission", page)
         self.assertIn("Start a mission: Guard-return audit", page, "the next step, at the top")
-        self.assertIn("Guard <b class=\"wiq-num\">10.0%</b>", page, "the bar starts at the measured number")
+        # Guard is experimental: the mission stands, but no bar toward a number
+        # target is drawn for it (audit 2026-10-14, #28).
+        self.assertNotIn("Guard <b class=\"wiq-num\">10.0%</b>", page)
 
         taken = self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 0}, follow_redirects=False)
         self.assertEqual(taken.status_code, 303)
@@ -1663,7 +1665,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 145)
         self.assertIn("improved", page)
         self.assertIn("Improved ✓", page)
-        self.assertIn("Next fight: <b class=\"wiq-num\">15.0%</b>", page)
+        self.assertNotIn("Next fight: <b class=\"wiq-num\">15.0%</b>", page)
         self.assertIn("Level", page)
 
         exported = database.list_training_sessions(profile_id)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from core.metric_catalog import BY_KEY, is_experimental, reference_target
+
 import math
 from collections.abc import Callable
 
@@ -146,7 +148,7 @@ def clear_difference(key: str, mine: float, theirs: float, own: dict | None = No
 
 POSE_DIMENSIONS = [
     (
-        "guard_index", "Guard", (0.17, 0.10),
+        "guard_index", "Guard (experimental)", (0.17, 0.10),
         "Guard-return audit",
         "4 x 90 sec: after every exchange, freeze in stance and confirm both hands have returned before the partner counters.",
     ),
@@ -560,20 +562,26 @@ def build_coaching(fighter: str, metrics: dict, events: list[StrikeEvent]) -> di
     }
 
 
-def _metric_progress(key: str, current: float) -> tuple[float, Callable[[float], str]]:
+def _show(key: str) -> Callable[[float], str]:
+    if key == "pressure_index":
+        # Stored as -1..1 and spoken as 0..100.
+        return lambda value: f"{(value + 1) / 2 * 100:.0f} out of 100"
+    if key == "footwork_body_lengths_per_second":
+        return lambda value: f"{value:.1f} body lengths a second"
+    return lambda value: f"{_pct(value)}%"
+
+
+def _metric_progress(key: str, current: float) -> tuple[float | None, Callable[[float], str]]:
     """Where one measurement should get to, and how to say it out loud.
 
     One definition, because the next-session goal and the multi-week
-    progression have to agree. Two copies of this arithmetic would drift, and
-    an athlete told to reach two different numbers for the same thing stops
-    believing either.
+    progression have to agree. The target is the measurement's reference line
+    (core.metric_catalog.reference_target), or None: no target for an
+    experimental measurement, for one with no reference range, or for one
+    already past its line. It used to be the current figure plus eight points
+    (audit 2026-10-14, #28).
     """
-    if key == "pressure_index":
-        # Stored as -1..1 and spoken as 0..100, so +6 spoken is +0.12 stored.
-        return min(0.5, current + 0.12), lambda value: f"{(value + 1) / 2 * 100:.0f} out of 100"
-    if key == "footwork_body_lengths_per_second":
-        return current + 0.25, lambda value: f"{value:.1f} body lengths a second"
-    return min(0.95, current + 0.08), lambda value: f"{_pct(value)}%"
+    return reference_target(key, current), _show(key)
 
 
 def metric_goal(key: str, current: float) -> tuple[float, Callable[[float], str]]:
@@ -620,6 +628,8 @@ def build_training_progression(coaching: dict, fighter: str, own: dict) -> list[
         for drill in drills:
             current = float(drill["measured"])
             final, show = _metric_progress(drill["metric"], current)
+            if final is None:
+                continue
             step = current + (final - current) * (index / len(_PROGRESSION_WEEKS))
             targets.append({
                 "label": drill.get("label", "this measurement"),
@@ -674,12 +684,23 @@ def build_training_plan(coaching: dict, fighter: str, own: dict) -> list[dict]:
             )
         current = float(current)
         target, show = _metric_progress(key, current)
-        if key == "pressure_index":
+        label = drill.get("label", "this number")
+        if target is None:
+            if is_experimental(key):
+                plain = label.replace(" (experimental)", "").lower()
+                goal = (f"No number target: {plain} is experimental, so it is not used as a goal. "
+                        f"It was {show(current)} in this fight; judge the drill by the shape it describes.")
+            elif BY_KEY.get(key) is not None and BY_KEY[key].band is not None:
+                goal = f"Keep {label.lower()} where it is ({show(current)}) while you work on the drill."
+            else:
+                goal = (f"No number target: WarriorIQ has no reference range for {label.lower()} yet. "
+                        f"It was {show(current)} in this fight.")
+        elif key == "pressure_index":
             goal = f"Move your pressure from {show(current)} to {show(target)}."
         elif key == "footwork_body_lengths_per_second":
             goal = f"Move your feet more: {show(current)} to {show(target)}."
         else:
-            goal = f"Raise {drill.get('label', 'this number').lower()} from {show(current)} to {show(target)}."
+            goal = f"Raise {label.lower()} from {show(current)} to {show(target)}, the line WarriorIQ flags below."
         if theirs is not None:
             if key == "pressure_index":
                 theirs_shown = f"{(float(theirs) + 1) / 2 * 100:.0f}"

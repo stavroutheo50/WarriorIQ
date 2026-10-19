@@ -68,7 +68,7 @@ class ProgressLeavesOutIdentityFailuresTests(unittest.TestCase):
         return {"job_id": job_id, "created_at": created, "report": {
             "video": {"analysis_target": "BOTH", "focus_fighter": "A"},
             "setup": {"ruleset": "K1"}, "integrity": integrity,
-            "metrics": {"A": {"pose_coverage": .8, "guard_index": guard, "guard_definition": "hands_up_share/2"}},
+            "metrics": {"A": {"pose_coverage": .8, "guard_index": guard, "guard_definition": "hands_up_share/3"}},
             "coaching": {}, "training_plan": {},
         }}
 

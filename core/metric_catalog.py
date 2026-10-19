@@ -67,6 +67,15 @@ class Metric:
     # None. The whole band is None when nothing in the project knows.
     band: tuple[float | None, float | None] | None
     band_source: str
+    # Not yet checked against labelled clips: shown with an "Experimental"
+    # label everywhere, and never given a training target (audit 2026-10-14,
+    # #5, #28).
+    experimental: bool = False
+
+    @property
+    def label(self) -> str:
+        """The name as shown, with the experimental mark where it applies."""
+        return f"{self.name} (experimental)" if self.experimental else self.name
 
     def reading(self, value: float | None) -> dict:
         """Where one measured value sits against its band."""
@@ -141,10 +150,13 @@ CATALOG: tuple[Metric, ...] = (
     Metric(
         key="guard_index",
         name="Guard",
-        definition="The share of the fight your hands stayed up near your head.",
+        definition="The share of the fight both your hands stayed up near your chin.",
         unit="percent", direction="higher",
         band=(GUARD_WEAKNESS, GUARD_STRENGTH),
         band_source=COACHING_BAND,
+        # Wrist-to-chin over shoulder width, both hands (core/guard.py). No
+        # labelled guard clips exist yet to check it against.
+        experimental=True,
     ),
     Metric(
         key="balance_index",
@@ -187,6 +199,32 @@ CATALOG: tuple[Metric, ...] = (
 )
 
 BY_KEY: dict[str, Metric] = {metric.key: metric for metric in CATALOG}
+
+EXPERIMENTAL_NOTE = ("Experimental: measured from where the wrists are relative to the chin, but not yet "
+                     "checked against hand-labelled fight clips. Read it as a rough indication, not a fact.")
+
+
+def is_experimental(key: str) -> bool:
+    metric = BY_KEY.get(key)
+    return bool(metric and metric.experimental)
+
+
+def reference_target(key: str, current: float) -> float | None:
+    """The training target for one measurement, or None when it should have none.
+
+    Audit 2026-10-14 (#28): "raise guard from 7.3% to 15.3%" was the current
+    figure plus eight points, a number from nowhere. A target is now set only
+    for a measurement that is not experimental and has a reference range, and
+    it is that range's line - the level below which WarriorIQ flags it. At or
+    above that line there is nothing to aim for that the project can name.
+    """
+    metric = BY_KEY.get(key)
+    if metric is None or metric.experimental or metric.band is None:
+        return None
+    low = metric.band[0]
+    if low is None or float(current) >= low:
+        return None
+    return float(low)
 
 # Names that used to appear for the same measurement, kept so a test can prove
 # none of them came back. Every one of these was on the page at the same time

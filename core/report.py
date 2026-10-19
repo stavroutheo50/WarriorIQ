@@ -551,6 +551,24 @@ def published_families(sport: str | None, report: dict | None = None) -> tuple[s
     return tuple(family for family in scored if family in exam)
 
 
+def strike_numbers_shown(report: dict | None, sport: str | None = None) -> tuple[str, ...]:
+    """The one rule for whether a fight's strike numbers are shown, and which families.
+
+    Audit 2026-10-14 (#8): the report showed strike counts while Compare said
+    they were "hidden until accurate" for the same fight, because each page
+    had its own gate. Report, replay, Compare and Fight Camp all read this:
+    the families published for the sport (the switch, or this model's accuracy
+    exam - published_families), none when the counts failed the plausibility
+    check, and none when WarriorIQ could not tell who was who, since every
+    count is an attribution to a fighter.
+    """
+    report = report or {}
+    if not (report.get("integrity") or {}).get("identity_evidence_trusted", True):
+        return ()
+    sport = sport or (report.get("scorecard") or {}).get("sport")
+    return published_families(sport, report)
+
+
 SHARE_CARD_NOTE = "Automatic estimate by WarriorIQ, not checked by a person."
 
 

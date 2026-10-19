@@ -1324,7 +1324,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("20 s", hands_down)
         self.assertEqual(hands_down.count("Not measured"), 2)
         self.assertIn("re-run to measure", hands_down)
-        hands_up = re.search(r'Hands up by the face.*?</div>', page, re.S).group(0)
+        hands_up = re.search(r'Both hands up by the chin \(experimental\).*?</div>', page, re.S).group(0)
         self.assertEqual(hands_up.count(">0%<"), 2)
 
     def test_saved_movement_scorecard_renders_as_a_comparison_for_counted_rulesets(self):
@@ -1528,7 +1528,7 @@ class PublicPageTests(unittest.TestCase):
         report = json.loads((Path(__file__).resolve().parent / "fixtures" / "report_sample.json").read_text(encoding="utf-8"))
         m = report["metrics"]["A"]
         if m.get("guard_index") is not None:
-            self.assertIn(f"Your hands were up by the face {round(m['guard_index'] * 100)}% of the time you were seen", page)
+            self.assertIn(f"Your hands were both up by the chin {round(m['guard_index'] * 100)}% of the time you were seen", page)
         if m.get("balance_index") is not None:
             self.assertIn(f"You stood balanced {round(m['balance_index'] * 100)}% of the time", page)
         if m.get("pressure_index") is not None:
@@ -2076,7 +2076,9 @@ class PublicPageTests(unittest.TestCase):
 
     def test_progress_uses_supported_movement_metrics_when_actions_are_unvalidated(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(encoding="utf-8")
-        for label in ("Guard", "Balance", "Ring centre", "How clearly we saw you"):
+        # Guard carries the Experimental badge (audit 2026-10-14, #5).
+        self.assertIn('<span class="label">Guard {{ experimental_badge }}</span>', template)
+        for label in ("Balance", "Ring centre", "How clearly we saw you"):
             self.assertIn(f'<span class="label">{label}</span>', template)
         self.assertIn("Movement progress is ready", template)
         self.assertNotIn("conversion: Not validated", template)

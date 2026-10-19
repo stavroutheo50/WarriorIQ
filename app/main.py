@@ -32,6 +32,7 @@ from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPExceptio
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.concurrency import run_in_threadpool
@@ -106,9 +107,10 @@ from core import feed, social, worker_alerts
 from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
 from core.progress_insights import build_progress
 from core.progress_view import stage_view
+from core.scoring import score_explanation
 from core.selection_check import pair_verdict
 from core.quality_guardian import inspect_video_quality
-from core.metric_catalog import BY_KEY as METRIC_CATALOG, evidence_limitations, readings as metric_readings
+from core.metric_catalog import BY_KEY as METRIC_CATALOG, EXPERIMENTAL_NOTE, evidence_limitations, readings as metric_readings
 from core.chunked_upload import (
     ChunkedUploadError, StoredUpload, append as append_chunk, begin as begin_chunked,
     discard as discard_chunked, extend_lease, finalise as finalise_chunked,
@@ -139,6 +141,7 @@ from core.count_plausibility import counts_implausible
 from core.report import (
     build_preliminary_scorecard, identity_failure, identity_verdict, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
+    strike_numbers_shown,
     coaching_moments, did_well, fix_first, not_a_fight, not_a_fight_reason, refresh_identity_integrity, share_card,
     unattributed_kick_total, withhold_for_sideways,
 )
@@ -352,6 +355,11 @@ templates.env.globals["preflight_limits"] = json.dumps(client_thresholds())
 # One name, one definition and one reference per measurement, so the report
 # cannot call the same number three things in three sections.
 templates.env.globals["metric_catalog"] = METRIC_CATALOG
+# One label for every measurement not yet checked against labelled clips
+# (core/metric_catalog.py experimental; audit 2026-10-14, #5).
+templates.env.globals["experimental_badge"] = Markup(
+    '<span class="badge-experimental" title="Not yet checked against hand-labelled fight clips">Experimental</span>')
+templates.env.globals["experimental_note"] = EXPERIMENTAL_NOTE
 # The movement comparison is decided at render time, so reports saved with a
 # "10-10" movement scorecard are shown without one (core/generalship.py).
 templates.env.globals["movement_comparison"] = movement_comparison
@@ -2415,7 +2423,11 @@ def _withhold_score_while_counts_are_off(report: dict) -> None:
     while counts were on loses its score on read too. Never written back.
     """
     implausible = counts_implausible(report)
-    counts_on = STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED
+    # Shown only while this fight's strike numbers are, by the one rule every
+    # page uses (core.report.strike_numbers_shown): a score built from counts
+    # the page withholds would be the same numbers in another form (audit
+    # 2026-10-14, #7).
+    counts_on = bool(strike_numbers_shown(report))
     # The score's own switch too (core/features.py): marketing, pricing and
     # the report all read it, so a score is shown only while it is on.
     if counts_on and feature_is_on("scoring") and not implausible:
@@ -6015,6 +6027,8 @@ def result_page(request: Request, job_id: str):
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
         "identity_failure": _identity_failure(report),
+        # "Why this score" (core.scoring.score_explanation; audit 2026-10-14, #7).
+        "score_reasons": score_explanation(report.get("scorecard"), names),
         # "Punches and knees are not counted" on taekwondo, which awards no
         # knees - the note names only what this sport actually scores.
         "withheld_families": _reported_strike_families(
@@ -6046,12 +6060,11 @@ def result_page(request: Request, job_id: str):
         "kick_total": None if identity_trusted else unattributed_kick_total(report),
         # The global switch, or this sport's accuracy exam for the model that
         # made the report (core/strike_exam.py): published_families says both.
+        # The one rule every page uses (core.report.strike_numbers_shown).
         "strike_counts_published": bool(published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)),
-        # Attributions, like the per-fighter cards, so only when identity held.
-        "counted_strikes": (_with_checks(job_id, _counted_strikes(report, published_families(
-            (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)))
-            if identity_trusted else []),
+        "counted_strikes": _with_checks(job_id, _counted_strikes(report, strike_numbers_shown(
+            report, (report.get("scorecard") or {}).get("sport") or _job_sport(job)))),
         "can_check_strikes": bool(_account(request)),
         "went_down": _went_down(job_id, report),
         "wrong_sport": _wrong_sport(report, job),
@@ -6582,7 +6595,7 @@ def replay_page(
     )
     sport = (report.get("scorecard") or {}).get("sport") or _job_sport(_authorized_job(request, job_id) or {})
     policy = counting_policy(sport, report=report)
-    if replay_mode == "movement_chapters" and identity_safe and published_families(sport, report):
+    if replay_mode == "movement_chapters" and strike_numbers_shown(report, sport):
         # The report lists every counted strike ("Watch every counted strike")
         # while this page said no action had passed. The same list is offered
         # here, labelled as what it is: automatic counts, estimates.
@@ -7628,6 +7641,10 @@ def compare_page(request: Request, a: str = "", b: str = ""):
         name="compare.html",
         context={
             "request": request, "fights": fights, "a": a, "b": b, "reports": reports,
+            # Strike numbers by the same rule as the report, replay and Fight
+            # Camp (core.report.strike_numbers_shown; audit 2026-10-14, #8).
+            "strikes_shown": [bool(strike_numbers_shown(report)) if report else False for report in reports],
+            "estimate_note": ESTIMATE_NOTE,
             # Each card is headed with its fight, not "Fight analysis 1" - and
             # the page can say when the two are different fighters.
             "picked": [next((f for f in fights if f["job_id"] == job_id), None) for job_id in (a, b)],

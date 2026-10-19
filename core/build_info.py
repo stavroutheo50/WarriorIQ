@@ -31,7 +31,9 @@ from pathlib import Path
 #    motion compensated before matching, officials held as a third-person
 #    class, and a fighter followed for 20-45% of the fight reported at low
 #    confidence instead of failing (audit 2026-10-14, #2).
-ANALYSIS_VERSION = 5
+# 6: guard needs both wrists up by the chin (core/guard.py hands_up_share/3;
+#    audit 2026-10-14, #5).
+ANALYSIS_VERSION = 6
 
 ROOT = Path(__file__).resolve().parents[1]
 

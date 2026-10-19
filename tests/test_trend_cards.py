@@ -4,7 +4,7 @@ from core.progress_insights import build_progress
 
 
 def _record(job_id, created, guard, pressure=None, numbers=None, identity=None):
-    metrics = {"pose_coverage": .85, "guard_index": guard, "guard_definition": "hands_up_share/2"}
+    metrics = {"pose_coverage": .85, "guard_index": guard, "guard_definition": "hands_up_share/3"}
     if pressure is not None:
         metrics["pressure_index"] = pressure
     if numbers is not None:
@@ -25,10 +25,10 @@ def test_a_card_per_measure_with_two_fights_and_the_change_since_the_first():
                     _record("b", "2026-08-08", .30, pressure=.30),
                     _record("c", "2026-08-15", .45, pressure=.25)])
     guard = cards["guard"]
-    assert (guard["first"], guard["latest"], guard["change"], guard["fights"]) == ("20%", "45%", "+25 pts", 3)
+    assert (guard["first"], guard["latest"], guard["change"], guard["fights"]) == ("20%", "45%", "+25 percentage points", 3)
     assert guard["direction"] == "up"                     # hands up more is better
     assert (cards["pressure"]["first"], cards["pressure"]["latest"]) == ("55", "62")   # out of 100
-    assert cards["pressure"]["change"] == "+7 pts"   # the printed figures, 62 - 55
+    assert cards["pressure"]["change"] == "+7 on the 0-100 scale"   # the printed figures, 62 - 55
     assert cards["pressure"]["direction"] == "neutral"   # style, not quality
     assert len(guard["line"].split()) == 3
 
