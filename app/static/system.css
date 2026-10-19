@@ -509,3 +509,5 @@ summary:focus-visible,
 .measured-grid h3{margin:0 0 10px;font-size:18px}
 .measured-grid p{margin:0 0 8px;line-height:1.55}
 .measured-grid .plan-price{margin:0;font-size:30px;font-weight:900}
+/* A little air between the upload button and its progress bar (owner, 2026-10-19). */
+#uploadProgress{margin-top:14px}
