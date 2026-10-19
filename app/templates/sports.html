@@ -8,7 +8,7 @@
     <div class="eyebrow">Step 1 of 4 · Upload · Your sport</div>
     <h1>Which sport are we watching?</h1>
     <p>Tap your sport.</p>
-    {% if allowance and allowance.remaining == 0 %}
+    {% if allowance and allowance.remaining == 0 and not allowance.bonus_remaining %}
     <p class="chooser-limit"><b>Limit reached.</b> Your {{allowance.plan.label}} allowance is used for now — it resets automatically. <a class="text-link" href="/pricing">Compare plans</a> for more analyses.</p>
     {% endif %}
   </header>

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.config import DATASET, DB_PATH, SETTINGS
-from core.payments import PLANS, effective_plan_key, plan_for_key
+from core.payments import PLANS, allowance, effective_plan_key, plan_for_key
 
 LOGGER = logging.getLogger("warrioriq.db")
 
@@ -619,6 +619,12 @@ def _init_db_schema() -> None:
             con.execute("ALTER TABLE fights ADD COLUMN event_name TEXT")
         if "opponent_name" not in fight_columns:
             con.execute("ALTER TABLE fights ADD COLUMN opponent_name TEXT")
+        # How much video an analysis covered, for plans counted in video
+        # minutes (audit 2026-10-14, #51). Nullable: rows written before it,
+        # and analyses counted per day or month, carry none.
+        usage_columns = {row[1] for row in con.execute("PRAGMA table_info(analysis_usage)").fetchall()}
+        if "video_seconds" not in usage_columns:
+            con.execute("ALTER TABLE analysis_usage ADD COLUMN video_seconds REAL")
         acceptance_columns = {row[1] for row in con.execute("PRAGMA table_info(legal_acceptances)").fetchall()}
         if "current_status" not in acceptance_columns:
             con.execute("ALTER TABLE legal_acceptances ADD COLUMN current_status TEXT NOT NULL DEFAULT 'accepted'")
@@ -1864,13 +1870,35 @@ def refund_credit(account_id: int) -> None:
 
 
 def _usage_period(plan: dict, moment: datetime) -> tuple[str, int | None]:
-    if plan.get("unlimited"):
+    """The period an analysis now counts against, and that period's limit.
+
+    The limit is analyses, except for a plan counted in video minutes, where
+    it is minutes (core.payments.allowance, audit 2026-10-14 #51).
+    """
+    rule = allowance(plan)
+    if rule["period"] == "unlimited":
         return "unlimited", None
-    if plan.get("daily_limit") is not None:
-        return f"day:{moment.date().isoformat()}", int(plan["daily_limit"])
-    if plan.get("monthly_limit") is not None:
-        return f"month:{moment.strftime('%Y-%m')}", int(plan["monthly_limit"])
+    if rule["period"] == "day":
+        return f"day:{moment.date().isoformat()}", rule["amount"]
+    if rule["period"] == "month":
+        return f"month:{moment.strftime('%Y-%m')}", rule["amount"]
+    if rule["period"] == "video_minutes":
+        return f"minutes:{moment.strftime('%Y-%m')}", rule["amount"]
     return "unavailable", 0
+
+
+def _usage_in_period(con, account_id: int, period_key: str) -> float:
+    """Analyses used in a period - or, for a video-minutes period, minutes used."""
+    if period_key.startswith("minutes:"):
+        seconds = con.execute(
+            "SELECT COALESCE(SUM(video_seconds),0) FROM analysis_usage WHERE account_id=? AND period_key=?",
+            (account_id, period_key),
+        ).fetchone()[0]
+        return float(seconds or 0) / 60.0
+    return float(con.execute(
+        "SELECT COUNT(*) FROM analysis_usage WHERE account_id=? AND period_key=?",
+        (account_id, period_key),
+    ).fetchone()[0])
 
 
 # Fight Camp: analyses bought with points (core/camp.py). A purchase is a
@@ -1916,8 +1944,13 @@ def redeem_points_for_analysis(profile_id: int, cost: int, monthly_cap: int, mon
         return "bought"
 
 
-def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None) -> bool:
-    """Atomically reserve one analysis against the account's current plan."""
+def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None,
+                     video_seconds: float | None = None) -> bool:
+    """Atomically reserve one analysis against the account's current plan.
+
+    video_seconds is the length of video this analysis covers; a plan counted
+    in video minutes needs it, and every row records it.
+    """
     moment = now or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
@@ -1934,11 +1967,11 @@ def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None) 
         plan = plan_for_key(_effective_plan_key(account))
         period_key, limit = _usage_period(plan, moment)
         if limit is not None:
-            used = int(con.execute(
-                "SELECT COUNT(*) FROM analysis_usage WHERE account_id=? AND period_key=?",
-                (account_id, period_key),
-            ).fetchone()[0])
-            if used >= limit:
+            used = _usage_in_period(con, account_id, period_key)
+            # A minutes plan refuses a video that would go past the limit; an
+            # analyses plan refuses once the count is reached.
+            wanted = (max(0.0, float(video_seconds or 0)) / 60.0) if period_key.startswith("minutes:") else 1.0
+            if used + wanted > limit:
                 # The plan's allowance is spent: an analysis bought with Fight
                 # Camp points is used instead, if there is one. It is recorded
                 # under its own period key, so release_analysis gives it back
@@ -1947,8 +1980,9 @@ def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None) 
                     return False
                 period_key = BONUS_PERIOD_KEY
         con.execute(
-            "INSERT INTO analysis_usage(job_id,account_id,period_key,created_at) VALUES(?,?,?,?)",
-            (job_id, account_id, period_key, moment.astimezone(timezone.utc).isoformat()),
+            "INSERT INTO analysis_usage(job_id,account_id,period_key,created_at,video_seconds) VALUES(?,?,?,?,?)",
+            (job_id, account_id, period_key, moment.astimezone(timezone.utc).isoformat(),
+             None if video_seconds is None else float(video_seconds)),
         )
         return True
 
@@ -1971,14 +2005,21 @@ def analysis_allowance(account_id: int, now: datetime | None = None) -> dict:
         account = con.execute("SELECT plan,plan_override,email FROM accounts WHERE id=?", (account_id,)).fetchone()
         plan = plan_for_key(_effective_plan_key(account))
         period_key, limit = _usage_period(plan, moment)
-        used = int(con.execute(
-            "SELECT COUNT(*) FROM analysis_usage WHERE account_id=? AND period_key=?",
-            (account_id, period_key),
-        ).fetchone()[0])
+        minutes = period_key.startswith("minutes:")
+        used = _usage_in_period(con, account_id, period_key)
+        used = round(used, 1) if minutes else int(used)
         bonus = _bonus_analyses_left(con, account_id)
+    if minutes:
+        # Bought analyses are whole analyses, not minutes; they are reported
+        # beside the minutes rather than added to them.
+        return {
+            "plan": plan, "period_key": period_key, "used": used, "limit": limit, "unit": "minutes",
+            "remaining": max(0, int(limit - used)), "bonus_remaining": bonus,
+        }
     return {
         "plan": plan,
         "period_key": period_key,
+        "unit": "analyses",
         "used": used,
         "limit": limit,
         # Analyses bought with Fight Camp points count as remaining too, so

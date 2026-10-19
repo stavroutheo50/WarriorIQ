@@ -101,7 +101,8 @@ from core.fight_presence import attach_plausibility
 from core.features import FEATURES
 from core.features import is_on as feature_is_on
 from core.features import status as feature_status
-from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
+from core.sample_report import SAMPLE_NOTICE, SAMPLE_REPORT, sample_rows
+from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, allowance_column, allowance_text, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core import feed, social, worker_alerts
 from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
@@ -348,6 +349,7 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 # core.upload_security, so neither can drift from what the server accepts.
 templates.env.globals["fight_video_accept"] = FIGHT_VIDEO_ACCEPT
 templates.env.globals["fight_video_label"] = FIGHT_VIDEO_LABEL
+templates.env.globals["allowance_column"] = allowance_column
 templates.env.globals["fight_video_extensions"] = sorted(FIGHT_VIDEO_EXTENSIONS)
 # The pre-upload check compares footage against the same numbers the worker's
 # probe uses, rather than a second set copied into JavaScript.
@@ -1286,6 +1288,17 @@ def _authorized_job(request: Request, job_id: str) -> dict | None:
     return None
 
 
+def _analysed_seconds(job: dict, req) -> float | None:
+    """How much video this analysis covers, after any trim (#51: minutes plans)."""
+    try:
+        start = float(getattr(req, "start_seconds", None) or 0.0)
+        end = getattr(req, "end_seconds", None)
+        end = float(end) if end else float(job.get("video_duration") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, end - start) if end else None
+
+
 def _job_page_refused(request: Request) -> RedirectResponse:
     """A fight page this visitor may not open (audit 2026-10-14 #49).
 
@@ -1947,7 +1960,7 @@ STATIC_PUBLIC_PAGES = frozenset({
     "/", "/legal", "/terms", "/cookies", "/acceptable-use", "/refunds", "/video-upload-policy",
     "/sports-medical-disclaimer", "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
     "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
-    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
+    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis", "/sample-report",
 })
 STATIC_PUBLIC_MAX_AGE = 300
 
@@ -3635,8 +3648,35 @@ def home(request: Request):
             "profile": profile,
             "version": SETTINGS.version,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
+            **_home_sections(),
         },
     )
+
+
+def _home_demo_clip() -> str | None:
+    """The demo clip's URL when the file is really there (#53), else None."""
+    path = SETTINGS.demo_clip
+    if not path.startswith("/static/"):
+        return None
+    local = (ROOT / "app" / path.lstrip("/")).resolve()
+    if local.is_file() and (ROOT / "app" / "static").resolve() in local.parents:
+        return f"{path}?v={ASSET_VERSION}"
+    return None
+
+
+def _home_sections() -> dict:
+    """What the homepage's measured, accuracy and plans sections read (#55)."""
+    measured = {}
+    for sport in SPORTS:
+        policy = counting_policy(sport, published=STRIKE_COUNTS_PUBLISHED,
+                                 validated=STRIKE_COUNTS_PRECISION_VALIDATED)
+        measured[sport] = {"label": RULESET_SPORTS.get(sport, sport.replace("_", " ").title()),
+                           "counted": _prose_list(policy.counted), "unobserved": _prose_list(sport_unobserved(sport))}
+    athlete = [(key, {**plan, "allowance": allowance_text(plan)}) for key, plan in PLANS.items()
+               if plan.get("audience") == "athlete"]
+    coach_prices = [plan["price"] for plan in PLANS.values() if plan.get("audience") != "athlete"]
+    return {"measured": measured, "summary_plans": athlete, "coach_from": coach_prices[0] if coach_prices else None,
+            "payments_enabled": SETTINGS.payments_enabled, "demo_clip": _home_demo_clip()}
 
 
 def _reported_strike_families(sport: str) -> dict:
@@ -5284,9 +5324,9 @@ def start(request: Request, job_id: str, payload: StartPayload):
 
     req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, focus_fighter)
     if job.get("account_id") and not job.get("usage_reserved"):
-        if not reserve_analysis(int(job["account_id"]), job_id):
+        if not reserve_analysis(int(job["account_id"]), job_id, video_seconds=_analysed_seconds(job, req)):
             plan = _request_plan(request)
-            raise HTTPException(429, f"Your {plan['label']} plan includes {plan['limit_label'].lower()}. Your allowance will reset automatically.")
+            raise HTTPException(429, f"Your {plan['label']} plan includes {allowance_text(plan).lower()}. Your allowance will reset automatically.")
         update_job(job_id, {"usage_reserved": True})
     try:
         analysis_run_id = prepare_job_run(job_id, {
@@ -5359,9 +5399,9 @@ def _start_solo(request: Request, job_id: str, job: dict, fighter_a_box: list[fl
     _save_fighter_portrait(job_id, "A", fighter_a_box)
     req = _analysis_request(job_id, {**job, "solo": True}, fighter_a_box, [], "A")
     if job.get("account_id") and not job.get("usage_reserved"):
-        if not reserve_analysis(int(job["account_id"]), job_id):
+        if not reserve_analysis(int(job["account_id"]), job_id, video_seconds=_analysed_seconds(job, req)):
             plan = _request_plan(request)
-            raise HTTPException(429, f"Your {plan['label']} plan includes {plan['limit_label'].lower()}. Your allowance will reset automatically.")
+            raise HTTPException(429, f"Your {plan['label']} plan includes {allowance_text(plan).lower()}. Your allowance will reset automatically.")
         update_job(job_id, {"usage_reserved": True})
     try:
         analysis_run_id = prepare_job_run(job_id, {
@@ -9088,6 +9128,14 @@ def sitemap_xml():
         f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
         media_type="application/xml",
     )
+
+
+@app.get("/sample-report", response_class=HTMLResponse)
+def sample_report_page(request: Request):
+    """A report anyone can open, with invented data that says so (audit 2026-10-14, #54)."""
+    return templates.TemplateResponse(request=request, name="sample_report.html", context={
+        "request": request, "report": SAMPLE_REPORT, "rows": sample_rows(), "notice": SAMPLE_NOTICE,
+    })
 
 
 @app.get("/kickboxing-fight-analysis", response_class=HTMLResponse)

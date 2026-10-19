@@ -1453,6 +1453,11 @@ class Settings:
     email_provider_location: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER_LOCATION", "").strip()
     # The domain WarriorIQ's own support and privacy addresses must be on (E1).
     public_email_domain: str = os.getenv("WARRIORIQ_PUBLIC_EMAIL_DOMAIN", "warrioriq.eu").strip().lower()
+    # The homepage's looping demo clip (audit 2026-10-14, #53): a path under
+    # /static/ to footage WarriorIQ owns or has licensed, with the skeleton
+    # overlay drawn in. Shown only when the file exists; until then the
+    # homepage shows a placeholder that says the clip is coming.
+    demo_clip: str = os.getenv("WARRIORIQ_DEMO_CLIP", "/static/demo/warrioriq-demo.mp4").strip()
     require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 
 

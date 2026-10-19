@@ -30,14 +30,19 @@
   </div>
 
 <section class="product-preview" aria-labelledby="previewTitle" data-reveal>
-  <div class="preview-visual" aria-label="Illustration of the WarriorIQ live-analysis interface">
+  {#- Audit 2026-10-14 (#53): this was two empty boxes labelled A and B. It is
+      now a short looping clip with the skeleton overlay, once one exists
+      (WARRIORIQ_DEMO_CLIP, footage WarriorIQ owns or has licensed), and until
+      then a placeholder that says so - never a fabricated "live" screen. -#}
+  <div class="preview-visual">
     <div class="preview-screen">
-      <div class="preview-screen-head"><span><i></i> Interface preview</span><b>WarriorIQ live</b></div>
-      <div class="preview-fight-stage"><span class="preview-fighter preview-a">A</span><span class="preview-fighter preview-b">B</span><i class="preview-scan" aria-hidden="true"></i></div>
-      <div class="preview-timeline"><i></i><span></span><span></span><span></span></div>
+      <div class="preview-screen-head"><span><i></i> {% if demo_clip %}Demo clip{% else %}Demo clip coming soon{% endif %}</span><b>Skeleton overlay</b></div>
+      {% if demo_clip %}<video class="preview-demo" src="{{ demo_clip }}" autoplay muted loop playsinline preload="metadata" aria-label="A short fight clip with WarriorIQ's skeleton overlay on both fighters"></video>
+      {% else %}<div class="preview-placeholder" role="img" aria-label="Placeholder for the demo clip"><p><strong>A 10–15 second clip of a real analysis goes here.</strong><span>Until it is ready, the sample report shows what you get.</span></p></div>{% endif %}
+      <div class="preview-sample-link"><a class="text-link" href="/sample-report">Open the sample report →</a></div>
     </div>
   </div>
-  <div class="preview-copy"><div class="eyebrow">The product is the corner</div><h2 id="previewTitle">Watch the analysis take shape.</h2><p>Video stays central. Fighter identity, processing progress, measured movement, and supported fight moments arrive from the same pipeline that builds the final report.</p><ul class="preview-proof"><li><span>01</span><div><strong>Identity stays visible</strong><small>Fighter A and Fighter B remain explicit throughout the review.</small></div></li><li><span>02</span><div><strong>Evidence stays connected</strong><small>Supported moments take you back to the exact part of the fight.</small></div></li><li><span>03</span><div><strong>Uncertainty stays honest</strong><small>Unsupported contact and scoring claims remain withheld.</small></div></li></ul></div>
+  <div class="preview-copy"><div class="eyebrow">The product is the corner</div><h2 id="previewTitle">Watch the analysis take shape.</h2><p>Video stays central. Fighter identity, processing progress, measured movement, and supported fight moments arrive from the same pipeline that builds the final report.</p><ul class="preview-proof"><li><span>01</span><div><strong>Identity stays visible</strong><small>Fighter A and Fighter B remain explicit throughout the review.</small></div></li><li><span>02</span><div><strong>Evidence stays connected</strong><small>Supported moments take you back to the exact part of the fight.</small></div></li><li><span>03</span><div><strong>Uncertainty stays honest</strong><small>Unsupported contact and scoring claims remain withheld.</small></div></li></ul><p><a class="text-link" href="/sample-report">See a sample report (made-up data) →</a></p></div>
 </section>
 </section>
 
@@ -48,6 +53,30 @@
   <article><span>03</span><div><h3>Analyse</h3><p>Follow real progress, fighter locks, measured movement, and supported attempts.</p></div></article>
   <article><span>04</span><div><h3>Improve</h3><p>Take the replay, coach report, and fighter-specific plan into training.</p></div></article>
 </div></section>
+
+{#- Audit 2026-10-14 (#55): what is measured per sport, the measured accuracy,
+    and a pricing summary. Every sentence about counting comes from
+    core.sport_policy and every price and allowance from core.payments, so
+    this page cannot say more than the report or the pricing page does. -#}
+<section class="product-section measured-section" id="what-is-measured" aria-labelledby="measuredTitle"><div class="section-intro" data-reveal><div class="eyebrow">What is measured</div><h2 id="measuredTitle">Sport by sport, what the report covers.</h2><p>Every sport gets the same movement measurements. Strike counts and the parts of a sport the camera cannot judge differ, and the report says which.</p></div>
+<div class="measured-grid">{% for sport, item in measured.items() %}<article><h3>{{ item.label }}</h3>
+  <p><strong>Measured:</strong> movement, centre, pressure, balance and guard <span class="small muted">(guard is experimental)</span>.</p>
+  {% if item.counted %}<p><strong>Counted, as rough estimates:</strong> {{ item.counted }}.</p>{% else %}<p><strong>Strike counts:</strong> not shown at the moment.</p>{% endif %}
+  {% if item.unobserved %}<p class="small muted"><strong>Not seen:</strong> {{ item.unobserved }}.</p>{% endif %}
+</article>{% endfor %}</div></section>
+
+<section class="product-section accuracy-section" id="accuracy" aria-labelledby="accuracyTitle"><div class="section-intro" data-reveal><div class="eyebrow">Accuracy</div><h2 id="accuracyTitle">How accurate it is, measured.</h2><p>These are the checks done so far, on small sets of footage. They are findings, not validated accuracy figures, and they are why counts are labelled as estimates.</p></div>
+<div class="measured-grid">
+  <article><h3>Flagged actions</h3><p>On 178 clips from three reference fights, checked by hand, <strong>about a third</strong> of the actions the report displayed were real strikes.</p></article>
+  <article><h3>One labelled bout</h3><p>On a Kick Light bout labelled by a competitor, <strong>11 of 16</strong> counted moments were real strikes, and <strong>6</strong> of those had the right type.</p></article>
+  <article><h3>Against official stats</h3><p>On three UFC rounds, strikes thrown while both fighters stood were close to the official numbers (<strong>29 vs 21, 36 vs 12, 20 vs 17</strong>). In grappling the counts ran three to six times too high.</p></article>
+  <article><h3>Guard</h3><p>Not yet checked against hand-labelled clips, so it is marked <strong>experimental</strong> wherever it appears.</p></article>
+</div></section>
+
+<section class="product-section pricing-summary" id="plans" aria-labelledby="plansTitle"><div class="section-intro" data-reveal><div class="eyebrow">Plans</div><h2 id="plansTitle">Start free. Upgrade when you need more.</h2>{% if not payments_enabled %}<p>Billing is not open yet: paid prices apply once it opens.</p>{% endif %}</div>
+<div class="measured-grid">{% for key, plan in summary_plans %}<article><h3>{{ plan.label }}</h3><p class="plan-price">{{ plan.price }}</p><p class="small muted">{{ plan.period }}{% if not payments_enabled and key != 'free' %}, when billing opens{% endif %}</p><p>{{ plan.allowance }}</p></article>{% endfor %}
+  {% if coach_from %}<article><h3>Coaches and gyms</h3><p class="plan-price">from {{ coach_from }}</p><p class="small muted">per month{% if not payments_enabled %}, when billing opens{% endif %}</p><p>Room for a squad of fighters.</p></article>{% endif %}
+</div><p><a class="text-link" href="/pricing">Compare every plan →</a></p></section>
 
 <section class="product-section learn-section" aria-labelledby="learnTitle"><div class="section-intro" data-reveal><div class="eyebrow">Fight analysis guides</div><h2 id="learnTitle">Make the footage—and the review—more useful.</h2><p>Practical guidance for athletes and coaches, written around what WarriorIQ can measure and where video evidence has limits.</p></div><div class="learn-grid">
   <a href="/kickboxing-fight-analysis"><span>Kickboxing</span><strong>How fight analysis works</strong><b>Read guide →</b></a>
@@ -67,6 +96,6 @@
 
 <section class="product-section coach-callout final-cta" data-reveal><div><div class="eyebrow">Bring your corner with you</div><h2>One fight. A clearer next session.</h2><p class="muted">Save progress, share a private summary, and turn the same fight evidence into practical work between sessions.</p></div><div class="hero-actions">{% if request.state.account %}<a class="btn" data-motion-primary href="/analyze">Analyse a fight</a>{% else %}<a class="btn" data-motion-primary href="/signup?next=/analyze">Create a free account to analyse a fight</a>{% endif %}<a class="btn secondary" href="/pricing">Explore plans</a></div></section>
 
-<section class="product-section faq"><div class="section-intro" data-reveal><div class="eyebrow">Questions</div><h2>Before you upload</h2></div><details><summary>Is WarriorIQ an official judge?</summary><p>No. {% if features.scoring.on %}Scorecards are evidence-gated estimates for training and review, not replacements for licensed officials.{% else %}WarriorIQ does not score fights yet; when score estimates arrive they will be training estimates, not a replacement for licensed officials.{% endif %}</p></details><details><summary>Can I analyse a fight without an account?</summary><p>No. A fight belongs to a workspace &mdash; your footage, the athletes in it and your upload allowance are all attached to an account &mdash; so WarriorIQ asks you to create one first. It is free, and your fights stay private to you.</p></details><details><summary>What happens when the AI is uncertain?</summary><p>It leaves out anything the video cannot support and says so on the report. When it cannot tell the two fighters apart, the report asks you to point them out again on a clear picture.</p></details>
+<section class="product-section faq"><div class="section-intro" data-reveal><div class="eyebrow">Questions</div><h2>Before you upload</h2></div><details><summary>Is WarriorIQ an official judge?</summary><p>No. {% if features.scoring.on %}Scorecards are evidence-gated estimates for training and review, not replacements for licensed officials.{% else %}WarriorIQ does not score fights yet; when score estimates arrive they will be training estimates, not a replacement for licensed officials.{% endif %}</p></details><details><summary>Can I analyse a fight without an account?</summary><p>No. A fight belongs to a workspace &mdash; your footage, the athletes in it and your upload allowance are all attached to an account &mdash; so WarriorIQ asks you to create one first. It is free, and your fights stay private to you.</p></details><details><summary>How accurate are the strike counts?</summary><p>Not accurate enough to treat as exact. They are labelled as rough estimates everywhere they appear; the <a class="text-link" href="#accuracy">accuracy checks above</a> are why.</p></details><details><summary>Can I see a report before signing up?</summary><p>Yes. The <a class="text-link" href="/sample-report">sample report</a> shows the layout with made-up fighters and numbers.</p></details><details><summary>What happens when the AI is uncertain?</summary><p>It leaves out anything the video cannot support and says so on the report. When it cannot tell the two fighters apart, the report asks you to point them out again on a clear picture.</p></details>
 </section>
 {% endblock %}

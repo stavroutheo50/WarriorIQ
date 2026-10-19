@@ -6,7 +6,7 @@
 <header class="pricing-hero">
   <div class="eyebrow">WarriorIQ plans</div>
   <h1>Pick your pace.<br><em>Keep improving.</em></h1>
-  <p>Every plan uses the same fight-analysis engine. Higher plans unlock more daily analyses and a deeper performance report.</p>
+  <p>Every plan uses the same fight-analysis engine. Higher plans unlock more analyses and a deeper performance report.</p>
   {#- "No video filename shown" was removed (QA, 2026-10-07): the Pending list
       and library search show and search the filename, which is how people
       find their own fights. -#}<div class="pricing-promise"><span>✓ Your footage stays private</span><span>✓ Upgrade when you need more</span></div>
@@ -35,7 +35,7 @@
 <section class="allowance-strip">
   <div><span class="small muted">Your current plan</span><strong>{{allowance.plan.label}}</strong></div>
   <div><span class="small muted">Current allowance</span><strong>{{allowance.plan.limit_label}}</strong></div>
-  <div><span class="small muted">Available now</span><strong>{% if allowance.remaining is none %}Unlimited{% else %}{{allowance.remaining}} remaining{% endif %}</strong></div>
+  <div><span class="small muted">Available now</span><strong>{% if allowance.remaining is none %}Unlimited{% elif allowance.unit == 'minutes' %}{{allowance.remaining}} video minutes remaining{% else %}{{allowance.remaining}} remaining{% endif %}</strong></div>
 </section>
 {% endif %}
 
@@ -64,7 +64,7 @@
         <th scope="col">Plan</th>
         <th scope="col">Price</th>
         <th scope="col">Fighters</th>
-        <th scope="col"><abbr title="Analyses per day">Per day</abbr></th>
+        {% set allowance_title, allowance_label = allowance_column() %}<th scope="col"><abbr title="{{ allowance_title }}">{{ allowance_label }}</abbr></th>
         <th scope="col" class="compare-report">Report</th>
       </tr>
     </thead>
