@@ -15,11 +15,11 @@ def _sections(**settings):
 
 
 def test_subprocessors_name_the_real_host_and_analysis_provider():
-    sections = _sections(hosting_provider="Render", worker_wake_url="https://x--warrioriq-worker-wake.modal.run",
+    sections = _sections(hosting_provider="Render", worker_wake_url="", analysis_provider_name="",
                          analysis_worker_mode="remote", analytics_measurement_id="G-TEST")
     headings = " ".join(sections)
     assert "Render (website hosting and storage)" in sections
-    assert "Modal (fight analysis)" in sections
+    assert "Analysis computer" in sections
     assert "Google" in headings
     assert "no WarriorIQ cloud host" not in " ".join(sections.values())
 
@@ -29,7 +29,7 @@ def test_switched_off_providers_are_not_listed():
                          analytics_measurement_id="", gtm_container_id="", email_provider="",
                          payments_enabled=False)
     headings = " ".join(sections)
-    for absent in ("Modal", "Google", "Stripe", "OpenAI", "Render"):
+    for absent in ("Analysis computer", "Google", "Stripe", "OpenAI", "Render"):
         assert absent not in headings
 
 

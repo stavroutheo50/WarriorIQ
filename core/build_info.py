@@ -1,7 +1,7 @@
 """Which analysis code produced a result.
 
 QA, 2026-10-04: reports made after the whole-video fix still started at the
-fighter-selection frame. The web app had the fix; the GPU worker on Modal had
+fighter-selection frame. The web app had the fix; the GPU worker had
 been deployed from an older checkout and was running the old analyser. Nothing
 in a report said which code made it, so the two could disagree silently.
 
@@ -42,8 +42,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def build_commit() -> str:
     """The commit this code was built from, or "unknown".
 
-    A Modal image ships without .git, so the deploy bakes the commit into
-    WARRIORIQ_BUILD_COMMIT; a checkout answers from git directly.
+    A copy without .git can carry the commit in WARRIORIQ_BUILD_COMMIT; a
+    checkout answers from git directly.
 
     QA, 2026-10-07: reports said "build unknown". The cPanel deploy copies the
     code without .git and records the commit in DEPLOYED_COMMIT (.cpanel.yml),

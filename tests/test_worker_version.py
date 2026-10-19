@@ -1,6 +1,6 @@
 """A worker older than the web app gets no work, and its results are refused.
 
-QA, 2026-10-04: the GPU worker on Modal had been deployed from a checkout that
+QA, 2026-10-04: the GPU worker had been deployed from a checkout that
 predated the whole-video fix, so new reports still started at the selection
 frame while the web app's code said they could not. Every result now carries
 core/build_info.stamp(), and the server compares it with its own.

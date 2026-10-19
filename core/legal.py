@@ -200,7 +200,7 @@ LEGAL_DOCUMENTS = {
         "description": "Which external providers may process WarriorIQ data and when.",
         # Built per request from this deployment's configuration by
         # subprocessor_sections(): the fixed list said "no WarriorIQ cloud host
-        # is configured" on a site hosted on Render with analysis on Modal, and
+        # is configured" on a site hosted on Render, and
         # carried "the operator must..." notes meant for whoever deployed it.
         "intro": "The providers below receive personal data from WarriorIQ, each for the purpose stated. The list follows this website's current configuration, so a provider appears here once it is switched on.",
         "sections": [],
@@ -319,15 +319,7 @@ def subprocessor_sections() -> list[tuple[str, str]]:
             "Accounts, the database, uploaded fight videos and finished reports are stored with WarriorIQ's "
             "hosting provider, which is named here before WarriorIQ takes payments. Saved fight videos are "
             f"deleted after {SETTINGS.saved_video_retention_days} days.") + where(SETTINGS.hosting_location)))
-    # Named either by its wake URL or by WARRIORIQ_ANALYSIS_PROVIDER_NAME=Modal:
-    # the live site analyses on Modal and the list left it out (#10).
-    if "modal.run" in SETTINGS.worker_wake_url.lower() or SETTINGS.analysis_provider_name.strip().lower() == "modal":
-        sections.append(("Modal (fight analysis)", (
-            "Modal provides the cloud graphics card that analyses each fight. Data processed: for one analysis "
-            "it receives the fight video and the two fighter boxes you drew, returns the measurements to this "
-            "website, and the video and working files are deleted from it when the run ends.")
-            + where(SETTINGS.analysis_provider_location)))
-    elif SETTINGS.analysis_worker_mode == "remote" and _named(SETTINGS.analysis_provider_name):
+    if SETTINGS.analysis_worker_mode == "remote" and _named(SETTINGS.analysis_provider_name):
         name = SETTINGS.analysis_provider_name
         sections.append((f"{name} (fight analysis)", (
             f"{name} provides the machine that analyses each fight. For one analysis it downloads the fight "

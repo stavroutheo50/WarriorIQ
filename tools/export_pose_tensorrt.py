@@ -1,7 +1,7 @@
 """Build the TensorRT pose engine for this machine's GPU.
 
-The recipe lives in core/trt_engine.py so the Modal worker builds an identical
-engine inside its container - the same dynamic shape, the same fp16 fallback -
+The recipe lives in core/trt_engine.py so every GPU worker builds an identical
+engine - the same dynamic shape, the same fp16 fallback -
 rather than keeping a second copy of it that drifts.
 """
 

@@ -7,7 +7,7 @@ costs were found and cut:
   the fight (9.2 s of a 22.6 s CPU run on a 4-second clip); it now looks at
   640 first and climbs only when it has to;
 * the GPU worker image had no TensorRT, so the pose engine was never built and
-  every cold start paid an ONNX export that then failed (deploy/modal_worker.py).
+  every start paid an ONNX export that then failed.
 
 The end-to-end check against a reference clip needs a CUDA device - the budget
 is a GPU promise - and is skipped without one. The probe checks run anywhere.
@@ -118,11 +118,7 @@ def test_a_failed_engine_build_is_not_retried_on_every_cold_start(tmp_path):
         assert build.call_count == 2
 
 
-def test_the_gpu_image_carries_tensorrt_and_never_installs_at_run_time():
-    source = (ROOT / "deploy" / "modal_worker.py").read_text(encoding="utf-8")
-    assert 'pip_install_from_requirements("requirements-trt-cuda12.txt")' in source
-    assert '"YOLO_AUTOINSTALL": "false"' in source
-    assert "retry_failed_after_seconds=24 * 3600" in source
+def test_the_gpu_requirements_pin_tensorrt():
     requirements = (ROOT / "requirements-trt-cuda12.txt").read_text(encoding="utf-8")
     assert "tensorrt-cu12==10." in requirements and "onnxslim==" in requirements
 

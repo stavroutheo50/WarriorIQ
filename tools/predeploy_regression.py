@@ -11,7 +11,7 @@ the product's rules (core/predeploy_checks.py):
   * no kick or knee where the legs were not visible;
   * processing time no longer than the video (models loaded first, as in a
     warm worker; a cold container's start-up is measured separately by
-    deploy/modal_worker.py drain_queue);
+    worker.py);
   * one verdict per report.
 
 Clip kinds and what each must show:

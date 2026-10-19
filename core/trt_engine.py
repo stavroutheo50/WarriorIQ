@@ -185,7 +185,7 @@ def ensure_pose_engine(models_dir: str | Path, name: str | None = None,
 
     ``retry_failed_after_seconds`` is for a scale-to-zero worker, where every
     container is a cold start: a build that cannot succeed there (no TensorRT
-    in the image, which was the case on Modal until 2026-10-04) still exported
+    installed) still exported
     ONNX first and then failed, on every cold start, before the first frame.
     A failure is recorded beside the engine and not retried until it is that
     old. None retries every time, as a local worker always has.
