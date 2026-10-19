@@ -31,16 +31,19 @@
         {% if mode == 'signup' %}<label class="check legal-check"><input type="checkbox" name="accept_terms" value="true" required><span>I agree to the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms of Service</a>, <a class="text-link" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> and <a class="text-link" href="/acceptable-use" target="_blank" rel="noopener">Acceptable Use Policy</a>.</span></label>{% endif %}
         {% if mode == 'signup' %}<label class="check legal-check optional-choice"><input type="checkbox" name="marketing_consent" value="true"><span>Send product updates. <span class="muted">Optional and off by default.</span></span></label>{% endif %}
       </div>
-      {% if request.state.oauth_providers %}
+      {#- GitHub is offered for sign-in only, to accounts created with it (an
+          account created through it may have no password to fall back on).
+          It was an inline text link beside a full Google button; it is now
+          a button of the same size (audit 2026-10-14 #50). Not on /signup. -#}
+      {% set legacy_providers = request.state.legacy_oauth_providers if mode != 'signup' else [] %}
+      {% if request.state.oauth_providers or legacy_providers %}
       <div class="social-auth" aria-label="Social account options">
         <p>Use an account you already trust</p>
         <div class="social-auth-grid">
           {# One button per CONFIGURED provider, so nothing renders that cannot
-             work. The GitHub icon below is kept although GitHub has no button
-             any more: PROVIDER_LABELS in core/social_auth.py is what removed it,
-             and leaving the icon means putting it back is one line there rather
-             than two edits. #}
-          {% for provider in request.state.oauth_providers %}
+             work. PROVIDER_LABELS in core/social_auth.py decides which
+             providers can create an account. #}
+          {% for provider in request.state.oauth_providers|list + legacy_providers|list %}
           <button class="social-auth-button social-{{provider.key}}" type="submit" formaction="/auth/{{provider.key}}/start" formmethod="post" formnovalidate data-keep-label="true">
             <span class="social-auth-icon" aria-hidden="true">
               {% if provider.key == 'google' %}<svg viewBox="0 0 24 24"><path fill="#4285f4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.6h3.3c1.9-1.8 2.9-4.4 2.9-7.5z"/><path fill="#34a853" d="M12 22c2.7 0 5-.9 6.7-2.3l-3.3-2.6c-.9.6-2.1 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3v2.7A10 10 0 0 0 12 22z"/><path fill="#fbbc05" d="M6.4 14a6 6 0 0 1 0-3.9V7.4H3a10 10 0 0 0 0 9.3L6.4 14z"/><path fill="#ea4335" d="M12 6c1.5 0 2.8.5 3.9 1.5l2.9-2.8A9.8 9.8 0 0 0 3 7.4l3.4 2.7C7.2 7.7 9.4 6 12 6z"/></svg>
@@ -53,17 +56,7 @@
           {% endfor %}
         </div>
         {% if mode == 'signup' %}<p class="social-auth-gate" id="socialGate">Answer the age question and accept the policies above to use these.</p><p class="social-auth-gate" id="socialMinor" hidden>Under {{request.state.minimum_account_age}}? Use the email form below, so WarriorIQ can ask your parent or guardian.</p>{% endif %}
-        {#- Sign-in only, and only for someone who already has one of these.
-            GitHub is no longer offered as a way to create an account, but an
-            account created through it has no password and may have no address
-            to reset one to, so removing its only door would lock that person
-            out. Not shown on /signup. -#}
-        {% if mode != 'signup' and request.state.legacy_oauth_providers %}
-        <p class="social-auth-legacy small muted">Signed up with
-          {%- for provider in request.state.legacy_oauth_providers %} {% if not loop.first %}or {% endif %}
-          <button class="text-link" type="submit" formaction="/auth/{{provider.key}}/start" formmethod="post" formnovalidate data-keep-label="true">{{provider.label}}</button>
-          {%- endfor %}? Use that to sign in.</p>
-        {% endif %}
+        {% if legacy_providers %}<p class="social-auth-legacy small muted">{% for provider in legacy_providers %}{% if not loop.first %} or {% endif %}{{provider.label}}{% endfor %} sign-in is for accounts created with it.</p>{% endif %}
       </div>
       <div class="auth-divider"><span>or continue with email</span></div>
       {% endif %}

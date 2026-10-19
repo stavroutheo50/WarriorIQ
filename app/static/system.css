@@ -478,3 +478,20 @@ summary:focus-visible,
 .archive-bulk{display:flex;align-items:center;gap:10px;margin:8px 0 14px}
 .fight-select{display:flex;align-items:flex-start;padding:4px}
 .fight-select input{width:20px;height:20px;cursor:pointer}
+/* Sport switcher items are buttons now (a POST, audit 2026-10-14, #43);
+   they look like the links they replace. The current sport is ticked (#46). */
+.sport-menu-panel form{margin:0}
+.sport-menu-panel button{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:11px 12px;border:0;border-radius:10px;background:none;color:#eef3ff;font:inherit;font-size:13px;font-weight:700;text-align:left;cursor:pointer}
+.sport-menu-panel button:hover,.sport-menu-panel button:focus-visible{background:#16213c}
+.sport-menu-panel button span{font-weight:500;color:#9fb0cc;font-size:12px}
+.sport-menu-panel button .sport-menu-label{color:#eef3ff;font-size:13px;font-weight:700}
+.sport-menu-panel button[aria-current="true"]{background:rgb(var(--sport-accent) / .16);box-shadow:inset 3px 0 0 rgb(var(--sport-accent))}
+.sport-menu-tick{color:rgb(var(--sport-accent))}
+
+/* The copyright line broke over two or three lines between 768px and 1440px
+   (audit 2026-10-14 #48): it keeps one line and the footer wraps instead. */
+.legal-footer{flex-wrap:wrap}
+.footer-copyright{flex:0 0 auto;white-space:nowrap}
+/* GitHub's mark is drawn near-black, which vanished on the dark button. */
+.social-github .social-auth-icon svg path{fill:#e6edf3}
+.social-auth>p.social-auth-legacy{text-transform:none;letter-spacing:0;font-weight:500}

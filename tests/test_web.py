@@ -481,13 +481,20 @@ class PublicPageTests(unittest.TestCase):
         crest and accent on every other page - so the answer is present without
         a banner, and the chip is itself the way to change it.
         """
-        client = TestClient(app)
+        from browser_client import BrowserClient
+
+        client = BrowserClient(app)
         try:
             # Nothing chosen yet: no chip rather than a wrong default.
             self.assertNotIn('class="sport-switch"', client.get("/history").text)
 
+            # Opening a sport's page saves nothing (audit 2026-10-14, #43);
+            # choosing it does, and that is a POST.
             opened = client.get("/analyze/muay_thai")
             self.assertEqual(opened.status_code, 200)
+            self.assertIsNone(client.cookies.get("warrioriq_sport"))
+            chosen = client.post("/sport", data={"sport": "muay_thai"}, follow_redirects=False)
+            self.assertEqual((chosen.status_code, chosen.headers["location"]), (303, "/analyze/muay_thai"))
             self.assertEqual(client.cookies.get("warrioriq_sport"), "muay_thai")
 
             elsewhere = client.get("/history").text
@@ -500,10 +507,13 @@ class PublicPageTests(unittest.TestCase):
             self.assertIn('<details class="sport-menu"', elsewhere)
             self.assertNotIn('class="sport-switch" href="/analyze"', elsewhere)
             for key in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
-                self.assertIn(f'href="/analyze/{key}"', elsewhere)
+                self.assertIn(f'name="sport" value="{key}"', elsewhere)
+            # The current sport is ticked and marked for screen readers (#46).
+            self.assertIn('<button type="submit" aria-current="true">', elsewhere)
+            self.assertIn("(current sport)", elsewhere)
 
             # Switching sport switches the shell.
-            client.get("/analyze/boxing")
+            client.post("/sport", data={"sport": "boxing"})
             self.assertIn("--sport-accent:233 106 106", client.get("/history").text)
         finally:
             client.close()
@@ -530,11 +540,15 @@ class PublicPageTests(unittest.TestCase):
                 if previous == current:
                     continue
                 with self.subTest(previous=previous, current=current):
-                    client = TestClient(app)
+                    from browser_client import BrowserClient
+
+                    client = BrowserClient(app)
                     try:
-                        client.get(f"/analyze/{previous}")
+                        client.post("/sport", data={"sport": previous})
                         self.assertEqual(client.cookies.get("warrioriq_sport"), previous)
                         page = client.get(f"/analyze/{current}").text
+                        # The page shows its own sport, and opening it saved nothing.
+                        self.assertEqual(client.cookies.get("warrioriq_sport"), previous)
                         self.assertIn(
                             f'<span class="sport-switch-name">{current_label}</span>', page)
                         self.assertNotIn(
@@ -2744,7 +2758,11 @@ class SmallUiConsistencyTests(unittest.TestCase):
         self.assertIn('.faq details[open] summary:after{content:"−"}', css)
 
     def test_the_sport_chip_is_absent_where_sport_means_nothing(self):
-        self.client.get("/analyze/muay_thai")
+        from browser_client import BrowserClient
+
+        self.client.close()
+        self.client = BrowserClient(app)
+        self.client.post("/sport", data={"sport": "muay_thai"})
         # The header is identical on every page (QA 2026-10-11, D8): the chip
         # disappearing on some pages made the menu change shape.
         for path in ("/privacy", "/terms", "/legal", "/profile", "/settings/privacy"):
@@ -4031,6 +4049,7 @@ class NavigationReachabilityTests(unittest.TestCase):
     KNOWN_BREAKPOINTS = {
         430, 440, 480, 560, 620, 650, 680, 700, 720, 760, 780,
         850, 860, 900, 950, 980, 981, 1000, 1024, 1100, 1120, 1180,
+        1023,   # the header collapses below 1024px (audit 2026-10-14 #47)
     }
 
     def test_no_new_breakpoint_is_introduced(self):

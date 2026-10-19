@@ -1396,8 +1396,10 @@ def account_for_session(token_hash: str) -> dict | None:
                accounts.stripe_customer_id,accounts.stripe_subscription_id,accounts.subscription_status,
                accounts.subscription_period_end,accounts.subscription_cancelled_at,
                accounts.email_verified_at,accounts.password_login_enabled,
-               accounts.guardian_approval_status
+               accounts.guardian_approval_status,
+               profiles.display_name AS display_name
                FROM sessions JOIN accounts ON accounts.id=sessions.account_id
+               LEFT JOIN profiles ON profiles.id=accounts.profile_id
                WHERE sessions.token_hash=? AND sessions.expires_at>? AND accounts.account_status='active'""",
             (token_hash, now),
         ).fetchone()

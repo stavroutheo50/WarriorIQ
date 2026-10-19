@@ -1286,6 +1286,19 @@ def _authorized_job(request: Request, job_id: str) -> dict | None:
     return None
 
 
+def _job_page_refused(request: Request) -> RedirectResponse:
+    """A fight page this visitor may not open (audit 2026-10-14 #49).
+
+    Signed out: the sign-in page, which comes back here afterwards. That
+    happens for every id, existing or not, so it says nothing about which
+    ids exist. Signed in: 404, the same as a fight that does not exist.
+    """
+    if _account(request) is None:
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return RedirectResponse(f"/login?next={quote(target, safe='/')}", status_code=303)
+    raise HTTPException(404)
+
+
 def _full_progress_report(path: Path) -> dict | None:
     """The fields Progress needs from a full report, identity gate re-applied.
 
@@ -1756,6 +1769,24 @@ def _rate_limited_response(request: Request, wait_seconds: int):
     )
 
 
+def account_display(account: dict | None) -> dict:
+    """The name and avatar letter the header shows for an account.
+
+    Audit 2026-10-14 (#44): the letter came from the email ("S") rather than
+    the athlete's name ("T"). The display name is used once the athlete has
+    set one; the placeholder every new profile starts with ("My Athlete") is
+    not a name, so until then the email stands in.
+    """
+    if not account:
+        return {"label": "", "initial": ""}
+    name = " ".join(str(account.get("display_name") or "").split())
+    if not name or name == SETTINGS.default_profile_name:
+        name = ""
+    label = name or str(account.get("email") or "")
+    initial = next((ch for ch in label if ch.isalnum()), "?").upper()
+    return {"label": label, "initial": initial, "email": str(account.get("email") or "")}
+
+
 def _load_viewer_state(request: Request) -> None:
     """Who is asking and what they have running: the per-page context.
 
@@ -1765,6 +1796,7 @@ def _load_viewer_state(request: Request) -> None:
     was serving for as long as one visitor's lookups took.
     """
     request.state.account = resolve_session(request.cookies.get(SESSION_COOKIE))
+    request.state.account_display = account_display(request.state.account)
     request.state.analysis_navigation = _analysis_navigation_state(
         _owner_key(request),
         request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
@@ -3811,15 +3843,31 @@ def sport_setup(request: Request, sport: str):
     # that still says Taekwondo. The URL is what the visitor asked for, so it
     # wins over the cookie for this render.
     request.state.active_sport = sport_identity(key)
-    response = templates.TemplateResponse(
+    # Nothing is saved here (audit 2026-10-14, #43): opening a sport's setup
+    # page - a link, a preview, a crawler - changed the sport shown in the
+    # header and on the profile. A GET never changes state; choosing a sport
+    # is POST /sport, and uploading a fight saves its sport.
+    return templates.TemplateResponse(
         request=request, name="analyze.html", context=_sport_context(request, key),
     )
-    # Remembered so the shell can keep showing which sport this session is in,
-    # and so returning to the product lands where the visitor left off.
+
+
+def _remember_sport(request: Request, response, key: str) -> None:
+    """Save the sport this visitor chose: the header chip and where they land next time."""
     response.set_cookie(
         ACTIVE_SPORT_COOKIE, key, max_age=60 * 60 * 24 * 180,
         httponly=False, samesite="lax", secure=_request_is_secure(request),
     )
+
+
+@app.post("/sport", dependencies=[Depends(require_csrf)])
+def choose_sport(request: Request, sport: str = Form(...), next_path: str = Form("")):
+    """An explicit choice of sport from the header's switcher (#43)."""
+    key = (sport or "").strip().lower()
+    if key not in SPORTS:
+        raise HTTPException(400, "Unknown sport.")
+    response = RedirectResponse(_safe_next(next_path, f"/analyze/{key}"), status_code=303)
+    _remember_sport(request, response, key)
     return response
 
 
@@ -4256,6 +4304,13 @@ async def upload(
         ACTIVE_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
+    # Uploading a fight is an explicit choice of its sport (#43).
+    try:
+        uploaded_sport = sport_of(ruleset)
+    except (KeyError, ValueError):
+        uploaded_sport = None
+    if uploaded_sport in SPORTS:
+        _remember_sport(request, response, uploaded_sport)
     return response
 
 
@@ -5371,7 +5426,7 @@ def restart_interrupted_analysis(request: Request, job_id: str):
 def progress_page(request: Request, job_id: str):
     authorized = _authorized_job(request, job_id)
     if not authorized:
-        raise HTTPException(404)
+        return _job_page_refused(request)
     job = get_job(job_id) or authorized
     # QA, 2026-10-07: opened before the fighters were picked it showed
     # "Analysis running 0.0% - Loading the analysis models" forever, and a
@@ -5992,7 +6047,7 @@ def _result_opened(request: Request, response, job_id: str):
 def result_page(request: Request, job_id: str):
     job = _authorized_job(request, job_id)
     if not job:
-        raise HTTPException(404)
+        return _job_page_refused(request)
     if job.get("history_saved") is False:
         persist_completed_job(job_id, str(job.get("analysis_run_id") or ""))
     path = _require_completed_artifact(job_id, "report.json")
@@ -6642,7 +6697,7 @@ def replay_page(
     outcome: str | None = None,
 ):
     if not _authorized_job(request, job_id):
-        raise HTTPException(404)
+        return _job_page_refused(request)
     path = _require_completed_artifact(job_id, "report.json")
     if not path.exists():
         raise HTTPException(404)

@@ -25,7 +25,7 @@
    already in the documented scale in style.css, rather than a fifth width.
    All four rules stay in ONE query: splitting them across breakpoints is what
    once left a signed-in visitor with no navigation at all. */
-@media(max-width:900px){.navlinks{display:none}.nav-more{display:none}.account-nav{display:none}.mobile-menu-button{display:block}}
+@media(max-width:1023px){.navlinks{display:none}.nav-more{display:none}.account-nav{display:none}.mobile-menu-button{display:block}}
 @media(max-width:900px){.trust-panel,.auth-layout{grid-template-columns:1fr}.auth-layout{gap:20px;padding:55px 0}.auth-card{justify-self:stretch;max-width:none}.feature-band{grid-template-columns:1fr}.feature-band>div{border-right:0;border-bottom:1px solid #284166}.feature-band>div:last-child{border-bottom:0}.coach-callout{align-items:flex-start;flex-direction:column}.progress-layout{grid-template-columns:1fr}.pricing-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:620px){.product-section{padding:48px 0}.trust-panel{padding:25px;grid-template-columns:1fr;gap:22px}.pricing-grid{grid-template-columns:1fr}.quality-strip{grid-template-columns:1fr}.quality-measures{justify-content:flex-start}.assignment-row{align-items:flex-start;flex-direction:column}.chart-legend{flex-direction:column}.footer{flex-direction:column;gap:10px}.auth-copy h1,.empty-workspace h1{font-size:42px}.empty-workspace{padding:25px;margin:40px 0}}
 

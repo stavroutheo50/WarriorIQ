@@ -2459,9 +2459,11 @@ class SocialSignInCspTests(unittest.TestCase):
         self.assertNotIn("Signed up with", signup)
 
         self.assertEqual({"google", "github"}, starts(login))
-        self.assertIn("Signed up with", login)
-        self.assertNotIn("Continue with GitHub", login,
-                         "recovery is a quiet line, not a headline button")
+        # Audit 2026-10-14 (#50): an inline link beside a full Google button
+        # read as an afterthought; both are now buttons of the same size, with
+        # a line saying GitHub is for accounts created with it.
+        self.assertIn("Continue with GitHub", login)
+        self.assertIn("GitHub sign-in is for accounts created with it.", login)
 
     def test_the_response_header_carries_those_origins(self):
         from fastapi.testclient import TestClient
