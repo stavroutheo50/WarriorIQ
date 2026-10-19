@@ -57,6 +57,43 @@ def env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _legal_identity() -> dict[str, str]:
+    """WARRIORIQ_LEGAL_IDENTITY: the operator's legal details as ONE value.
+
+    Audit 2026-10-14 (#9): the entity, its address and its contact addresses
+    were seven separate settings, so a change of company or mailbox meant
+    finding every one. This JSON object sets them together, and every legal
+    page reads the fields it fills:
+
+        {"name": "WarriorIQ Ltd", "address": "...", "registration": "...",
+         "vat": "...", "country": "Cyprus", "support_email": "support@warrioriq.eu",
+         "privacy_email": "privacy@warrioriq.eu", "dmca_email": "copyright@warrioriq.eu"}
+
+    A key it carries wins over the older single setting
+    (WARRIORIQ_OPERATOR_NAME and the rest), which still work on their own.
+    Malformed JSON is ignored rather than half-applied.
+    """
+    import json
+
+    raw = os.getenv("WARRIORIQ_LEGAL_IDENTITY", "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): str(v).strip() for k, v in value.items() if isinstance(v, (str, int, float)) and str(v).strip()}
+
+
+LEGAL_IDENTITY = _legal_identity()
+
+
+def legal_value(key: str, env_name: str) -> str:
+    return LEGAL_IDENTITY.get(key) or os.getenv(env_name, "").strip()
+
+
 IS_RENDER = env_bool("RENDER", False)
 
 
@@ -1257,7 +1294,9 @@ class Settings:
     # ------------------------------------------------------------
     # These values intentionally have no made-up defaults. Paid checkout is
     # blocked until the real operator has supplied every launch-critical item.
-    policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-08-24")
+    # 2026-10-19: /subprocessors now names Render, Modal, Google and Stripe
+    # with purpose, location and data (audit 2026-10-14 #10).
+    policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-10-19")
     public_base_url: str = os.getenv("WARRIORIQ_PUBLIC_BASE_URL", "").rstrip("/")
     # Serve replay video through a CDN (Cloudflare in front of this site, or
     # any pull CDN). Off unless both are set. /media then redirects to
@@ -1273,14 +1312,14 @@ class Settings:
         value.strip().lower() for value in os.getenv("WARRIORIQ_ALLOWED_HOSTS", "").split(",")
         if value.strip()
     )
-    operator_name: str = os.getenv("WARRIORIQ_OPERATOR_NAME", "").strip()
-    operator_address: str = os.getenv("WARRIORIQ_OPERATOR_ADDRESS", "").strip()
-    operator_registration: str = os.getenv("WARRIORIQ_OPERATOR_REGISTRATION", "").strip()
-    operator_vat: str = os.getenv("WARRIORIQ_OPERATOR_VAT", "").strip()
-    governing_country: str = os.getenv("WARRIORIQ_GOVERNING_COUNTRY", "").strip()
-    support_email: str = os.getenv("WARRIORIQ_SUPPORT_EMAIL", "").strip()
-    privacy_email: str = os.getenv("WARRIORIQ_PRIVACY_EMAIL", "").strip()
-    dmca_email: str = os.getenv("WARRIORIQ_DMCA_EMAIL", "").strip()
+    operator_name: str = legal_value("name", "WARRIORIQ_OPERATOR_NAME")
+    operator_address: str = legal_value("address", "WARRIORIQ_OPERATOR_ADDRESS")
+    operator_registration: str = legal_value("registration", "WARRIORIQ_OPERATOR_REGISTRATION")
+    operator_vat: str = legal_value("vat", "WARRIORIQ_OPERATOR_VAT")
+    governing_country: str = legal_value("country", "WARRIORIQ_GOVERNING_COUNTRY")
+    support_email: str = legal_value("support_email", "WARRIORIQ_SUPPORT_EMAIL")
+    privacy_email: str = legal_value("privacy_email", "WARRIORIQ_PRIVACY_EMAIL")
+    dmca_email: str = legal_value("dmca_email", "WARRIORIQ_DMCA_EMAIL")
     dmca_agent_name: str = os.getenv("WARRIORIQ_DMCA_AGENT_NAME", "").strip()
     minimum_account_age: int = int(os.getenv("WARRIORIQ_MINIMUM_AGE", "18"))
     saved_video_retention_days: int = max(1, int(os.getenv("WARRIORIQ_VIDEO_RETENTION_DAYS", "30")))

@@ -70,3 +70,17 @@ services:
       # a busy_timeout, so the processes share the database safely.
       - key: WEB_CONCURRENCY
         value: "4"
+      # /subprocessors names the providers that receive personal data, with
+      # where they process it (audit 2026-10-14, #10). The region is the one
+      # set above. Modal's location is set in the dashboard once its region is
+      # pinned (OPS_TODO.md): WARRIORIQ_ANALYSIS_PROVIDER_LOCATION.
+      - key: WARRIORIQ_HOSTING_PROVIDER
+        value: Render
+      - key: WARRIORIQ_HOSTING_LOCATION
+        value: Frankfurt, Germany (EU)
+      - key: WARRIORIQ_ANALYSIS_PROVIDER_NAME
+        value: Modal
+      # The operator's legal name, address and contact addresses, as one JSON
+      # value read by every legal page (#9). Kept out of the repository.
+      - key: WARRIORIQ_LEGAL_IDENTITY
+        sync: false
