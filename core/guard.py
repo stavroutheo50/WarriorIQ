@@ -22,7 +22,8 @@ Nothing else computes a guard figure.
 
 **The reading itself** (QA, 2026-10-07: the same clip gave 27% / 45% at
 1280x720 and 18% / 18% at 160x90, with no warning) is the distance from the
-nearer wrist to the chin, over shoulder width - so it is in the fighter's own
+farther of the two wrists to the chin (both hands must be up; audit
+2026-10-14, #5), over shoulder width - so it is in the fighter's own
 proportions, not the picture's - and only on frames where the face, both
 shoulders, the hips and a wrist were found confidently and the body is big
 enough in the picture for a wrist to be placed. Each reading is then smoothed
@@ -40,11 +41,12 @@ import numpy as np
 # Stored on each fighter's metrics so a report says which guard it carries.
 # Reports without it were made by the old, inconsistent summaries; see
 # reconcile_report_guard.
-GUARD_DEFINITION = "hands_up_share/2"
-# Consistent summaries, both of them: /1 classified the old body-length
-# reading, /2 the wrist-to-chin reading below. Only reports made before either
-# are reconciled.
-CONSISTENT_DEFINITIONS = frozenset({"hands_up_share/1", GUARD_DEFINITION})
+GUARD_DEFINITION = "hands_up_share/3"
+# Consistent summaries, all of them: /1 classified the old body-length
+# reading, /2 the nearer wrist to the chin, /3 both wrists to the chin (audit
+# 2026-10-14, #5). Only reports made before any of them are reconciled; the
+# older two stay on their own reports and out of trends (comparable_guard).
+CONSISTENT_DEFINITIONS = frozenset({"hands_up_share/1", "hands_up_share/2", GUARD_DEFINITION})
 LEGACY_DEFINITION = "legacy_hands_up_share"
 
 # ---- The per-frame reading -------------------------------------------------
@@ -71,10 +73,15 @@ UPRIGHT_SHOULDER_WIDTH = 0.8
 # down to an 8 px scale, drifted by up to 8 points at 4 px, and broke at
 # 2.5 px - which is where a 160x90 copy of a 1280x720 fight sits.
 MIN_SCALE_PX = 8.0
-# Wrist within this many shoulder widths of the chin: hands up by the face.
-# About 28 cm on an adult, close to what the old line meant (~26 cm from the
-# nose). A definition, not a validated norm: no labelled guard data exists.
-HANDS_UP = 0.7
+# Both wrists within this many shoulder widths of the chin: hands up.
+# Audit 2026-10-14 (#5): the nearer-wrist reading counted a guard with one
+# hand up and the other at the hip; a guard is both hands. Judged on the
+# farther wrist, the line is looser than the old nearer-wrist 0.7 (about
+# 28 cm): 0.9 is about 36 cm on an adult, which allows the lead hand held out
+# in front of the face. A definition, not a validated norm - no labelled
+# guard data exists - which is why guard is shown as Experimental
+# (core/metric_catalog.py).
+HANDS_UP = 0.9
 # Readings are the median over +-this many seconds before they are
 # classified, so one misplaced wrist is not a dropped guard.
 SMOOTH_SECONDS = 0.25
@@ -94,7 +101,7 @@ NOT_MEASURED_SHORT = {TOO_SMALL: "too small in the picture", UNCLEAR: "hands or 
 
 
 def reading(keypoints, confidence) -> tuple[float | None, str | None]:
-    """Nearer wrist to chin, over shoulder width, for one frame.
+    """Farther wrist to chin, over shoulder width, for one frame.
 
     Returns (reading, None), or (None, why) where ``why`` is TOO_SMALL or
     UNCLEAR. Lower readings are hands nearer the face.
@@ -112,7 +119,10 @@ def reading(keypoints, confidence) -> tuple[float | None, str | None]:
         return None, UNCLEAR
     face = [points[i] for i in _FACE if seen(i, FACE_CONFIDENCE)]
     wrists = [points[i] for i in (9, 10) if seen(i, WRIST_CONFIDENCE)]
-    if not face or not wrists:
+    # Both hands, or no reading: a frame with one wrist unseen cannot say
+    # whether the guard was up, and guessing from one hand is what made the
+    # old figure meaningless.
+    if not face or len(wrists) < 2:
         return None, UNCLEAR
     neck = (points[5] + points[6]) / 2.0
     torso = float(np.linalg.norm(neck - (points[11] + points[12]) / 2.0))
@@ -121,7 +131,8 @@ def reading(keypoints, confidence) -> tuple[float | None, str | None]:
         return None, TOO_SMALL
     head = np.mean(np.asarray(face, dtype=np.float32), axis=0)
     chin = head + CHIN_FRACTION * (neck - head)
-    return float(min(np.linalg.norm(wrist - chin) for wrist in wrists)) / scale, None
+    # The farther wrist: hands up only when both are by the chin.
+    return float(max(np.linalg.norm(wrist - chin) for wrist in wrists)) / scale, None
 
 
 def not_measured_reason(rejected: Counter | dict) -> str:
@@ -147,7 +158,7 @@ BLOCK_SECONDS = 2.0
 # check, and was said of a report three days old (QA, 2026-10-07).
 # Analysis engine version that first measured the guard this way
 # (core/build_info.py ANALYSIS_VERSION 4).
-GUARD_ENGINE_VERSION = 4
+GUARD_ENGINE_VERSION = 5
 LEGACY_NOTE = ("Not measured in this report: it was made by {engine}, before the guard was measured "
                "consistently (engine v{current}). Re-run the analysis to measure it.")
 LEGACY_PARTIAL_NOTE = ("This report was made by {engine}, before the guard was measured consistently "

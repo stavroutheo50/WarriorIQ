@@ -4,6 +4,7 @@ import atexit
 import collections
 import json
 import logging
+import os
 import secrets
 import sqlite3
 import threading
@@ -13,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.config import DATASET, DB_PATH, SETTINGS
-from core.payments import PLANS, effective_plan_key, plan_for_key
+from core.payments import PLANS, allowance, effective_plan_key, plan_for_key
 
 LOGGER = logging.getLogger("warrioriq.db")
 
@@ -98,7 +99,39 @@ def _remove_annotation_sequences(con: sqlite3.Connection, job_id: str) -> None:
             path.unlink(missing_ok=True)
 
 
+_schema_ready_for: tuple | None = None
+_schema_lock = threading.Lock()
+
+
+def _database_identity() -> tuple | None:
+    try:
+        stat = os.stat(DB_PATH)
+    except OSError:
+        return None
+    return (str(DB_PATH), stat.st_dev, stat.st_ino)
+
+
 def init_db() -> None:
+    """Create and migrate the schema - once per process per database file.
+
+    Every query function calls this, and it ran the whole schema script and
+    its PRAGMA migration checks on each call: several times per page view
+    (audit 2026-10-14, #4). A database file replaced or deleted since (a new
+    inode) is migrated again.
+    """
+    global _schema_ready_for
+    current = _database_identity()
+    if current is not None and current == _schema_ready_for:
+        return
+    with _schema_lock:
+        current = _database_identity()
+        if current is not None and current == _schema_ready_for:
+            return
+        _init_db_schema()
+        _schema_ready_for = _database_identity()
+
+
+def _init_db_schema() -> None:
     with connection() as con:
         con.executescript(
             """
@@ -512,6 +545,12 @@ def init_db() -> None:
                 FOREIGN KEY(followed_profile_id) REFERENCES profiles(id)
             );
             CREATE INDEX IF NOT EXISTS idx_follows_followed ON follows(followed_profile_id, status);
+            -- Lookups made on most signed-in pages (audit 2026-10-14, #4).
+            CREATE INDEX IF NOT EXISTS idx_fights_profile ON fights(profile_id, id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_points_ledger_profile ON points_ledger(profile_id);
+            CREATE INDEX IF NOT EXISTS idx_camp_missions_profile ON camp_missions(profile_id);
             """
         )
         columns = {row[1] for row in con.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -573,6 +612,19 @@ def init_db() -> None:
             con.execute("ALTER TABLE fights ADD COLUMN video_delete_after TEXT")
         if "video_deleted_at" not in fight_columns:
             con.execute("ALTER TABLE fights ADD COLUMN video_deleted_at TEXT")
+        # Optional names the athlete gives a fight (audit 2026-10-14, #30):
+        # the library titled fights by their file name ("3.mp4"). Nullable, so
+        # every existing fight keeps working and is titled "Sport · Date".
+        if "event_name" not in fight_columns:
+            con.execute("ALTER TABLE fights ADD COLUMN event_name TEXT")
+        if "opponent_name" not in fight_columns:
+            con.execute("ALTER TABLE fights ADD COLUMN opponent_name TEXT")
+        # How much video an analysis covered, for plans counted in video
+        # minutes (audit 2026-10-14, #51). Nullable: rows written before it,
+        # and analyses counted per day or month, carry none.
+        usage_columns = {row[1] for row in con.execute("PRAGMA table_info(analysis_usage)").fetchall()}
+        if "video_seconds" not in usage_columns:
+            con.execute("ALTER TABLE analysis_usage ADD COLUMN video_seconds REAL")
         acceptance_columns = {row[1] for row in con.execute("PRAGMA table_info(legal_acceptances)").fetchall()}
         if "current_status" not in acceptance_columns:
             con.execute("ALTER TABLE legal_acceptances ADD COLUMN current_status TEXT NOT NULL DEFAULT 'accepted'")
@@ -635,6 +687,8 @@ def save_fight(
     summary: dict,
     video_delete_after: str | None = None,
     fighter_id: int | None = None,
+    event_name: str | None = None,
+    opponent_name: str | None = None,
 ) -> None:
     init_db()
     now = datetime.now(timezone.utc).isoformat()
@@ -643,11 +697,13 @@ def save_fight(
             """
             INSERT INTO fights(job_id, profile_id, original_name, video_path, report_path,
                                fight_type, ruleset, analysis_target, created_at, summary_json, video_delete_after,
-                               fighter_id)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                               fighter_id, event_name, opponent_name)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(job_id) DO UPDATE SET
                 report_path=excluded.report_path,
-                summary_json=excluded.summary_json
+                summary_json=excluded.summary_json,
+                event_name=COALESCE(fights.event_name, excluded.event_name),
+                opponent_name=COALESCE(fights.opponent_name, excluded.opponent_name)
             """,
             (
                 job_id,
@@ -662,8 +718,29 @@ def save_fight(
                 json.dumps(summary),
                 video_delete_after,
                 fighter_id,
+                clean_fight_name(event_name),
+                clean_fight_name(opponent_name),
             ),
         )
+
+
+FIGHT_NAME_MAX = 80
+
+
+def clean_fight_name(value: str | None) -> str | None:
+    """An event or opponent name as stored: one line, trimmed, or None."""
+    text = " ".join(str(value or "").split())[:FIGHT_NAME_MAX]
+    return text or None
+
+
+def set_fight_details(job_id: str, profile_id: int, event_name: str | None, opponent_name: str | None) -> bool:
+    """Name a saved fight's event and opponent. Only the owner's fight; True when one was updated."""
+    init_db()
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE fights SET event_name=?, opponent_name=? WHERE job_id=? AND profile_id=?",
+            (clean_fight_name(event_name), clean_fight_name(opponent_name), job_id, int(profile_id)))
+        return cursor.rowcount > 0
 
 
 def list_fights(profile_id: int = 1) -> list[dict]:
@@ -1325,8 +1402,10 @@ def account_for_session(token_hash: str) -> dict | None:
                accounts.stripe_customer_id,accounts.stripe_subscription_id,accounts.subscription_status,
                accounts.subscription_period_end,accounts.subscription_cancelled_at,
                accounts.email_verified_at,accounts.password_login_enabled,
-               accounts.guardian_approval_status
+               accounts.guardian_approval_status,
+               profiles.display_name AS display_name
                FROM sessions JOIN accounts ON accounts.id=sessions.account_id
+               LEFT JOIN profiles ON profiles.id=accounts.profile_id
                WHERE sessions.token_hash=? AND sessions.expires_at>? AND accounts.account_status='active'""",
             (token_hash, now),
         ).fetchone()
@@ -1770,6 +1849,7 @@ def save_completed_analysis(job_id: str, job: dict, report: dict, report_path: s
         analysis_target=str(job.get("focus_fighter") or "A"), summary=summary,
         fighter_id=job.get("fighter_id"),
         video_delete_after=(datetime.now(timezone.utc) + timedelta(days=SETTINGS.saved_video_retention_days)).isoformat(),
+        event_name=job.get("event_name"), opponent_name=job.get("opponent_name"),
     )
 
 
@@ -1790,13 +1870,35 @@ def refund_credit(account_id: int) -> None:
 
 
 def _usage_period(plan: dict, moment: datetime) -> tuple[str, int | None]:
-    if plan.get("unlimited"):
+    """The period an analysis now counts against, and that period's limit.
+
+    The limit is analyses, except for a plan counted in video minutes, where
+    it is minutes (core.payments.allowance, audit 2026-10-14 #51).
+    """
+    rule = allowance(plan)
+    if rule["period"] == "unlimited":
         return "unlimited", None
-    if plan.get("daily_limit") is not None:
-        return f"day:{moment.date().isoformat()}", int(plan["daily_limit"])
-    if plan.get("monthly_limit") is not None:
-        return f"month:{moment.strftime('%Y-%m')}", int(plan["monthly_limit"])
+    if rule["period"] == "day":
+        return f"day:{moment.date().isoformat()}", rule["amount"]
+    if rule["period"] == "month":
+        return f"month:{moment.strftime('%Y-%m')}", rule["amount"]
+    if rule["period"] == "video_minutes":
+        return f"minutes:{moment.strftime('%Y-%m')}", rule["amount"]
     return "unavailable", 0
+
+
+def _usage_in_period(con, account_id: int, period_key: str) -> float:
+    """Analyses used in a period - or, for a video-minutes period, minutes used."""
+    if period_key.startswith("minutes:"):
+        seconds = con.execute(
+            "SELECT COALESCE(SUM(video_seconds),0) FROM analysis_usage WHERE account_id=? AND period_key=?",
+            (account_id, period_key),
+        ).fetchone()[0]
+        return float(seconds or 0) / 60.0
+    return float(con.execute(
+        "SELECT COUNT(*) FROM analysis_usage WHERE account_id=? AND period_key=?",
+        (account_id, period_key),
+    ).fetchone()[0])
 
 
 # Fight Camp: analyses bought with points (core/camp.py). A purchase is a
@@ -1842,8 +1944,13 @@ def redeem_points_for_analysis(profile_id: int, cost: int, monthly_cap: int, mon
         return "bought"
 
 
-def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None) -> bool:
-    """Atomically reserve one analysis against the account's current plan."""
+def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None,
+                     video_seconds: float | None = None) -> bool:
+    """Atomically reserve one analysis against the account's current plan.
+
+    video_seconds is the length of video this analysis covers; a plan counted
+    in video minutes needs it, and every row records it.
+    """
     moment = now or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
@@ -1860,11 +1967,11 @@ def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None) 
         plan = plan_for_key(_effective_plan_key(account))
         period_key, limit = _usage_period(plan, moment)
         if limit is not None:
-            used = int(con.execute(
-                "SELECT COUNT(*) FROM analysis_usage WHERE account_id=? AND period_key=?",
-                (account_id, period_key),
-            ).fetchone()[0])
-            if used >= limit:
+            used = _usage_in_period(con, account_id, period_key)
+            # A minutes plan refuses a video that would go past the limit; an
+            # analyses plan refuses once the count is reached.
+            wanted = (max(0.0, float(video_seconds or 0)) / 60.0) if period_key.startswith("minutes:") else 1.0
+            if used + wanted > limit:
                 # The plan's allowance is spent: an analysis bought with Fight
                 # Camp points is used instead, if there is one. It is recorded
                 # under its own period key, so release_analysis gives it back
@@ -1873,8 +1980,9 @@ def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None) 
                     return False
                 period_key = BONUS_PERIOD_KEY
         con.execute(
-            "INSERT INTO analysis_usage(job_id,account_id,period_key,created_at) VALUES(?,?,?,?)",
-            (job_id, account_id, period_key, moment.astimezone(timezone.utc).isoformat()),
+            "INSERT INTO analysis_usage(job_id,account_id,period_key,created_at,video_seconds) VALUES(?,?,?,?,?)",
+            (job_id, account_id, period_key, moment.astimezone(timezone.utc).isoformat(),
+             None if video_seconds is None else float(video_seconds)),
         )
         return True
 
@@ -1897,14 +2005,21 @@ def analysis_allowance(account_id: int, now: datetime | None = None) -> dict:
         account = con.execute("SELECT plan,plan_override,email FROM accounts WHERE id=?", (account_id,)).fetchone()
         plan = plan_for_key(_effective_plan_key(account))
         period_key, limit = _usage_period(plan, moment)
-        used = int(con.execute(
-            "SELECT COUNT(*) FROM analysis_usage WHERE account_id=? AND period_key=?",
-            (account_id, period_key),
-        ).fetchone()[0])
+        minutes = period_key.startswith("minutes:")
+        used = _usage_in_period(con, account_id, period_key)
+        used = round(used, 1) if minutes else int(used)
         bonus = _bonus_analyses_left(con, account_id)
+    if minutes:
+        # Bought analyses are whole analyses, not minutes; they are reported
+        # beside the minutes rather than added to them.
+        return {
+            "plan": plan, "period_key": period_key, "used": used, "limit": limit, "unit": "minutes",
+            "remaining": max(0, int(limit - used)), "bonus_remaining": bonus,
+        }
     return {
         "plan": plan,
         "period_key": period_key,
+        "unit": "analyses",
         "used": used,
         "limit": limit,
         # Analyses bought with Fight Camp points count as remaining too, so
@@ -2283,6 +2398,33 @@ def archive_fighter(profile_id: int, fighter_id: int) -> bool:
             (int(fighter_id), profile_id),
         ).rowcount
     return bool(changed)
+
+
+def delete_fighters(profile_id: int, fighter_ids: list[int]) -> list[dict]:
+    """Remove fighters from one workspace for good, with their athlete history.
+
+    Only for an operator's clean-up (tools/delete_qa_test_data.py): the site
+    itself archives. Their fights must be deleted first (delete_fight), so no
+    fight is left pointing at a fighter that is gone. Returns the rows removed.
+    """
+    ids = [int(fighter_id) for fighter_id in fighter_ids]
+    if not ids:
+        return []
+    init_db()
+    marks = ",".join("?" for _ in ids)
+    with connection() as con:
+        rows = [dict(row) for row in con.execute(
+            f"SELECT * FROM fighters WHERE profile_id=? AND id IN ({marks})", (profile_id, *ids))]
+        found = [row["id"] for row in rows]
+        if not found:
+            return []
+        marks = ",".join("?" for _ in found)
+        con.execute(f"UPDATE fights SET fighter_id=NULL WHERE profile_id=? AND fighter_id IN ({marks})",
+                    (profile_id, *found))
+        con.execute(f"DELETE FROM athlete_sessions WHERE fighter_id IN ({marks})", found)
+        con.execute(f"DELETE FROM athlete_ratings WHERE fighter_id IN ({marks})", found)
+        con.execute(f"DELETE FROM fighters WHERE profile_id=? AND id IN ({marks})", (profile_id, *found))
+    return rows
 
 
 def assign_fighter_to_fight(profile_id: int, job_id: str, fighter_id: int | None) -> bool:

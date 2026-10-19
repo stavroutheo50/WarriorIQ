@@ -32,6 +32,7 @@ from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPExceptio
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.concurrency import run_in_threadpool
@@ -88,7 +89,7 @@ from core.db import (
     set_account_status, set_annotation_sequence,
     page_view_summary, plan_interest_counts, plans_wanted_by, policies_outdated,
     record_page_view, record_plan_interest, record_policy_reacceptance,
-    set_fight_review_status, toggle_assignment, update_cookie_preferences,
+    set_fight_review_status, toggle_assignment, update_cookie_preferences, set_fight_details, clean_fight_name,
     update_marketing_consent, update_password_hash, update_profile,
 )
 from core.evidence_trust import accepted_model_event, report_evidence_trust
@@ -100,13 +101,17 @@ from core.fight_presence import attach_plausibility
 from core.features import FEATURES
 from core.features import is_on as feature_is_on
 from core.features import status as feature_status
-from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
+from core.sample_report import SAMPLE_NOTICE, SAMPLE_REPORT, sample_rows
+from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, allowance_column, allowance_text, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core import feed, social, worker_alerts
 from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
 from core.progress_insights import build_progress
+from core.progress_view import stage_view
+from core.scoring import score_explanation
+from core.selection_check import pair_verdict
 from core.quality_guardian import inspect_video_quality
-from core.metric_catalog import BY_KEY as METRIC_CATALOG, evidence_limitations, readings as metric_readings
+from core.metric_catalog import BY_KEY as METRIC_CATALOG, EXPERIMENTAL_NOTE, evidence_limitations, readings as metric_readings
 from core.chunked_upload import (
     ChunkedUploadError, StoredUpload, append as append_chunk, begin as begin_chunked,
     discard as discard_chunked, extend_lease, finalise as finalise_chunked,
@@ -137,6 +142,7 @@ from core.count_plausibility import counts_implausible
 from core.report import (
     build_preliminary_scorecard, identity_failure, identity_verdict, kick_minimum_check, observed_summary,
     ESTIMATE_NOTE, STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, published_families,
+    strike_numbers_shown,
     coaching_moments, did_well, fix_first, not_a_fight, not_a_fight_reason, refresh_identity_integrity, share_card,
     unattributed_kick_total, withhold_for_sideways,
 )
@@ -144,19 +150,19 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
-from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, result_check
+from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_policy import counting_policy
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
 from core.coaching import count_of
-from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label, fight_choice_stamp
+from core.squad import build_squad_view, compare_movement, compare_with_previous, fight_choice_label, fight_choice_stamp, fight_title
 from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import (
-    detect_shot_changes, ffmpeg_frame, get_video_info, normalize_container, opencv_decodes,
+    detect_shot_changes, ffmpeg_frame, get_video_info, has_video_stream, normalize_container, opencv_decodes,
     playback_file, probe_upload, quarter_turn, read_frame, remove_derivative, rotate_frame,
     selection_frame,
 )
@@ -197,11 +203,20 @@ def _session_secret() -> str:
                 return stored
         generated = secrets.token_urlsafe(48)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(generated, encoding="utf-8")
+        # Created exclusively: several server processes start together
+        # (run.py worker_count), and each writing its own key would leave
+        # them signing with different ones. The first wins; the rest read it.
         try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+            descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            for _ in range(50):
+                stored = path.read_text(encoding="utf-8").strip()
+                if stored:
+                    return stored
+                time.sleep(0.02)
+            raise OSError("session secret file stayed empty")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(generated)
         logging.getLogger("warrioriq").warning(
             "WARRIORIQ_OAUTH_STATE_SECRET is not set; generated one at %s. "
             "Set it in the environment instead - a key on disk is fine for a "
@@ -334,6 +349,7 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 # core.upload_security, so neither can drift from what the server accepts.
 templates.env.globals["fight_video_accept"] = FIGHT_VIDEO_ACCEPT
 templates.env.globals["fight_video_label"] = FIGHT_VIDEO_LABEL
+templates.env.globals["allowance_column"] = allowance_column
 templates.env.globals["fight_video_extensions"] = sorted(FIGHT_VIDEO_EXTENSIONS)
 # The pre-upload check compares footage against the same numbers the worker's
 # probe uses, rather than a second set copied into JavaScript.
@@ -341,6 +357,11 @@ templates.env.globals["preflight_limits"] = json.dumps(client_thresholds())
 # One name, one definition and one reference per measurement, so the report
 # cannot call the same number three things in three sections.
 templates.env.globals["metric_catalog"] = METRIC_CATALOG
+# One label for every measurement not yet checked against labelled clips
+# (core/metric_catalog.py experimental; audit 2026-10-14, #5).
+templates.env.globals["experimental_badge"] = Markup(
+    '<span class="badge-experimental" title="Not yet checked against hand-labelled fight clips">Experimental</span>')
+templates.env.globals["experimental_note"] = EXPERIMENTAL_NOTE
 # The movement comparison is decided at render time, so reports saved with a
 # "10-10" movement scorecard are shown without one (core/generalship.py).
 templates.env.globals["movement_comparison"] = movement_comparison
@@ -616,6 +637,17 @@ class StartPayload(BaseModel):
     # Optional so older clients keep working; None means "not said", and the
     # report then names no corner rather than guessing red for A.
     fighter_a_corner: str | None = None
+    # How each box was made: dragged by hand, or a tap on a person the
+    # detector found. A box drawn by hand is never refused for overlapping
+    # the other (core/selection_check.py, audit 2026-10-14 #11). Optional so
+    # older clients keep working.
+    fighter_a_drawn: bool = False
+    fighter_b_drawn: bool = False
+    both_detected: bool = False
+    # Trim before analysis (audit 2026-10-14, #20): analyse only this part of
+    # the video. Either may be left out; None keeps what the upload asked for.
+    trim_start_seconds: float | None = None
+    trim_end_seconds: float | None = None
 
 
 class PairCheckPayload(BaseModel):
@@ -915,7 +947,12 @@ def _analysis_navigation_state(
     active = _owned_job(owner_key, active_job_id, processing_statuses)
     if active is not None and not _is_live_processing_job(active):
         active = None
-    if active is None:
+    # The fallback scans every job on disk. A signed-out visitor without the
+    # active-analysis cookie cannot own a running job - starting one sets that
+    # cookie in this browser - so for them, which is most public page views,
+    # the scan is skipped. It was the bulk of a public page's first byte on a
+    # host with a few hundred fights (audit 2026-10-14, #4).
+    if active is None and (active_job_id or not owner_key.startswith("guest:")):
         active = _active_job_for_owner(owner_key)
 
     completed = _owned_job(owner_key, completed_job_id, {"complete"})
@@ -941,7 +978,7 @@ def _analysis_navigation_url(job: dict) -> str:
     return f"/result/{job_id}" if job.get("status") == "complete" else f"/progress/{job_id}"
 
 
-def _safe_next(value: str | None, fallback: str = "/dashboard") -> str:
+def _safe_next(value: str | None, fallback: str = "/camp") -> str:
     r"""Only ever redirect to a path on this site.
 
     "starts with / and not //" is the usual rule and it is not enough. A
@@ -1249,6 +1286,30 @@ def _authorized_job(request: Request, job_id: str) -> dict | None:
     if not _account(request) and guest_job_valid(job_id, request.state.guest_id):
         return {"job_id": job_id, "guest": True}
     return None
+
+
+def _analysed_seconds(job: dict, req) -> float | None:
+    """How much video this analysis covers, after any trim (#51: minutes plans)."""
+    try:
+        start = float(getattr(req, "start_seconds", None) or 0.0)
+        end = getattr(req, "end_seconds", None)
+        end = float(end) if end else float(job.get("video_duration") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, end - start) if end else None
+
+
+def _job_page_refused(request: Request) -> RedirectResponse:
+    """A fight page this visitor may not open (audit 2026-10-14 #49).
+
+    Signed out: the sign-in page, which comes back here afterwards. That
+    happens for every id, existing or not, so it says nothing about which
+    ids exist. Signed in: 404, the same as a fight that does not exist.
+    """
+    if _account(request) is None:
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return RedirectResponse(f"/login?next={quote(target, safe='/')}", status_code=303)
+    raise HTTPException(404)
 
 
 def _full_progress_report(path: Path) -> dict | None:
@@ -1721,6 +1782,24 @@ def _rate_limited_response(request: Request, wait_seconds: int):
     )
 
 
+def account_display(account: dict | None) -> dict:
+    """The name and avatar letter the header shows for an account.
+
+    Audit 2026-10-14 (#44): the letter came from the email ("S") rather than
+    the athlete's name ("T"). The display name is used once the athlete has
+    set one; the placeholder every new profile starts with ("My Athlete") is
+    not a name, so until then the email stands in.
+    """
+    if not account:
+        return {"label": "", "initial": ""}
+    name = " ".join(str(account.get("display_name") or "").split())
+    if not name or name == SETTINGS.default_profile_name:
+        name = ""
+    label = name or str(account.get("email") or "")
+    initial = next((ch for ch in label if ch.isalnum()), "?").upper()
+    return {"label": label, "initial": initial, "email": str(account.get("email") or "")}
+
+
 def _load_viewer_state(request: Request) -> None:
     """Who is asking and what they have running: the per-page context.
 
@@ -1730,6 +1809,7 @@ def _load_viewer_state(request: Request) -> None:
     was serving for as long as one visitor's lookups took.
     """
     request.state.account = resolve_session(request.cookies.get(SESSION_COOKIE))
+    request.state.account_display = account_display(request.state.account)
     request.state.analysis_navigation = _analysis_navigation_state(
         _owner_key(request),
         request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
@@ -1871,6 +1951,33 @@ def _schedule_maintenance() -> None:
         raise
 
 
+# Public pages that read the same for every signed-out visitor: the legal
+# pages, the guides and the homepage. Cached in the visitor's own browser for
+# a few minutes (audit 2026-10-14, #4). "private", not "public": each page
+# carries a per-response CSP nonce and the visitor's CSRF token, which a
+# shared cache must never hand to somebody else.
+STATIC_PUBLIC_PAGES = frozenset({
+    "/", "/legal", "/terms", "/cookies", "/acceptable-use", "/refunds", "/video-upload-policy",
+    "/sports-medical-disclaimer", "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
+    "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
+    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis", "/sample-report",
+})
+STATIC_PUBLIC_MAX_AGE = 300
+
+
+def _cacheable_public_page(request: Request, response) -> bool:
+    """A signed-out GET of a static public page, with nothing of the visitor's own on it."""
+    return bool(
+        request.method == "GET"
+        and response.status_code == 200
+        and request.url.path in STATIC_PUBLIC_PAGES
+        and not request.url.query
+        and getattr(request.state, "account", None) is None
+        and not request.cookies.get(ACTIVE_ANALYSIS_COOKIE)
+        and not request.cookies.get(LAST_COMPLETED_ANALYSIS_COOKIE)
+        and response.headers.get("content-type", "").lower().startswith("text/html"))
+
+
 def _apply_response_headers(request: Request, response) -> None:
     """Security and caching headers every response carries, page or asset."""
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -1919,6 +2026,12 @@ def _apply_response_headers(request: Request, response) -> None:
     # recovery line - so github.com is no longer allowed on every page of a
     # site that offers no GitHub sign-up.
     form_action = " ".join(["'self'", *SOCIAL_AUTH.form_action_origins_for(request.url.path)])
+    # The replay CDN, only when one is configured (SETTINGS.media_cdn_base_url).
+    media_src = "'self' blob:"
+    if SETTINGS.media_cdn_base_url and SETTINGS.media_signing_key:
+        cdn = urlsplit(SETTINGS.media_cdn_base_url)
+        if cdn.scheme == "https" and cdn.netloc:
+            media_src += f" https://{cdn.netloc}"
     # blob: in media-src is the fight the visitor just chose, played from their
     # own device while it uploads. A blob: URL names something this page itself
     # created from a file the person picked - it cannot address anything remote
@@ -1927,10 +2040,15 @@ def _apply_response_headers(request: Request, response) -> None:
     response.headers.setdefault(
         "Content-Security-Policy",
         f"default-src 'self' data:; script-src {script_src}; style-src 'self' 'unsafe-inline'; "
-        f"img-src {img_src}; media-src 'self' blob:; connect-src {connect_src}; frame-src {frame_src}; "
+        f"img-src {img_src}; media-src {media_src}; connect-src {connect_src}; frame-src {frame_src}; "
         f"frame-ancestors 'none'; form-action {form_action}",
     )
-    if request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/", "/f/")):
+    if _cacheable_public_page(request, response):
+        response.headers.setdefault("Cache-Control", f"private, max-age={STATIC_PUBLIC_MAX_AGE}")
+        # Signing in changes the cookie, and with it which copy may be used.
+        response.headers["Vary"] = ", ".join(
+            filter(None, [response.headers.get("Vary"), "Cookie"]))
+    elif request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/", "/f/")):
         # setdefault, so a route that has already chosen keeps its value.
         # /media/ does exactly that: a fight video is private but not
         # volatile, and re-sending 101 MB on every seek is not privacy.
@@ -2038,7 +2156,9 @@ async def viewer_context(request: Request, call_next):
     )
     if _is_counted_page_view(request, response):
         try:
-            record_page_view(_counted_path(request.url.path))
+            # Off the event loop: the batch flush is a database write, and on
+            # the event loop it held every other request until it finished.
+            await run_in_threadpool(record_page_view, _counted_path(request.url.path))
         except Exception:  # pragma: no cover - counting must never cost a page
             # A visitor came for the page, not for the statistic. If the write
             # fails the page still has to be served, so this swallows rather
@@ -2352,7 +2472,11 @@ def _withhold_score_while_counts_are_off(report: dict) -> None:
     while counts were on loses its score on read too. Never written back.
     """
     implausible = counts_implausible(report)
-    counts_on = STRIKE_COUNTS_PUBLISHED or STRIKE_COUNTS_PRECISION_VALIDATED
+    # Shown only while this fight's strike numbers are, by the one rule every
+    # page uses (core.report.strike_numbers_shown): a score built from counts
+    # the page withholds would be the same numbers in another form (audit
+    # 2026-10-14, #7).
+    counts_on = bool(strike_numbers_shown(report))
     # The score's own switch too (core/features.py): marketing, pricing and
     # the report all read it, so a score is shown only while it is on.
     if counts_on and feature_is_on("scoring") and not implausible:
@@ -2828,7 +2952,7 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
     return response
 
 
-def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/dashboard"):
+def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/camp"):
     return templates.TemplateResponse(
         request=request,
         name="auth.html",
@@ -2855,7 +2979,7 @@ def _social_auth_error(request: Request, intent: dict | None, message: str):
         request,
         str(intent.get("mode") or "login"),
         message,
-        str(intent.get("next_path") or "/dashboard"),
+        str(intent.get("next_path") or "/camp"),
     )
 
 
@@ -2864,7 +2988,7 @@ async def social_auth_start(
     request: Request,
     provider: str,
     mode: str = Form("login"),
-    next_path: str = Form("/dashboard"),
+    next_path: str = Form("/camp"),
     accept_terms: bool = Form(False),
     age_confirmed: bool = Form(False),
     accept_policies: bool = Form(False),
@@ -3156,7 +3280,7 @@ def _send_guardian_email(request: Request, account: dict, guardian_name: str, gu
 
 
 @app.get("/signup", response_class=HTMLResponse)
-def signup_page(request: Request, next: str = "/dashboard"):
+def signup_page(request: Request, next: str = "/camp"):
     if _account(request):
         return RedirectResponse(_safe_next(next), status_code=303)
     return _auth_page(request, "signup", next_path=next)
@@ -3167,7 +3291,7 @@ def signup(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
-    next_path: str = Form("/dashboard"),
+    next_path: str = Form("/camp"),
     accept_terms: bool = Form(False),
     age_confirmed: bool = Form(False),
     marketing_consent: bool = Form(False),
@@ -3259,7 +3383,7 @@ def guardian_status_page(request: Request, sent: str = ""):
         return RedirectResponse("/login?next=/guardian", status_code=303)
     status = str(account.get("guardian_approval_status") or "not_applicable")
     if status in {"not_applicable", GUARDIAN_APPROVED}:
-        return RedirectResponse("/dashboard", status_code=303)
+        return RedirectResponse("/camp", status_code=303)
     named = _guardian_request(account) or {}
     return templates.TemplateResponse(
         request=request, name="guardian.html",
@@ -3350,7 +3474,7 @@ def guardian_approve(request: Request, token: str, decision: str = Form(""),
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = "/dashboard"):
+def login_page(request: Request, next: str = "/camp"):
     if _account(request):
         return RedirectResponse(_safe_next(next), status_code=303)
     return _auth_page(request, "login", next_path=next)
@@ -3361,7 +3485,7 @@ def login(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
-    next_path: str = Form("/dashboard"),
+    next_path: str = Form("/camp"),
 ):
     """Sign in.
 
@@ -3524,8 +3648,35 @@ def home(request: Request):
             "profile": profile,
             "version": SETTINGS.version,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
+            **_home_sections(),
         },
     )
+
+
+def _home_demo_clip() -> str | None:
+    """The demo clip's URL when the file is really there (#53), else None."""
+    path = SETTINGS.demo_clip
+    if not path.startswith("/static/"):
+        return None
+    local = (ROOT / "app" / path.lstrip("/")).resolve()
+    if local.is_file() and (ROOT / "app" / "static").resolve() in local.parents:
+        return f"{path}?v={ASSET_VERSION}"
+    return None
+
+
+def _home_sections() -> dict:
+    """What the homepage's measured, accuracy and plans sections read (#55)."""
+    measured = {}
+    for sport in SPORTS:
+        policy = counting_policy(sport, published=STRIKE_COUNTS_PUBLISHED,
+                                 validated=STRIKE_COUNTS_PRECISION_VALIDATED)
+        measured[sport] = {"label": RULESET_SPORTS.get(sport, sport.replace("_", " ").title()),
+                           "counted": _prose_list(policy.counted), "unobserved": _prose_list(sport_unobserved(sport))}
+    athlete = [(key, {**plan, "allowance": allowance_text(plan)}) for key, plan in PLANS.items()
+               if plan.get("audience") == "athlete"]
+    coach_prices = [plan["price"] for plan in PLANS.values() if plan.get("audience") != "athlete"]
+    return {"measured": measured, "summary_plans": athlete, "coach_from": coach_prices[0] if coach_prices else None,
+            "payments_enabled": SETTINGS.payments_enabled, "demo_clip": _home_demo_clip()}
 
 
 def _reported_strike_families(sport: str) -> dict:
@@ -3625,6 +3776,8 @@ def _sport_context(request: Request, sport: str) -> dict:
         # A workspace with one seat has one fighter, so it is told rather than
         # asked which one this fight is about.
         "single_fighter": (_request_plan(request) or {}).get("roster_limit") == 1,
+        # Pre-selected in "Which fighter?" (audit 2026-10-14, #16).
+        "main_fighter_id": _main_fighter_id(request),
         "unobserved": sport_unobserved(sport),
         # Only offered when a provider is configured; see core/sport_check.py.
         "sport_check_enabled": sport_check.provider() is not None,
@@ -3730,15 +3883,31 @@ def sport_setup(request: Request, sport: str):
     # that still says Taekwondo. The URL is what the visitor asked for, so it
     # wins over the cookie for this render.
     request.state.active_sport = sport_identity(key)
-    response = templates.TemplateResponse(
+    # Nothing is saved here (audit 2026-10-14, #43): opening a sport's setup
+    # page - a link, a preview, a crawler - changed the sport shown in the
+    # header and on the profile. A GET never changes state; choosing a sport
+    # is POST /sport, and uploading a fight saves its sport.
+    return templates.TemplateResponse(
         request=request, name="analyze.html", context=_sport_context(request, key),
     )
-    # Remembered so the shell can keep showing which sport this session is in,
-    # and so returning to the product lands where the visitor left off.
+
+
+def _remember_sport(request: Request, response, key: str) -> None:
+    """Save the sport this visitor chose: the header chip and where they land next time."""
     response.set_cookie(
         ACTIVE_SPORT_COOKIE, key, max_age=60 * 60 * 24 * 180,
         httponly=False, samesite="lax", secure=_request_is_secure(request),
     )
+
+
+@app.post("/sport", dependencies=[Depends(require_csrf)])
+def choose_sport(request: Request, sport: str = Form(...), next_path: str = Form("")):
+    """An explicit choice of sport from the header's switcher (#43)."""
+    key = (sport or "").strip().lower()
+    if key not in SPORTS:
+        raise HTTPException(400, "Unknown sport.")
+    response = RedirectResponse(_safe_next(next_path, f"/analyze/{key}"), status_code=303)
+    _remember_sport(request, response, key)
     return response
 
 
@@ -3801,6 +3970,9 @@ async def upload(
     # to go somewhere else first.
     fighter_id: str = Form(""),
     fighter_name: str = Form(""),
+    # Optional names for the library card and the report (audit 2026-10-14, #30).
+    event_name: str = Form(""),
+    opponent_name: str = Form(""),
     rights_confirmed: bool = Form(False),
     people_permissions_confirmed: bool = Form(False),
     minor_permission_status: str = Form(""),
@@ -3868,6 +4040,16 @@ async def upload(
             "That file is not a video. The name ends in a video extension but the "
             f"contents are not {FIGHT_VIDEO_LABEL}. Pick the clip straight "
             "from your camera roll.",
+        )
+
+    # The real file type, read by ffprobe (core.video.has_video_stream): the
+    # first bytes can look right with no picture behind them. None (no probe
+    # tool on this host) leaves the decision to the checks below.
+    if SETTINGS.upload_stream_probe and await run_in_threadpool(has_video_stream, video_path) is False:
+        video_path.unlink(missing_ok=True)
+        raise HTTPException(
+            400,
+            "That file has no video in it. Pick the clip straight from your camera roll.",
         )
 
     scan = await run_in_threadpool(scan_upload, video_path)
@@ -4115,6 +4297,8 @@ async def upload(
             "openai_identity_recovery": bool(openai_identity_recovery),
             "external_ai_opted_in": bool(openai_identity_recovery),
             "fighter_id": chosen_fighter["id"] if chosen_fighter else None,
+            "event_name": clean_fight_name(event_name),
+            "opponent_name": clean_fight_name(opponent_name),
         },
     )
     acceptance_owner = {"profile_id": int(account["profile_id"])} if account else {"guest_id": request.state.guest_id}
@@ -4160,6 +4344,13 @@ async def upload(
         ACTIVE_ANALYSIS_COOKIE, job_id, max_age=60 * 60 * 24 * 30,
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
+    # Uploading a fight is an explicit choice of its sport (#43).
+    try:
+        uploaded_sport = sport_of(ruleset)
+    except (KeyError, ValueError):
+        uploaded_sport = None
+    if uploaded_sport in SPORTS:
+        _remember_sport(request, response, uploaded_sport)
     return response
 
 
@@ -4640,6 +4831,7 @@ _WORKER_PROGRESS_FIELDS = {
     "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
     "fighter_b_confidence", "current_round", "quality_mode", "live_event_mode",
     "live_events", "provisional_stats", "latest_observation",
+    "stage_fraction", "tracked_video_seconds", "eta_scope",
 }
 _WORKER_ARCHIVE_FILES = {"report.json", "tracking.jsonl", "events.json"}
 _WORKER_REPORT_KEYS = {
@@ -4770,6 +4962,9 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
             "(modal deploy deploy/modal_worker.py, or restart a local worker on the current code)",
             worker_id, payload.analysis_version, ANALYSIS_VERSION)
         record_worker_refusal(worker_id, "worker_outdated")
+        worker_alerts.note_version_mismatch(outputs=OUTPUTS, recipients=SETTINGS.admin_emails,
+                                            send=send_transactional_email, worker_id=worker_id,
+                                            reason="worker_outdated")
         return {"job": None, "refused": "worker_outdated", "required_analysis_version": ANALYSIS_VERSION}
     differences = code_differences(payload.analysis_files) if payload.analysis_files else None
     # Files only the worker has are strays left in its folder: code that is the
@@ -4786,10 +4981,14 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
             "the worker and the website to the same commit", worker_id, payload.analysis_fingerprint,
             analysis_fingerprint(), differences)
         record_worker_refusal(worker_id, "worker_code_differs")
+        worker_alerts.note_version_mismatch(outputs=OUTPUTS, recipients=SETTINGS.admin_emails,
+                                            send=send_transactional_email, worker_id=worker_id,
+                                            reason="worker_code_differs")
         return {"job": None, "refused": "worker_code_differs",
                 "required_analysis_version": ANALYSIS_VERSION, "required_fingerprint": analysis_fingerprint(),
                 "differences": differences}
     clear_worker_refusal()
+    worker_alerts.clear_version_mismatch(OUTPUTS)
     claimed = claim_next_job(worker_id)
     if not claimed:
         return {"job": None}
@@ -5067,21 +5266,18 @@ def start(request: Request, job_id: str, payload: StartPayload):
             raise HTTPException(409, "The selected frame is unavailable. Choose another frame.")
         video_height, video_width = selection.shape[:2]
     fighter_a_box = _validated_fighter_box(payload.fighter_a_box, video_width, video_height, "Fighter A")
+    job = _apply_trim(job_id, job, payload.trim_start_seconds, payload.trim_end_seconds)
     if payload.solo:
         return _start_solo(request, job_id, job, fighter_a_box, video_width, video_height, capacity)
     if payload.fighter_b_box is None:
         raise HTTPException(400, "Draw a box around Fighter B too, or choose a solo session for a video of one person.")
     fighter_b_box = _validated_fighter_box(payload.fighter_b_box, video_width, video_height, "Fighter B")
-    shared = (
-        max(0.0, min(fighter_a_box[2], fighter_b_box[2]) - max(fighter_a_box[0], fighter_b_box[0]))
-        * max(0.0, min(fighter_a_box[3], fighter_b_box[3]) - max(fighter_a_box[1], fighter_b_box[1]))
-    )
-    smallest = min(
-        (fighter_a_box[2] - fighter_a_box[0]) * (fighter_a_box[3] - fighter_a_box[1]),
-        (fighter_b_box[2] - fighter_b_box[0]) * (fighter_b_box[3] - fighter_b_box[1]),
-    )
-    if shared / max(1.0, smallest) >= 0.28:
-        raise HTTPException(400, "Draw a separate fighter in each box; the two selections overlap too much.")
+    # Two close fighters overlap; only two boxes that are nearly the same box
+    # are refused, and never a box drawn by hand (core/selection_check.py).
+    overlap = pair_verdict(fighter_a_box, fighter_b_box, a_drawn=payload.fighter_a_drawn,
+                           b_drawn=payload.fighter_b_drawn, both_detected=payload.both_detected)
+    if overlap["verdict"] == "block":
+        raise HTTPException(400, overlap["message"])
 
     # Asked here, on one frame, in a few milliseconds - because it decides
     # whether anything the analysis says afterwards about *which* fighter did
@@ -5128,9 +5324,9 @@ def start(request: Request, job_id: str, payload: StartPayload):
 
     req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, focus_fighter)
     if job.get("account_id") and not job.get("usage_reserved"):
-        if not reserve_analysis(int(job["account_id"]), job_id):
+        if not reserve_analysis(int(job["account_id"]), job_id, video_seconds=_analysed_seconds(job, req)):
             plan = _request_plan(request)
-            raise HTTPException(429, f"Your {plan['label']} plan includes {plan['limit_label'].lower()}. Your allowance will reset automatically.")
+            raise HTTPException(429, f"Your {plan['label']} plan includes {allowance_text(plan).lower()}. Your allowance will reset automatically.")
         update_job(job_id, {"usage_reserved": True})
     try:
         analysis_run_id = prepare_job_run(job_id, {
@@ -5157,6 +5353,40 @@ def start(request: Request, job_id: str, payload: StartPayload):
                                       on_official=on_official, kit=kit)
 
 
+def _apply_trim(job_id: str, job: dict, start: float | None, end: float | None) -> dict:
+    """Store the part of the video to analyse, and return the job as updated.
+
+    The analysis already honours requested_start_seconds and end_seconds
+    (core/analyzer.py), in process and on a remote worker alike; until now
+    nothing on the page could set them. The picture the fighters were tapped
+    on has to lie inside the kept part, since identity starts there.
+    """
+    if start is None and end is None:
+        return job
+    duration = float(job.get("video_duration") or 0.0)
+    begin = max(0.0, float(start or 0.0))
+    finish = None if end is None else float(end)
+    if duration > 0:
+        begin = min(begin, max(0.0, duration - 0.001))
+        if finish is not None:
+            finish = min(finish, duration)
+    from core.preflight_client import MIN_USABLE_SECONDS
+
+    # The same minimum the upload page holds a clip to.
+    minimum = float(MIN_USABLE_SECONDS)
+    if finish is not None and finish - begin < minimum:
+        raise HTTPException(400, f"Keep at least {minimum:g} seconds of video: the end has to be after the start.")
+    chosen = float(job.get("selection_seconds", job.get("start_seconds", 0.0)) or 0.0)
+    if chosen < begin - 0.05 or (finish is not None and chosen > finish + 0.05):
+        raise HTTPException(400, (
+            f"The picture you tapped the fighters on is at {_clock(chosen)}, outside the part you kept "
+            f"({_clock(begin)}-{_clock(finish if finish is not None else duration)}). Pick a moment inside "
+            "it, or widen the trim."))
+    patch = {"requested_start_seconds": begin, "end_seconds": finish}
+    update_job(job_id, patch)
+    return {**job, **patch}
+
+
 def _start_solo(request: Request, job_id: str, job: dict, fighter_a_box: list[float],
                 video_width: float, video_height: float, capacity: dict):
     """Queue a solo session: one person, movement and guard only, no scoring."""
@@ -5169,9 +5399,9 @@ def _start_solo(request: Request, job_id: str, job: dict, fighter_a_box: list[fl
     _save_fighter_portrait(job_id, "A", fighter_a_box)
     req = _analysis_request(job_id, {**job, "solo": True}, fighter_a_box, [], "A")
     if job.get("account_id") and not job.get("usage_reserved"):
-        if not reserve_analysis(int(job["account_id"]), job_id):
+        if not reserve_analysis(int(job["account_id"]), job_id, video_seconds=_analysed_seconds(job, req)):
             plan = _request_plan(request)
-            raise HTTPException(429, f"Your {plan['label']} plan includes {plan['limit_label'].lower()}. Your allowance will reset automatically.")
+            raise HTTPException(429, f"Your {plan['label']} plan includes {allowance_text(plan).lower()}. Your allowance will reset automatically.")
         update_job(job_id, {"usage_reserved": True})
     try:
         analysis_run_id = prepare_job_run(job_id, {
@@ -5236,7 +5466,7 @@ def restart_interrupted_analysis(request: Request, job_id: str):
 def progress_page(request: Request, job_id: str):
     authorized = _authorized_job(request, job_id)
     if not authorized:
-        raise HTTPException(404)
+        return _job_page_refused(request)
     job = get_job(job_id) or authorized
     # QA, 2026-10-07: opened before the fighters were picked it showed
     # "Analysis running 0.0% - Loading the analysis models" forever, and a
@@ -5271,6 +5501,7 @@ def _public_job_status(job_id: str, job: dict) -> dict:
         "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
         "fighter_b_confidence", "current_round", "quality_mode", "live_event_mode",
         "live_events", "provisional_stats", "latest_observation", "focus_fighter", "analysis_run_id",
+        "eta_scope",
     }
     payload = {key: value for key, value in job.items() if key in public_fields}
     if not STRIKE_COUNTS_PUBLISHED:
@@ -5313,13 +5544,20 @@ def _public_job_status(job_id: str, job: dict) -> dict:
     # analysis "running" at 0.9% with an ETA "calculating" (QA, 2026-10-11).
     # The worker is there but refused for running other code than this site:
     # the fight waits until both are updated, and the page says so.
+    # QA, 2026-10-14: this used to sit under "Warming up the analysis
+    # computer" with a timer that kept counting, which promised a start that
+    # was not coming. Now the page says the analysis is paused for an update
+    # and stops counting; the owner has already been alerted (claim route).
+    paused = bool(job.get("status") == "queued" and recent_worker_refusal())
+    payload["paused_for_update"] = paused
     payload["worker_refused"] = (
-        "The analysis computer is running a different version of WarriorIQ from this website, so it "
-        "will not analyse fights until both are updated. Your fight is saved and waiting."
-        if job.get("status") == "queued" and recent_worker_refusal() else None)
-    payload["warming_up"] = bool(job.get("status") in {"queued", "running"}
+        "Analysis is paused for an update. The analysis computer and this website are being "
+        "brought to the same version; your fight is saved and keeps its place in the queue."
+        if paused else None)
+    payload["warming_up"] = bool(not paused and job.get("status") in {"queued", "running"}
                                  and job.get("stage") in {None, "queued", "preparing", "loading", "models"}
                                  and not float(job.get("processed_video_seconds") or 0.0))
+    payload["stage_view"] = stage_view(job, payload["analysis_duration_seconds"], paused=paused)
     return payload
 
 
@@ -5698,6 +5936,19 @@ def _fighter_names(request: Request, job: dict, report: dict) -> dict:
     Without a filed fighter, the letters stay.
     """
     names = {"A": "Fighter A", "B": "Fighter B"}
+    video = report.get("video") or {}
+    focus = str(job.get("focus_fighter") or video.get("focus_fighter") or "A")
+    if focus not in names:
+        return names
+    other = "B" if focus == "A" else "A"
+    # The opponent's name when the athlete gave one (audit 2026-10-14, #30/#31),
+    # whether or not the fight was filed against a roster fighter.
+    opponent = job.get("opponent_name")
+    if opponent is None and job.get("job_id"):
+        opponent = (get_fight(str(job["job_id"])) or {}).get("opponent_name")
+    opponent = clean_fight_name(opponent)
+    if opponent:
+        names[other] = opponent
     profile_id = _profile_id(request)
     if profile_id is None or not str(job.get("fighter_id") or "").isdigit():
         return names
@@ -5705,12 +5956,8 @@ def _fighter_names(request: Request, job: dict, report: dict) -> dict:
     name = " ".join(str((fighter or {}).get("name") or "").split())
     if not name:
         return names
-    video = report.get("video") or {}
-    focus = str(job.get("focus_fighter") or video.get("focus_fighter") or "A")
-    if focus not in names:
-        return names
     names[focus] = name
-    names["B" if focus == "A" else "A"] = "Opponent"
+    names[other] = opponent or "Opponent"
     return names
 
 
@@ -5840,7 +6087,7 @@ def _result_opened(request: Request, response, job_id: str):
 def result_page(request: Request, job_id: str):
     job = _authorized_job(request, job_id)
     if not job:
-        raise HTTPException(404)
+        return _job_page_refused(request)
     if job.get("history_saved") is False:
         persist_completed_job(job_id, str(job.get("analysis_run_id") or ""))
     path = _require_completed_artifact(job_id, "report.json")
@@ -5940,6 +6187,8 @@ def result_page(request: Request, job_id: str):
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
         "identity_failure": _identity_failure(report),
+        # "Why this score" (core.scoring.score_explanation; audit 2026-10-14, #7).
+        "score_reasons": score_explanation(report.get("scorecard"), names),
         # "Punches and knees are not counted" on taekwondo, which awards no
         # knees - the note names only what this sport actually scores.
         "withheld_families": _reported_strike_families(
@@ -5971,15 +6220,16 @@ def result_page(request: Request, job_id: str):
         "kick_total": None if identity_trusted else unattributed_kick_total(report),
         # The global switch, or this sport's accuracy exam for the model that
         # made the report (core/strike_exam.py): published_families says both.
+        # The one rule every page uses (core.report.strike_numbers_shown).
         "strike_counts_published": bool(published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)),
-        # Attributions, like the per-fighter cards, so only when identity held.
-        "counted_strikes": (_with_checks(job_id, _counted_strikes(report, published_families(
-            (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)))
-            if identity_trusted else []),
+        "counted_strikes": _with_checks(job_id, _counted_strikes(report, strike_numbers_shown(
+            report, (report.get("scorecard") or {}).get("sport") or _job_sport(job)))),
         "can_check_strikes": bool(_account(request)),
         "went_down": _went_down(job_id, report),
         "wrong_sport": _wrong_sport(report, job),
+        # Kicks or knees found in a boxing upload: a suggestion only (#19).
+        "kicks_in_boxing": None if _wrong_sport(report, job) else sport_check.kicks_in_boxing(report),
         # Stats-only story card for Instagram, TikTok, WhatsApp and the rest:
         # an image made in the browser, no link and no video, so every plan.
         "share_card": share_card(report) if _account(request) else None,
@@ -6487,7 +6737,7 @@ def replay_page(
     outcome: str | None = None,
 ):
     if not _authorized_job(request, job_id):
-        raise HTTPException(404)
+        return _job_page_refused(request)
     path = _require_completed_artifact(job_id, "report.json")
     if not path.exists():
         raise HTTPException(404)
@@ -6507,7 +6757,7 @@ def replay_page(
     )
     sport = (report.get("scorecard") or {}).get("sport") or _job_sport(_authorized_job(request, job_id) or {})
     policy = counting_policy(sport, report=report)
-    if replay_mode == "movement_chapters" and identity_safe and published_families(sport, report):
+    if replay_mode == "movement_chapters" and strike_numbers_shown(report, sport):
         # The report lists every counted strike ("Watch every counted strike")
         # while this page said no action had passed. The same list is offered
         # here, labelled as what it is: automatic counts, estimates.
@@ -6626,10 +6876,64 @@ def _video_removed(job_id: str) -> bool:
         return True
 
 
+def _media_signature(job_id: str, expires: int) -> str:
+    message = f"{job_id}:{int(expires)}".encode("utf-8")
+    return hmac.new(SETTINGS.media_signing_key.encode("utf-8"), message, hashlib.sha256).hexdigest()[:32]
+
+
+def _signed_media_url(job_id: str, now: float | None = None) -> str | None:
+    """A CDN address for this fight's video, or None when no CDN is configured."""
+    if not (SETTINGS.media_cdn_base_url and SETTINGS.media_signing_key):
+        return None
+    period = max(60, int(SETTINGS.media_url_seconds))
+    now = time.time() if now is None else now
+    # Rounded up to the next whole period, plus one: the URL is the same for
+    # every request in a period (so the CDN copy is reused) and never has less
+    # than one period left to run.
+    expires = (int(now) // period + 2) * period
+    return (f"{SETTINGS.media_cdn_base_url}/media-signed/{quote(job_id)}"
+            f"?exp={expires}&sig={_media_signature(job_id, expires)}")
+
+
+def _media_path(job_id: str) -> Path:
+    job = get_job(job_id)
+    if job:
+        path = Path(job["video_path"])
+    else:
+        fight = get_fight(job_id)
+        path = Path(fight["video_path"]) if fight else Path("missing")
+    if not path.exists():
+        raise HTTPException(404)
+    return playback_file(path)
+
+
+@app.get("/media-signed/{job_id}", include_in_schema=False)
+def media_signed(job_id: str, exp: int = 0, sig: str = ""):
+    """The video behind a signed CDN address (_signed_media_url).
+
+    No session: a CDN pulling it has none. The signature and the expiry are
+    the authorisation, checked in constant time; anything else is a 404, so an
+    address cannot be probed for whether a fight exists.
+    """
+    if not (SETTINGS.media_cdn_base_url and SETTINGS.media_signing_key):
+        raise HTTPException(404)
+    if int(exp) < time.time() or not hmac.compare_digest(str(sig), _media_signature(job_id, int(exp))):
+        raise HTTPException(404)
+    path = _media_path(job_id)
+    # Public, because the address itself is the secret and it expires; the CDN
+    # may keep it until then and serve every seek from its edge.
+    remaining = max(0, int(exp) - int(time.time()))
+    return FileResponse(path, headers={"Cache-Control": f"public, max-age={remaining}, immutable",
+                                       "X-Robots-Tag": "noindex, nofollow"})
+
+
 @app.get("/media/{job_id}")
 def media(request: Request, job_id: str):
     if not _authorized_job(request, job_id):
         raise HTTPException(404)
+    signed = _signed_media_url(job_id)
+    if signed:
+        return RedirectResponse(signed, status_code=302, headers={"Cache-Control": "private, no-store"})
     job = get_job(job_id)
     if job:
         path = Path(job["video_path"])
@@ -7198,6 +7502,27 @@ def _display_name(profile: dict | None, fights: list[dict]) -> str:
     return own or SETTINGS.default_profile_name
 
 
+def _main_fighter_id(request: Request) -> int | None:
+    """The profile's main fighter: the roster entry named like the profile, else
+    the one most fights are filed under (the athlete Fight Camp follows)."""
+    account = _account(request)
+    if not account:
+        return None
+    profile_id = int(account["profile_id"])
+    roster = list_fighters(profile_id)
+    if not roster:
+        return None
+    profile = get_profile(profile_id) or {}
+    own = " ".join(str(profile.get("display_name") or "").split()).casefold()
+    named = next((f for f in roster if own and " ".join(str(f.get("name") or "").split()).casefold() == own), None)
+    if named:
+        return int(named["id"])
+    most = _athlete_fighter_id(list_fights(profile_id))
+    if most is not None and any(int(f["id"]) == int(most) for f in roster):
+        return int(most)
+    return int(roster[0]["id"]) if len(roster) == 1 else None
+
+
 def _athlete_fighter_id(fights: list[dict]) -> int | None:
     """The roster fighter this page follows: the one most fights are filed under."""
     ids = Counter(fight["fighter_id"] for fight in fights if fight.get("fighter_id") is not None)
@@ -7404,19 +7729,59 @@ def _is_solo_fight(fight: dict) -> bool:
 
 
 @app.get("/history", response_class=HTMLResponse)
-def history_page(request: Request, cancelled: str = ""):
+def history_page(request: Request, cancelled: str = "", deleted: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
     for fight in fights:
         fight["card"] = _library_card(fight["job_id"])
         fight["report_available"] = bool(fight["card"].get("available"))
+        # "3.mp4" was the title (audit 2026-10-14, #30): the event the athlete
+        # named, else "Sport · Date".
+        fight["title"] = fight_title(fight)
+        fight["names"] = _library_names(fight)
+        fight["sport"] = _ruleset_sport(fight.get("ruleset"))
     pending = _pending_jobs_for_owner(_owner_key(request)) if profile_id is not None else []
     return templates.TemplateResponse(
         request=request, name="history.html",
         context={"request": request, "fights": fights, "pending": pending,
                  "cancelled_notice": (cancelled == "1" and profile_id is not None),
+                 "deleted_count": int(deleted) if deleted.isdigit() and profile_id is not None else None,
+                 # Library filters (#33): the sports and rulesets actually present.
+                 "filter_rulesets": sorted({f.get("ruleset") for f in fights if f.get("ruleset")}),
+                 "filter_sports": sorted({_ruleset_sport(f.get("ruleset")) for f in fights if f.get("ruleset")}),
                  "signed_in": profile_id is not None},
     )
+
+
+def _ruleset_sport(ruleset: str | None) -> str:
+    from core.scoring import RULESETS, normalize_ruleset
+
+    try:
+        return RULESETS[normalize_ruleset(ruleset or "K1")].sport
+    except (KeyError, ValueError):
+        return "kickboxing"
+
+
+def _library_names(fight: dict) -> dict:
+    """What a library card calls each side: the filed fighter and the named
+    opponent, on the side the fight was analysed for (#31)."""
+    focus = str(fight.get("analysis_target") or "A")
+    focus = focus if focus in ("A", "B") else "A"
+    other = "B" if focus == "A" else "A"
+    opponent = fight.get("opponent_name")
+    if not fight.get("fighter_name"):
+        return {focus: f"Fighter {focus}", other: opponent or f"Fighter {other}", "focus": focus}
+    return {focus: fight["fighter_name"], other: opponent or "Opponent", "focus": focus}
+
+
+@app.post("/fights/{job_id}/details", dependencies=[Depends(require_csrf)])
+def fight_details(request: Request, job_id: str, event_name: str = Form(""), opponent_name: str = Form("")):
+    """Name a saved fight's event and opponent from its library card (#30)."""
+    profile_id = _profile_id(request)
+    if profile_id is None or not set_fight_details(job_id, profile_id, event_name, opponent_name):
+        raise HTTPException(404)
+    _LIBRARY_CARD_CACHE.pop(job_id, None)
+    return RedirectResponse(f"/history#fight-{job_id}", status_code=303)
 
 
 def _remove_fight_files(fight: dict) -> None:
@@ -7437,12 +7802,11 @@ def _remove_profile_file(value: str | None) -> None:
         path.unlink(missing_ok=True)
 
 
-@app.post("/delete/{job_id}", dependencies=[Depends(require_csrf)])
-def delete_fight_route(request: Request, job_id: str):
-    profile_id = _profile_id(request)
+def _delete_own_fight(request: Request, profile_id: int, job_id: str) -> bool:
+    """Delete one of this profile's fights, its files and its video. False when it is not theirs."""
     existing = get_fight(job_id)
-    if profile_id is None or not existing or int(existing["profile_id"]) != profile_id:
-        raise HTTPException(404)
+    if not existing or int(existing["profile_id"]) != profile_id:
+        return False
     fight = delete_fight(job_id)
     if fight:
         _remove_fight_files(fight)
@@ -7451,11 +7815,55 @@ def delete_fight_route(request: Request, job_id: str):
             "fight_analysis_deleted", account_id=int(account["id"]) if account else None,
             resource_type="fight", resource_id=job_id,
         )
+    return True
+
+
+@app.post("/delete/{job_id}", dependencies=[Depends(require_csrf)])
+def delete_fight_route(request: Request, job_id: str):
+    profile_id = _profile_id(request)
+    if profile_id is None or not _delete_own_fight(request, profile_id, job_id):
+        raise HTTPException(404)
     return RedirectResponse("/history", status_code=303)
 
 
+BULK_DELETE_LIMIT = 100
+
+
+@app.post("/history/delete", dependencies=[Depends(require_csrf)])
+async def bulk_delete_fights(request: Request):
+    """Delete several fights at once from the library (audit 2026-10-14, #33).
+
+    The same deletion as one fight, one by one, and only this account's own:
+    an id that is not theirs is skipped without saying whether it exists.
+    """
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        raise HTTPException(404)
+    _enforce_rate_limit(request, "bulk-delete", 10, 600)
+    form = await request.form()
+    job_ids = [str(value) for value in form.getlist("job_id")][:BULK_DELETE_LIMIT]
+    deleted = 0
+    for job_id in dict.fromkeys(job_ids):
+        if await run_in_threadpool(_delete_own_fight, request, profile_id, job_id):
+            deleted += 1
+    return RedirectResponse(f"/history?deleted={deleted}", status_code=303)
+
+
+def _fight_identity_failed(fight: dict) -> bool:
+    """Did this saved fight fail the identity check? Read from its stored
+    summary, so the picker needs no report file opened per fight."""
+    summary = fight.get("summary") or {}
+    if isinstance(summary, str):
+        try:
+            summary = json.loads(summary)
+        except ValueError:
+            summary = {}
+    integrity = ((summary.get("progress_report") or {}).get("integrity") or {})
+    return integrity.get("identity_evidence_trusted") is False
+
+
 @app.get("/compare", response_class=HTMLResponse)
-def compare_page(request: Request, a: str = "", b: str = ""):
+def compare_page(request: Request, a: str = "", b: str = "", include_failed: str = ""):
     profile_id = _profile_id(request)
     fights = list_fights(profile_id) if profile_id is not None else []
     # Only offer fights that can actually be compared. The row outlives its
@@ -7478,7 +7886,18 @@ def compare_page(request: Request, a: str = "", b: str = ""):
             fight.get("ruleset"), fight.get("created_at"), fight.get("fight_type"),
             fight.get("fighter_name"))
         fight["choice_stamp"] = fight_choice_stamp(fight.get("created_at"))
+        # The picker (audit 2026-10-14, #37): title, thumbnail, score, status.
+        fight["title"] = fight_title(fight)
+        fight["card"] = _library_card(fight["job_id"])
+        # A fight that failed the identity check is marked and left out unless
+        # asked for (#34): its numbers may be the wrong person's.
+        fight["identity_failed"] = _fight_identity_failed(fight) or bool(fight["card"].get("failed"))
     allowed = {fight["job_id"] for fight in fights}
+    failed_picked = [job_id for job_id in (a, b)
+                     if any(f["job_id"] == job_id and f["identity_failed"] for f in fights)]
+    allow_failed = include_failed == "1"
+    if failed_picked and not allow_failed:
+        allowed = allowed - set(failed_picked)
     # A solo session picked by its address (it is not offered in the picker)
     # was answered "Choose two different saved fights", which says the reader
     # did something they did not (QA, 2026-10-07).
@@ -7499,6 +7918,10 @@ def compare_page(request: Request, a: str = "", b: str = ""):
         name="compare.html",
         context={
             "request": request, "fights": fights, "a": a, "b": b, "reports": reports,
+            # Strike numbers by the same rule as the report, replay and Fight
+            # Camp (core.report.strike_numbers_shown; audit 2026-10-14, #8).
+            "strikes_shown": [bool(strike_numbers_shown(report)) if report else False for report in reports],
+            "estimate_note": ESTIMATE_NOTE,
             # Each card is headed with its fight, not "Fight analysis 1" - and
             # the page can say when the two are different fighters.
             "picked": [next((f for f in fights if f["job_id"] == job_id), None) for job_id in (a, b)],
@@ -7509,6 +7932,12 @@ def compare_page(request: Request, a: str = "", b: str = ""):
                                == _fight_digest(next(f for f in fights if f["job_id"] == b))),
             "signed_in": profile_id is not None,
             "solo_picked": bool(solo_ids),
+            "failed_picked": failed_picked if not allow_failed else [],
+            "include_failed": allow_failed,
+            # The address of this comparison, to share with the owner's own
+            # devices; it opens only for this account (#36).
+            "share_url": (f"{SETTINGS.public_base_url}/compare?a={quote(a)}&b={quote(b)}"
+                          + ("&include_failed=1" if allow_failed else "")) if a and b else "",
             # The page promised a movement comparison "below" and rendered
             # nothing. These are the numbers that survive the strike gate.
             "movement": compare_movement(reports),
@@ -7527,11 +7956,19 @@ def coach_redirect(request: Request):
     Fight Camp; old links and bookmarks keep working, query string included
     (the browser carries a #squad fragment across the redirect itself)."""
     query = request.url.query
-    return RedirectResponse("/dashboard" + (f"?{query}" if query else ""), status_code=308)
+    return RedirectResponse("/camp" + (f"?{query}" if query else ""), status_code=308)
+
+
+@app.get("/dashboard")
+def dashboard_redirect(request: Request):
+    """/dashboard served the same page as /camp at a second address (audit
+    2026-10-14, #42). It now moves there for good - 301, so bookmarks and
+    search engines update - with the query string kept."""
+    query = request.url.query
+    return RedirectResponse("/camp" + (f"?{query}" if query else ""), status_code=301)
 
 
 @app.get("/camp", response_class=HTMLResponse)
-@app.get("/dashboard", response_class=HTMLResponse)
 def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = "", redeem: str = ""):
     """Fight Camp: missions from the latest fight, progress, and the squad.
 
@@ -7671,11 +8108,11 @@ def _form_refusal(message: str, next_path: str, fallback: str) -> RedirectRespon
 def _roster_refusal(message: str, typed: str) -> RedirectResponse:
     """Send a rejected roster addition back to /coach, message and name intact."""
     query = urlencode({"error": message, "name": " ".join(typed.split())[:80]})
-    return RedirectResponse(f"/dashboard?{query}#squad", status_code=303)
+    return RedirectResponse(f"/camp?{query}#squad", status_code=303)
 
 
 @app.post("/coach/fighters", dependencies=[Depends(require_csrf)])
-def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/dashboard#squad")):
+def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = Form("/camp#squad")):
     """Add someone to the roster without having to analyse a fight first.
 
     Filing an old fight needs a fighter to file it against, and until now the
@@ -7703,7 +8140,7 @@ def add_coach_fighter(request: Request, name: str = Form(...), next_path: str = 
                 name,
             )
     create_fighter(profile_id, cleaned)
-    return RedirectResponse(_safe_next(next_path, "/dashboard#squad"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/camp#squad"), status_code=303)
 
 
 @app.post("/coach/fights/{job_id}/fighter", dependencies=[Depends(require_csrf)])
@@ -7711,7 +8148,7 @@ def assign_fight_to_fighter(
     request: Request,
     job_id: str,
     fighter_id: str = Form(""),
-    next_path: str = Form("/dashboard#squad"),
+    next_path: str = Form("/camp#squad"),
 ):
     """File a past fight against a fighter.
 
@@ -7725,7 +8162,7 @@ def assign_fight_to_fighter(
     chosen = int(fighter_id) if fighter_id.strip().isdigit() else None
     if not assign_fighter_to_fight(profile_id, job_id, chosen):
         raise HTTPException(404, "That fight or fighter is not in this workspace.")
-    return RedirectResponse(_safe_next(next_path, "/dashboard#squad"), status_code=303)
+    return RedirectResponse(_safe_next(next_path, "/camp#squad"), status_code=303)
 
 
 @app.post("/coach/assignments", dependencies=[Depends(require_csrf)])
@@ -7940,7 +8377,7 @@ def save_cookie_preferences(
 
 
 @app.get("/policies", response_class=HTMLResponse)
-def policies_updated(request: Request, next: str = "/dashboard"):
+def policies_updated(request: Request, next: str = "/camp"):
     """Ask an account whose accepted policy version is behind the current one.
 
     Reached only after authentication, so there is an account to compare
@@ -7965,7 +8402,7 @@ def policies_updated(request: Request, next: str = "/dashboard"):
 @app.post("/policies", dependencies=[Depends(require_csrf)])
 def accept_updated_policies(
     request: Request,
-    next_path: str = Form("/dashboard"),
+    next_path: str = Form("/camp"),
     accept_policies: bool = Form(False),
 ):
     account = _account(request)
@@ -8090,6 +8527,9 @@ def admin_page(request: Request, q: str = ""):
             "traffic": page_view_summary(30),
             "email_problem": email_settings_problem(),
             "email_test": request.query_params.get("email_test", "")[:600],
+            # Set while a worker is being refused for running other code.
+            "worker_version_flag": worker_alerts.version_mismatch_flag(OUTPUTS),
+            "release": release_version(),
         },
     )
 
@@ -8612,7 +9052,7 @@ def health_check(request: Request):
     # report the same one or it gets no fights, so it can be checked from
     # outside without a worker token. A hash says nothing about the code.
     payload = {"status": "ok", "service": "WarriorIQ", "commit": RUNNING_COMMIT,
-               "fingerprint": analysis_fingerprint()}
+               "fingerprint": analysis_fingerprint(), "release": release_version()}
     # The probe skips the per-visitor context (see _is_lightweight_request), so
     # the session is read here, and only when there is one to read.
     if not hasattr(request.state, "account") and request.cookies.get(SESSION_COOKIE):
@@ -8688,6 +9128,14 @@ def sitemap_xml():
         f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
         media_type="application/xml",
     )
+
+
+@app.get("/sample-report", response_class=HTMLResponse)
+def sample_report_page(request: Request):
+    """A report anyone can open, with invented data that says so (audit 2026-10-14, #54)."""
+    return templates.TemplateResponse(request=request, name="sample_report.html", context={
+        "request": request, "report": SAMPLE_REPORT, "rows": sample_rows(), "notice": SAMPLE_NOTICE,
+    })
 
 
 @app.get("/kickboxing-fight-analysis", response_class=HTMLResponse)

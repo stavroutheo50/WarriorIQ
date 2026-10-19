@@ -1,8 +1,9 @@
-"""Scale-to-zero GPU worker for WarriorIQ.
+"""GPU worker for WarriorIQ on Modal.
 
 Runs the same `worker.py` and the same models as a local GPU machine, so the
-analysis is identical. The difference is lifetime: the container starts when a
-fight is queued, drains the queue, and exits, so no GPU is billed while idle.
+analysis is identical. Since 2026-10-14 one container is kept warm with the
+models loaded (WARRIORIQ_MODAL_MIN_CONTAINERS, default 1), so a fight no longer
+pays a cold start; set it to 0 for the old scale-to-zero behaviour.
 
     modal secret create warrioriq \
         WARRIORIQ_WORKER_REMOTE_URL=https://warrioriq.eu \
@@ -22,7 +23,8 @@ Every report now carries the commit it was built from (WARRIORIQ_BUILD_COMMIT
 below), and the report footer shows it.
 
     modal run deploy/modal_worker.py::build_engines   # once per GPU type
-    modal deploy deploy/modal_worker.py
+    python deploy/release.py                          # deploys this, then checks
+                                                      # both sides report one release
 
 History: before its first deploy, on 2026-09-20, this module was
 executed against the installed client (modal 1.5.5) and builds its App cleanly:
@@ -44,7 +46,7 @@ Not verified from the repository, because it needs the Modal account:
 - that TensorRT 10.13 (requirements-trt-cuda12.txt) resolves alongside torch
   2.11 in this image
 - the first engine build on an A10
-- the startup timings drain_queue now prints
+- the startup timings Worker.load now prints
 Check the "WarriorIQ pose backend:" line after deploying: it must say
 tensorrt.
 """
@@ -95,6 +97,24 @@ def _deploy_commit() -> str:
         return "unknown"
     return (commit + ("-dirty" if dirty else "")) if commit else "unknown"
 
+# QA, 2026-10-14 (#1): a 24 s clip took about 3.5 minutes. Most of it was a
+# cold start - a new container, then the engine check and model load - paid by
+# every fight because the container exited the moment the queue was empty.
+#
+# GPU: an A10 by default, an L4 if WARRIORIQ_MODAL_GPU=L4 at deploy time. Never
+# a T4 (no usable fp16 throughput for this stack). The engine cache is keyed by
+# GPU name, so switching builds a new engine instead of loading a foreign one.
+ALLOWED_GPUS = ("A10", "L4")
+GPU = os.environ.get("WARRIORIQ_MODAL_GPU", "A10").strip() or "A10"
+if GPU not in ALLOWED_GPUS:
+    raise ValueError(f"WARRIORIQ_MODAL_GPU must be one of {ALLOWED_GPUS}, not {GPU!r}")
+# One container kept warm with the models already loaded, so a fight starts on
+# a machine that is ready. 0 restores scale-to-zero (no idle GPU bill, a cold
+# start per fight). Read on the deploying machine.
+MIN_CONTAINERS = int(os.environ.get("WARRIORIQ_MODAL_MIN_CONTAINERS", "1"))
+# How long a container that has gone idle stays up beyond the warm minimum.
+SCALEDOWN_SECONDS = int(os.environ.get("WARRIORIQ_MODAL_SCALEDOWN_SECONDS", "300"))
+
 image = (
     modal.Image.debian_slim(python_version="3.11")
     # OpenCV needs the GL/glib runtime libraries; ffmpeg decodes the fight video.
@@ -126,7 +146,11 @@ image = (
     # Every report this worker writes carries this commit and the analysis
     # version (core/build_info.py); the web app refuses a worker older than
     # itself, so a stale deploy shows up as refused claims, not short reports.
-    .env({"WARRIORIQ_BUILD_COMMIT": _deploy_commit()})
+    # The GPU and warm-container settings are baked in too, so the module
+    # re-imported inside the container declares the same app it was deployed as.
+    .env({"WARRIORIQ_BUILD_COMMIT": _deploy_commit(), "WARRIORIQ_MODAL_GPU": GPU,
+          "WARRIORIQ_MODAL_MIN_CONTAINERS": str(MIN_CONTAINERS),
+          "WARRIORIQ_MODAL_SCALEDOWN_SECONDS": str(SCALEDOWN_SECONDS)})
     .add_local_dir(
         ".",
         "/app",
@@ -175,6 +199,7 @@ image = (
 weights = modal.Volume.from_name("warrioriq-weights", create_if_missing=True)
 
 app = modal.App("warrioriq-worker", image=image)
+
 
 
 def _prepare_runtime() -> None:
@@ -287,58 +312,87 @@ def _report_backend() -> str:
     return f"{backend}:{tracker.model_path}"
 
 
-@app.function(
-    # A10 over T4: the T4 has no usable fp16 tensor throughput for this stack
-    # and 16 GB it cannot feed, while the engine is built dynamic at imgsz 1600
-    # for small-source footage. Changing this string is safe - the engine cache
-    # is keyed by GPU name, so a new GPU type builds its own rather than
-    # loading one it cannot deserialise.
-    #
-    # "A10", not "A10G". Modal's accepted strings are T4, L4, A10, L40S, A100,
-    # A100-40GB, A100-80GB, RTX-PRO-6000, H100, H200, B200, B300 - checked
-    # against modal.com/docs/guide/gpu on 2026-09-20. "A10G" is the AWS name
-    # for the same card and Modal rejects it, which fails the deploy rather
-    # than quietly falling back to a CPU container.
-    gpu="A10",
+def _warm_both_sizes() -> dict:
+    """Run the pose model once at 640 and once at 1280 so neither size pays its
+    first-call cost inside a fight. The low-resolution path runs at 1280+ and
+    the engine is dynamic (core/trt_engine.py), so both go through one engine."""
+    import time
+
+    import numpy as np
+
+    from core.analyzer import get_pose_tracker
+    from core.config import SETTINGS
+
+    tracker = get_pose_tracker()
+    timings = {}
+    for size in sorted({int(SETTINGS.default_imgsz), 1280}):
+        frame = np.zeros((size * 9 // 16, size, 3), dtype=np.uint8)
+        started = time.perf_counter()
+        try:
+            tracker.model.predict(frame, device=tracker.device, imgsz=size, conf=SETTINGS.detection_conf,
+                                  classes=[0], verbose=False)
+        except Exception as exc:                                    # noqa: BLE001
+            print(f"WarriorIQ warmup at imgsz {size} failed: {type(exc).__name__}")
+            continue
+        timings[size] = round(time.perf_counter() - started, 3)
+    return timings
+
+
+@app.cls(
+    gpu=GPU,
     volumes={DATA_DIR: weights},
     secrets=[modal.Secret.from_name("warrioriq")],
     timeout=3600,
     # One container at a time: worker.py claims a single job per loop, and the
     # web server's lease already prevents two workers owning one analysis.
     max_containers=1,
+    min_containers=MIN_CONTAINERS,
+    scaledown_window=SCALEDOWN_SECONDS,
 )
-def drain_queue() -> int:
-    """Claim and analyse every queued fight, then exit so billing stops."""
-    import sys
-    import time
+class Worker:
+    """The analysis worker, with its models loaded once per container."""
 
-    # The fixed start-up cost, phase by phase, so the next cut is chosen by
-    # measurement (QA, 2026-10-04: 0:10 for a 0:01 clip).
-    started = time.perf_counter()
-    phases = {}
-    sys.path.insert(0, "/app")
-    os.chdir("/app")
-    _prepare_runtime()
-    phases["runtime"] = time.perf_counter() - started
-    mark = time.perf_counter()
-    _prepare_engine()
-    phases["engine"] = time.perf_counter() - mark
-    mark = time.perf_counter()
-    print("WarriorIQ pose backend:", _report_backend())
-    phases["model_load"] = time.perf_counter() - mark
-    print("WarriorIQ startup seconds:", {k: round(v, 2) for k, v in phases.items()},
-          "total", round(time.perf_counter() - started, 2))
+    @modal.enter()
+    def load(self) -> None:
+        import sys
+        import time
 
-    from worker import run_worker
+        # The fixed start-up cost, phase by phase, so the next cut is chosen by
+        # measurement (QA, 2026-10-04: 0:10 for a 0:01 clip).
+        started = time.perf_counter()
+        phases = {}
+        sys.path.insert(0, "/app")
+        os.chdir("/app")
+        _prepare_runtime()
+        phases["runtime"] = time.perf_counter() - started
+        mark = time.perf_counter()
+        _prepare_engine()
+        phases["engine"] = time.perf_counter() - mark
+        mark = time.perf_counter()
+        print("WarriorIQ pose backend:", _report_backend())
+        phases["model_load"] = time.perf_counter() - mark
+        mark = time.perf_counter()
+        print("WarriorIQ warmup seconds by imgsz:", _warm_both_sizes())
+        phases["warmup"] = time.perf_counter() - mark
+        from core.build_info import release_version
 
-    # once=True keeps claiming while work remains and returns as soon as the
-    # queue is empty, which is exactly the lifetime we want to pay for.
-    result = run_worker(once=True)
-    weights.commit()
-    return result
+        print("WarriorIQ release:", release_version(), "gpu:", GPU)
+        print("WarriorIQ startup seconds:", {k: round(v, 2) for k, v in phases.items()},
+              "total", round(time.perf_counter() - started, 2))
+
+    @modal.method()
+    def drain(self) -> int:
+        """Claim and analyse every queued fight; the container then stays warm."""
+        from worker import run_worker
+
+        # once=True keeps claiming while work remains and returns as soon as the
+        # queue is empty.
+        result = run_worker(once=True)
+        weights.commit()
+        return result
 
 
-@app.function(gpu="A10", volumes={DATA_DIR: weights}, timeout=1800)
+@app.function(gpu=GPU, volumes={DATA_DIR: weights}, timeout=1800)
 def build_engines() -> str:
     """Build this GPU type's TensorRT engine onto the Volume ahead of time.
 
@@ -382,11 +436,11 @@ def wake(payload: dict, request: Request) -> dict:
     if not expected or scheme.lower() != "bearer" or not hmac.compare_digest(presented, expected):
         raise HTTPException(401, "Worker authentication failed.")
 
-    drain_queue.spawn()
+    Worker().drain.spawn()
     return {"ok": True, "job_id": payload.get("job_id")}
 
 
 @app.local_entrypoint()
 def main() -> None:
     """`modal run deploy/modal_worker.py` drains the queue once, for testing."""
-    print("worker exit code:", drain_queue.remote())
+    print("worker exit code:", Worker().drain.remote())

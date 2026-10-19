@@ -23,7 +23,7 @@ def test_the_reason_is_inside_the_start_column_and_announced():
 def test_every_disabled_state_has_a_reason():
     function = PAGE.split("function startReasonText(valid){", 1)[1].split("\n}", 1)[0]
     for reason in ("Tap ${who('A')} first.", "`Now tap ${who('B')}.`",
-                   "Tap the person training to start.", "cover the same person"):
+                   "Tap the person training to start.", "almost the same box"):
         assert reason in function
     assert "startReason.textContent=startReasonText(valid)" in PAGE
 

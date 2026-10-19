@@ -10,6 +10,20 @@ def _number(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
 
 
+def change_words(shown, unit: str) -> str:
+    """A change between fights, with its unit.
+
+    Audit 2026-10-14: "+1 pts since last fight" read like the points of the
+    game (#39), and "Ring centre -13" had no unit at all (#40). A change in a
+    percentage is in percentage points; pressure is on a 0-100 scale.
+    """
+    if unit == "percent":
+        return f"{int(shown):+d} percentage point{'' if abs(int(shown)) == 1 else 's'}"
+    if unit == "pressure":
+        return f"{int(shown):+d} on the 0-100 scale"
+    return f"{float(shown):+.1f} body lengths a second" if unit == "rate" else f"{float(shown):+.1f}"
+
+
 def identity_failed(record: dict, fighter: str) -> bool:
     """Did the report behind this record say its fighters could not be trusted?
 
@@ -65,7 +79,14 @@ def _point(record: dict, fighter: str) -> dict | None:
     # were "already measured", but the detector that measured them is the same
     # one measured at 29% precision, so an older report is not a more reliable
     # one. It is the same numbers with less provenance.
-    action_trusted = bool(report.get("integrity", {}).get("action_metrics_trusted", False))
+    # The one rule every page uses for strike numbers (core.report
+    # strike_numbers_shown; audit 2026-10-14, #8): Fight Camp shows a fight's
+    # counts exactly when its report does, as the same estimates.
+    from core.report import strike_numbers_shown
+
+    shown_families = strike_numbers_shown(report)
+    action_trusted = bool(shown_families)
+    family_counts = attacks.get("families") or {}
     return {
         "job_id": record.get("job_id"),
         "created_at": record.get("created_at", ""),
@@ -77,9 +98,8 @@ def _point(record: dict, fighter: str) -> dict | None:
         # counts because they were overstated by eleven in two of three bouts
         # checked against video; a progress chart summing them across fights
         # inherits that error and compounds it over time.
-        "attempts": _number(
-            (attacks.get("families") or {}).get("kick")
-        ) if action_trusted else None,
+        "attempts": _number(sum(float(family_counts.get(family) or 0) for family in shown_families)
+                            ) if action_trusted else None,
         "activity": _number(dashboard.get("activity_attempts_per_minute")) if action_trusted else None,
         "combinations": _number(dashboard.get("combinations_per_minute")) if action_trusted else None,
         "coverage": _number(metrics.get("pose_coverage")),
@@ -161,8 +181,7 @@ def trend_cards(points: list[dict]) -> list[dict]:
             direction = "neutral"
         else:
             direction = "up" if (change > 0) == higher_is_better else "down"
-        change_text = ((("%+d pts" % shown) if unit in ("percent", "pressure") else ("%+.1f" % shown))
-                       if shown else "no change")
+        change_text = change_words(shown, unit) if shown else "no change"
         cards.append({"key": key, "label": label, "line": line, "fights": len(values),
                       "latest": _card_value(latest, unit), "first": _card_value(first, unit),
                       "first_at": series[0][0], "latest_at": series[-1][0],

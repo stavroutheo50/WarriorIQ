@@ -617,6 +617,49 @@ class PoseTracker:
         self._prepared[(int(frame_index), size)] = (
             boxes, keypoints, result.path, result.names, time.perf_counter() - started)
 
+    def prepare_detections_batch(self, frames: list[tuple[int, object]], imgsz: int | None = None) -> None:
+        """prepare_detections for several frames in one model call.
+
+        The results are kept exactly as prepare_detections keeps them, so the
+        forward pass cannot tell the two apart. If the batched call fails - an
+        engine built for batch 1 refuses a larger batch - each frame is
+        prepared on its own instead: batching may cost nothing but speed.
+        """
+        if not frames:
+            return
+        if len(frames) == 1 or SETTINGS.pose_batch_size <= 1:
+            for index, frame in frames:
+                self.prepare_detections(frame, index, imgsz)
+            return
+        size = self._servable(int(imgsz or SETTINGS.default_imgsz))
+        started = time.perf_counter()
+        callbacks = getattr(self.model, "callbacks", {})
+        held = {}
+        for event in ("on_predict_start", "on_predict_postprocess_end"):
+            current = callbacks.get(event)
+            if current:
+                held[event] = list(current)
+                current[:] = [cb for cb in current if not _is_tracking_callback(cb)]
+        try:
+            results = self.model.predict([frame for _, frame in frames], mode="track", batch=len(frames),
+                                         **self._track_kwargs(size))
+        except Exception as exc:                                    # noqa: BLE001
+            LOGGER.info("pose_batch_unavailable size=%s error=%s - preparing frame by frame",
+                        len(frames), type(exc).__name__)
+            results = None
+        finally:
+            for event, saved in held.items():
+                callbacks[event][:] = saved
+        if results is None or len(results) != len(frames):
+            for index, frame in frames:
+                self.prepare_detections(frame, index, imgsz)
+            return
+        share = (time.perf_counter() - started) / len(frames)
+        for (index, _), result in zip(frames, results, strict=True):
+            boxes = result.boxes.data.detach().cpu().numpy() if result.boxes is not None else None
+            keypoints = result.keypoints.data.detach().cpu().numpy() if result.keypoints is not None else None
+            self._prepared[(int(index), size)] = (boxes, keypoints, result.path, result.names, share)
+
     def forget_prepared(self) -> None:
         self._prepared.clear()
         self.prepared_seconds_used = 0.0

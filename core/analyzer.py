@@ -211,6 +211,8 @@ from core.preflight import probe as probe_video
 from core.pose_smoothing import JointGate
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
 from core.report import build_report, identity_tracking, not_a_fight, withhold_for_not_a_fight, write_report
+from core.progress_eta import StageEta
+from core.camera_motion import GlobalMotion
 from core.rtm_pose import refine as refine_fighter_pose
 from core.edgetam_recovery import build_recovery
 from core.sam_recovery import nearest_guidance, sam_sampling_stride
@@ -835,15 +837,22 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
         return _analyze(replace(req, start_seconds=requested_start, selection_seconds=None),
                         progress_callback, seed_seconds=seed_seconds)
 
+    backtrack_span = max(0.001, seed_seconds - requested_start)
+    backtrack_eta = StageEta(fps)
+
     def report_progress(fraction: float) -> None:
         if progress_callback is None:
             return
+        fraction = max(0.0, min(1.0, fraction))
+        elapsed = time.perf_counter() - wrapper_started
+        eta = backtrack_eta.update("backtrack", fraction * backtrack_span, backtrack_span, elapsed)
         progress_callback(AnalysisProgress(
-            percent=0.5 + 0.5 * max(0.0, min(1.0, fraction)),
+            percent=0.5 + 0.5 * fraction,
             message="Following both fighters back to the start of the video",
-            elapsed_seconds=0.0, processed_video_seconds=0.0, speed=0.0, eta_seconds=None,
+            elapsed_seconds=elapsed, processed_video_seconds=0.0, speed=0.0, eta_seconds=eta,
             stage="tracking", video_duration_seconds=float(info.duration),
-            analysed_from_seconds=requested_start,
+            analysed_from_seconds=requested_start, stage_fraction=fraction,
+            tracked_video_seconds=None, eta_scope="stage" if eta is not None else None,
         ).to_dict())
 
     report_progress(0.0)
@@ -1014,6 +1023,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     estimated_total_seconds: float | None = None
     analysis_phase_started_at: float | None = None
     live_action_trusted = False
+    # The identity pass gets a time-left of its own once it has measured its
+    # own speed (core/progress_eta.py); before this it showed none at all.
+    stage_eta = StageEta(info.fps)
 
     def progress(
         message: str,
@@ -1028,10 +1040,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         live_events_snapshot: list[dict] | None = None,
         stats: dict | None = None,
         observation: dict | None = None,
+        stage_fraction: float | None = None,
+        tracked_seconds: float | None = None,
     ):
         nonlocal estimated_total_seconds, analysis_phase_started_at
         if progress_callback is None:
             return
+        eta_scope = "job"
         speed = processed / elapsed if elapsed > 0.0 else 0.0
         bounded_percent = float(max(0.0, min(100.0, percent)))
         if analysis_phase_started_at is None and bounded_percent >= ANALYSIS_PHASE_START:
@@ -1053,8 +1068,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 estimated_total_seconds = 0.82 * estimated_total_seconds + 0.18 * projected_total
             estimated_total_seconds = max(elapsed, estimated_total_seconds)
             eta = max(0.0, estimated_total_seconds - elapsed)
+        elif stage == "tracking" and tracked_seconds is not None:
+            # The SAM2 pass, timed on its own: time left in this pass only,
+            # and said so, since the frame pass after it has not run yet.
+            eta = stage_eta.update("tracking", tracked_seconds, segment_duration, elapsed)
+            eta_scope = "stage"
         else:
-            # Warmup and the SAM2 pass. Nothing here measures the frame pass.
+            # Warmup. Nothing has measured a pass yet.
             eta = None
         payload = AnalysisProgress(
             percent=bounded_percent,
@@ -1078,6 +1098,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             live_events=live_events_snapshot or [],
             provisional_stats=stats or {},
             latest_observation=observation,
+            stage_fraction=None if stage_fraction is None else float(max(0.0, min(1.0, stage_fraction))),
+            tracked_video_seconds=None if tracked_seconds is None else float(tracked_seconds),
+            eta_scope=eta_scope if eta is not None else None,
         )
         progress_callback(payload.to_dict())
 
@@ -1227,6 +1250,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             None,
             quality,
             stage="tracking",
+            stage_fraction=completed / max(1, total),
+            tracked_seconds=segment_duration * completed / max(1, total),
         ),
     )
     sam_was_available = sam_recovery.available
@@ -1255,6 +1280,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                     "identity": 0.0, "joint_refinement": 0.0,
                     "pose_measures": 0.0, "strike_detection": 0.0, "tracking_file": 0.0}
 
+    # The camera's move between analysed frames (core/camera_motion.py), seeded
+    # with the selection frame the identities start from.
+    camera_motion = GlobalMotion() if SETTINGS.camera_motion_compensation else None
+    if camera_motion is not None:
+        camera_motion.update(first_frame, [p.box for p in first_people])
     fallback_buffer_enabled = _fallback_buffer_needed(sam_tracks, sam_was_available)
     frame_buffer: deque[tuple[int, np.ndarray]] = deque(maxlen=max(SETTINGS.sam_buffer_frames + 4, 24))
     if fallback_buffer_enabled:
@@ -1423,6 +1453,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 people.extend(expected)
                 identity_started = time.perf_counter()
                 step_seconds["missing_fighter_search"] += identity_started - search_started
+                # Move the remembered boxes with the camera before matching, so
+                # a pan does not put the right fighter "too far to be them".
+                if camera_motion is not None:
+                    manager.compensate_camera(camera_motion.update(frame, [p.box for p in people]))
                 fighter_a, fighter_b = manager.update(people, source_frame, sam_guidance=guidance)
                 in_exchange = _fighters_in_range(fighter_a, fighter_b)
                 joints_started = time.perf_counter()
@@ -1686,6 +1720,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                     live_events_snapshot=live_event_data,
                     stats=live_stats,
                     observation=_latest_observation(seconds, info.width, info.height, fighter_a, fighter_b, manager),
+                    stage_fraction=processed_seconds / max(1e-6, segment_duration),
                 )
 
             if source_frame >= end_frame - 1:
@@ -1888,6 +1923,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "fighter_B_suspicious_handoffs_per_minute": round(
             manager.suspicious_handoffs["B"] / (segment_duration / 60.0), 2),
         "identity_swaps_corrected": int(manager.swaps_corrected),
+        # Audit 2026-10-14, #2: re-identified after leaving the picture, frames
+        # where the camera's move was compensated, and officials held apart.
+        "identity_reentries": dict(manager.reentries),
+        "camera_motion_compensated_frames": int(manager.camera_compensations),
+        "official_tracks": len(manager.official_tracks),
         "kit_attribution": kit_proposals,
         "clothed_official_filter": bool(manager.clothed_official_filter),
         "fighter_A_sam_recoveries": manager.a.sam_recovery_count,
@@ -2158,6 +2198,12 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             before_frame_pass=pose_pass_start - sweep_start - sam_sweep_seconds,
             frame_pass=frame_pass_seconds),
     })
+    # One line per analysis with every stage's time and the realtime ratio, so a
+    # slow run can be read from the worker's log without opening the report.
+    LOGGER.info("analysis_stage_seconds job=%s video_seconds=%.2f analysis_seconds=%.2f ratio=%.2f stages=%s",
+                req.job_id, segment_duration, analysis_seconds,
+                analysis_seconds / max(1e-6, segment_duration),
+                json.dumps(report["performance"]["stage_seconds"], separators=(",", ":")))
     # Not recognised as a fight: the saved file and the progress snapshot hold
     # measured movement only, as every page that reads them will show it.
     implausible = not_a_fight(report)

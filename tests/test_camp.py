@@ -138,33 +138,31 @@ class StandingTests(unittest.TestCase):
 
 
 class MissionProgressTests(unittest.TestCase):
+    # Since the audit of 14 Oct 2026 (#28) the goal is the measurement's
+    # reference line (core.metric_catalog.reference_target): balance's is 48%.
     def test_the_bar_runs_from_the_measured_number_to_the_plans_goal(self):
-        bar = mission_progress("guard_index", 0.10)
-        # The training plan's sentence for the same number says 10% to 18%.
-        self.assertEqual((bar["label"], bar["before"], bar["goal"]), ("Guard", "10.0%", "18.0%"))
-        self.assertEqual(bar["unlock"], "13.0%")
-        self.assertEqual(bar["tick"], 38)          # 3 of the 8 points to the goal
+        bar = mission_progress("balance_index", 0.30)
+        self.assertEqual((bar["label"], bar["before"], bar["goal"]), ("Balance", "30.0%", "48.0%"))
         self.assertEqual((bar["fill"], bar["after"], bar["improved"]), (0, None, None),
                          "nothing is filled before a fight has measured it")
 
     def test_a_later_fight_fills_it_with_what_it_measured(self):
-        bar = mission_progress("guard_index", 0.10, {"after": 0.14, "improved": True})
-        self.assertEqual((bar["after"], bar["fill"], bar["improved"]), ("14.0%", 50, True))
-        worse = mission_progress("guard_index", 0.10, {"after": 0.07, "improved": False})
-        self.assertEqual((worse["after"], worse["fill"], worse["improved"]), ("7.0%", 0, False))
-        past = mission_progress("guard_index", 0.10, {"after": 0.40, "improved": True})
+        bar = mission_progress("balance_index", 0.30, {"after": 0.39, "improved": True})
+        self.assertEqual((bar["after"], bar["fill"], bar["improved"]), ("39.0%", 50, True))
+        worse = mission_progress("balance_index", 0.30, {"after": 0.25, "improved": False})
+        self.assertEqual((worse["after"], worse["fill"], worse["improved"]), ("25.0%", 0, False))
+        past = mission_progress("balance_index", 0.30, {"after": 0.60, "improved": True})
         self.assertEqual(past["fill"], 100)
 
-    def test_the_units_follow_the_number(self):
-        pressure = mission_progress("pressure_index", -0.20)
-        self.assertEqual((pressure["before"], pressure["goal"]), ("40 out of 100", "46 out of 100"))
-        feet = mission_progress("footwork_body_lengths_per_second", 0.8)
-        self.assertEqual((feet["before"], feet["unlock"]), ("0.8 body lengths a second", "0.9 body lengths a second"))
+    def test_no_bar_where_there_is_no_reference_or_the_number_is_experimental(self):
+        self.assertIsNone(mission_progress("guard_index", 0.10), "guard is experimental")
+        self.assertIsNone(mission_progress("pressure_index", -0.20), "no reference range")
+        self.assertIsNone(mission_progress("footwork_body_lengths_per_second", 0.8), "no reference range")
 
     def test_nothing_to_draw_without_a_measured_number(self):
         self.assertIsNone(mission_progress(None, None))
-        self.assertIsNone(mission_progress("guard_index", None))
-        self.assertIsNone(mission_progress("guard_index", 0.97), "no room left to a goal")
+        self.assertIsNone(mission_progress("balance_index", None))
+        self.assertIsNone(mission_progress("balance_index", 0.97), "already past the line")
 
 
 class BoardTests(unittest.TestCase):
@@ -181,7 +179,8 @@ class BoardTests(unittest.TestCase):
         board = mission_board(self.camp(), [], {}, {}, {})
         self.assertEqual([card["stage"] for card in board], ["new"])
         self.assertEqual(board[0]["index"], 0)
-        self.assertEqual(board[0]["progress"]["before"], "10.0%")
+        # The fixture's mission is on guard, which is experimental: no bar.
+        self.assertIsNone(board[0]["progress"])
 
     def test_each_mission_is_one_card_at_its_stage(self):
         items = [self.item(1, "Guard-return audit"), self.item(2, "Own drill", "complete"),

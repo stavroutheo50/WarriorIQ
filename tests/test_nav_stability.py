@@ -19,5 +19,5 @@ CSS = (Path(__file__).resolve().parents[1] / "app" / "static" / "product.css").r
 def test_the_desktop_header_has_equal_side_columns():
     assert (".nav{display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(max-content,1fr);"
             "column-gap:12px;align-items:center}"
-            ".nav>.brand{justify-self:start}.nav>.account-nav{justify-self:end}\n"
-            "@media(max-width:900px){.nav{display:flex}}") in CSS
+            ".nav>.brand{justify-self:start}.nav>.account-nav{justify-self:end}") in CSS
+    assert "@media(max-width:1023px){.nav{display:flex}}" in CSS

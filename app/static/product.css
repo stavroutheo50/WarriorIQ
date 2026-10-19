@@ -374,7 +374,9 @@ body[data-page=home] main > .hero{padding-bottom:clamp(32px,5vh,56px)}
    pill plus the account email were wider than a side column and the pill
    was drawn over "Plans". When they no longer fit, the links move over. */
 .nav{display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(max-content,1fr);column-gap:12px;align-items:center}.nav>.brand{justify-self:start}.nav>.account-nav{justify-self:end}
-@media(max-width:900px){.nav{display:flex}}
+/* Below 1024px the links wrapped onto a second line (audit 2026-10-14 #47):
+   the header collapses to the menu button instead. */
+@media(max-width:1023px){.nav{display:flex}}
 
 /* Upload problems read as problems: the file line under the picker had no
    colour for a rejected file (QA, 2026-10-04). */

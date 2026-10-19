@@ -311,19 +311,22 @@ def subprocessor_sections() -> list[tuple[str, str]]:
         return f" Location: {location}." if location else " Location: not yet published."
     if SETTINGS.hosting_provider:
         sections.append((f"{SETTINGS.hosting_provider} (website hosting and storage)", (
-            f"{SETTINGS.hosting_provider} hosts this website. Accounts, the database, uploaded fight videos and "
-            "finished reports are stored on its servers. Saved fight videos are deleted after "
+            f"{SETTINGS.hosting_provider} hosts this website. Data processed: accounts, the database, uploaded "
+            "fight videos and finished reports are stored on its servers. Saved fight videos are deleted after "
             f"{SETTINGS.saved_video_retention_days} days.") + where(SETTINGS.hosting_location)))
     else:
         sections.append(("Website hosting and storage (provider not yet named)", (
             "Accounts, the database, uploaded fight videos and finished reports are stored with WarriorIQ's "
             "hosting provider, which is named here before WarriorIQ takes payments. Saved fight videos are "
             f"deleted after {SETTINGS.saved_video_retention_days} days.") + where(SETTINGS.hosting_location)))
-    if "modal.run" in SETTINGS.worker_wake_url.lower():
+    # Named either by its wake URL or by WARRIORIQ_ANALYSIS_PROVIDER_NAME=Modal:
+    # the live site analyses on Modal and the list left it out (#10).
+    if "modal.run" in SETTINGS.worker_wake_url.lower() or SETTINGS.analysis_provider_name.strip().lower() == "modal":
         sections.append(("Modal (fight analysis)", (
-            "Modal provides the cloud graphics card that analyses each fight. For one analysis it receives the "
-            "fight video and the two fighter boxes you drew, returns the measurements to this website, and the "
-            "video and working files are deleted from it when the run ends.") + where(SETTINGS.analysis_provider_location)))
+            "Modal provides the cloud graphics card that analyses each fight. Data processed: for one analysis "
+            "it receives the fight video and the two fighter boxes you drew, returns the measurements to this "
+            "website, and the video and working files are deleted from it when the run ends.")
+            + where(SETTINGS.analysis_provider_location)))
     elif SETTINGS.analysis_worker_mode == "remote" and _named(SETTINGS.analysis_provider_name):
         name = SETTINGS.analysis_provider_name
         sections.append((f"{name} (fight analysis)", (
@@ -354,8 +357,14 @@ def subprocessor_sections() -> list[tuple[str, str]]:
             "WarriorIQ's account emails, such as sign-in and verification messages, are sent through an email "
             "delivery company, named here before WarriorIQ takes payments. It receives your email address and "
             "the message.") + where(SETTINGS.email_provider_location)))
+    # Google gets its own entry (#10): it is the sign-in offered to everyone.
+    if SETTINGS.google_client_id and SETTINGS.google_client_secret and SETTINGS.oauth_state_secret:
+        sections.append(("Google (sign-in)", (
+            "Google runs \"Continue with Google\". Data processed: only when you choose that button, Google "
+            "confirms who you are and WarriorIQ receives a Google account identifier, your email address and "
+            "display name. WarriorIQ does not keep Google's access tokens. Location: Google's global "
+            "infrastructure, which can include the United States.")))
     sign_in = [name for name, configured in (
-        ("Google", SETTINGS.google_client_id and SETTINGS.google_client_secret),
         ("Meta/Facebook", SETTINGS.facebook_client_id and SETTINGS.facebook_client_secret),
         ("Microsoft", SETTINGS.microsoft_client_id and SETTINGS.microsoft_client_secret),
         ("GitHub", SETTINGS.github_client_id and SETTINGS.github_client_secret),
@@ -368,8 +377,9 @@ def subprocessor_sections() -> list[tuple[str, str]]:
             "and does not keep the provider's access tokens.")))
     if SETTINGS.payments_enabled and os.getenv("STRIPE_SECRET_KEY", "").strip():
         sections.append(("Stripe (payments)", (
-            "Stripe runs checkout for paid plans and receives your email and billing details. WarriorIQ never "
-            "sees or stores full card details.")))
+            "Stripe runs checkout for paid plans. Data processed: your email and billing details; WarriorIQ "
+            "never sees or stores full card details. Location: Stripe's infrastructure, which can include the "
+            "United States.")))
     if os.getenv("OPENAI_API_KEY", "").strip():
         sections.append(("OpenAI (optional identity recovery)", (
             "Only if you switch on identity recovery for an upload, selected frames of that fight are sent to "

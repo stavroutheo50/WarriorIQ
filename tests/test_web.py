@@ -350,11 +350,16 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("chooser-head", response.text)
 
     def test_every_workspace_route_answers_a_guest_the_same_way(self):
-        for path in ("/analyze", "/dashboard", "/history", "/profile", "/compare"):
+        for path in ("/analyze", "/camp", "/history", "/profile", "/compare"):
             with self.subTest(path=path):
                 response = self.client.get(path, follow_redirects=False)
                 self.assertEqual(response.status_code, 200, f"{path} still redirects")
                 self.assertIn("empty-workspace", response.text)
+        # /dashboard was the same page at a second address; it moves to /camp
+        # for good (audit 2026-10-14, #42) and lands on the same shell.
+        moved = self.client.get("/dashboard?x=1", follow_redirects=False)
+        self.assertEqual((moved.status_code, moved.headers["location"]), (301, "/camp?x=1"))
+        self.assertIn("empty-workspace", self.client.get("/dashboard").text)
         # /coach is the same page as /dashboard and now forwards there
         # (QA 2026-10-11, D3), landing on the same signed-out shell.
         self.assertEqual(self.client.get("/coach", follow_redirects=False).status_code, 308)
@@ -476,13 +481,20 @@ class PublicPageTests(unittest.TestCase):
         crest and accent on every other page - so the answer is present without
         a banner, and the chip is itself the way to change it.
         """
-        client = TestClient(app)
+        from browser_client import BrowserClient
+
+        client = BrowserClient(app)
         try:
             # Nothing chosen yet: no chip rather than a wrong default.
             self.assertNotIn('class="sport-switch"', client.get("/history").text)
 
+            # Opening a sport's page saves nothing (audit 2026-10-14, #43);
+            # choosing it does, and that is a POST.
             opened = client.get("/analyze/muay_thai")
             self.assertEqual(opened.status_code, 200)
+            self.assertIsNone(client.cookies.get("warrioriq_sport"))
+            chosen = client.post("/sport", data={"sport": "muay_thai"}, follow_redirects=False)
+            self.assertEqual((chosen.status_code, chosen.headers["location"]), (303, "/analyze/muay_thai"))
             self.assertEqual(client.cookies.get("warrioriq_sport"), "muay_thai")
 
             elsewhere = client.get("/history").text
@@ -495,10 +507,13 @@ class PublicPageTests(unittest.TestCase):
             self.assertIn('<details class="sport-menu"', elsewhere)
             self.assertNotIn('class="sport-switch" href="/analyze"', elsewhere)
             for key in ("kickboxing", "boxing", "muay_thai", "taekwondo", "mma"):
-                self.assertIn(f'href="/analyze/{key}"', elsewhere)
+                self.assertIn(f'name="sport" value="{key}"', elsewhere)
+            # The current sport is ticked and marked for screen readers (#46).
+            self.assertIn('<button type="submit" aria-current="true">', elsewhere)
+            self.assertIn("(current sport)", elsewhere)
 
             # Switching sport switches the shell.
-            client.get("/analyze/boxing")
+            client.post("/sport", data={"sport": "boxing"})
             self.assertIn("--sport-accent:233 106 106", client.get("/history").text)
         finally:
             client.close()
@@ -525,11 +540,15 @@ class PublicPageTests(unittest.TestCase):
                 if previous == current:
                     continue
                 with self.subTest(previous=previous, current=current):
-                    client = TestClient(app)
+                    from browser_client import BrowserClient
+
+                    client = BrowserClient(app)
                     try:
-                        client.get(f"/analyze/{previous}")
+                        client.post("/sport", data={"sport": previous})
                         self.assertEqual(client.cookies.get("warrioriq_sport"), previous)
                         page = client.get(f"/analyze/{current}").text
+                        # The page shows its own sport, and opening it saved nothing.
+                        self.assertEqual(client.cookies.get("warrioriq_sport"), previous)
                         self.assertIn(
                             f'<span class="sport-switch-name">{current_label}</span>', page)
                         self.assertNotIn(
@@ -585,7 +604,10 @@ class PublicPageTests(unittest.TestCase):
         # The deployed commit makes a settings-only deploy visible, but the probe
         # must stay minimal: no account, model, path or worker detail. The
         # analysis-code fingerprint is a bare hash a worker must match.
-        self.assertEqual(set(payload), {"status", "service", "commit", "fingerprint"})
+        # "release" is the analysis version and that fingerprint together, the
+        # one string the worker and the website must both report (#23).
+        self.assertEqual(set(payload), {"status", "service", "commit", "fingerprint", "release"})
+        self.assertRegex(payload["release"], r"^\d+\.[0-9a-f]{12}$")
         self.assertRegex(payload["fingerprint"], r"^[0-9a-f]{16}$")
         self.assertNotIn("/", payload["commit"])
         self.assertLessEqual(len(payload["commit"]), 40)
@@ -1321,7 +1343,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("20 s", hands_down)
         self.assertEqual(hands_down.count("Not measured"), 2)
         self.assertIn("re-run to measure", hands_down)
-        hands_up = re.search(r'Hands up by the face.*?</div>', page, re.S).group(0)
+        hands_up = re.search(r'Both hands up by the chin \(experimental\).*?</div>', page, re.S).group(0)
         self.assertEqual(hands_up.count(">0%<"), 2)
 
     def test_saved_movement_scorecard_renders_as_a_comparison_for_counted_rulesets(self):
@@ -1515,7 +1537,7 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("We couldn&rsquo;t follow you properly in this video", page)
         self.assertIn("Put the phone on a tripod", text)
         self.assertEqual(text.count("tripod"), 1, "the filming advice is given once")
-        self.assertIn('href="/analyze">Upload a new video', page)
+        self.assertIn('href="/analyze">Upload a steadier video', page)
         self.assertNotIn('href="/select/abc"', page)
         # The recording note moves inside the folded numbers.
         self.assertLess(page.index('id="roughNumbers"'), page.index('id="recordingWarnings"'))
@@ -1525,7 +1547,7 @@ class PublicPageTests(unittest.TestCase):
         report = json.loads((Path(__file__).resolve().parent / "fixtures" / "report_sample.json").read_text(encoding="utf-8"))
         m = report["metrics"]["A"]
         if m.get("guard_index") is not None:
-            self.assertIn(f"Your hands were up by the face {round(m['guard_index'] * 100)}% of the time you were seen", page)
+            self.assertIn(f"Your hands were both up by the chin {round(m['guard_index'] * 100)}% of the time you were seen", page)
         if m.get("balance_index") is not None:
             self.assertIn(f"You stood balanced {round(m['balance_index'] * 100)}% of the time", page)
         if m.get("pressure_index") is not None:
@@ -2073,7 +2095,9 @@ class PublicPageTests(unittest.TestCase):
 
     def test_progress_uses_supported_movement_metrics_when_actions_are_unvalidated(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(encoding="utf-8")
-        for label in ("Guard", "Balance", "Ring centre", "How clearly we saw you"):
+        # Guard carries the Experimental badge (audit 2026-10-14, #5).
+        self.assertIn('<span class="label">Guard {{ experimental_badge }}</span>', template)
+        for label in ("Balance", "Ring centre", "How clearly we saw you"):
             self.assertIn(f'<span class="label">{label}</span>', template)
         self.assertIn("Movement progress is ready", template)
         self.assertNotIn("conversion: Not validated", template)
@@ -2121,8 +2145,11 @@ class PublicPageTests(unittest.TestCase):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "compare.html").read_text(encoding="utf-8")
         self.assertIn("fights|length < 2", template)
         self.assertIn("Two fights required", template)
-        self.assertIn('name="{{field}}" required', template)
-        self.assertIn("setCustomValidity", template)
+        # A radio picker since the audit of 14 Oct 2026 (#37): each side is
+        # required, and a missing or duplicate pair stops the submit.
+        self.assertIn('<input type="radio" name="{{field}}"', template)
+        self.assertIn("{% if blocked %}disabled{% endif %} required>", template)
+        self.assertIn("if(!validateComparison())event.preventDefault()", template)
         self.assertIn("Choose two different fights", template)
 
     def test_history_new_analysis_button_targets_the_upload_card(self):
@@ -2731,7 +2758,11 @@ class SmallUiConsistencyTests(unittest.TestCase):
         self.assertIn('.faq details[open] summary:after{content:"−"}', css)
 
     def test_the_sport_chip_is_absent_where_sport_means_nothing(self):
-        self.client.get("/analyze/muay_thai")
+        from browser_client import BrowserClient
+
+        self.client.close()
+        self.client = BrowserClient(app)
+        self.client.post("/sport", data={"sport": "muay_thai"})
         # The header is identical on every page (QA 2026-10-11, D8): the chip
         # disappearing on some pages made the menu change shape.
         for path in ("/privacy", "/terms", "/legal", "/profile", "/settings/privacy"):
@@ -4018,6 +4049,7 @@ class NavigationReachabilityTests(unittest.TestCase):
     KNOWN_BREAKPOINTS = {
         430, 440, 480, 560, 620, 650, 680, 700, 720, 760, 780,
         850, 860, 900, 950, 980, 981, 1000, 1024, 1100, 1120, 1180,
+        1023,   # the header collapses below 1024px (audit 2026-10-14 #47)
     }
 
     def test_no_new_breakpoint_is_introduced(self):
@@ -4696,6 +4728,9 @@ class CookielessTrafficCountTests(unittest.TestCase):
 
         from core import db as database
 
+        # Start from an empty batch: a page view an earlier test left pending
+        # on this worker would otherwise be flushed here too.
+        database.flush_page_views()
         database.record_page_view("/pricing", day="2026-01-02")
         with mock.patch.object(database, "connection", side_effect=OSError("no database")):
             database._flush_page_views_at_exit()   # must not raise

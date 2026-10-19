@@ -58,7 +58,9 @@ def test_an_untrusted_report_offers_no_plan_target_or_coaching_claim():
     from core.report import identity_verdict, refresh_identity_integrity
 
     # Fighter B lost: identity fails as a whole, even though A passed alone.
-    report = _report(cov_a=0.95, cov_b=0.20)
+    # (Since the audit of 14 Oct 2026, #2, a fighter followed for 20-45% of the
+    # fight is reported at low confidence instead, so "lost" is below that.)
+    report = _report(cov_a=0.95, cov_b=0.10)
     assert identity_verdict(report)["trusted"] is False
     refreshed = refresh_identity_integrity(deepcopy(report))
     assert refreshed["training_plan"]["A"] == [] and refreshed["coaching"]["A"]["improvements"] == []

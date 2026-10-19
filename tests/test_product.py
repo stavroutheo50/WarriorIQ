@@ -539,7 +539,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             follow_redirects=False,
         )
         self.assertEqual(success.status_code, 303)
-        self.assertEqual(success.headers["location"], "/dashboard")
+        # A refused next falls back to Fight Camp at /camp (audit 2026-10-14, #42).
+        self.assertEqual(success.headers["location"], "/camp")
 
     def test_starter_daily_allowance_is_atomic_and_failed_use_is_returned(self):
         account = register("athlete@example.com", "Strong-Local-Password")
@@ -1033,7 +1034,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
                 "focus_fighter": "A",
             })
             self.assertEqual(overlapping.status_code, 400)
-            self.assertIn("separate fighter", overlapping.json()["detail"])
+            # Nearly the same box, neither drawn by hand (core/selection_check.py).
+            self.assertIn("different fighter", overlapping.json()["detail"])
         finally:
             delete_job(job_id)
 
@@ -1614,7 +1616,9 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertIn("Guard-return audit", page)
         self.assertIn("Take on this mission", page)
         self.assertIn("Start a mission: Guard-return audit", page, "the next step, at the top")
-        self.assertIn("Guard <b class=\"wiq-num\">10.0%</b>", page, "the bar starts at the measured number")
+        # Guard is experimental: the mission stands, but no bar toward a number
+        # target is drawn for it (audit 2026-10-14, #28).
+        self.assertNotIn("Guard <b class=\"wiq-num\">10.0%</b>", page)
 
         taken = self.client.post("/camp/missions", data={"job_id": "campfight1", "index": 0}, follow_redirects=False)
         self.assertEqual(taken.status_code, 303)
@@ -1662,7 +1666,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 145)
         self.assertIn("improved", page)
         self.assertIn("Improved ✓", page)
-        self.assertIn("Next fight: <b class=\"wiq-num\">15.0%</b>", page)
+        self.assertNotIn("Next fight: <b class=\"wiq-num\">15.0%</b>", page)
         self.assertIn("Level", page)
 
         exported = database.list_training_sessions(profile_id)
@@ -2279,12 +2283,14 @@ class DowngradeBlockTests(unittest.TestCase):
     def test_the_pricing_page_says_so_before_the_click(self):
         """Better to see why on the card than to fail after committing."""
         page = self.client.get("/pricing?audience=coach").text
-        self.assertIn("Too small", page)
-        self.assertIn("you have 8 fighters", page)
+        # One notice above the cards, not one per card (audit 2026-10-14 #52).
+        self.assertEqual(page.count('id="rosterTooBig"'), 1)
+        self.assertIn("You have 8 fighters, more than", page)
+        self.assertNotIn("Too small", page)
         # The button says the numbers, not "Not enough room" (QA, 2026-10-07).
         self.assertIn("You have 8 fighters — this plan holds 5", page)
         self.assertNotIn("Not enough room", page)
-        self.assertIn('id="blocked-coach_5"', page)
+        self.assertIn('aria-describedby="rosterTooBig"', page)
 
 
 class AddFighterFromCoachPageTests(unittest.TestCase):
@@ -2335,7 +2341,7 @@ class AddFighterFromCoachPageTests(unittest.TestCase):
         # Refused back to the page rather than as a 402 page, so the coach
         # keeps the squad they were looking at and can read why.
         self.assertEqual(second.status_code, 303)
-        self.assertIn("/dashboard?", second.headers["location"])
+        self.assertIn("/camp?", second.headers["location"])
         self.assertIn("all+in+use", second.headers["location"])
         self.assertEqual(len(database.list_fighters(self.profile)), 1)
         self.assertIn("all in use", self.client.get(
@@ -2455,9 +2461,11 @@ class SocialSignInCspTests(unittest.TestCase):
         self.assertNotIn("Signed up with", signup)
 
         self.assertEqual({"google", "github"}, starts(login))
-        self.assertIn("Signed up with", login)
-        self.assertNotIn("Continue with GitHub", login,
-                         "recovery is a quiet line, not a headline button")
+        # Audit 2026-10-14 (#50): an inline link beside a full Google button
+        # read as an afterthought; both are now buttons of the same size, with
+        # a line saying GitHub is for accounts created with it.
+        self.assertIn("Continue with GitHub", login)
+        self.assertIn("GitHub sign-in is for accounts created with it.", login)
 
     def test_the_response_header_carries_those_origins(self):
         from fastapi.testclient import TestClient

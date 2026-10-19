@@ -13,7 +13,7 @@
 <div class="metric"><div class="value">{{m.footwork_body_lengths_per_second|default(none)|movement_value('footwork')}}</div><div class="label">Movement · body lengths/sec</div></div>
 <div class="metric"><div class="value">{{m.pressure_index|default(none)|movement_value('pressure')}}</div><div class="label">Pressure · of 100</div></div>
 <div class="metric"><div class="value">{{m.ring_center_control|default(none)|movement_value('centre')}}</div><div class="label">Centre</div></div>
-<div class="metric"><div class="value">{{m.guard_index|default(none)|movement_value('centre')}}</div><div class="label">Guard</div></div>
+<div class="metric"><div class="value">{{m.guard_index|default(none)|movement_value('centre')}}</div><div class="label">Guard {{ experimental_badge }}</div></div>
 <div class="metric"><div class="value">{{m.balance_index|default(none)|movement_value('centre')}}</div><div class="label">Balance</div></div>
 <div class="metric"><div class="value">{{m.pose_coverage|default(none)|movement_value('centre')}}</div><div class="label">Seen</div></div></div>
 <h3>Training priorities</h3><ul class="list-clean">{% for item in report.coaching[fighter].improvements[:3] %}<li><strong>{{item.title}}</strong><br><span class="muted">{{item.detail}}</span></li>{% else %}<li class="muted">No evidence-backed priority available.</li>{% endfor %}</ul>

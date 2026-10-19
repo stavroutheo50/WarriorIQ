@@ -21,7 +21,7 @@ def _samples(seconds: float, rate: float = 5.0, speed=lambda t: 1.0, guard=lambd
 class OverTimeTests(unittest.TestCase):
     def test_five_second_points_with_speed_and_hands_up(self):
         samples = _samples(30, speed=lambda t: 2.0 if t >= 15 else 1.0,
-                           guard=lambda t: 0.5 if t < 10 else 0.9)   # up (<= 0.7) for the first 10 s
+                           guard=lambda t: 0.5 if t < 10 else 1.2)   # up (<= 0.9) for the first 10 s
         weights = [0.2] * len(samples)
         series = over_time(samples, weights)
         self.assertEqual(series["step_seconds"], 5.0)

@@ -38,6 +38,10 @@ if "core.config" in sys.modules:                                    # pragma: no
 # The setup page's person detector is fetched from the network on first use;
 # no test should do that. Tests that need it patch it in.
 os.environ["WARRIORIQ_PERSON_DETECTOR"] = "0"
+# Upload tests send a few bytes with a video container's header and stub the
+# decoder; ffprobe would see through that. The probe has its own tests, which
+# switch it on (tests/test_audit_2026_10_14_phase5.py).
+os.environ["WARRIORIQ_UPLOAD_STREAM_PROBE"] = "0"
 # Production ships with strike counts off (core.report.STRIKE_COUNTS_PUBLISHED).
 # Most report tests pin how counts read when they are on, so the suite runs
 # with them on; tests/test_strike_counts_off.py pins the default-off path by
@@ -69,3 +73,25 @@ def pytest_report_header(config) -> str:
 
 def pytest_sessionfinish(session, exitstatus) -> None:
     shutil.rmtree(_RUNTIME, ignore_errors=True)
+
+
+import pytest  # noqa: E402  (after the environment is set, as above)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limit_windows():
+    """Each test starts with no requests counted against its address.
+
+    Every test client shares one address ("testclient"), and the per-address
+    limits (login: 30 in five minutes) are counted in process memory. With
+    pytest-xdist one worker can run more than thirty tests that sign in within
+    a few seconds, and the next test's login was then refused with a 429 -
+    failing tests that have nothing to do with rate limits, depending only on
+    which worker they landed on. Tests of the limiter make all their requests
+    inside one test, so starting each test empty does not weaken them.
+    Read from sys.modules so this never imports the app on its own.
+    """
+    web = sys.modules.get("app.main")
+    if web is not None:
+        web._rate_windows.clear()
+    yield

@@ -6,7 +6,7 @@
 <header class="pricing-hero">
   <div class="eyebrow">WarriorIQ plans</div>
   <h1>Pick your pace.<br><em>Keep improving.</em></h1>
-  <p>Every plan uses the same fight-analysis engine. Higher plans unlock more daily analyses and a deeper performance report.</p>
+  <p>Every plan uses the same fight-analysis engine. Higher plans unlock more analyses and a deeper performance report.</p>
   {#- "No video filename shown" was removed (QA, 2026-10-07): the Pending list
       and library search show and search the filename, which is how people
       find their own fights. -#}<div class="pricing-promise"><span>✓ Your footage stays private</span><span>✓ Upgrade when you need more</span></div>
@@ -35,7 +35,7 @@
 <section class="allowance-strip">
   <div><span class="small muted">Your current plan</span><strong>{{allowance.plan.label}}</strong></div>
   <div><span class="small muted">Current allowance</span><strong>{{allowance.plan.limit_label}}</strong></div>
-  <div><span class="small muted">Available now</span><strong>{% if allowance.remaining is none %}Unlimited{% else %}{{allowance.remaining}} remaining{% endif %}</strong></div>
+  <div><span class="small muted">Available now</span><strong>{% if allowance.remaining is none %}Unlimited{% elif allowance.unit == 'minutes' %}{{allowance.remaining}} video minutes remaining{% else %}{{allowance.remaining}} remaining{% endif %}</strong></div>
 </section>
 {% endif %}
 
@@ -64,7 +64,7 @@
         <th scope="col">Plan</th>
         <th scope="col">Price</th>
         <th scope="col">Fighters</th>
-        <th scope="col"><abbr title="Analyses per day">Per day</abbr></th>
+        {% set allowance_title, allowance_label = allowance_column() %}<th scope="col"><abbr title="{{ allowance_title }}">{{ allowance_label }}</abbr></th>
         <th scope="col" class="compare-report">Report</th>
       </tr>
     </thead>
@@ -83,14 +83,16 @@
   </table>
 </div>
 
+{#- Plans smaller than the roster are refused rather than sold and reconciled
+    afterwards: making the numbers fit would mean archiving somebody's fighters
+    for them. Said once here, not on every card (audit 2026-10-14 #52). -#}
+{% set small_plans = [] %}{% for key,plan in plans.items() %}{% if plan.roster_limit and roster_held and roster_held > plan.roster_limit %}{% set _ = small_plans.append(plan.label) %}{% endif %}{% endfor %}
+{% if small_plans %}<div class="plan-blocked plan-blocked-summary" id="rosterTooBig" role="note">You have {{ roster_held|count_of('fighter') }}, more than {{ small_plans|join(', ') }} can hold. Archive fighters on the Fight Camp roster first to choose {{ 'that plan' if small_plans|length == 1 else 'one of those plans' }}.</div>{% endif %}
 <div class="pricing-grid">
 {% for key,plan in plans.items() %}
   <section class="card pricing-card {% if key == 'athlete_pro' %}featured{% elif key == 'gym' %}gym-featured{% endif %}" id="plan-{{key}}" data-plan="{{key}}">
     {% if plan.highlight %}<div class="plan-banner">{{plan.highlight}}</div>{% endif %}
     {% set too_small = plan.roster_limit and roster_held and roster_held > plan.roster_limit %}
-    {# Refused rather than sold and reconciled afterwards: making the numbers
-       fit would mean archiving somebody's fighters for them. #}
-    {% if too_small %}<div class="plan-blocked" id="blocked-{{key}}">Too small — you have {{roster_held}} fighters. Archive {{roster_held - plan.roster_limit}} first.</div>{% endif %}
     <div class="plan-card-head">
       <div class="eyebrow">{{plan.label}}</div>
       {% if key == current_plan_key %}<span class="current-plan">Current plan</span>{% endif %}
@@ -133,11 +135,11 @@
     {% if key == 'gym' %}<div class="gym-note"><strong>Built to stay out of the way.</strong><span>Run every athlete through the same repeatable review workflow without counting each upload.</span></div>{% endif %}
 
     {% if key == current_plan_key %}
-      <a class="btn secondary" href="{% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Open your workspace</a>
+      <a class="btn secondary" href="/camp">Open your workspace</a>
     {% elif key == 'free' %}
-      {% if account %}<a class="btn secondary" href="/dashboard">Use Starter</a>{% else %}<a class="btn" href="/signup">Start free</a>{% endif %}
+      {% if account %}<a class="btn secondary" href="/camp">Use Starter</a>{% else %}<a class="btn" href="/signup">Start free</a>{% endif %}
     {% elif too_small %}
-      <button class="btn secondary" type="button" disabled aria-describedby="blocked-{{key}}">You have {{ roster_held|count_of('fighter') }} — this plan holds {{ plan.roster_limit }}</button>
+      <button class="btn secondary" type="button" disabled aria-describedby="rosterTooBig">You have {{ roster_held|count_of('fighter') }} — this plan holds {{ plan.roster_limit }}</button>
     {% elif payments_enabled and plan.stripe_price_id %}
       <form method="post" action="/checkout/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="check billing-check"><input type="checkbox" name="billing_acceptance" value="true" required> I understand {{plan.price}} {{plan.period}}, recurring until cancelled, with {{plan.limit_label|lower}}. I accept the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms</a> and <a class="text-link" href="/refunds" target="_blank" rel="noopener">cancellation policy</a>.</label><button class="btn" type="submit" data-loading-label="Opening secure checkout…">Continue to secure payment</button></form>
     {% elif account %}
@@ -150,7 +152,7 @@
       {% if key in plans_wanted %}<p class="small muted plan-wanted">✓ Noted — you are on the list for {{plan.label}}. We will email you when billing opens.</p>
       {% else %}<form method="post" action="/plan-interest/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="/pricing"><button class="btn" type="submit">Tell us you want {{plan.label}}</button></form>{% endif %}
     {% else %}
-      {% if payments_enabled %}<a class="btn secondary" href="/signup?next={% if key in ['coach','gym'] %}/coach{% else %}/dashboard{% endif %}">Create account first</a>
+      {% if payments_enabled %}<a class="btn secondary" href="/signup?next=/camp">Create account first</a>
       {% else %}<a class="btn secondary" href="/signup?next=/pricing">Create a free account to request {{plan.label}}</a>{% endif %}
     {% endif %}
   </section>

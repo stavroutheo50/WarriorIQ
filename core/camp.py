@@ -227,6 +227,9 @@ def mission_progress(metric: str | None, measured: float | None, result: dict | 
         return None
     before = float(measured)
     goal, show = metric_goal(metric, before)
+    if goal is None:
+        # No target for this measurement (core.metric_catalog.reference_target).
+        return None
     span = goal - before
     if span <= 0:
         return None

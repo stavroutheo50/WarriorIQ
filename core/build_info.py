@@ -27,7 +27,13 @@ from pathlib import Path
 #    with the fighter boxes drawn on the turned frame; and guard measured as
 #    wrist-to-chin over shoulder width (core/guard.py). An older worker would
 #    analyse a turned job unturned, with its boxes on the wrong pixels.
-ANALYSIS_VERSION = 4
+# 5: fighters re-identified by appearance after leaving the frame, camera
+#    motion compensated before matching, officials held as a third-person
+#    class, and a fighter followed for 20-45% of the fight reported at low
+#    confidence instead of failing (audit 2026-10-14, #2).
+# 6: guard needs both wrists up by the chin (core/guard.py hands_up_share/3;
+#    audit 2026-10-14, #5).
+ANALYSIS_VERSION = 6
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -111,6 +117,18 @@ def code_differences(worker_files: dict[str, str]) -> dict[str, list[str]]:
     return {"changed": sorted(name for name in own if name in worker_files and worker_files[name] != own[name]),
             "missing_on_worker": sorted(name for name in own if name not in worker_files),
             "extra_on_worker": sorted(name for name in worker_files if name not in own)}
+
+
+def release_version() -> str:
+    """The one version string the website and the worker must both report.
+
+    QA, 2026-10-14: the two were deployed separately and drifted, and fights
+    waited at "warming up". The string is the analysis version and the code
+    fingerprint together - exactly what the claim route compares - so the two
+    sides agree on this string if and only if the worker will be given fights.
+    deploy/release.py prints it and checks both sides report it.
+    """
+    return f"{ANALYSIS_VERSION}.{analysis_fingerprint()[:12]}"
 
 
 def stamp() -> dict:

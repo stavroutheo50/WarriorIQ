@@ -223,16 +223,87 @@ PLANS = {
 }
 
 
+# How a plan's allowance is counted (audit 2026-10-14, #51).
+#
+#   day            daily_limit analyses each UTC day - the default, and the
+#                  limits every plan above has today;
+#   month          monthly_limit analyses each calendar month;
+#   video_minutes  monthly_video_minutes minutes of analysed video each month.
+#
+# Chosen per plan with "allowance_period", or for every plan at once with
+# WARRIORIQ_ALLOWANCE_PERIOD. A plan without the number its period needs keeps
+# counting per day, so switching the setting can never leave a plan without a
+# limit. The numbers for month and video_minutes are the owner's to set.
+ALLOWANCE_PERIODS = ("day", "month", "video_minutes")
+DEFAULT_ALLOWANCE_PERIOD = os.getenv("WARRIORIQ_ALLOWANCE_PERIOD", "day").strip().lower()
+
+
+def allowance(plan: dict) -> dict:
+    """{"period": "day" | "month" | "video_minutes" | "unlimited" | "unavailable", "amount": n}."""
+    if plan.get("unlimited"):
+        return {"period": "unlimited", "amount": None}
+    wanted = str(plan.get("allowance_period") or DEFAULT_ALLOWANCE_PERIOD)
+    if wanted == "month" and plan.get("monthly_limit") is not None:
+        return {"period": "month", "amount": int(plan["monthly_limit"])}
+    if wanted == "video_minutes" and plan.get("monthly_video_minutes") is not None:
+        return {"period": "video_minutes", "amount": int(plan["monthly_video_minutes"])}
+    if plan.get("daily_limit") is not None:
+        return {"period": "day", "amount": int(plan["daily_limit"])}
+    if plan.get("monthly_limit") is not None:
+        return {"period": "month", "amount": int(plan["monthly_limit"])}
+    return {"period": "unavailable", "amount": 0}
+
+
+def allowance_text(plan: dict, *, every: bool = False) -> str:
+    """"3 analyses per day", "30 analyses per month", "120 video minutes per month"."""
+    rule = allowance(plan)
+    amount = rule["amount"]
+    if rule["period"] == "unlimited" or (rule["period"] != "unavailable" and amount is None):
+        return "Unlimited fight analyses"
+    if rule["period"] == "video_minutes":
+        return f"{amount} video minute{'' if amount == 1 else 's'} {'every' if every else 'per'} month"
+    noun = f"{amount} analys{'is' if amount == 1 else 'es'}"
+    if rule["period"] == "month":
+        return f"{noun} {'every' if every else 'per'} month"
+    if rule["period"] == "day":
+        return f"{noun} {'every' if every else 'per'} day"
+    return "No analyses"
+
+
+ALLOWANCE_COLUMN = {
+    "day": ("Analyses per day", "Per day"),
+    "month": ("Analyses per month", "Per month"),
+    "video_minutes": ("Minutes of video per month", "Video min / month"),
+}
+
+
+def allowance_column() -> tuple[str, str]:
+    """The pricing table's allowance heading, (full title, short label)."""
+    return ALLOWANCE_COLUMN.get(DEFAULT_ALLOWANCE_PERIOD, ALLOWANCE_COLUMN["day"])
+
+
+def allowance_cell(plan: dict) -> str:
+    """The pricing table's allowance cell: the number when the plan counts by
+    the column's period, else with its own unit ("30 / month")."""
+    rule = allowance(plan)
+    if rule["period"] == "unlimited":
+        return "Unlimited"
+    column = DEFAULT_ALLOWANCE_PERIOD if DEFAULT_ALLOWANCE_PERIOD in ALLOWANCE_COLUMN else "day"
+    if rule["period"] == column:
+        return str(rule["amount"])
+    if rule["period"] == "video_minutes":
+        return f"{rule['amount']} min / month"
+    if rule["period"] in {"day", "month"}:
+        return f"{rule['amount']} / {rule['period']}"
+    return "0"
+
+
 def plan_features(plan: dict) -> list[str]:
     """A plan's feature list, from its own limits and the feature switches."""
     out: list[str] = []
     for item in plan.get("feature_spec") or []:
         if item == DAILY:
-            daily = plan.get("daily_limit")
-            if plan.get("unlimited") or daily is None:
-                out.append("Unlimited fight analyses")
-            else:
-                out.append(f"{daily} analys{'is' if daily == 1 else 'es'} per day")
+            out.append(allowance_text(plan))
         elif item == MOMENTS:
             if not feature_on("key_moments"):
                 continue
@@ -464,7 +535,6 @@ def comparison_rows() -> list[dict]:
     for key, plan in PLANS.items():
         unlimited = bool(plan.get("unlimited"))
         roster = plan.get("roster_limit")
-        daily = plan.get("daily_limit")
         rows.append({
             "key": key,
             "label": plan.get("label"),
@@ -473,8 +543,17 @@ def comparison_rows() -> list[dict]:
             # "Unlimited" rather than a blank: an empty cell in a comparison
             # reads as "this plan does not have that".
             "fighters": "Unlimited" if (unlimited or roster is None) else str(roster),
-            "daily": "Unlimited" if (unlimited or daily is None) else str(daily),
+            # Named "daily" for the template; it is whatever period the plan counts by (#51).
+            "daily": allowance_cell(plan),
             "report": _REPORT_WORD.get(str(plan.get("report_tier")), "Complete"),
             "audience": plan.get("audience"),
         })
     return rows
+
+
+# An athlete plan's headline is its allowance, so it follows the counting
+# period rather than being typed by hand (#51). A coach plan's headline is its
+# roster ("Up to 5 fighters") and is left as written.
+for _plan in PLANS.values():
+    if _plan.get("audience") == "athlete":
+        _plan["limit_label"] = allowance_text(_plan, every=True)

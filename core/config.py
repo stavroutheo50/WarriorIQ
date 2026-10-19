@@ -57,6 +57,43 @@ def env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _legal_identity() -> dict[str, str]:
+    """WARRIORIQ_LEGAL_IDENTITY: the operator's legal details as ONE value.
+
+    Audit 2026-10-14 (#9): the entity, its address and its contact addresses
+    were seven separate settings, so a change of company or mailbox meant
+    finding every one. This JSON object sets them together, and every legal
+    page reads the fields it fills:
+
+        {"name": "WarriorIQ Ltd", "address": "...", "registration": "...",
+         "vat": "...", "country": "Cyprus", "support_email": "support@warrioriq.eu",
+         "privacy_email": "privacy@warrioriq.eu", "dmca_email": "copyright@warrioriq.eu"}
+
+    A key it carries wins over the older single setting
+    (WARRIORIQ_OPERATOR_NAME and the rest), which still work on their own.
+    Malformed JSON is ignored rather than half-applied.
+    """
+    import json
+
+    raw = os.getenv("WARRIORIQ_LEGAL_IDENTITY", "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): str(v).strip() for k, v in value.items() if isinstance(v, (str, int, float)) and str(v).strip()}
+
+
+LEGAL_IDENTITY = _legal_identity()
+
+
+def legal_value(key: str, env_name: str) -> str:
+    return LEGAL_IDENTITY.get(key) or os.getenv(env_name, "").strip()
+
+
 IS_RENDER = env_bool("RENDER", False)
 
 
@@ -152,6 +189,12 @@ class Settings:
     # strike timing starts being measured rather than estimated.
     min_tracking_fps: float = float(os.getenv("WARRIORIQ_MIN_FPS", "6"))
     max_tracking_fps: float = float(os.getenv("WARRIORIQ_MAX_FPS", "30"))
+    # Frames handed to the pose model in one call where the frames are known
+    # ahead of time (the backward identity pass). One call per frame paid the
+    # GPU's launch and transfer overhead per frame. 1 switches batching off.
+    # A TensorRT engine accepts batches only up to the size it was built for,
+    # so the engine is built for this size too (core/trt_engine.py).
+    pose_batch_size: int = max(1, int(os.getenv("WARRIORIQ_POSE_BATCH", "8")))
     # Hold the analysis to the length of the video by planning the sampling
     # stride once, early, from measured throughput. Until 2026-09-10 this
     # setting was defined here and **read nowhere in the codebase** - a switch
@@ -428,6 +471,30 @@ class Settings:
     min_reid_score: float = 0.48
     min_reid_margin: float = 0.05
     max_normalized_jump: float = 1.65
+    # A fighter who has been out of sight this long may come back anywhere in
+    # the picture - they left the frame, or the camera turned - so the
+    # distance gate above stops applying and appearance alone decides: the
+    # pooled ReID embedding against the one captured where the user tapped
+    # them must clear reentry_min_reid_similarity (stricter than the ordinary
+    # gate), or without an embedding the kit histogram must clear
+    # reentry_min_appearance_similarity. Audit 2026-10-14, #2.
+    reentry_after_seconds: float = float(os.getenv("WARRIORIQ_REENTRY_AFTER_SECONDS", "1.0"))
+    reentry_min_reid_similarity: float = float(os.getenv("WARRIORIQ_REENTRY_MIN_REID", "0.84"))
+    reentry_min_appearance_similarity: float = float(os.getenv("WARRIORIQ_REENTRY_MIN_APPEARANCE", "0.70"))
+    # Move the remembered boxes with the camera before matching
+    # (core/camera_motion.py). Audit 2026-10-14, #2.
+    camera_motion_compensation: bool = env_bool("WARRIORIQ_CAMERA_MOTION", True)
+    # Read the real file type of every upload with ffprobe (core.video
+    # has_video_stream; audit 2026-10-14, #17). Stands down by itself on a
+    # host with neither ffprobe nor ffmpeg.
+    upload_stream_probe: bool = env_bool("WARRIORIQ_UPLOAD_STREAM_PROBE", True)
+    # A track whose referee probability, pooled over its sightings, says
+    # official is held as an official - a third-person class never assigned to
+    # Fighter A or B - and refused even on frames where the per-frame score
+    # dips, as long as that frame is not clearly a fighter's (fighters measured
+    # at most 0.084). Audit 2026-10-14, #2.
+    official_track_min_sightings: int = 3
+    official_track_floor_probability: float = 0.15
     max_missing_analyzed_frames: int = 20
     missing_before_recovery: int = 4
     appearance_ema: float = 0.85
@@ -1227,20 +1294,32 @@ class Settings:
     # ------------------------------------------------------------
     # These values intentionally have no made-up defaults. Paid checkout is
     # blocked until the real operator has supplied every launch-critical item.
-    policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-08-24")
+    # 2026-10-19: /subprocessors now names Render, Modal, Google and Stripe
+    # with purpose, location and data (audit 2026-10-14 #10).
+    policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-10-19")
     public_base_url: str = os.getenv("WARRIORIQ_PUBLIC_BASE_URL", "").rstrip("/")
+    # Serve replay video through a CDN (Cloudflare in front of this site, or
+    # any pull CDN). Off unless both are set. /media then redirects to
+    # <media_cdn_base_url>/media-signed/<job>?exp=..&sig=.., a URL that is
+    # unguessable, expires, and may therefore be cached publicly; the CDN pulls
+    # it from this server once. Audit 2026-10-14, #25. See OPS_TODO.md.
+    media_cdn_base_url: str = os.getenv("WARRIORIQ_MEDIA_CDN_BASE_URL", "").rstrip("/")
+    media_signing_key: str = os.getenv("WARRIORIQ_MEDIA_SIGNING_KEY", "")
+    # How long a signed media URL lives. Expiry is rounded up to a whole
+    # period, so one viewer's URL stays the same - and cached - for a while.
+    media_url_seconds: int = int(os.getenv("WARRIORIQ_MEDIA_URL_SECONDS", "3600"))
     allowed_hosts: tuple[str, ...] = tuple(
         value.strip().lower() for value in os.getenv("WARRIORIQ_ALLOWED_HOSTS", "").split(",")
         if value.strip()
     )
-    operator_name: str = os.getenv("WARRIORIQ_OPERATOR_NAME", "").strip()
-    operator_address: str = os.getenv("WARRIORIQ_OPERATOR_ADDRESS", "").strip()
-    operator_registration: str = os.getenv("WARRIORIQ_OPERATOR_REGISTRATION", "").strip()
-    operator_vat: str = os.getenv("WARRIORIQ_OPERATOR_VAT", "").strip()
-    governing_country: str = os.getenv("WARRIORIQ_GOVERNING_COUNTRY", "").strip()
-    support_email: str = os.getenv("WARRIORIQ_SUPPORT_EMAIL", "").strip()
-    privacy_email: str = os.getenv("WARRIORIQ_PRIVACY_EMAIL", "").strip()
-    dmca_email: str = os.getenv("WARRIORIQ_DMCA_EMAIL", "").strip()
+    operator_name: str = legal_value("name", "WARRIORIQ_OPERATOR_NAME")
+    operator_address: str = legal_value("address", "WARRIORIQ_OPERATOR_ADDRESS")
+    operator_registration: str = legal_value("registration", "WARRIORIQ_OPERATOR_REGISTRATION")
+    operator_vat: str = legal_value("vat", "WARRIORIQ_OPERATOR_VAT")
+    governing_country: str = legal_value("country", "WARRIORIQ_GOVERNING_COUNTRY")
+    support_email: str = legal_value("support_email", "WARRIORIQ_SUPPORT_EMAIL")
+    privacy_email: str = legal_value("privacy_email", "WARRIORIQ_PRIVACY_EMAIL")
+    dmca_email: str = legal_value("dmca_email", "WARRIORIQ_DMCA_EMAIL")
     dmca_agent_name: str = os.getenv("WARRIORIQ_DMCA_AGENT_NAME", "").strip()
     minimum_account_age: int = int(os.getenv("WARRIORIQ_MINIMUM_AGE", "18"))
     saved_video_retention_days: int = max(1, int(os.getenv("WARRIORIQ_VIDEO_RETENTION_DAYS", "30")))
@@ -1374,6 +1453,11 @@ class Settings:
     email_provider_location: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER_LOCATION", "").strip()
     # The domain WarriorIQ's own support and privacy addresses must be on (E1).
     public_email_domain: str = os.getenv("WARRIORIQ_PUBLIC_EMAIL_DOMAIN", "warrioriq.eu").strip().lower()
+    # The homepage's looping demo clip (audit 2026-10-14, #53): a path under
+    # /static/ to footage WarriorIQ owns or has licensed, with the skeleton
+    # overlay drawn in. Shown only when the file exists; until then the
+    # homepage shows a placeholder that says the clip is coming.
+    demo_clip: str = os.getenv("WARRIORIQ_DEMO_CLIP", "/static/demo/warrioriq-demo.mp4").strip()
     require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
 
 

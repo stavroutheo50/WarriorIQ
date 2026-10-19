@@ -196,7 +196,7 @@
   {#- Rounded before the sign is chosen: '%+.0f' printed a change of -0.3
       points as "-0" (QA, 2026-10-07). -#}
   {%- set pts = (d*100)|round|int if d is not none else 0 -%}
-  {%- if r and r.is_latest and d is not none -%}<i class="{% if pts > 0 %}up{% elif pts < 0 %}down{% else %}quiet{% endif %}">{{'%+d'|format(pts) if pts else '0'}}</i>
+  {%- if r and r.is_latest and d is not none -%}<i class="{% if pts > 0 %}up{% elif pts < 0 %}down{% else %}quiet{% endif %}">{% if pts %}{{'%+d'|format(pts)}} <abbr title="percentage point{{'' if pts|abs == 1 else 's'}} since the fight before">pp</abbr>{% else %}no change{% endif %}</i>
   {%- elif r and not r.is_latest -%}<i class="quiet">from <time datetime="{{r.created_at}}" data-local="date">{{r.created_at|fight_moment(false)}}</time></i>{%- endif -%}
 {%- endmacro -%}
 {% set hk = progress.headline_key %}{% set headline = progress.recent.get(hk) %}
@@ -207,14 +207,14 @@
     {% set delta = progress.trends.get(hk) %}
     {% set delta_pts = (delta*100)|round|int if delta is not none else 0 %}
     {% if headline and not headline.is_latest %}<span class="stat-delta flat">From your fight on <time datetime="{{headline.created_at}}" data-local="date">{{headline.created_at|fight_moment(false)}}</time></span>
-    {% elif delta is not none and delta_pts != 0 %}<span class="stat-delta {% if delta_pts > 0 %}up{% else %}down{% endif %}">{{'%+d'|format(delta_pts)}} pts since last fight</span>
+    {% elif delta is not none and delta_pts != 0 %}<span class="stat-delta {% if delta_pts > 0 %}up{% else %}down{% endif %}">{{'%+d'|format(delta_pts)}} percentage point{{'' if delta_pts|abs == 1 else 's'}} since last fight</span>
     {% elif delta is not none %}<span class="stat-delta flat">Same as last fight</span>
     {% else %}<span class="stat-delta flat">First measured fight</span>{% endif %}
   </div>
   <div class="stat-support">
     {#- The headline figure is not repeated beside it ("GUARD POSITION 7%"
         above "GUARD 7%", QA 2026-10-11). -#}
-    {% if hk != 'guard' %}<div class="stat"><span class="label">Guard</span><b class="wiq-num">{{ recent_value('guard') }}</b>{{ recent_change('guard') }}</div>{% endif %}
+    {% if hk != 'guard' %}<div class="stat"><span class="label">Guard {{ experimental_badge }}</span><b class="wiq-num">{{ recent_value('guard') }}</b>{{ recent_change('guard') }}</div>{% endif %}
     {% if hk != 'balance' %}<div class="stat"><span class="label">Balance</span><b class="wiq-num">{{ recent_value('balance') }}</b>{{ recent_change('balance') }}</div>{% endif %}
     {% if hk != 'center' %}<div class="stat"><span class="label">Ring centre</span><b class="wiq-num">{{ recent_value('center') }}</b>{{ recent_change('center') }}</div>{% endif %}
     <div class="stat"><span class="label">How clearly we saw you</span><b class="wiq-num">{% if progress.average_coverage is not none %}{{'%.0f'|format(progress.average_coverage*100)}}%{% else %}—{% endif %}</b><i class="quiet">average</i></div>
@@ -222,13 +222,16 @@
 </section>
 
 {% if progress.latest.action_trusted %}
+{#- Shown exactly when the latest fight's report shows strike counts, and
+    labelled as the same estimates (core.report.strike_numbers_shown). -#}
+<p class="small muted">Strike figures are automatic estimates, not checked by a person - the same counts your fight report shows.</p>
 <section class="stat-support action-band">
   <div class="stat"><span class="label">Conversion</span><b class="wiq-num">{% if progress.latest.accuracy is not none %}{{'%.0f'|format(progress.latest.accuracy*100)}}%{% else %}—{% endif %}</b><i class="quiet">latest fight</i></div>
   <div class="stat"><span class="label">Attempts</span><b class="wiq-num">{{progress.latest.attempts|int}}</b><i class="quiet">detected</i></div>
   <div class="stat"><span class="label">Attempts / min</span><b class="wiq-num">{% if progress.latest.activity is not none %}{{'%.1f'|format(progress.latest.activity)}}{% else %}—{% endif %}</b><i class="quiet">work rate</i></div>
   <div class="stat"><span class="label">Combinations / min</span><b class="wiq-num">{% if progress.latest.combinations is not none %}{{'%.1f'|format(progress.latest.combinations)}}{% else %}—{% endif %}</b><i class="quiet">linked strikes</i></div>
 </section>
-{% else %}<div class="notice progress-calibration"><strong>Movement progress is ready.</strong> Attempts, conversion and combinations are not shown because WarriorIQ cannot yet count strikes accurately enough to be worth showing you. The guard, balance, ring-position and movement figures above are measured from your body and are real.</div>{% endif %}
+{% else %}<div class="notice progress-calibration"><strong>Movement progress is ready.</strong> Attempts, conversion and combinations are not shown, the same as on your latest fight's report: strike counts are not published for that fight. The balance, ring-position and movement figures above are measured from your body. Guard is experimental: it is measured too, but not yet checked against hand-labelled clips, so read it as a rough indication.</div>{% endif %}
 
 <section class="card progress-trend"><div class="eyebrow">Your movement</div><h2>{{progress.trend_label}} trend</h2><svg class="progress-chart" id="movementChart" viewBox="0 0 640 230" role="img" aria-label="{{progress.trend_label}} across saved fights"></svg><div class="chart-legend"><span><i class="legend-dot"></i>{{progress.trend_label}}</span><span>{% if progress.trend_key == 'coverage' %}How clearly you were seen, not how well you fought{% else %}Only supported measurements are plotted{% endif %}</span></div></section>
 
@@ -296,7 +299,7 @@
           {% else %}<span class="muted">Not filed</span>{% endif %}
         </td>
         <td data-label="Fight">{{f.label}}</td>
-        <td data-label="Seen">{{'%.0f'|format(f.coverage*100)}}%{% if f.unusable_reason == 'identity' %} <small class="muted">couldn't tell who was who</small> <a class="text-link small" href="/select/{{f.job_id}}">Fix</a>{% elif f.unusable_reason == 'not_a_fight' %} <small class="muted">not recognised as a fight</small>{% elif not f.usable %} <small class="muted">too low to compare</small>{% endif %}</td>
+        <td data-label="Seen">{% if f.unusable_reason == 'identity' %}<small class="muted">Fighters told apart only {{'%.0f'|format(f.coverage*100)}}% of the time</small>{% else %}{{'%.0f'|format(f.coverage*100)}}%{% endif %}{% if f.unusable_reason == 'identity' %} <a class="text-link small" href="/select/{{f.job_id}}" data-retag-rerun>Re-tag and re-run</a>{% elif f.unusable_reason == 'not_a_fight' %} <small class="muted">not recognised as a fight</small>{% elif not f.usable %} <small class="muted">too low to compare</small>{% endif %}</td>
         <td class="small{% if not f.movement_verdict %} is-empty{% endif %}" data-label="Movement">{{f.movement_verdict or '—'}}</td>
         <td data-label="Pressure">{{f.pressure|movement_value('pressure')}}</td>
         <td{% if f.centre is none %} class="is-empty"{% endif %} data-label="Centre">{% if f.centre is not none %}{{'%.0f'|format(f.centre*100)}}%{% else %}—{% endif %}</td>
@@ -357,9 +360,13 @@
 <section class="card" id="left-out">
   <div class="eyebrow">Left out of your progress</div>
   <h2>{{ progress.identity_failed_fights|length }} fight{{ '' if progress.identity_failed_fights|length == 1 else 's' }} we couldn't tell who was who in</h2>
-  <p class="muted">Show WarriorIQ who is who on each one and it joins your progress.</p>
-  <details class="left-out-list"><summary>Show {{ 'it' if progress.identity_failed_fights|length == 1 else 'them' }}</summary>
-  <ul class="list-clean">{% for item in progress.identity_failed_fights %}<li><span>{{ item.label }}</span> {% if item.fixable %}<a class="btn secondary tiny" href="/select/{{ item.job_id }}">Show me who is who</a>{% else %}<span class="small muted">The video was removed after {{ video_retention_days|default(30) }} days, so this one can no longer be fixed.</span> <a class="text-link" href="/result/{{ item.job_id }}">Open report</a>{% endif %}</li>{% endfor %}</ul>
+  <p class="muted">Re-tag the two fighters on each one and it is analysed again; once WarriorIQ can tell who is who, it joins your progress.</p>
+  {#- One click per fight (audit 2026-10-14, #41): the button opens the fight's
+      selection frame, and Start there re-runs the analysis on the saved video. -#}
+  {% set first_fixable = (progress.identity_failed_fights|selectattr('fixable')|list|first) %}
+  {% if first_fixable %}<p><a class="btn" href="/select/{{ first_fixable.job_id }}" data-retag-rerun>Re-tag and re-run {{ first_fixable.label }}</a></p>{% endif %}
+  <details class="left-out-list"{% if progress.identity_failed_fights|length <= 5 %} open{% endif %}><summary>Show {{ 'it' if progress.identity_failed_fights|length == 1 else 'all ' ~ progress.identity_failed_fights|length }}</summary>
+  <ul class="list-clean">{% for item in progress.identity_failed_fights %}<li><span>{{ item.label }}</span> {% if item.fixable %}<a class="btn secondary tiny" href="/select/{{ item.job_id }}" data-retag-rerun>Re-tag and re-run</a>{% else %}<span class="small muted">The video was removed after {{ video_retention_days|default(30) }} days, so this one can no longer be fixed.</span> <a class="text-link" href="/result/{{ item.job_id }}">Open report</a>{% endif %}</li>{% endfor %}</ul>
   </details>
 </section>
 {% endif %}

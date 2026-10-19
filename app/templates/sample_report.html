@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Sample fight report (made-up data) · WarriorIQ{% endblock %}
+{% block description %}What a WarriorIQ fight report looks like, shown with invented fighters and numbers. Not a real fight.{% endblock %}
+{% block content %}
+{#- Audit 2026-10-14 (#54). Everything on this page is invented
+    (core/sample_report.py) and says so twice: in the banner, and on the
+    measurements themselves. -#}
+<div class="notice sample-notice" role="note"><strong>{{ notice }}</strong></div>
+<section class="numbers-first-report sample-report">
+  <header>
+    <div><div class="eyebrow">Sample report · {{ report.sport }} · {{ report.ruleset }} · {{ report.rounds }} × {{ report.round_minutes }} min</div>
+    <h1>Sample fight report</h1></div>
+  </header>
+
+  <section class="fighter-comparison" aria-labelledby="sampleTracking">
+    <div class="numbers-section-heading"><div><div class="eyebrow">Checked first</div><h2 id="sampleTracking">How well both fighters were followed</h2></div><span>Made-up numbers</span></div>
+    <p class="small muted">A real report shows this before any measurement. When a fighter was not seen for long enough, the numbers that depend on it are withheld rather than guessed.</p>
+    <div class="trust-checks">
+      <span>{{ report.fighters.A }} seen {{ (report.tracking.seen_A * 100)|round|int }}% of the fight</span>
+      <span>{{ report.fighters.B }} seen {{ (report.tracking.seen_B * 100)|round|int }}% of the fight</span>
+      <span>Fighters told apart {{ (report.tracking.told_apart * 100)|round|int }}% of the time</span>
+    </div>
+  </section>
+
+  <section class="fighter-comparison" aria-labelledby="sampleMeasures">
+    <div class="numbers-section-heading"><div><div class="eyebrow">Measured</div><h2 id="sampleMeasures">How each fighter moved</h2></div><span>Made-up numbers</span></div>
+    <table class="sample-table">
+      <thead><tr><th scope="col">Measure</th><th scope="col">{{ report.fighters.A }}</th><th scope="col">{{ report.fighters.B }}</th></tr></thead>
+      <tbody>
+      {% for row in rows %}
+        <tr><th scope="row">{{ row.metric.name }}{% if row.metric.experimental %} {{ experimental_badge }}{% endif %}<small>{{ row.metric.definition }}</small></th><td>{{ row.A }}</td><td>{{ row.B }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted">{{ experimental_note }}</p>
+  </section>
+
+  <section class="simple-rounds" aria-labelledby="sampleRounds">
+    <div class="numbers-section-heading"><div><div class="eyebrow">Round by round</div><h2 id="sampleRounds">What changed between rounds</h2></div></div>
+    {% for r in report.rounds_detail %}<article><header><strong>Round {{ r.round }}</strong></header><div><span>{{ r.note }}</span></div></article>{% endfor %}
+    <p class="small muted">No score is shown here. A real report estimates a round-by-round score only when both fighters were tracked steadily enough for a fair one, and it is an estimate for training, not official judging.</p>
+  </section>
+
+  <section class="simple-rounds" aria-labelledby="samplePriorities">
+    <div class="numbers-section-heading"><div><div class="eyebrow">Coaching</div><h2 id="samplePriorities">What to work on first</h2></div></div>
+    {% for title, why in report.priorities %}<article><header><strong>{{ title }}</strong></header><div><span>{{ why }}</span></div></article>{% endfor %}
+  </section>
+
+  <section class="simple-rounds" aria-labelledby="samplePlan">
+    <div class="numbers-section-heading"><div><div class="eyebrow">Training</div><h2 id="samplePlan">A four-week plan from the numbers</h2></div></div>
+    {% for week, work in report.plan %}<article><header><strong>{{ week }}</strong></header><div><span>{{ work }}</span></div></article>{% endfor %}
+  </section>
+
+  <div class="hero-actions">{% if request.state.account %}<a class="btn" href="/analyze">Analyse my own fight</a>{% else %}<a class="btn" href="/signup?next=/analyze">Create a free account to analyse your fight</a>{% endif %}<a class="btn secondary" href="/">Back to the home page</a></div>
+</section>
+{% endblock %}

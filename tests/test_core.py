@@ -85,13 +85,18 @@ class ProductFoundationTests(unittest.TestCase):
         # ranking against the band these metrics sit in rather than comparing a
         # guard percentage against a balance percentage - and only named when it
         # sits a whole spread below that band.
-        self.assertIn("Guard 5%", coaching_a["improvements"][0]["title"])
+        self.assertIn("Guard (experimental) 5%", coaching_a["improvements"][0]["title"])
         self.assertIn("Balance 44%", coaching_b["improvements"][0]["title"])
         self.assertTrue(plan_a)
         self.assertTrue(plan_b)
         self.assertNotEqual(plan_a, plan_b)
         self.assertIn("5.0%", plan_a[0]["goal"])
-        self.assertIn("13.0%", plan_a[0]["goal"])
+        # Guard is experimental, so the plan sets no number target for it
+        # (audit 2026-10-14, #28); it used to be "5.0% to 13.0%".
+        self.assertNotIn("13.0%", plan_a[0]["goal"])
+        self.assertIn("No number target", plan_a[0]["goal"])
+        # Balance 44% is under its 48% reference line: that is the target.
+        self.assertIn("48.0%", plan_b[0]["goal"])
 
     def test_legacy_low_overlap_referee_track_is_invalidated_despite_high_coverage(self):
         metric = self._pose_metrics(.4, .7, .6)
@@ -357,65 +362,66 @@ class ProductFoundationTests(unittest.TestCase):
         self.assertEqual(result["trends"]["activity"], 2.0)
         self.assertEqual(result["focus"][0]["title"], "Guard recovery")
 
-    def test_a_report_with_no_integrity_flag_is_not_trusted(self):
-        """Missing means unknown, and unknown means withheld.
-
-        This used to fail *open*: a report carrying no integrity flag - which
-        is anything analysed before the flag existed - was trusted whenever it
-        had any attempts at all, which is nearly every report. The reasoning
-        was that those fields were already measured. They were measured by the
-        same detector later found to be 29% precise, so an older report is not
-        a more reliable one; it is the same numbers with less provenance.
-        """
-        records = [{"created_at": "2026-08-10T00:00:00+00:00", "job_id": "old", "report": {
+    # Since the audit of 14 Oct 2026 (#8) Fight Camp shows a fight's strike
+    # numbers exactly when that fight's report does (core.report
+    # strike_numbers_shown), as the same estimates, instead of a rule of its own.
+    @staticmethod
+    def _record(job_id="f", integrity=None, families=None, accuracy=.62):
+        report = {
             "video": {"analysis_target": "BOTH", "focus_fighter": "A"},
-            "setup": {"ruleset": "K1"}, "tracking": {"fighter_A_coverage": .9},
-            "metrics": {"A": {"pose_coverage": .9, "guard_index": .4, "guard_definition": "hands_up_share/2",
-                              "attacks": {"accuracy": .62, "attempts": 12,
-                                          "families": {"punch": 8, "kick": 4}},
+            "setup": {"ruleset": "K1"}, "scorecard": {"sport": "kickboxing"},
+            "tracking": {"fighter_A_coverage": .9},
+            "metrics": {"A": {"pose_coverage": .9, "guard_index": .4, "guard_definition": "hands_up_share/3",
+                              "attacks": {"accuracy": accuracy, "attempts": 12,
+                                          "families": families or {"punch": 8, "kick": 4}},
                               "dashboard": {"activity_attempts_per_minute": 6.0}}},
             "coaching": {"A": {"improvements": []}}, "training_plan": {"A": []},
-        }}]
+        }
+        if integrity is not None:
+            report["integrity"] = integrity
+        return [{"created_at": "2026-08-10T00:00:00+00:00", "job_id": job_id, "report": report}]
+
+    def test_camp_shows_strike_numbers_exactly_when_the_report_does(self):
+        from core import report as report_module
+        from core.report import strike_numbers_shown
+
+        records = self._record()
+        shown = strike_numbers_shown(records[0]["report"])
         latest = build_progress(records, "A")["latest"]
-        self.assertFalse(latest["action_trusted"])
-        self.assertIsNone(latest["accuracy"])
-        self.assertIsNone(latest["attempts"])
-        # The pose measurements are unaffected - they never needed the flag.
-        self.assertEqual(latest["guard"], .4)
-        self.assertEqual(latest["coverage"], .9)
+        self.assertEqual(latest["action_trusted"], bool(shown))
+        self.assertEqual(latest["attempts"], 12 if shown else None)      # the families the report shows
+        with mock.patch.object(report_module, "STRIKE_COUNTS_PUBLISHED", False), \
+                mock.patch.object(report_module, "STRIKE_COUNTS_PRECISION_VALIDATED", False), \
+                mock.patch("core.strike_exam.passed_families", return_value=()):
+            self.assertEqual(strike_numbers_shown(records[0]["report"]), ())
+            hidden = build_progress(records, "A")["latest"]
+        self.assertFalse(hidden["action_trusted"])
+        self.assertIsNone(hidden["accuracy"])
+        self.assertIsNone(hidden["attempts"])
+        # The pose measurements are unaffected either way.
+        self.assertEqual(hidden["guard"], .4)
+        self.assertEqual(hidden["coverage"], .9)
 
-    def test_progress_counts_leg_strikes_not_every_attempt(self):
-        """A progress chart summing punches compounds their error over time."""
-        records = [{"created_at": "2026-08-10T00:00:00+00:00", "job_id": "new", "report": {
-            "video": {"analysis_target": "BOTH", "focus_fighter": "A"},
-            "setup": {"ruleset": "K1"}, "tracking": {"fighter_A_coverage": .9},
-            "integrity": {"action_metrics_trusted": True},
-            "metrics": {"A": {"pose_coverage": .9,
-                              "attacks": {"accuracy": .5, "attempts": 12,
-                                          "families": {"punch": 8, "kick": 4}},
-                              "dashboard": {}}},
-            "coaching": {"A": {"improvements": []}}, "training_plan": {"A": []},
-        }}]
-        self.assertEqual(build_progress(records, "A")["latest"]["attempts"], 4)
+    def test_a_fight_whose_identity_failed_shows_no_strike_numbers_anywhere(self):
+        from core.report import strike_numbers_shown
 
-    def test_progress_keeps_pose_baselines_but_hides_untrusted_action_candidates(self):
-        records = [{"created_at": "2026-08-10T00:00:00+00:00", "job_id": "pose", "report": {
-            "video": {"analysis_target": "BOTH", "focus_fighter": "A"},
-            "setup": {"ruleset": "K1"},
-            "integrity": {"action_metrics_trusted": False},
-            "metrics": {"A": {
-                "pose_coverage": .91, "guard_index": .64, "guard_definition": "hands_up_share/2",
-                "balance_index": .58,
-                "ring_center_control": .47, "footwork_body_lengths_per_second": .32,
-                "attacks": {"accuracy": .99, "attempts": 99},
-                "dashboard": {"activity_attempts_per_minute": 30.0, "combinations_per_minute": 12.0},
-            }},
-            "coaching": {"A": {"improvements": []}}, "training_plan": {"A": []},
-        }}]
-        progress = build_progress(records, "A")
+        records = self._record(integrity={"identity_evidence_trusted": False})
+        self.assertEqual(strike_numbers_shown(records[0]["report"]), ())
+        # Left out of progress altogether, counts and all.
+        self.assertIsNone(build_progress(records, "A")["latest"])
+
+    def test_progress_keeps_pose_baselines_whether_or_not_counts_are_shown(self):
+        from core import report as report_module
+
+        records = self._record()
+        records[0]["report"]["metrics"]["A"].update(balance_index=.58, ring_center_control=.47,
+                                                    footwork_body_lengths_per_second=.32, guard_index=.64)
+        with mock.patch.object(report_module, "STRIKE_COUNTS_PUBLISHED", False), \
+                mock.patch.object(report_module, "STRIKE_COUNTS_PRECISION_VALIDATED", False), \
+                mock.patch("core.strike_exam.passed_families", return_value=()):
+            progress = build_progress(records, "A")
         self.assertEqual(progress["latest"]["guard"], .64)
         self.assertEqual(progress["latest"]["balance"], .58)
-        self.assertIsNone(progress["latest"]["accuracy"])
         self.assertIsNone(progress["latest"]["attempts"])
         self.assertEqual(progress["action_fight_count"], 0)
 
@@ -1347,7 +1353,7 @@ class EngagementRangeTests(unittest.TestCase):
 
         ahead = build_pose_coaching("A", dict(guard_index=0.62, balance_index=0.70),
                                     dict(guard_index=0.52, balance_index=0.70))
-        self.assertEqual(ahead["strengths"][0]["title"], "Guard: ahead of your opponent")
+        self.assertEqual(ahead["strengths"][0]["title"], "Guard (experimental): ahead of your opponent")
         self.assertIn("62%", ahead["strengths"][0]["detail"])
         behind = build_pose_coaching("A", dict(guard_index=0.50, balance_index=0.60),
                                      dict(guard_index=0.60, balance_index=0.75))
@@ -2282,11 +2288,13 @@ class TrainingProgressionTests(unittest.TestCase):
     """A month of work, not one session repeated."""
 
     def _coaching(self):
+        # Balance below its reference line, so it has a target; guard is
+        # experimental and has none (audit 2026-10-14, #28).
         return {"drills": [
+            {"name": "Balanced-finish rounds", "prescription": "4 x 90 sec: finish every technique in stance.",
+             "metric": "balance_index", "label": "Post-action balance", "measured": 0.30, "opponent": 0.80},
             {"name": "Guard-return audit", "prescription": "4 x 90 sec: freeze in stance after every exchange.",
              "metric": "guard_index", "label": "Guard position", "measured": 0.125, "opponent": 0.31},
-            {"name": "Balanced-finish rounds", "prescription": "4 x 90 sec: finish every technique in stance.",
-             "metric": "balance_index", "label": "Post-action balance", "measured": 0.756, "opponent": 0.80},
         ]}
 
     def test_the_last_week_lands_exactly_on_the_next_session_goal(self):
@@ -2317,8 +2325,10 @@ class TrainingProgressionTests(unittest.TestCase):
         self.assertEqual(len(set(themes)), 4, "four distinct themes")
         self.assertEqual(len(set(methods)), 4, "four distinct methods")
         # The targets climb rather than repeating the same number every week.
-        guard = [week["targets"][0]["to"] for week in weeks]
-        self.assertEqual(len(set(guard)), 4, f"targets must step up: {guard}")
+        balance = [week["targets"][0]["to"] for week in weeks]
+        self.assertEqual(len(set(balance)), 4, f"targets must step up: {balance}")
+        # Guard is experimental: no weekly target at all.
+        self.assertTrue(all(len(week["targets"]) == 1 for week in weeks))
 
     def test_the_plan_carries_the_real_drill_without_repeating_the_name(self):
         from core.coaching import build_training_progression
@@ -2327,7 +2337,7 @@ class TrainingProgressionTests(unittest.TestCase):
         # The plan is headed with the fighter's name; each line repeating it
         # read "Alex: ... Alex ..." (QA, 2026-10-07).
         self.assertFalse(any(item.startswith("Fighter B:") for week in weeks for item in week["work"]))
-        self.assertIn("freeze in stance", weeks[0]["work"][0])
+        self.assertIn("freeze in stance", weeks[0]["work"][1])
 
     def test_no_drills_means_no_invented_progression(self):
         from core.coaching import build_training_progression
@@ -3949,26 +3959,26 @@ class RedirectSafetyTests(unittest.TestCase):
         """
         from app.main import _safe_next
 
-        self.assertEqual(_safe_next("/" + chr(92) + "evil.example"), "/dashboard")
-        self.assertEqual(_safe_next(chr(92) + chr(92) + "evil.example"), "/dashboard")
+        self.assertEqual(_safe_next("/" + chr(92) + "evil.example"), "/camp")
+        self.assertEqual(_safe_next(chr(92) + chr(92) + "evil.example"), "/camp")
 
     def test_protocol_relative_and_absolute_are_refused(self):
         from app.main import _safe_next
 
-        self.assertEqual(_safe_next("//evil.example"), "/dashboard")
-        self.assertEqual(_safe_next("https://evil.example"), "/dashboard")
+        self.assertEqual(_safe_next("//evil.example"), "/camp")
+        self.assertEqual(_safe_next("https://evil.example"), "/camp")
 
     def test_control_characters_are_refused(self):
         from app.main import _safe_next
 
         for ch in (chr(13), chr(10), chr(9), chr(0), chr(127)):
-            self.assertEqual(_safe_next("/ok" + ch + "x"), "/dashboard")
+            self.assertEqual(_safe_next("/ok" + ch + "x"), "/camp")
 
     def test_nothing_falls_back(self):
         from app.main import _safe_next
 
-        self.assertEqual(_safe_next(None), "/dashboard")
-        self.assertEqual(_safe_next("   "), "/dashboard")
+        self.assertEqual(_safe_next(None), "/camp")
+        self.assertEqual(_safe_next("   "), "/camp")
 
 
 class SessionSecretTests(unittest.TestCase):
@@ -5252,10 +5262,10 @@ class CompareMovementTests(unittest.TestCase):
         result = compare_movement([
             self._report(pressure_index=0.10, ring_center_control=0.60,
                          footwork_body_lengths_per_second=1.20, guard_index=0.20,
-                         guard_definition="hands_up_share/2", balance_index=0.70),
+                         guard_definition="hands_up_share/3", balance_index=0.70),
             self._report(pressure_index=0.30, ring_center_control=0.40,
                          footwork_body_lengths_per_second=1.20, guard_index=0.20,
-                         guard_definition="hands_up_share/2", balance_index=0.70),
+                         guard_definition="hands_up_share/3", balance_index=0.70),
         ])
         self.assertTrue(result["available"])
         rows = {row["key"]: row for row in result["rows"]}
@@ -5270,7 +5280,7 @@ class CompareMovementTests(unittest.TestCase):
         self.assertEqual(rows["ring_center_control"]["leader"], "a")
         # Identical numbers are level, not a winner by a rounding error.
         self.assertEqual(rows["guard_index"]["leader"], "level")
-        self.assertEqual(rows["footwork_body_lengths_per_second"]["delta"], "level")
+        self.assertEqual(rows["footwork_body_lengths_per_second"]["delta"], "level (within measurement noise)")
 
     def test_a_metric_missing_from_both_fights_is_left_out_rather_than_shown_empty(self):
         from core.squad import compare_movement

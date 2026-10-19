@@ -35,16 +35,44 @@
   <div class="eyebrow">This video did not work</div>
   <h2 id="trustCardTitle">{% if camera_lost %}We couldn&rsquo;t follow you properly in this video{% else %}We weren&rsquo;t sure which fighter was which{% endif %}</h2>
   <p>{% if camera_lost %}The camera moved a lot, so we kept losing track of you.{% else %}So the numbers may belong to the wrong person.{% endif %}{% if numbers.state == 'unverified' %} The rough numbers further down are shown greyed out; don&rsquo;t rely on them.{% endif %}</p>
-  {% if camera_lost %}
-  <div class="trust-next"><strong>Next time</strong><ul>
+  {#- The actual cause and the fix that matches it (audit 2026-10-14, #24): the
+      old card offered "tap each fighter once" even when the fighters had left
+      the frame or the camera had moved, which re-tapping cannot fix.
+      core.report.identity_failure decides the cause; this only words the fix. -#}
+  {% set cause = identity_failure.cause if identity_failure else ('camera' if camera_lost else 'unknown') %}
+  {% if identity_failure %}<p class="trust-cause" data-identity-cause="{{ cause }}"><strong>What went wrong:</strong> {{ identity_failure.headline }}</p>{% endif %}
+  {% if cause == 'camera' %}
+  <div class="trust-next"><strong>The fix: steady the camera</strong><ul>
     <li>Put the phone on a tripod, or keep it completely still.</li>
     <li>Get both fighters big in the picture.</li>
     <li>Keep other people out of the shot if you can.</li>
   </ul></div>
+  <a class="btn" href="/analyze">Upload a steadier video</a>
+  {% elif cause == 'coverage' %}
+  <div class="trust-next"><strong>The fix: keep both fighters in the picture</strong><ul>
+    <li>Trim the video to the part where both fighters stay in shot, then analyse it again.</li>
+    <li>If they were hard to see on the frame you chose, re-tap them on a clearer one.</li>
+  </ul></div>
+  <a class="btn" href="/select/{{job_id}}">Re-tag and trim</a>
+  {% elif cause in ['small'] %}
+  <p class="trust-next"><strong>The fix: film closer.</strong> {{ identity_failure.advice }}</p>
+  <a class="btn" href="/analyze">Upload a closer video</a>
+  {% elif identity_failure and not identity_failure.repick %}
+  <p class="trust-next"><strong>The fix:</strong> {{ identity_failure.advice }}</p>
   <a class="btn" href="/analyze">Upload a new video</a>
   {% else %}
-  <p class="trust-next"><strong>Fix it in a few seconds:</strong> press <b>Show me who is who</b> at the top and tap each fighter once.</p>
+  <p class="trust-next"><strong>The fix: re-tap the fighters.</strong> {% if identity_failure %}{{ identity_failure.advice }} {% endif %}Press <b>Show me who is who</b> at the top and tap each fighter once.</p>
   {% endif %}
+</section>
+{% endif %}
+{#- Followed for part of the fight only: the report is kept, at low confidence,
+    with every number taken from the parts where the fighters were followed
+    (core.report.identity_partial_by_fighter; audit 2026-10-14, #2). -#}
+{% if not identity_failed and report.integrity.identity_partial %}
+<section class="notice partial-identity" role="note" aria-label="Low confidence report">
+  <strong>Low confidence.</strong>
+  {% for fighter in ['A', 'B'] if (report.integrity.identity_confidence or {}).get(fighter) == 'low' %}{{ names[fighter] }} was followed for {{ ((report.tracking['fighter_' ~ fighter ~ '_coverage']|default(0)) * 100)|round|int }}% of the fight{{ '; ' if not loop.last else '.' }}{% endfor %}
+  Every number below comes only from the parts of the fight where they were followed.
 </section>
 {% endif %}
 {% if not share_card %}<p class="small share-unavailable-reason" id="shareUnavailableReason" role="note" hidden>{% if share_card_missing == 'account' %}Sharing is for your own saved fights. <a class="text-link" href="/signup?next=/result/{{job_id}}">Create a free account</a> or <a class="text-link" href="/login?next=/result/{{job_id}}">sign in</a>, then analyse your fight while signed in.{% elif numbers.share_reason %}{{ numbers.share_reason }}{% if numbers.state == 'unverified' %}{% if camera_lost %}{% else %} <a class="text-link" href="/select/{{job_id}}">Show me who is who</a> and it can be shared.{% endif %}{% endif %}{% else %}This fight has no strike numbers to put on a card yet.{% endif %}</p>{% endif %}
@@ -55,6 +83,15 @@
   <strong>You have probably uploaded the wrong kind of video.</strong>
   This looks like an MMA video: there were {{ wrong_sport.ground_seconds }} seconds of fighting on the ground, which {{ wrong_sport.chosen }} does not have. Analyse it as MMA to get a report that fits it.
   <a class="text-link" href="/analyze/mma">Analyse an MMA video</a>
+</section>
+{% endif %}
+{#- Kicks or knees in a boxing upload (core.sport_check.kicks_in_boxing). A
+    suggestion, never a block: the boxing report stands as it is. -#}
+{% if kicks_in_boxing %}
+<section class="notice sport-suggestion" role="note">
+  <strong>Was this kickboxing or Muay Thai?</strong>
+  WarriorIQ's detector picked out {{ kicks_in_boxing.kicks }} kick{{ '' if kicks_in_boxing.kicks == 1 else 's' }}{% if kicks_in_boxing.knees %} and {{ kicks_in_boxing.knees }} knee{{ '' if kicks_in_boxing.knees == 1 else 's' }}{% endif %} in this fight. Boxing scores neither, so if they were real, this fight reads better under another sport.
+  <a class="text-link" href="/analyze/kickboxing">Analyse as kickboxing</a> · <a class="text-link" href="/analyze/muay_thai">Analyse as Muay Thai</a>. If it was boxing, ignore this.
 </section>
 {% endif %}
 {% if can_share and sharing %}
@@ -233,7 +270,7 @@
         person", never "you". -#}
     {% set who = 'The tracked person' if numbers.state == 'unverified' else 'You' %}{% set whose = 'The tracked person&rsquo;s'|safe if numbers.state == 'unverified' else 'Your' %}
     {% set mv = m.footwork_body_lengths_per_second %}{% set pr = ((m.pressure_index + 1) / 2 * 100)|round|int if m.pressure_index is not none else none %}{% set ce = (m.ring_center_control * 100)|round|int if m.ring_center_control is not none else none %}{% set gu = (m.guard_index * 100)|round|int if m.guard_index is not none else none %}{% set ba = (m.balance_index * 100)|round|int if m.balance_index is not none else none %}{% set se = (m.pose_coverage * 100)|round|int if m.pose_coverage is not none else none %}
-    <article><b class="wiq-num">{% if mv is not none %}<span data-count-up>{{'%.1f'|format(mv)}}</span>{% else %}&mdash;{% endif %}</b><span>Movement <i class="vital-unit">body lengths / sec</i></span><small>{% if mv is not none %}{{ who }} covered {{'%.1f'|format(mv)}} body lengths of ground every second.{% if numbers.state != 'unverified' %} A busy round is about 1.5.{% endif %}{% else %}Not measured: not enough of the body was seen.{% endif %}</small></article><article><b class="wiq-num">{% if pr is not none %}<span data-count-up>{{ pr }}</span>{% else %}&mdash;{% endif %}</b><span>Pressure <i class="vital-unit">0&ndash;100</i></span><small>{% if pr is not none %}{% if pr > 50 %}{{ who }} walked forward at the opponent more than backing off.{% elif pr < 50 %}{{ who }} backed off more than walking forward.{% else %}{{ who }} walked forward and backed off equally.{% endif %} 50 is even.{% else %}Not measured.{% endif %}</small></article><article><b class="wiq-num">{% if ce is not none %}<span data-count-up>{{ ce }}</span><em>%</em>{% else %}&mdash;{% endif %}</b><span>Centre</span><small>{% if ce is not none %}{{ who }} {{ 'was' if numbers.state == 'unverified' else 'were' }} in the middle of the ring {{ ce }}% of the time.{% else %}Not measured.{% endif %}</small></article><article><b class="wiq-num">{% if gu is not none %}<span data-count-up>{{ gu }}</span><em>%</em>{% else %}&mdash;{% endif %}</b><span>Guard</span><small>{% if gu is not none %}{{ whose }} hands were up by the face {{ gu }}% of the time {{ 'it was' if numbers.state == 'unverified' else 'you were' }} seen.{% else %}Not measured: the hands were not seen clearly enough.{% endif %}</small></article><article><b class="wiq-num">{% if ba is not none %}<span data-count-up>{{ ba }}</span><em>%</em>{% else %}&mdash;{% endif %}</b><span>Balance</span><small>{% if ba is not none %}{{ who }} stood balanced {{ ba }}% of the time.{% else %}Not measured: the hips and feet were not seen clearly enough.{% endif %}</small></article><article><b class="wiq-num">{% if se is not none %}<span data-count-up>{{ se }}</span><em>%</em>{% else %}&mdash;{% endif %}</b><span>Seen</span><small>{% if se is not none %}The camera saw {{ 'the tracked person' if numbers.state == 'unverified' else 'you' }} clearly for {{ se }}% of the video.{% if se < 70 %} Under 70%, so the other numbers are less reliable.{% endif %}{% else %}Not measured.{% endif %}</small></article>
+    <article><b class="wiq-num">{% if mv is not none %}<span data-count-up>{{'%.1f'|format(mv)}}</span>{% else %}&mdash;{% endif %}</b><span>Movement <i class="vital-unit">body lengths / sec</i></span><small>{% if mv is not none %}{{ who }} covered {{'%.1f'|format(mv)}} body lengths of ground every second.{% if numbers.state != 'unverified' %} A busy round is about 1.5.{% endif %}{% else %}Not measured: not enough of the body was seen.{% endif %}</small></article><article><b class="wiq-num">{% if pr is not none %}<span data-count-up>{{ pr }}</span>{% else %}&mdash;{% endif %}</b><span>Pressure <i class="vital-unit">0&ndash;100</i></span><small>{% if pr is not none %}{% if pr > 50 %}{{ who }} walked forward at the opponent more than backing off.{% elif pr < 50 %}{{ who }} backed off more than walking forward.{% else %}{{ who }} walked forward and backed off equally.{% endif %} 50 is even.{% else %}Not measured.{% endif %}</small></article><article><b class="wiq-num">{% if ce is not none %}<span data-count-up>{{ ce }}</span><em>%</em>{% else %}&mdash;{% endif %}</b><span>Centre</span><small>{% if ce is not none %}{{ who }} {{ 'was' if numbers.state == 'unverified' else 'were' }} in the middle of the ring {{ ce }}% of the time.{% else %}Not measured.{% endif %}</small></article><article><b class="wiq-num">{% if gu is not none %}<span data-count-up>{{ gu }}</span><em>%</em>{% else %}&mdash;{% endif %}</b><span>Guard {{ experimental_badge }}</span><small>{% if gu is not none %}{{ whose }} hands were both up by the chin {{ gu }}% of the time {{ 'it was' if numbers.state == 'unverified' else 'you were' }} seen.{% else %}Not measured: the hands were not seen clearly enough.{% endif %}</small></article><article><b class="wiq-num">{% if ba is not none %}<span data-count-up>{{ ba }}</span><em>%</em>{% else %}&mdash;{% endif %}</b><span>Balance</span><small>{% if ba is not none %}{{ who }} stood balanced {{ ba }}% of the time.{% else %}Not measured: the hips and feet were not seen clearly enough.{% endif %}</small></article><article><b class="wiq-num">{% if se is not none %}<span data-count-up>{{ se }}</span><em>%</em>{% else %}&mdash;{% endif %}</b><span>Seen</span><small>{% if se is not none %}The camera saw {{ 'the tracked person' if numbers.state == 'unverified' else 'you' }} clearly for {{ se }}% of the video.{% if se < 70 %} Under 70%, so the other numbers are less reliable.{% endif %}{% else %}Not measured.{% endif %}</small></article>
   </div>
   {#- Every number above is an average, and the reader is owed the ground it
      stands on. These used to be withheld entirely below 60% coverage, so a
@@ -349,7 +386,7 @@
 
   {% if graphs.guard %}
   <div class="graph-block">
-    <h3>Your guard through the fight</h3>
+    <h3>Your guard through the fight {{ experimental_badge }}</h3><p class="small muted">{{ experimental_note }}</p>
     {% if graphs.reads.guard %}<p class="graph-read">{{ graphs.reads.guard }}</p>{% endif %}
     <p class="graph-hint">Left to right is the fight from start to end. Each bar is a few seconds. A full bar means your hands were up by the face the whole time; an empty one, down the whole time.{% if graphs.guard.gaps %} No bar {% for gap in graphs.guard.gaps %}{{ gap.from }}&ndash;{{ gap.to }} ({{ gap.reason }}){{ '; ' if not loop.last else '.' }}{% endfor %}{% endif %}</p>
     {% call graph_frame(['100%', '50%', '0%'], graphs.ticks, 'Hands up by the face') %}
@@ -633,7 +670,7 @@
       {%- set guard_b = report.metrics[opponent] if report.metrics and opponent in report.metrics else {} -%}
       {#- "Not measured", with why, wherever core/guard.py withheld a figure. -#}
       {%- set guard_why = guard_a.guard_note_short or guard_b.guard_note_short or '' -%}
-      {{ row('Hands up by the face', ('%.0f%%'|format(mp.hands_up_share*100)) if mp.hands_up_share is not none else ('Not measured' if guard_a.guard_note else '—'), ('%.0f%%'|format(mo.hands_up_share*100)) if mo and mo.hands_up_share is not none else ('Not measured' if guard_b.guard_note else '—'), 'of the time seen' if not (guard_a.guard_note or guard_b.guard_note) or (mp.hands_up_share is not none and mo and mo.hands_up_share is not none) else guard_why) }}
+      {{ row('Both hands up by the chin (experimental)', ('%.0f%%'|format(mp.hands_up_share*100)) if mp.hands_up_share is not none else ('Not measured' if guard_a.guard_note else '—'), ('%.0f%%'|format(mo.hands_up_share*100)) if mo and mo.hands_up_share is not none else ('Not measured' if guard_b.guard_note else '—'), 'of the time seen' if not (guard_a.guard_note or guard_b.guard_note) or (mp.hands_up_share is not none and mo and mo.hands_up_share is not none) else guard_why) }}
       {{ row('Longest with hands down', 'Not measured' if guard_a.guard_note and mp.longest_hands_down_seconds is none else secs(mp.longest_hands_down_seconds), 'Not measured' if guard_b.guard_note and (not mo or mo.longest_hands_down_seconds is none) else secs(mo.longest_hands_down_seconds if mo else none), guard_why) }}
       {{ row('Times off balance', mp.off_balance_count if mp.off_balance_count is not none else '—', mo.off_balance_count if mo and mo.off_balance_count is not none else '—') }}
       {{ row('Defensive moves', (report.metrics[primary].defenses|default({})).values()|sum, (report.metrics[opponent].defenses|default({})).values()|sum, 'slips, blocks and evasions seen') }}
@@ -1266,6 +1303,7 @@
   {% if report.scorecard.available %}<p class="small muted">{{report.scorecard.disclaimer}}</p>{% endif %}
   {% if report.scorecard.coverage_note %}<p class="small coverage-line">{{report.scorecard.coverage_note}}</p>{% endif %}
   {% if report.scorecard.evidence and analysis_target == 'BOTH' and report.scorecard.status not in ['identity_integrity_failed', 'fighters_not_separable'] %}<p class="small muted">Built from {% if report.scorecard.evidence.evidence_source == 'unvalidated_action_candidates' %}{{report.scorecard.evidence.scoring_action_candidates}} possible scoring strikes the system spotted but has not confirmed{% else %}{{report.scorecard.evidence.verified_scoring_actions}} scoring strikes that were checked{% endif %} &middot; {{ names.A }} seen {{'%.0f'|format(report.scorecard.evidence.fighter_A_tracking_coverage*100)}}%, {{ names.B }} seen {{'%.0f'|format(report.scorecard.evidence.fighter_B_tracking_coverage*100)}}% of the fight.</p>{% endif %}
+  {% if score_reasons %}<details class="score-why" open><summary><strong>Why this score</strong></summary><ul>{% for line in score_reasons %}<li>{{ line }}</li>{% endfor %}</ul></details>{% endif %}
   {% if report.scorecard.available %}<div class="table-wrap"><table><thead><tr><th>Round</th><th>A</th><th>B</th><th>Estimate</th></tr></thead><tbody>{% for r in report.scorecard.rounds %}<tr><td>{{r.round}}</td><td>{{r.fighter_A}}</td><td>{{r.fighter_B}}</td><td>{{r.winner}}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
 </section>
 

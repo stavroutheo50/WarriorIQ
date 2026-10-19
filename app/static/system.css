@@ -465,3 +465,53 @@ summary:focus-visible,
   transform: translateY(-50%);
   background: var(--wiq-line);
 }
+/* A measurement not yet checked against labelled clips (audit 2026-10-14, #5). */
+.badge-experimental{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;border:1px solid rgba(241,184,75,.55);background:rgba(241,184,75,.12);color:#f1c46b;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:none;vertical-align:middle;white-space:nowrap}
+/* Library card naming (audit 2026-10-14, #30). */
+.fight-title{margin:2px 0 0;color:#c9d6ea;font-size:13px}
+.fight-details-edit{font-size:13px}.fight-details-edit summary{cursor:pointer;color:#9fb4d6}
+.fight-details-edit form{display:grid;gap:8px;margin-top:8px}.fight-details-edit label{display:grid;gap:4px}
+.upload-names{margin:0 0 14px}.upload-names summary{cursor:pointer;font-weight:700}
+/* Screen-reader-only text. Used by templates but never defined until now. */
+.visually-hidden,.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+/* Library bulk delete (audit 2026-10-14, #33). */
+.archive-bulk{display:flex;align-items:center;gap:10px;margin:8px 0 14px}
+.fight-select{display:flex;align-items:flex-start;padding:4px}
+.fight-select input{width:20px;height:20px;cursor:pointer}
+/* Sport switcher items are buttons now (a POST, audit 2026-10-14, #43);
+   they look like the links they replace. The current sport is ticked (#46). */
+.sport-menu-panel form{margin:0}
+.sport-menu-panel button{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:11px 12px;border:0;border-radius:10px;background:none;color:#eef3ff;font:inherit;font-size:13px;font-weight:700;text-align:left;cursor:pointer}
+.sport-menu-panel button:hover,.sport-menu-panel button:focus-visible{background:#16213c}
+.sport-menu-panel button span{font-weight:500;color:#9fb0cc;font-size:12px}
+.sport-menu-panel button .sport-menu-label{color:#eef3ff;font-size:13px;font-weight:700}
+.sport-menu-panel button[aria-current="true"]{background:rgb(var(--sport-accent) / .16);box-shadow:inset 3px 0 0 rgb(var(--sport-accent))}
+.sport-menu-tick{color:rgb(var(--sport-accent))}
+
+/* The copyright line broke over two or three lines between 768px and 1440px
+   (audit 2026-10-14 #48): it keeps one line and the footer wraps instead. */
+.legal-footer{flex-wrap:wrap}
+.footer-copyright{flex:0 0 auto;white-space:nowrap}
+/* GitHub's mark is drawn near-black, which vanished on the dark button. */
+.social-github .social-auth-icon svg path{fill:#e6edf3}
+.social-auth>p.social-auth-legacy{text-transform:none;letter-spacing:0;font-weight:500}
+/* The roster notice now sits once above the plan cards (audit 2026-10-14 #52). */
+.plan-blocked-summary{margin:0 0 18px;font-size:var(--wiq-text-sm,14px)}
+/* Public sample report (audit 2026-10-14 #54). */
+.sample-notice{margin:24px 0 0}
+.sample-table{width:100%;border-collapse:collapse;border-top:1px solid #40516a}
+.sample-table th,.sample-table td{padding:12px 10px;border-bottom:1px solid var(--wiq-line-soft);text-align:left;vertical-align:top}
+.sample-table td{font-size:20px;font-variant-numeric:tabular-nums}
+.sample-table tbody th small{display:block;margin-top:4px;color:var(--wiq-text-tertiary);font-size:12px;font-weight:500;text-transform:none;letter-spacing:0}
+/* Homepage sections (audit 2026-10-14 #53 #55). */
+.preview-demo{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#05080e}
+.preview-placeholder{display:grid;place-items:center;min-height:300px;margin:14px 0;text-align:center;padding:24px;border:1px dashed var(--wiq-line);border-radius:12px}
+.preview-sample-link{padding:4px 0 2px}
+.preview-placeholder p{margin:0;max-width:340px;color:var(--wiq-text-secondary)}
+.preview-placeholder strong,.preview-placeholder span{display:block}
+.preview-placeholder span{margin-top:6px;font-size:13px;color:var(--wiq-text-tertiary)}
+.measured-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.measured-grid article{padding:20px;border:1px solid var(--wiq-line);border-radius:14px;background:var(--wiq-canvas-raised)}
+.measured-grid h3{margin:0 0 10px;font-size:18px}
+.measured-grid p{margin:0 0 8px;line-height:1.55}
+.measured-grid .plan-price{margin:0;font-size:30px;font-weight:900}

@@ -360,6 +360,82 @@ def identity_ready_by_fighter(tracking: dict) -> dict[str, bool]:
     }
 
 
+# Below the 0.45 the strict gate asks for, a fighter followed for at least
+# this much is reported on the parts where they were followed, labelled low
+# confidence, instead of failing the whole report (audit 2026-10-14, #2: half
+# of real fights failed the identity check, most for coverage alone). Below it
+# there is too little to say anything about the fighter at all.
+PARTIAL_IDENTITY_MIN_COVERAGE = 0.20
+STRICT_IDENTITY_MIN_COVERAGE = 0.45
+HIGH_IDENTITY_COVERAGE = 0.70
+
+
+def identity_partial_by_fighter(tracking: dict) -> dict[str, bool]:
+    """Fighters who failed the strict gate on coverage alone, with enough to report on.
+
+    Every other part of the gate still has to pass - the seed, the churn rate
+    and the kit check - because those say the lock may have been on the wrong
+    person. Low coverage only says the lock was there less of the time, and
+    the metrics are averages over the frames where it was.
+    """
+    ready = identity_ready_by_fighter(tracking)
+    churned = identity_churned(tracking)
+    alike_blocks = lookalike_blocks_identity(tracking)
+    seed_unconfirmed = tracking.get("identity_seed_confirmed") is False
+    partial = {}
+    for fighter in ("A", "B"):
+        coverage = float(tracking.get(f"fighter_{fighter}_coverage", 0.0) or 0.0)
+        partial[fighter] = bool(
+            not ready[fighter]
+            and not seed_unconfirmed
+            and _identity_seed_safe(tracking, fighter)
+            and PARTIAL_IDENTITY_MIN_COVERAGE <= coverage < STRICT_IDENTITY_MIN_COVERAGE
+            and not alike_blocks
+            and not churned[fighter])
+    return partial
+
+
+def identity_confidence_by_fighter(tracking: dict) -> dict[str, str | None]:
+    """"high", "medium" or "low" per fighter, or None where identity failed."""
+    ready = identity_ready_by_fighter(tracking)
+    partial = identity_partial_by_fighter(tracking)
+    levels: dict[str, str | None] = {}
+    for fighter in ("A", "B"):
+        coverage = float(tracking.get(f"fighter_{fighter}_coverage", 0.0) or 0.0)
+        if ready[fighter]:
+            levels[fighter] = "high" if coverage >= HIGH_IDENTITY_COVERAGE else "medium"
+        else:
+            levels[fighter] = "low" if partial[fighter] else None
+    return levels
+
+
+def followed_rounds(tracking: dict, rounds: list, start_seconds: float, threshold: float) -> list[int]:
+    """Selected rounds in which both fighters were followed for at least ``threshold``.
+
+    Read from the 10-second coverage windows the analysis records (their
+    times are relative to the analysed start), weighted by analysed frames.
+    """
+    windows = tracking.get("coverage_windows") or []
+    followed = []
+    for spec in rounds or []:
+        if not getattr(spec, "selected", True):
+            continue
+        frames = covered_a = covered_b = 0.0
+        for window in windows:
+            begin = float(start_seconds) + float(window.get("start_seconds", 0.0))
+            end = float(start_seconds) + float(window.get("end_seconds", 0.0))
+            overlap = min(end, float(spec.end_seconds)) - max(begin, float(spec.start_seconds))
+            if overlap <= 0 or end <= begin:
+                continue
+            weight = float(window.get("analyzed_frames", 0) or 0) * overlap / (end - begin)
+            frames += weight
+            covered_a += weight * float(window.get("fighter_A_coverage", 0.0) or 0.0)
+            covered_b += weight * float(window.get("fighter_B_coverage", 0.0) or 0.0)
+        if frames > 0 and min(covered_a, covered_b) / frames >= threshold:
+            followed.append(int(spec.number))
+    return followed
+
+
 # The tracking fields the identity gate reads. Saved with each fight's
 # progress snapshot so the Progress page can apply the same gate the report
 # page applies, without reopening the full report.
@@ -473,6 +549,24 @@ def published_families(sport: str | None, report: dict | None = None) -> tuple[s
 
     exam = passed_families(sport, report)
     return tuple(family for family in scored if family in exam)
+
+
+def strike_numbers_shown(report: dict | None, sport: str | None = None) -> tuple[str, ...]:
+    """The one rule for whether a fight's strike numbers are shown, and which families.
+
+    Audit 2026-10-14 (#8): the report showed strike counts while Compare said
+    they were "hidden until accurate" for the same fight, because each page
+    had its own gate. Report, replay, Compare and Fight Camp all read this:
+    the families published for the sport (the switch, or this model's accuracy
+    exam - published_families), none when the counts failed the plausibility
+    check, and none when WarriorIQ could not tell who was who, since every
+    count is an attribution to a fighter.
+    """
+    report = report or {}
+    if not (report.get("integrity") or {}).get("identity_evidence_trusted", True):
+        return ()
+    sport = sport or (report.get("scorecard") or {}).get("sport")
+    return published_families(sport, report)
 
 
 SHARE_CARD_NOTE = "Automatic estimate by WarriorIQ, not checked by a person."
@@ -862,7 +956,11 @@ def identity_verdict(report: dict) -> dict:
     evidence" never sits beside "we lost sight of a fighter".
     """
     tracking = report.get("tracking") or {}
-    ready = identity_ready_by_fighter(tracking)
+    strict = identity_ready_by_fighter(tracking)
+    partial = identity_partial_by_fighter(tracking)
+    # A fighter followed for part of the fight is reported on that part, at
+    # low confidence, rather than failing everything (audit 2026-10-14, #2).
+    ready = {fighter: bool(strict[fighter] or partial[fighter]) for fighter in ("A", "B")}
     target = (report.get("video") or {}).get("analysis_target", "BOTH")
     required = ("A", "B") if target == "BOTH" else (target,)
     trusted = all(ready.get(fighter, False) for fighter in required)
@@ -873,6 +971,8 @@ def identity_verdict(report: dict) -> dict:
         "by_fighter": ready,
         "required": required,
         "coverage": coverage,
+        "partial": any(partial[fighter] for fighter in required) and trusted,
+        "confidence": identity_confidence_by_fighter(tracking),
         "followed_enough_to_score": min(coverage[f] for f in required) >= SETTINGS.min_tracking_coverage_for_score,
         "cause": None if trusted else identity_failure(tracking, required),
     }
@@ -1009,6 +1109,8 @@ def refresh_identity_integrity(report: dict) -> dict:
     integrity = report.setdefault("integrity", {})
     integrity["identity_evidence_trusted"] = identity_safe
     integrity["fighter_identity_trusted"] = identity_ready
+    integrity["identity_partial"] = bool(verdict["partial"])
+    integrity["identity_confidence"] = verdict["confidence"]
 
     if not identity_safe:
         integrity["action_metrics_trusted"] = False
@@ -1075,6 +1177,9 @@ def build_preliminary_scorecard(
     round_numbers: list[int],
     tracking: dict,
     analysis_target: str,
+    *,
+    rounds: list | None = None,
+    start_seconds: float = 0.0,
 ) -> dict:
     """Build a visible, explicitly unvalidated estimate from action candidates.
 
@@ -1089,6 +1194,16 @@ def build_preliminary_scorecard(
     # With counts published but not validated, the score is built the same
     # way - from the landed candidates - and labelled an estimate.
     estimated = STRIKE_COUNTS_PUBLISHED and not STRIKE_COUNTS_PRECISION_VALIDATED
+    # Not followed well enough over the whole fight: score only the rounds in
+    # which both fighters were (audit 2026-10-14, #2), and say which.
+    scored_rounds = None
+    if not coverage_ok and rounds:
+        scored_rounds = followed_rounds(tracking, rounds, start_seconds, SETTINGS.min_tracking_coverage_for_score)
+        scored_rounds = [number for number in scored_rounds if number in set(round_numbers)] or None
+    if scored_rounds:
+        coverage_ok = True
+        events = [event for event in events if event.round_number in set(scored_rounds)]
+        round_numbers = scored_rounds
     scorecard = score_fight(events, ruleset, round_numbers, [], reliable=coverage_ok,
                             estimated=estimated)
     candidate_count = int(scorecard.get("verified_actions_counted", 0))
@@ -1185,6 +1300,15 @@ def build_preliminary_scorecard(
             "Preliminary computer estimate from high-confidence action candidates. The actions are not verified fight facts; "
             "the report does not ask you to label or correct them. This is not an official judges' score."
         )
+    if scored_rounds and scorecard.get("available"):
+        listed = ", ".join(str(number) for number in scored_rounds)
+        scorecard["scored_rounds"] = list(scored_rounds)
+        scorecard["status_detail"] = "followed_rounds_only"
+        scorecard["disclaimer"] = (
+            f"Low confidence: scored on round{'s' if len(scored_rounds) > 1 else ''} {listed} only - the "
+            f"part of the fight where both fighters were followed for at least "
+            f"{SETTINGS.min_tracking_coverage_for_score*100:.0f}% of the time. The other rounds are not scored. "
+            + scorecard.get("disclaimer", ""))
     return scorecard
 
 
@@ -1206,11 +1330,17 @@ def build_report(
     # Without it the report page (which refreshes) said "not safe to use"
     # while the integrity stored here - and saved into the Progress snapshot -
     # said trusted, so Progress charted a fight its own report disowned.
-    identity_ready = identity_ready_by_fighter(tracking)
+    strict_identity = identity_ready_by_fighter(tracking)
+    identity_partial = identity_partial_by_fighter(tracking)
+    # Ready, or followed for part of the fight and reported on that part at
+    # low confidence (identity_partial_by_fighter): the same rule identity_verdict
+    # applies when the page refreshes the report.
+    identity_ready = {fighter: bool(strict_identity[fighter] or identity_partial[fighter]) for fighter in ("A", "B")}
     tracking["fighter_A_initial_lock_safe"] = identity_ready["A"]
     tracking["fighter_B_initial_lock_safe"] = identity_ready["B"]
     required_fighters = ("A", "B") if req.analysis_target == "BOTH" else (req.analysis_target,)
     identity_evidence_trusted = all(identity_ready[fighter] for fighter in required_fighters)
+    partial_identity = identity_evidence_trusted and any(identity_partial[f] for f in required_fighters)
     # A release-ready model still has to have confirmed each event itself
     # (core.evidence_trust.accepted_model_event); rule-only candidates are not
     # promoted to verified facts because the model is loaded.
@@ -1261,7 +1391,8 @@ def build_report(
             "evidence_source": "validated_model",
         }
     else:
-        scorecard = build_preliminary_scorecard(events, req.ruleset, round_numbers, tracking, req.analysis_target)
+        scorecard = build_preliminary_scorecard(events, req.ruleset, round_numbers, tracking, req.analysis_target,
+                                                rounds=rounds, start_seconds=float(req.start_seconds))
         if req.analysis_target == "BOTH" and not identity_evidence_trusted:
             failed = ", ".join(f"Fighter {fighter}" for fighter in ("A", "B") if not identity_ready[fighter])
             scorecard.update({
@@ -1371,6 +1502,8 @@ def build_report(
             **evidence_trust,
             "identity_evidence_trusted": identity_evidence_trusted,
             "fighter_identity_trusted": identity_ready,
+            "identity_partial": partial_identity,
+            "identity_confidence": identity_confidence_by_fighter(tracking),
             "action_metrics_trusted": action_metrics_trusted,
             "coaching_evidence_mode": "validated_actions" if action_metrics_trusted else "pose_only" if identity_evidence_trusted else "withheld_identity_failure",
             "human_review_complete": False,
