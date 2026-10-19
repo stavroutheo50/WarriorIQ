@@ -112,11 +112,13 @@ def test_the_sample_shows_only_measurements_a_report_publishes():
 # --------------------------------------------------------------------- #55
 def test_the_homepage_has_the_new_sections():
     page = BrowserClient(web.app).get("/").text
-    for anchor in ('id="what-is-measured"', 'id="accuracy"', 'id="plans"', 'class="product-section faq"'):
+    for anchor in ('id="what-is-measured"', 'id="plans"', 'class="product-section faq"', 'href="/accuracy"'):
         assert anchor in page, anchor
     for sport in ("Kickboxing", "Boxing", "Muay Thai", "Taekwondo", "MMA"):
         assert f"<h3>{sport}</h3>" in page
-    assert "about a third" in page and "11 of 16" in page
+    assert "about a third" not in page                     # moved to /accuracy (2026-10-19)
+    accuracy = BrowserClient(web.app).get("/accuracy").text
+    assert "about a third" in accuracy and "11 of 16" in accuracy
     assert "€9.99" in page and 'href="/pricing">Compare every plan' in page
 
 

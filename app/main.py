@@ -350,6 +350,10 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 templates.env.globals["fight_video_accept"] = FIGHT_VIDEO_ACCEPT
 templates.env.globals["fight_video_label"] = FIGHT_VIDEO_LABEL
 templates.env.globals["allowance_column"] = allowance_column
+templates.env.globals["chunked_upload_enabled"] = SETTINGS.chunked_upload_enabled
+# "Sport · Date" or the event name, the library's own title (core/squad.py).
+templates.env.filters["fight_title"] = fight_title
+templates.env.globals["analysis_chip_label"] = lambda job: analysis_chip_label(job)
 templates.env.globals["fight_video_extensions"] = sorted(FIGHT_VIDEO_EXTENSIONS)
 # The pre-upload check compares footage against the same numbers the worker's
 # probe uses, rather than a second set copied into JavaScript.
@@ -930,6 +934,19 @@ def _owned_job(owner_key: str, job_id: str | None, statuses: set[str]) -> dict |
     if not job or job.get("owner_key") != owner_key or job.get("status") not in statuses:
         return None
     return {"job_id": job_id, **job}
+
+
+def analysis_chip_label(job: dict) -> str:
+    """The header badge for a running analysis, in the progress page's own terms.
+
+    The badge said "Analysing 45%" (the whole job) beside a page saying 17%
+    (the current step), walkthrough 2026-10-19. Both now say the step and that
+    step's percentage.
+    """
+    view = stage_view(job, float(job.get("video_duration") or 0.0))
+    percent = view.get("percent")
+    label = f"Analysing step {view['step']}/{view['steps']}"
+    return label if percent is None else f"{label} · {int(max(0.0, min(99.0, float(percent))))}%"
 
 
 def _analysis_navigation_state(
@@ -1685,6 +1702,12 @@ async def _admit_fight_upload(request: Request, call_next):
         await run_in_threadpool(reserve_upload_storage, account_id, job_id, min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes))
         reserved = await run_in_threadpool(reserve_analysis, account_id, job_id)
         if not reserved:
+            held = _upload_holding_analysis(request)
+            if held:
+                return JSONResponse({"detail": (
+                    f"Your analysis is being held by {held['name']}, which is still waiting for you to pick "
+                    "the fighters. Pick the fighters to analyse it, or cancel it in your Fight library to "
+                    "upload a different video.")}, status_code=429)
             return JSONResponse({"detail": "Your analysis allowance is used for this period. It will reset automatically."}, status_code=429)
         request.state.upload_job_id = job_id
         response = await call_next(request)
@@ -1960,7 +1983,7 @@ STATIC_PUBLIC_PAGES = frozenset({
     "/", "/legal", "/terms", "/cookies", "/acceptable-use", "/refunds", "/video-upload-policy",
     "/sports-medical-disclaimer", "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
     "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
-    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis", "/sample-report",
+    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis", "/sample-report", "/accuracy",
 })
 STATIC_PUBLIC_MAX_AGE = 300
 
@@ -3792,7 +3815,21 @@ def _sport_context(request: Request, sport: str) -> dict:
         # plan's ceiling, shown before a file is picked: the 429 used to be the
         # first anyone heard of the cap (QA, 2026-10-11).
         "pending_uploads": pending_upload_status(int(account["id"])) if account else None,
+        # An upload still waiting for its fighters holds the analysis it will
+        # use; with that the allowance's last one, the page says which and
+        # how to get it back (walkthrough 2026-10-19).
+        "held_upload": _upload_holding_analysis(request) if account else None,
     }
+
+
+def _upload_holding_analysis(request: Request) -> dict | None:
+    """This visitor's newest upload that is waiting for fighters and holds an analysis."""
+    for job_id, job in list_jobs():
+        if (job.get("owner_key") == _owner_key(request) and job.get("status") == "selecting"
+                and job.get("usage_reserved")):
+            return {"job_id": job_id, "url": f"/select/{job_id}",
+                    "name": str(job.get("original_name") or "your last video")[:80]}
+    return None
 
 
 def _ruleset_summary(sport: str) -> list[str]:
@@ -4398,6 +4435,9 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
                  "frame_source": job.get("selection_source"),
                  "frame_clock": _clock(float(job.get("selection_seconds", job.get("start_seconds")) or 0.0)),
                  "fighter_name": (fighter or {}).get("name"),
+                 # The opponent's name from the upload form, so this page says
+                 # "Nikos" rather than "Opponent" (walkthrough 2026-10-19).
+                 "opponent_name": clean_fight_name(job.get("opponent_name")),
                  # A fresh upload (still waiting for its fighters, nothing
                  # saved) is discarded by "Upload a different video"; it used
                  # to stay pending and two of them locked uploads out with 429
@@ -5472,6 +5512,7 @@ def progress_page(request: Request, job_id: str):
         # A turned analysis draws its skeletons on turned frames, which the
         # browser's video is not; the page shows turned stills instead.
         "live_turned": bool(quarter_turn(job.get("rotate_clockwise"))),
+        "fighter_names": _fighter_names(request, {**job, "job_id": job_id}, {}),
         # The same counting policy as the upload page and the report, so the
         # live view cannot claim "leg strikes only" above a feed of punches.
         "live_counting_note": counting_policy(_job_sport(job)).live_note,
@@ -5551,6 +5592,7 @@ def _public_job_status(job_id: str, job: dict) -> dict:
                                  and job.get("stage") in {None, "queued", "preparing", "loading", "models"}
                                  and not float(job.get("processed_video_seconds") or 0.0))
     payload["stage_view"] = stage_view(job, payload["analysis_duration_seconds"], paused=paused)
+    payload["chip_label"] = analysis_chip_label(job)
     return payload
 
 
@@ -5609,6 +5651,7 @@ def active_analysis(request: Request):
         "job_id": job["job_id"],
         "status": job.get("status"),
         "percent": float(job.get("percent", 0.0)),
+        "chip_label": analysis_chip_label(job),
         "url": _analysis_navigation_url(job),
     }
 
@@ -5815,13 +5858,13 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
     if status == "scoring_off":
         coming = FEATURES["scoring"].coming
         return {"reason": coming,
-                "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+                "fix": "Nothing to redo - this is not about your video.",
                 "disclaimer": f"No score is shown. {coming}"}
     if status == "strike_counts_off":
         return {
             "reason": ("A score is built from counted strikes, and WarriorIQ does not count strikes "
                        "until its counting is accurate enough."),
-            "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+            "fix": "Nothing to redo - this is not about your video.",
             "disclaimer": ("No score is shown. A score is built from counted strikes, and automatic "
                            "strike counting is switched off until it is accurate enough. Movement, "
                            "guard, balance, centre and pressure below are unaffected."),
@@ -5844,7 +5887,7 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
                 "Scoring a round needs punches counted as well as kicks, and WarriorIQ cannot "
                 "count punches accurately yet."
             ),
-            "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+            "fix": "Nothing to redo - this is not about your video.",
             "disclaimer": (
                 "No score is shown. Boxing is scored on punches, and WarriorIQ's punch counting "
                 "is not accurate enough yet - checked against video, the punch count was "
@@ -5863,7 +5906,7 @@ def _score_withheld(report: dict, job_id: str | None = None) -> dict | None:
                 "Scoring needs to know which strikes landed, and WarriorIQ cannot tell that "
                 "reliably yet, so no strike is counted towards a score."
             ),
-            "fix": "Nothing to redo - the movement, guard and balance numbers below are measured and real.",
+            "fix": "Nothing to redo - this is not about your video.",
             "disclaimer": (
                 "No score is shown. A score needs to know which strikes landed, and WarriorIQ "
                 "cannot tell that reliably yet, so no strike is counted towards one. Movement, "
@@ -9121,6 +9164,12 @@ def sitemap_xml():
         f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
         media_type="application/xml",
     )
+
+
+@app.get("/accuracy", response_class=HTMLResponse)
+def accuracy_page(request: Request):
+    """The measured accuracy figures, moved off the homepage (walkthrough 2026-10-19)."""
+    return templates.TemplateResponse(request=request, name="accuracy.html", context={"request": request})
 
 
 @app.get("/sample-report", response_class=HTMLResponse)

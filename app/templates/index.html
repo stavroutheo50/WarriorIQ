@@ -49,8 +49,8 @@
   <article><span>04</span><div><h3>Improve</h3><p>Take the replay, coach report, and fighter-specific plan into training.</p></div></article>
 </div></section>
 
-{#- Audit 2026-10-14 (#55): what is measured per sport, the measured accuracy,
-    and a pricing summary. Every sentence about counting comes from
+{#- Audit 2026-10-14 (#55): what is measured per sport and a pricing summary;
+    the measured accuracy has its own page, /accuracy (walkthrough 2026-10-19). Every sentence about counting comes from
     core.sport_policy and every price and allowance from core.payments, so
     this page cannot say more than the report or the pricing page does. -#}
 <section class="product-section measured-section" id="what-is-measured" aria-labelledby="measuredTitle"><div class="section-intro" data-reveal><div class="eyebrow">What is measured</div><h2 id="measuredTitle">Sport by sport, what the report covers.</h2><p>Every sport gets the same movement measurements. Strike counts and the parts of a sport the camera cannot judge differ, and the report says which.</p></div>
@@ -60,37 +60,22 @@
   {% if item.unobserved %}<p class="small muted"><strong>Not seen:</strong> {{ item.unobserved }}.</p>{% endif %}
 </article>{% endfor %}</div></section>
 
-<section class="product-section accuracy-section" id="accuracy" aria-labelledby="accuracyTitle"><div class="section-intro" data-reveal><div class="eyebrow">Accuracy</div><h2 id="accuracyTitle">How accurate it is, measured.</h2><p>These are the checks done so far, on small sets of footage. They are findings, not validated accuracy figures, and they are why counts are labelled as estimates.</p></div>
-<div class="measured-grid">
-  <article><h3>Flagged actions</h3><p>On 178 clips from three reference fights, checked by hand, <strong>about a third</strong> of the actions the report displayed were real strikes.</p></article>
-  <article><h3>One labelled bout</h3><p>On a Kick Light bout labelled by a competitor, <strong>11 of 16</strong> counted moments were real strikes, and <strong>6</strong> of those had the right type.</p></article>
-  <article><h3>Against official stats</h3><p>On three UFC rounds, strikes thrown while both fighters stood were close to the official numbers (<strong>29 vs 21, 36 vs 12, 20 vs 17</strong>). In grappling the counts ran three to six times too high.</p></article>
-  <article><h3>Guard</h3><p>Not yet checked against hand-labelled clips, so it is marked <strong>experimental</strong> wherever it appears.</p></article>
-</div></section>
+
 
 <section class="product-section pricing-summary" id="plans" aria-labelledby="plansTitle"><div class="section-intro" data-reveal><div class="eyebrow">Plans</div><h2 id="plansTitle">Start free. Upgrade when you need more.</h2>{% if not payments_enabled %}<p>Billing is not open yet: paid prices apply once it opens.</p>{% endif %}</div>
 <div class="measured-grid">{% for key, plan in summary_plans %}<article><h3>{{ plan.label }}</h3><p class="plan-price">{{ plan.price }}</p><p class="small muted">{{ plan.period }}{% if not payments_enabled and key != 'free' %}, when billing opens{% endif %}</p><p>{{ plan.allowance }}</p></article>{% endfor %}
   {% if coach_from %}<article><h3>Coaches and gyms</h3><p class="plan-price">from {{ coach_from }}</p><p class="small muted">per month{% if not payments_enabled %}, when billing opens{% endif %}</p><p>Room for a squad of fighters.</p></article>{% endif %}
 </div><p><a class="text-link" href="/pricing">Compare every plan →</a></p></section>
 
-<section class="product-section learn-section" aria-labelledby="learnTitle"><div class="section-intro" data-reveal><div class="eyebrow">Fight analysis guides</div><h2 id="learnTitle">Make the footage—and the review—more useful.</h2><p>Practical guidance for athletes and coaches, written around what WarriorIQ can measure and where video evidence has limits.</p></div><div class="learn-grid">
-  <a href="/kickboxing-fight-analysis"><span>Kickboxing</span><strong>How fight analysis works</strong><b>Read guide →</b></a>
-  <a href="/k1-fight-analysis"><span>Kickboxing · K-1</span><strong>Reviewing a bout with the ruleset in view</strong><b>Read guide →</b></a>
-  <a href="/fight-video-analysis-for-coaches"><span>All five sports</span><strong>Turn a fight report into useful training work</strong><b>Read guide →</b></a>
-  <a href="/how-to-record-a-fight-for-analysis"><span>All five sports</span><strong>Record a clearer fight on any phone</strong><b>Read guide →</b></a>
-</div></section>
 
-<section class="product-section product-outcomes"><div class="outcome-intro" data-reveal><div class="eyebrow">From footage to work</div><h2>Your next round starts here.</h2><p>Every useful insight has somewhere to go—into a replay, a training session, or a conversation with your coach.</p><a class="text-link" href="/history">Open your fight library →</a></div><div class="outcome-list" data-motion-sequence="outcomes">
-  {#- One page, so one card (D3, QA 2026-10-11): /dashboard and /coach both
-      showed Fight Camp under two different promises. -#}
-  <a href="/camp"><span>Fight Camp</span><strong>Your measured progress across saved fights, your squad, and training missions from your latest report.</strong><b>Fight Camp →</b></a>
-  <a href="/history"><span>Evidence replay</span><strong>Return to the movement and timing{% if features.key_moments.on %}, and supported key moments{% endif %}.</strong><b>Replay →</b></a>
-</div></section>
 
-<section class="trust-panel"><div><div class="eyebrow">Built for serious review</div><h2>Evidence before claims.</h2><p>When footage cannot support a conclusion, WarriorIQ says so. Measured observations stay separate from uncertainty{% if features.scoring.on %}, and scorecards remain training estimates—not official judging{% endif %}.</p></div><div class="trust-checks">{% if features.scoring.on %}<span>Confidence-gated scorecards</span>{% else %}<span>Score estimates coming</span>{% endif %}<span>Ruleset-aware evidence</span><span>Private to your account</span><span>Account-controlled deletion</span></div></section>
+
+
+
 
 <section class="product-section coach-callout final-cta" data-reveal><div><div class="eyebrow">Bring your corner with you</div><h2>One fight. A clearer next session.</h2><p class="muted">Save progress, share a private summary, and turn the same fight evidence into practical work between sessions.</p></div><div class="hero-actions">{% if request.state.account %}<a class="btn" data-motion-primary href="/analyze">Analyse a fight</a>{% else %}<a class="btn" data-motion-primary href="/signup?next=/analyze">Create a free account to analyse a fight</a>{% endif %}<a class="btn secondary" href="/pricing">Explore plans</a></div></section>
 
-<section class="product-section faq"><div class="section-intro" data-reveal><div class="eyebrow">Questions</div><h2>Before you upload</h2></div><details><summary>Is WarriorIQ an official judge?</summary><p>No. {% if features.scoring.on %}Scorecards are evidence-gated estimates for training and review, not replacements for licensed officials.{% else %}WarriorIQ does not score fights yet; when score estimates arrive they will be training estimates, not a replacement for licensed officials.{% endif %}</p></details><details><summary>Can I analyse a fight without an account?</summary><p>No. A fight belongs to a workspace &mdash; your footage, the athletes in it and your upload allowance are all attached to an account &mdash; so WarriorIQ asks you to create one first. It is free, and your fights stay private to you.</p></details><details><summary>How accurate are the strike counts?</summary><p>Not accurate enough to treat as exact. They are labelled as rough estimates everywhere they appear; the <a class="text-link" href="#accuracy">accuracy checks above</a> are why.</p></details><details><summary>Can I see a report before signing up?</summary><p>Yes. The <a class="text-link" href="/sample-report">sample report</a> shows the layout with made-up fighters and numbers.</p></details><details><summary>What happens when the AI is uncertain?</summary><p>It leaves out anything the video cannot support and says so on the report. When it cannot tell the two fighters apart, the report asks you to point them out again on a clear picture.</p></details>
+<section class="product-section faq"><div class="section-intro" data-reveal><div class="eyebrow">Questions</div><h2>Before you upload</h2></div><details><summary>Is WarriorIQ an official judge?</summary><p>No. {% if features.scoring.on %}Scorecards are evidence-gated estimates for training and review, not replacements for licensed officials.{% else %}WarriorIQ does not score fights yet; when score estimates arrive they will be training estimates, not a replacement for licensed officials.{% endif %}</p></details><details><summary>Can I analyse a fight without an account?</summary><p>No. A fight belongs to a workspace &mdash; your footage, the athletes in it and your upload allowance are all attached to an account &mdash; so WarriorIQ asks you to create one first. It is free, and your fights stay private to you.</p></details><details><summary>How accurate are the strike counts?</summary><p>Not accurate enough to treat as exact. They are labelled as rough estimates everywhere they appear; the <a class="text-link" href="/accuracy">accuracy checks</a> are why.</p></details><details><summary>Can I see a report before signing up?</summary><p>Yes. The <a class="text-link" href="/sample-report">sample report</a> shows the layout with made-up fighters and numbers.</p></details><details><summary>What happens when the AI is uncertain?</summary><p>It leaves out anything the video cannot support and says so on the report. When it cannot tell the two fighters apart, the report asks you to point them out again on a clear picture.</p></details>
+<p class="faq-guides small">Guides: <a class="text-link" href="/how-to-record-a-fight-for-analysis">Record a clearer fight</a> · <a class="text-link" href="/kickboxing-fight-analysis">How fight analysis works</a> · <a class="text-link" href="/k1-fight-analysis">K-1 review</a> · <a class="text-link" href="/fight-video-analysis-for-coaches">For coaches</a> · <a class="text-link" href="/accuracy">Accuracy</a></p>
 </section>
 {% endblock %}

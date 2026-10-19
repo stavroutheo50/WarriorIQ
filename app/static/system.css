@@ -511,3 +511,34 @@ summary:focus-visible,
 .measured-grid .plan-price{margin:0;font-size:30px;font-weight:900}
 /* A little air between the upload button and its progress bar (owner, 2026-10-19). */
 #uploadProgress{margin-top:14px}
+/* With the "Analysing 45%" badge in the header, the links wrapped onto two
+   lines at 1280px (walkthrough 2026-10-19). Links never wrap; while the badge
+   shows, the account email gives way and only the avatar stays. */
+.navlinks>a,.nav-more>summary{white-space:nowrap}
+.account-nav:has(.active-analysis-chip) .profile-email{display:none}
+/* Which bar colour is which fighter on "You vs your opponent" (walkthrough 2026-10-19). */
+.h2h-legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 12px;color:var(--wiq-text-secondary)}
+.h2h-legend span{display:inline-flex;align-items:center;gap:7px}
+.h2h-swatch{display:inline-block;width:14px;height:10px;border-radius:2px}
+.h2h-swatch.mine{background:var(--mine)}
+.h2h-swatch.theirs{background:var(--theirs)}
+/* Library cards (walkthrough 2026-10-19). The bulk-delete tick box was a
+   fifth item in a four-column card, which pushed the title into a narrow
+   column and ran the opponent's name into the score. It sits on the corner of
+   the thumbnail instead, out of the grid. */
+.fight-record{position:relative}
+.fight-record>.fight-select{position:absolute;top:28px;left:8px;z-index:2;display:grid;place-items:center;width:30px;height:30px;border-radius:6px;background:rgba(10,15,24,.82);cursor:pointer}
+.fight-record>.fight-select input{width:18px;height:18px;margin:0;cursor:pointer}
+.fight-record-main{min-width:0}
+.fight-record-main h2{flex-wrap:wrap}
+/* The "no results" box is hidden until a search finds nothing; a display rule
+   left its empty button showing under the pager. */
+.archive-no-results[hidden]{display:none}
+/* In the stacked (desktop) actions column, Delete was pushed to the right by a
+   rule meant for the narrow row layout and was clipped. */
+@media not all and (max-width:1120px){.fight-record-actions form[data-confirm-delete]{margin-left:0;padding-left:0;border-left:0}}
+/* The signed-out sport chooser's only heading is now its H1 (walkthrough 2026-10-19), kept at the size it had as an H2. */
+.empty-workspace h1.workspace-required-title{font-size:clamp(24px,3vw,32px);line-height:1.2;margin:0 0 12px}
+/* Compare picker: a fight whose picture is missing kept its text in the 64px
+   picture column, one word per line (walkthrough 2026-10-19). */
+.compare-option-text{grid-column:3}

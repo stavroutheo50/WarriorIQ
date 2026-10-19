@@ -4418,7 +4418,8 @@ class ObservedSummaryTests(unittest.TestCase):
             'if identity_trusted and not (report.get("scorecard") or {}).get("available")',
             source)
         page = Path("app/templates/result.html").read_text(encoding="utf-8")
-        self.assertIn("{% elif observed %}", page)
+        # Not repeated under the strike strip that already shows the counts (2026-10-19).
+        self.assertIn("{% elif observed and not strip_shown %}", page)
 
 
 class KickMinimumTests(unittest.TestCase):

@@ -481,7 +481,8 @@ class DurableAnalysisStateTests(TestCase):
 
             running = client.get("/dashboard").text
             self.assertIn(f'href="/progress/{job_id}"', running)
-            self.assertIn("Analysing 44%", running)
+            # The badge speaks in the progress page's steps (walkthrough 2026-10-19).
+            self.assertIn("Analysing step 1/4", running)
 
             state.update_job(job_id, {"status": "complete", "percent": 100.0})
             completed = client.get("/dashboard").text
@@ -518,7 +519,7 @@ class DurableAnalysisStateTests(TestCase):
 
             dashboard = client.get("/dashboard").text
             self.assertIn(f'href="/progress/{active_id}"', dashboard)
-            self.assertIn("Analysing 37%", dashboard)
+            self.assertIn("Analysing step 1/4", dashboard)
             self.assertNotIn(f'href="/result/{completed_id}"', dashboard)
 
             navigation = client.get("/api/active-analysis").json()

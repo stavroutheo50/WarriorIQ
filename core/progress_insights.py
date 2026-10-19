@@ -65,6 +65,10 @@ def _point(record: dict, fighter: str) -> dict | None:
     fighter = followed_side(record, fighter)
     if identity_failed(record, fighter):
         return None
+    # Too little fight footage to measure: the report itself shows no numbers,
+    # so its "0% seen" is not the athlete's form (walkthrough 2026-10-19).
+    if (report.get("integrity") or {}).get("fight_footage_sufficient") is False:
+        return None
     metrics = report.get("metrics", {}).get(fighter)
     if not metrics:
         return None

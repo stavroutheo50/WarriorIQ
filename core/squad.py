@@ -172,6 +172,9 @@ def summarize_fight(report: dict, fight: dict) -> dict | None:
         # Not recognised as a fight (core/fight_presence.py): its movement is
         # not a fighter's form, so it stays out of the trend.
         else "not_a_fight" if not_a_fight(report)
+        # Too little fight footage to measure (the report shows no numbers):
+        # its 0% or 100% "seen" describes no fight at all (2026-10-19).
+        else "no_fight" if (report.get("integrity") or {}).get("fight_footage_sufficient") is False
         else "coverage" if min(coverage["A"], coverage["B"]) < _MIN_COVERAGE
         else None
     )
@@ -304,7 +307,7 @@ def build_squad_view(fights: list[dict], limit: int = 25) -> dict:
         "unusable_count": len(rows) - len(usable),
         "unusable_identity": sum(1 for row in rows if row.get("unusable_reason") == "identity"),
         "unusable_coverage": sum(1 for row in rows if row.get("unusable_reason") == "coverage"),
-        "unusable_not_a_fight": sum(1 for row in rows if row.get("unusable_reason") == "not_a_fight"),
+        "unusable_not_a_fight": sum(1 for row in rows if row.get("unusable_reason") in {"not_a_fight", "no_fight"}),
         "trend": trend,
         "trend_available": bool(trend),
         "trend_sport": trend_sport,
