@@ -126,4 +126,4 @@ below point to it.
 | Static page time to first byte | Mean 3–74 ms across `/`, `/pricing`, `/privacy`, `/terms`, `/subprocessors` and `/sample-report` |
 | Close fighters / hand-drawn box | Overlapping boxes (IoU 0.79) with one drawn by hand: `warn`, never a block |
 | Signed out | `/result/<id>`, `/replay/<id>` and `/progress/<id>` return 303 to `/login?next=…`; `/openapi.json`, `/docs` and `/redoc` return 404 |
-| Benchmark ratio (CPU only, no GPU here) | 24 s clip: 55.8 s, ratio 2.33. 60 s and 180 s: still running when this was written. CPU numbers say nothing about the GPU promise; see OPS_TODO §1 |
+| Benchmark ratio (CPU only, no GPU here) | 24 s: 55.8 s, ratio **2.33**; 60 s: 116.8 s, ratio **1.95**; 180 s: 338.1 s, ratio **1.88**. The script exited 1 because every ratio is above 1.0. Nearly all the time is the frame pass on CPU PyTorch. **This does not meet the target here** and says nothing about the GPU promise; see OPS_TODO §1 |
