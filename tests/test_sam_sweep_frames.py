@@ -91,3 +91,30 @@ def test_a_decoding_error_reaches_the_sweep():
     with pytest.raises(RuntimeError, match="disk gone"):
         list(frames)
     frames.close()
+
+
+# The masks' boxes are found on the card now (2026-10-20: 7.4 s of a 37 s sweep).
+def _cases():
+    rng = np.random.default_rng(11)
+    empty = torch.full((1, 40, 60), -1.0)
+    three = empty.clone()
+    three[0, 5, 7] = three[0, 6, 9] = three[0, 30, 50] = 2.0
+    four = three.clone()
+    four[0, 39, 0] = 0.5
+    blob = torch.from_numpy(rng.normal(size=(1, 40, 60)).astype(np.float32))
+    edge = torch.full((40, 60), -3.0)
+    edge[0, :] = 1.0
+    edge[:, 59] = 1.0
+    return [empty, three, four, blob, edge, torch.zeros(2, 4, 4) + 1.0, torch.full((1, 40, 60), 0.0)]
+
+
+@pytest.mark.parametrize("logits", _cases())
+def test_the_box_from_the_card_is_the_box_numpy_found(logits):
+    from core.sam_recovery import SamRecovery
+
+    expected = SamRecovery._mask_to_box((logits > 0.0).detach().cpu().numpy())
+    got = SamRecovery._logits_to_box(logits)
+    if expected is None:
+        assert got is None
+    else:
+        assert got is not None and got.dtype == np.float32 and np.array_equal(got, expected)
