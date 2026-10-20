@@ -95,3 +95,15 @@ def test_the_replay_goes_full_screen_with_the_skeletons():
     assert "playFullButton.onclick=()=>{enterBig();playAt(" in page
     css = (ROOT / "app" / "static" / "components.css").read_text(encoding="utf-8")
     assert ".replay-wrap.replay-theatre{position:fixed;inset:0" in css
+
+
+def test_the_phone_menu_is_grouped_and_marks_the_page_you_are_on():
+    base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
+    menu = base[base.index('<div class="mobile-menu" id="mobileMenu"'):base.index("<main id=")]
+    for heading in ("Your fights", "Account", "Help"):
+        assert f'<p class="mobile-menu-heading">{heading}</p>' in menu
+    assert '<a data-nav="camp" href="/camp">Fight Camp<small>Your progress over time</small></a>' in menu
+    assert ">Plans and billing<" not in menu      # it sat beside "Plans"; now "Billing"
+    assert "document.querySelectorAll(`[data-nav=\"${active}\"]`)" in base
+    css = (ROOT / "app" / "static" / "product.css").read_text(encoding="utf-8")
+    assert ".mobile-menu{max-height:calc(100dvh - 80px);overflow-y:auto" in css
