@@ -21,6 +21,14 @@ class RemoteWorkerError(RuntimeError):
     pass
 
 
+class WorkerRefused(RemoteWorkerError):
+    """The web app answered, and will not give this worker fights: its code differs."""
+
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        self.reason = reason
+
+
 # How long to wait for the web side to answer.
 #
 # Was 30 seconds, and that is not enough for the host this actually talks to.
@@ -83,20 +91,26 @@ class RemoteWorkerClient:
             named = "; ".join(f"{label}: {', '.join(differences[key])}" for key, label in (
                 ("changed", "different here"), ("missing_on_worker", "missing here"))
                 if differences.get(key))
-            raise RemoteWorkerError(
+            raise WorkerRefused(
                 "The web app refused this worker: its analysis code is not the same as the "
                 f"website's (worker {analysis_fingerprint()}, website {response.get('required_fingerprint')}). "
                 + (f"Files in this worker's core folder - {named}. " if named else "")
-                + "Update the worker and the website to the same version from GitHub, then restart the worker.")
+                + "Update the worker and the website to the same version from GitHub, then restart the worker.",
+                "worker_code_differs")
         if response.get("refused"):
             # The server is newer than this code. Saying so is the only useful
             # thing a stale worker can do; analysing would produce a report
             # the server will not accept.
-            raise RemoteWorkerError(
+            raise WorkerRefused(
                 f"The web app refused this worker ({response['refused']}): it needs analysis "
                 f"version {response.get('required_analysis_version')}, this worker is "
-                f"{ANALYSIS_VERSION}. Redeploy the worker from the current code.")
+                f"{ANALYSIS_VERSION}. Redeploy the worker from the current code.",
+                str(response["refused"]))
         return response.get("job")
+
+    def analysis_code(self) -> dict:
+        """The web app's own core/*.py, so a refused worker can match it exactly."""
+        return self._request("GET", "/api/worker/analysis-code", timeout=max(WORKER_HTTP_TIMEOUT_SECONDS, 180))
 
     def progress(self, job_id: str, analysis_run_id: str, patch: dict) -> None:
         self._request("POST", f"/api/worker/jobs/{job_id}/progress", {

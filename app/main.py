@@ -5026,6 +5026,22 @@ def remote_worker_claim(request: Request, payload: WorkerIdentityPayload):
     return {"job": _remote_job_payload(job_id, job)}
 
 
+@app.get("/api/worker/analysis-code", dependencies=[Depends(_require_remote_worker)])
+def remote_worker_analysis_code(request: Request):
+    """This web app's core/*.py, for a worker it refuses for running other code.
+
+    2026-10-19: every website deploy that touched core/ paused all analyses
+    until someone ran update-worker on the GPU PC, and the PC was often updated
+    from a different commit or not at all. The worker now fetches exactly the
+    code it is compared against (worker.py _sync_analysis_code), so the two
+    cannot stay apart. Only the worker token can read it.
+    """
+    _require_remote_worker(request)
+    core = Path(__file__).resolve().parents[1] / "core"
+    return {"analysis_version": ANALYSIS_VERSION, "fingerprint": analysis_fingerprint(),
+            "files": {path.name: path.read_text(encoding="utf-8") for path in sorted(core.glob("*.py"))}}
+
+
 @app.get("/api/worker/jobs/{job_id}/video", dependencies=[Depends(_require_remote_worker)])
 def remote_worker_video(request: Request, job_id: str, worker_id: str, analysis_run_id: str):
     _require_remote_worker(request)
