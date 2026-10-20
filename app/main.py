@@ -128,6 +128,7 @@ from core.upload_security import (
     reserve_upload_storage, release_upload_storage, pending_upload_status,
 )
 from core import sport_check
+from core import strike_marks
 from core.fight_stats import _deduplicate as _deduplicate_strikes
 from core.ground import STRIKING_SPORTS, looks_like_grappling
 from core.camp import (
@@ -681,6 +682,12 @@ class AnnotationPayload(BaseModel):
 class SportCheckPayload(BaseModel):
     sport: str
     frames: list[str]
+
+
+class StrikeMarksPayload(BaseModel):
+    marks: list
+    covered_seconds: float = 0.0
+    playback_rate: float = 1.0
 
 
 class StrikeCheckPayload(BaseModel):
@@ -6856,6 +6863,89 @@ def replay_page(
             ),
         },
     )
+
+
+STRIKE_MARKS_FILE = "strike_marks.json"
+
+
+def _strike_marks_path(job_id: str) -> Path:
+    """The fight's own folder, not one analysis run: re-running the analysis
+    keeps the marks, and deleting the fight removes them with the folder."""
+    directory = (OUTPUTS / job_id).resolve()
+    if directory.parent != OUTPUTS.resolve():
+        raise HTTPException(404)
+    return directory / STRIKE_MARKS_FILE
+
+
+def _read_strike_marks(job_id: str) -> dict:
+    try:
+        stored = json.loads(_strike_marks_path(job_id).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"marks": [], "covered_seconds": 0.0}
+    return stored if isinstance(stored, dict) else {"marks": [], "covered_seconds": 0.0}
+
+
+def _strike_marks_comparison(report: dict, stored: dict) -> dict:
+    # Every family, published or not: this page measures the detector itself,
+    # so the owner sees everything it counted, labelled as automatic.
+    return strike_marks.compare(stored.get("marks") or [], _counted_strikes(report, strike_marks.FAMILIES),
+                                float(stored.get("covered_seconds") or 0.0))
+
+
+@app.get("/mark/{job_id}", response_class=HTMLResponse)
+def strike_marks_page(request: Request, job_id: str):
+    """Watch the fight and tap each strike as it is thrown (2026-10-20).
+
+    The person's marks are the answer the strike counter is measured against:
+    how many counted strikes are real, and how many real ones it missed. Only
+    the signed-in owner of the fight.
+    """
+    if not _account(request) or not _authorized_job(request, job_id):
+        return _job_page_refused(request)
+    report = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
+    stored = _read_strike_marks(job_id)
+    span = _analysed_span_summary(report) or {}
+    return templates.TemplateResponse(request=request, name="mark.html", context={
+        "request": request, "job_id": job_id,
+        "names": _fighter_names(request, _authorized_job(request, job_id) or {}, report),
+        "video_removed": _video_removed(job_id),
+        "start_seconds": float(span.get("start_seconds") or 0.0),
+        "marks": stored.get("marks") or [],
+        "covered_seconds": float(stored.get("covered_seconds") or 0.0),
+        "comparison": _strike_marks_comparison(report, stored),
+    })
+
+
+@app.post("/api/strike-marks/{job_id}", dependencies=[Depends(require_csrf)])
+def save_strike_marks(request: Request, job_id: str, payload: StrikeMarksPayload):
+    """Every mark on this fight, saved whole after each tap, and the comparison."""
+    _enforce_rate_limit(request, "strike_marks", 600, 300)
+    if not _account(request) or not _authorized_job(request, job_id):
+        raise HTTPException(403, "Sign in to mark your own fight.")
+    report = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
+    span = _analysed_span_summary(report) or {}
+    try:
+        marks = strike_marks.clean_marks(payload.marks, span.get("duration_seconds"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    if not (math.isfinite(payload.covered_seconds) and math.isfinite(payload.playback_rate)):
+        raise HTTPException(400, "Invalid answer")
+    previous = _read_strike_marks(job_id)
+    stored = {
+        "marks": marks,
+        # Only ever grows: going back to re-watch does not shrink what was seen.
+        "covered_seconds": round(max(float(previous.get("covered_seconds") or 0.0),
+                                     max(0.0, payload.covered_seconds),
+                                     max((mark["t"] for mark in marks), default=0.0)), 2),
+        "playback_rate": round(min(4.0, max(0.1, payload.playback_rate)), 2),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    path = _strike_marks_path(job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = path.with_suffix(".tmp")
+    staged.write_text(json.dumps(stored), encoding="utf-8")
+    os.replace(staged, path)
+    return {"saved": len(marks), "comparison": _strike_marks_comparison(report, stored)}
 
 
 def _tracking_response_chunks(path: Path):
