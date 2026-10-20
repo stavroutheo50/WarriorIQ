@@ -9003,6 +9003,10 @@ async def chunked_upload_finish(request: Request, job_id: str):
             external_ai_guardian_permission=flag("external_ai_guardian_permission"),
             fighter_id=text("fighter_id"),
             fighter_name=text("fighter_name"),
+            # Left out until 2026-10-20: upload() then got its Form("") default
+            # object, and the report named the opponent "annotation=str ...".
+            event_name=text("event_name"),
+            opponent_name=text("opponent_name"),
             rights_confirmed=flag("rights_confirmed"),
             people_permissions_confirmed=flag("people_permissions_confirmed"),
             minor_permission_status=text("minor_permission_status", "no_minors"),

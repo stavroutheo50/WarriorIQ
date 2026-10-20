@@ -14,6 +14,11 @@
 #      models and the top-level scripts over the rest;
 #   4. prints the new fingerprint and starts the worker again.
 # .env, .venv, outputs and downloaded model weights are never touched.
+#
+# A folder that is a Git copy is updated with Git instead (2026-10-20): copying
+# files over a Git copy left it half on one version and half on another, Git
+# then refused to update it, and the website refused the worker for an hour.
+# Changed files are put aside with `git stash`, never deleted.
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -31,29 +36,45 @@ Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" |
     Where-Object { $_.CommandLine -like '*worker.py*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 $service = Get-ScheduledTask -TaskName 'WarriorIQ Analysis Worker' -ErrorAction SilentlyContinue
-if ($service) { Stop-ScheduledTask -TaskName 'WarriorIQ Analysis Worker' }
-
-Write-Host 'Downloading the latest code from GitHub...'
-$source = Join-Path $env:TEMP 'warrioriq_main'
-if (Test-Path $source) { Remove-Item $source -Recurse -Force }
-git clone --quiet --depth 1 --branch main https://github.com/stavroutheo50/WarriorIQ.git $source
-if ($LASTEXITCODE -ne 0) { throw 'git clone failed - is Git installed and signed in to GitHub?' }
-
-Write-Host 'Copying it into this folder...'
-$previous = Join-Path $root 'core_previous'
-if (Test-Path $previous) { Remove-Item $previous -Recurse -Force }
-if (Test-Path (Join-Path $root 'core')) { Rename-Item (Join-Path $root 'core') 'core_previous' }
-# robocopy exit codes below 8 mean success.
-robocopy (Join-Path $source 'core') (Join-Path $root 'core') /MIR /NJH /NJS /NFL /NDL | Out-Null
-if ($LASTEXITCODE -ge 8) { throw 'Copying core failed.' }
-foreach ($folder in 'app', 'tools', 'deploy', 'models') {
-    robocopy (Join-Path $source $folder) (Join-Path $root $folder) /E /NJH /NJS /NFL /NDL | Out-Null
-    if ($LASTEXITCODE -ge 8) { throw "Copying $folder failed." }
+if ($service) {
+    try { Stop-ScheduledTask -TaskName 'WarriorIQ Analysis Worker' } catch { Write-Host 'Could not stop the background worker (run as administrator to stop it); it restarts on the new code by itself.' }
 }
-robocopy $source $root *.py *.bat requirements*.txt /XF update-worker.bat /NJH /NJS /NFL /NDL | Out-Null
-if ($LASTEXITCODE -ge 8) { throw 'Copying the top-level files failed.' }
 
-$commit = git -C $source rev-parse --short HEAD
+if (Test-Path (Join-Path $root '.git')) {
+    Write-Host 'This folder is a Git copy: updating it with Git...'
+    git -C $root fetch --quiet origin main
+    if ($LASTEXITCODE -ne 0) { throw 'git fetch failed - is this PC online and signed in to GitHub?' }
+    if (git -C $root status --porcelain --untracked-files=no) {
+        git -C $root stash push --quiet -m "update-worker $(Get-Date -Format s)"
+        if ($LASTEXITCODE -ne 0) { throw 'git stash failed - nothing was changed.' }
+        Write-Host 'Files changed in this folder were put aside with git stash (see: git stash list).'
+    }
+    git -C $root merge --ff-only --quiet origin/main
+    if ($LASTEXITCODE -ne 0) { throw 'git could not move this folder to GitHub main - send the lines above to whoever maintains WarriorIQ.' }
+    $commit = git -C $root rev-parse --short HEAD
+} else {
+    Write-Host 'Downloading the latest code from GitHub...'
+    $source = Join-Path $env:TEMP 'warrioriq_main'
+    if (Test-Path $source) { Remove-Item $source -Recurse -Force }
+    git clone --quiet --depth 1 --branch main https://github.com/stavroutheo50/WarriorIQ.git $source
+    if ($LASTEXITCODE -ne 0) { throw 'git clone failed - is Git installed and signed in to GitHub?' }
+
+    Write-Host 'Copying it into this folder...'
+    $previous = Join-Path $root 'core_previous'
+    if (Test-Path $previous) { Remove-Item $previous -Recurse -Force }
+    if (Test-Path (Join-Path $root 'core')) { Rename-Item (Join-Path $root 'core') 'core_previous' }
+    # robocopy exit codes below 8 mean success.
+    robocopy (Join-Path $source 'core') (Join-Path $root 'core') /MIR /NJH /NJS /NFL /NDL | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw 'Copying core failed.' }
+    foreach ($folder in 'app', 'tools', 'deploy', 'models') {
+        robocopy (Join-Path $source $folder) (Join-Path $root $folder) /E /NJH /NJS /NFL /NDL | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "Copying $folder failed." }
+    }
+    robocopy $source $root *.py *.bat requirements*.txt /XF update-worker.bat /NJH /NJS /NFL /NDL | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw 'Copying the top-level files failed.' }
+
+    $commit = git -C $source rev-parse --short HEAD
+}
 $fingerprint = & $python -c "from core.build_info import analysis_fingerprint as f; print(f())"
 Write-Host ''
 Write-Host "Worker updated to GitHub main $commit (code fingerprint $fingerprint)."
