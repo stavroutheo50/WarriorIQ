@@ -1,0 +1,84 @@
+"""Owner's requests and the bug they reported, 20 Oct 2026.
+
+- a large (chunked) upload named the opponent "annotation=str required=False ..."
+- the share button only says Share, and the share box has an X
+- the rules are asked next to the video, not under "More options"
+- update-worker updates a Git copy with Git
+"""
+
+from __future__ import annotations
+
+import inspect
+from pathlib import Path
+
+from browser_client import BrowserClient
+
+import app.main as web
+from core import db as database
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_a_chunked_upload_passes_every_form_field_to_the_upload():
+    source = inspect.getsource(web.chunked_upload_finish)
+    call = source[source.index("await upload("):]
+    fields = [name for name, parameter in inspect.signature(web.upload).parameters.items()
+              if name not in {"request", "background", "video"}]
+    missing = [name for name in fields if f"{name}=" not in call]
+    assert not missing, missing
+
+
+def test_the_leaked_default_is_never_a_name():
+    from fastapi import Form
+
+    assert database.clean_fight_name(Form("")) is None
+    assert database.clean_fight_name("annotation=str required=False alias='opponent_name'") is None
+    assert database.clean_fight_name("  Nikos  ") == "Nikos"
+
+
+def test_a_stored_leaked_name_is_cleared_on_start():
+    import uuid
+
+    from core.auth import hash_password
+
+    account = database.create_account(f"own20-{uuid.uuid4().hex[:8]}@example.com", hash_password("Strong-Local-Password"))
+    profile_id = int(database.get_account_by_email(account["email"])["profile_id"])
+    job = uuid.uuid4().hex[:12]
+    database.save_fight(job, profile_id, "a.mp4", "", "", "sparring", "K1", "A", {}, "2999-01-01T00:00:00+00:00")
+    with database.connection() as con:
+        con.execute("UPDATE fights SET opponent_name=?, event_name=? WHERE job_id=?",
+                    ("annotation=str required=False", "annotation=str", job))
+    database._schema_ready_for = None    # as on the next start of the app
+    database.init_db()
+    with database.connection() as con:
+        row = con.execute("SELECT opponent_name, event_name FROM fights WHERE job_id=?", (job,)).fetchone()
+    assert tuple(row) == (None, None)
+
+
+def test_the_share_button_just_says_share_and_the_box_has_an_x():
+    page = (ROOT / "app" / "templates" / "result.html").read_text(encoding="utf-8")
+    assert "Share to story" not in page and "Share to your story" not in page
+    assert "data-share-card-open>Share</button>" in page
+    assert 'class="share-card-x" type="button" data-share-card-close aria-label="Close"' in page
+    script = (ROOT / "app" / "static" / "share_card.js").read_text(encoding="utf-8")
+    assert 'querySelectorAll("[data-share-card-close]")' in script
+    assert "event.target === dialog" in script
+
+
+def test_the_rules_are_asked_next_to_the_video():
+    import uuid
+
+    client = BrowserClient(web.app)
+    client.post("/signup", data={"email": f"own20-{uuid.uuid4().hex[:8]}@example.com",
+                                 "password": "Strong-Local-Password", "accept_terms": "true",
+                                 "age_confirmed": "true"}, follow_redirects=False)
+    text = client.get("/analyze/kickboxing").text
+    assert text.index('id="fightVideo"') < text.index('id="fightRuleset"') < text.index('name="rights_confirmed"')
+    assert "rulesSummary" not in text
+
+
+def test_update_worker_uses_git_in_a_git_copy():
+    script = (ROOT / "deploy" / "update-worker.ps1").read_text(encoding="utf-8")
+    assert "if (Test-Path (Join-Path $root '.git'))" in script
+    assert "git -C $root merge --ff-only --quiet origin/main" in script
+    assert "git -C $root stash push" in script

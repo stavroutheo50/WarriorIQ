@@ -619,6 +619,11 @@ def _init_db_schema() -> None:
             con.execute("ALTER TABLE fights ADD COLUMN event_name TEXT")
         if "opponent_name" not in fight_columns:
             con.execute("ALTER TABLE fights ADD COLUMN opponent_name TEXT")
+        # Large uploads stored the form's default object as these names until
+        # 2026-10-20 ("annotation=str required=False ..."). Not a name anyone
+        # typed: cleared, so the fight is called "Opponent" again.
+        for column in ("event_name", "opponent_name"):
+            con.execute(f"UPDATE fights SET {column}=NULL WHERE {column} LIKE 'annotation=%'")
         # How much video an analysis covered, for plans counted in video
         # minutes (audit 2026-10-14, #51). Nullable: rows written before it,
         # and analyses counted per day or month, carry none.
@@ -729,7 +734,11 @@ FIGHT_NAME_MAX = 80
 
 def clean_fight_name(value: str | None) -> str | None:
     """An event or opponent name as stored: one line, trimmed, or None."""
+    if value is not None and not isinstance(value, str):
+        return None    # a form default object, never a name (2026-10-20)
     text = " ".join(str(value or "").split())[:FIGHT_NAME_MAX]
+    if text.startswith("annotation="):
+        return None    # one already stored that way, in a job's saved state
     return text or None
 
 

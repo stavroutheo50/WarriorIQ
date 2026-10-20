@@ -57,6 +57,14 @@
       <input type="hidden" name="round_duration_seconds" value="0">
       {% if only_ruleset %}
       <input type="hidden" name="ruleset" value="{{only_ruleset}}">
+      {% else %}
+      {#- Asked near the top, next to the video (owner, 2026-10-20): the rules
+          decide what is scored, so they were too easy to miss under
+          "More options". Still defaults to the sport's first ruleset. -#}
+      <div class="field upload-rules">
+        <label for="fightRuleset">Which rules?</label>
+        <select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}">{{label}}</option>{% endfor %}</select>
+      </div>
       {% endif %}
 
       {# Who is this fight about? A coach's workspace holds a squad, so filing
@@ -116,15 +124,9 @@
           rules default to the sport's first ruleset, and they and the
           optional settings wait under "More options" rather than asking
           everyone. Same fields, same names: the server is unchanged. -#}
-      {% if not only_ruleset or request.state.external_ai_available %}
+      {% if request.state.external_ai_available %}
       <details class="upload-more" data-upload-step="check">
-        <summary>More options{% if not only_ruleset %} <span class="muted" id="rulesSummary">&middot; Rules: {{ rulesets[0][1] }}</span>{% endif %}</summary>
-      {% if not only_ruleset %}
-      <div class="field">
-        <label for="fightRuleset">Which rules?</label>
-        <select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}">{{label}}</option>{% endfor %}</select>
-      </div>
-      {% endif %}
+        <summary>More options</summary>
       {% endif %}
       {% if request.state.external_ai_available %}
       <fieldset class="upload-consent card-inset"><legend>Optional tracking recovery</legend>
@@ -132,7 +134,7 @@
         <label class="check" id="externalGuardianChoice" hidden><input type="checkbox" name="external_ai_guardian_permission" value="true"> <span>I have parent or guardian permission for selected frames showing minors to be sent to OpenAI for this purpose.</span></label>
       </fieldset>
       {% endif %}
-      {% if not only_ruleset or request.state.external_ai_available %}
+      {% if request.state.external_ai_available %}
       </details>
       {% endif %}
       <p class="upload-validation" id="uploadValidation" role="status" aria-live="polite" hidden></p>
@@ -358,8 +360,6 @@
     named.forEach(item=>{const holder=item.field.closest('.check')||item.field.closest('fieldset');
       if(holder)holder.classList.add('needs-attention')});
   };
-  const rulesSelect=document.getElementById('fightRuleset'),rulesSummary=document.getElementById('rulesSummary');
-  if(rulesSelect&&rulesSummary)rulesSelect.addEventListener('change',()=>{rulesSummary.textContent='\u00b7 Rules: '+rulesSelect.selectedOptions[0].textContent});
   // Every answer, by any route (click, keyboard, autofill, a restored page),
   // re-reads what is outstanding: the line said "One thing left: answer the
   // under-18 question" after it was answered (D5, QA 2026-10-11).

@@ -247,7 +247,11 @@
       if (title) { title.setAttribute("tabindex", "-1"); title.focus({ preventScroll: true }); }
       dialog.scrollTop = 0;
     });
-    dialog.querySelector("[data-share-card-close]").addEventListener("click", function () { dialog.close(); });
+    dialog.querySelectorAll("[data-share-card-close]").forEach(function (button) {
+      button.addEventListener("click", function () { dialog.close(); });
+    });
+    // A tap on the dimmed page around the card closes it too.
+    dialog.addEventListener("click", function (event) { if (event.target === dialog) dialog.close(); });
     dialog.querySelector("[data-share-card-send]").addEventListener("click", async function () {
       var blob = await blobOf(canvas);
       var file = new File([blob], "warrioriq-fight.png", { type: "image/png" });
@@ -259,7 +263,7 @@
       var url = URL.createObjectURL(blob), a = document.createElement("a");
       a.href = url; a.download = "warrioriq-fight.png"; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-      if (window.wiqToast) window.wiqToast("Image saved. Add it to your story from your photos.", "success");
+      if (window.wiqToast) window.wiqToast("Image saved. Share it from your photos.", "success");
     });
   }
 
