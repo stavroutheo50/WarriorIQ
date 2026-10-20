@@ -2200,10 +2200,16 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     })
     # One line per analysis with every stage's time and the realtime ratio, so a
     # slow run can be read from the worker's log without opening the report.
-    LOGGER.info("analysis_stage_seconds job=%s video_seconds=%.2f analysis_seconds=%.2f ratio=%.2f stages=%s",
+    # The sweep's own split and the frame pass per frame ride along (2026-10-20):
+    # the owner's log was the measurement the sweep speed-up was chosen from.
+    LOGGER.info("analysis_stage_seconds job=%s video_seconds=%.2f analysis_seconds=%.2f ratio=%.2f stages=%s "
+                "sweep=%s sweep_frames=%d frame_pass_per_frame=%s",
                 req.job_id, segment_duration, analysis_seconds,
                 analysis_seconds / max(1e-6, segment_duration),
-                json.dumps(report["performance"]["stage_seconds"], separators=(",", ":")))
+                json.dumps(report["performance"]["stage_seconds"], separators=(",", ":")),
+                json.dumps(report["performance"].get("sam_sweep_breakdown") or {}, separators=(",", ":")),
+                int(report["performance"].get("sam_sweep_frames") or 0),
+                json.dumps(report["performance"].get("frame_pass_breakdown_per_frame") or {}, separators=(",", ":")))
     # Not recognised as a fight: the saved file and the progress snapshot hold
     # measured movement only, as every page that reads them will show it.
     implausible = not_a_fight(report)
