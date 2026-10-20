@@ -166,6 +166,18 @@
 {% endif %}
 {% endset %}
 {% if not lead_with_numbers %}{{ fix_html }}{% endif %}
+{#- The score, said once: at the top of a normal report, large (owner,
+    2026-10-20: "make it larger so I can read it, put it at the top"), and
+    in the fight summary otherwise. -#}
+{#- Keep doing / Fix next: at the top of a normal report (2026-10-20), so the
+    page's point is on the first screen; further down otherwise. -#}
+{% macro keep_fix(who) -%}
+  {%- set gaps = coaching_gaps(report, who, (report.scorecard|default({})).sport) -%}
+  <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[who].strengths|default([]) %}<strong>{{keep[0].title if keep else 'No clear strength yet'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% else %}<small>{{ gaps.keep }}</small>{% endif %}</article>{% set fix=report.coaching[who].improvements|default([]) %}{#- Said once: at the top as "Fix this first" when that card is shown. -#}{% if not ff %}<article><span>Fix next</span><strong>{{fix[0].title if fix else 'Nothing clear to fix yet'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% else %}<small>{{ gaps.fix }}</small>{% endif %}</article>{% endif %}</div>
+{%- endmacro %}
+{% set score_html %}
+<div class="result-scoreline">{% if features is defined and features.scoring and not features.scoring.on %}<span>Score</span><strong class="score-muted">Coming</strong><small>{{ features.scoring.coming }}</small>{% elif report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{{ names.A }} : {{ names.B }} &middot; {% if report.scorecard.winner_estimate %}{{ names.get(report.scorecard.winner_estimate, 'Fighter ' ~ report.scorecard.winner_estimate) }} ahead on the estimate{% else %}Even on the estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% if score_withheld.fix and not score_withheld.fix.startswith('Nothing to redo') %} {{ score_withheld.fix }}{% endif %}{% if score_withheld.action %} <a class="recheck-link" href="{{score_withheld.action.url}}">{{score_withheld.action.label}}</a>{% endif %}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
+{% endset %}
 {% set overview_html %}
 {#- The fight's details after its answer (2026-10-09): on a phone the
     ruleset, format, focus and score-coming lines filled the first screen and
@@ -180,7 +192,7 @@
 {#- From _fight_format, the same helper the library card reads. -#}{% if fight_format %}<div><span>Format</span><strong>{{ fight_format.label }}</strong></div>{% endif %}{% if analysed_label %}<div><span>Analysed</span><strong>{{analysed_label}}</strong></div>{% endif %}<div class="result-context-focus"><span>Report focus</span><strong>{% set rf = report.video.focus_fighter|default(report.video.analysis_target, true) %}{{ names.get(rf, 'Fighter ' ~ rf) }}</strong></div></div>
   {#- core/features.py: while scoring is switched off the score is "coming",
       not "Not scored" with a per-fight reason that reads as this fight's fault. -#}
-  <div class="result-scoreline">{% if features is defined and features.scoring and not features.scoring.on %}<span>Score</span><strong class="score-muted">Coming</strong><small>{{ features.scoring.coming }}</small>{% elif report.scorecard.available %}<span>{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><strong>{{report.scorecard.totals.A}} : {{report.scorecard.totals.B}}</strong><small>{% if report.scorecard.winner_estimate %}{{ names.get(report.scorecard.winner_estimate, 'Fighter ' ~ report.scorecard.winner_estimate) }} estimate{% else %}Even estimate{% endif %}</small>{% else %}<span>Score</span><strong class="score-muted">Not scored</strong><small>{% if score_withheld %}{{score_withheld.reason}}{% if score_withheld.fix and not score_withheld.fix.startswith('Nothing to redo') %} {{ score_withheld.fix }}{% endif %}{% if score_withheld.action %} <a class="recheck-link" href="{{score_withheld.action.url}}">{{score_withheld.action.label}}</a>{% endif %}{% else %}Tracking was not steady enough for a fair score.{% endif %}</small>{% endif %}</div>
+  {% if not lead_with_numbers %}{{ score_html }}{% endif %}
   {# When the score is withheld the page used to stop here. It knows more than
      nothing: what each fighter was seen doing, and over how much of the round.
      Every number below is a floor with its denominator attached, and none of
@@ -250,6 +262,7 @@
     (core/fight_presence.py): the notice above says so instead. -#}
 {% if numbers.state != 'no_fight' %}
 {% set rough = identity_failed and numbers.state != 'movement_only' %}
+{% if lead_with_numbers %}<section class="result-score-top" aria-label="Score">{{ score_html }}</section>{% endif %}
 {% if rough %}<details class="report-all rough-numbers" id="roughNumbers"><summary><span><strong>Rough numbers (may be wrong)</strong><small>What we measured, which may include other people</small></span><b aria-hidden="true">+</b></summary>
 {% if recording_warnings %}<div class="notice" role="note" id="recordingWarnings"><strong>About this recording.</strong><ul class="list-clean">{% for text in recording_warnings %}<li>{{ text }}</li>{% endfor %}</ul></div>{% endif %}
 {% endif %}
@@ -300,6 +313,14 @@
 {% endif %}
 {% if notes_count %}<details class="recording-notes" id="recordingNotes"><summary>About this recording &middot; {{ notes_count }} note{{ '' if notes_count == 1 else 's' }}</summary>{{ notes_html }}</details>{% endif %}
 {{ fix_html }}
+{% if not identity_failed and numbers.state != 'movement_only' %}{{ keep_fix(vitals_primary) }}{% endif %}
+{% endif %}
+{#- Everything else folds under one row on a normal report (2026-10-20: "I
+    don't want to scroll so much"): the fight summary, the graphs, every
+    number and the coaching plan. Nothing is removed. A report led by "Rough
+    numbers" has its own fold. -#}
+{% set fold_rest = lead_with_numbers %}
+{% if fold_rest %}<details class="report-all" id="reportAll"><summary><span><strong>See all the details</strong><small>Graphs, every number, the rounds and the coaching plan</small></span><b aria-hidden="true">+</b></summary>
 {{ overview_html }}
 {% endif %}
 {#- Your fight in graphs (core/movement_graphs.py, 2026-10-11): the same
@@ -460,7 +481,7 @@
     the report, everything from here to the deep dive folds under one row.
     Only then: without that card, the warnings and numbers below are the
     report and stay open. -#}
-{% if ff %}<details class="report-all" id="reportAll"><summary><span><strong>See all the details</strong><small>Every number, the rounds, the score and the share card</small></span><b aria-hidden="true">+</b></summary>{% endif %}
+
 {% set movement = none if identity_failed else movement_comparison(report.movement_scorecard|default({}, true), (report.setup|default({})).ruleset, (report.scorecard|default({})).available, names) %}
 {% if movement %}
 <section class="card" id="report-movement-score">
@@ -956,8 +977,8 @@
       (core.report.identity_verdict). They were shown beside "identity check
       failed" (QA, 2026-10-04). -#}
   {% if not identity_failed and numbers.state != 'movement_only' %}
-  {%- set gaps = coaching_gaps(report, primary, (report.scorecard|default({})).sport) -%}
-  <div class="keep-fix-row"><article><span>Keep doing</span>{% set keep=report.coaching[primary].strengths|default([]) %}<strong>{{keep[0].title if keep else 'No clear strength yet'}}</strong>{% if keep %}<small>{{keep[0].detail}}</small>{% else %}<small>{{ gaps.keep }}</small>{% endif %}</article>{% set fix=report.coaching[primary].improvements|default([]) %}{#- Said once: at the top as "Fix this first" when that card is shown. -#}{% if not ff %}<article><span>Fix next</span><strong>{{fix[0].title if fix else 'Nothing clear to fix yet'}}</strong>{% if fix %}<small>{{fix[0].detail}}</small>{% else %}<small>{{ gaps.fix }}</small>{% endif %}</article>{% endif %}</div>
+  {% if not lead_with_numbers %}{{ keep_fix(primary) }}{% endif %}
+  {%- set gaps = coaching_gaps(report, primary, (report.scorecard|default({})).sport) -%}{% set keep=report.coaching[primary].strengths|default([]) %}{% set fix=report.coaching[primary].improvements|default([]) %}
   {% if report_access.report_tier == 'full' %}<section class="card complete-report-section" id="report-summary">{#- The cards fill the row however many there are, and a long name is cut
     with its full text in a title, instead of wrapping over several lines
     (QA, 2026-10-07; static/fixes.css .performance-insights). -#}{% set summary_name = names.get(primary, 'Fighter ' ~ primary) %}<div class="eyebrow">Final coaching summary · <span class="fighter-name-fit" title="{{ summary_name }}">{{ summary_name }}</span></div><h2>What this fight says to work on next</h2><div class="performance-insights">{#- Only what "Keep doing" / "Fix next" above has not already said: this
@@ -1101,7 +1122,9 @@
   </div>
 </section>
 {% endif %}
-{% if ff or rough %}</details>{% endif %}
+{#- The "See all the details" fold closes after the complete report below,
+    so the page ends in one fold, not two in a row (2026-10-20). -#}
+{% if rough %}</details>{% endif %}
 
 <details class="report-deep-dive"><summary><span><strong>Complete performance report and training plan</strong><small>Open the full movement, scoring, coaching, and integrity detail</small></span><b aria-hidden="true">＋</b></summary><div class="report-deep-dive-body">
 {#- Built from the same two gates that decide whether each section is emitted,
@@ -1422,6 +1445,7 @@
 {#- Closes the report-deep-dive opened inside the "numbers.state != no_fight" block;
     unconditional, it closed <main> early on a no-fight report (walkthrough 2026-10-19). -#}
 {% if numbers.state != 'no_fight' %}</div></details>{% endif %}
+{% if fold_rest %}</details>{% endif %}
 <aside class="notice ai-report-notice"><strong>AI-Assisted Analysis.</strong> WarriorIQ uses computer vision and AI; detection mistakes are possible. {% if features is defined and features.scoring and features.scoring.on %}Measurements and scores are estimates{% else %}The measurements are estimates from video, and this report gives no score{% endif %}. These are not guaranteed facts or an official judging decision. Use this report as training and performance guidance—not medical advice. Camera angle, resolution, obstruction and poor lighting can reduce analysis quality. <a class="text-link" href="/ai-transparency">How WarriorIQ AI works</a> · <a class="text-link" href="/sports-medical-disclaimer">Sports &amp; medical safety</a></aside>
 <p class="small muted analysis-build" data-analysis-build>Analysis engine {% if analysis_build.analysis_version %}v{{analysis_build.analysis_version}}{% else %}from before v2 (no version recorded){% endif %}{% if analysis_build.outdated %} · <strong>the current engine is v{{analysis_build.current_version}}; analyse again for a report from it.</strong>{% endif %}</p>
 {% endblock %}

@@ -60,9 +60,12 @@ class PageTests(unittest.TestCase):
         self.assertLess(fix, keep)
         self.assertLess(keep, fold)
         self.assertIn('href="/replay/abc?t=8.50"', page)
-        folded = page[fold:page.index('<details class="report-deep-dive">')]
+        # Since 2026-10-20 the complete report folds inside it too: one fold
+        # at the end of the page, not two in a row.
+        folded = page[fold:page.index('<aside class="notice ai-report-notice">')]
         self.assertTrue(folded.rstrip().endswith("</details>"))
         self.assertIn('class="numbers-first-report"', folded)
+        self.assertIn('<details class="report-deep-dive">', folded)
 
     def test_the_answer_comes_before_the_fight_details(self):
         # 2026-10-09: on a phone the details filled the first screen.
@@ -70,10 +73,28 @@ class PageTests(unittest.TestCase):
         self.assertLess(page.index('id="did-well"'), page.index('class="result-overview"'))
         self.assertIn('class="result-context-focus"', page)
 
-    def test_without_fix_this_first_nothing_is_folded(self):
+    def test_without_fix_this_first_the_details_still_fold(self):
+        # Changed 2026-10-20 (owner: "I want it shorter, so I don't want to
+        # scroll so much"): the details fold on every normal report, and Keep
+        # doing / Fix next sit above the fold instead.
         page = self._page(_report(improvements=[]))
         self.assertNotIn('id="fix-first"', page)
-        self.assertNotIn('id="reportAll"', page)
+        self.assertIn('id="reportAll"', page)
+        self.assertLess(page.index('class="keep-fix-row"'), page.index('id="reportAll"'))
+        self.assertLess(page.index('class="result-score-top"'), page.index('class="fight-vitals"'))
+
+    def test_the_score_is_at_the_top_with_both_names(self):
+        # Owner, 2026-10-20: "make it larger so I can read it, put it at the top".
+        report = _report()
+        report.setdefault("scorecard", {}).update(
+            {"available": True, "totals": {"A": 29, "B": 28}, "winner_estimate": "A", "status": "estimated"})
+        page = self._page(report)
+        top = page.index('class="result-score-top"')
+        self.assertLess(top, page.index('class="fight-vitals"'))
+        self.assertIn("<strong>29 : 28</strong><small>Fighter A : Fighter B &middot; Fighter A ahead on the estimate",
+                      page[top:])
+        # Said once: not again in the folded fight summary.
+        self.assertEqual(page.count('class="result-scoreline"'), 1)
 
     def test_links_into_a_fold_open_it(self):
         source = (ROOT / "app" / "templates" / "result.html").read_text(encoding="utf-8")
