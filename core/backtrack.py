@@ -100,6 +100,9 @@ class Handoff:
     # person chose rather than wherever the hand-off lands.
     seed_a: object | None = field(default=None, repr=False)
     seed_b: object | None = field(default=None, repr=False)
+    # Where `seconds` went (2026-10-20: 47.5 s of a 111 s analysis on the
+    # owner's RTX 5060, and nothing said which part).
+    time_split: dict = field(default_factory=dict)
 
     @property
     def moved(self) -> bool:
@@ -114,6 +117,7 @@ class Handoff:
             "reason": self.reason,
             "samples": self.samples,
             "seconds_spent": round(self.seconds, 2),
+            "time_split": {key: round(value, 2) for key, value in self.time_split.items()},
         }
 
 
@@ -242,6 +246,7 @@ def _shot_signature(frame: np.ndarray) -> np.ndarray:
 def _buffer_samples(video_path: str, frames_wanted: list[int], workdir: Path,
                     should_continue: Callable[[], bool],
                     on_frame: Callable[[int, np.ndarray], None] | None = None,
+                    timing: dict | None = None,
                     ) -> tuple[dict[int, Path], set[int]]:
     """Decode the span once, forward, keeping only the sampled frames.
 
@@ -263,18 +268,23 @@ def _buffer_samples(video_path: str, frames_wanted: list[int], workdir: Path,
         capture.set(cv2.CAP_PROP_POS_FRAMES, first)
         index = first
         previous_signature = None
+        timing = timing if timing is not None else {}
         while index <= last:
+            decoding_started = time.perf_counter()
             if not capture.grab():
                 break
             if index in wanted_set:
                 ok, frame = capture.retrieve()
+                timing["decoding"] = timing.get("decoding", 0.0) + time.perf_counter() - decoding_started
                 if not ok or frame is None:
                     break
                 path = workdir / f"{index:08d}.jpg"
                 if on_frame is not None:
                     on_frame(index, frame)
+                saving_started = time.perf_counter()
                 if cv2.imwrite(str(path), frame, [cv2.IMWRITE_JPEG_QUALITY, 92]):
                     stored[index] = path
+                timing["saving_frames"] = timing.get("saving_frames", 0.0) + time.perf_counter() - saving_started
                 signature = _shot_signature(frame)
                 if previous_signature is not None and cv2.compareHist(
                         previous_signature, signature, cv2.HISTCMP_CORREL) < CUT_CORRELATION:
@@ -283,6 +293,8 @@ def _buffer_samples(video_path: str, frames_wanted: list[int], workdir: Path,
                 previous_signature = signature
                 if not should_continue():
                     break
+            else:
+                timing["decoding"] = timing.get("decoding", 0.0) + time.perf_counter() - decoding_started
             index += 1
     finally:
         capture.release()
@@ -327,17 +339,20 @@ def backtrack(
         # model in one call (PoseTracker.prepare_detections_batch).
         waiting: list[tuple[int, np.ndarray]] = []
         batch_size = max(1, int(getattr(SETTINGS, "pose_batch_size", 1)))
+        timing: dict[str, float] = {}
 
         def flush() -> None:
             nonlocal prepared
             if not waiting:
                 return
             batch = getattr(pose_tracker, "prepare_detections_batch", None)
+            model_started = time.perf_counter()
             if batch is not None and len(waiting) > 1:
                 batch(list(waiting), imgsz)
             else:
                 for index, image in waiting:
                     pose_tracker.prepare_detections(image, index, imgsz)
+            timing["pose_model"] = timing.get("pose_model", 0.0) + time.perf_counter() - model_started
             prepared += len(waiting)
             waiting.clear()
             # The model run is most of this pass's time, so progress follows it.
@@ -350,7 +365,7 @@ def backtrack(
             if len(waiting) >= batch_size:
                 flush()
 
-        stored, cuts = _buffer_samples(video_path, frames, scratch, lambda: True, on_frame=prepare)
+        stored, cuts = _buffer_samples(video_path, frames, scratch, lambda: True, on_frame=prepare, timing=timing)
         flush()
         if seed_frame not in stored:
             return Handoff(seed_frame=seed_frame, requested_start_frame=requested_start_frame,
@@ -362,12 +377,17 @@ def backtrack(
                 path = stored.get(index)
                 if path is None:
                     return
+                reading_started = time.perf_counter()
                 image = cv2.imread(str(path))
+                timing["reading_frames"] = timing.get("reading_frames", 0.0) + time.perf_counter() - reading_started
                 if image is None:
                     return
                 if progress is not None:
                     progress(0.9 + 0.1 * done / max(1, total))
-                yield index, pose_tracker.track(image, imgsz, frame_index=index)
+                tracking_started = time.perf_counter()
+                people = pose_tracker.track(image, imgsz, frame_index=index)
+                timing["tracking"] = timing.get("tracking", 0.0) + time.perf_counter() - tracking_started
+                yield index, people
 
         def initial(a_box, b_box, people):
             seed_image = cv2.imread(str(stored[seed_frame]))
@@ -379,6 +399,7 @@ def backtrack(
         pose_tracker.reset_tracking()
         shutil.rmtree(scratch, ignore_errors=True)
     handoff.seconds = time.perf_counter() - started
+    handoff.time_split = dict(timing) if "timing" in locals() else {}
     LOGGER.info(
         "backtrack seed_frame=%s reached_frame=%s requested_start=%s reason=%s samples=%s seconds=%.2f",
         seed_frame, handoff.frame, requested_start_frame, handoff.reason, handoff.samples, handoff.seconds)

@@ -355,6 +355,28 @@ class SamRecovery:
             torch.cuda.empty_cache()
 
     @staticmethod
+    def _logits_to_box(logits: torch.Tensor) -> np.ndarray | None:
+        """_mask_to_box, worked out where the mask already is.
+
+        2026-10-20, the owner's RTX 5060: turning masks into boxes was 7.4 s
+        of a 37 s sweep - 0.1 s a mask - because each full-resolution mask was
+        copied off the card and every pixel searched with numpy. On the card
+        the same answer is four numbers and a count: the same box, the same
+        "fewer than four pixels is no box" rule.
+        """
+        mask = (logits.detach() > 0.0).squeeze()
+        if mask.ndim != 2:
+            return None
+        rows = torch.nonzero(mask.any(dim=1)).flatten()
+        cols = torch.nonzero(mask.any(dim=0)).flatten()
+        if rows.numel() == 0:
+            return None
+        found = torch.stack([mask.sum(), cols[0], rows[0], cols[-1], rows[-1]]).cpu().numpy()
+        if int(found[0]) < 4:
+            return None
+        return found[1:].astype(np.float32)
+
+    @staticmethod
     def _mask_to_box(mask) -> np.ndarray | None:
         array = np.squeeze(mask)
         if array.ndim != 2:
@@ -450,7 +472,7 @@ class SamRecovery:
                     guided: dict[str, np.ndarray] = {}
                     boxing_started = time.perf_counter()
                     for j, object_id in enumerate(object_ids):
-                        box = self._mask_to_box((mask_logits[j] > 0.0).detach().cpu().numpy())
+                        box = self._logits_to_box(mask_logits[j])
                         if box is not None:
                             guided["A" if int(object_id) == 1 else "B"] = box
                     boxing += time.perf_counter() - boxing_started

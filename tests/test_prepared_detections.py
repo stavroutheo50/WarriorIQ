@@ -83,6 +83,18 @@ def test_the_backward_pass_prepares_every_sample_from_the_original_frame(tmp_pat
     assert tracker.tracked[0] == 9               # tracked from the prepared output, by frame
 
 
+def test_the_backward_pass_says_where_its_time_went(tmp_path):
+    # 2026-10-20: 47.5 s of a 111 s analysis on the owner's PC, with no split.
+    video = _video(tmp_path / "clip.avi", 12)
+    handoff = backtrack.backtrack(video, _FakeTracker(), 10.0, 0, 9, [0, 0, 10, 10], [20, 0, 30, 10], 640,
+                                  find_initial=lambda a, b, people, image: (None, None, 0.0, 0.0),
+                                  workdir=tmp_path, step=2)
+    split = handoff.as_dict(10.0)["time_split"]
+    assert {"decoding", "saving_frames", "pose_model", "reading_frames", "tracking"} <= set(split)
+    assert all(value >= 0 for value in split.values())
+    assert sum(split.values()) <= handoff.seconds + 0.05
+
+
 # --- the tracker is fed exactly what Ultralytics' callback would feed it ------
 
 class _RecordingTracker:
