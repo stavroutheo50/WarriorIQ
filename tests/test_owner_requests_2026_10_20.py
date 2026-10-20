@@ -82,3 +82,16 @@ def test_update_worker_uses_git_in_a_git_copy():
     assert "if (Test-Path (Join-Path $root '.git'))" in script
     assert "git -C $root merge --ff-only --quiet origin/main" in script
     assert "git -C $root stash push" in script
+
+
+def test_the_replay_goes_full_screen_with_the_skeletons():
+    page = (ROOT / "app" / "templates" / "replay.html").read_text(encoding="utf-8")
+    video = page[page.index('<video id="video"'):page.index("</video>")]
+    # An iPhone plays inline (its own player has no skeletons), and the video's
+    # own full-screen button, which shows it without them, is hidden.
+    assert "playsinline" in video and 'controlslist="nofullscreen"' in video
+    assert 'id="replayFs"' in page
+    assert "wrap.requestFullscreen" in page and "wrap.classList.add('replay-theatre')" in page
+    assert "playFullButton.onclick=()=>{enterBig();playAt(" in page
+    css = (ROOT / "app" / "static" / "components.css").read_text(encoding="utf-8")
+    assert ".replay-wrap.replay-theatre{position:fixed;inset:0" in css

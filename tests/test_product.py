@@ -695,7 +695,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
             response = self.client.get(f"/replay/{job_id}")
             self.assertEqual(response.status_code, 200)
             self.assertIn("Movement with skeletons", response.text)
-            self.assertIn("Play full fight", response.text)
+            self.assertIn("Play the whole fight", response.text)
             self.assertIn("Jump anywhere in the fight", response.text)
             self.assertNotIn("No verified key moments are available", response.text)
             self.assertIn("identitySafe=true", response.text)

@@ -986,3 +986,11 @@ main:has(.result-title) .section-title h2,.section-title h1.page-h1{font-size:cl
 .result-score-top .result-scoreline strong{font-size:clamp(40px,11vw,64px)!important;line-height:1.05;font-variant-numeric:tabular-nums}
 .result-score-top .result-scoreline strong.score-muted{font-size:clamp(28px,8vw,40px)!important}
 .result-score-top .result-scoreline small{display:block!important;font-size:14px}
+
+/* Skeleton replay full screen: video and skeletons together (2026-10-20). */
+.replay-fs{position:absolute;top:10px;right:10px;z-index:3;width:44px;height:44px;border:1px solid rgba(255,255,255,.35);border-radius:12px;background:rgba(3,6,14,.65);color:#fff;font-size:22px;line-height:1;cursor:pointer}
+.replay-fs:hover,.replay-fs:focus-visible{background:rgba(3,6,14,.9)}
+.replay-wrap:fullscreen,.replay-wrap.replay-theatre{margin:0;border:0;border-radius:0;background:#000;display:flex;align-items:center;justify-content:center}
+.replay-wrap.replay-theatre{position:fixed;inset:0;z-index:1000}
+.replay-wrap:fullscreen video,.replay-wrap.replay-theatre video{width:100%;height:100%;max-height:none}
+body.replay-theatre-open{overflow:hidden}
