@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 from browser_client import BrowserClient
@@ -80,9 +81,19 @@ def test_marks_are_kept_in_time_order():
 
 
 # --------------------------------------------------------------------- pages
-def _owner_with_fight():
-    client = BrowserClient(web.app)
+@pytest.fixture
+def admin_email():
+    # Internal tool (owner, 2026-10-20): only WarriorIQ's admins mark strikes.
     email = f"mark-{uuid.uuid4().hex[:8]}@example.com"
+    previous = web.SETTINGS.admin_emails
+    object.__setattr__(web.SETTINGS, "admin_emails", (email,))
+    yield email
+    object.__setattr__(web.SETTINGS, "admin_emails", previous)
+
+
+def _owner_with_fight(email=None):
+    client = BrowserClient(web.app)
+    email = email or f"mark-{uuid.uuid4().hex[:8]}@example.com"
     client.post("/signup", data={"email": email, "password": "Strong-Local-Password", "accept_terms": "true",
                                  "age_confirmed": "true"}, follow_redirects=False)
     profile_id = int(database.get_account_by_email(email)["profile_id"])
@@ -102,8 +113,8 @@ def _owner_with_fight():
     return client, job_id
 
 
-def test_the_owner_marks_strikes_and_sees_the_comparison():
-    client, job_id = _owner_with_fight()
+def test_an_admin_marks_strikes_and_sees_the_comparison(admin_email):
+    client, job_id = _owner_with_fight(admin_email)
     page = client.get(f"/mark/{job_id}")
     assert page.status_code == 200 and "Mark the strikes" in page.text
     saved = client.post(f"/api/strike-marks/{job_id}", json={
@@ -126,8 +137,16 @@ def strike_marks_file():
     return web.STRIKE_MARKS_FILE
 
 
-def test_someone_else_cannot_open_or_save_the_marks():
-    _, job_id = _owner_with_fight()
+def test_a_customer_is_never_asked_to_mark_their_own_fight():
+    # The product a customer gets does no manual work (owner, 2026-10-20).
+    client, job_id = _owner_with_fight()
+    assert client.get(f"/mark/{job_id}").status_code == 404
+    assert client.post(f"/api/strike-marks/{job_id}", json={"marks": []}).status_code == 403
+    assert "/mark/" not in client.get(f"/replay/{job_id}").text
+
+
+def test_someone_else_cannot_open_or_save_the_marks(admin_email):
+    _, job_id = _owner_with_fight(admin_email)
     stranger = BrowserClient(web.app)
     stranger.post("/signup", data={"email": f"other-{uuid.uuid4().hex[:8]}@example.com",
                                    "password": "Strong-Local-Password", "accept_terms": "true",
@@ -139,8 +158,17 @@ def test_someone_else_cannot_open_or_save_the_marks():
     assert BrowserClient(web.app).get(f"/mark/{job_id}", follow_redirects=False).status_code == 303
 
 
-def test_a_bad_mark_is_refused_and_nothing_is_written():
-    client, job_id = _owner_with_fight()
+def test_a_bad_mark_is_refused_and_nothing_is_written(admin_email):
+    client, job_id = _owner_with_fight(admin_email)
     refused = client.post(f"/api/strike-marks/{job_id}", json={"marks": [{"t": 5, "fighter": "Z"}]})
     assert refused.status_code == 400
     assert not (web.OUTPUTS / job_id / web.STRIKE_MARKS_FILE).exists()
+
+
+def test_a_customer_is_not_asked_whether_a_strike_was_right_or_who_went_down():
+    client, job_id = _owner_with_fight()
+    assert client.post(f"/api/strike-check/{job_id}", json={
+        "seconds": 3.0, "fighter": "A", "family": "punch", "verdict": "right"}).status_code == 403
+    assert client.post(f"/api/down-check/{job_id}", json={"seconds": 3.0, "verdict": "A"}).status_code == 403
+    source = (Path(web.__file__)).read_text(encoding="utf-8")
+    assert '"can_check_strikes": _is_admin(request),' in source

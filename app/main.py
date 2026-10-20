@@ -6284,7 +6284,9 @@ def result_page(request: Request, job_id: str):
             (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)),
         "counted_strikes": _with_checks(job_id, _counted_strikes(report, strike_numbers_shown(
             report, (report.get("scorecard") or {}).get("sport") or _job_sport(job)))),
-        "can_check_strikes": bool(_account(request)),
+        # "Was this right?" and "Who went down?" are manual work: internal,
+        # admins only. A customer is never asked (owner, 2026-10-20).
+        "can_check_strikes": _is_admin(request),
         "went_down": _went_down(job_id, report),
         "wrong_sport": _wrong_sport(report, job),
         # Kicks or knees found in a boxing upload: a suggestion only (#19).
@@ -6413,8 +6415,8 @@ def check_counted_strike(request: Request, job_id: str, payload: StrikeCheckPayl
     the full correction and the owner's training consent.
     """
     _enforce_rate_limit(request, "strike_checks", 300, 300)
-    if not _account(request) or not _authorized_job(request, job_id):
-        raise HTTPException(403, "Sign in to check your own fight.")
+    if not _account(request) or not _authorized_job(request, job_id) or not _is_admin(request):
+        raise HTTPException(403, "Not available.")
     fighter = payload.fighter.upper()
     family = payload.family.lower()
     verdict = payload.verdict.lower()
@@ -6463,8 +6465,8 @@ def check_went_down(request: Request, job_id: str, payload: DownCheckPayload):
     Stored like a strike check, marked source "down_check".
     """
     _enforce_rate_limit(request, "down_checks", 120, 300)
-    if not _account(request) or not _authorized_job(request, job_id):
-        raise HTTPException(403, "Sign in to check your own fight.")
+    if not _account(request) or not _authorized_job(request, job_id) or not _is_admin(request):
+        raise HTTPException(403, "Not available.")
     verdict = payload.verdict if payload.verdict in {"A", "B"} else payload.verdict.lower()
     if not math.isfinite(payload.seconds) or payload.seconds < 0 or verdict not in DOWN_CHECK_VERDICTS:
         raise HTTPException(400, "Invalid answer")
@@ -6856,6 +6858,8 @@ def replay_page(
             "moments": coaching_moments(report, _moment_fighters(report),
                                         str(plan.get("report_tier") or ""), plan.get("coaching_items")),
             "names": _fighter_names(request, _authorized_job(request, job_id) or {}, report),
+            # The strike-marking tool is internal (admins only, 2026-10-20).
+            "can_mark_strikes": _is_admin(request),
             "counting_policy": policy.as_dict(),
             "evidence_filter": " · ".join(
                 value.replace("_", " ").title()
@@ -6897,10 +6901,14 @@ def strike_marks_page(request: Request, job_id: str):
     """Watch the fight and tap each strike as it is thrown (2026-10-20).
 
     The person's marks are the answer the strike counter is measured against:
-    how many counted strikes are real, and how many real ones it missed. Only
-    the signed-in owner of the fight.
+    how many counted strikes are real, and how many real ones it missed.
+
+    Internal: WarriorIQ's own admins, on fights they own. The owner,
+    2026-10-20: the product a customer gets does no manual work, so no
+    customer is ever asked to mark anything. Anyone else gets the same answer
+    as a fight that is not theirs.
     """
-    if not _account(request) or not _authorized_job(request, job_id):
+    if not _account(request) or not _authorized_job(request, job_id) or not _is_admin(request):
         return _job_page_refused(request)
     report = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
     stored = _read_strike_marks(job_id)
@@ -6920,8 +6928,8 @@ def strike_marks_page(request: Request, job_id: str):
 def save_strike_marks(request: Request, job_id: str, payload: StrikeMarksPayload):
     """Every mark on this fight, saved whole after each tap, and the comparison."""
     _enforce_rate_limit(request, "strike_marks", 600, 300)
-    if not _account(request) or not _authorized_job(request, job_id):
-        raise HTTPException(403, "Sign in to mark your own fight.")
+    if not _account(request) or not _authorized_job(request, job_id) or not _is_admin(request):
+        raise HTTPException(403, "Not available.")
     report = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
     span = _analysed_span_summary(report) or {}
     try:
