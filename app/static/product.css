@@ -417,3 +417,12 @@ body[data-page=home] main > .hero{padding-bottom:clamp(32px,5vh,56px)}
 .active-analysis-chip{white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums}
 .privacy-fight-list article[hidden]{display:none}
 .settings-fold>summary{cursor:pointer;color:#9fd8ff;font-weight:750;margin:6px 0 12px}
+
+/* Phone menu in groups (2026-10-20). */
+/* Taller than a phone screen now, and pinned under the bar: it scrolls inside. */
+.mobile-menu{max-height:calc(100dvh - 80px);overflow-y:auto;overscroll-behavior:contain}
+.mobile-menu-heading{margin:14px 13px 4px;font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#8ea0bd}
+.mobile-menu-heading:first-of-type{margin-top:4px}
+.mobile-menu a:has(small){flex-direction:column;align-items:flex-start;justify-content:center;gap:0}
+.mobile-menu a small{display:block;font-size:13px;font-weight:400;color:#9aa8bf;margin-top:2px}
+.mobile-menu a[aria-current="page"]{background:rgba(47,111,237,.16);box-shadow:inset 3px 0 0 #2f6fed}
