@@ -977,3 +977,12 @@ main:has(.result-title) .section-title h2,.section-title h1.page-h1{font-size:cl
 .compare-option.is-failed{opacity:.6}.compare-option.is-failed .compare-option-status{color:#f1a98b}
 .compare-option:has(input:disabled){cursor:not-allowed}
 .compare-share .share-link-field{width:min(100%,520px)}
+
+/* The score at the top of a normal report, large (owner, 2026-10-20). Beats
+   the 18px the summary row uses on a phone. */
+.result-score-top{margin:4px 0 18px;padding:18px 20px;border:1px solid var(--wiq-line,rgba(255,255,255,.12));border-radius:16px;background:var(--wiq-panel,#1a2232)}
+.result-score-top .result-scoreline{display:flex;flex-direction:column;gap:4px;text-align:left}
+.result-score-top .result-scoreline span{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--wiq-muted,#9aa6bd)}
+.result-score-top .result-scoreline strong{font-size:clamp(40px,11vw,64px)!important;line-height:1.05;font-variant-numeric:tabular-nums}
+.result-score-top .result-scoreline strong.score-muted{font-size:clamp(28px,8vw,40px)!important}
+.result-score-top .result-scoreline small{display:block!important;font-size:14px}
