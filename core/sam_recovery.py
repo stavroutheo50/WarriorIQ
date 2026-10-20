@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import shutil
 import tempfile
 import threading
@@ -74,20 +75,103 @@ class _DecodedClip:
     def full(self) -> bool:
         return self.count >= int(self.images.shape[0])
 
-    def add(self, frame_bgr: np.ndarray) -> None:
-        if self.full:
-            return
+    @staticmethod
+    def prepare(frame_bgr: np.ndarray, image_size: int) -> np.ndarray:
+        """The per-frame image work, apart so the sweep's helper thread can do it."""
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         # PIL resizes with bicubic by default, which is what SAM2's loader got
         # from Image.resize, so the model sees the filter it was tuned on.
-        resized = cv2.resize(rgb, (self.image_size, self.image_size),
-                             interpolation=cv2.INTER_CUBIC)
-        frame = torch.from_numpy(np.ascontiguousarray(resized))
+        return np.ascontiguousarray(cv2.resize(rgb, (int(image_size), int(image_size)),
+                                               interpolation=cv2.INTER_CUBIC))
+
+    def add(self, frame_bgr: np.ndarray) -> None:
+        self.add_prepared(self.prepare(frame_bgr, self.image_size))
+
+    def add_prepared(self, resized_rgb: np.ndarray) -> None:
+        if self.full:
+            return
+        frame = torch.from_numpy(resized_rgb)
         self.images[self.count] = frame.permute(2, 0, 1).float().div_(255.0)
         self.count += 1
 
     def taken(self) -> torch.Tensor:
         return self.images[: self.count]
+
+
+_END = object()
+
+
+class _SampledFrames:
+    """The frames the sweep keeps, decoded and prepared on a helper thread.
+
+    2026-10-20, measured on the owner's RTX 5060: the sweep was 43 s of an
+    84 s analysis (52%) and 70 s of 213 s. It read() every source frame -
+    decode and colour conversion - to keep one in `stride` (about one in
+    fifteen), and decoded while the card waited. The frame pass already
+    grab()s the frames it skips and decodes ahead (core/frame_feed.py; grab
+    measured -61% on 1080p60). This brings the sweep the same two things.
+
+    The results do not change: the same frames, in the same order, stopping
+    at the same frame a read() loop would stop at, prepared by the same code.
+    OpenCV and torch release the GIL, so decoding runs beside propagation.
+    """
+
+    def __init__(self, cap, start_frame: int, end_frame: int, stride: int, image_size: int,
+                 depth: int = 16):
+        self._cap, self._start, self._end = cap, int(start_frame), int(end_frame)
+        self._stride, self._image_size = max(1, int(stride)), int(image_size)
+        self._queue: queue.Queue = queue.Queue(maxsize=max(1, depth))
+        self._stopped = threading.Event()
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(target=self._run, name="warrioriq-sam-frames", daemon=True)
+        self._thread.start()
+
+    def _put(self, item) -> bool:
+        while not self._stopped.is_set():
+            try:
+                self._queue.put(item, timeout=0.2)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def _run(self) -> None:
+        try:
+            source = self._start
+            while source < self._end and not self._stopped.is_set():
+                # read() is grab() + retrieve(); a failed grab is where read()
+                # would have stopped too.
+                if not self._cap.grab():
+                    break
+                if (source - self._start) % self._stride == 0:
+                    ok, frame = self._cap.retrieve()
+                    if not ok or frame is None:
+                        break
+                    if not self._put((source, _DecodedClip.prepare(frame, self._image_size), frame.shape[:2])):
+                        return
+                source += 1
+        except BaseException as exc:  # noqa: BLE001 - handed to the reading thread
+            self._error = exc
+        finally:
+            self._put(_END)
+
+    def __iter__(self):
+        while True:
+            item = self._queue.get()
+            if item is _END:
+                if self._error is not None:
+                    raise self._error
+                return
+            yield item
+
+    def close(self) -> None:
+        self._stopped.set()
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+        self._thread.join(timeout=5.0)
 
 
 def _install_in_memory_loader() -> None:
@@ -434,33 +518,32 @@ class SamRecovery:
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            source = start_frame
             saved = 0
             completed = 0
             clip = None
             chunk_sources: list[int] = []
-            while source < end_frame:
-                decoding_started = time.perf_counter()
-                ok, frame = cap.read()
-                if not ok or frame is None:
-                    break
-                if (source - start_frame) % stride == 0:
+            frames = _SampledFrames(cap, start_frame, end_frame, stride, image_size)
+            try:
+                # "decoding" is now the time the sweep waited for its next
+                # frame; decoding that overlapped propagation costs nothing.
+                waiting_since = time.perf_counter()
+                for source, prepared, shape in frames:
+                    self.sweep_seconds["decoding"] += time.perf_counter() - waiting_since
                     if clip is None:
                         capacity = min(chunk_frames, max(1, expected - saved))
-                        clip = _DecodedClip(image_size, capacity,
-                                            height or frame.shape[0], width or frame.shape[1])
+                        clip = _DecodedClip(image_size, capacity, height or shape[0], width or shape[1])
                         chunk_sources = []
-                    clip.add(frame)
+                    clip.add_prepared(prepared)
                     chunk_sources.append(source)
                     saved += 1
-                self.sweep_seconds["decoding"] += time.perf_counter() - decoding_started
-                if (source - start_frame) % stride == 0:
                     if clip.full:
                         self._propagate_clip(clip, chunk_sources, seeds, tracks,
                                              progress_callback, completed, expected)
                         completed += len(chunk_sources)
                         clip, chunk_sources = None, []
-                source += 1
+                    waiting_since = time.perf_counter()
+            finally:
+                frames.close()
             if clip is not None and clip.count:
                 self._propagate_clip(clip, chunk_sources, seeds, tracks,
                                      progress_callback, completed, expected)
