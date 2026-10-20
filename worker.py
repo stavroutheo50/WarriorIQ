@@ -77,7 +77,7 @@ from app.state import (
 from core.config import OUTPUTS, SETTINGS
 from core.db import record_analysis_failure, release_analysis
 from core.types import AnalysisRequest
-from core.worker_client import RemoteWorkerClient, RemoteWorkerError, retry_heartbeat
+from core.worker_client import RemoteWorkerClient, RemoteWorkerError, WorkerRefused, retry_heartbeat
 
 
 LOGGER = logging.getLogger("warrioriq.worker")
@@ -582,11 +582,62 @@ def _worker_is_alive(pid: int) -> bool:
         return False
 
 
+# How long a refused worker waits before fetching the website's code again,
+# when the last fetch did not end the refusal.
+CODE_SYNC_RETRY_SECONDS = 600
+
+
+def _sync_analysis_code(client: RemoteWorkerClient, root: Path | None = None) -> bool:
+    """Make this worker's core/ exactly the web app's, after the web app refused it.
+
+    2026-10-19: every website deploy that touched core/ paused every analysis
+    ("Analysis is paused for an update") until update-worker was run on this
+    PC - and it was run late, in another folder, or from another commit. The
+    web app serves the code it compares against, so a refused worker installs
+    that, keeps its old core/*.py in core_previous, and exits between jobs (the
+    check at the top of the loop) so its launcher starts it on the new code.
+    The download is checked against the web app's fingerprint before a file is
+    written. WARRIORIQ_WORKER_AUTO_UPDATE=0 turns this off.
+    """
+    if os.getenv("WARRIORIQ_WORKER_AUTO_UPDATE", "1").strip() == "0":
+        return False
+    root = root or Path(__file__).resolve().parent
+    served = client.analysis_code()
+    files = served.get("files") or {}
+    if not files or not all(isinstance(text, str) and name.endswith(".py") and name[:-3].isidentifier()
+                            for name, text in files.items()):
+        LOGGER.error("The web app sent no usable analysis code; core/ left as it is")
+        return False
+    digest = hashlib.sha256()
+    for name in sorted(files):
+        digest.update(name.encode("utf-8") + b"\0")
+        digest.update(files[name].encode("utf-8").replace(b"\r\n", b"\n") + b"\0")
+    if digest.hexdigest()[:16] != served.get("fingerprint"):
+        LOGGER.error("The analysis code download does not match the web app's fingerprint; core/ left as it is")
+        return False
+    core, previous = root / "core", root / "core_previous"
+    shutil.rmtree(previous, ignore_errors=True)
+    previous.mkdir()
+    for path in core.glob("*.py"):
+        shutil.copy2(path, previous / path.name)
+    for name, text in files.items():
+        staged = core / f"{name}.sync"
+        staged.write_bytes(text.encode("utf-8"))
+        os.replace(staged, core / name)
+    for path in core.glob("*.py"):
+        if path.name not in files:
+            path.unlink()
+    LOGGER.warning("Analysis code updated to the website's (fingerprint %s); the previous code is in %s. "
+                   "Restarting on it.", served.get("fingerprint"), previous)
+    return True
+
+
 def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
     client = RemoteWorkerClient(SETTINGS.worker_remote_url, SETTINGS.worker_token, worker_id)
     running_code = _source_fingerprint()
     LOGGER.info("Worker running analysis code %s", running_code)
     idle_warmup: threading.Thread | None = None
+    next_code_sync = 0.0
     while True:
         # Checked between jobs, never during one. Exiting hands the queue back
         # cleanly and whatever supervises this restarts it on the new code.
@@ -620,6 +671,18 @@ def run_remote_worker(worker_id: str, *, once: bool = False) -> int:
                 time.sleep(max(2.0, SETTINGS.worker_poll_seconds))
                 continue
             claimed = client.claim()
+        except WorkerRefused as exc:
+            LOGGER.error("%s", exc)
+            if time.monotonic() >= next_code_sync:
+                next_code_sync = time.monotonic() + CODE_SYNC_RETRY_SECONDS
+                try:
+                    _sync_analysis_code(client)
+                except (RemoteWorkerError, OSError) as sync_error:
+                    LOGGER.error("Could not fetch the website's analysis code: %s", sync_error)
+            if once:
+                return 1
+            time.sleep(max(2.0, SETTINGS.worker_poll_seconds))
+            continue
         except RemoteWorkerError as exc:
             LOGGER.warning("Remote worker connection unavailable: %s", exc)
             if once:

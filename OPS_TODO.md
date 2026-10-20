@@ -7,6 +7,7 @@ money, hardware or a lawyer. Nothing here has been done to any live service.
 
 - [ ] **Update your GPU worker PC:** run `deploy/update-worker.ps1` (or `update-worker.bat`) on it. It brings the worker to the code on `main` and restarts it. The pose engine for your GPU is built and cached the first time it runs.
 - [ ] **Deploy the website and the worker from the same commit.** The release string (`deploy/release.py`, `/health` → `release`) must match. If it doesn't, analyses pause with "Analysis is paused for an update" and the admin page shows a flag.
+  - Since 2026-10-19 the worker fixes this itself: when the website refuses it, it downloads the website's analysis code (`/api/worker/analysis-code`), installs it (the old code goes to `core_previous`) and restarts. Run `update-worker.bat` once to get this; after that, website deploys no longer pause analyses. `WARRIORIQ_WORKER_AUTO_UPDATE=0` in the PC's `.env` turns it off.
 - [ ] **Measure the speed promise on your GPU PC:** `python tools/benchmark_realtime.py --lengths 24 60 180`.
   - Each ratio must be 1.0 or less; the script exits 1 otherwise.
   - The only measurement so far was on a CPU-only build machine (see AUDIT_FIXES.md, Final checks). It says nothing about GPU speed.
