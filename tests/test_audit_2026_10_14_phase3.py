@@ -211,4 +211,5 @@ def test_signed_cdn_urls_are_off_by_default_and_verified_when_on(tmp_path):
 
 def test_the_replay_buffers_the_start_of_the_video():
     page = (ROOT / "app" / "templates" / "replay.html").read_text(encoding="utf-8")
-    assert '<video id="video" controls preload="auto" src="/media/{{job_id}}">' in page
+    video = page[page.index('<video id="video"'):page.index("</video>")]
+    assert 'preload="auto"' in video and 'src="/media/{{job_id}}"' in video
