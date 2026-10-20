@@ -1313,6 +1313,10 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         account = register("checker@example.com", "Strong-Local-Password")
         self.client.post("/login", data={"email": "checker@example.com",
                                          "password": "Strong-Local-Password", "accept_policies": "true"})
+        # Internal since 2026-10-20: only admins are asked (owner: no manual work for customers).
+        from core.config import SETTINGS
+        self.addCleanup(object.__setattr__, SETTINGS, "admin_emails", SETTINGS.admin_emails)
+        object.__setattr__(SETTINGS, "admin_emails", ("checker@example.com",))
         job_id = "checkfight1"
         job_dir = webapp.OUTPUTS / job_id
         job_dir.mkdir()
@@ -1396,6 +1400,10 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         account = register("downs@example.com", "Strong-Local-Password")
         self.client.post("/login", data={"email": "downs@example.com",
                                          "password": "Strong-Local-Password", "accept_policies": "true"})
+        # Internal since 2026-10-20: only admins are asked (owner: no manual work for customers).
+        from core.config import SETTINGS
+        self.addCleanup(object.__setattr__, SETTINGS, "admin_emails", SETTINGS.admin_emails)
+        object.__setattr__(SETTINGS, "admin_emails", ("downs@example.com",))
         job_id = "downfight1"
         job_dir = webapp.OUTPUTS / job_id
         job_dir.mkdir()

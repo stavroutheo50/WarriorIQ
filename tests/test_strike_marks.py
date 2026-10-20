@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 from browser_client import BrowserClient
@@ -162,3 +163,12 @@ def test_a_bad_mark_is_refused_and_nothing_is_written(admin_email):
     refused = client.post(f"/api/strike-marks/{job_id}", json={"marks": [{"t": 5, "fighter": "Z"}]})
     assert refused.status_code == 400
     assert not (web.OUTPUTS / job_id / web.STRIKE_MARKS_FILE).exists()
+
+
+def test_a_customer_is_not_asked_whether_a_strike_was_right_or_who_went_down():
+    client, job_id = _owner_with_fight()
+    assert client.post(f"/api/strike-check/{job_id}", json={
+        "seconds": 3.0, "fighter": "A", "family": "punch", "verdict": "right"}).status_code == 403
+    assert client.post(f"/api/down-check/{job_id}", json={"seconds": 3.0, "verdict": "A"}).status_code == 403
+    source = (Path(web.__file__)).read_text(encoding="utf-8")
+    assert '"can_check_strikes": _is_admin(request),' in source

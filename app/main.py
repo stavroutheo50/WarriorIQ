@@ -6284,7 +6284,9 @@ def result_page(request: Request, job_id: str):
             (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)),
         "counted_strikes": _with_checks(job_id, _counted_strikes(report, strike_numbers_shown(
             report, (report.get("scorecard") or {}).get("sport") or _job_sport(job)))),
-        "can_check_strikes": bool(_account(request)),
+        # "Was this right?" and "Who went down?" are manual work: internal,
+        # admins only. A customer is never asked (owner, 2026-10-20).
+        "can_check_strikes": _is_admin(request),
         "went_down": _went_down(job_id, report),
         "wrong_sport": _wrong_sport(report, job),
         # Kicks or knees found in a boxing upload: a suggestion only (#19).
@@ -6413,8 +6415,8 @@ def check_counted_strike(request: Request, job_id: str, payload: StrikeCheckPayl
     the full correction and the owner's training consent.
     """
     _enforce_rate_limit(request, "strike_checks", 300, 300)
-    if not _account(request) or not _authorized_job(request, job_id):
-        raise HTTPException(403, "Sign in to check your own fight.")
+    if not _account(request) or not _authorized_job(request, job_id) or not _is_admin(request):
+        raise HTTPException(403, "Not available.")
     fighter = payload.fighter.upper()
     family = payload.family.lower()
     verdict = payload.verdict.lower()
@@ -6463,8 +6465,8 @@ def check_went_down(request: Request, job_id: str, payload: DownCheckPayload):
     Stored like a strike check, marked source "down_check".
     """
     _enforce_rate_limit(request, "down_checks", 120, 300)
-    if not _account(request) or not _authorized_job(request, job_id):
-        raise HTTPException(403, "Sign in to check your own fight.")
+    if not _account(request) or not _authorized_job(request, job_id) or not _is_admin(request):
+        raise HTTPException(403, "Not available.")
     verdict = payload.verdict if payload.verdict in {"A", "B"} else payload.verdict.lower()
     if not math.isfinite(payload.seconds) or payload.seconds < 0 or verdict not in DOWN_CHECK_VERDICTS:
         raise HTTPException(400, "Invalid answer")
