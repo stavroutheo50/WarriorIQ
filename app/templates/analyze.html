@@ -63,7 +63,9 @@
           "More options". Still defaults to the sport's first ruleset. -#}
       <div class="field upload-rules">
         <label for="fightRuleset">Which rules?</label>
-        <select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}">{{label}}</option>{% endfor %}</select>
+        <select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}" data-hint="{{ ruleset_hints.get(key, '') if ruleset_hints is defined else '' }}">{{label}}</option>{% endfor %}</select>
+        {#- What the chosen rules mean, for whoever does not know (core.scoring.ruleset_hint). -#}
+        {% set first_hint = (ruleset_hints|default({})).get(rulesets[0][0], '') %}{% if first_hint %}<p class="small muted ruleset-hint" id="rulesetHint">{{ first_hint }} Not sure? Leave {{ rulesets[0][1] }}.</p>{% endif %}
       </div>
       {% endif %}
 
@@ -328,6 +330,9 @@
       if(ready)opened.add(name);
       parts.forEach(part=>{part.hidden=!opened.has(name)});
       ready=ready&&(!stepDone[name]||stepDone[name]())}};
+  {const rules=document.getElementById('fightRuleset'),hint=document.getElementById('rulesetHint');
+   if(rules&&hint){const tail=hint.textContent.slice(hint.textContent.indexOf('Not sure?'));
+     rules.addEventListener('change',()=>{const h=rules.selectedOptions[0].dataset.hint||'';hint.textContent=h?`${h} ${tail}`:tail})}}
   const stepShown=field=>{const step=field.closest('[data-upload-step]');return !step||!step.hidden};
   const outstanding=()=>{
     const missing=[];

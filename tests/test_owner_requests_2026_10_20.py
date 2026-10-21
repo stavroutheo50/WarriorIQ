@@ -107,3 +107,32 @@ def test_the_phone_menu_is_grouped_and_marks_the_page_you_are_on():
     assert "document.querySelectorAll(`[data-nav=\"${active}\"]`)" in base
     css = (ROOT / "app" / "static" / "product.css").read_text(encoding="utf-8")
     assert ".mobile-menu{max-height:calc(100dvh - 80px);overflow-y:auto" in css
+
+
+def test_each_kickboxing_ruleset_says_what_it_allows():
+    from core.scoring import RULESETS, ruleset_hint
+
+    assert ruleset_hint("K1") == "Full power, low kicks allowed, knees allowed."
+    assert ruleset_hint("POINT_FIGHTING") == "Light contact, stops after each point, no low kicks, no knees."
+    # Built from the profile's own flags, so it cannot claim what scoring does not do.
+    for key, profile in RULESETS.items():
+        hint = ruleset_hint(key)
+        if profile.sport != "kickboxing":
+            assert hint == ""
+            continue
+        assert ("knees allowed" in hint) == profile.allow_knee
+        assert ("low kicks allowed" in hint) == profile.allow_low_kick
+    page = (ROOT / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
+    assert 'id="rulesetHint"' in page and "Not sure? Leave" in page
+
+
+def test_the_six_numbers_say_good_or_bad_only_from_the_catalogue():
+    from core.metric_catalog import BY_KEY
+
+    page = (ROOT / "app" / "templates" / "result.html").read_text(encoding="utf-8")
+    for key in ("footwork_body_lengths_per_second", "pressure_index", "ring_center_control",
+                "guard_index", "balance_index", "pose_coverage"):
+        assert f'verdict("{key}"' in page
+    assert BY_KEY["guard_index"].reading(0.70)["standing"] == "doing_well"
+    assert BY_KEY["ring_center_control"].reading(0.77)["standing"] == "no_reference"
+    assert "Style, not a score" in page and "numbers.state != 'unverified'" in page
