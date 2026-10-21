@@ -951,3 +951,23 @@ def score_explanation(scorecard: dict | None, names: dict | None = None) -> list
         lines.append("Points are added up across "
                      + ("the round." if count == 1 else "both rounds." if count == 2 else f"all {count} rounds."))
     return lines
+
+
+def ruleset_hint(key: str) -> str:
+    """One line a newcomer can choose a ruleset from, built from the profile's
+    own flags so it cannot say something the scoring does not do
+    (owner, 2026-10-20: a beginner could not tell K-1 from Kick Light)."""
+    profile = RULESETS.get(key)
+    # Only kickboxing's rulesets differ in what these flags hold; Muay Thai's
+    # two (with and without elbows) would read the same, which helps nobody.
+    if profile is None or profile.sport != "kickboxing":
+        return ""
+    parts = ["full power" if profile.allow_full_power else "light contact"]
+    if profile.point_stop:
+        parts.append("stops after each point")
+    if profile.allow_kick:
+        parts.append("low kicks allowed" if profile.allow_low_kick else "no low kicks")
+    parts.append("knees allowed" if profile.allow_knee else "no knees")
+    text = ", ".join(parts)
+    return text[:1].upper() + text[1:] + "."
+

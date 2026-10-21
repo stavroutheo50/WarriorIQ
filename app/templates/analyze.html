@@ -63,7 +63,9 @@
           "More options". Still defaults to the sport's first ruleset. -#}
       <div class="field upload-rules">
         <label for="fightRuleset">Which rules?</label>
-        <select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}">{{label}}</option>{% endfor %}</select>
+        <select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}" data-hint="{{ ruleset_hints.get(key, '') if ruleset_hints is defined else '' }}">{{label}}</option>{% endfor %}</select>
+        {#- What the chosen rules mean, for whoever does not know (core.scoring.ruleset_hint). -#}
+        {% set first_hint = (ruleset_hints|default({})).get(rulesets[0][0], '') %}{% if first_hint %}<p class="small muted ruleset-hint" id="rulesetHint">{{ first_hint }} Not sure? Leave {{ rulesets[0][1] }}.</p>{% endif %}
       </div>
       {% endif %}
 
@@ -167,7 +169,11 @@
         kicks. -#}
     {% set policy = counting_policy %}
     <div class="setup-coverage" data-covered="{{ 'no' if (policy.withheld or not policy.counted or policy.not_analysed) else 'yes' }}" role="note" aria-label="What your report counts">
-      <p><b>{{ policy.setup_line }}</b>{% if policy.estimates %} {{ policy.estimate_note }}{% endif %}</p>
+      {#- The bold line already says "automatic estimates"; the note's own
+          opening says it again ("Automatic counts, not checked by a person"),
+          which read as the same sentence three times (2026-10-20). Here only
+          the part after it. The report and replay keep the whole note. -#}
+      <p><b>{{ policy.setup_line }}</b>{% if policy.estimates %} {{ policy.estimate_note|replace('Automatic counts, not checked by a person. ', '') }}{% endif %}</p>
       {% if policy.not_analysed_line %}<p>{{ policy.not_analysed_line }}</p>{% endif %}
     </div>
     {#- Training clips up front (after mmagpt.app, which is built around them).
@@ -328,6 +334,9 @@
       if(ready)opened.add(name);
       parts.forEach(part=>{part.hidden=!opened.has(name)});
       ready=ready&&(!stepDone[name]||stepDone[name]())}};
+  {const rules=document.getElementById('fightRuleset'),hint=document.getElementById('rulesetHint');
+   if(rules&&hint){const tail=hint.textContent.slice(hint.textContent.indexOf('Not sure?'));
+     rules.addEventListener('change',()=>{const h=rules.selectedOptions[0].dataset.hint||'';hint.textContent=h?`${h} ${tail}`:tail})}}
   const stepShown=field=>{const step=field.closest('[data-upload-step]');return !step||!step.hidden};
   const outstanding=()=>{
     const missing=[];

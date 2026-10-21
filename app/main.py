@@ -108,7 +108,7 @@ from core import feed, social, worker_alerts
 from core.notifications import EmailNotSent, deliver_email, email_settings_problem, send_transactional_email
 from core.progress_insights import build_progress
 from core.progress_view import stage_view
-from core.scoring import score_explanation
+from core.scoring import ruleset_hint, score_explanation
 from core.selection_check import pair_verdict
 from core.quality_guardian import inspect_video_quality
 from core.metric_catalog import BY_KEY as METRIC_CATALOG, EXPERIMENTAL_NOTE, evidence_limitations, readings as metric_readings
@@ -3785,6 +3785,8 @@ def _sport_context(request: Request, sport: str) -> dict:
         # question with a single answer. The page drops the field and posts the
         # key instead of showing a select the reader cannot get wrong.
         "rulesets": [(key, RULESET_LABELS[key]) for key in keys],
+        # What each one means, in a line, for whoever does not know (2026-10-20).
+        "ruleset_hints": {key: ruleset_hint(key) for key in keys},
         "only_ruleset": keys[0] if len(keys) == 1 else None,
         # The workspace roster, so a fight can be filed against the person it
         # was actually about. Empty for a guest, who has no workspace.

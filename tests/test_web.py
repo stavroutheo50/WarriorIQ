@@ -404,7 +404,12 @@ class PublicPageTests(unittest.TestCase):
                 self.assertIn("setup-coverage", page, sport)
                 self.assertIn(html.escape(policy.setup_line), page, sport)
                 if policy.estimates:
-                    self.assertIn(html.escape(policy.estimate_note), page, sport)
+                    # The accuracy sentence, without the opening that repeated
+                    # the bold line ("automatic estimates") - 2026-10-20.
+                    accuracy = policy.estimate_note.replace("Automatic counts, not checked by a person. ", "")
+                    self.assertIn(html.escape(accuracy), page, sport)
+                    box = page[page.index("setup-coverage"):]
+                    self.assertNotIn("Automatic counts, not checked by a person.", box[:box.index("</div>")], sport)
             boxing = self.client.get("/analyze/boxing").text.lower()
             box = boxing[boxing.index("setup-coverage"):boxing.index("setup-card")]
             self.assertNotIn("kick", box)
