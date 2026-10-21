@@ -169,7 +169,11 @@
         kicks. -#}
     {% set policy = counting_policy %}
     <div class="setup-coverage" data-covered="{{ 'no' if (policy.withheld or not policy.counted or policy.not_analysed) else 'yes' }}" role="note" aria-label="What your report counts">
-      <p><b>{{ policy.setup_line }}</b>{% if policy.estimates %} {{ policy.estimate_note }}{% endif %}</p>
+      {#- The bold line already says "automatic estimates"; the note's own
+          opening says it again ("Automatic counts, not checked by a person"),
+          which read as the same sentence three times (2026-10-20). Here only
+          the part after it. The report and replay keep the whole note. -#}
+      <p><b>{{ policy.setup_line }}</b>{% if policy.estimates %} {{ policy.estimate_note|replace('Automatic counts, not checked by a person. ', '') }}{% endif %}</p>
       {% if policy.not_analysed_line %}<p>{{ policy.not_analysed_line }}</p>{% endif %}
     </div>
     {#- Training clips up front (after mmagpt.app, which is built around them).
