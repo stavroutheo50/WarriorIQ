@@ -947,6 +947,14 @@ class Settings:
     max_suspicious_handoffs_per_minute: float = float(
         os.getenv("WARRIORIQ_MAX_SUSPICIOUS_HANDOFFS_PER_MINUTE", "12")
     )
+    # Judge a hand-off against the fighter's latest sighting, including the
+    # stand-in crops found where SAM2 said they were (track ids -1001/-1002),
+    # not against the last tracker track - which can be seconds old after a
+    # SAM2-guided stretch, so a correct re-find read as a jump. The owner's
+    # handheld bout (568x320, ~17 people in shot) had 194 guided recoveries
+    # for B and read 14.9 suspicious hand-offs a minute. A setting so
+    # tools/run_identity_benchmark.py can compare the two.
+    handoff_from_latest_sighting: bool = env_bool("WARRIORIQ_HANDOFF_FROM_LATEST", True)
     # Run the SAM2 sweep beside the frame pass rather than before it
     # (core/sam_recovery.py SweepInBackground). Measured 2026-10-21 on the
     # owner's RTX 5060: 75 s of sweep, then 120 s of frame pass, for a 197 s
