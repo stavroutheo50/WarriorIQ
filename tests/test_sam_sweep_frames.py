@@ -118,3 +118,64 @@ def test_the_box_from_the_card_is_the_box_numpy_found(logits):
         assert got is None
     else:
         assert got is not None and got.dtype == np.float32 and np.array_equal(got, expected)
+
+
+# The sweep beside the frame pass (2026-10-21): the same guidance as running it first.
+class _FakeRecovery:
+    """Finishes sampled frames in order, slowly, as SamRecovery.track_segment does."""
+
+    def __init__(self, stride=5, end=300, fail_at=None, delay=0.0005):
+        self.frame_done, self.available, self.sweep_seconds = None, True, {"propagation": 0.0}
+        self.continuous_frames, self.continuous_failure_reason = 0, None
+        self.stride, self.end, self.fail_at, self.delay = stride, end, fail_at, delay
+        self.released_before_done = None
+        self.events = []
+
+    def track_segment(self, video_path, start, end, fps, a, b):
+        import time as _time
+
+        rng = np.random.default_rng(5)
+        tracks = {}
+        for source in range(start, end, self.stride):
+            _time.sleep(self.delay * float(rng.integers(0, 4)))
+            if self.fail_at is not None and source >= self.fail_at:
+                raise RuntimeError("CUDA out of memory")
+            guided = {"A": np.asarray([source, 0, source + 10, 10], dtype=np.float32)} if source % 3 else {}
+            if guided:
+                tracks[source] = guided
+            if self.frame_done is not None:
+                self.frame_done(source, guided or None)
+        self.continuous_frames = len(tracks)
+        return tracks
+
+    def release(self):
+        self.events.append("release")
+
+
+def test_the_background_sweep_gives_the_guidance_running_it_first_gave():
+    from core.sam_recovery import SweepInBackground, nearest_guidance
+
+    first = _FakeRecovery()
+    first.frame_done = None
+    finished = first.track_segment("v", 10, 300, 30.0, None, None)
+    sweep = SweepInBackground(_FakeRecovery(), "v", 10, 300, 30.0, None, None)
+    for source in range(10, 300, 2):              # the frame pass asks as it goes
+        got = sweep.guidance(source, 5)
+        want = nearest_guidance(finished, source, 5)
+        assert (got is None) == (want is None), source
+        if got is not None:
+            assert np.array_equal(got["A"], want["A"]), source
+    assert sweep.join().keys() == finished.keys()
+    assert sweep.waited >= 0 and not sweep.finished_empty()
+
+
+def test_a_sweep_that_fails_ends_with_no_tracks_and_releases_first():
+    from core.sam_recovery import SweepInBackground
+
+    recovery = _FakeRecovery(fail_at=120)
+    sweep = SweepInBackground(recovery, "v", 10, 300, 30.0, None, None)
+    sweep.guidance(290, 5)                       # waits for the end, which is the failure
+    assert sweep.finished_empty() and sweep.join() == {}
+    assert recovery.events == ["release"] and recovery.frame_done is None
+    assert "CUDA out of memory" in recovery.continuous_failure_reason
+    assert sweep.guidance(50, 5) is None         # after the failure: no tracks, as before

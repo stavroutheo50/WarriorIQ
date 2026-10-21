@@ -947,6 +947,13 @@ class Settings:
     max_suspicious_handoffs_per_minute: float = float(
         os.getenv("WARRIORIQ_MAX_SUSPICIOUS_HANDOFFS_PER_MINUTE", "12")
     )
+    # Run the SAM2 sweep beside the frame pass rather than before it
+    # (core/sam_recovery.py SweepInBackground). Measured 2026-10-21 on the
+    # owner's RTX 5060: 75 s of sweep, then 120 s of frame pass, for a 197 s
+    # fight. The frame pass waits for the sweep wherever it needs it, so the
+    # guidance is the same. WARRIORIQ_SAM_OVERLAP=0 runs them one after the
+    # other, as before.
+    sam_overlap_sweep: bool = env_bool("WARRIORIQ_SAM_OVERLAP", True)
     # Putting A and B back the right way round after the tracker swapped them.
     #
     # When a fighter is lost for a moment - a clinch, the phone swinging past -
