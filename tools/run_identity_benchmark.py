@@ -107,7 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     })
     keys = ("right", "swapped", "partial", "other", "missing")
     totals = {arm: {**{key: 0 for key in keys}, "checked": 0} for arm in ARMS}
-    print(f"{'clip':8} {'arm':4} {'right':>7} {'swapped':>8} {'partial':>8} {'other':>6} {'missing':>8} {'seconds':>8}")
+    print(f"{'clip':8} {'arm':4} {'right':>7} {'swapped':>8} {'partial':>8} {'other':>6} {'missing':>8} {'seconds':>8}"
+          f" {'susp/min A':>10} {'susp/min B':>10}")
     for path in chosen:
         truth = json.loads(path.read_text(encoding="utf-8"))
         video = _download(truth)
@@ -129,8 +130,13 @@ def main(argv: list[str] | None = None) -> int:
                 row["checked"] += int(counts["frames"])
             for key in row:
                 totals[arm][key] += row[key]
+            # The rate the "could not follow you" gate reads (core/report.py churn_rate).
+            tracking = json.loads((out_dir / "report.json").read_text(encoding="utf-8")).get("tracking", {})
+            rates = [tracking.get(f"fighter_{f}_suspicious_handoffs_per_minute") for f in ("A", "B")]
             print(f"{path.stem:8} {arm:4} {row['right']:>3}/{row['checked']:<3} {row['swapped']:>8} "
-                  f"{row['partial']:>8} {row['other']:>6} {row['missing']:>8} {seconds:>8.0f}", flush=True)
+                  f"{row['partial']:>8} {row['other']:>6} {row['missing']:>8} {seconds:>8.0f}"
+                  f" {rates[0] if rates[0] is not None else '-':>10} {rates[1] if rates[1] is not None else '-':>10}",
+                  flush=True)
     print()
     for arm, row in totals.items():
         print(f"TOTAL {args.setting} {arm:3}: right {row['right']}/{row['checked']}, right person with a smaller box "

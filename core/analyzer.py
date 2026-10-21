@@ -215,7 +215,7 @@ from core.progress_eta import StageEta
 from core.camera_motion import GlobalMotion
 from core.rtm_pose import refine as refine_fighter_pose
 from core.edgetam_recovery import build_recovery
-from core.sam_recovery import nearest_guidance, sam_sampling_stride
+from core.sam_recovery import SweepInBackground, nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
 from core.scoring import (
     RULESETS, collapse_simultaneous_labels, is_legal_event, normalize_ruleset,
@@ -1234,31 +1234,43 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
 
     progress("Following both fighters", 1.0, time.perf_counter() - wall_start, 0.0, manager, None, quality, stage="tracking")
     sweep_start = time.perf_counter()
-    sam_tracks = sam_recovery.track_segment(
-        req.video_path,
-        start_frame,
-        end_frame,
-        info.fps,
-        canonical_a_box,
-        canonical_b_box,
-        progress_callback=lambda completed, total: progress(
-            "Following both fighters",
-            2.0 + 33.0 * completed / max(1, total),
-            time.perf_counter() - wall_start,
-            segment_duration * completed / max(1, total),
-            manager,
-            None,
-            quality,
-            stage="tracking",
-            stage_fraction=completed / max(1, total),
-            tracked_seconds=segment_duration * completed / max(1, total),
-        ),
-    )
-    sam_was_available = sam_recovery.available
-    sam_sweep_breakdown = dict(getattr(sam_recovery, "sweep_seconds", {}) or {})
-    sam_sweep_frames = int(getattr(sam_recovery, "continuous_frames", 0) or 0)
-    sam_recovery.release()
-    sam_sweep_seconds = time.perf_counter() - sweep_start
+    # The sweep beside the frame pass when SAM2 is there to run it
+    # (SETTINGS.sam_overlap_sweep); otherwise first, as it always was.
+    background_sweep = None
+    if SETTINGS.sam_overlap_sweep and SETTINGS.sam_continuous_enabled and sam_recovery._load():
+        background_sweep = SweepInBackground(
+            sam_recovery, req.video_path, start_frame, end_frame, info.fps, canonical_a_box, canonical_b_box)
+        sam_tracks = {}
+        sam_was_available = True
+        sam_sweep_breakdown: dict = {}
+        sam_sweep_frames = 0
+        sam_sweep_seconds = 0.0
+    else:
+        sam_tracks = sam_recovery.track_segment(
+            req.video_path,
+            start_frame,
+            end_frame,
+            info.fps,
+            canonical_a_box,
+            canonical_b_box,
+            progress_callback=lambda completed, total: progress(
+                "Following both fighters",
+                2.0 + 33.0 * completed / max(1, total),
+                time.perf_counter() - wall_start,
+                segment_duration * completed / max(1, total),
+                manager,
+                None,
+                quality,
+                stage="tracking",
+                stage_fraction=completed / max(1, total),
+                tracked_seconds=segment_duration * completed / max(1, total),
+            ),
+        )
+        sam_was_available = sam_recovery.available
+        sam_sweep_breakdown = dict(getattr(sam_recovery, "sweep_seconds", {}) or {})
+        sam_sweep_frames = int(getattr(sam_recovery, "continuous_frames", 0) or 0)
+        sam_recovery.release()
+        sam_sweep_seconds = time.perf_counter() - sweep_start
     # The bar reserves 0-35% for SAM2. Without a GPU SAM2 is skipped at once,
     # and the bar used to sit at 1% until the first frame-pass update, then
     # jump past 50%. Mark the start of the frame pass as soon as it begins.
@@ -1285,7 +1297,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     camera_motion = GlobalMotion() if SETTINGS.camera_motion_compensation else None
     if camera_motion is not None:
         camera_motion.update(first_frame, [p.box for p in first_people])
-    fallback_buffer_enabled = _fallback_buffer_needed(sam_tracks, sam_was_available)
+    # A running sweep counts as guidance coming, exactly as finished tracks did.
+    fallback_buffer_enabled = (False if background_sweep is not None
+                               else _fallback_buffer_needed(sam_tracks, sam_was_available))
     frame_buffer: deque[tuple[int, np.ndarray]] = deque(maxlen=max(SETTINGS.sam_buffer_frames + 4, 24))
     if fallback_buffer_enabled:
         frame_buffer.append((start_frame, first_frame.copy()))
@@ -1421,7 +1435,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 feed.allow_through(next_inference_frame)
 
                 people = pose_tracker.track(frame, current_imgsz, frame_index=source_frame)
-                guidance = nearest_guidance(sam_tracks, source_frame, sam_stride)
+                guidance = (background_sweep.guidance(source_frame, sam_stride) if background_sweep is not None
+                            else nearest_guidance(sam_tracks, source_frame, sam_stride))
                 search_started = time.perf_counter()
                 focused = pose_tracker.recover_from_guidance(frame, guidance, people)
                 for observation in focused:
@@ -1479,7 +1494,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 recovery_allowed = quality.mode != "deadline" or speed_now >= 0.90
 
                 for state, name in ((manager.a, "A"), (manager.b, "B")):
-                    if recovery_allowed and not sam_tracks and manager.needs_recovery(state, analyzed_frames):
+                    no_sweep_tracks = (background_sweep.finished_empty() if background_sweep is not None
+                                       else not sam_tracks)
+                    if recovery_allowed and no_sweep_tracks and manager.needs_recovery(state, analyzed_frames):
                         state.last_sam_attempt_analyzed_frame = analyzed_frames
                         buffered = _buffer_since_last_seen(frame_buffer, state.last_seen_source_frame)
                         recovered_box = sam_recovery.recover(buffered, state.last_box)
@@ -1731,6 +1748,15 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         cap.release()
         if tracking_file is not None:
             tracking_file.close()
+        # The sweep beside the frame pass finishes, and releases SAM2 itself,
+        # before anything else touches the predictor.
+        if background_sweep is not None:
+            sam_tracks = background_sweep.join()
+            sam_was_available = background_sweep.available
+            sam_sweep_breakdown = {**background_sweep.breakdown,
+                                   "in_background": round(background_sweep.seconds, 2),
+                                   "frame_pass_waited": round(background_sweep.waited, 2)}
+            sam_sweep_frames = background_sweep.frames
         # A rescue during the frame pass loads SAM2 again; park it for the next
         # job instead of dropping it with this run (core/sam_recovery.py).
         sam_recovery.release()

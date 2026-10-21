@@ -314,6 +314,8 @@ class SamRecovery:
         self.failure_reason = None
         self.continuous_frames = 0
         self.continuous_failure_reason = None
+        # Told each frame the sweep finishes, in order (SweepInBackground).
+        self.frame_done = None
         # Where the sweep's time goes (2026-10-13): on an RTX 5060 it took
         # 0.23 s a frame, more than the 0.173 s the stride planner assumes,
         # and the report could not say whether decoding, SAM2's own frame
@@ -479,6 +481,8 @@ class SamRecovery:
                     if guided:
                         tracks[source_frames[int(frame_index)]] = guided
                         last_guided = guided
+                    if self.frame_done is not None:
+                        self.frame_done(source_frames[int(frame_index)], guided or None)
                     if progress_callback is not None and int(frame_index) % 15 == 0:
                         progress_callback(min(total, completed + int(frame_index) + 1), total)
             for name in ("A", "B"):
@@ -588,3 +592,94 @@ def nearest_guidance(
         return None
     nearest = min(tracks, key=lambda frame: abs(frame - source_frame))
     return tracks[nearest] if abs(nearest - source_frame) <= max(0, tolerance) else None
+
+
+class SweepInBackground:
+    """The continuous sweep on a helper thread while the frame pass runs.
+
+    2026-10-21, the owner's RTX 5060: a 197 s fight took 200 s - the sweep
+    75 s, then the frame pass 120 s, one after the other. The frame pass keeps
+    the card busy about 40% of each frame; the rest is CPU work. Running the
+    sweep beside it fills that gap.
+
+    The frame pass gets exactly the guidance it would have got: guidance()
+    waits until the sweep has finished every frame up to `source_frame +
+    tolerance`, so nearest_guidance sees every key that could be the answer
+    (keys further on are further than the tolerance). Frames are finished in
+    order. When the sweep is over, the answer comes from its returned tracks
+    - which are empty if it failed, as they were when it ran first.
+
+    The predictor is released on the sweep's own thread before the sweep is
+    marked over, so a frame-pass rescue (only after an empty sweep) never
+    meets a running sweep. One difference from running first, and only on a
+    sweep that fails part-way or finds nothing at all: frames analysed before
+    that was known used the guidance there was, and the fallback frame buffer
+    for rescues was not kept.
+    """
+
+    def __init__(self, recovery: SamRecovery, video_path: str, start_frame: int, end_frame: int,
+                 source_fps: float, fighter_a_box, fighter_b_box):
+        self._recovery = recovery
+        self._condition = threading.Condition()
+        self._tracks: dict[int, dict[str, np.ndarray]] = {}
+        self._reached = int(start_frame) - 1
+        self._done = False
+        self.result: dict[int, dict[str, np.ndarray]] = {}
+        self.available: bool | None = None
+        self.breakdown: dict[str, float] = {}
+        self.frames = 0
+        self.seconds = 0.0
+        self.waited = 0.0
+        recovery.frame_done = self._frame_done
+        self._thread = threading.Thread(
+            target=self._run, name="warrioriq-sam-sweep", daemon=True,
+            args=(video_path, start_frame, end_frame, source_fps, fighter_a_box, fighter_b_box))
+        self._thread.start()
+
+    def _frame_done(self, source_frame: int, guided) -> None:
+        with self._condition:
+            if guided:
+                self._tracks[int(source_frame)] = guided
+            self._reached = max(self._reached, int(source_frame))
+            self._condition.notify_all()
+
+    def _run(self, *args) -> None:
+        started = time.perf_counter()
+        result: dict = {}
+        try:
+            result = self._recovery.track_segment(*args) or {}
+        except Exception as exc:  # noqa: BLE001 - the frame pass must still finish
+            self._recovery.continuous_failure_reason = f"{type(exc).__name__}: {exc}"
+            result = {}
+        finally:
+            self._recovery.frame_done = None
+            available = self._recovery.available
+            breakdown = dict(getattr(self._recovery, "sweep_seconds", {}) or {})
+            frames = int(getattr(self._recovery, "continuous_frames", 0) or 0)
+            try:
+                self._recovery.release()
+            finally:
+                with self._condition:
+                    self.result = result
+                    self.available, self.breakdown, self.frames = available, breakdown, frames
+                    self.seconds = time.perf_counter() - started
+                    self._done = True
+                    self._condition.notify_all()
+
+    def guidance(self, source_frame: int, tolerance: int) -> dict[str, np.ndarray] | None:
+        """nearest_guidance, once every frame that could be the answer is finished."""
+        started = time.perf_counter()
+        target = int(source_frame) + max(0, int(tolerance))
+        with self._condition:
+            self._condition.wait_for(lambda: self._done or self._reached >= target)
+            self.waited += time.perf_counter() - started
+            return nearest_guidance(self.result if self._done else self._tracks, source_frame, tolerance)
+
+    def finished_empty(self) -> bool:
+        """The sweep is over and found nothing: what "no tracks" meant before."""
+        with self._condition:
+            return self._done and not self.result
+
+    def join(self) -> dict[int, dict[str, np.ndarray]]:
+        self._thread.join()
+        return self.result
