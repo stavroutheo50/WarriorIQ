@@ -115,6 +115,30 @@ class SuspiciousHandoffTests(unittest.TestCase):
         self.manager._commit(state, _person(7, 105, 205, 0.0), 2, 1.0, recovered=True)
         self.assertEqual(self.manager.suspicious_handoffs["A"], 1)
 
+    def test_a_track_picking_up_where_sam2_followed_them_is_not_suspicious(self):
+        # 2026-10-22: a fighter walked across the picture on crops found where
+        # SAM2 said they were (-1001), then a new tracker track took over there.
+        # Judged against where the old track left them, that read as a jump.
+        state = self.manager.a
+        self.manager._commit(state, _person(1, 100, 200, 1.0), 1, 1.0)
+        for step, x in enumerate((250, 400, 550, 600), start=2):
+            self.manager._commit(state, _person(-1001, x, x + 100, 1.0), step, 1.0)
+        self.manager._commit(state, _person(7, 605, 705, 1.0), 6, 1.0, recovered=True)
+        self.assertEqual(self.manager.track_handoffs["A"], 1)
+        self.assertEqual(self.manager.suspicious_handoffs["A"], 0)
+
+    def test_without_the_setting_the_old_track_is_still_the_reference(self):
+        previous = SETTINGS.handoff_from_latest_sighting
+        object.__setattr__(SETTINGS, "handoff_from_latest_sighting", False)
+        try:
+            state = self.manager.a
+            self.manager._commit(state, _person(1, 100, 200, 1.0), 1, 1.0)
+            self.manager._commit(state, _person(-1001, 600, 700, 1.0), 2, 1.0)
+            self.manager._commit(state, _person(7, 605, 705, 1.0), 3, 1.0, recovered=True)
+            self.assertEqual(self.manager.suspicious_handoffs["A"], 1)
+        finally:
+            object.__setattr__(SETTINGS, "handoff_from_latest_sighting", previous)
+
 
 class StillFighterTests(unittest.TestCase):
     """A phone close-up makes real footwork read as standing still."""
