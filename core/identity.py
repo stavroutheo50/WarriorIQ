@@ -833,6 +833,15 @@ class IdentityManager:
                     self.suspicious_handoffs[state.name] = self.suspicious_handoffs.get(state.name, 0) + 1
             self._last_real_track[state.name] = int(obs.track_id)
             self._last_real_obs[state.name] = (obs.appearance, obs.box.copy())
+        elif (SETTINGS.handoff_from_latest_sighting and obs.track_id is not None
+              and self._last_real_obs.get(state.name) is not None):
+            # Followed between tracker tracks by a crop found where SAM2 said
+            # they were (-1001/-1002): the next hand-off is judged against
+            # where they were last seen, not where the last track left them
+            # (SETTINGS.handoff_from_latest_sighting).
+            seen_look = self._last_real_obs[state.name][0]
+            self._last_real_obs[state.name] = (
+                obs.appearance if obs.appearance is not None else seen_look, obs.box.copy())
         state.identity_confidence = float(max(0.0, min(1.0, score)))
         state.missing_frames = 0
         if (obs.reid is not None
