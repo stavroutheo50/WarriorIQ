@@ -315,6 +315,65 @@ def _keep_remote_lease(
             LOGGER.warning("Remote lease renewal failed for job %s: %s", job_id, exc)
 
 
+class _ProgressSender:
+    """Sends the analysis's progress to the web app from a thread of its own.
+
+    The frame pass reports progress every 40 frames, and used to wait for the
+    web app's answer each time. The shared host answers in one to several
+    seconds (core/worker_client.py WORKER_HTTP_TIMEOUT_SECONDS), so on the
+    owner's RTX 5060 the analysis stood still for it: 0.026 s of every
+    analysed frame went to no named step, a quarter of the frame pass
+    (analysis_stage_seconds, 2026-10-21, a 197 s fight analysed in 182 s).
+
+    The analysis now hands each update over and carries on. Updates that pile
+    up while one is being sent are merged, newest value of each field winning
+    - the web app applies them the same way (app.state.update_job_for_worker),
+    so the page shows what it would have, a little less often on a slow host.
+    A lost run is still noticed: the next update raises AnalysisRunLost. A
+    failed send is logged and the next one tried, as the lease keeper does;
+    it no longer stops the analysis.
+    """
+
+    def __init__(self, client: RemoteWorkerClient, job_id: str, analysis_run_id: str,
+                 ownership_lost: threading.Event):
+        self._client, self._job_id, self._run_id = client, job_id, analysis_run_id
+        self._ownership_lost = ownership_lost
+        self._condition = threading.Condition()
+        self._pending: dict | None = None
+        self._closed = False
+        self._thread = threading.Thread(target=self._run, name=f"warrioriq-progress-{job_id}", daemon=True)
+        self._thread.start()
+
+    def __call__(self, patch: dict) -> None:
+        if self._ownership_lost.is_set():
+            raise AnalysisRunLost(f"Analysis run {self._run_id} no longer owns {self._job_id}")
+        with self._condition:
+            self._pending = {**(self._pending or {}), **patch}
+            self._condition.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while self._pending is None and not self._closed:
+                    self._condition.wait()
+                if self._pending is None:
+                    return
+                patch, self._pending = self._pending, None
+            try:
+                self._client.progress(self._job_id, self._run_id, patch)
+            except AnalysisRunLost:
+                self._ownership_lost.set()
+            except RemoteWorkerError as exc:
+                LOGGER.warning("Progress update failed for job %s: %s", self._job_id, exc)
+
+    def close(self, timeout: float) -> None:
+        """Send what is waiting, for up to `timeout` seconds, then stop."""
+        with self._condition:
+            self._closed = True
+            self._condition.notify()
+        self._thread.join(timeout)
+
+
 def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
     from core.analyzer import analyze
 
@@ -340,12 +399,13 @@ def run_remote_claimed_job(client: RemoteWorkerClient, job: dict) -> None:
             if not output_dir.resolve().is_relative_to(OUTPUTS.resolve()):
                 raise RuntimeError("Unsafe worker output path")
 
-            def progress(patch: dict) -> None:
-                if ownership_lost.is_set():
-                    raise AnalysisRunLost(f"Analysis run {analysis_run_id} no longer owns {job_id}")
-                client.progress(job_id, analysis_run_id, patch)
-
-            analyze(_remote_request(job, video_path), progress)
+            progress = _ProgressSender(client, job_id, analysis_run_id, ownership_lost)
+            try:
+                analyze(_remote_request(job, video_path), progress)
+            finally:
+                # The last update goes before the result; a late one is
+                # refused by the web app once the run is no longer running.
+                progress.close(timeout=30.0)
             if ownership_lost.is_set():
                 raise AnalysisRunLost(f"Analysis run {analysis_run_id} no longer owns {job_id}")
             _worker_result_archive(job_id, archive_path, analysis_run_id)
