@@ -298,12 +298,18 @@ def _punch_arm_not_seen(event) -> bool:
     return seen is not None and float(seen) < PUNCH_ARM_CONFIDENCE
 
 
+def _video_checked(event) -> float | None:
+    """The video check's probability that this was a punch, if it scored it
+    (core/strike_verifier.py, after the frame pass)."""
+    if getattr(event, "family", None) != "punch" or SETTINGS.punch_check_threshold <= 0.0:
+        return None
+    value = (getattr(event, "evidence", None) or {}).get("video_punch_probability")
+    return None if value is None else float(value)
+
+
 def _not_a_punch(event) -> bool:
-    """The learned check (core/strike_verifier.py) says a person would not call
-    this proposal a punch. See SETTINGS.punch_check_threshold."""
-    if SETTINGS.punch_check_threshold <= 0.0:
-        return False
-    probability = strike_verifier.punch_probability(event)
+    """The video check says a person would not call this proposal a punch."""
+    probability = _video_checked(event)
     return probability is not None and probability < SETTINGS.punch_check_threshold
 
 
@@ -437,7 +443,10 @@ def _attempt_drop_reason(event, ruleset: str | None = None) -> str | None:
         return "arm_not_seen"
     if _not_a_punch(event):
         return "not_a_punch"
-    if _punch_thrown_at_nothing(event):
+    # A punch the video check scored is judged by it alone: on fighters it had
+    # not seen it found twice the real punches these skeleton rules kept, with
+    # no more false ones (tools/fit_strike_check.py, V18).
+    if _video_checked(event) is None and _punch_thrown_at_nothing(event):
         return "thrown_at_nothing"
     if (float(event.metadata.get("attacker_identity_confidence", 1.0)) < 0.76
             or float(event.metadata.get("opponent_identity_confidence", 1.0)) < 0.76):
@@ -1398,6 +1407,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     kit_attribution = KitAttribution(
         seed_seconds, darker_at_selection_boxes(shorts_dark.get("A"), shorts_dark.get("B")))
     metric_frames: list[tuple[float, int | None, PersonObservation | None, PersonObservation | None]] = []
+    # Where each fighter's box was on every analysed frame, for the video
+    # check's crops after the frame pass (core/strike_verifier.py).
+    box_track: list[tuple[float, list | None, list | None]] = []
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
     # Decoding runs a step ahead on a helper thread; see core/frame_feed.py.
     feed = FrameFeed(
@@ -1633,6 +1645,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             presence.observe(seconds, fighter_a, fighter_b, people)
             strikes_started = time.perf_counter()
             step_seconds["pose_measures"] += strikes_started - measures_started
+            box_track.append((seconds, None if fighter_a is None else fighter_a.box.tolist(),
+                              None if fighter_b is None else fighter_b.box.tolist()))
             if active_selected_round:
                 active_analyzed_frames += 1
                 # Measured once the whole fight is classified, so footage that
@@ -1859,6 +1873,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # 5 meant it, and re-cutting the fight underneath them would be wrong.
     # Both fighters move when one of them is hit. Decide which of the two was
     # the aggressor before anything downstream counts, scores or reports them.
+    # A second look at every proposed punch, from the pixels around it. Done
+    # before the pair rule below, which leaves the punches it scored alone.
+    strike_check = ({"scored": 0, "reason": "off"} if SETTINGS.punch_check_threshold <= 0.0 else
+                    strike_verifier.score_punches(req.video_path, events, strike_verifier.boxes_from_track(box_track)))
+    LOGGER.info("strike_check %s", json.dumps(strike_check))
     events, defender_actions = resolve_simultaneous_attribution(events)
     kit_proposals = kit_attribution.proposals(events, apply=kit_attribution_active())
 
@@ -2005,6 +2024,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "camera_motion_compensated_frames": int(manager.camera_compensations),
         "official_tracks": len(manager.official_tracks),
         "kit_attribution": kit_proposals,
+        "strike_check": strike_check,
         "clothed_official_filter": bool(manager.clothed_official_filter),
         "fighter_A_sam_recoveries": manager.a.sam_recovery_count,
         "fighter_B_sam_recoveries": manager.b.sam_recovery_count,
