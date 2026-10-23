@@ -10,7 +10,7 @@ were thrown (precision), and of the strikes thrown, how many it counts
     python tools/benchmark_dense_strikes.py
     python tools/benchmark_dense_strikes.py --ruleset BOXING --json
 
-Each fight is a folder in dataset/regression/ with:
+Each fight is a folder in dataset/regression/ or dataset/public/phone_strikes/ with:
 
   track.jsonl.gz   the analyser's tracking.jsonl for the labelled stretch
   strikes.json     every strike thrown: time of fullest extension, fighter,
@@ -47,8 +47,10 @@ OUTCOME_OF = {"clean": "landed", "likely_landed": "landed", "blocked": "blocked"
 
 
 def dense_fights() -> list[Path]:
-    root = PROJECT_ROOT / "dataset" / "regression"
-    return sorted(p for p in root.iterdir()
+    # dataset/public/ is not in Git: pose tracks of identifiable athletes stay
+    # out of a public repository (.gitignore).
+    roots = [PROJECT_ROOT / "dataset" / "regression", PROJECT_ROOT / "dataset" / "public" / "phone_strikes"]
+    return sorted(p for root in roots if root.is_dir() for p in root.iterdir()
                   if p.is_dir() and (p / "track.jsonl.gz").exists() and (p / "strikes.json").exists())
 
 
