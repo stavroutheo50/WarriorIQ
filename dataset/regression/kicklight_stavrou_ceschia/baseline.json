@@ -11,11 +11,11 @@
   "labelled_strikes_missed": 4
  },
  "counted_in_report": {
-  "proposals_raw": 19,
-  "proposals_counted": 16,
+  "proposals_raw": 17,
+  "proposals_counted": 14,
   "real_strike": 11,
   "right_type": 6,
-  "nothing_happened": 5,
+  "nothing_happened": 3,
   "unsure": 0,
   "unlabelled": 0,
   "labelled_strikes": 19,

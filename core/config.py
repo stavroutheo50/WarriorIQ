@@ -703,6 +703,9 @@ class Settings:
     # knee and ankle of the leg must both be seen on this share of an action's
     # samples, or no kick or knee is emitted for it.
     min_leg_keypoint_confidence: float = float(os.getenv("WARRIORIQ_MIN_LEG_KEYPOINT_CONF", "0.5"))
+    # A punch counts only when the arm that threw it was seen this surely
+    # (core/analyzer.py PUNCH_ARM_CONFIDENCE). 0 turns the check off.
+    punch_arm_confidence: float = float(os.getenv("WARRIORIQ_PUNCH_ARM_CONFIDENCE", "0.3"))
     min_leg_visible_share: float = 0.8
 
     # ------------------------------------------------------------

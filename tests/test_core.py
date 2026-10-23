@@ -4294,6 +4294,7 @@ class ObservedSummaryTests(unittest.TestCase):
         cases = {
             "not_a_strike": event(family="step"),
             "too_faint": event(confidence=0.0),
+            "arm_not_seen": event(family="punch", evidence={"arm_confidence": 0.1}),
             "thrown_at_nothing": event(family="punch", outcome="missed"),
             "unsure_who_was_who": event(metadata={"attacker_identity_confidence": 0.5}),
         }
@@ -4303,7 +4304,7 @@ class ObservedSummaryTests(unittest.TestCase):
         with unittest.mock.patch("core.analyzer._live_event_reliable", return_value=False):
             diagnostics = _live_event_diagnostics(list(cases.values()) + [event()], "K1", False, [])
         self.assertEqual(diagnostics["dropped"], {reason: 1 for reason in cases})
-        self.assertEqual(diagnostics["candidate_events_seen"], 5)
+        self.assertEqual(diagnostics["candidate_events_seen"], 6)
 
     def test_no_frame_copies_for_a_sam2_rescue_that_cannot_run(self):
         from core.analyzer import _fallback_buffer_needed
