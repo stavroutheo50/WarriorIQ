@@ -240,6 +240,9 @@ class IdentityManager:
         # The hand-offs above that look like a different person: colour
         # changed or the box jumped. See SETTINGS.max_suspicious_handoffs_per_minute.
         self.suspicious_handoffs = {"A": 0, "B": 0}
+        # Suspicious hand-offs of the current frame, for the frame pass to
+        # check against the fighters' kit (core/kit.py HandoffKitCheck).
+        self.handoffs_to_check: list[tuple[str, np.ndarray]] = []
         self._last_real_obs: dict[str, tuple | None] = {"A": None, "B": None}
         # Both fighters bare-chested at selection, so an upright clothed
         # person is the official. See core/referee.py.
@@ -831,6 +834,7 @@ class IdentityManager:
                         appearance_similarity(before[0], obs.appearance) < 0.8
                         or normalized_distance(before[1], obs.box) > 0.8):
                     self.suspicious_handoffs[state.name] = self.suspicious_handoffs.get(state.name, 0) + 1
+                    self.handoffs_to_check.append((state.name, obs.box.copy()))
             self._last_real_track[state.name] = int(obs.track_id)
             self._last_real_obs[state.name] = (obs.appearance, obs.box.copy())
         elif (SETTINGS.handoff_from_latest_sighting and obs.track_id is not None
@@ -1136,6 +1140,11 @@ class IdentityManager:
         self._cross_match_frames = 0
         self.swaps_corrected += 1
         return b_obs, a_obs
+
+    def confirm_handoff(self, name: str) -> None:
+        """A suspicious hand-off the fighter's own kit showed was them."""
+        if self.suspicious_handoffs.get(name, 0) > 0:
+            self.suspicious_handoffs[name] -= 1
 
     def _release_if_furniture(self, state: FighterState) -> bool:
         """Let go of a fighter that has turned out to be a seated spectator.

@@ -25,7 +25,7 @@ from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
 from core.frame_feed import FrameFeed
 from core.generalship import judge_fight
 from core.fight_presence import FightPresence
-from core.kit import kit_similarity
+from core.kit import HandoffKitCheck, kit_similarity, region_colours
 from core.kit_attribution import KitAttribution, box_shorts_dark_share, darker_at_selection_boxes
 from core.slow_watch import SlowRunWatch
 from core.kit_attribution import active as kit_attribution_active
@@ -727,6 +727,8 @@ def _seed_frame_kit(video_path: str, frame_index: int, box_a, box_b) -> dict | N
         # Whose shorts are darker, read where the boxes are known to be right
         # (core/kit_attribution.py).
         kit["shorts_dark"] = {"A": box_shorts_dark_share(frame, box_a), "B": box_shorts_dark_share(frame, box_b)}
+        # Each fighter's kit colours, for checking hand-offs (core/kit.py HandoffKitCheck).
+        kit["colours"] = {"A": region_colours(frame, box_a), "B": region_colours(frame, box_b)}
     return kit
 
 
@@ -1225,6 +1227,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "A": box_shorts_dark_share(first_frame, req.fighter_a_box),
         "B": box_shorts_dark_share(first_frame, req.fighter_b_box)}
     shorts_dark = shorts_dark or {}
+    handoff_kit = HandoffKitCheck(
+        ((seed_kit or {}).get("colours") if seed_kit is not None else
+         {"A": region_colours(first_frame, req.fighter_a_box), "B": region_colours(first_frame, req.fighter_b_box)})
+        if SETTINGS.handoff_kit_check else None)
     histogram_similarity = fighter_pair_similarity(*(seed_pair or (initial_a, initial_b)))
     pair_similarity = kit["similarity"] if kit is not None else histogram_similarity
     manager.prime_track_history(warm_samples)
@@ -1523,6 +1529,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                         )
                         fighter_a = recovered_a or fighter_a
                         fighter_b = recovered_b or fighter_b
+
+            # A fighter picked up again by someone wearing their own kit was
+            # not lost: take that hand-off back off the suspicious count.
+            for name, box in manager.handoffs_to_check:
+                if handoff_kit.confirms(frame, box, name):
+                    manager.confirm_handoff(name)
+            manager.handoffs_to_check.clear()
 
             seconds = first_seconds if source_frame == start_frame else decoded_seconds
             spec = round_at_time(rounds, seconds)
@@ -1948,6 +1961,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             manager.suspicious_handoffs["A"] / (segment_duration / 60.0), 2),
         "fighter_B_suspicious_handoffs_per_minute": round(
             manager.suspicious_handoffs["B"] / (segment_duration / 60.0), 2),
+        # Suspicious hand-offs the fighter's own kit showed were them, taken
+        # off the counts above (core/kit.py HandoffKitCheck).
+        "handoff_kit_check_regions": sorted(handoff_kit.apart),
+        "fighter_A_kit_confirmed_handoffs": handoff_kit.confirmed["A"],
+        "fighter_B_kit_confirmed_handoffs": handoff_kit.confirmed["B"],
         "identity_swaps_corrected": int(manager.swaps_corrected),
         # Audit 2026-10-14, #2: re-identified after leaving the picture, frames
         # where the camera's move was compensated, and officials held apart.

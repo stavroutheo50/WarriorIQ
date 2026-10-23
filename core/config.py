@@ -955,6 +955,11 @@ class Settings:
     # for B and read 14.9 suspicious hand-offs a minute. A setting so
     # tools/run_identity_benchmark.py can compare the two.
     handoff_from_latest_sighting: bool = env_bool("WARRIORIQ_HANDOFF_FROM_LATEST", True)
+    # A suspicious hand-off is taken back when the person picked up wears the
+    # fighter's own kit, read where the person drew the boxes, in every region
+    # that tells the two fighters apart (core/kit.py HandoffKitCheck). Only for
+    # clearly different kits; 0 counts every suspicious hand-off, as before.
+    handoff_kit_check: bool = env_bool("WARRIORIQ_HANDOFF_KIT_CHECK", True)
     # Run the SAM2 sweep beside the frame pass rather than before it
     # (core/sam_recovery.py SweepInBackground). Measured 2026-10-21 on the
     # owner's RTX 5060: 75 s of sweep, then 120 s of frame pass, for a 197 s
