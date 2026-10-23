@@ -25,6 +25,7 @@ from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
 from core.frame_feed import FrameFeed
 from core.generalship import judge_fight
 from core.fight_presence import FightPresence
+from core import strike_verifier
 from core.kit import HandoffKitCheck, kit_similarity, region_colours
 from core.kit_attribution import KitAttribution, box_shorts_dark_share, darker_at_selection_boxes
 from core.slow_watch import SlowRunWatch
@@ -297,6 +298,15 @@ def _punch_arm_not_seen(event) -> bool:
     return seen is not None and float(seen) < PUNCH_ARM_CONFIDENCE
 
 
+def _not_a_punch(event) -> bool:
+    """The learned check (core/strike_verifier.py) says a person would not call
+    this proposal a punch. See SETTINGS.punch_check_threshold."""
+    if SETTINGS.punch_check_threshold <= 0.0:
+        return False
+    probability = strike_verifier.punch_probability(event)
+    return probability is not None and probability < SETTINGS.punch_check_threshold
+
+
 def _live_attempt_reliable(event, ruleset: str | None = None) -> bool:
     """Return only identity-safe temporal attempts for the provisional live view.
 
@@ -425,6 +435,8 @@ def _attempt_drop_reason(event, ruleset: str | None = None) -> str | None:
         return "too_faint"
     if _punch_arm_not_seen(event):
         return "arm_not_seen"
+    if _not_a_punch(event):
+        return "not_a_punch"
     if _punch_thrown_at_nothing(event):
         return "thrown_at_nothing"
     if (float(event.metadata.get("attacker_identity_confidence", 1.0)) < 0.76

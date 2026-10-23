@@ -27,12 +27,12 @@ import numpy as np
 SHOULDER, ELBOW, WRIST = {"left": 5, "right": 6}, {"left": 7, "right": 8}, {"left": 9, "right": 10}
 
 # Filled in by tools/fit_strike_verifier.py; see WEIGHTS_SOURCE.
-FEATURES: tuple[str, ...] = ()
-MEAN: tuple[float, ...] = ()
-SCALE: tuple[float, ...] = ()
-WEIGHTS: tuple[float, ...] = ()
-BIAS = 0.0
-WEIGHTS_SOURCE = ""
+FEATURES: tuple[str, ...] = ('arm_confidence', 'speed', 'extension_gain', 'detector_confidence', 'contact_distance', 'guard_distance', 'hand_to_foot_travel', 'opponent_seen_share', 'duration', 'contact_frames', 'near_contact_frames', 'elbow_straightness', 'reach', 'outcome_missed', 'outcome_uncertain')
+MEAN: tuple[float, ...] = (0.4960, 3.2630, 0.1757, 0.5385, 0.5682, 0.5250, 0.9422, 0.9660, 0.2894, 0.5106, 0.9404, 0.6931, 0.2493, 0.5702, 0.1362,)
+SCALE: tuple[float, ...] = (0.1335, 1.3505, 0.0875, 0.0924, 0.4775, 0.5251, 0.6217, 0.1596, 0.1335, 0.9909, 1.4777, 0.2263, 0.0782, 0.4950, 0.3430,)
+WEIGHTS: tuple[float, ...] = (0.7288, 0.5293, -0.1048, -0.0184, -0.6221, -0.1832, -0.2336, -0.7677, -0.3807, -0.6744, 0.6049, 0.0575, 0.4250, 0.2652, -0.0229,)
+BIAS = -0.0827
+WEIGHTS_SOURCE = '235 judged punch proposals (115 real) in 2 public-domain phone sparring clips; held-out AUC 0.730'
 
 
 def _angle(a, b, c) -> float:
