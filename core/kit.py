@@ -125,3 +125,93 @@ def alike_reason(kit: dict | None) -> str:
     if kit.get("achromatic"):
         return "black_and_white"
     return "kit"
+
+
+# ------------------------------------------------- hand-offs checked by kit
+# A region is used to tell the two fighters apart only when their kits differ
+# there by at least this Delta E at selection: clearly different colours, not
+# two shades of one kit under changing light.
+HANDOFF_REGION_DELTA_E = 25.0
+# A box is wearing a fighter's kit in a region when it is within this share of
+# the A-to-B difference of that fighter's own colour, and nearer to it than to
+# the opponent's.
+HANDOFF_OWN_SHARE = 0.5
+
+
+def region_colours(image: np.ndarray | None, box) -> dict[str, list[float]]:
+    """The median L*a*b* colour of each kit region of one box, as stored lists."""
+    if image is None or box is None:
+        return {}
+    height, width = image.shape[:2]
+    x1, y1, x2, y2 = (float(v) for v in box)
+    left, top = int(max(0, x1)), int(max(0, y1))
+    right, bottom = int(min(width, x2)), int(min(height, y2))
+    if right - left < 2 or bottom - top < 2:
+        return {}
+    # Only the box is converted: this runs on frames where a fighter was
+    # picked up again, not once per analysis.
+    lab = _lab(image[top:bottom, left:right])
+    local = (x1 - left, y1 - top, x2 - left, y2 - top)
+    out = {}
+    for name, span in REGIONS.items():
+        colour = _region_colour(lab, local, span)
+        if colour is not None:
+            out[name] = [round(float(v), 2) for v in colour]
+    return out
+
+
+class HandoffKitCheck:
+    """Was a fighter picked up again by a person wearing their kit?
+
+    The identity manager counts a hand-off between tracker tracks as
+    suspicious when the person picked up looks different by its torso colour
+    histogram or is far from where the last track left them
+    (core/identity.py). A hand-held phone at a crowded event does both to the
+    right fighter all the time - the camera swings, the fighter is 85 pixels
+    tall - and the "could not follow you" gate (core/report.py churn_rate)
+    then refused fights the identity manager never confused.
+
+    When the two fighters wear clearly different kit, the kit answers the
+    question directly: the box picked up is read in the same regions as the
+    boxes the person drew on the frame they chose, and the hand-off is
+    confirmed only if every region that tells the two apart matches this
+    fighter's colour and not the opponent's. Anything less - kit too alike,
+    box too small, a region not readable, closer to the opponent - leaves the
+    hand-off counted as suspicious, as before.
+    """
+
+    def __init__(self, colours: dict | None):
+        colours = colours or {}
+        a, b = colours.get("A") or {}, colours.get("B") or {}
+        self.reference = {"A": {}, "B": {}}
+        self.apart: dict[str, float] = {}
+        for region in REGIONS:
+            if region in a and region in b:
+                delta = float(np.linalg.norm(np.subtract(a[region], b[region])))
+                if delta >= HANDOFF_REGION_DELTA_E:
+                    self.apart[region] = delta
+                    self.reference["A"][region] = np.asarray(a[region], dtype=np.float32)
+                    self.reference["B"][region] = np.asarray(b[region], dtype=np.float32)
+        self.confirmed = {"A": 0, "B": 0}
+        self.checked = {"A": 0, "B": 0}
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.apart)
+
+    def confirms(self, image: np.ndarray | None, box, fighter: str) -> bool:
+        if not self.enabled or box is None or float(box[3]) - float(box[1]) < MIN_BOX_HEIGHT:
+            return False
+        self.checked[fighter] += 1
+        seen = region_colours(image, box)
+        other = "B" if fighter == "A" else "A"
+        for region, delta in self.apart.items():
+            if region not in seen:
+                return False
+            colour = np.asarray(seen[region], dtype=np.float32)
+            own = float(np.linalg.norm(colour - self.reference[fighter][region]))
+            opponent = float(np.linalg.norm(colour - self.reference[other][region]))
+            if own > HANDOFF_OWN_SHARE * delta or own >= opponent:
+                return False
+        self.confirmed[fighter] += 1
+        return True
