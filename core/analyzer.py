@@ -69,6 +69,16 @@ from core.build_info import stamp as build_stamp
 # essentially nothing behind it, which is all this gate is for.
 ATTEMPT_CONFIDENCE = CONFIDENCE_FLOOR + 0.10 * (CONFIDENCE_CEILING - CONFIDENCE_FLOOR)
 
+# A punch is counted only when the pose model saw the arm that threw it
+# (core/action.py arm_confidence). When the arm is hidden or blurred the model
+# still places a wrist, the guess jumps from frame to frame, and the detector
+# reads the jump as a punch. Measured 2026-10-23 against every strike labelled
+# in four public-domain phone sparring clips (tools/benchmark_dense_strikes.py,
+# 128 sure strikes): real punches' arms averaged 0.84, falsely counted ones
+# 0.47. Kicks are left alone: legs were seen as surely on false kicks as on
+# real ones, and their own visibility gate already applies.
+PUNCH_ARM_CONFIDENCE = SETTINGS.punch_arm_confidence
+
 LOGGER = logging.getLogger("warrioriq.analysis")
 
 # What this pipeline needs resident, measured on 2026-09-16 on an 8 GB RTX 5060:
@@ -279,6 +289,14 @@ def _punch_thrown_at_nothing(event) -> bool:
     return not (guard is not None and float(guard) <= MISSED_PUNCH_REACHED_GUARD)
 
 
+def _punch_arm_not_seen(event) -> bool:
+    """A punch read from an arm the pose model could not see. See PUNCH_ARM_CONFIDENCE."""
+    if getattr(event, "family", None) != "punch":
+        return False
+    seen = (getattr(event, "evidence", None) or {}).get("arm_confidence")
+    return seen is not None and float(seen) < PUNCH_ARM_CONFIDENCE
+
+
 def _live_attempt_reliable(event, ruleset: str | None = None) -> bool:
     """Return only identity-safe temporal attempts for the provisional live view.
 
@@ -405,6 +423,8 @@ def _attempt_drop_reason(event, ruleset: str | None = None) -> str | None:
         return "not_a_strike"
     if float(getattr(event, "confidence", 0.0)) < ATTEMPT_CONFIDENCE:
         return "too_faint"
+    if _punch_arm_not_seen(event):
+        return "arm_not_seen"
     if _punch_thrown_at_nothing(event):
         return "thrown_at_nothing"
     if (float(event.metadata.get("attacker_identity_confidence", 1.0)) < 0.76

@@ -102,6 +102,20 @@ def _joint_seen(sample: "Sample", idx: int) -> bool:
     return float(sample.conf[idx]) >= SETTINGS.min_leg_keypoint_confidence
 
 
+def arm_confidence(samples: list["Sample"], side: str) -> float | None:
+    """How surely the pose model saw this arm over an action, 0 to 1.
+
+    The mean over the action's samples of the weaker of elbow and wrist. A
+    punch is read from where the wrist goes; when the model could not see the
+    arm it still places a wrist, and the guess jitters - which reads as an arm
+    shooting out. None when no sample carries confidences.
+    """
+    elbow, wrist = (L_ELBOW, L_WRIST) if side == "left" else (R_ELBOW, R_WRIST)
+    seen = [min(float(item.conf[elbow]), float(item.conf[wrist])) for item in samples
+            if item.conf is not None and len(item.conf) > max(elbow, wrist)]
+    return float(np.mean(seen)) if seen else None
+
+
 def legs_visible(samples: list["Sample"], side: str | None = None) -> bool:
     """Were a knee and its ankle confidently seen across this window?
 
@@ -776,6 +790,10 @@ class ActionEngine:
                             "family_seed": seed_family,
                             "family_flipped": seed_family != family,
                             "family_travel_ratio": family_ratio,
+                            # See arm_confidence; read by the attempt gate
+                            # (core/analyzer.py PUNCH_ARM_CONFIDENCE).
+                            "arm_confidence": arm_confidence(
+                                action_samples, "left" if event_limb.startswith("left") else "right"),
                             # Turning and jumping are separately scored actions
                             # in several rulesets - a turning kick to the head
                             # is worth 5 in WT taekwondo against 3 for the same
