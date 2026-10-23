@@ -707,8 +707,10 @@ class Settings:
     # (core/analyzer.py PUNCH_ARM_CONFIDENCE). 0 turns the check off.
     punch_arm_confidence: float = float(os.getenv("WARRIORIQ_PUNCH_ARM_CONFIDENCE", "0.3"))
     # A punch counts only when the learned check (core/strike_verifier.py)
-    # gives it at least this probability of being a punch. 0 (the default
-    # until it is shown to help on fighters it was not fitted on) turns it off.
+    # gives it at least this probability of being a punch. 0, the default,
+    # turns it off: fitted on three judged clips (379 punches), it did not
+    # help on a fourth it had not seen (V18: 0.5 kept 6 of 12 real strikes
+    # and removed none of 10 false ones) or on Kick Light (lost 1 real).
     punch_check_threshold: float = float(os.getenv("WARRIORIQ_PUNCH_CHECK", "0"))
     min_leg_visible_share: float = 0.8
 
