@@ -1875,8 +1875,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # the aggressor before anything downstream counts, scores or reports them.
     # A second look at every proposed punch, from the pixels around it. Done
     # before the pair rule below, which leaves the punches it scored alone.
-    strike_check = ({"scored": 0, "reason": "off"} if SETTINGS.punch_check_threshold <= 0.0 else
-                    strike_verifier.score_punches(req.video_path, events, strike_verifier.boxes_from_track(box_track)))
+    if SETTINGS.punch_check_threshold <= 0.0:
+        strike_check = {"scored": 0, "reason": "off"}
+    elif not strike_verifier.applies_to(req.ruleset):
+        strike_check = {"scored": 0, "reason": "not_measured_for_this_sport"}
+    else:
+        strike_check = strike_verifier.score_punches(
+            req.video_path, events, strike_verifier.boxes_from_track(box_track))
     LOGGER.info("strike_check %s", json.dumps(strike_check))
     events, defender_actions = resolve_simultaneous_attribution(events)
     kit_proposals = kit_attribution.proposals(events, apply=kit_attribution_active())
