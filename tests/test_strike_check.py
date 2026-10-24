@@ -125,3 +125,10 @@ def test_the_pair_rule_leaves_scored_punches_alone():
     far.evidence.pop("video_punch_probability")
     kept, dropped = resolve_simultaneous_attribution([near, far])
     assert dropped == 1 and kept == [near]
+
+
+def test_only_sports_it_was_measured_on_are_checked():
+    # Boxing only (2026-10-24): on Muay Thai it let more false strikes through.
+    assert check.applies_to("BOXING")
+    for ruleset in ("K1", "KICK_LIGHT", "MUAY_THAI", "ITF_TAEKWONDO", "WT_TAEKWONDO", "MMA", None):
+        assert not check.applies_to(ruleset)

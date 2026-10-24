@@ -36,6 +36,19 @@ from core.config import MODELS
 LOGGER = logging.getLogger("warrioriq.strike_check")
 
 HEAD_PATH = MODELS / "strike_check_head.npz"
+# Sports the check has been shown to help on, each clip scored by a head that
+# had not seen it. Fitted and measured on boxing sparring only. On Muay Thai
+# (two judged broadcast minutes, 2026-10-24) it let more false strikes
+# through than the rules it replaces (real/false 5/8 -> 7/13, 1/20 -> 3/22),
+# so every other sport keeps those rules until it has data of its own.
+SPORTS = ("boxing",)
+
+
+def applies_to(ruleset: str | None) -> bool:
+    """Whether punches in a fight under this ruleset are checked at all."""
+    from core.scoring import normalize_ruleset, sport_of
+
+    return bool(ruleset) and sport_of(normalize_ruleset(ruleset)) in SPORTS
 FRAMES = 16
 FRAME_STEP_SECONDS = 0.05
 WINDOW_BEFORE_SECONDS = 0.4
