@@ -706,6 +706,14 @@ class Settings:
     # A punch counts only when the arm that threw it was seen this surely
     # (core/analyzer.py PUNCH_ARM_CONFIDENCE). 0 turns the check off.
     punch_arm_confidence: float = float(os.getenv("WARRIORIQ_PUNCH_ARM_CONFIDENCE", "0.3"))
+    # A punch the video check scored (core/strike_verifier.py) counts when it
+    # gives at least this probability of a punch, and the skeleton rules it
+    # replaces - thrown at nothing, the pair rule - no longer apply to it.
+    # Each clip scored by a head fitted without it, through these gates
+    # (2026-10-23): V18 real 17 -> 35, false 15 -> 17; VID real 39 -> 46,
+    # false 21 -> 19. 0.6 removed more false punches but cost VID 5 real ones.
+    # 0 turns the check off and the rules back on.
+    punch_check_threshold: float = float(os.getenv("WARRIORIQ_PUNCH_CHECK", "0.5"))
     min_leg_visible_share: float = 0.8
 
     # ------------------------------------------------------------

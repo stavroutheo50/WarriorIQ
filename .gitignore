@@ -94,6 +94,11 @@ fights/*
 # without it in the repo the filter cannot be enabled on any other machine.
 !models/referee_probe.npz
 
+# The video strike check's fitted head (core/strike_verifier.py): 38 KB of
+# weights fitted by tools/fit_strike_check.py. The 127 MB backbone it sits on
+# is downloaded by torchvision on first use and is not stored here.
+!models/strike_check_head.npz
+
 # Same reasoning: the tracker config is measured settings, not weights. It had
 # been sitting untracked on one machine, which meant the thresholds every
 # identity decision depends on existed in exactly one place, could not be

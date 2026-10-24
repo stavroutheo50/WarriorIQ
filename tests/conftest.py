@@ -38,6 +38,9 @@ if "core.config" in sys.modules:                                    # pragma: no
 # The setup page's person detector is fetched from the network on first use;
 # no test should do that. Tests that need it patch it in.
 os.environ["WARRIORIQ_PERSON_DETECTOR"] = "0"
+# The video strike check downloads its pretrained model on first use; no test
+# should do that. tests/test_strike_check.py tests it with a stand-in backbone.
+os.environ["WARRIORIQ_PUNCH_CHECK"] = "0"
 # Upload tests send a few bytes with a video container's header and stub the
 # decoder; ffprobe would see through that. The probe has its own tests, which
 # switch it on (tests/test_audit_2026_10_14_phase5.py).

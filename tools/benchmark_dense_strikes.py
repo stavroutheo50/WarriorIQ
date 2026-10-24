@@ -26,6 +26,12 @@ span, is left out of both sides rather than guessed at.
 
 What it cannot do: the fight-presence and kit re-attribution steps read the
 video, so they are not replayed. Both only remove or move strikes.
+
+    python tools/benchmark_dense_strikes.py --ruleset BOXING --video
+
+--video also runs the video punch check (core/strike_verifier.py) as the
+analysis does, for fights with a source.json naming their video. Its features
+are cached beside each fight (features_check.npz), keyed by fighter and time.
 """
 
 from __future__ import annotations
@@ -121,12 +127,98 @@ def _shares(row: dict) -> dict:
     return row
 
 
-def run(ruleset: str | None) -> dict:
+def _thrown(track: Path) -> list:
+    """The action path up to the pair rule: what the video check sees."""
+    import gzip
+
+    from core.action import ActionEngine
+    from core.contact import classify_contact, thrown_at_opponent
+    from tools.benchmark_labelled_fight import _observation
+
+    engine, events = ActionEngine(), []
+    with gzip.open(track, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            record = json.loads(line)
+            a, b = _observation(record["fighter_A"]["observation"]), _observation(record["fighter_B"]["observation"])
+            conf_a = float(record["fighter_A"]["identity_confidence"])
+            conf_b = float(record["fighter_B"]["identity_confidence"])
+            args = (record["source_frame"], record["time_seconds"], record["round_number"])
+            for event in engine.update("A", *args, a, b, conf_a, conf_b) + engine.update("B", *args, b, a, conf_b, conf_a):
+                event = classify_contact(event)
+                if thrown_at_opponent(event):
+                    events.append(event)
+    return events
+
+
+HELD_OUT = False
+
+
+def _held_out_head(fight_name: str):
+    """A head fitted without this fight's judged punches (tools/fit_strike_check.py),
+    so a fight the shipped head was fitted on is not scored by it."""
+    import numpy as np
+
+    from tools import fit_strike_check
+
+    folders = [p for p in fit_strike_check.ROOT.iterdir() if (p / "features_r3d18.npz").exists()
+               and not p.name.startswith(fight_name)]
+    X = np.concatenate([np.load(p / "features_r3d18.npz")["features"] for p in folders])
+    y = np.concatenate([np.load(p / "features_r3d18.npz")["labels"] for p in folders])
+    head = fit_strike_check.fit(X, y)
+    return lambda features: fit_strike_check.predict(head, np.atleast_2d(features))[0]
+
+
+def _video_checked(fight: Path, truth: dict) -> list:
+    """Replay with the video punch check scoring punches before the pair rule."""
+    import gzip
+
+    import numpy as np
+
+    from core import strike_verifier
+    from core.contact import resolve_simultaneous_attribution
+
+    start, end = truth["covered"]
+    events = [e for e in _thrown(fight / "track.jsonl.gz") if start - 1.0 <= float(e.peak_time) <= end + 1.0]
+    punches = [e for e in events if e.family == "punch"]
+    keys = [f"{e.fighter}:{float(e.evidence.get('action_peak_time', e.peak_time)):.3f}" for e in punches]
+    cache_path = fight / "features_check.npz"
+    cache = dict(np.load(cache_path, allow_pickle=False)) if cache_path.exists() else {}
+    missing = [i for i, key in enumerate(keys) if key not in cache]
+    if missing:
+        rows = []
+        with gzip.open(fight / "track.jsonl.gz", "rt", encoding="utf-8") as handle:
+            for line in handle:
+                record = json.loads(line)
+                boxes = [((record.get(f"fighter_{f}") or {}).get("observation") or {}).get("box") for f in "AB"]
+                rows.append((float(record["time_seconds"]), boxes[0], boxes[1]))
+        lookup = strike_verifier.boxes_from_track(rows)
+        video = json.loads((fight / "source.json").read_text(encoding="utf-8"))["video"]
+        values = strike_verifier.clip_features(
+            str(PROJECT_ROOT / video),
+            [float(punches[i].evidence.get("action_peak_time", punches[i].peak_time)) for i in missing],
+            [lookup(punches[i].fighter) for i in missing])
+        for i, value in zip(missing, values):
+            if value is not None:
+                cache[keys[i]] = value
+        np.savez(cache_path, **cache)
+    probability = _held_out_head(fight.name) if HELD_OUT else strike_verifier.Head().probability
+    for event, key in zip(punches, keys):
+        if key in cache:
+            event.evidence["video_punch_probability"] = float(probability(cache[key]))
+    kept, _ = resolve_simultaneous_attribution(events)
+    return kept
+
+
+def run(ruleset: str | None, video: bool = False) -> dict:
     results = {}
     total: dict = {}
     for fight in dense_fights():
         truth = json.loads((fight / "strikes.json").read_text(encoding="utf-8"))
-        row = score(counted_events(replay(fight / "track.jsonl.gz"), ruleset), truth)
+        if video and (fight / "source.json").exists():
+            events = _video_checked(fight, truth)
+        else:
+            events = replay(fight / "track.jsonl.gz")
+        row = score(counted_events(events, ruleset), truth)
         results[fight.name] = _shares(row)
         for key, value in row.items():
             if isinstance(value, (int, float)) and key not in {"precision", "recall"}:
@@ -139,8 +231,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--ruleset", default=None, help="score as the report for this ruleset counts (e.g. BOXING)")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--video", action="store_true", help="also run the video punch check, as the analysis does")
+    parser.add_argument("--held-out", action="store_true",
+                        help="with --video: score each fight with a head fitted without its judged punches")
     args = parser.parse_args()
-    results = run(args.ruleset)
+    global HELD_OUT
+    HELD_OUT = args.held_out
+    results = run(args.ruleset, video=args.video)
     if args.json:
         print(json.dumps(results, indent=1))
         return 0
