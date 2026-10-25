@@ -63,6 +63,9 @@ def test_kit_alike_or_a_tiny_box_confirms_nothing():
     check = _check()
     small = _frame(((600, 120, 620, 160), BLUE, WHITE))
     assert not check.confirms(small, (600, 120, 620, 160), "B")
+    # 55 px: under the report's "too small to compare" line, still read here.
+    smallish = _frame(((600, 120, 620, 175), BLUE, WHITE))
+    assert check.confirms(smallish, (600, 120, 620, 175), "B")
     assert not HandoffKitCheck(None).confirms(small, B_BOX, "B")
 
 
