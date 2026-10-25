@@ -136,6 +136,13 @@ HANDOFF_REGION_DELTA_E = 25.0
 # the A-to-B difference of that fighter's own colour, and nearer to it than to
 # the opponent's.
 HANDOFF_OWN_SHARE = 0.5
+# Smallest box a hand-off is read on. Lower than MIN_BOX_HEIGHT, which decides
+# whether the report blames fighters too small to compare at all: checking one
+# known fighter against two known kits needs fewer pixels than that. On the
+# owner's Light Contact fight f604d0c6d027 (568x320, fighters 57-90 px,
+# 2026-10-25) 50 cleared 11 of 17 suspicious hand-offs against 9 at 60, and
+# confirmed the opponent's box as the fighter 0 times in 40.
+HANDOFF_MIN_BOX_HEIGHT = 50
 
 
 def region_colours(image: np.ndarray | None, box) -> dict[str, list[float]]:
@@ -200,7 +207,7 @@ class HandoffKitCheck:
         return bool(self.apart)
 
     def confirms(self, image: np.ndarray | None, box, fighter: str) -> bool:
-        if not self.enabled or box is None or float(box[3]) - float(box[1]) < MIN_BOX_HEIGHT:
+        if not self.enabled or box is None or float(box[3]) - float(box[1]) < HANDOFF_MIN_BOX_HEIGHT:
             return False
         self.checked[fighter] += 1
         seen = region_colours(image, box)
