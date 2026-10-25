@@ -132,3 +132,21 @@ def test_only_sports_it_was_measured_on_are_checked():
     assert check.applies_to("BOXING")
     for ruleset in ("K1", "KICK_LIGHT", "MUAY_THAI", "ITF_TAEKWONDO", "WT_TAEKWONDO", "MMA", None):
         assert not check.applies_to(ruleset)
+
+
+def test_one_pass_reads_the_same_frames_as_seeking(tmp_path):
+    # 2026-10-25: one forward pass instead of a seek per punch, 2.7x faster on
+    # 190 punches of V18. Same frames, or the head would see different input.
+    video = _video(tmp_path / "v.mp4", seconds=12.0)
+    from core.video import open_capture
+
+    centres = [1.0, 1.3, 1.9, 6.0, 6.2, 11.5]          # overlapping, a gap, the end
+    capture = open_capture(str(video))
+    seeking = [check.read_window(capture, check.window_times(c)) for c in centres]
+    capture.release()
+    capture = open_capture(str(video))
+    reader = check._ForwardReader(capture)
+    one_pass = [reader.window(check.window_times(c)) for c in centres]
+    capture.release()
+    for a, b in zip(seeking, one_pass):
+        assert all(np.array_equal(x, y) for x, y in zip(a, b))
