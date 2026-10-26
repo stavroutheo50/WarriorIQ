@@ -147,3 +147,21 @@ def test_github_is_a_button_like_google_on_sign_in_only():
     assert "{% set legacy_providers = request.state.legacy_oauth_providers if mode != 'signup' else [] %}" in page
     assert "{% for provider in request.state.oauth_providers|list + legacy_providers|list %}" in page
     assert re.search(r'<button class="text-link"[^>]*formaction="/auth/', page) is None
+
+
+def test_enter_in_the_password_field_signs_in_with_email():
+    # Live walkthrough 2026-10-26: Enter presses the form's first submit button,
+    # which was Continue with Google, so Enter after a password went to Google.
+    page = (TEMPLATES / "auth.html").read_text(encoding="utf-8")
+    form = page[page.index('<form class="auth-form"'):page.index("</form>")]
+    first_submit = re.search(r'<button[^>]*type="submit"[^>]*>', form).group(0)
+    assert "formaction" not in first_submit
+
+
+def test_the_cookie_choice_does_not_reload_the_page():
+    # Live walkthrough 2026-10-26: the banner's forms reloaded the page, which
+    # dropped a fight video already chosen on the upload form.
+    page = (TEMPLATES / "base.html").read_text(encoding="utf-8")
+    banner = page[page.index('id="cookieNotice"'):]
+    assert "event.preventDefault()" in banner and "fetch(form.action" in banner
+    assert 'action="/cookie-preferences"' in banner      # still works without the script

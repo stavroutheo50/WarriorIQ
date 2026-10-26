@@ -7807,10 +7807,13 @@ def _pending_jobs_for_owner(owner_key: str) -> list[dict]:
             continue
         if get_fight(job_id):
             continue
-        percent = max(0.0, min(99.0, float(job.get("percent") or 0.0)))
         label = _PENDING_LABELS[status]
-        if status == "running" and percent > 0:
-            label = f"Being analysed - {int(percent)}%"
+        if status == "running":
+            # The progress page's own step and percentage. The whole-job
+            # percent read "Being analysed - 0%" beside a progress page at 36%
+            # while both fighters were followed back to the start (live
+            # walkthrough, 2026-10-26).
+            label = analysis_chip_label(job).replace("Analysing", "Being analysed:", 1)
         pending.append({
             "job_id": job_id,
             "status": status,

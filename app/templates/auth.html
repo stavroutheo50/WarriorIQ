@@ -16,6 +16,11 @@
     <form class="auth-form" method="post" action="/{% if mode == 'signup' %}signup{% else %}login{% endif %}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <input type="hidden" name="mode" value="{{mode}}">
       <input type="hidden" name="next_path" value="{{next_path}}">
+      {#- Enter in a field presses the form's FIRST submit button, and the
+          Continue with Google button comes before Sign in, so Enter after
+          typing a password went to Google (live walkthrough, 2026-10-26).
+          This copy of the email button comes first, so Enter signs in. -#}
+      <button class="visually-hidden" type="submit" tabindex="-1" aria-hidden="true">{% if mode == 'signup' %}Create private workspace{% else %}Sign in{% endif %}</button>
       <div class="auth-required-choices">
         {#- Any age may sign up. Under the minimum age a parent or guardian is
             emailed to approve before any fight is uploaded (app.main /guardian). -#}
