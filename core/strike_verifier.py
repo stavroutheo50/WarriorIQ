@@ -100,10 +100,50 @@ def read_window(capture, times: list[float]) -> list[np.ndarray] | None:
         decoded.append((stamp, frame))
         if stamp >= times[-1] + 0.05:
             break
+    return _nearest(decoded, times)
+
+
+def _nearest(decoded: list[tuple[float, np.ndarray]], times: list[float]) -> list[np.ndarray] | None:
     if not decoded:
         return None
     stamps = np.array([stamp for stamp, _ in decoded])
     return [decoded[int(np.argmin(np.abs(stamps - t)))][1] for t in times]
+
+
+class _ForwardReader:
+    """Windows in time order from one pass through the video.
+
+    read_window seeks for every proposal, and a seek decodes again from the
+    previous keyframe. Punches come in combinations, so neighbouring windows
+    overlap and most of that decoding was repeated. This keeps the frames of
+    the last window and decodes forward to the next one, seeking only across
+    a gap longer than SEEK_GAP_SECONDS. It returns the same frames
+    read_window would: both keep every decoded frame and pick the nearest.
+    """
+
+    SEEK_GAP_SECONDS = 3.0
+
+    def __init__(self, capture):
+        self.capture = capture
+        self.frames: list[tuple[float, np.ndarray]] = []
+        self.ended = False
+
+    def window(self, times: list[float]) -> list[np.ndarray] | None:
+        start, end = times[0] - 0.05, times[-1] + 0.05
+        last = self.frames[-1][0] if self.frames else None
+        if last is None or start < self.frames[0][0] or start - last > self.SEEK_GAP_SECONDS:
+            self.capture.set(cv2.CAP_PROP_POS_MSEC, max(0.0, start) * 1000.0)
+            self.frames, self.ended = [], False
+        self.frames = [item for item in self.frames if item[0] >= start]
+        while not self.ended and (not self.frames or self.frames[-1][0] < end):
+            ok, frame = self.capture.read()
+            if not ok or frame is None:
+                self.ended = True
+                break
+            stamp = float(self.capture.get(cv2.CAP_PROP_POS_MSEC)) / 1000.0
+            if stamp >= start:
+                self.frames.append((stamp, frame))
+        return _nearest([item for item in self.frames if item[0] <= end], times)
 
 
 def clip_array(frames: list[np.ndarray], times: list[float], boxes_at: BoxesAt) -> np.ndarray:
@@ -169,13 +209,14 @@ def clip_features(video_path: str, centres: list[float], boxes_for: list[BoxesAt
     if model is None:
         return [None] * len(centres)
     capture = open_capture(video_path)
+    reader = _ForwardReader(capture)
     out: list[np.ndarray | None] = [None] * len(centres)
     try:
         pending: list[tuple[int, np.ndarray]] = []
         order = sorted(range(len(centres)), key=lambda i: centres[i])
         for position, index in enumerate(order):
             times = window_times(centres[index])
-            frames = read_window(capture, times)
+            frames = reader.window(times)
             if frames is not None:
                 pending.append((index, clip_array(frames, times, boxes_for[index])))
             if pending and (len(pending) >= batch_size or position == len(order) - 1):
