@@ -285,3 +285,20 @@ def test_an_older_truncated_report_is_labelled_too():
     summary = web._analysed_span_summary(old)
     assert summary["label"] == "0:30–1:56 of 1:56"
     assert "first 0:30" in summary["note"]
+
+
+def test_backward_pass_progress_is_sent_every_few_seconds_not_every_sample():
+    # Live walkthrough 2026-10-26: a report per sample, each waiting 1-2 s for
+    # the website, made a 2-minute backward pass take 26 minutes.
+    from core.analyzer import PROGRESS_MAX_SILENCE_SECONDS, _backtrack_progress_due as due
+
+    assert due(None, 100.0, 0.0)                                       # the first one
+    assert not due(100.0, 100.5, 0.3)                                  # half a second later
+    assert due(100.0, 100.0 + PROGRESS_MAX_SILENCE_SECONDS, 0.3)       # the bar still moves
+    assert due(100.0, 100.1, 1.0)                                      # and always the end
+    sent, last = 0, None
+    for sample in range(1060):                                         # 1,060 samples in 106 s
+        now = sample * 0.1
+        if due(last, now, sample / 1059):
+            sent, last = sent + 1, now
+    assert sent <= 25
