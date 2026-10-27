@@ -158,6 +158,19 @@
       </div>
       <button class="btn upload-submit" id="uploadSubmit" type="submit" data-loading-label="Starting upload…" data-motion-primary disabled>Choose a video to continue</button>
       <div class="upload-progress" id="uploadProgress" role="status" aria-live="polite" hidden><span><i id="uploadProgressBar"></i></span><b id="uploadProgressText">Uploading fight video…</b><small id="uploadProgressHint">Keep this tab open — you can keep reading the page. WarriorIQ moves you on by itself.</small></div>
+      {#- Pick the fighters while the video uploads (2026-10-27): the page
+          takes frames from the file on this phone, so the two fighters can be
+          tapped while the bytes travel and the analysis starts the moment the
+          upload ends. Shown only when this browser can read the file
+          (static/early-pick.js); otherwise the fighter page does it, as
+          before. -#}
+      <section class="early-pick card-inset" id="earlyPick" aria-labelledby="earlyPickTitle" hidden>
+        <h3 id="earlyPickTitle">While it uploads: tap your fighters</h3>
+        <p class="small" id="earlyPickStatus" role="status" aria-live="polite">Finding your fighters in the video…</p>
+        <div class="early-pick-stage"><canvas id="earlyPickCanvas" aria-label="A moment from your video. Tap each fighter, or drag a box around them."></canvas></div>
+        <div class="early-pick-actions"><button class="btn secondary" type="button" id="earlyPickRedo" hidden>Start over</button><button class="btn secondary" type="button" id="earlyPickOther" hidden>Different moment</button></div>
+        <p class="small" id="earlyPickFallback" hidden><a class="text-link" href="#">Pick them on the full fighter page instead</a></p>
+      </section>
       {% if request.state.account and request.state.account.guardian_approval_status in ['pending_guardian', 'guardian_declined'] %}<p class="notice" role="status">{% if request.state.account.guardian_approval_status == 'guardian_declined' %}Your parent or guardian did not approve this account, so it cannot upload fight videos.{% else %}Your parent or guardian has not approved your account yet, so fight videos cannot be uploaded. <a class="text-link" href="/guardian">See the approval status</a>{% endif %}</p>
       {% elif request.state.account %}<p class="small good">This analysis will be saved privately to your athlete workspace.</p>{% else %}<p class="small muted">Analysis needs a free account, so your fights stay private to you. <a class="text-link" href="/signup?next=/analyze/{{sport}}">Create one in a moment.</a></p>{% endif %}
     </form>
@@ -189,7 +202,7 @@
     </div>
 </section>
 {% endblock %}
-{% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}" src="/static/early-pick.js?v={{asset_version}}" defer></script><script nonce="{{ request.state.csp_nonce }}">
 (()=>{
   const form=document.getElementById('fightUploadForm'),videoInput=document.getElementById('fightVideo'),fileStatus=document.getElementById('fileStatus'),fileButton=document.getElementById('fileButton'),fileButtonText=document.getElementById('fileButtonText'),uploadSubmit=document.getElementById('uploadSubmit'),uploadCard=document.getElementById('analyze'),progress=document.getElementById('uploadProgress'),progressBar=document.getElementById('uploadProgressBar'),progressText=document.getElementById('uploadProgressText');
   const sport=form.dataset.sport||'';
@@ -718,6 +731,9 @@
     }
 
     const job = session.job_id;
+    // Frames from the file on this phone, to tap the fighters on while it
+    // uploads (static/early-pick.js). Never waited for.
+    if (window.wiqEarlyPick) window.wiqEarlyPick.begin(file, job, (form.querySelector('[name="fighter_name"]') || {}).value || '');
     // Anything that stops the upload from here on hands the server's
     // reservation straight back. Left behind, an abandoned session used to
     // count as a pending fight until it expired half an hour later.
@@ -817,6 +833,9 @@
       progressBar.style.width='100%';progressText.textContent='Video ready. Opening fighter selection…';
       uploadSubmit.textContent='Video ready';
       ready={jobId:payload.job_id,nextUrl:payload.next_url};
+      // Fighters being tapped on this page: it starts the analysis itself,
+      // or opens the fighter page if it cannot.
+      if(window.wiqEarlyPick&&window.wiqEarlyPick.wants()){progressText.textContent='Video ready.';window.wiqEarlyPick.uploaded(payload);return}
       advance();
     }).catch((error)=>{
       if(error===FALLBACK){uploadInFlight=false;legacySend();return}

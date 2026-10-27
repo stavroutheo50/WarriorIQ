@@ -9,3 +9,13 @@
 @media(max-width:1120px){.analysis-choice{grid-template-columns:1fr}.analysis-choice-actions{justify-content:space-between}}
 .start-wrap{display:flex;flex-direction:column;gap:6px;min-width:0}
 .start-reason{margin:0;max-width:260px;color:#c9d3e3;font-size:13px;line-height:1.4}
+
+/* Fighters tapped on the upload page while the video uploads
+   (templates/analyze.html #earlyPick, static/early-pick.js). */
+.early-pick{display:grid;gap:9px;margin-top:12px;padding:13px;border:1px solid #2b416b;border-radius:12px;background:#0a1428;color:#dbe6f7}
+.early-pick[hidden]{display:none}
+.early-pick h3{margin:0;font-size:15px}
+.early-pick-stage{width:100%;line-height:0}
+.early-pick-stage canvas{display:block;width:100%;border-radius:8px;touch-action:none;cursor:crosshair;background:#02050b}
+.early-pick-actions{display:flex;flex-wrap:wrap;gap:8px}
+.early-pick-actions [hidden],.early-pick p[hidden]{display:none}

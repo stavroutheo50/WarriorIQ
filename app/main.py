@@ -154,7 +154,7 @@ from core.retention import (
 from core import training_consent
 from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
-from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
+from core.person_detect import cut_at_side, detect_people as detect_people_in_frame, find_clear_moment, looks_like_referee, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_policy import counting_policy
 from core.sport_profiles import SPORT_IDENTITIES, sport_identity
@@ -9058,6 +9058,53 @@ async def chunked_upload_status(request: Request, job_id: str):
     return JSONResponse({"offset": session.received_bytes,
                          "declared": session.declared_bytes,
                          "complete": session.complete})
+
+
+# A frame the browser captured while the upload runs is a picture, not a video:
+# far smaller than the selection-frame ceiling, which also allows huge stills.
+MAX_EARLY_FRAME_BYTES = 4 * 1024 * 1024
+
+
+@app.post("/api/upload/{job_id}/people", dependencies=[Depends(_chunked_enabled), Depends(require_csrf)])
+async def chunked_upload_people(request: Request, job_id: str):
+    """The people in a frame the browser took from the video still uploading.
+
+    2026-10-27: a 3-minute phone video took 11 minutes to upload at 0.5 MB/s,
+    and picking the fighters only began after it. The upload page now shows a
+    frame from the file on the phone and lets them be tapped while the bytes
+    are still travelling; this finds the people to tap. Nothing is stored -
+    once the upload finishes, the page sends the chosen frame to
+    /api/selection-frame and the boxes to /api/start like the fighter page.
+    """
+    account = _account(request)
+    if not account:
+        raise HTTPException(401, "Sign in to continue this upload.")
+    _enforce_rate_limit(request, "early-people", 60, 300)
+    try:
+        await run_in_threadpool(load_chunked, job_id, int(account["id"]))
+    except ChunkedUploadError as exc:
+        return _chunked_failure(exc)
+    body = await request.body()
+    if not body or len(body) > MAX_EARLY_FRAME_BYTES:
+        raise HTTPException(400, "No usable picture arrived.")
+    frame = await run_in_threadpool(cv2.imdecode, np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(400, "That is not a picture.")
+    people = await run_in_threadpool(detect_people_in_frame, frame)
+    if people is None:
+        return {"people": [], "score": 0.0, "pair_found": False, "availability": "manual_only"}
+    height, width = frame.shape[:2]
+    # Small figures are crowd, not fighters, and too small to tap - as on the
+    # fighter page (detect_people).
+    tall = [p for p in people if p["box"][3] - p["box"][1] >= 0.10 * height]
+    for person in tall:
+        person["referee_like"] = looks_like_referee(frame, person["box"])
+        person["cut_at_side"] = cut_at_side(person["box"], width)
+    score, pair = pair_score(tall, height)
+    return {"people": [{"box": p["box"], "confidence": p["confidence"]} for p in tall],
+            "score": float(score), "pair_found": pair is not None,
+            "suggested": list(pair) if pair is not None else None,
+            "availability": "candidates_ready"}
 
 
 @app.post("/api/upload/{job_id}/abort", dependencies=[Depends(_chunked_enabled), Depends(require_csrf)])
