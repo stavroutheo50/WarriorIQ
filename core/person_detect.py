@@ -194,6 +194,52 @@ def _whole_body(box: list[float], height: int) -> bool:
     return box[1] > 0.01 * height and box[3] < 0.99 * height
 
 
+# A referee dresses in a white shirt and dark trousers. Measured on the live
+# walkthrough's videos (2026-10-26): every referee had 88-96% of the shirt
+# white and over 60% of the trousers dark; no fighter more than 31% white.
+REFEREE_SHIRT_WHITE = 0.6
+REFEREE_TROUSERS_DARK = 0.5
+# A shirt this white counts on its own: behind the ropes a referee's box can
+# end at the waist, with no trousers to see (Full Contact clip, same day).
+REFEREE_SHIRT_ALONE = 0.65
+# How much a pair including a referee-looking person counts for. Not zero: a
+# fighter in a white top and black trousers can still be the only choice.
+REFEREE_PAIR_WEIGHT = 0.3
+
+
+def looks_like_referee(frame: np.ndarray, box: list[float]) -> bool:
+    """A white shirt over dark trousers - how a referee is dressed.
+
+    The automatic start picked the referee as one of the two fighters on three
+    of four live-walkthrough videos (2026-10-26), standing between two fighters
+    at the opening bell or beside the pair once they closed in.
+    """
+    height, width = frame.shape[:2]
+    x1, y1, x2, y2 = (int(round(v)) for v in box)
+    x1, x2 = max(0, x1), min(width, x2)
+    y1, y2 = max(0, y1), min(height, y2)
+    tall, wide = y2 - y1, x2 - x1
+    if tall < 8 or wide < 4:
+        return False
+    hsv = cv2.cvtColor(frame[y1:y2, x1 + wide // 4:x2 - wide // 4], cv2.COLOR_BGR2HSV)
+    shirt = hsv[int(0.22 * tall):int(0.48 * tall)].reshape(-1, 3)
+    trousers = hsv[int(0.58 * tall):int(0.88 * tall)].reshape(-1, 3)
+    if not len(shirt) or not len(trousers):
+        return False
+    white = float(np.mean((shirt[:, 1] < 60) & (shirt[:, 2] > 150)))
+    dark = float(np.mean(trousers[:, 2] < 80))
+    return white >= REFEREE_SHIRT_ALONE or (white >= REFEREE_SHIRT_WHITE and dark >= REFEREE_TROUSERS_DARK)
+
+
+def cut_at_side(box: list[float], width: int) -> bool:
+    """Touching the left or right edge: likely someone only partly in the picture.
+
+    A coach half out of the frame at the ring's edge was picked as a fighter on
+    the live walkthrough's boxing clip (2026-10-26).
+    """
+    return box[0] <= 0.01 * width or box[2] >= 0.99 * width
+
+
 def pair_score(people: list[dict], height: int) -> tuple[float, tuple[int, int] | None]:
     """How clear a start this frame gives, and which two people make it.
 
@@ -230,6 +276,10 @@ def pair_score(people: list[dict], height: int) -> tuple[float, tuple[int, int] 
                         _shared(a, other["box"]) > 0.15 or _shared(b, other["box"]) > 0.15):
                     score *= 0.5
                     break
+            if people[i].get("referee_like") or people[j].get("referee_like"):
+                score *= REFEREE_PAIR_WEIGHT
+            if people[i].get("cut_at_side") or people[j].get("cut_at_side"):
+                score *= REFEREE_PAIR_WEIGHT
             # Bigger is easier to follow; a gentle preference only.
             score *= min(1.0, ((ha + hb) / 2) / (0.35 * height)) ** 0.5
             if score > best:
@@ -275,6 +325,9 @@ def _scan(cap, indices, fps: float, relaxed: list | None = None) -> list[dict] |
         people = detect_people(frame)
         if people is None:
             return None
+        for person in people:
+            person["referee_like"] = looks_like_referee(frame, person["box"])
+            person["cut_at_side"] = cut_at_side(person["box"], frame.shape[1])
         score, pair = pair_score(people, frame.shape[0])
         # A frame full of similar-sized people is a busier start than two
         # people alone; a mild preference, so a tournament hall still works.

@@ -354,6 +354,19 @@ class EndToEndTests(unittest.TestCase):
         payload.update(extra)
         return self.client.post("/api/upload/begin", json=payload, headers=self.headers)
 
+    def test_a_held_analysis_is_named_rather_than_called_used_up(self):
+        """Live walkthrough 2026-10-26: the live page said only "allowance
+        used" while an upload waiting for its fighters held the analysis."""
+        from unittest.mock import patch
+
+        held = {"job_id": "held0000001", "url": "/select/held0000001", "name": "truncated.mp4"}
+        with patch.object(webapp, "reserve_analysis", return_value=False), \
+                patch.object(webapp, "_upload_holding_analysis", return_value=held):
+            response = self._begin(64)
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("being held by truncated.mp4", response.json()["detail"])
+        self.assertIn("cancel it in your Fight library", response.json()["detail"])
+
     def test_a_session_opens_and_reports_the_chunk_size_to_use(self):
         response = self._begin(64)
         self.assertEqual(response.status_code, 201, response.text)

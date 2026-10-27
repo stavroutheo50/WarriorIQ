@@ -69,6 +69,47 @@ class PairScoreTests(unittest.TestCase):
         self.assertIsNone(pair)
 
 
+class RefereeTests(unittest.TestCase):
+    """Live walkthrough 2026-10-26: the automatic start picked the referee as a
+    fighter on three of four videos, and a coach cut off at the frame's edge."""
+
+    HEIGHT = 480
+
+    @staticmethod
+    def _dressed(shirt, trousers):
+        frame = np.full((480, 640, 3), (40, 120, 40), np.uint8)       # green floor
+        frame[100:420, 300:360] = (200, 120, 60)                       # skin-ish body
+        frame[100 + int(0.22 * 320):100 + int(0.48 * 320), 300:360] = shirt
+        frame[100 + int(0.58 * 320):100 + int(0.88 * 320), 300:360] = trousers
+        return frame, [300.0, 100.0, 360.0, 420.0]
+
+    def test_a_white_shirt_over_dark_trousers_looks_like_a_referee(self):
+        from core.person_detect import looks_like_referee
+
+        self.assertTrue(looks_like_referee(*self._dressed((245, 245, 245), (20, 20, 20))))
+        # Behind the ropes only the shirt shows.
+        self.assertTrue(looks_like_referee(*self._dressed((245, 245, 245), (60, 60, 200))))
+        self.assertFalse(looks_like_referee(*self._dressed((200, 60, 30), (20, 20, 20))))    # blue top
+        self.assertFalse(looks_like_referee(*self._dressed((60, 60, 200), (40, 40, 200))))   # bare chest, red shorts
+
+    def test_a_pair_with_a_referee_or_someone_cut_off_counts_for_less(self):
+        from core.person_detect import pair_score
+
+        a, b = _person(100, 100, 220, 420), _person(330, 110, 450, 420)
+        clear, _ = pair_score([a, b], self.HEIGHT)
+        referee, _ = pair_score([a, dict(b, referee_like=True)], self.HEIGHT)
+        cut, _ = pair_score([a, dict(b, cut_at_side=True)], self.HEIGHT)
+        self.assertLess(referee, clear / 2)
+        self.assertLess(cut, clear / 2)
+
+    def test_touching_the_side_of_the_picture_is_cut_off(self):
+        from core.person_detect import cut_at_side
+
+        self.assertTrue(cut_at_side([0.0, 100.0, 80.0, 400.0], 640))
+        self.assertTrue(cut_at_side([580.0, 100.0, 640.0, 400.0], 640))
+        self.assertFalse(cut_at_side([100.0, 100.0, 220.0, 400.0], 640))
+
+
 class LivePageStillsTests(unittest.TestCase):
     def test_live_page_switches_to_stills_when_the_video_cannot_play(self):
         from pathlib import Path
@@ -264,3 +305,13 @@ class DrawnBoxBarTests(unittest.TestCase):
         self.assertEqual(detect.call_args.kwargs["min_confidence"], webapp.DRAWN_BOX_CONFIDENCE)
         from core.person_detect import MIN_CONFIDENCE
         self.assertLess(webapp.DRAWN_BOX_CONFIDENCE, MIN_CONFIDENCE)
+
+
+def test_the_selection_page_warns_when_one_box_is_much_shorter():
+    # Live walkthrough 2026-10-26: Fighter B's box was head and shoulders only,
+    # half Fighter A's height, and B was followed for 20% of the clip.
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "select.html").read_text(encoding="utf-8")
+    assert "function shortBox()" in page and "Math.min(ha,hb)>=.6*Math.max(ha,hb)" in page
+    assert "box is much shorter than the other" in page

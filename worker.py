@@ -687,8 +687,35 @@ def _sync_analysis_code(client: RemoteWorkerClient, root: Path | None = None) ->
     for path in core.glob("*.py"):
         if path.name not in files:
             path.unlink()
+    _sync_worker_file(served.get("worker"), root)
     LOGGER.warning("Analysis code updated to the website's (fingerprint %s); the previous code is in %s. "
                    "Restarting on it.", served.get("fingerprint"), previous)
+    return True
+
+
+def _sync_worker_file(served: dict | None, root: Path) -> bool:
+    """Install the website's worker.py beside its core/, keeping the old one.
+
+    2026-10-26: the automatic update installed core/ only, so the owner's PC
+    kept a worker.py from a week before - one whose progress reports waited on
+    the website, which cost 26 minutes of a 29-minute analysis. Checked against
+    the website's hash before it is written; takes effect on the restart that
+    follows every code update.
+    """
+    if not isinstance(served, dict) or not isinstance(served.get("text"), str):
+        return False
+    data = served["text"].encode("utf-8")
+    if hashlib.sha256(data).hexdigest() != served.get("sha256"):
+        LOGGER.error("The worker.py download does not match the website's hash; worker.py left as it is")
+        return False
+    current = root / "worker.py"
+    if current.is_file() and current.read_bytes().replace(b"\r\n", b"\n") == data.replace(b"\r\n", b"\n"):
+        return False
+    if current.is_file():
+        shutil.copy2(current, root / "worker_previous.py")
+    staged = root / "worker.py.sync"
+    staged.write_bytes(data)
+    os.replace(staged, current)
     return True
 
 

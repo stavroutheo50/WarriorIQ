@@ -2811,3 +2811,16 @@ class AccountDeletionCoverageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_a_free_account_is_not_offered_cancellation_or_withdrawal():
+    # Live walkthrough 2026-10-26: both buttons showed, greyed out, on Starter.
+    from browser_client import BrowserClient
+
+    client = BrowserClient(webapp.app)
+    client.get("/")
+    client.post("/signup", data={"email": "free-billing@example.com", "password": "Strong-Local-Password",
+                                 "accept_terms": "true", "age_group": "adult"})
+    page = client.get("/settings/billing").text
+    assert "Nothing to cancel" in page
+    assert "Cancel Subscription" not in page and "Withdraw from Contract" not in page
