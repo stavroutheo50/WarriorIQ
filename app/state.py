@@ -555,6 +555,14 @@ def persist_completed_job(job_id: str, analysis_run_id: str) -> bool:
         else:
             job["history_saved"] = True
             job["message"] = "Complete"
+            if job.get("training_consent"):
+                # The owner ticked "Help WarriorIQ get better" on upload.
+                from core import training_consent
+
+                training_consent.keep(job_id, str(job.get("video_path") or ""), report_path.parent, {
+                    "ruleset": job.get("ruleset"), "profile_id": job.get("profile_id"),
+                    "original_name": job.get("original_name"),
+                })
         if _write_session(job_id, job):
             _remember(job_id, job)
         return job["history_saved"]

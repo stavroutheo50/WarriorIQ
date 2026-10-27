@@ -151,6 +151,7 @@ from core.retention import (
     GUEST_RETENTION_HOURS, cleanup_abandoned_processing_files, cleanup_expired_guest_jobs,
     guest_job_valid,
 )
+from core import training_consent
 from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
 from core.person_detect import detect_people as detect_people_in_frame, find_clear_moment, pair_score
@@ -4000,6 +4001,8 @@ async def upload(
     selected_rounds: str = Form("ALL"),
     openai_identity_recovery: bool = Form(False),
     external_ai_guardian_permission: bool = Form(False),
+    # "Help WarriorIQ get better" (2026-10-27): optional, off unless ticked.
+    training_consent: bool = Form(False),
     # Which fighter this bout is about. Either an existing roster id, or a new
     # name typed on the setup page - a coach adding a fighter should not have
     # to go somewhere else first.
@@ -4331,6 +4334,8 @@ async def upload(
             "upload_scan_status": scan["status"],
             "openai_identity_recovery": bool(openai_identity_recovery),
             "external_ai_opted_in": bool(openai_identity_recovery),
+            # Never for footage with minors in it, whatever was ticked.
+            "training_consent": bool(training_consent and minor_permission_status == "no_minors"),
             "fighter_id": chosen_fighter["id"] if chosen_fighter else None,
             "event_name": clean_fight_name(event_name),
             "opponent_name": clean_fight_name(opponent_name),
@@ -4358,6 +4363,14 @@ async def upload(
         resource_type="fight", resource_id=job_id,
         metadata={"guest": not bool(account), "minor_permission_status": minor_permission_status},
     )
+    if training_consent and minor_permission_status == "no_minors":
+        record_legal_acceptance(
+            "fight_training_consent", SETTINGS.policy_version,
+            resource_id=job_id,
+            metadata={"purpose": "improve_strike_detection", "explicit_opt_in": True,
+                      "kept_until": "the fight, its video or the account is deleted"},
+            **acceptance_owner,
+        )
     if openai_identity_recovery:
         record_legal_acceptance(
             "external_ai_frame_processing", SETTINGS.policy_version,
@@ -5158,6 +5171,26 @@ def remote_worker_dataset(request: Request):
             "X-WarriorIQ-Sequence-Count": str(len(files)),
         },
     )
+
+
+@app.get("/api/worker/consented", dependencies=[Depends(_require_remote_worker)])
+def remote_worker_consented(request: Request):
+    """The fights their owners shared to improve the analysis, for the training machine.
+
+    Worker token only, like the labelled dataset above. Lists what is kept;
+    each file comes from the route below.
+    """
+    _require_remote_worker(request)
+    return {"fights": training_consent.kept()}
+
+
+@app.get("/api/worker/consented/{job_id}/{name}", dependencies=[Depends(_require_remote_worker)])
+def remote_worker_consented_file(request: Request, job_id: str, name: str):
+    _require_remote_worker(request)
+    path = training_consent.kept_file(job_id, name)
+    if path is None:
+        raise HTTPException(404)
+    return FileResponse(path, filename=f"{job_id}-{name}")
 
 
 @app.post("/api/worker/jobs/{job_id}/progress", dependencies=[Depends(_require_remote_worker)])
@@ -7503,6 +7536,7 @@ def delete_original_video(request: Request, job_id: str):
     video = Path(fight.get("video_path") or "missing").resolve()
     if video.parent == UPLOADS.resolve():
         video.unlink(missing_ok=True)
+    training_consent.forget(job_id)
     mark_fight_video_deleted(job_id, int(account["profile_id"]))
     record_security_event(
         "fight_video_deleted", account_id=int(account["id"]), resource_type="fight", resource_id=job_id,
@@ -7949,6 +7983,7 @@ def fight_details(request: Request, job_id: str, event_name: str = Form(""), opp
 
 
 def _remove_fight_files(fight: dict) -> None:
+    training_consent.forget(fight["job_id"])
     job_dir = (OUTPUTS / fight["job_id"]).resolve()
     if job_dir.parent == OUTPUTS.resolve() and job_dir.exists():
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -9123,6 +9158,7 @@ async def chunked_upload_finish(request: Request, job_id: str):
             selected_rounds=text("selected_rounds", "ALL"),
             openai_identity_recovery=flag("openai_identity_recovery"),
             external_ai_guardian_permission=flag("external_ai_guardian_permission"),
+            training_consent=flag("training_consent"),
             fighter_id=text("fighter_id"),
             fighter_name=text("fighter_name"),
             # Left out until 2026-10-20: upload() then got its Form("") default

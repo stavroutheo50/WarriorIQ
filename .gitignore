@@ -49,6 +49,10 @@ logs/
 # them personal data under GDPR, and this repository is public. They live on the
 # server and are fetched with tools/pull_dataset.py; they must never be a commit.
 dataset/sequences/
+# Fights customers shared through "Help WarriorIQ get better" (2026-10-27):
+# their videos, on the server and on the training machine. Never a commit.
+dataset/consented/
+dataset/consented_fights/
 
 # BoxingVI, and what tools/import_boxingvi.py builds from it. Same reasoning as
 # above and then some: these are pose measurements of identifiable athletes cut
