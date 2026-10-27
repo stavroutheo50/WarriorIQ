@@ -119,6 +119,11 @@
       </details>
       {% endif %}
       <fieldset class="upload-consent card-inset" data-upload-step="check"><legend>Three quick questions</legend><label class="check"><input type="checkbox" name="rights_confirmed" value="true" required> <span>This is my video, or I have the right to upload it.</span></label><label class="check"><input type="checkbox" name="people_permissions_confirmed" value="true" required> <span>Everyone in the video is OK with me uploading it.</span></label><fieldset class="minor-permission"><legend id="minorPermissionLabel">Is anyone in the video under 18?</legend><label class="check"><input type="radio" name="minor_permission_status" value="no_minors" required> <span>No, all 18 or over</span></label><label class="check"><input type="radio" name="minor_permission_status" value="guardian_authorized" required> <span>Yes, and a parent or guardian said OK</span></label></fieldset><p class="small muted">TV footage still needs permission. <a class="text-link" href="/video-upload-policy" target="_blank" rel="noopener">Video Upload Policy</a>.</p></fieldset>
+      {#- Optional, off unless ticked (2026-10-27). The strike detector is
+          weakest on kicks, and public footage of them is scarce; footage
+          people choose to share is how it gets better. Ignored by the server
+          for footage with anyone under 18 in it. -#}
+      <label class="check upload-training-consent" data-upload-step="check"><input type="checkbox" name="training_consent" value="true"> <span><strong>Help WarriorIQ get better</strong> (optional): keep this video privately and use it to improve how WarriorIQ spots strikes. Nobody else sees it. Delete the fight, its video or your account and it is deleted too. Not used for videos with anyone under 18. <a class="text-link" href="/privacy#purposes" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
       {#- One question at a time (a newcomer found the full form "rocket
           science", 2026-10-09): the fighter question appears once a video is
           chosen and the permission questions once that is answered, by the
@@ -242,7 +247,7 @@
   // 500, so waiting a minute to be told nothing useful was the old behaviour.
   const UPLOAD_LIMIT={{upload_limit_bytes}};
   const overLimit=b=>b>UPLOAD_LIMIT;
-  const sizeAdvice=b=>overLimit(b)?{tone:'bad',text:`${fmtMB(b)} — too large to upload. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps instead of 4K or 60 fps, or trim to a single round, and it will fit.`}:b>104857600?{tone:'warn',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data, less on Wi-Fi. Filming at 1080p and 30 fps instead of 4K or 60 fps makes it several times smaller with no loss to the analysis.`}
+  const sizeAdvice=b=>overLimit(b)?{tone:'bad',text:`${fmtMB(b)} — too large to upload. The limit is ${fmtMB(UPLOAD_LIMIT)}. Film at 1080p and 30 fps instead of 4K or 60 fps, or trim to a single round, and it will fit.`}:b>104857600?{tone:'warn',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data, less on Wi-Fi. Filming at 1080p and 30 fps instead of 4K or 60 fps (and on an iPhone, Settings → Camera → Formats → High Efficiency) makes the next one several times smaller with no loss to the analysis.`}
     :b>104857600?{tone:'note',text:`${fmtMB(b)} — ${fmtMins(b)} on mobile data. Wi-Fi will be quicker.`}
     :{tone:'ok',text:`${fmtMB(b)} — checking the video on this device…`};
   // Refuse an impossible file here rather than after the transfer. An 11-byte
@@ -301,6 +306,11 @@
       if(seconds<PREFLIGHT_LIMITS.min_usable_seconds-0.05){rejectFile(`This clip is ${seconds.toFixed(1)} seconds long. WarriorIQ needs at least ${PREFLIGHT_LIMITS.min_usable_seconds} seconds of video to measure anything.`);return}
       const mins=Math.floor(seconds/60),secs=String(Math.round(seconds%60)).padStart(2,'0');
       if(seconds<SHORT_FIGHT_SECONDS){fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload. A clip this short gives only a few numbers; the report says how much fight it found.`;fileStatus.dataset.tone='warn';return}
+      // A big file keeps its size advice (how long it takes, and the camera
+      // setting that halves the next one): this line used to replace it a
+      // moment after it appeared (owner's 330 MB upload, 2026-10-27).
+      const advice=sizeAdvice(f.size);
+      if(advice.tone!=='ok'){fileStatus.textContent=`${mins}:${secs} — ${advice.text}`;fileStatus.dataset.tone=advice.tone;return}
       fileStatus.textContent=`${mins}:${secs} — ${fmtMB(f.size)} — ready to upload`};
     probe.onerror=unsure;probe.src=url};
 // What is still outstanding, named, above the button that refuses to work.
@@ -687,7 +697,7 @@
     // Checkboxes are absent from FormData when unticked; the server reads
     // them as consent, so send the answer rather than the absence.
     ['rights_confirmed', 'people_permissions_confirmed', 'openai_identity_recovery',
-     'external_ai_guardian_permission'].forEach((name) => {
+     'external_ai_guardian_permission', 'training_consent'].forEach((name) => {
       const box = form.querySelector(`[name="${name}"]`);
       if (box) fields[name] = Boolean(box.checked);
     });
