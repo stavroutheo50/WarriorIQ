@@ -215,6 +215,18 @@ ANALYSIS_PHASE_SPAN = 63.0
 # and the bar sat still long enough to look frozen.
 PROGRESS_MAX_SILENCE_SECONDS = 5.0
 
+
+def _backtrack_progress_due(last_sent_at: float | None, now: float, fraction: float) -> bool:
+    """Send the backward pass's progress at its start, its end and every few seconds.
+
+    It reported after every sample, and a worker from before the background
+    progress sender (worker.py _ProgressSender) waits for the website's answer
+    to each report: about 1,060 reports of 1-2 seconds each, so 26 of a
+    29-minute analysis of a 3-minute clip were spent waiting (live walkthrough,
+    2026-10-26; the pass itself took 2 minutes).
+    """
+    return last_sent_at is None or fraction >= 1.0 or now - last_sent_at >= PROGRESS_MAX_SILENCE_SECONDS
+
 from core.identity import IdentityManager, fighter_pair_similarity
 from core.metrics import MetricsAccumulator
 from core.preflight import Preflight
@@ -882,12 +894,17 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
 
     backtrack_span = max(0.001, seed_seconds - requested_start)
     backtrack_eta = StageEta(fps)
+    last_progress_sent: list[float | None] = [None]
 
     def report_progress(fraction: float) -> None:
         if progress_callback is None:
             return
         fraction = max(0.0, min(1.0, fraction))
-        elapsed = time.perf_counter() - wrapper_started
+        now = time.perf_counter()
+        if not _backtrack_progress_due(last_progress_sent[0], now, fraction):
+            return
+        last_progress_sent[0] = now
+        elapsed = now - wrapper_started
         eta = backtrack_eta.update("backtrack", fraction * backtrack_span, backtrack_span, elapsed)
         progress_callback(AnalysisProgress(
             percent=0.5 + 0.5 * fraction,

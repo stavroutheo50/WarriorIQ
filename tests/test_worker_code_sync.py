@@ -116,3 +116,34 @@ def test_a_refusal_is_its_own_error_type():
     with pytest.raises(worker_client.WorkerRefused) as refused:
         client.claim()
     assert refused.value.reason == "worker_code_differs"
+
+
+def test_worker_py_comes_with_the_code_and_the_old_one_is_kept(worker_folder):
+    # 2026-10-26: only core/ was updated, so the PC kept a week-old worker.py.
+    (worker_folder / "worker.py").write_text("OLD_WORKER = 1\n")
+    files = {"scoring.py": "NEW = 2\n"}
+    text = "NEW_WORKER = 2\n"
+    served = {"files": files, "fingerprint": _fingerprint(files),
+              "worker": {"text": text, "sha256": hashlib.sha256(text.encode()).hexdigest()}}
+    assert worker._sync_analysis_code(_Client(served), worker_folder)
+    assert (worker_folder / "worker.py").read_text() == text
+    assert (worker_folder / "worker_previous.py").read_text() == "OLD_WORKER = 1\n"
+
+
+def test_a_corrupted_worker_py_is_not_installed(worker_folder):
+    (worker_folder / "worker.py").write_text("OLD_WORKER = 1\n")
+    files = {"scoring.py": "NEW = 2\n"}
+    served = {"files": files, "fingerprint": _fingerprint(files),
+              "worker": {"text": "BROKEN", "sha256": "0" * 64}}
+    worker._sync_analysis_code(_Client(served), worker_folder)
+    assert (worker_folder / "worker.py").read_text() == "OLD_WORKER = 1\n"
+    assert not (worker_folder / "worker_previous.py").exists()
+
+
+def test_the_web_app_serves_its_worker_py(monkeypatch):
+    monkeypatch.setitem(web.app.dependency_overrides, web._require_remote_worker, lambda: None)
+    monkeypatch.setattr(web, "_require_remote_worker", lambda request: None)
+    body = BrowserClient(web.app).get("/api/worker/analysis-code").json()
+    text = (build_info.ROOT / "worker.py").read_text(encoding="utf-8")
+    assert body["worker"]["text"] == text
+    assert body["worker"]["sha256"] == hashlib.sha256(text.encode("utf-8")).hexdigest()

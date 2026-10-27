@@ -175,3 +175,20 @@ def test_the_library_does_not_label_every_fight_competition(account):
     library = client.get("/history").text
     assert "<span>Competition</span>" not in library
     assert library.count("<span>Sparring</span>") == 1
+
+
+def test_the_library_shows_the_progress_pages_step_and_percent(account):
+    # Live walkthrough 2026-10-26: the library said "Being analysed - 0%" (the
+    # whole job) beside a progress page at 36% (the step it was on).
+    created, client = account
+    job_id = _selecting_job(created)
+    run = state.prepare_job_run(job_id, {})
+    assert state.start_job_run(job_id, "worker-1", run)
+    try:
+        state.update_job_for_worker(job_id, "worker-1", run, {
+            "percent": 0.66, "stage": "tracking", "stage_fraction": 0.36,
+            "message": "Following both fighters back to the start of the video"})
+        chip = web.analysis_chip_label(state.get_job(job_id))
+        assert chip.replace("Analysing", "Being analysed:", 1) in client.get("/history").text
+    finally:
+        state.delete_job(job_id)

@@ -5046,9 +5046,18 @@ def remote_worker_analysis_code(request: Request):
     cannot stay apart. Only the worker token can read it.
     """
     _require_remote_worker(request)
-    core = Path(__file__).resolve().parents[1] / "core"
-    return {"analysis_version": ANALYSIS_VERSION, "fingerprint": analysis_fingerprint(),
-            "files": {path.name: path.read_text(encoding="utf-8") for path in sorted(core.glob("*.py"))}}
+    root = Path(__file__).resolve().parents[1]
+    core = root / "core"
+    payload = {"analysis_version": ANALYSIS_VERSION, "fingerprint": analysis_fingerprint(),
+               "files": {path.name: path.read_text(encoding="utf-8") for path in sorted(core.glob("*.py"))}}
+    # worker.py too (2026-10-26): only core/ was sent, so the owner's PC ran
+    # a worker.py from a week before, whose progress reports waited on the
+    # website - 26 minutes of one 29-minute analysis.
+    worker_file = root / "worker.py"
+    if worker_file.is_file():
+        text = worker_file.read_text(encoding="utf-8")
+        payload["worker"] = {"text": text, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+    return payload
 
 
 @app.get("/api/worker/jobs/{job_id}/video", dependencies=[Depends(_require_remote_worker)])
@@ -7807,10 +7816,13 @@ def _pending_jobs_for_owner(owner_key: str) -> list[dict]:
             continue
         if get_fight(job_id):
             continue
-        percent = max(0.0, min(99.0, float(job.get("percent") or 0.0)))
         label = _PENDING_LABELS[status]
-        if status == "running" and percent > 0:
-            label = f"Being analysed - {int(percent)}%"
+        if status == "running":
+            # The progress page's own step and percentage. The whole-job
+            # percent read "Being analysed - 0%" beside a progress page at 36%
+            # while both fighters were followed back to the start (live
+            # walkthrough, 2026-10-26).
+            label = analysis_chip_label(job).replace("Analysing", "Being analysed:", 1)
         pending.append({
             "job_id": job_id,
             "status": status,
@@ -8935,6 +8947,16 @@ async def chunked_upload_begin(request: Request):
         reserved = await run_in_threadpool(reserve_analysis, account_id, job_id)
         if not reserved:
             release_upload_storage(job_id)
+            # The same explanation as the form upload above: the live page
+            # uploads in chunks, and said only "allowance used" while an
+            # upload waiting for its fighters held the analysis (live
+            # walkthrough, 2026-10-26).
+            held = _upload_holding_analysis(request)
+            if held:
+                return JSONResponse({"detail": (
+                    f"Your analysis is being held by {held['name']}, which is still waiting for you to pick "
+                    "the fighters. Pick the fighters to analyse it, or cancel it in your Fight library to "
+                    "upload a different video.")}, status_code=429)
             return JSONResponse(
                 {"detail": "Your analysis allowance is used for this period. "
                            "It will reset automatically."}, status_code=429)
