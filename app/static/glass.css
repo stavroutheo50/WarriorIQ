@@ -18,15 +18,23 @@
 
 :root {
   --glass-canvas: #0a0f18;
-  --glass-fill: linear-gradient(165deg, rgba(255, 255, 255, .13) 0%, rgba(255, 255, 255, .055) 38%, rgba(255, 255, 255, .03) 100%);
-  --glass-fill-strong: linear-gradient(165deg, rgba(40, 48, 66, .78) 0%, rgba(18, 24, 36, .72) 100%);
-  --glass-rim: linear-gradient(135deg, rgba(255, 255, 255, .5) 0%, rgba(255, 255, 255, .1) 28%, rgba(255, 255, 255, .04) 55%, rgba(255, 255, 255, .08) 78%, rgba(255, 255, 255, .3) 100%);
+  /* Clear glass: almost no fill, a touch lighter at the top. A grey or
+     diagonal fill reads as brushed metal (owner, 2026-10-28). */
+  --glass-fill: linear-gradient(180deg, rgba(255, 255, 255, .075) 0%, rgba(255, 255, 255, .03) 100%);
+  --glass-fill-strong: linear-gradient(180deg, rgba(30, 38, 54, .62) 0%, rgba(14, 19, 30, .58) 100%);
+  /* The rim catches light from above: a bright top edge, faint sides and a
+     soft return along the bottom. Drawn on the border itself - as a
+     background layer it showed through the clear fill and lit the whole
+     face like brushed metal. */
+  --glass-edge-top: rgba(255, 255, 255, .26);
+  --glass-edge-side: rgba(255, 255, 255, .09);
+  --glass-edge-bottom: rgba(255, 255, 255, .05);
   --glass-tint: rgba(255, 255, 255, .07);
   --glass-tint-hover: rgba(255, 255, 255, .12);
   --glass-edge: rgba(255, 255, 255, .14);
-  --glass-shine: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 0 22px rgba(255, 255, 255, .035);
-  --glass-shadow: 0 22px 54px -22px rgba(0, 0, 0, .75);
-  --glass-blur: blur(28px) saturate(185%);
+  --glass-shine: inset 0 1px 0 rgba(255, 255, 255, .22), inset 0 -1px 0 rgba(255, 255, 255, .05), inset 0 0 20px rgba(255, 255, 255, .025);
+  --glass-shadow: 0 20px 50px -24px rgba(0, 0, 0, .8);
+  --glass-blur: blur(24px) saturate(180%);
   --glass-text-soft: #c3cad8;
   --glass-text-faint: #a9b2c3;
   /* The site-wide accent (eyebrows, the bar's current page, small labels)
@@ -55,8 +63,10 @@ html::before, html::after, body::before, body:before { display: none; }
 .glass-panel,
 .glass-chip,
 .home-card {
-  border: 1px solid transparent !important;
-  background: var(--glass-fill) padding-box, var(--glass-rim) border-box !important;
+  border: 1px solid var(--glass-edge-side) !important;
+  border-top-color: var(--glass-edge-top) !important;
+  border-bottom-color: var(--glass-edge-bottom) !important;
+  background: var(--glass-fill) !important;
   box-shadow: var(--glass-shine), var(--glass-shadow) !important;
 }
 /* Only what floats over other content is blurred: a blur over the plain
@@ -73,7 +83,7 @@ html::before, html::after, body::before, body:before { display: none; }
 .profile-menu-panel,
 .nav-more-panel,
 .cookie-notice {
-  background: var(--glass-fill-strong) padding-box, var(--glass-rim) border-box !important;
+  background: var(--glass-fill-strong) !important;
 }
 .card::before, .hero-card::before, .pricing-card::before { display: none; }
 
@@ -126,14 +136,15 @@ html::before, html::after, body::before, body:before { display: none; }
 .btn:hover,
 .btn:not(.secondary):hover { background: #ffffff; color: #0a0d14; }
 .btn.secondary {
-  border: 1px solid transparent !important;
-  background: var(--glass-fill) padding-box, var(--glass-rim) border-box;
+  border: 1px solid var(--glass-edge-side) !important;
+  border-top-color: var(--glass-edge-top) !important;
+  background: var(--glass-fill);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
   color: #ffffff !important;
   box-shadow: var(--glass-shine), 0 10px 24px -14px rgba(0, 0, 0, .7) !important;
 }
-.btn.secondary:hover { background: linear-gradient(165deg, rgba(255, 255, 255, .2), rgba(255, 255, 255, .08)) padding-box, var(--glass-rim) border-box; }
+.btn.secondary:hover { background: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(255, 255, 255, .06)); }
 .btn.danger {
   border: 1px solid rgba(255, 120, 140, .4) !important;
   background: rgba(255, 90, 110, .08);
@@ -201,6 +212,8 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 }
 /* Headline top left, the interface preview to its right (owner, 2026-10-28). */
 .home-hero {
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
   gap: clamp(32px, 5vw, 72px);
@@ -219,11 +232,27 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 .home-lead { max-width: 560px; margin: 24px 0 0; color: var(--glass-text-soft); font-size: clamp(17px, 1.5vw, 20px); line-height: 1.5; }
 .home-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
 .home-actions .btn { min-height: 56px; padding-inline: 28px; font-size: 17px; }
-.home-preview { padding: 12px; border-radius: 30px; }
+.home-preview { position: relative; padding: 12px; border-radius: 30px; }
+/* Glass only looks like glass with something behind it. A soft blue and
+   violet light sits behind the preview, the way an iPhone's glass sits on its
+   wallpaper; the rest of the page stays plain. */
+.home-preview::before {
+  content: "";
+  position: absolute;
+  inset: -18% -12% -22% -14%;
+  z-index: -1;
+  border-radius: 50%;
+  background:
+    radial-gradient(42% 46% at 30% 38%, rgba(64, 120, 255, .38), transparent 70%),
+    radial-gradient(38% 42% at 72% 66%, rgba(150, 92, 255, .30), transparent 70%),
+    radial-gradient(30% 30% at 60% 22%, rgba(56, 210, 255, .18), transparent 70%);
+  filter: blur(30px);
+  pointer-events: none;
+}
 .home-preview .preview-screen {
   border: 1px solid rgba(255, 255, 255, .08) !important;
   border-radius: 20px;
-  background: rgba(6, 9, 15, .55) !important;
+  background: rgba(6, 9, 15, .62) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
 }
 .home-preview .preview-screen-head b { color: rgba(255, 255, 255, .85); }
