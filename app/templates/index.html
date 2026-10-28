@@ -8,10 +8,21 @@
     questions stay, shorter. Every claim keeps the conditions it had: the
     score only when scoring is on, strike counts called estimates. -#}
 <section class="home-hero">
+  <div class="home-hero-copy">
   <p class="home-sports glass-chip">{% for sport, name in sports.items() %}{% if not loop.first %} · {% endif %}{{name}}{% endfor %}</p>
   <h1>Your fight.<br><em>In numbers.</em></h1>
   <p class="home-lead">Film it on your phone. WarriorIQ measures both fighters' movement, guard and balance{% if features.strike_counts.on %}, counts what they threw{% endif %}{% if features.scoring.on %}, gives a round-by-round score estimate{% endif %} and builds your four-week plan.{% if not features.scoring.on %} Score estimates are coming.{% endif %}</p>
   <div class="home-actions">{% if request.state.account %}<a class="btn btn-lead" data-motion-primary href="/analyze">Analyse my video <span aria-hidden="true">&#8594;</span></a>{% else %}<a class="btn btn-lead" data-motion-primary href="/signup?next=/analyze">Create a free account <span aria-hidden="true">&#8594;</span></a>{% endif %}<a class="btn secondary btn-lead" href="/sample-report">See a sample report</a></div>
+  </div>
+  {#- The interface preview the homepage had before (owner, 2026-10-28: "the
+      interface preview, that's it"), in a glass frame. -#}
+  <div class="home-preview glass-panel" aria-label="Illustration of the WarriorIQ live-analysis interface">
+    <div class="preview-screen">
+      <div class="preview-screen-head"><span><i></i> Interface preview</span><b>WarriorIQ live</b></div>
+      <div class="preview-fight-stage"><span class="preview-fighter preview-a">A</span><span class="preview-fighter preview-b">B</span><i class="preview-scan" aria-hidden="true"></i></div>
+      <div class="preview-timeline"><i></i><span></span><span></span><span></span></div>
+    </div>
+  </div>
 </section>
 
 {#- Numbers from one real WarriorIQ report (a 94-second Kick Light round

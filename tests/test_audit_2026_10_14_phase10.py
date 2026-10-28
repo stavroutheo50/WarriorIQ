@@ -81,10 +81,12 @@ def test_pricing_copy_follows_the_period():
 
 
 # --------------------------------------------------------------------- #53
-def test_the_homepage_shows_a_real_report_not_a_placeholder():
-    # The glass homepage (owner, 2026-10-28) replaced the interface preview with
-    # numbers from a real report; still no demo-clip placeholder.
+def test_the_preview_is_the_original_interface_preview():
+    # The owner asked for the original preview back (2026-10-19), and again
+    # beside the glass homepage's headline (2026-10-28); no demo-clip placeholder.
     page = BrowserClient(web.app).get("/").text
+    assert '<span class="preview-fighter preview-a">A</span>' in page
+    assert "Interface preview" in page
     assert "From a real WarriorIQ report" in page
     assert "Demo clip coming soon" not in page and "goes here" not in page
 
