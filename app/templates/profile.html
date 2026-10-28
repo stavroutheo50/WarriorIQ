@@ -75,6 +75,7 @@
     {% endif %}
     <div class="field"><label for="profileGym">Gym or team</label><input id="profileGym" name="gym" value="{{profile.gym or ''}}" maxlength="80"></div>
     <div class="field"><label for="profileBio">Bio</label><textarea id="profileBio" name="bio" rows="2" maxlength="280">{{profile.bio or ''}}</textarea></div>
+    {% if not minor %}<label class="check"><input type="checkbox" id="profileShowEmail" name="show_email" value="true"{% if profile.show_email %} checked{% endif %}><span>Show my email on my page. <span class="muted">Off: your email stays private and only your username is shown.</span></span></label>{% endif %}
     <button class="btn" type="submit">Save public profile</button>
     {% if profile.handle %}<a class="btn secondary" href="/athlete/{{profile.handle}}">View my page</a>{% endif %}
   </form>

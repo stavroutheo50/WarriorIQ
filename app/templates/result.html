@@ -317,6 +317,7 @@
   <p class="strike-strip-note">Estimates, counted automatically and not checked by a person. In grappling they can run well over the real number.</p>
 </section>
 {% endif %}
+{% if stat_sheet and stat_sheet.available and not identity_failed and numbers.state != 'movement_only' %}{% include "_stat_sheet.html" %}{% endif %}
 {% if notes_count %}<details class="recording-notes" id="recordingNotes"><summary>About this recording &middot; {{ notes_count }} note{{ '' if notes_count == 1 else 's' }}</summary>{{ notes_html }}</details>{% endif %}
 {{ fix_html }}
 {% if not identity_failed and numbers.state != 'movement_only' %}{{ keep_fix(vitals_primary) }}{% endif %}

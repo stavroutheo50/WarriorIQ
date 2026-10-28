@@ -1,0 +1,66 @@
+{#- The head-to-head stat sheet (owner, 2026-10-28: "more graphs, more stats,
+    like football stats"). Every value comes from core/stat_sheet.py, which
+    only arranges what the analysis measured; strike rows keep their estimate
+    label. The bars and graphs draw in when the sheet scrolls into view, and
+    stand complete without script or with reduced motion. -#}
+{% set sheet = stat_sheet %}
+<section class="stat-sheet" id="statSheet" aria-labelledby="statSheetTitle">
+  <header class="stat-sheet-head">
+    <h2 id="statSheetTitle">Fight stats</h2>
+    <div class="stat-sheet-names" aria-hidden="true"><span class="stat-a">{{ names.A }}</span><span class="stat-b">{{ names.B }}</span></div>
+  </header>
+
+  {% for group, title in [(sheet.strikes, 'Striking'), (sheet.movement, 'Movement')] %}{% if group %}
+  <h3 class="stat-group">{{ title }}</h3>
+  <dl class="stat-rows">
+    {% for row in group %}
+    <div class="stat-row">
+      <dd class="stat-a wiq-num">{% if row.count %}<span data-count-up>{{ row.a_text }}</span>{% else %}{{ row.a_text }}{% endif %}</dd>
+      <dt>{{ row.label }}{% if row.unit %} <small>{{ row.unit }}</small>{% endif %}{% if row.note %} <small class="stat-note">{{ row.note }}</small>{% endif %}</dt>
+      <dd class="stat-b wiq-num">{% if row.count %}<span data-count-up>{{ row.b_text }}</span>{% else %}{{ row.b_text }}{% endif %}</dd>
+      <div class="stat-bar" role="img" aria-label="{{ names.A }} {{ row.a_text }}, {{ names.B }} {{ row.b_text }}"><i class="stat-bar-a" style="--share: {{ row.share_a }}%"></i><i class="stat-bar-b" style="--share: {{ 100 - row.share_a }}%"></i></div>
+    </div>
+    {% endfor %}
+  </dl>
+  {% endif %}{% endfor %}
+
+  {% if sheet.timeline %}
+  <figure class="stat-graph">
+    <figcaption><strong>Strikes thrown, every {{ sheet.timeline.bucket_seconds }} seconds</strong> <small class="stat-note">estimate</small></figcaption>
+    <div class="stat-timeline" role="img" aria-label="Strikes thrown by each fighter through the fight, in {{ sheet.timeline.bucket_seconds }}-second steps; the busiest step had {{ sheet.timeline.peak }}.">
+      {% for bucket in sheet.timeline.buckets %}
+      <div class="stat-step" title="{{ bucket.label }}: {{ names.A }} {{ bucket.A }}, {{ names.B }} {{ bucket.B }}">
+        <i class="stat-step-a" style="--h: {{ bucket.a_height }}%"></i><i class="stat-step-b" style="--h: {{ bucket.b_height }}%"></i>
+        {% if loop.first or loop.index0 % 3 == 0 %}<span>{{ bucket.label }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </figure>
+  {% endif %}
+
+  {% if sheet.pace %}
+  <figure class="stat-graph">
+    <figcaption><strong>Movement speed through the fight</strong> <small>body lengths/sec, top of the graph {{ sheet.pace.max_speed }}</small></figcaption>
+    <svg class="stat-pace" viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="How fast each fighter moved through the fight">
+      <polyline class="stat-line-a" pathLength="1" points="{{ sheet.pace.a }}"></polyline>
+      <polyline class="stat-line-b" pathLength="1" points="{{ sheet.pace.b }}"></polyline>
+    </svg>
+    <div class="stat-axis" aria-hidden="true"><span>0:00</span><span>{{ sheet.pace.end_label }}</span></div>
+  </figure>
+  {% endif %}
+</section>
+<script nonce="{{ request.state.csp_nonce }}">
+(() => {
+  // Draw the bars and graphs in as the sheet scrolls into view. Without
+  // IntersectionObserver, or with reduced motion, they are already complete.
+  const sheet = document.getElementById('statSheet');
+  if (!sheet || !('IntersectionObserver' in window) || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  sheet.classList.add('is-armed');
+  const seen = new IntersectionObserver(entries => entries.forEach(entry => {
+    if (!entry.isIntersecting) return;
+    entry.target.classList.add('is-in');
+    seen.unobserve(entry.target);
+  }), { threshold: 0.15 });
+  sheet.querySelectorAll('.stat-rows, .stat-graph').forEach(part => seen.observe(part));
+})();
+</script>

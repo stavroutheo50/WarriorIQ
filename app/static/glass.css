@@ -85,6 +85,25 @@ html::before, html::after, body::before, body:before { display: none; }
 .cookie-notice {
   background: var(--glass-fill-strong) !important;
 }
+/* Dialogs that open over the page: the same floating glass, darker so the
+   page behind does not compete with what is being shared or corrected. */
+.share-card-dialog,
+.correction-dialog,
+.wiq-confirm {
+  border: 1px solid var(--glass-edge-side) !important;
+  border-top-color: var(--glass-edge-top) !important;
+  border-radius: 28px !important;
+  background: linear-gradient(180deg, rgba(30, 38, 54, .9) 0%, rgba(12, 17, 27, .92) 100%) !important;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shine), 0 30px 80px -20px rgba(0, 0, 0, .85) !important;
+}
+.share-card-dialog::backdrop, .correction-dialog::backdrop { background: rgba(4, 6, 10, .6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.share-card-dialog canvas { border-radius: 22px; }
+.share-card-x { border-radius: 50% !important; }
+/* The bar itself is nearly opaque: content scrolling under it showed
+   through (owner, 2026-10-28). The glass stays in its edge and sheen. */
+.nav { background: linear-gradient(180deg, rgba(24, 31, 45, .97) 0%, rgba(12, 17, 27, .96) 100%) !important; }
 .card::before, .hero-card::before, .pricing-card::before { display: none; }
 
 /* --- The bar: a floating glass strip -------------------------------------- */
@@ -97,6 +116,24 @@ html::before, html::after, body::before, body:before { display: none; }
   padding: 0 10px 0 18px;
   border-radius: 999px;
 }
+/* The page scrolled into view in the gap around the floating bar (owner,
+   2026-10-28: "I must not see anything behind it"). A band in the page's own
+   colour sits under the bar's whole height and fades out just below it. */
+.nav-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 49;
+  height: 92px;
+  background: linear-gradient(180deg, var(--glass-canvas) 0%, var(--glass-canvas) 84%, rgba(10, 15, 24, 0) 100%);
+  pointer-events: none;
+}
+/* The page's entrance animation (motion.css) kept its last frame, so .shell
+   stayed transformed after it ended - and a transformed ancestor turns a
+   fixed child into one that scrolls with the page. Releasing the last frame
+   lets the band above stay put. */
+body.motion-enabled .shell { animation-fill-mode: backwards; }
 .brand-word span { color: inherit; }
 .navlinks { height: auto; gap: 2px; }
 .navlinks > a, .nav-more > summary {
@@ -124,17 +161,23 @@ html::before, html::after, body::before, body:before { display: none; }
 .mobile-menu a:hover, .mobile-menu button:hover { background: var(--glass-tint-hover); }
 
 /* --- Buttons: pills ------------------------------------------------------- */
+/* Every button is glass (owner, 2026-10-28: "not every button is glass").
+   The main action is the brighter pane; the others the clearer one. */
 .btn,
 .btn:not(.secondary) {
   border-radius: 999px;
   padding-inline: 22px;
-  border: 1px solid rgba(255, 255, 255, .9);
-  background: linear-gradient(180deg, #ffffff 0%, #e6eaf1 100%);
-  color: #0a0d14;
-  box-shadow: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(10, 13, 20, .12), 0 12px 28px -12px rgba(0, 0, 0, .7) !important;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-top-color: rgba(255, 255, 255, .55);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .26) 0%, rgba(255, 255, 255, .12) 100%);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), inset 0 -1px 0 rgba(255, 255, 255, .08), 0 12px 28px -14px rgba(0, 0, 0, .8) !important;
 }
 .btn:hover,
-.btn:not(.secondary):hover { background: #ffffff; color: #0a0d14; }
+.btn:not(.secondary):hover { background: linear-gradient(180deg, rgba(255, 255, 255, .34) 0%, rgba(255, 255, 255, .16) 100%); color: #ffffff; }
+.btn:active { transform: scale(.98); }
 .btn.secondary {
   border: 1px solid var(--glass-edge-side) !important;
   border-top-color: var(--glass-edge-top) !important;
@@ -153,6 +196,49 @@ html::before, html::after, body::before, body:before { display: none; }
 }
 .btn.danger:hover { background: rgba(255, 90, 110, .14); }
 .btn:disabled, .btn[aria-disabled="true"] { opacity: .5; }
+
+/* --- Focus and touch --------------------------------------------------------
+   Phones flashed a grey square over whatever was tapped, and the focus ring
+   was a hard blue box (owner: "a square around it, not oval glass"). The ring
+   now follows each control's own rounded shape. */
+* { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid rgba(255, 255, 255, .75); outline-offset: 3px; }
+
+.settings-tabs { gap: 6px; border-bottom: 0; }
+.settings-tabs a {
+  border: 1px solid var(--glass-edge-side);
+  border-bottom: 1px solid var(--glass-edge-side) !important;
+  border-radius: 999px;
+  background: var(--glass-tint);
+}
+.settings-tabs a[aria-current="page"] {
+  border-top-color: var(--glass-edge-top);
+  background: var(--glass-tint-hover);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+
+.profile-menu > summary {
+  border: 1px solid var(--glass-edge-side);
+  border-top-color: var(--glass-edge-top);
+  border-radius: 999px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shine);
+}
+.profile-menu > summary:hover, .profile-menu[open] > summary { background: var(--glass-tint-hover); border-color: rgba(255, 255, 255, .22); }
+.profile-initial { border-radius: 50%; }
+.profile-menu-panel a, .profile-menu-panel button { border-radius: 16px; }
+.profile-menu-panel a:hover { background: var(--glass-tint-hover); }
+
+select, .moment-time, .sport-switch { border-radius: 999px !important; }
+.moment-time { background: var(--glass-tint); }
+.sport-card {
+  border: 1px solid var(--glass-edge-side);
+  border-top-color: var(--glass-edge-top);
+  border-radius: 24px;
+  background: var(--glass-fill) !important;
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
 
 /* --- Small surfaces -------------------------------------------------------- */
 .card, .hero-card, .pricing-card, .auth-card, .setup-card, .empty-workspace, .trust-panel, .analysis-process-card { border-radius: 26px; }
@@ -310,6 +396,7 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
   .home-steps ol { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .home-pair strong, .home-score strong { font-size: 50px; }
   .nav { top: 8px; margin-top: 8px; height: 58px; padding: 0 6px 0 14px; }
+  .nav-backdrop { height: 80px; }
   .cookie-notice { bottom: 10px; padding: 14px; }
   .cookie-notice p { font-size: 13px; }
 }
@@ -317,4 +404,73 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 /* A forced-colours user has asked the OS to drop decoration entirely. */
 @media (forced-colors: active) {
   .nav, .mobile-menu, .profile-menu-panel, .nav-more-panel, .cookie-notice, .card, .glass-panel { backdrop-filter: none; }
+}
+
+/* --- Report: the head-to-head stat sheet (_stat_sheet.html) -----------------
+   Football-app style (owner, 2026-10-28): both fighters' values either side
+   of the stat, a split bar under it, then two graphs. Fighter A is blue and
+   B amber, as everywhere a fighter is coloured. */
+.stat-sheet {
+  margin: 28px 0;
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid var(--glass-edge-side);
+  border-top-color: var(--glass-edge-top);
+  border-radius: 28px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.stat-sheet-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; }
+.stat-sheet-head h2 { margin: 0; font-size: clamp(24px, 3vw, 32px); letter-spacing: -.02em; }
+.stat-sheet-names { display: flex; gap: 14px; font-size: 14px; font-weight: 700; }
+.stat-a { color: #8cc2ff; }
+.stat-b { color: #f7c96b; }
+.stat-group { margin: 26px 0 6px; color: var(--glass-text-faint); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
+.stat-rows { margin: 0; }
+.stat-row {
+  display: grid;
+  grid-template-columns: minmax(56px, 1fr) minmax(0, 2.4fr) minmax(56px, 1fr);
+  align-items: center;
+  gap: 4px 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+}
+.stat-row dd { margin: 0; font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.stat-row dd.stat-b { text-align: right; }
+.stat-row dt { text-align: center; color: #dfe4ee; font-size: 14px; font-weight: 600; }
+.stat-row dt small { display: block; color: var(--glass-text-faint); font-size: 12px; font-weight: 500; }
+.stat-note { color: #8a93a6; }
+.stat-bar { grid-column: 1 / -1; display: flex; gap: 4px; height: 8px; }
+.stat-bar i { display: block; height: 100%; border-radius: 999px; }
+.stat-bar-a { width: var(--share); background: linear-gradient(90deg, rgba(140, 194, 255, .55), #8cc2ff); transform-origin: right; }
+.stat-bar-b { width: var(--share); background: linear-gradient(90deg, #f7c96b, rgba(247, 201, 107, .55)); transform-origin: left; }
+
+.stat-graph { margin: 30px 0 0; }
+.stat-graph figcaption { margin-bottom: 12px; color: #dfe4ee; font-size: 14px; }
+.stat-graph figcaption small { color: var(--glass-text-faint); }
+.stat-timeline { display: flex; align-items: flex-end; gap: 3px; height: 150px; padding-bottom: 20px; position: relative; }
+.stat-step { position: relative; flex: 1 1 0; display: flex; align-items: flex-end; gap: 2px; height: 100%; min-width: 0; }
+.stat-step i { flex: 1 1 0; height: var(--h); min-height: 2px; border-radius: 6px 6px 2px 2px; transform-origin: bottom; }
+.stat-step-a { background: linear-gradient(180deg, #8cc2ff, rgba(140, 194, 255, .35)); }
+.stat-step-b { background: linear-gradient(180deg, #f7c96b, rgba(247, 201, 107, .35)); }
+.stat-step span { position: absolute; left: 0; bottom: -20px; color: var(--glass-text-faint); font-size: 12px; white-space: nowrap; }
+.stat-pace { display: block; width: 100%; height: 150px; overflow: visible; }
+.stat-pace polyline { fill: none; stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.stat-line-a { stroke: #8cc2ff; }
+.stat-line-b { stroke: #f7c96b; }
+.stat-axis { display: flex; justify-content: space-between; margin-top: 6px; color: var(--glass-text-faint); font-size: 12px; }
+
+/* Drawn in on scroll; complete at rest without script or with reduced motion. */
+.stat-sheet.is-armed .stat-bar i { transform: scaleX(0); }
+.stat-sheet.is-armed .stat-step i { transform: scaleY(0); }
+.stat-sheet.is-armed .stat-pace polyline { stroke-dasharray: 1; stroke-dashoffset: 1; }
+.stat-sheet.is-armed .is-in .stat-bar i { transform: scaleX(1); transition: transform .9s cubic-bezier(.2, .8, .2, 1); }
+.stat-sheet.is-armed .is-in .stat-step i { transform: scaleY(1); transition: transform .8s cubic-bezier(.2, .8, .2, 1); }
+.stat-sheet.is-armed .is-in .stat-step:nth-child(3n+2) i { transition-delay: .05s; }
+.stat-sheet.is-armed .is-in .stat-step:nth-child(3n) i { transition-delay: .1s; }
+.stat-sheet.is-armed .is-in .stat-pace polyline { stroke-dashoffset: 0; transition: stroke-dashoffset 1.6s ease-out; }
+
+@media (max-width: 560px) {
+  .stat-row dd { font-size: 18px; }
+  .stat-row dt { font-size: 13px; }
+  .stat-timeline { gap: 2px; }
 }

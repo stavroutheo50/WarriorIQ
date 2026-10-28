@@ -154,6 +154,7 @@ from core.retention import (
 from core import training_consent
 from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
+from core.stat_sheet import build_stat_sheet
 from core.person_detect import cut_at_side, detect_people as detect_people_in_frame, find_clear_moment, looks_like_referee, pair_score
 from core.scoring import RULESETS, SPORTS, deduplicate_scoring_events, event_legality, is_verified_scoring_event, normalize_ruleset, score_fight, sport_counted_families, sport_of, sport_unobserved, coverage_note
 from core.sport_policy import counting_policy
@@ -1823,13 +1824,17 @@ def account_display(account: dict | None) -> dict:
     not a name, so until then the email stands in.
     """
     if not account:
-        return {"label": "", "initial": ""}
+        return {"label": "", "initial": "", "has_username": False}
     name = " ".join(str(account.get("display_name") or "").split())
     if not name or name == SETTINGS.default_profile_name:
         name = ""
-    label = name or str(account.get("email") or "")
-    initial = next((ch for ch in label if ch.isalnum()), "?").upper()
-    return {"label": label, "initial": initial, "email": str(account.get("email") or "")}
+    # The bar shows the username, then the name, and never the email
+    # (owner, 2026-10-28): it is on screen whenever the page is, in every
+    # screenshot and screen share. Without either, the bar asks for a username.
+    handle = str(account.get("handle") or "")
+    label = f"@{handle}" if handle else name
+    initial = next((ch for ch in (handle or name or str(account.get("email") or "")) if ch.isalnum()), "?").upper()
+    return {"label": label, "initial": initial, "email": str(account.get("email") or ""), "has_username": bool(handle)}
 
 
 def _load_viewer_state(request: Request) -> None:
@@ -6369,6 +6374,12 @@ def result_page(request: Request, job_id: str):
             (report.get("scorecard") or {}).get("sport") or _job_sport(job), report=report).estimate_note,
         "families_shown": published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job), report),
+        # The head-to-head stat sheet and its two graphs (core/stat_sheet.py).
+        # Strike rows only when the fighters were told apart and this sport's
+        # counts are published - the same rule as every other count here.
+        "stat_sheet": build_stat_sheet(
+            report, published_families((report.get("scorecard") or {}).get("sport") or _job_sport(job), report),
+            identity_trusted),
         # Only Full Contact has an obligatory kick count, so this is None for
         # every other discipline and the block simply does not render.
         "kick_minimum": kick_minimum_check(report) if identity_trusted else None,
@@ -7200,7 +7211,7 @@ def _social_target(handle: str) -> tuple[dict, bool]:
 
 @app.post("/profile/public", dependencies=[Depends(require_csrf)])
 def save_public_profile(request: Request, handle: str = Form(""), visibility: str = Form("private"),
-                        bio: str = Form(""), gym: str = Form("")):
+                        bio: str = Form(""), gym: str = Form(""), show_email: bool = Form(False)):
     profile_id = _profile_id(request)
     account = _account(request)
     if profile_id is None or not account:
@@ -7214,7 +7225,9 @@ def save_public_profile(request: Request, handle: str = Form(""), visibility: st
     if wanted == "public" and (minor or not clean):
         wanted = "private"
     try:
-        set_public_profile(profile_id, clean, wanted, " ".join(bio.split())[:280], " ".join(gym.split())[:80])
+        # Never for an account under the minimum age, whatever the box says.
+        set_public_profile(profile_id, clean, wanted, " ".join(bio.split())[:280], " ".join(gym.split())[:80],
+                           show_email=bool(show_email) and not minor)
     except HandleTaken:
         return RedirectResponse("/profile?" + urlencode({"error": "That username is taken. Choose another."})
                                 + "#public-profile", status_code=303)
@@ -7259,6 +7272,9 @@ def athlete_page(request: Request, handle: str):
             "counts": count_follows(int(profile["id"])),
             "public": social.effective_visibility(profile, minor) == "public",
             "reported": request.query_params.get("reported") == "1",
+            # Only when the athlete chose to show it, and never for a minor.
+            "public_email": ((get_account_by_profile(int(profile["id"])) or {}).get("email")
+                             if visible and not minor and profile.get("show_email") else None),
         },
     )
 

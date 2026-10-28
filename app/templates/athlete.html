@@ -15,6 +15,7 @@
       <p class="athlete-facts">
         <span>@{{athlete.handle}}</span>
         {% if visible and athlete.gym %}<span>{{athlete.gym}}</span>{% endif %}
+        {% if public_email %}<span class="athlete-email">{{public_email}}</span>{% endif %}
         <span>{{counts.followers}} follower{{'' if counts.followers == 1 else 's'}}</span>
         <span>{{counts.following}} following</span>
       </p>
