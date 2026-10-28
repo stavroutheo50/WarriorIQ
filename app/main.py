@@ -399,7 +399,8 @@ CSS_BUNDLES: dict[str, tuple[str, ...]] = {
     # a11y.css is last, and has to stay last: it sets floor values for tap
     # targets and control font size that must win over whatever a component
     # asked for, and load order is how they do that without !important.
-    "shell": ("premium.css", "motion.css", "redesign.css", "a11y.css"),
+    # glass.css is the 2026-10-28 look: it restyles what comes before it.
+    "shell": ("premium.css", "motion.css", "redesign.css", "glass.css", "a11y.css"),
 }
 
 

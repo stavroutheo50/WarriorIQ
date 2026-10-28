@@ -1,0 +1,258 @@
+/* The glass look (owner, 2026-10-28).
+
+   A plain dark navy page - no grid, no glow - with frosted, see-through
+   surfaces on top of it: the floating bar, buttons, cards, menus and the
+   cookie notice. Loaded after every other stylesheet but a11y.css (see
+   CSS_BUNDLES in app/main.py), so it only restyles: no markup, route or
+   script changes with it.
+
+   Blur is kept to the surfaces that float over content (the bar, menus, the
+   cookie notice). Cards sit on the plain page, where a blur shows nothing and
+   costs a cheap phone a frame, so they get the frosted fill and edge only. */
+
+:root {
+  --glass-fill: rgba(255, 255, 255, .055);
+  --glass-fill-hover: rgba(255, 255, 255, .09);
+  --glass-float: rgba(14, 19, 30, .72);
+  --glass-edge: rgba(255, 255, 255, .14);
+  --glass-edge-strong: rgba(255, 255, 255, .24);
+  --glass-shine: inset 0 1px 0 rgba(255, 255, 255, .14);
+  --glass-shadow: 0 18px 44px -18px rgba(0, 0, 0, .7);
+  --glass-blur: blur(22px) saturate(170%);
+  --glass-gold: #f2b544;
+  --glass-canvas: #0a0f18;
+}
+
+/* --- The page: plain ------------------------------------------------------- */
+html, body { background: var(--glass-canvas); }
+html::before, html::after, body::before, body:before { display: none; }
+
+/* --- The bar: a floating glass strip -------------------------------------- */
+.nav {
+  position: sticky;
+  top: 12px;
+  z-index: 50;
+  height: 64px;
+  margin-top: 12px;
+  padding: 0 10px 0 18px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 999px;
+  background: var(--glass-float);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.brand-word span { color: var(--glass-gold); }
+.navlinks { height: auto; gap: 2px; }
+.navlinks > a, .nav-more > summary {
+  height: auto;
+  padding: 9px 13px;
+  border-radius: 999px;
+  font-size: 13.5px;
+}
+.navlinks > a:hover { background: var(--glass-fill); color: #ffffff; }
+.navlinks > a[aria-current="page"] { background: var(--glass-fill-hover); color: #ffffff; }
+.navlinks > a[aria-current="page"]::after { display: none; }
+.account-nav .nav-signup, .account-nav .btn { border-radius: 999px; }
+.mobile-menu-button {
+  border: 1px solid var(--glass-edge);
+  border-radius: 50%;
+  background: var(--glass-fill);
+}
+
+/* Menus that open over the page. */
+.mobile-menu,
+.profile-menu-panel,
+.nav-more-panel {
+  border: 1px solid var(--glass-edge);
+  border-radius: 22px;
+  background: var(--glass-float);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.mobile-menu a, .mobile-menu button { border-radius: 14px; }
+.mobile-menu a:hover, .mobile-menu button:hover { background: var(--glass-fill-hover); }
+
+/* --- Buttons: pills ------------------------------------------------------- */
+.btn,
+.btn:not(.secondary) {
+  border-radius: 999px;
+  padding-inline: 22px;
+  background: rgba(255, 255, 255, .94);
+  background-image: none;
+  color: #0a0d14;
+  border: 1px solid rgba(255, 255, 255, .9);
+  box-shadow: inset 0 1px 0 #ffffff, 0 10px 26px -10px rgba(0, 0, 0, .6) !important;
+}
+.btn:hover,
+.btn:not(.secondary):hover { background: #ffffff; color: #0a0d14; }
+.btn.secondary {
+  background: var(--glass-fill);
+  color: #ffffff !important;
+  border: 1px solid var(--glass-edge-strong) !important;
+  box-shadow: var(--glass-shine) !important;
+}
+.btn.secondary:hover { background: var(--glass-fill-hover); border-color: rgba(255, 255, 255, .34) !important; }
+.btn.danger {
+  background: rgba(255, 90, 110, .08);
+  color: #ff9aa8 !important;
+  border: 1px solid rgba(255, 120, 140, .4) !important;
+  box-shadow: none !important;
+}
+.btn.danger:hover { background: rgba(255, 90, 110, .14); }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .5; }
+
+/* --- Surfaces: frosted cards ----------------------------------------------- */
+.card,
+.hero-card,
+.pricing-card,
+.auth-card,
+.trust-panel,
+.analysis-process-card {
+  border: 1px solid var(--glass-edge);
+  border-radius: 24px;
+  background: var(--glass-fill);
+  background-image: none;
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.card:hover { border-color: var(--glass-edge-strong); }
+.card::before, .hero-card::before, .pricing-card::before { display: none; }
+
+.pill, .check, .trust-checks span {
+  border-color: var(--glass-edge);
+  background: var(--glass-fill);
+  border-radius: 999px;
+}
+.notice { border-radius: 16px; }
+
+/* --- Form fields ---------------------------------------------------------- */
+.field input, .field select, .field textarea, .field-input {
+  border: 1px solid var(--glass-edge);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .04);
+}
+.field input:focus, .field select:focus, .field textarea:focus, .field-input:focus {
+  border-color: rgba(242, 181, 68, .7);
+}
+
+/* Inputs no component styles (the password box beside "Download account
+   data", for one) rendered as the browser's white default. :where() keeps
+   this at zero specificity, so every styled field keeps its own look. */
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]):not([type="range"]):not([type="color"]), select, textarea) {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .04);
+  color: inherit;
+}
+
+/* The second line of a display headline ("Keep improving.") in the brand gold,
+   as on the homepage, instead of redesign.css's forced grey. */
+h1 em { color: var(--glass-gold) !important; }
+
+/* --- Cookie notice: one glass strip at the bottom -------------------------- */
+.cookie-notice {
+  left: 50%;
+  right: auto;
+  bottom: 16px;
+  width: min(760px, calc(100% - 24px));
+  transform: translateX(-50%);
+  border: 1px solid var(--glass-edge);
+  border-radius: 22px;
+  background: var(--glass-float);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+
+/* --- Homepage (index.html) ------------------------------------------------ */
+.glass-chip {
+  display: inline-block;
+  padding: 9px 18px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 999px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shine);
+  color: #dfe4ee;
+  font-size: 14px;
+  font-weight: 600;
+}
+.home-hero { padding: clamp(64px, 12vh, 132px) 0 56px; text-align: center; }
+.home-hero h1 {
+  margin: 30px 0 0;
+  font-size: clamp(42px, 11vw, 148px);
+  font-weight: 850;
+  line-height: .9;
+  letter-spacing: -.045em;
+  text-transform: uppercase;
+}
+.home-hero h1 em { font-style: normal; color: var(--glass-gold) !important; } /* over redesign.css's grey !important */
+.home-lead { max-width: 640px; margin: 28px auto 0; color: #c3cad8; font-size: clamp(17px, 1.6vw, 21px); line-height: 1.5; }
+.home-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+.home-actions .btn { min-height: 56px; padding-inline: 30px; font-size: 17px; }
+
+.home-proof { padding: 24px 0 72px; }
+.home-proof-title, .home-steps h3 { margin: 0; }
+.home-proof-title { text-align: center; color: #a9b2c3; font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .1em; }
+.home-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; margin-top: 24px; }
+.home-card {
+  padding: 26px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 26px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.home-card h3 { margin: 0; color: #a9b2c3; font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .08em; }
+.home-card h3 span { margin-left: 6px; color: #7f8aa0; text-transform: none; letter-spacing: 0; }
+.home-card small { display: block; margin-top: 8px; color: #dfe4ee; font-size: 15px; line-height: 1.5; }
+.home-pair { display: flex; gap: 28px; margin-top: 16px; }
+.home-pair strong, .home-score strong { font-size: 60px; font-weight: 850; line-height: 1; font-variant-numeric: tabular-nums; }
+.home-pair small { margin-top: 6px; }
+.home-a { color: #8cc2ff; }
+.home-b { color: #f7c96b; }
+.home-score { display: flex; align-items: baseline; gap: 10px; margin: 16px 0 0; color: #8a93a6; font-size: 40px; }
+.home-drill { margin: 16px 0 0; font-size: 26px; font-weight: 750; line-height: 1.15; }
+.home-card-featured { border-color: rgba(242, 181, 68, .45); background: rgba(242, 181, 68, .07); }
+.home-price { margin: 12px 0 0; font-size: 40px; font-weight: 850; line-height: 1.1; }
+.home-price span { display: block; margin-top: 4px; color: #a9b2c3; font-size: 15px; font-weight: 500; }
+#plans .home-card h3 { color: #ffffff; font-size: 18px; font-weight: 750; text-transform: none; letter-spacing: 0; }
+
+.home-steps { padding: 24px 0 40px; }
+.home-steps ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin: 0; padding: 0; list-style: none; }
+.home-steps li { display: flex; gap: 14px; }
+.home-steps b { color: var(--glass-gold); font-size: 15px; }
+.home-steps h3 { font-size: 22px; }
+.home-steps p { margin: 6px 0 0; color: #a9b2c3; }
+
+.home-section { padding: 40px 0; }
+.home-section > h2 { margin: 0 0 8px; font-size: clamp(34px, 4.4vw, 52px); font-weight: 850; letter-spacing: -.03em; }
+.home-measured { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 20px; }
+.home-measured details.home-card { padding: 0; }
+.home-measured summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 18px 22px; cursor: pointer; }
+.home-measured summary h3 { margin: 0; font-size: 16px; }
+.home-measured summary span { color: #a9b2c3; }
+.home-measured details p { margin: 0; padding: 0 22px 14px; color: #c3cad8; line-height: 1.55; }
+.home-more { margin-top: 18px; color: #a9b2c3; }
+.faq details { border-bottom: 1px solid var(--glass-edge); }
+
+@media (max-width: 720px) {
+  .home-hero { padding-top: 40px; }
+  .glass-chip { font-size: 12px; padding: 8px 14px; }
+  .home-actions { flex-direction: column; }
+  .home-actions .btn { width: 100%; }
+  .home-steps ol { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .home-pair strong, .home-score strong { font-size: 50px; }
+}
+
+@media (max-width: 720px) {
+  .nav { top: 8px; margin-top: 8px; height: 58px; padding: 0 6px 0 14px; }
+  .cookie-notice { bottom: 10px; padding: 14px; }
+  .cookie-notice p { font-size: 13px; }
+}
+
+/* A forced-colours user has asked the OS to drop decoration entirely. */
+@media (forced-colors: active) {
+  .nav, .mobile-menu, .profile-menu-panel, .nav-more-panel, .cookie-notice { backdrop-filter: none; }
+}
