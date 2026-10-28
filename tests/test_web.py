@@ -1001,7 +1001,7 @@ class PublicPageTests(unittest.TestCase):
 
     def test_professional_home_has_product_and_trust_sections(self):
         response = self.client.get("/")
-        self.assertIn("Four steps. No technical homework.", response.text)
+        self.assertIn('id="how-it-works"', response.text)
         # Shortened on 2026-10-19 (owner): the outcomes and trust panels are gone;
         # what is measured, plans and the FAQ carry the product and the trust.
         self.assertIn('id="what-is-measured"', response.text)
@@ -1034,10 +1034,11 @@ class PublicPageTests(unittest.TestCase):
 
         self.assertIn('/assets/base.css', shell)
         self.assertIn("product.css", CSS_BUNDLES["base"])
-        self.assertIn("Upload your fight.", home)
-        self.assertIn("See it in numbers.", home)
-        self.assertIn('class="product-preview"', home)
-        self.assertIn('class="workflow-track"', home)
+        self.assertIn("In numbers.", home)
+        self.assertIn('class="home-proof"', home)
+        self.assertIn('class="home-steps"', home)
+        self.assertIn("glass.css", CSS_BUNDLES["shell"])
+        self.assertEqual("a11y.css", CSS_BUNDLES["shell"][-1])
         self.assertIn('class="fight-archive"', history)
         self.assertIn('id="historySearch"', history_template)
 
@@ -1198,9 +1199,8 @@ class PublicPageTests(unittest.TestCase):
 
     def test_home_copy_uses_the_warrioriq_combat_sports_voice(self):
         page = self.client.get("/").text
-        self.assertIn("For fighters and coaches", page)
-        self.assertIn("Upload your fight.", page)
-        self.assertIn("See it in numbers.", page)
+        # The glass homepage headline (owner, 2026-10-28).
+        self.assertIn("Your fight.<br><em>In numbers.</em>", page)
         self.assertNotIn("WonderIQ", page)
         # "Frame by frame" is industry shorthand a fighter does not read as a
         # promise. The headline says what they get instead.
