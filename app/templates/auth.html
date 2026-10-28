@@ -65,7 +65,7 @@
       </div>
       <div class="auth-divider"><span>or continue with email</span></div>
       {% endif %}
-      <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" name="email" autocomplete="email" required></div>
+      <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" name="email" autocomplete="email" value="{{email}}" required></div>
       {#- minlength is a signup rule. On sign-in it constrains a password that
           already exists, so an account created under an older policy cannot
           submit the form at all and is given no reason why, and the attribute
@@ -84,6 +84,15 @@
 (()=>{
   const form=document.querySelector('.auth-form');
   if(!form)return;
+  // On a phone the card sits below the page's heading, so a refusal shown in
+  // it was off screen and the page looked as if nothing had happened.
+  const refusal=document.querySelector('.auth-card [role="alert"]');
+  if(refusal){
+    refusal.scrollIntoView({block:'center'});
+    const email=document.getElementById('authEmail');
+    const password=document.getElementById('authPassword');
+    if(email&&email.value&&password)password.focus({preventScroll:true});
+  }
   // The guardian's details are only asked of someone under the minimum age.
   const guardian=document.getElementById('guardianFields');
   const ageChoices=[...form.querySelectorAll('input[name="age_group"]')];

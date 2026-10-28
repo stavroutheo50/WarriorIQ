@@ -2983,11 +2983,13 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
     return response
 
 
-def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/camp"):
+def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/camp", email: str = ""):
+    # email refills the form after a refusal, so a typo is fixed, not retyped.
     return templates.TemplateResponse(
         request=request,
         name="auth.html",
-        context={"request": request, "mode": mode, "error": error, "next_path": _safe_next(next_path)},
+        context={"request": request, "mode": mode, "error": error, "next_path": _safe_next(next_path),
+                 "email": email.strip()[:254]},
         status_code=400 if error else 200,
     )
 
@@ -3354,7 +3356,18 @@ def signup(
     try:
         account = register(email, password)
     except ValueError as exc:
-        return _auth_page(request, "signup", str(exc), next_path)
+        # Signing up with an address that already has an account re-showed
+        # the sign-up form, cleared, with the reason below the fold on a phone
+        # (2026-10-28). What that person wants is to sign in, so they are
+        # shown the sign-in form with their address already in it.
+        if get_account_by_email(normalize_email(email)):
+            return _auth_page(
+                request, "login",
+                "You already have an account with this email. Sign in below, or use Forgot password if you "
+                "don't remember it.",
+                next_path, email=email,
+            )
+        return _auth_page(request, "signup", str(exc), next_path, email=email)
     record_account_signup_acceptance(
         int(account["id"]), terms_version=SETTINGS.policy_version,
         privacy_version=SETTINGS.policy_version, marketing_consent=bool(marketing_consent),
@@ -3531,7 +3544,7 @@ def login(
     account = authenticate(email, password)
     if not account:
         record_security_event("login_failed", severity="warning", metadata={"email_hash": token_digest(email.strip().lower())[:16]})
-        return _auth_page(request, "login", "The email or password is incorrect.", next_path)
+        return _auth_page(request, "login", "The email or password is incorrect.", next_path, email=email)
     if SETTINGS.require_email_verification and not account.get("email_verified_at"):
         return _auth_page(
             request, "login",
