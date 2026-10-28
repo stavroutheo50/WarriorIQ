@@ -716,8 +716,10 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self._sign_in("actions@example.com")
         home = self.client.get("/").text
         self.assertIn('href="/analyze">Analyse my video', home)
-        for link in ('href="/camp">Fight Camp', 'href="/compare">Compare fights', 'href="/pricing">Plans'):
+        for link in ('href="/">Home', 'href="/camp">Fight Camp', 'href="/pricing">Plans'):
             self.assertIn(link, home)  # in the bar itself, not under a More menu
+        # Compare fights moved into the Fight library (owner, 2026-10-28).
+        self.assertNotIn('href="/compare">Compare fights', home)
         self.assertNotIn('class="nav-more"', home)
         self.assertIn('href="/history">Fight library', home)
 

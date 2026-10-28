@@ -2164,7 +2164,8 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('href="/analyze">{% if fights %}Analyse another fight', template)
         # A signed-out visitor has no library to add to and is offered sign-in
         # instead, so the button is not rendered for them at all.
-        self.assertIn("{% if signed_in %}<a class=\"btn\" data-motion-primary href=\"/analyze\">", template)
+        self.assertIn('<a class="btn" data-motion-primary href="/analyze">', template)
+        self.assertIn("{% if signed_in %}<div class=\"hero-actions\">", template)
 
     def test_coach_workspace_uses_the_selected_fighter_and_one_click_plan(self):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(encoding="utf-8")
@@ -2200,7 +2201,8 @@ class PublicPageTests(unittest.TestCase):
         validation counts.
         """
         menu = self.client.get("/").text.split('<div class="mobile-menu"', 1)[1].split('</div>', 1)[0]
-        for label in (">Analyse fight<", ">How it works<", ">Plans<", ">Sign in<", ">Create account<"):
+        # Home replaced "Analyse fight" (owner, 2026-10-28).
+        for label in (">Home<", ">How it works<", ">Plans<", ">Sign in<", ">Create account<"):
             self.assertIn(label, menu)
         for hidden in ("Accuracy", "Compare", "Fight library", ">Progress<", ">Coach<"):
             self.assertNotIn(hidden, menu, "workspace tools are not offered before there is a workspace")
@@ -2209,8 +2211,9 @@ class PublicPageTests(unittest.TestCase):
         """Splitting the navigation must not cost an account holder anything."""
         with self.signed_in():
             menu = self.client.get("/").text.split('<div class="mobile-menu"', 1)[1].split('</div>', 1)[0]
-        # Progress and Coach are one page now, Fight Camp.
-        for label in (">Analyse a video<", ">Fight library<", ">Fight Camp<", ">Plans<"):
+        # Progress and Coach are one page now, Fight Camp. Home replaced
+        # "Analyse a video" (owner, 2026-10-28); Compare is in the library.
+        for label in (">Home<", ">Fight library<", ">Fight Camp<", ">Plans<"):
             self.assertIn(label, menu)
         self.assertNotIn("Accuracy", menu, "still never the accuracy lab")
 
@@ -4090,12 +4093,13 @@ class NavigationReachabilityTests(unittest.TestCase):
             return base[opened:base.index(end, opened)]
 
         desktop = (region('<div class="account-nav">', '<button class="mobile-menu-button"')
-                   + region('<a data-nav="analyze" href="/analyze" title=', '{% else %}'))
+                   + region('<a data-nav="home" href="/" title=', '{% else %}'))
         menu = region('<div class="mobile-menu" id="mobileMenu"', "<main id=")
 
         hidden = set(re.findall(r'href="(/[^"#]*)"', desktop))
         reachable = set(re.findall(r'href="(/[^"#]*)"', menu))
-        self.assertIn("/compare", hidden, "the bar no longer holds the compare link")
+        # Compare fights moved from the bar into the Fight library (owner, 2026-10-28).
+        self.assertNotIn("/compare", hidden)
         self.assertEqual(
             hidden - reachable, set(),
             f"hidden behind the hamburger but missing from it: {sorted(hidden - reachable)}")

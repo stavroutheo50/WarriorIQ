@@ -562,8 +562,12 @@ def _init_db_schema() -> None:
             con.execute("ALTER TABLE profiles ADD COLUMN allow_model_training INTEGER NOT NULL DEFAULT 0")
         # Public athlete profiles (core/social.py). Every existing profile is
         # private with no handle: nothing becomes visible that was not before.
+        # show_email (2026-10-28): the athlete's choice to show their email on
+        # their public page. Off for every existing profile, so nothing that
+        # was private becomes visible.
         for column, definition in (("handle", "TEXT"), ("visibility", "TEXT NOT NULL DEFAULT 'private'"),
-                                   ("bio", "TEXT NOT NULL DEFAULT ''"), ("gym", "TEXT NOT NULL DEFAULT ''")):
+                                   ("bio", "TEXT NOT NULL DEFAULT ''"), ("gym", "TEXT NOT NULL DEFAULT ''"),
+                                   ("show_email", "INTEGER NOT NULL DEFAULT 0")):
             if column not in columns:
                 con.execute(f"ALTER TABLE profiles ADD COLUMN {column} {definition}")
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_handle ON profiles(handle) WHERE handle IS NOT NULL")
@@ -1412,7 +1416,7 @@ def account_for_session(token_hash: str) -> dict | None:
                accounts.subscription_period_end,accounts.subscription_cancelled_at,
                accounts.email_verified_at,accounts.password_login_enabled,
                accounts.guardian_approval_status,
-               profiles.display_name AS display_name
+               profiles.display_name AS display_name, profiles.handle AS handle
                FROM sessions JOIN accounts ON accounts.id=sessions.account_id
                LEFT JOIN profiles ON profiles.id=accounts.profile_id
                WHERE sessions.token_hash=? AND sessions.expires_at>? AND accounts.account_status='active'""",
@@ -2674,8 +2678,12 @@ def get_account_by_profile(profile_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def set_public_profile(profile_id: int, handle: str | None, visibility: str, bio: str, gym: str) -> None:
-    """Raises HandleTaken when another profile already uses the handle."""
+def set_public_profile(profile_id: int, handle: str | None, visibility: str, bio: str, gym: str,
+                       show_email: bool | None = None) -> None:
+    """Raises HandleTaken when another profile already uses the handle.
+
+    show_email None leaves the stored choice as it is.
+    """
     init_db()
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
@@ -2685,6 +2693,8 @@ def set_public_profile(profile_id: int, handle: str | None, visibility: str, bio
                 raise HandleTaken(handle)
         con.execute("UPDATE profiles SET handle=?, visibility=?, bio=?, gym=?, updated_at=? WHERE id=?",
                     (handle, visibility, bio, gym, now, profile_id))
+        if show_email is not None:
+            con.execute("UPDATE profiles SET show_email=? WHERE id=?", (int(bool(show_email)), profile_id))
         if visibility == "public":
             # Going public accepts everyone already waiting, as a public
             # profile would have on the day they asked.

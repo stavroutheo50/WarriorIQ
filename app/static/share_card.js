@@ -13,7 +13,7 @@
   "use strict";
   var W = 1080, H = 1920;
   var FONT = '"InterVar", Inter, "Segoe UI", system-ui, -apple-system, sans-serif';
-  var INK = "#f4f7ff", MUTED = "#9aa8c2", CYAN = "#4fd7ff", RED = "#ff718f", LINE = "#243653";
+  var INK = "#f4f7ff", MUTED = "#a9b2c3", BLUE = "#8cc2ff", RED = "#ff718f";
   var PLURAL = { punch: "Punches", kick: "Kicks", knee: "Knees" };
 
   function font(weight, size) { return weight + " " + size + "px " + FONT; }
@@ -37,81 +37,109 @@
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
   }
 
+  // The shield from the site's header, drawn once it has loaded (init()
+  // redraws an open card when it arrives).
+  var LOGO = new Image();
+  LOGO.src = "/static/warrioriq-logo-192.png";
+
+  // A glass panel, as on the site (static/glass.css): an almost clear fill,
+  // a bright top edge and faint sides.
+  function glass(ctx, x, y, w, h, r) {
+    roundRect(ctx, x, y, w, h, r);
+    var fill = ctx.createLinearGradient(0, y, 0, y + h);
+    fill.addColorStop(0, "rgba(255,255,255,0.10)"); fill.addColorStop(1, "rgba(255,255,255,0.035)");
+    ctx.fillStyle = fill; ctx.fill();
+    var edge = ctx.createLinearGradient(0, y, 0, y + h);
+    edge.addColorStop(0, "rgba(255,255,255,0.42)"); edge.addColorStop(0.18, "rgba(255,255,255,0.10)");
+    edge.addColorStop(1, "rgba(255,255,255,0.06)");
+    ctx.lineWidth = 2; ctx.strokeStyle = edge; ctx.stroke();
+  }
+
+  function bar(ctx, x, y, w, share) {
+    roundRect(ctx, x, y, w, 16, 8); ctx.fillStyle = "rgba(255,255,255,0.10)"; ctx.fill();
+    roundRect(ctx, x, y, Math.max(16, w * Math.max(0, Math.min(1, share))), 16, 8);
+    var g = ctx.createLinearGradient(x, 0, x + w, 0);
+    g.addColorStop(0, "rgba(140,194,255,0.65)"); g.addColorStop(1, BLUE);
+    ctx.fillStyle = g; ctx.fill();
+  }
+
   function draw(canvas, card, side) {
     var ctx = canvas.getContext("2d"), me = card.fighters[side] || { strikes: null, total: null, movement: [] };
-    var other = side === "A" ? "B" : "A";
-    ctx.fillStyle = "#070a16"; ctx.fillRect(0, 0, W, H);
-    var glow = ctx.createRadialGradient(160, 220, 0, 160, 220, 900);
-    glow.addColorStop(0, "rgba(79,215,255,0.28)"); glow.addColorStop(1, "rgba(79,215,255,0)");
-    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
-    glow = ctx.createRadialGradient(W - 120, H - 260, 0, W - 120, H - 260, 900);
-    glow.addColorStop(0, "rgba(255,113,143,0.22)"); glow.addColorStop(1, "rgba(255,113,143,0)");
-    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+    var other = side === "A" ? "B" : "A", x = 84, w = W - 2 * x;
+    ctx.fillStyle = "#0a0f18"; ctx.fillRect(0, 0, W, H);
+    [[180, 360, "rgba(64,120,255,0.38)"], [W - 140, H - 520, "rgba(150,92,255,0.30)"], [W - 260, 700, "rgba(56,210,255,0.14)"]]
+      .forEach(function (light) {
+        var g = ctx.createRadialGradient(light[0], light[1], 0, light[0], light[1], 760);
+        g.addColorStop(0, light[2]); g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      });
 
-    var x = 96, y = 190;
+    // Header: the shield and the wordmark, as in the site's bar.
     ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = INK; ctx.font = font(800, 52); ctx.fillText("WARRIOR", x, y);
+    if (LOGO.complete && LOGO.naturalWidth) ctx.drawImage(LOGO, x, 72, 104, 104);
     // One word, as the site header spells it (QA, 2026-10-07: "WARRIOR IQ").
-    var wordmark = ctx.measureText("WARRIOR").width;
-    ctx.fillStyle = CYAN; ctx.fillText("IQ", x + wordmark, y);
+    ctx.fillStyle = INK; ctx.font = font(800, 58); ctx.fillText("WARRIOR", x + 128, 144);
+    ctx.fillText("IQ", x + 128 + ctx.measureText("WARRIOR").width, 144);
+    ctx.font = font(600, 32); ctx.fillStyle = MUTED;
+    ctx.fillText(String(card.sport || "Fight").toUpperCase() + "  ·  FIGHT ANALYSIS", x, 246);
 
-    y += 90;
-    ctx.font = font(600, 36); ctx.fillStyle = MUTED;
-    ctx.fillText(String(card.sport || "Fight").toUpperCase() + "  ·  FIGHT ANALYSIS", x, y);
-
-    if (me.total !== null && me.total !== undefined && me.strikes) {
-      y += 330;
-      ctx.fillStyle = INK; ctx.font = font(800, 300); ctx.fillText(String(me.total), x - 12, y);
-      y += 80;
-      ctx.font = font(600, 48); ctx.fillStyle = MUTED; ctx.fillText("strikes thrown", x, y);
-
-      y += 110;
+    var y = 290;
+    var counted = me.total !== null && me.total !== undefined && me.strikes;
+    if (counted) {
       var families = ["punch", "kick", "knee"].filter(function (f) { return f in me.strikes; }), top = 1;
       families.forEach(function (f) { top = Math.max(top, me.strikes[f]); });
+      var h = 330 + families.length * 96;
+      glass(ctx, x, y, w, h, 44);
+      ctx.fillStyle = INK; ctx.font = font(800, 230); ctx.fillText(String(me.total), x + 48, y + 236);
+      ctx.font = font(600, 44); ctx.fillStyle = MUTED; ctx.fillText("strikes thrown", x + 52, y + 300);
+      var row = y + 386;
       families.forEach(function (f) {
-        ctx.font = font(700, 44); ctx.fillStyle = INK; ctx.fillText(PLURAL[f] || f, x, y);
-        ctx.textAlign = "right"; ctx.fillText(String(me.strikes[f]), W - x, y); ctx.textAlign = "left";
-        roundRect(ctx, x, y + 26, W - 2 * x, 18, 9); ctx.fillStyle = LINE; ctx.fill();
-        roundRect(ctx, x, y + 26, Math.max(18, (W - 2 * x) * me.strikes[f] / top), 18, 9);
-        ctx.fillStyle = CYAN; ctx.fill();
-        y += 128;
+        ctx.font = font(700, 40); ctx.fillStyle = INK; ctx.fillText(PLURAL[f] || f, x + 52, row);
+        ctx.textAlign = "right"; ctx.fillText(String(me.strikes[f]), x + w - 52, row); ctx.textAlign = "left";
+        bar(ctx, x + 52, row + 24, w - 104, me.strikes[f] / top);
+        row += 96;
       });
-    } else {
-      // Strike counts are switched off: the card carries what was measured
-      // from movement instead, each row on its own 0-100 scale.
-      y += 140;
-      (me.movement || []).forEach(function (row) {
-        ctx.font = font(700, 44); ctx.fillStyle = INK; ctx.fillText(row.label, x, y);
-        ctx.textAlign = "right"; ctx.fillText(String(row.value) + (row.unit || ""), W - x, y); ctx.textAlign = "left";
-        roundRect(ctx, x, y + 26, W - 2 * x, 18, 9); ctx.fillStyle = LINE; ctx.fill();
-        roundRect(ctx, x, y + 26, Math.max(18, (W - 2 * x) * row.value / 100), 18, 9);
-        ctx.fillStyle = CYAN; ctx.fill();
-        y += 128;
-      });
+      y += h + 28;
     }
 
     if (card.score) {
-      y += 10;
-      ctx.font = font(600, 36); ctx.fillStyle = MUTED; ctx.fillText("Estimated score", x, y);
-      y += 110;
-      ctx.font = font(800, 110); ctx.fillStyle = INK;
-      ctx.fillText(card.score[side] + " – " + card.score[other], x, y);
-      y += 60;
+      glass(ctx, x, y, w, 190, 40);
+      ctx.font = font(600, 32); ctx.fillStyle = MUTED; ctx.fillText("Estimated score", x + 52, y + 64);
+      ctx.font = font(800, 104); ctx.fillStyle = INK;
+      ctx.fillText(card.score[side] + " – " + card.score[other], x + 48, y + 162);
+      y += 214;
     }
 
-    [["Strength", me.strength, CYAN], ["Working on", me.working_on, RED]].forEach(function (row) {
-      if (!row[1] || y > H - 420) return;
-      y += 40;
-      roundRect(ctx, x, y, W - 2 * x, 190, 28); ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fill();
-      ctx.fillStyle = row[2]; ctx.fillRect(x, y + 34, 8, 122);
-      ctx.font = font(600, 32); ctx.fillStyle = MUTED; ctx.fillText(row[0], x + 44, y + 70);
-      ctx.font = font(700, 42); ctx.fillStyle = INK; wrap(ctx, row[1], x + 44, y + 130, W - 2 * x - 88, 50, 2);
-      y += 190;
+    // What was measured from movement: tiles beside the counts, or the main
+    // panel when strike counts are switched off. Each on its own 0-100 scale.
+    var moves = (me.movement || []).slice(0, 4);
+    if (moves.length) {
+      var gap = 20, tw = (w - gap) / 2, th = 150;
+      moves.forEach(function (m, i) {
+        var tx = x + (i % 2) * (tw + gap), ty = y + Math.floor(i / 2) * (th + gap);
+        glass(ctx, tx, ty, tw, th, 36);
+        ctx.font = font(600, 28); ctx.fillStyle = MUTED; ctx.fillText(m.label, tx + 36, ty + 50);
+        ctx.font = font(800, 64); ctx.fillStyle = INK; ctx.fillText(String(m.value), tx + 34, ty + 114);
+        var valueWidth = ctx.measureText(String(m.value)).width;
+        ctx.font = font(600, 30); ctx.fillStyle = MUTED; ctx.fillText((m.unit || "").trim(), tx + 40 + valueWidth, ty + 114);
+        bar(ctx, tx + 36, ty + 124, tw - 72, m.value / 100);
+      });
+      y += Math.ceil(moves.length / 2) * (th + gap) + 4;
+    }
+
+    [["Strength", me.strength, BLUE], ["Working on", me.working_on, RED]].forEach(function (item) {
+      if (!item[1] || y > H - 360) return;
+      glass(ctx, x, y, w, 132, 34);
+      ctx.fillStyle = item[2]; roundRect(ctx, x + 30, y + 28, 8, 76, 4); ctx.fill();
+      ctx.font = font(600, 28); ctx.fillStyle = MUTED; ctx.fillText(item[0], x + 64, y + 54);
+      ctx.font = font(700, 38); ctx.fillStyle = INK; wrap(ctx, item[1], x + 64, y + 102, w - 110, 44, 1);
+      y += 152;
     });
 
-    ctx.font = font(500, 30); ctx.fillStyle = MUTED;
-    wrap(ctx, card.note, x, H - 190, W - 2 * x, 42, 2);
-    ctx.font = font(700, 38); ctx.fillStyle = INK; ctx.fillText("warrioriq.eu", x, H - 96);
+    ctx.font = font(500, 28); ctx.fillStyle = MUTED;
+    wrap(ctx, card.note, x, H - 200, w, 40, 2);
+    if (LOGO.complete && LOGO.naturalWidth) ctx.drawImage(LOGO, x, H - 138, 56, 56);
+    ctx.font = font(700, 40); ctx.fillStyle = INK; ctx.fillText("warrioriq.eu", x + 72, H - 96);
   }
 
   function toast(message, kind) { if (window.wiqToast) window.wiqToast(message, kind); }
@@ -225,6 +253,8 @@
     var card = JSON.parse(data.textContent), canvas = dialog.querySelector("canvas");
     var side = dialog.dataset.side === "B" ? "B" : "A";
     function render() { draw(canvas, card, side); }
+    // The logo usually arrives after the first draw: put it on the card.
+    LOGO.addEventListener("load", function () { if (dialog.open) render(); });
     var box = dialog.querySelector("[data-story-job]");
     var link = box ? initLink(box, function () { return side; }) : null;
     dialog.querySelectorAll("input[name=shareSide]").forEach(function (input) {

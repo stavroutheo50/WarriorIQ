@@ -60,7 +60,11 @@ def test_the_avatar_uses_the_athletes_name():
     assert web.account_display({"email": "stavros@example.com", "display_name": "Theo Stavrou"})["initial"] == "T"
     # The placeholder every new profile starts with is not a name.
     placeholder = web.account_display({"email": "stavros@example.com", "display_name": web.SETTINGS.default_profile_name})
-    assert (placeholder["initial"], placeholder["label"]) == ("S", "stavros@example.com")
+    # The bar never shows the email (owner, 2026-10-28): with no name and no
+    # username it has no label, and the page asks for a username instead.
+    assert (placeholder["initial"], placeholder["label"], placeholder["has_username"]) == ("S", "", False)
+    handle = web.account_display({"email": "stavros@example.com", "display_name": "Theo Stavrou", "handle": "theo.kicks"})
+    assert (handle["label"], handle["initial"], handle["has_username"]) == ("@theo.kicks", "T", True)
 
 
 def test_the_header_shows_the_name_once_it_is_set():
