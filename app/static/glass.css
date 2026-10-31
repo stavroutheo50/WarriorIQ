@@ -474,3 +474,80 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
   .stat-row dt { font-size: 13px; }
   .stat-timeline { gap: 2px; }
 }
+
+/* --- Live analysis: the scoreboard over the video (progress.html) ----------
+   Each fighter's live strike count on the side they were picked on, in their
+   colour; a count that goes up pops once. */
+.live-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 18px;
+  border: 1px solid var(--glass-edge-side);
+  border-top-color: var(--glass-edge-top);
+  border-radius: 22px;
+  background: var(--glass-fill-strong);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.live-board-side { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.live-board-side.is-right { flex-direction: row-reverse; text-align: right; }
+.live-board-side span { overflow: hidden; color: #dfe4ee; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.live-board-side strong { font-size: clamp(34px, 5vw, 52px); font-weight: 850; line-height: 1; font-variant-numeric: tabular-nums; }
+.live-board-side.fighter-a strong { color: #8cc2ff; }
+.live-board-side.fighter-b strong { color: #f7c96b; }
+.live-board-mid { display: grid; justify-items: center; color: var(--glass-text-faint); text-align: center; }
+.live-board-mid b { color: #ffffff; font-size: 13px; text-transform: uppercase; letter-spacing: .1em; }
+.live-board-mid small { font-size: 12px; }
+.live-board strong.is-hit { animation: board-hit .5s cubic-bezier(.2, .8, .2, 1); }
+@keyframes board-hit { 0% { transform: scale(1); } 35% { transform: scale(1.25); text-shadow: 0 0 22px currentColor; } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .live-board strong.is-hit { animation: none; } }
+@media (max-width: 560px) {
+  .live-board { padding: 10px 14px; gap: 8px; }
+  .live-board-side, .live-board-side.is-right { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .live-board-side.is-right { align-items: flex-end; }
+  .live-board-side span { max-width: 100%; font-size: 12px; }
+}
+
+/* --- Colour (owner, 2026-10-28: "a bit more colour") -------------------------
+   A soft light at the top of every page: the sport's own colour on a sport's
+   pages, blue and violet elsewhere. The page below stays plain. */
+body {
+  background:
+    radial-gradient(1000px 480px at 12% -120px, rgb(var(--sport-accent, 64 120 255) / .26), transparent 70%),
+    radial-gradient(860px 440px at 92% -140px, rgba(150, 92, 255, .2), transparent 70%),
+    var(--glass-canvas) !important;
+  background-repeat: no-repeat !important;
+}
+/* Eyebrows carry a small gradient line instead of a flat dash. */
+.eyebrow::before { background: linear-gradient(90deg, #8cc2ff, #a98bff) !important; }
+/* Fight library: each fighter's name in their colour, and a split bar of
+   strikes thrown under the result. */
+.fight-strike-split { display: grid; grid-template-columns: auto minmax(60px, 1fr) auto; align-items: center; gap: 8px; margin-top: 10px; }
+.fight-strike-split b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.fight-strike-split .stat-bar { grid-column: auto; height: 6px; }
+.fight-strike-label { display: block; margin-top: 2px; color: var(--glass-text-faint); font-size: 12px; }
+
+/* --- Homepage clip (index.html) -------------------------------------------
+   The real tracking example in the glass frame where the interface preview
+   was. */
+.home-preview { margin: 0; }
+.home-clip { position: relative; overflow: hidden; border-radius: 20px; background: #05070b; aspect-ratio: 16 / 9; }
+.home-clip video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.home-clip-live {
+  position: absolute; top: 12px; right: 12px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--glass-edge-side); border-top-color: var(--glass-edge-top); border-radius: 999px;
+  background: rgba(10, 15, 24, .55);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+}
+.home-clip-live i { width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; box-shadow: 0 0 10px #3ddc97; }
+.home-preview figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 6px 2px; color: #dfe4ee; font-size: 13px; }
+.home-preview figcaption span { display: inline-flex; align-items: center; gap: 6px; }
+.home-dot { width: 10px; height: 10px; border-radius: 3px; }
+.home-dot-a { background: #8cc2ff; }
+.home-dot-b { background: #f7c96b; }
+.home-clip-note { margin-left: auto; color: var(--glass-text-faint); }

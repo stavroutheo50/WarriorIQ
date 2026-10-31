@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}WarriorIQ · AI Fight Analysis for Combat Sports{% endblock %}
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
+(() => {
+  const clip = document.getElementById('heroClip');
+  if (!clip) return;
+  // Reduced motion: the poster stays, the clip does not play.
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { clip.removeAttribute('autoplay'); clip.pause(); return; }
+  clip.play().catch(() => {});
+})();
+</script>{% endblock %}
 {% block description %}Upload a kickboxing, boxing, Muay Thai, taekwondo or MMA fight. WarriorIQ measures how both fighters moved{% if features.scoring.on %}, estimates the round-by-round score under your sport's rules,{% endif %} and builds a four-week training plan from your own numbers.{% endblock %}
 {% block content %}
 {#- The glass homepage (owner, 2026-10-28): straight to the point. One line,
@@ -14,15 +23,19 @@
   <p class="home-lead">Film it on your phone. WarriorIQ measures both fighters' movement, guard and balance{% if features.strike_counts.on %}, counts what they threw{% endif %}{% if features.scoring.on %}, gives a round-by-round score estimate{% endif %} and builds your four-week plan.{% if not features.scoring.on %} Score estimates are coming.{% endif %}</p>
   <div class="home-actions">{% if request.state.account %}<a class="btn btn-lead" data-motion-primary href="/analyze">Analyse my video <span aria-hidden="true">&#8594;</span></a>{% else %}<a class="btn btn-lead" data-motion-primary href="/signup?next=/analyze">Create a free account <span aria-hidden="true">&#8594;</span></a>{% endif %}<a class="btn secondary btn-lead" href="/sample-report">See a sample report</a></div>
   </div>
-  {#- The interface preview the homepage had before (owner, 2026-10-28: "the
-      interface preview, that's it"), in a glass frame. -#}
-  <div class="home-preview glass-panel" aria-label="Illustration of the WarriorIQ live-analysis interface">
-    <div class="preview-screen">
-      <div class="preview-screen-head"><span><i></i> Interface preview</span><b>WarriorIQ live</b></div>
-      <div class="preview-fight-stage"><span class="preview-fighter preview-a">A</span><span class="preview-fighter preview-b">B</span><i class="preview-scan" aria-hidden="true"></i></div>
-      <div class="preview-timeline"><i></i><span></span><span></span><span></span></div>
+  {#- A real example instead of two empty boxes (owner, 2026-10-28): seven
+      seconds of a free-licence stock clip (Mixkit 40979, "Two women fighting
+      mixed martial arts", Mixkit Stock Video Free License) with WarriorIQ's
+      own analysis drawn on it - the boxes, skeletons and strike names are
+      the analyser's output, nothing added by hand. Still for anyone who has
+      asked for less motion. -#}
+  <figure class="home-preview glass-panel">
+    <div class="home-clip">
+      <video id="heroClip" src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline autoplay preload="auto" aria-label="An MMA exchange with WarriorIQ following both fighters: a box and skeleton on each, and each strike named as it is thrown"></video>
+      <span class="home-clip-live" aria-hidden="true"><i></i>WarriorIQ live</span>
     </div>
-  </div>
+    <figcaption><span><i class="home-dot home-dot-a"></i>Fighter A</span><span><i class="home-dot home-dot-b"></i>Fighter B</span><span class="home-clip-note">Real WarriorIQ tracking on a stock clip</span></figcaption>
+  </figure>
 </section>
 
 {#- Numbers from one real WarriorIQ report (a 94-second Kick Light round
