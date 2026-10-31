@@ -81,14 +81,15 @@ def test_pricing_copy_follows_the_period():
 
 
 # --------------------------------------------------------------------- #53
-def test_the_preview_is_the_original_interface_preview():
-    # The owner asked for the original preview back (2026-10-19), and again
-    # beside the glass homepage's headline (2026-10-28); no demo-clip placeholder.
+def test_the_hero_shows_a_real_tracking_example():
+    # The empty interface preview became a real example (owner, 2026-10-28):
+    # a stock clip with WarriorIQ's own tracking drawn on it, never a placeholder.
     page = BrowserClient(web.app).get("/").text
-    assert '<span class="preview-fighter preview-a">A</span>' in page
-    assert "Interface preview" in page
+    assert 'id="heroClip" src="/static/hero-fight.mp4' in page
+    assert "Real WarriorIQ tracking on a stock clip" in page
     assert "From a real WarriorIQ report" in page
     assert "Demo clip coming soon" not in page and "goes here" not in page
+    assert (web.ROOT / "app" / "static" / "hero-fight.mp4").stat().st_size < 4_000_000
 
 
 # --------------------------------------------------------------------- #54
