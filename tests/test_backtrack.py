@@ -188,26 +188,36 @@ def test_a_failed_seed_check_never_reruns_from_the_seed():
 
 
 @pytest.mark.parametrize("reason", ["camera_cut", "fighter_lost", "not_detected_at_seed", "unavailable"])
-def test_no_hand_off_still_analyses_from_the_start(reason):
-    # 0:18 of 0:30, 0:08 of 0:10 and 0:05 of 0:08 were analysed only from the
-    # chosen frame on. The forward pass now starts at 0:00 whatever the
-    # backward pass managed, and the chosen frame checks who is who.
+def test_no_hand_off_starts_at_the_chosen_frame_and_says_so(reason):
+    # The boxes were drawn on the chosen frame; at 0:00 they sit on whoever
+    # happens to be there. The opening is left out, and the report names it.
     handoff = backtrack.Handoff(seed_frame=900, requested_start_frame=0, frame=900, reason=reason)
     (req, kwargs), = _run(handoff)
-    assert req.start_seconds == 0.0
+    assert req.start_seconds == 30.0
     assert req.fighter_a_box == A_BOX and req.fighter_b_box == B_BOX
     assert kwargs["seed_check"]["frame"] == 900
-    assert kwargs.get("excluded_reason") is None
+    assert kwargs["excluded_reason"] == reason
 
 
-def test_a_hand_off_that_stopped_short_still_starts_at_the_beginning():
+def test_a_hand_off_that_stopped_short_starts_where_it_stopped():
+    # Owner, 2026-11-01 (V18 picked at 1:38, followed back to 1:31): starting
+    # at 0:00 with 1:31's boxes swapped the fighters before the pick and the
+    # report withheld everything. The forward pass starts at 1:31 instead.
     handoff = backtrack.Handoff(seed_frame=900, requested_start_frame=0, frame=450,
                                 a_box=[95, 80, 195, 310], b_box=[405, 80, 505, 310], reason="fighter_lost")
     (req, kwargs), = _run(handoff)
-    assert req.start_seconds == 0.0
-    # The earliest boxes both fighters were followed to are the best guess.
+    assert req.start_seconds == 15.0
     assert req.fighter_a_box == [95, 80, 195, 310]
     assert kwargs["seed_check"]["a_box"] == A_BOX
+    assert kwargs["excluded_reason"] == "fighter_lost"
+
+
+def test_a_hand_off_that_stopped_within_the_first_second_keeps_the_whole_video():
+    handoff = backtrack.Handoff(seed_frame=900, requested_start_frame=0, frame=20,
+                                a_box=[95, 80, 195, 310], b_box=[405, 80, 505, 310], reason="fighter_lost")
+    (req, kwargs), = _run(handoff)
+    assert req.start_seconds == pytest.approx(20 / 30.0)
+    assert kwargs["excluded_reason"] is None
 
 
 def test_an_unconfirmed_seed_makes_the_identity_untrusted():
