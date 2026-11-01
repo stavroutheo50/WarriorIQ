@@ -94,5 +94,7 @@ def test_the_boxing_live_page_never_lists_kicks():
         request=Stub(state=Stub(csrf_token="t" * 43, csp_nonce="n", account=None), url=Stub(path="/p")),
         job_id="j", initial_status={}, live_counting_note="", strike_counts_published=True,
         live_families=("punch",), asset_version="t")
+    # The live statistics rows were removed with the section (owner,
+    # 2026-11-01); none of them may come back for a boxing fight.
     for label in ("Kick attempts", "Kicks landed", "Kick accuracy"):
-        assert re.search(rf"<div hidden><span>{label}", html), label
+        assert label not in html, label

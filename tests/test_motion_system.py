@@ -33,8 +33,11 @@ class WarriorIQMotionSystemTests(TestCase):
     def test_live_statistics_use_the_shared_counting_api(self):
         template = (ROOT / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
 
-        self.assertIn("WarriorIQMotion?.countTo", template)
+        # The counted statistics panel is gone (owner, 2026-11-01); the live
+        # score board and the feed remain.
+        self.assertNotIn("WarriorIQMotion?.countTo", template)
         self.assertIn("eventElementById", template)
+        self.assertIn("function renderBoard", template)
 
     def test_motion_css_keeps_effects_scoped_and_reduced_motion_safe(self):
         css = (ROOT / "app" / "static" / "motion.css").read_text(encoding="utf-8")
