@@ -1,0 +1,26 @@
+{
+ "covered": [
+  0.0,
+  7.5
+ ],
+ "unreadable": [],
+ "strikes": [
+  {
+   "t": 1.84,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 6.1,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "hook",
+   "outcome": null,
+   "sure": true
+  }
+ ],
+ "notes": "Waist-up and close: neither boxer's legs are in the picture, so any kick or knee counted here is false. A: blue gloves (left). B: red gloves. A's arm at 1.84 s reaches over B's head and stays there, more a hold than a punch, so not sure. After 7.5 s A is out of frame."
+}
