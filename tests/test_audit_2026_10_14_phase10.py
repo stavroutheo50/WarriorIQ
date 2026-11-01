@@ -84,9 +84,11 @@ def test_pricing_copy_follows_the_period():
 def test_the_preview_is_the_original_interface_preview():
     # The owner asked for the original preview back (2026-10-19), and again
     # beside the glass homepage's headline (2026-10-28); no demo-clip placeholder.
+    # Since 2026-11-01 the frame holds a click-to-play skeleton illustration,
+    # labelled as one and still until the visitor presses play.
     page = BrowserClient(web.app).get("/").text
-    assert '<span class="preview-fighter preview-a">A</span>' in page
-    assert "Interface preview" in page
+    assert 'class="pv-fighter pv-a"' in page and 'data-preview-play hidden' in page
+    assert "Interface preview" in page and "<b>Illustration</b>" in page
     assert "From a real WarriorIQ report" in page
     assert "Demo clip coming soon" not in page and "goes here" not in page
 

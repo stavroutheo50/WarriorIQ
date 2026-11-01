@@ -343,6 +343,50 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 }
 .home-preview .preview-screen-head b { color: rgba(255, 255, 255, .85); }
 
+/* Click-to-play skeletons in the interface frame (owner, 2026-11-01). Every
+   animation is paused until the visitor presses play; reduced-motion visitors
+   can still choose to play it, since nothing moves on its own. */
+.preview-skeletons svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.preview-skeletons .pv-floor { stroke: rgba(255, 255, 255, .12); stroke-width: 1; }
+.pv-fighter { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.pv-fighter circle { stroke: none; }
+.pv-fighter .pv-head { fill: none; stroke-width: 2.5; }
+.pv-fighter text { stroke: none; font-size: 13px; font-weight: 850; text-anchor: middle; }
+.pv-a { stroke: var(--wiq-a); }
+.pv-a circle, .pv-a text { fill: var(--wiq-a); }
+.pv-a .pv-head { stroke: var(--wiq-a); fill: none; }
+.pv-b { stroke: var(--wiq-b); }
+.pv-b circle, .pv-b text { fill: var(--wiq-b); }
+.pv-b .pv-head { stroke: var(--wiq-b); fill: none; }
+/* The jab rests half-extended, so the still frame reads as a guard. */
+.pv-jab { transform-origin: 114px 58px; transform: scaleX(.45); }
+.pv-a { animation: pv-step-in 3.2s ease-in-out infinite paused; }
+.pv-jab { animation: pv-jab 3.2s ease-in-out infinite paused; }
+/* The hand moves with the jab rather than scaling with it, so it stays round. */
+.pv-hand { transform: translateX(-28.6px); animation: pv-hand 3.2s ease-in-out infinite paused; }
+.pv-b { animation: pv-step-back 3.2s ease-in-out infinite paused; }
+.home-preview .preview-timeline i { width: 0; animation: pv-playhead 3.2s linear infinite paused; }
+.home-preview.is-playing .pv-a, .home-preview.is-playing .pv-b,
+.home-preview.is-playing .pv-jab, .home-preview.is-playing .pv-hand, .home-preview.is-playing .preview-timeline i { animation-play-state: running; }
+@keyframes pv-step-in { 0%, 100% { transform: translateX(0); } 30%, 55% { transform: translateX(8px); } }
+@keyframes pv-jab { 0%, 32% { transform: scaleX(.45); } 40%, 46% { transform: scaleX(1); } 56%, 100% { transform: scaleX(.45); } }
+@keyframes pv-hand { 0%, 32% { transform: translateX(-28.6px); } 40%, 46% { transform: translateX(0); } 56%, 100% { transform: translateX(-28.6px); } }
+@keyframes pv-step-back { 0%, 38% { transform: translateX(0); } 48%, 70% { transform: translateX(10px); } 100% { transform: translateX(0); } }
+@keyframes pv-playhead { from { width: 0; } to { width: 100%; } }
+.preview-controls { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
+.preview-controls .preview-timeline { flex: 1 1 auto; margin: 0 3px; }
+.preview-play {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, .22); border-radius: 999px;
+  background: rgba(6, 9, 15, .72); color: #ffffff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.preview-play:hover { background: rgba(20, 26, 38, .9); }
+.preview-play[hidden] { display: none; }
+.preview-play-icon { width: 0; height: 0; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; }
+.is-playing .preview-play-icon { width: 10px; height: 12px; border-width: 0 3px; border-color: currentColor; }
+@media (forced-colors: active) { .pv-fighter, .pv-fighter .pv-head { stroke: CanvasText; } .pv-fighter circle, .pv-fighter text { fill: CanvasText; } }
+
 .home-proof { padding: 16px 0 72px; }
 .home-proof-title, .home-steps h3 { margin: 0; }
 .home-proof-title { color: var(--glass-text-faint); font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .1em; }

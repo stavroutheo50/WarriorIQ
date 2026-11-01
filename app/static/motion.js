@@ -130,5 +130,17 @@
     element.classList.remove('selection-impact');
     requestAnimationFrame(()=>element.classList.add('selection-impact'));
   };
+  // The homepage's click-to-play illustration (owner, 2026-11-01). Nothing
+  // moves until the visitor asks; without this script the still frame stands.
+  document.querySelectorAll('[data-preview-motion]').forEach(preview=>{
+    const button=preview.querySelector('[data-preview-play]'),label=button?.querySelector('.preview-play-label');
+    if(!button||!label)return;
+    button.hidden=false;
+    button.addEventListener('click',()=>{
+      const playing=preview.classList.toggle('is-playing');
+      label.textContent=playing?'Pause animation':'Play animation';
+    });
+  });
+
   window.WarriorIQMotion={impact,reduced,countTo};
 })();
