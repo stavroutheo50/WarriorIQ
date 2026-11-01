@@ -69,7 +69,11 @@ def rebuild(folder: Path, scratch: Path) -> None:
         fight_type="sparring", ruleset=source["ruleset"], start_seconds=0.0, selection_seconds=selection,
         round_count=1, round_duration_seconds=600, break_duration_seconds=0,
         job_id=folder.name, profile_id=1, persist_result=False), lambda _patch: None)
-    tracking = scratch / "out" / folder.name / "tracking.jsonl"
+    # Wherever the analysis was actually told to write: main() points it at the
+    # scratch folder, but settings read earlier in the process (a
+    # sitecustomize that imports core, say) keep whatever was set before.
+    from core.config import OUTPUTS
+    tracking = OUTPUTS / folder.name / "tracking.jsonl"
     with open(tracking, "rb") as raw, gzip.open(folder / "track.jsonl.gz", "wb") as packed:
         shutil.copyfileobj(raw, packed)
     print(folder / "track.jsonl.gz")

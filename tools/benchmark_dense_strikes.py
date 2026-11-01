@@ -172,6 +172,25 @@ def _held_out_head(fight_name: str):
     return lambda features: fit_strike_check.predict(head, np.atleast_2d(features))[0]
 
 
+def _local_video(fight: Path) -> Path:
+    """The fight's video on this machine.
+
+    A regression fight names its file; a stock clip (dataset/stock_strikes/)
+    only names where to download it, so it is fetched once into
+    dataset/public/, which stays out of Git like every other fight video.
+    """
+    source = json.loads((fight / "source.json").read_text(encoding="utf-8"))
+    if "video" in source:
+        return PROJECT_ROOT / source["video"]
+    local = PROJECT_ROOT / "dataset" / "public" / "stock_strikes_video" / f"{fight.name}.mp4"
+    if not local.exists():
+        import urllib.request
+
+        local.parent.mkdir(parents=True, exist_ok=True)
+        urllib.request.urlretrieve(source["download_url"], local)
+    return local
+
+
 def _video_checked(fight: Path, truth: dict) -> list:
     """Replay with the video punch check scoring punches before the pair rule."""
     import gzip
@@ -196,9 +215,8 @@ def _video_checked(fight: Path, truth: dict) -> list:
                 boxes = [((record.get(f"fighter_{f}") or {}).get("observation") or {}).get("box") for f in "AB"]
                 rows.append((float(record["time_seconds"]), boxes[0], boxes[1]))
         lookup = strike_verifier.boxes_from_track(rows)
-        video = json.loads((fight / "source.json").read_text(encoding="utf-8"))["video"]
         values = strike_verifier.clip_features(
-            str(PROJECT_ROOT / video),
+            str(_local_video(fight)),
             [float(punches[i].evidence.get("action_peak_time", punches[i].peak_time)) for i in missing],
             [lookup(punches[i].fighter) for i in missing])
         for i, value in zip(missing, values):
