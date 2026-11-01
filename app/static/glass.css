@@ -250,10 +250,13 @@ select, .moment-time, .sport-switch { border-radius: 999px !important; }
 .notice { border-radius: 18px; }
 
 /* --- Form fields ---------------------------------------------------------- */
+/* background-color, never the background shorthand: a dropdown draws its
+   arrow as a background image, and the shorthand reset it to repeat across
+   the whole box on hover (owner, 2026-11-01). */
 .field input, .field select, .field textarea, .field-input {
   border: 1px solid var(--glass-edge);
   border-radius: 14px;
-  background: rgba(255, 255, 255, .05);
+  background-color: rgba(255, 255, 255, .05);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, .25);
 }
 .field input:focus, .field select:focus, .field textarea:focus, .field-input:focus {
@@ -268,7 +271,7 @@ select, .moment-time, .sport-switch { border-radius: 999px !important; }
   padding: 8px 12px;
   border: 1px solid var(--glass-edge);
   border-radius: 12px;
-  background: rgba(255, 255, 255, .05);
+  background-color: rgba(255, 255, 255, .05);
   color: inherit;
 }
 
@@ -579,3 +582,39 @@ body {
 /* --- Sample report (sample_report.html) --- */
 .sample-notes .home-cards { margin-top: 18px; }
 .sample-source { margin-top: 22px; }
+
+/* --- Upload form: one step at a time (analyze.html) ------------------------
+   The button styles set display, which beat the hidden attribute: Back and
+   the upload button showed on the first step. */
+#uploadSteps[hidden], #uploadSteps li[hidden], #uploadStepNav[hidden], #uploadStepNav [hidden], #uploadSubmit[hidden] { display: none !important; }
+.upload-steps { display: flex; gap: 8px; margin: 4px 0 18px; padding: 0; list-style: none; }
+.upload-steps li {
+  display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--glass-edge-side); border-radius: 999px;
+  background: var(--glass-tint); color: var(--glass-text-faint);
+  font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.upload-steps li b {
+  display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(255, 255, 255, .1); color: #ffffff; font-size: 12px;
+}
+.upload-steps li[aria-current="step"] { border-top-color: var(--glass-edge-top); background: var(--glass-tint-hover); color: #ffffff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2); }
+.upload-steps li.is-done { color: #dfe4ee; }
+.upload-steps li.is-done b { background: #3ddc97; color: #06121a; }
+.upload-step-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
+.upload-step-nav .btn { min-width: 120px; }
+.upload-step-nav #uploadStepNext { margin-left: auto; }
+
+/* --- Upload page: how to film, shown (analyze.html) --- */
+.film-guide { margin-bottom: 20px; }
+.film-guide h2 { margin: 0 0 12px; font-size: 22px; letter-spacing: -.01em; }
+.film-shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; }
+.film-shot { margin: 0; overflow: hidden; border: 1px solid var(--glass-edge-side); border-top-color: var(--glass-edge-top); border-radius: 18px; background: var(--glass-fill); }
+.film-shot img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.film-shot.is-bad img { filter: saturate(.75); }
+.film-shot figcaption { display: flex; gap: 10px; padding: 10px 12px 12px; color: var(--glass-text-faint); font-size: 13px; line-height: 1.4; }
+.film-shot figcaption strong { display: block; color: #ffffff; font-size: 14px; }
+.film-shot figcaption b { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 24px; border-radius: 50%; font-size: 14px; }
+.film-shot.is-good figcaption b { background: #3ddc97; color: #06121a; }
+.film-shot.is-bad figcaption b { background: #ff5d6c; color: #ffffff; }

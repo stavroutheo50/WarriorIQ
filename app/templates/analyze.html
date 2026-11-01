@@ -23,6 +23,11 @@
     {% if pending_uploads %}<p class="console-pending small{% if pending_uploads.full %} pair-warning{% endif %}" id="pendingUploads" data-count="{{pending_uploads.count}}" data-limit="{{pending_uploads.limit if pending_uploads.limit is not none else ''}}">{% if pending_uploads.limit is none %}Fights waiting: {{pending_uploads.count}} &middot; no limit on your plan.{% elif pending_uploads.full %}Fights waiting: {{pending_uploads.count}} of {{pending_uploads.limit}}. Your plan allows {{pending_uploads.limit}} at a time &mdash; <a class="text-link" href="/history#pending">finish or cancel one</a> before uploading another.{% else %}Fights waiting: {{pending_uploads.count}} of {{pending_uploads.limit}} your plan allows at a time.{% endif %}</p>{% endif %}
     {% set allowance_exhausted = allowance and allowance.remaining == 0 and not allowance.bonus_remaining %}
     <form id="fightUploadForm" action="/upload" method="post" enctype="multipart/form-data" data-sport="{{sport}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+      {#- One step at a time, each on its own (owner, 2026-11-01: "it must not be
+          everything on the same page"): the video, then the fight details,
+          then the checks, with Back and Next. Without the script every field
+          shows, as before; the fields and the server are unchanged. -#}
+      <ol class="upload-steps" id="uploadSteps" hidden><li data-step="video"><b>1</b>Video</li><li data-step="who"><b>2</b>Details</li><li data-step="check"><b>3</b>Confirm</li></ol>
       <div class="field upload-field" data-upload-step="video"><label>Fight video</label><input class="file-native" id="fightVideo" type="file" name="video" accept="{{fight_video_accept}}" required {% if allowance_exhausted %}disabled{% endif %}><label class="file-button {% if allowance_exhausted %}disabled{% endif %}" id="fileButton" for="fightVideo" data-motion-primary><span aria-hidden="true">↥</span><b id="fileButtonText">{% if allowance_exhausted %}Analysis allowance used{% else %}Choose fight video{% endif %}</b><small>{% if allowance_exhausted %}{% if held_upload %}Held by a video waiting for its fighters{% else %}Resets automatically{% endif %}{% else %}Tap to browse{% endif %}</small></label><div class="file-status" id="fileStatus" aria-live="polite">{% if allowance_exhausted %}{% if held_upload %}Your analysis is held by <strong>{{ held_upload.name }}</strong>, still waiting for its fighters. <a class="text-link" href="{{ held_upload.url }}">Pick the fighters</a> or <a class="text-link" href="/history#pending">cancel it</a> to upload a different video.{% else %}<a class="text-link" href="/pricing">Compare plans for more analyses</a>{% endif %}{% else %}{{fight_video_label}} &mdash; up to {{ '%.1f'|format(upload_limit_bytes / 1048576) }} MB{% endif %}</div>
       {#- Filled in by the pre-upload check. Hidden until there is something
           measured to say, so an empty panel never occupies the page. #}
@@ -61,7 +66,7 @@
       {#- Asked near the top, next to the video (owner, 2026-10-20): the rules
           decide what is scored, so they were too easy to miss under
           "More options". Still defaults to the sport's first ruleset. -#}
-      <div class="field upload-rules">
+      <div class="field upload-rules" data-upload-step="who">
         <label for="fightRuleset">Which rules?</label>
         <select id="fightRuleset" name="ruleset">{% for key, label in rulesets %}<option value="{{key}}" data-hint="{{ ruleset_hints.get(key, '') if ruleset_hints is defined else '' }}">{{label}}</option>{% endfor %}</select>
         {#- What the chosen rules mean, for whoever does not know (core.scoring.ruleset_hint). -#}
@@ -144,6 +149,7 @@
       {% if request.state.external_ai_available %}
       </details>
       {% endif %}
+      <div class="upload-step-nav" id="uploadStepNav" hidden><button class="btn secondary" type="button" id="uploadStepBack">&#8592; Back</button><button class="btn" type="button" id="uploadStepNext">Next &#8594;</button></div>
       <p class="upload-validation" id="uploadValidation" role="status" aria-live="polite" hidden></p>
       {#- The server's own reason for refusing an upload, next to the button
           that retries it, plus the step that follows from it. It used to
@@ -180,6 +186,18 @@
       first-time visitor gave up before reaching it. Same words, still on
       the page; the sport cards already say what each sport's report counts. -#}
   <div class="setup-notes">
+    {#- Show, don't tell (owner, 2026-11-01): how to film, as three real frames
+        instead of paragraphs. Each is from a free-licence Mixkit stock clip
+        (Mixkit Stock Video Free License): 40979, 40966 and 40956. -#}
+    <section class="film-guide" aria-labelledby="filmGuideTitle">
+      <h2 id="filmGuideTitle">Film it like this</h2>
+      <div class="film-shots">
+        <figure class="film-shot is-good"><img src="/static/filming/good-full-body.jpg" width="640" height="360" loading="lazy" alt="Two fighters in a cage, both seen whole from head to feet, side-on to the camera"><figcaption><b aria-hidden="true">&#10003;</b><span><strong>Both fighters, head to feet</strong>Side-on, camera still, whole cage or ring in view.</span></figcaption></figure>
+        <figure class="film-shot is-bad"><img src="/static/filming/bad-legs-cut.jpg" width="640" height="360" loading="lazy" alt="Two boxers seen only from the waist up"><figcaption><b aria-hidden="true">&#10007;</b><span><strong>Legs cut off</strong>Kicks, knees and footwork cannot be read.</span></figcaption></figure>
+        <figure class="film-shot is-bad"><img src="/static/filming/bad-too-close.jpg" width="640" height="360" loading="lazy" alt="A boxer filmed so close that he blocks his opponent"><figcaption><b aria-hidden="true">&#10007;</b><span><strong>Too close</strong>One fighter hides the other.</span></figcaption></figure>
+      </div>
+      <p class="small"><a class="text-link" href="/how-to-record-a-fight-for-analysis">More filming tips</a></p>
+    </section>
     {#- What this sport's report will count, and how far to trust it. Every
         sport gets the same box from the same policy (core/sport_policy.py):
         it used to appear on three sports, say "punches, kicks and knees"
@@ -348,15 +366,25 @@
     who:()=>{const pick=document.getElementById('fighterPick'),name=document.getElementById('fighterName');
       if(pick)return Boolean(pick.value)&&(pick.value!=='new'||Boolean(name&&name.value.trim()));
       return name?Boolean(name.value.trim()):true}};
-  const opened=new Set(['video']);
+  // One step on screen at a time (owner, 2026-11-01). Next opens the
+  // following step once this one is answered; the upload button belongs to
+  // the last step only.
+  const stepNav=document.getElementById('uploadStepNav'),stepBack=document.getElementById('uploadStepBack'),stepNext=document.getElementById('uploadStepNext'),stepList=document.getElementById('uploadSteps');
+  const presentSteps=()=>stepOrder.filter(name=>form.querySelector(`[data-upload-step="${name}"]`));
+  let currentStep='video';
   const revealSteps=()=>{
-    let ready=true;
-    for(const name of stepOrder){
-      const parts=[...form.querySelectorAll(`[data-upload-step="${name}"]`)];
-      if(!parts.length)continue;
-      if(ready)opened.add(name);
-      parts.forEach(part=>{part.hidden=!opened.has(name)});
-      ready=ready&&(!stepDone[name]||stepDone[name]())}};
+    const steps=presentSteps();
+    if(!steps.includes(currentStep))currentStep=steps[0];
+    const at=steps.indexOf(currentStep),last=at===steps.length-1;
+    steps.forEach(name=>form.querySelectorAll(`[data-upload-step="${name}"]`).forEach(part=>{part.hidden=name!==currentStep}));
+    if(stepList){stepList.hidden=steps.length<2;stepList.querySelectorAll('li').forEach(item=>{const n=steps.indexOf(item.dataset.step);item.hidden=n<0;item.classList.toggle('is-done',n>=0&&n<at);if(item.dataset.step===currentStep)item.setAttribute('aria-current','step');else item.removeAttribute('aria-current')})}
+    if(stepNav){stepNav.hidden=steps.length<2;stepBack.hidden=at<=0;stepNext.hidden=last;stepNext.disabled=Boolean(stepDone[currentStep])&&!stepDone[currentStep]()}
+    uploadSubmit.hidden=!last};
+  const goToStep=offset=>{const steps=presentSteps(),at=steps.indexOf(currentStep);
+    currentStep=steps[Math.max(0,Math.min(steps.length-1,at+offset))];syncSubmit();
+    form.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'})};
+  if(stepBack)stepBack.addEventListener('click',()=>goToStep(-1));
+  if(stepNext)stepNext.addEventListener('click',()=>{if(!stepNext.disabled)goToStep(1)});
   {const rules=document.getElementById('fightRuleset'),hint=document.getElementById('rulesetHint');
    if(rules&&hint){const tail=hint.textContent.slice(hint.textContent.indexOf('Not sure?'));
      rules.addEventListener('change',()=>{const h=rules.selectedOptions[0].dataset.hint||'';hint.textContent=h?`${h} ${tail}`:tail})}}
