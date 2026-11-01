@@ -343,6 +343,18 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 }
 .home-preview .preview-screen-head b { color: rgba(255, 255, 255, .85); }
 
+/* The hero clip's play button (owner, 2026-11-01), over the clip's corner. */
+.preview-play {
+  position: absolute; right: 12px; bottom: 12px;
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, .22); border-radius: 999px;
+  background: rgba(6, 9, 15, .72); color: #ffffff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.preview-play:hover { background: rgba(20, 26, 38, .9); }
+.preview-play[hidden] { display: none; }
+.preview-play-icon { width: 0; height: 0; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; }
+.is-playing .preview-play-icon { width: 10px; height: 12px; border-width: 0 3px; border-color: currentColor; }
+
 .home-proof { padding: 16px 0 72px; }
 .home-proof-title, .home-steps h3 { margin: 0; }
 .home-proof-title { color: var(--glass-text-faint); font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .1em; }
@@ -368,24 +380,31 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 .home-steps li { display: flex; gap: 14px; }
 .home-steps b {
   display: grid; place-items: center; flex: 0 0 auto;
-  width: 30px; height: 30px; border-radius: 50%;
+  width: 44px; height: 44px; border-radius: 14px;
   background: var(--glass-tint-hover); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25);
   color: #ffffff; font-size: 14px;
 }
 .home-steps h3 { font-size: 22px; }
 .home-steps p { margin: 6px 0 0; color: var(--glass-text-faint); }
 
+/* Two value cards under the three columns (owner, 2026-11-01). */
+.home-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 0 0 56px; }
+.home-values h3 { color: #ffffff; font-size: 18px; text-transform: none; letter-spacing: 0; }
+
 .home-section { padding: 40px 0; }
 .home-section > h2 { margin: 0 0 8px; font-size: clamp(34px, 4.4vw, 52px); font-weight: 850; letter-spacing: -.03em; }
-.home-measured { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 20px; }
-.home-measured details.home-card { padding: 0; }
-.home-measured summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 18px 22px; cursor: pointer; }
-.home-measured summary h3 { margin: 0; font-size: 16px; }
-.home-measured summary span { color: var(--glass-text-faint); }
-.home-measured details p { margin: 0; padding: 0 22px 14px; color: var(--glass-text-soft); line-height: 1.55; }
+.home-measured { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; margin: 8px 0 16px; }
+.home-measured-sport { padding: 18px 20px; border: 1px solid var(--glass-edge); border-radius: 18px; }
+.home-measured-sport h3 { margin: 0; font-size: 16px; }
+.home-measured-sport p { margin: 6px 0 0; color: var(--glass-text-soft); line-height: 1.55; }
 .home-more { margin-top: 18px; color: var(--glass-text-faint); }
 .faq details { border-bottom: 1px solid var(--glass-edge); }
 
+/* The glow reached ~45px past the preview's sides, which made phones and
+   tablets scroll sideways once the preview met the page edge. */
+@media (max-width: 1100px) {
+  .home-preview::before { inset: -18% 0 -22% 0; }
+}
 @media (max-width: 900px) {
   .home-hero { grid-template-columns: minmax(0, 1fr); padding-top: 36px; }
 }
@@ -394,6 +413,7 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
   .home-actions { flex-direction: column; }
   .home-actions .btn { width: 100%; }
   .home-steps ol { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .home-values { grid-template-columns: minmax(0, 1fr); }
   .home-pair strong, .home-score strong { font-size: 50px; }
   .nav { top: 8px; margin-top: 8px; height: 58px; padding: 0 6px 0 14px; }
   .nav-backdrop { height: 80px; }
