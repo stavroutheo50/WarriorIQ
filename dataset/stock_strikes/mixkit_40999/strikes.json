@@ -1,0 +1,87 @@
+{
+ "covered": [
+  6.7,
+  9.8
+ ],
+ "unreadable": [
+  [
+   7.4,
+   7.9
+  ]
+ ],
+ "strikes": [
+  {
+   "t": 6.8,
+   "fighter": "B",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 7.12,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "cross",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 7.35,
+   "fighter": "A",
+   "family": "kick",
+   "technique": "low_kick",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 8.0,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 8.33,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 8.55,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "cross",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 8.7,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 9.17,
+   "fighter": "A",
+   "family": "knee",
+   "technique": "knee",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 9.67,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  }
+ ],
+ "notes": "Vertical clip through the cage. Only 6.7-9.8 s has both fighters in frame; the rest is one fighter alone or a wipe through black. Fighters: S in striped shorts with braids (left at 7.5 s), P in plain black shorts. The analyser swapped them during 7.4-7.9 s: before it A is S, after it A is P. Labels follow the person the track called A or B. At 7.35 s, during S's low kick, neither fighter is tracked."
+}

@@ -1,0 +1,12 @@
+{
+ "title": "Arduous mixed martial arts combat between two women",
+ "page_url": "https://mixkit.co/free-stock-video/arduous-mixed-martial-arts-combat-between-two-women-41103/",
+ "download_url": "https://assets.mixkit.co/videos/41103/41103-720.mp4",
+ "licence": "Mixkit Stock Video Free License",
+ "licence_url": "https://mixkit.co/license/#videoFree",
+ "licence_checked": "2026-11-01: the clip's page carries license=\"videoFree\"",
+ "ruleset": "MMA",
+ "selection_seconds": 1.0,
+ "labelled_by": "Claude, frame by frame at 8-24 fps, 2026-11-01; not yet checked by a person",
+ "pose_backend": "yolo26m-pose on CPU; rtmlib (RTMPose) was not installed, so keypoints may differ from a production run that uses it"
+}

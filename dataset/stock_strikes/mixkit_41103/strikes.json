@@ -1,0 +1,111 @@
+{
+ "covered": [
+  0.2,
+  8.4
+ ],
+ "unreadable": [
+  [
+   3.3,
+   4.1
+  ]
+ ],
+ "strikes": [
+  {
+   "t": 0.55,
+   "fighter": "B",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 1.25,
+   "fighter": "B",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 1.62,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 2.04,
+   "fighter": "A",
+   "family": "kick",
+   "technique": "round_kick",
+   "outcome": "landed",
+   "sure": true
+  },
+  {
+   "t": 2.56,
+   "fighter": "B",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 3.0,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "cross",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 3.25,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 4.22,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 5.45,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "cross",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 5.72,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 6.65,
+   "fighter": "A",
+   "family": "kick",
+   "technique": "round_kick",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 8.0,
+   "fighter": "B",
+   "family": "kick",
+   "technique": "round_kick",
+   "outcome": null,
+   "sure": true
+  }
+ ],
+ "notes": "Filmed through the cage. A: striped shorts, braided hair. B: plain black shorts. The analyser keeps A and B on the right people throughout. The clip opens mid-kick, so labelling starts at 0.2 s. 3.3-4.1 s: the camera passes a black post and the picture wipes. B lifts a knee at about 6.0 s and 6.9 s to check, which is a defence, not a strike."
+}

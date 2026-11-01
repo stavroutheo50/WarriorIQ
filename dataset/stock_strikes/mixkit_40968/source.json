@@ -1,0 +1,12 @@
+{
+ "title": "Boxer giving a direct hit to his rival",
+ "page_url": "https://mixkit.co/free-stock-video/boxer-giving-a-direct-hit-to-his-rival-40968/",
+ "download_url": "https://assets.mixkit.co/videos/40968/40968-720.mp4",
+ "licence": "Mixkit Stock Video Free License",
+ "licence_url": "https://mixkit.co/license/#videoFree",
+ "licence_checked": "2026-11-01: the clip's page carries license=\"videoFree\"",
+ "ruleset": "BOXING",
+ "selection_seconds": 0.0,
+ "labelled_by": "Claude, frame by frame at 12 fps, 2026-11-01; not yet checked by a person",
+ "pose_backend": "yolo26m-pose on CPU; rtmlib (RTMPose) was not installed, so keypoints may differ from a production run that uses it"
+}

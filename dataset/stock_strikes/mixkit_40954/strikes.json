@@ -1,0 +1,111 @@
+{
+ "covered": [
+  0.0,
+  7.3
+ ],
+ "unreadable": [
+  [
+   2.4,
+   4.45
+  ]
+ ],
+ "strikes": [
+  {
+   "t": 0.38,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": "blocked",
+   "sure": true
+  },
+  {
+   "t": 0.96,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 1.29,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "overhand",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 1.62,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "straight",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 1.96,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 2.3,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 4.55,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 5.15,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "cross",
+   "outcome": "blocked",
+   "sure": true
+  },
+  {
+   "t": 5.84,
+   "fighter": "B",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 6.76,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 7.0,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 7.15,
+   "fighter": "B",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  }
+ ],
+ "notes": "A: stars-and-stripes shorts, red gloves. B: blue 'ADX' shorts, blue gloves. Filmed through the ropes. 2.4-4.45 s: inside fighting and a clinch, with B's back to the camera and A hidden; arms cannot be told apart, so the span is left out. The fighters swap sides at about 3.9 s. Outcomes are only given where a glove was clearly caught on a guard."
+}
