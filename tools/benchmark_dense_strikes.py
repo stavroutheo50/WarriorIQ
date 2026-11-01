@@ -55,7 +55,11 @@ OUTCOME_OF = {"clean": "landed", "likely_landed": "landed", "blocked": "blocked"
 def dense_fights() -> list[Path]:
     # dataset/public/ is not in Git: pose tracks of identifiable athletes stay
     # out of a public repository (.gitignore).
-    roots = [PROJECT_ROOT / "dataset" / "regression", PROJECT_ROOT / "dataset" / "public" / "phone_strikes"]
+    # dataset/stock_strikes/ holds free-licence stock clips labelled strike by
+    # strike; their labels are committed, their pose tracks are rebuilt with
+    # tools/make_stock_strikes.py and stay out of Git like the others.
+    roots = [PROJECT_ROOT / "dataset" / "regression", PROJECT_ROOT / "dataset" / "public" / "phone_strikes",
+             PROJECT_ROOT / "dataset" / "stock_strikes"]
     return sorted(p for root in roots if root.is_dir() for p in root.iterdir()
                   if p.is_dir() and (p / "track.jsonl.gz").exists() and (p / "strikes.json").exists())
 

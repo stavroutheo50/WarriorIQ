@@ -127,3 +127,7 @@ logs/
 # Public datasets fetched by tools/fetch_public_datasets.py: used privately for
 # training and measurement, never committed or served.
 dataset/public/
+# Labelled stock clips: labels and licence records are committed, the pose
+# tracks are rebuilt with tools/make_stock_strikes.py (identifiable athletes,
+# public repository).
+dataset/stock_strikes/*/track.jsonl.gz

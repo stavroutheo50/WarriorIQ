@@ -1,0 +1,139 @@
+{
+ "covered": [
+  0.0,
+  9.9
+ ],
+ "unreadable": [
+  [
+   2.4,
+   3.7
+  ],
+  [
+   6.7,
+   7.8
+  ]
+ ],
+ "strikes": [
+  {
+   "t": 0.27,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 0.4,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 0.72,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 1.37,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 1.75,
+   "fighter": "B",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 2.14,
+   "fighter": "A",
+   "family": "kick",
+   "technique": "round_kick",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 4.25,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 4.8,
+   "fighter": "A",
+   "family": "kick",
+   "technique": "round_kick",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 5.45,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "cross",
+   "outcome": "blocked",
+   "sure": true
+  },
+  {
+   "t": 6.25,
+   "fighter": "B",
+   "family": "kick",
+   "technique": "round_kick",
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 6.6,
+   "fighter": "B",
+   "family": "kick",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 8.25,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 8.45,
+   "fighter": "B",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": false
+  },
+  {
+   "t": 9.3,
+   "fighter": "A",
+   "family": "punch",
+   "technique": null,
+   "outcome": null,
+   "sure": true
+  },
+  {
+   "t": 9.68,
+   "fighter": "B",
+   "family": "kick",
+   "technique": "round_kick",
+   "outcome": null,
+   "sure": true
+  }
+ ],
+ "notes": "Fighters: P in patterned shorts (left at 0 s), D in plain black shorts. The analyser swapped them during the 2.4-3.7 s occlusion: before it A is P, after it A is D (track ids 1 and 2 exchange at about 2.5 s with identity confidence 0.94). WarriorIQ's own report for this clip failed the identity check and withheld strike facts. These labels follow the person the track called A or B at that moment, so this file measures strike reading only; identity is measured by its own regressions. After 9.9 s it is a takedown and ground fighting, which are not strikes."
+}

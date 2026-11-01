@@ -1,0 +1,39 @@
+{
+ "covered": [
+  0.0,
+  6.1
+ ],
+ "unreadable": [
+  [
+   1.6,
+   3.7
+  ]
+ ],
+ "strikes": [
+  {
+   "t": 4.73,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": "blocked",
+   "sure": true
+  },
+  {
+   "t": 4.88,
+   "fighter": "A",
+   "family": "punch",
+   "technique": "cross",
+   "outcome": "blocked",
+   "sure": true
+  },
+  {
+   "t": 5.7,
+   "fighter": "B",
+   "family": "punch",
+   "technique": "jab",
+   "outcome": "missed",
+   "sure": false
+  }
+ ],
+ "notes": "A: stars-and-stripes shorts, red gloves. B: blue 'ADX' shorts, blue gloves. Glove touch at 1.0-1.15 s is not a strike. 1.6-3.7 s: camera pans and A is out of frame. B's lead hand at 5.6-5.8 s reaches out without landing: a pawing jab or a feint, so not sure."
+}

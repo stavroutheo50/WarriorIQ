@@ -1,0 +1,12 @@
+{
+ "title": "Practice fight between boxers",
+ "page_url": "https://mixkit.co/free-stock-video/practice-fight-between-boxers-40951/",
+ "download_url": "https://assets.mixkit.co/videos/40951/40951-720.mp4",
+ "licence": "Mixkit Stock Video Free License",
+ "licence_url": "https://mixkit.co/license/#videoFree",
+ "licence_checked": "2026-11-01: the clip's page carries license=\"videoFree\"",
+ "ruleset": "BOXING",
+ "selection_seconds": 0.0,
+ "labelled_by": "Claude, frame by frame at 8-24 fps, 2026-11-01; not yet checked by a person",
+ "pose_backend": "yolo26m-pose on CPU; rtmlib (RTMPose) was not installed, so keypoints may differ from a production run that uses it"
+}
