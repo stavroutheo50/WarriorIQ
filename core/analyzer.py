@@ -903,14 +903,16 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     is reached by following both fighters backwards from it (core/backtrack.py)
     and the result is checked when the forward pass arrives back at it.
 
-    The analysis always starts at the requested start (0:00 unless a later one
-    was asked for). It used to restart at the chosen frame whenever the
-    backward pass stopped short or the check failed, which silently cut the
-    opening off the report (QA, 2026-10-04: 0:08 of a 0:10 clip analysed as
-    "Analysis complete"). Now, when the fighters cannot be followed all the
-    way back, the forward pass still starts at the beginning and the check at
-    the chosen frame decides whether its identities can be trusted; if not,
-    the report says so rather than leaving footage out.
+    The analysis starts at the requested start (0:00 unless a later one was
+    asked for) whenever the fighters were followed back that far. When they
+    were not, it starts at the earliest frame they were followed to, and the
+    report states which part is left out and why (_analysed_span) - never
+    silently, which was the complaint in QA 2026-10-04 (0:08 of a 0:10 clip
+    analysed as "Analysis complete"). Starting at 0:00 anyway, seeded with
+    boxes from a different moment, put the identities on the wrong people and
+    cost the whole report instead (owner, 2026-11-01; see
+    _analyze_with_backtrack). The check at the chosen frame still decides
+    whether the identities can be trusted.
     """
     wrapper_started = time.perf_counter()
     seed_seconds = req.selection_seconds
@@ -1018,15 +1020,31 @@ def _analyze_with_backtrack(req: AnalysisRequest, progress_callback: ProgressCal
         handoff = _backtrack.Handoff(seed_frame=seed_frame, requested_start_frame=start_frame,
                                      frame=seed_frame, reason="unavailable")
     handoff_record = handoff.as_dict(fps)
+    # The forward pass starts at the earliest frame where who is who is known:
+    # the requested start when the backward pass got there, otherwise the
+    # frame it stopped at (or the chosen frame, when it could not start).
+    #
+    # It used to start at the requested start regardless, seeded with boxes
+    # from wherever the backward pass stopped - a different moment of the
+    # fight. On V18 (dataset/regression/identity_phone) picked at 1:38 it
+    # stopped at 1:31, the run began at 0:00 with 1:31's boxes, neither
+    # matched anybody there, and 10 of the 22 labelled checks before the pick
+    # were the two fighters swapped; the report then had to withhold
+    # everything as "not sure which fighter was which" (owner, 2026-11-01).
+    # The opening is now left out and the report says so and why
+    # (_analysed_span), rather than every number being in doubt.
+    excluded_reason = None
     if handoff.moved:
-        # Seeded where the backward pass got to. That is the requested start
-        # whenever it succeeded; when it stopped short the forward pass still
-        # begins there, at the start, with the boxes from the earliest frame
-        # both fighters were followed to as its best guess.
         start_boxes = (list(handoff.a_box), list(handoff.b_box))
-        forward_start = handoff.frame / fps if handoff.reason is None else requested_start
+        forward_start = handoff.frame / fps
     else:
         start_boxes = (list(req.fighter_a_box), list(req.fighter_b_box))
+        forward_start = seed_frame / fps if handoff.reason is not None else requested_start
+    if forward_start - requested_start >= 1.0:
+        excluded_reason = handoff.reason
+    elif not handoff.moved:
+        # The chosen frame is within a second of the start: the boxes drawn
+        # on it still fit there.
         forward_start = requested_start
     forward = replace(
         req, start_seconds=forward_start, selection_seconds=None,
@@ -1034,10 +1052,8 @@ def _analyze_with_backtrack(req: AnalysisRequest, progress_callback: ProgressCal
     seed_check = {"frame": seed_frame, "a_box": list(req.fighter_a_box), "b_box": list(req.fighter_b_box),
                   "window_frames": int(round(1.5 * fps))}
     seed_pair = (handoff.seed_a, handoff.seed_b) if handoff.seed_a is not None and handoff.seed_b is not None else None
-    # The reason is kept for the record only: no footage is excluded any more,
-    # so it is not passed on as an exclusion.
     return _analyze(forward, progress_callback, seed_seconds=seed_seconds,
-                    handoff=handoff_record, seed_check=seed_check,
+                    handoff=handoff_record, seed_check=seed_check, excluded_reason=excluded_reason,
                     seed_pair=seed_pair, measured_footage=measured, seed_kit=seed_kit,
                     budget_spent_before=time.perf_counter() - wrapper_started)
 
