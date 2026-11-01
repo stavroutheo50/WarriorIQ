@@ -10,7 +10,8 @@ were thrown (precision), and of the strikes thrown, how many it counts
     python tools/benchmark_dense_strikes.py
     python tools/benchmark_dense_strikes.py --ruleset BOXING --json
 
-Each fight is a folder in dataset/regression/ or dataset/public/phone_strikes/ with:
+Each fight is a folder in dataset/regression/, dataset/public/phone_strikes/,
+dataset/stock_strikes/ or dataset/own_sparring/ with:
 
   track.jsonl.gz   the analyser's tracking.jsonl for the labelled stretch
   strikes.json     every strike thrown: time of fullest extension, fighter,
@@ -58,8 +59,11 @@ def dense_fights() -> list[Path]:
     # dataset/stock_strikes/ holds free-licence stock clips labelled strike by
     # strike; their labels are committed, their pose tracks are rebuilt with
     # tools/make_stock_strikes.py and stay out of Git like the others.
+    # dataset/own_sparring/ holds sparring filmed by WarriorIQ's own people with
+    # the consent of everyone in it (source.json); labels committed, video and
+    # pose track never.
     roots = [PROJECT_ROOT / "dataset" / "regression", PROJECT_ROOT / "dataset" / "public" / "phone_strikes",
-             PROJECT_ROOT / "dataset" / "stock_strikes"]
+             PROJECT_ROOT / "dataset" / "stock_strikes", PROJECT_ROOT / "dataset" / "own_sparring"]
     return sorted(p for root in roots if root.is_dir() for p in root.iterdir()
                   if p.is_dir() and (p / "track.jsonl.gz").exists() and (p / "strikes.json").exists())
 

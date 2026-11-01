@@ -131,3 +131,7 @@ dataset/public/
 # tracks are rebuilt with tools/make_stock_strikes.py (identifiable athletes,
 # public repository).
 dataset/stock_strikes/*/track.jsonl.gz
+# Own sparring filmed with everyone's consent: labels and consent records are
+# committed, the pose tracks and the video itself never are.
+dataset/own_sparring/*/track.jsonl.gz
+dataset/own_sparring/**/*.mp4
