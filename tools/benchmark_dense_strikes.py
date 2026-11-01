@@ -231,6 +231,19 @@ def _video_checked(fight: Path, truth: dict) -> list:
     return kept
 
 
+def _fight_ruleset(fight: Path) -> str | None:
+    """The sport the fight was fought under, from its source.json.
+
+    A report counts only what its sport scores (core/sport_policy.py): a
+    boxing report never counts a kick. Scoring a boxing fight with every
+    family counted called 18 kicks false that no boxing report would show.
+    """
+    source = fight / "source.json"
+    if not source.exists():
+        return None
+    return json.loads(source.read_text(encoding="utf-8")).get("ruleset")
+
+
 def run(ruleset: str | None, video: bool = False) -> dict:
     results = {}
     total: dict = {}
@@ -240,7 +253,7 @@ def run(ruleset: str | None, video: bool = False) -> dict:
             events = _video_checked(fight, truth)
         else:
             events = replay(fight / "track.jsonl.gz")
-        row = score(counted_events(events, ruleset), truth)
+        row = score(counted_events(events, ruleset or _fight_ruleset(fight)), truth)
         results[fight.name] = _shares(row)
         for key, value in row.items():
             if isinstance(value, (int, float)) and key not in {"precision", "recall"}:
@@ -251,7 +264,7 @@ def run(ruleset: str | None, video: bool = False) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--ruleset", default=None, help="score as the report for this ruleset counts (e.g. BOXING)")
+    parser.add_argument("--ruleset", default=None, help="score every fight as the report for this ruleset counts (e.g. BOXING); default: each fight's own, from its source.json")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--video", action="store_true", help="also run the video punch check, as the analysis does")
     parser.add_argument("--held-out", action="store_true",
