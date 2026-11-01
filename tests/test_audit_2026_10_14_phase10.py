@@ -81,16 +81,20 @@ def test_pricing_copy_follows_the_period():
 
 
 # --------------------------------------------------------------------- #53
-def test_the_preview_is_the_original_interface_preview():
-    # The owner asked for the original preview back (2026-10-19), and again
-    # beside the glass homepage's headline (2026-10-28); no demo-clip placeholder.
-    # Since 2026-11-01 the frame holds a click-to-play skeleton illustration,
-    # labelled as one and still until the visitor presses play.
+def test_the_hero_shows_a_real_tracking_example():
+    # The empty interface preview became a real example (owner, 2026-10-28):
+    # a stock clip with WarriorIQ's own tracking drawn on it, never a placeholder.
     page = BrowserClient(web.app).get("/").text
-    assert 'class="pv-fighter pv-a"' in page and 'data-preview-play hidden' in page
-    assert "Interface preview" in page and "<b>Illustration</b>" in page
+    assert 'id="heroClip" src="/static/hero-fight.mp4' in page
+    assert "Real WarriorIQ tracking on a stock clip" in page
+    # Click to play (owner, 2026-11-01): no autoplay, nothing fetched up front,
+    # and the button stays hidden until the script that drives it has run.
+    clip = page[page.index('id="heroClip"'):page.index("></video>")]
+    assert "autoplay" not in clip and 'preload="none"' in clip
+    assert 'id="heroClipPlay" type="button" hidden' in page
     assert "From a real WarriorIQ report" in page
     assert "Demo clip coming soon" not in page and "goes here" not in page
+    assert (web.ROOT / "app" / "static" / "hero-fight.mp4").stat().st_size < 4_000_000
 
 
 # --------------------------------------------------------------------- #54

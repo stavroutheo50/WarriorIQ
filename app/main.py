@@ -5608,7 +5608,19 @@ def progress_page(request: Request, job_id: str):
         "live_families": published_families(_job_sport(job)),
         # A solo session follows one person; Fighter B's panel is hidden.
         "solo": bool(job.get("solo")),
+        # The live scoreboard puts each fighter's count on the side of the
+        # screen they stood on when picked (owner, 2026-10-28).
+        "board_sides": _board_sides(job),
     })
+
+
+def _board_sides(job: dict) -> list[str]:
+    """["A", "B"] when A was picked on the left of the frame, else ["B", "A"]."""
+    boxes = [job.get("fighter_a_box"), job.get("fighter_b_box")]
+    if not all(isinstance(box, list) and len(box) == 4 for box in boxes):
+        return ["A", "B"]
+    a_centre, b_centre = ((float(box[0]) + float(box[2])) / 2 for box in boxes)
+    return ["A", "B"] if a_centre <= b_centre else ["B", "A"]
 
 
 def _public_job_status(job_id: str, job: dict) -> dict:
@@ -7831,8 +7843,18 @@ def _library_card(job_id: str) -> dict:
         if (not solo and scorecard.get("available") and scorecard.get("winner_estimate")
                 and feature_is_on("scoring")):
             score = {"totals": scorecard.get("totals") or {}, "winner": scorecard.get("winner_estimate")}
+        # Each fighter's strike total for the card's split bar: the report's own
+        # "Strikes thrown" row (core/stat_sheet.py), so it appears only when the
+        # report would show it - counts published, fighters told apart.
+        strikes = None
+        if not solo and state not in FAILED_NUMBER_STATES:
+            trusted = bool((report.get("integrity") or {}).get("identity_evidence_trusted", True))
+            sheet = build_stat_sheet(report, published_families(scorecard.get("sport"), report), trusted)
+            row = next((r for r in sheet["strikes"] if r["label"] == "Strikes thrown"), None)
+            if row:
+                strikes = {"A": int(row["a"]), "B": int(row["b"]), "share_a": row["share_a"]}
         card = {"available": True, "numbers_state": state, "failed": state in FAILED_NUMBER_STATES,
-                "format": _fight_format(report), "score": score}
+                "format": _fight_format(report), "score": score, "strikes": strikes}
         _LIBRARY_CARD_CACHE[str(path)] = (stamp, card)
         return card
     except Exception:                                                # noqa: BLE001

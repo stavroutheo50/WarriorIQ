@@ -60,3 +60,25 @@ def test_home_replaces_analyse_and_compare_moves_into_the_library():
     template = (web.ROOT / "app" / "templates" / "history.html").read_text(encoding="utf-8")
     assert 'href="/compare">Compare fights</a>' in template
     assert 'href="/compare?a={{f.job_id}}">Compare</a>' in template
+
+
+def test_the_live_board_puts_each_fighter_on_the_side_they_were_picked_on(monkeypatch):
+    from app import state
+
+    monkeypatch.setattr(web, "STRIKE_COUNTS_PUBLISHED", True)
+    client = BrowserClient(web.app)
+    client.get("/")
+    owner = f"guest:{client.cookies.get(web.GUEST_COOKIE)}"
+    job_id = "board" + uuid.uuid4().hex[:8]
+    # A picked on the right of the frame, B on the left.
+    state.create_job(job_id, {"owner_key": owner, "status": "running", "stage": "analysis",
+                              "fighter_a_box": [900, 100, 1100, 700], "fighter_b_box": [100, 100, 300, 700]})
+    try:
+        page = client.get(f"/progress/{job_id}").text
+        board = page[page.index('id="liveBoard"'):page.index('id="videoWrap"')]
+        assert board.index('id="boardB"') < board.index('id="boardA"')
+        assert "live · provisional" in board
+    finally:
+        state.delete_job(job_id)
+    assert web._board_sides({"fighter_a_box": [0, 0, 10, 10], "fighter_b_box": [50, 0, 60, 10]}) == ["A", "B"]
+    assert web._board_sides({}) == ["A", "B"]

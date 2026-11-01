@@ -1,5 +1,19 @@
 {% extends "base.html" %}
 {% block title %}WarriorIQ · AI Fight Analysis for Combat Sports{% endblock %}
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
+(() => {
+  // Click to play (owner, 2026-11-01). Nothing moves or downloads until the
+  // visitor asks; without this script the poster stands and no button shows.
+  const clip = document.getElementById('heroClip'), button = document.getElementById('heroClipPlay');
+  if (!clip || !button) return;
+  const label = button.querySelector('.preview-play-label'), figure = clip.closest('.home-preview');
+  const show = playing => { figure.classList.toggle('is-playing', playing); label.textContent = playing ? 'Pause clip' : 'Play clip'; };
+  clip.addEventListener('play', () => show(true));
+  clip.addEventListener('pause', () => show(false));
+  button.addEventListener('click', () => { if (clip.paused) clip.play().catch(() => show(false)); else clip.pause(); });
+  button.hidden = false;
+})();
+</script>{% endblock %}
 {% block description %}Upload a kickboxing, boxing, Muay Thai, taekwondo or MMA fight. WarriorIQ measures how both fighters moved{% if features.scoring.on %}, estimates the round-by-round score under your sport's rules,{% endif %} and builds a four-week training plan from your own numbers.{% endblock %}
 {% block content %}
 {#- The glass homepage (owner, 2026-10-28): straight to the point. One line,
@@ -14,44 +28,21 @@
   <p class="home-lead">Film it on your phone. Get both fighters' movement, guard and balance{% if features.strike_counts.on %}, strike volume{% endif %}{% if features.scoring.on %}, a round-by-round score estimate{% endif %}{% if features.scoring.on %} and a four-week plan.{% else %} and a four-week plan. Score estimates are coming.{% endif %}</p>
   <div class="home-actions">{% if request.state.account %}<a class="btn btn-lead" data-motion-primary href="/analyze">Analyse my video <span aria-hidden="true">&#8594;</span></a>{% else %}<a class="btn btn-lead" data-motion-primary href="/signup?next=/analyze">Analyse a fight now — it's free <span aria-hidden="true">&#8594;</span></a>{% endif %}<a class="btn secondary btn-lead" href="/sample-report">See a sample report</a></div>
   </div>
-  {#- Click-to-play motion in the interface frame (owner, 2026-11-01). A drawn
-      illustration, not footage and not data: no numbers, still until the
-      visitor presses play, and the button only appears once motion.js runs. -#}
-  <div class="home-preview glass-panel" data-preview-motion>
-    <div class="preview-screen">
-      <div class="preview-screen-head"><span><i></i> Interface preview</span><b>Illustration</b></div>
-      <div class="preview-fight-stage preview-skeletons">
-        <svg viewBox="0 0 320 170" role="img" aria-labelledby="previewMotionLabel" focusable="false">
-          <title id="previewMotionLabel">Illustration of pose tracking: fighter A throws a jab and fighter B steps back</title>
-          <line class="pv-floor" x1="20" y1="150" x2="300" y2="150"/>
-          <g class="pv-fighter pv-a">
-            <circle class="pv-head" cx="112" cy="40" r="10"/>
-            <polyline points="112,50 108,92"/>
-            <polyline points="108,92 94,121 88,150"/>
-            <polyline points="108,92 124,120 132,150"/>
-            <polyline points="111,58 100,74 112,64"/>
-            <line class="pv-jab" x1="114" y1="58" x2="166" y2="56"/><circle class="pv-hand" cx="166" cy="56" r="3.5"/>
-            <circle cx="111" cy="58" r="3"/><circle cx="108" cy="92" r="3"/><circle cx="94" cy="121" r="3"/><circle cx="124" cy="120" r="3"/>
-            <text x="112" y="20">A</text>
-          </g>
-          <g class="pv-fighter pv-b">
-            <circle class="pv-head" cx="214" cy="40" r="10"/>
-            <polyline points="214,50 218,92"/>
-            <polyline points="218,92 232,121 238,150"/>
-            <polyline points="218,92 202,120 194,150"/>
-            <polyline points="215,58 202,70 200,52"/>
-            <polyline points="215,58 226,74 214,64"/>
-            <circle cx="215" cy="58" r="3"/><circle cx="218" cy="92" r="3"/><circle cx="232" cy="121" r="3"/><circle cx="202" cy="120" r="3"/>
-            <text x="214" y="20">B</text>
-          </g>
-        </svg>
-      </div>
-      <div class="preview-controls">
-        <div class="preview-timeline"><i></i><span></span><span></span><span></span></div>
-        <button class="preview-play" type="button" data-preview-play hidden><span aria-hidden="true" class="preview-play-icon"></span><span class="preview-play-label">Play animation</span></button>
-      </div>
+  {#- A real example instead of two empty boxes (owner, 2026-10-28): seven
+      seconds of a free-licence stock clip (Mixkit 40979, "Two women fighting
+      mixed martial arts", Mixkit Stock Video Free License) with WarriorIQ's
+      own analysis drawn on it - the boxes, skeletons and strike names are
+      the analyser's output, nothing added by hand. Click to play (owner,
+      2026-11-01): the poster shows until the visitor presses play, and the
+      2 MB clip is not fetched before then. -#}
+  <figure class="home-preview glass-panel">
+    <div class="home-clip">
+      <video id="heroClip" src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline preload="none" aria-label="An MMA exchange with WarriorIQ following both fighters: a box and skeleton on each, and each strike named as it is thrown"></video>
+      <span class="home-clip-live" aria-hidden="true"><i></i>WarriorIQ live</span>
+      <button class="preview-play" id="heroClipPlay" type="button" hidden><span aria-hidden="true" class="preview-play-icon"></span><span class="preview-play-label">Play clip</span></button>
     </div>
-  </div>
+    <figcaption><span><i class="home-dot home-dot-a"></i>Fighter A</span><span><i class="home-dot home-dot-b"></i>Fighter B</span><span class="home-clip-note">Real WarriorIQ tracking on a stock clip</span></figcaption>
+  </figure>
 </section>
 
 {#- Numbers from one real WarriorIQ report (a 94-second Kick Light round

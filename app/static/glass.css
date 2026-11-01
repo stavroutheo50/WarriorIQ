@@ -343,40 +343,9 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 }
 .home-preview .preview-screen-head b { color: rgba(255, 255, 255, .85); }
 
-/* Click-to-play skeletons in the interface frame (owner, 2026-11-01). Every
-   animation is paused until the visitor presses play; reduced-motion visitors
-   can still choose to play it, since nothing moves on its own. */
-.preview-skeletons svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.preview-skeletons .pv-floor { stroke: rgba(255, 255, 255, .12); stroke-width: 1; }
-.pv-fighter { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.pv-fighter circle { stroke: none; }
-.pv-fighter .pv-head { fill: none; stroke-width: 2.5; }
-.pv-fighter text { stroke: none; font-size: 13px; font-weight: 850; text-anchor: middle; }
-.pv-a { stroke: var(--wiq-a); }
-.pv-a circle, .pv-a text { fill: var(--wiq-a); }
-.pv-a .pv-head { stroke: var(--wiq-a); fill: none; }
-.pv-b { stroke: var(--wiq-b); }
-.pv-b circle, .pv-b text { fill: var(--wiq-b); }
-.pv-b .pv-head { stroke: var(--wiq-b); fill: none; }
-/* The jab rests half-extended, so the still frame reads as a guard. */
-.pv-jab { transform-origin: 114px 58px; transform: scaleX(.45); }
-.pv-a { animation: pv-step-in 3.2s ease-in-out infinite paused; }
-.pv-jab { animation: pv-jab 3.2s ease-in-out infinite paused; }
-/* The hand moves with the jab rather than scaling with it, so it stays round. */
-.pv-hand { transform: translateX(-28.6px); animation: pv-hand 3.2s ease-in-out infinite paused; }
-.pv-b { animation: pv-step-back 3.2s ease-in-out infinite paused; }
-.home-preview .preview-timeline i { width: 0; animation: pv-playhead 3.2s linear infinite paused; }
-.home-preview.is-playing .pv-a, .home-preview.is-playing .pv-b,
-.home-preview.is-playing .pv-jab, .home-preview.is-playing .pv-hand, .home-preview.is-playing .preview-timeline i { animation-play-state: running; }
-@keyframes pv-step-in { 0%, 100% { transform: translateX(0); } 30%, 55% { transform: translateX(8px); } }
-@keyframes pv-jab { 0%, 32% { transform: scaleX(.45); } 40%, 46% { transform: scaleX(1); } 56%, 100% { transform: scaleX(.45); } }
-@keyframes pv-hand { 0%, 32% { transform: translateX(-28.6px); } 40%, 46% { transform: translateX(0); } 56%, 100% { transform: translateX(-28.6px); } }
-@keyframes pv-step-back { 0%, 38% { transform: translateX(0); } 48%, 70% { transform: translateX(10px); } 100% { transform: translateX(0); } }
-@keyframes pv-playhead { from { width: 0; } to { width: 100%; } }
-.preview-controls { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
-.preview-controls .preview-timeline { flex: 1 1 auto; margin: 0 3px; }
+/* The hero clip's play button (owner, 2026-11-01), over the clip's corner. */
 .preview-play {
-  flex: 0 0 auto;
+  position: absolute; right: 12px; bottom: 12px;
   display: inline-flex; align-items: center; gap: 8px;
   min-height: 44px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, .22); border-radius: 999px;
   background: rgba(6, 9, 15, .72); color: #ffffff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
@@ -385,7 +354,6 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 .preview-play[hidden] { display: none; }
 .preview-play-icon { width: 0; height: 0; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; }
 .is-playing .preview-play-icon { width: 10px; height: 12px; border-width: 0 3px; border-color: currentColor; }
-@media (forced-colors: active) { .pv-fighter, .pv-fighter .pv-head { stroke: CanvasText; } .pv-fighter circle, .pv-fighter text { fill: CanvasText; } }
 
 .home-proof { padding: 16px 0 72px; }
 .home-proof-title, .home-steps h3 { margin: 0; }
@@ -526,3 +494,80 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
   .stat-row dt { font-size: 13px; }
   .stat-timeline { gap: 2px; }
 }
+
+/* --- Live analysis: the scoreboard over the video (progress.html) ----------
+   Each fighter's live strike count on the side they were picked on, in their
+   colour; a count that goes up pops once. */
+.live-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 18px;
+  border: 1px solid var(--glass-edge-side);
+  border-top-color: var(--glass-edge-top);
+  border-radius: 22px;
+  background: var(--glass-fill-strong);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.live-board-side { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.live-board-side.is-right { flex-direction: row-reverse; text-align: right; }
+.live-board-side span { overflow: hidden; color: #dfe4ee; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.live-board-side strong { font-size: clamp(34px, 5vw, 52px); font-weight: 850; line-height: 1; font-variant-numeric: tabular-nums; }
+.live-board-side.fighter-a strong { color: #8cc2ff; }
+.live-board-side.fighter-b strong { color: #f7c96b; }
+.live-board-mid { display: grid; justify-items: center; color: var(--glass-text-faint); text-align: center; }
+.live-board-mid b { color: #ffffff; font-size: 13px; text-transform: uppercase; letter-spacing: .1em; }
+.live-board-mid small { font-size: 12px; }
+.live-board strong.is-hit { animation: board-hit .5s cubic-bezier(.2, .8, .2, 1); }
+@keyframes board-hit { 0% { transform: scale(1); } 35% { transform: scale(1.25); text-shadow: 0 0 22px currentColor; } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .live-board strong.is-hit { animation: none; } }
+@media (max-width: 560px) {
+  .live-board { padding: 10px 14px; gap: 8px; }
+  .live-board-side, .live-board-side.is-right { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .live-board-side.is-right { align-items: flex-end; }
+  .live-board-side span { max-width: 100%; font-size: 12px; }
+}
+
+/* --- Colour (owner, 2026-10-28: "a bit more colour") -------------------------
+   A soft light at the top of every page: the sport's own colour on a sport's
+   pages, blue and violet elsewhere. The page below stays plain. */
+body {
+  background:
+    radial-gradient(1000px 480px at 12% -120px, rgb(var(--sport-accent, 64 120 255) / .26), transparent 70%),
+    radial-gradient(860px 440px at 92% -140px, rgba(150, 92, 255, .2), transparent 70%),
+    var(--glass-canvas) !important;
+  background-repeat: no-repeat !important;
+}
+/* Eyebrows carry a small gradient line instead of a flat dash. */
+.eyebrow::before { background: linear-gradient(90deg, #8cc2ff, #a98bff) !important; }
+/* Fight library: each fighter's name in their colour, and a split bar of
+   strikes thrown under the result. */
+.fight-strike-split { display: grid; grid-template-columns: auto minmax(60px, 1fr) auto; align-items: center; gap: 8px; margin-top: 10px; }
+.fight-strike-split b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.fight-strike-split .stat-bar { grid-column: auto; height: 6px; }
+.fight-strike-label { display: block; margin-top: 2px; color: var(--glass-text-faint); font-size: 12px; }
+
+/* --- Homepage clip (index.html) -------------------------------------------
+   The real tracking example in the glass frame where the interface preview
+   was. */
+.home-preview { margin: 0; }
+.home-clip { position: relative; overflow: hidden; border-radius: 20px; background: #05070b; aspect-ratio: 16 / 9; }
+.home-clip video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.home-clip-live {
+  position: absolute; top: 12px; right: 12px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--glass-edge-side); border-top-color: var(--glass-edge-top); border-radius: 999px;
+  background: rgba(10, 15, 24, .55);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+}
+.home-clip-live i { width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; box-shadow: 0 0 10px #3ddc97; }
+.home-preview figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 6px 2px; color: #dfe4ee; font-size: 13px; }
+.home-preview figcaption span { display: inline-flex; align-items: center; gap: 6px; }
+.home-dot { width: 10px; height: 10px; border-radius: 3px; }
+.home-dot-a { background: #8cc2ff; }
+.home-dot-b { background: #f7c96b; }
+.home-clip-note { margin-left: auto; color: var(--glass-text-faint); }
