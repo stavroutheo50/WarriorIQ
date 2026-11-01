@@ -7,9 +7,9 @@
    border that is bright along the top-left and bottom-right edges and almost
    gone between, the way light catches the edge of a pane.
 
-   No gold except the opponent's numbers on the homepage cards (owner: "keep
-   them on the strikes thrown and the estimated round score"); the rest of the
-   site's accent is a cool white.
+   Fighters are blue corner (A) and red corner (B) everywhere (owner,
+   2026-11-01: "blue versus red"); the rest of the site's accent is a cool
+   white.
 
    Loaded after every other stylesheet but a11y.css (see CSS_BUNDLES in
    app/main.py), so it only restyles: no markup, route or script changes with
@@ -250,10 +250,13 @@ select, .moment-time, .sport-switch { border-radius: 999px !important; }
 .notice { border-radius: 18px; }
 
 /* --- Form fields ---------------------------------------------------------- */
+/* background-color, never the background shorthand: a dropdown draws its
+   arrow as a background image, and the shorthand reset it to repeat across
+   the whole box on hover (owner, 2026-11-01). */
 .field input, .field select, .field textarea, .field-input {
   border: 1px solid var(--glass-edge);
   border-radius: 14px;
-  background: rgba(255, 255, 255, .05);
+  background-color: rgba(255, 255, 255, .05);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, .25);
 }
 .field input:focus, .field select:focus, .field textarea:focus, .field-input:focus {
@@ -268,7 +271,7 @@ select, .moment-time, .sport-switch { border-radius: 999px !important; }
   padding: 8px 12px;
   border: 1px solid var(--glass-edge);
   border-radius: 12px;
-  background: rgba(255, 255, 255, .05);
+  background-color: rgba(255, 255, 255, .05);
   color: inherit;
 }
 
@@ -367,7 +370,7 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 .home-pair strong, .home-score strong { font-size: 60px; font-weight: 850; line-height: 1; font-variant-numeric: tabular-nums; }
 .home-pair small { margin-top: 6px; }
 .home-a { color: #8cc2ff; }
-.home-b { color: #f7c96b; }
+.home-b { color: #ff6470; }
 .home-score { display: flex; align-items: baseline; gap: 10px; margin: 16px 0 0; color: #8a93a6; font-size: 40px; }
 .home-drill { margin: 16px 0 0; font-size: 26px; font-weight: 750; line-height: 1.15; }
 .home-card-featured { box-shadow: var(--glass-shine), 0 0 0 1px rgba(255, 255, 255, .22), var(--glass-shadow) !important; }
@@ -429,7 +432,7 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 /* --- Report: the head-to-head stat sheet (_stat_sheet.html) -----------------
    Football-app style (owner, 2026-10-28): both fighters' values either side
    of the stat, a split bar under it, then two graphs. Fighter A is blue and
-   B amber, as everywhere a fighter is coloured. */
+   B red, as everywhere a fighter is coloured. */
 .stat-sheet {
   margin: 28px 0;
   padding: clamp(18px, 3vw, 30px);
@@ -443,7 +446,7 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 .stat-sheet-head h2 { margin: 0; font-size: clamp(24px, 3vw, 32px); letter-spacing: -.02em; }
 .stat-sheet-names { display: flex; gap: 14px; font-size: 14px; font-weight: 700; }
 .stat-a { color: #8cc2ff; }
-.stat-b { color: #f7c96b; }
+.stat-b { color: #ff6470; }
 .stat-group { margin: 26px 0 6px; color: var(--glass-text-faint); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
 .stat-rows { margin: 0; }
 .stat-row {
@@ -462,7 +465,7 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 .stat-bar { grid-column: 1 / -1; display: flex; gap: 4px; height: 8px; }
 .stat-bar i { display: block; height: 100%; border-radius: 999px; }
 .stat-bar-a { width: var(--share); background: linear-gradient(90deg, rgba(140, 194, 255, .55), #8cc2ff); transform-origin: right; }
-.stat-bar-b { width: var(--share); background: linear-gradient(90deg, #f7c96b, rgba(247, 201, 107, .55)); transform-origin: left; }
+.stat-bar-b { width: var(--share); background: linear-gradient(90deg, #ff6470, rgba(255, 100, 112, .55)); transform-origin: left; }
 
 .stat-graph { margin: 30px 0 0; }
 .stat-graph figcaption { margin-bottom: 12px; color: #dfe4ee; font-size: 14px; }
@@ -471,12 +474,12 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 .stat-step { position: relative; flex: 1 1 0; display: flex; align-items: flex-end; gap: 2px; height: 100%; min-width: 0; }
 .stat-step i { flex: 1 1 0; height: var(--h); min-height: 2px; border-radius: 6px 6px 2px 2px; transform-origin: bottom; }
 .stat-step-a { background: linear-gradient(180deg, #8cc2ff, rgba(140, 194, 255, .35)); }
-.stat-step-b { background: linear-gradient(180deg, #f7c96b, rgba(247, 201, 107, .35)); }
+.stat-step-b { background: linear-gradient(180deg, #ff6470, rgba(255, 100, 112, .35)); }
 .stat-step span { position: absolute; left: 0; bottom: -20px; color: var(--glass-text-faint); font-size: 12px; white-space: nowrap; }
 .stat-pace { display: block; width: 100%; height: 150px; overflow: visible; }
 .stat-pace polyline { fill: none; stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 .stat-line-a { stroke: #8cc2ff; }
-.stat-line-b { stroke: #f7c96b; }
+.stat-line-b { stroke: #ff6470; }
 .stat-axis { display: flex; justify-content: space-between; margin-top: 6px; color: var(--glass-text-faint); font-size: 12px; }
 
 /* Drawn in on scroll; complete at rest without script or with reduced motion. */
@@ -516,7 +519,7 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 .live-board-side span { overflow: hidden; color: #dfe4ee; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .live-board-side strong { font-size: clamp(34px, 5vw, 52px); font-weight: 850; line-height: 1; font-variant-numeric: tabular-nums; }
 .live-board-side.fighter-a strong { color: #8cc2ff; }
-.live-board-side.fighter-b strong { color: #f7c96b; }
+.live-board-side.fighter-b strong { color: #ff6470; }
 .live-board-mid { display: grid; justify-items: center; color: var(--glass-text-faint); text-align: center; }
 .live-board-mid b { color: #ffffff; font-size: 13px; text-transform: uppercase; letter-spacing: .1em; }
 .live-board-mid small { font-size: 12px; }
@@ -569,9 +572,59 @@ body {
 .home-preview figcaption span { display: inline-flex; align-items: center; gap: 6px; }
 .home-dot { width: 10px; height: 10px; border-radius: 3px; }
 .home-dot-a { background: #8cc2ff; }
-.home-dot-b { background: #f7c96b; }
+.home-dot-b { background: #ff6470; }
 .home-clip-note { margin-left: auto; color: var(--glass-text-faint); }
 /* Nothing to tap on the homepage clip: no pause, no controls, no full screen
    (owner, 2026-11-01). */
 .home-clip video { pointer-events: none; user-select: none; -webkit-user-select: none; }
 .home-clip video::-webkit-media-controls, .home-clip video::-webkit-media-controls-start-playback-button { display: none !important; -webkit-appearance: none; }
+
+/* --- Sample report (sample_report.html) --- */
+.sample-notes .home-cards { margin-top: 18px; }
+.sample-source { margin-top: 22px; }
+
+/* --- Upload form: one step at a time (analyze.html) ------------------------
+   The button styles set display, which beat the hidden attribute: Back and
+   the upload button showed on the first step. */
+#uploadSteps[hidden], #uploadSteps li[hidden], #uploadStepNav[hidden], #uploadStepNav [hidden], #uploadSubmit[hidden] { display: none !important; }
+.upload-steps { display: flex; gap: 8px; margin: 4px 0 18px; padding: 0; list-style: none; }
+.upload-steps li {
+  display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--glass-edge-side); border-radius: 999px;
+  background: var(--glass-tint); color: var(--glass-text-faint);
+  font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.upload-steps li b {
+  display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(255, 255, 255, .1); color: #ffffff; font-size: 12px;
+}
+.upload-steps li[aria-current="step"] { border-top-color: var(--glass-edge-top); background: var(--glass-tint-hover); color: #ffffff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2); }
+.upload-steps li.is-done { color: #dfe4ee; }
+.upload-steps li.is-done b { background: #3ddc97; color: #06121a; }
+.upload-step-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
+.upload-step-nav .btn { min-width: 120px; }
+.upload-step-nav #uploadStepNext { margin-left: auto; }
+
+/* --- Upload page: how to film, shown (analyze.html) --- */
+.film-guide { margin-bottom: 20px; }
+.film-guide h2 { margin: 0 0 12px; font-size: 22px; letter-spacing: -.01em; }
+.film-shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; }
+.film-shot { margin: 0; overflow: hidden; border: 1px solid var(--glass-edge-side); border-top-color: var(--glass-edge-top); border-radius: 18px; background: var(--glass-fill); }
+.film-shot img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.film-shot.is-bad img { filter: saturate(.75); }
+.film-shot figcaption { display: flex; gap: 10px; padding: 10px 12px 12px; color: var(--glass-text-faint); font-size: 13px; line-height: 1.4; }
+.film-shot figcaption strong { display: block; color: #ffffff; font-size: 14px; }
+.film-shot figcaption b { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 24px; border-radius: 50%; font-size: 14px; }
+.film-shot.is-good figcaption b { background: #3ddc97; color: #06121a; }
+.film-shot.is-bad figcaption b { background: #ff5d6c; color: #ffffff; }
+
+/* Blue corner versus red corner (owner, 2026-11-01: "don't make it blue and
+   yellow, make it blue versus red"). Fighter B is red on every page; these
+   bring the live page's fighter A from cyan to the same blue. */
+.fighter-overlay.fighter-a { border-color: #5aa0ff; }
+.fighter-overlay.fighter-a b { background: #5aa0ff; }
+.analysis-markers button.fighter-a { background: #5aa0ff; }
+.live-event-item.fighter-a button { border-left-color: #5aa0ff; }
+.warmup-a { color: #5aa0ff; }
+.preview-b { color: #ffe3e6; }

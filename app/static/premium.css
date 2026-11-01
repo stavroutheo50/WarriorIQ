@@ -15,7 +15,7 @@
 :root {
   --wiq-aurora-a: 92 130 239;   /* --wiq-blue  */
   --wiq-aurora-b: 85 198 223;   /* --wiq-cyan  */
-  --wiq-aurora-c: 160 138 232;  /* --wiq-b     */
+  --wiq-aurora-c: 255 100 112;  /* --wiq-b     */
   --wiq-edge: rgba(255, 255, 255, .07);
   --wiq-edge-strong: rgba(255, 255, 255, .14);
   --wiq-lift: 0 1px 0 rgba(255,255,255,.05) inset, 0 24px 60px -28px rgba(0,0,0,.85);

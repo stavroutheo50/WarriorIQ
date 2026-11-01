@@ -84,7 +84,7 @@
       ctx.setLineDash([6 * px, 4 * px]); ctx.lineWidth = 2 * px; ctx.strokeStyle = '#ffffff'; outline(box);
     });
     ctx.setLineDash([]); ctx.lineWidth = 3 * px; ctx.font = `600 ${13 * px}px system-ui, sans-serif`;
-    [[boxA, '#4ea1ff', `A · ${nameA}`], [boxB, '#f5b942', 'B · Opponent']].forEach(([box, colour, label]) => {
+    [[boxA, '#4ea1ff', `A · ${nameA}`], [boxB, '#ff6470', 'B · Opponent']].forEach(([box, colour, label]) => {
       if (!box) return;
       ctx.strokeStyle = colour; ctx.strokeRect(box[0] * k, box[1] * k, (box[2] - box[0]) * k, (box[3] - box[1]) * k);
       const tw = ctx.measureText(label).width + 10 * px;
@@ -92,7 +92,7 @@
       ctx.fillStyle = '#081020'; ctx.fillText(label, box[0] * k + 5 * px, Math.max(14 * px, box[1] * k - 6 * px));
     });
     if (drag && drag.moved) {
-      ctx.strokeStyle = boxA ? '#f5b942' : '#4ea1ff'; ctx.lineWidth = 2 * px;
+      ctx.strokeStyle = boxA ? '#ff6470' : '#4ea1ff'; ctx.lineWidth = 2 * px;
       ctx.strokeRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0);
     }
     describe();

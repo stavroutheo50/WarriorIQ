@@ -36,7 +36,7 @@ from core.config import SETTINGS  # noqa: E402
 
 START, END = 90, 259          # frames at 24 fps: 3.75 s to 10.8 s
 POSTER_SECONDS = 2.33         # into the cut: A's kick, both fighters in view
-FIGHTERS = {9: ("A", (255, 194, 140)), 2: ("B", (107, 201, 247))}  # BGR of #8cc2ff, #f7c96b
+FIGHTERS = {9: ("A", (255, 194, 140)), 2: ("B", (112, 100, 255))}  # BGR of #8cc2ff (blue), #ff6470 (red)
 EDGES = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),
          (11, 13), (13, 15), (12, 14), (14, 16), (0, 5), (0, 6)]
 SEEN = .5                     # keypoint confidence below which nothing is drawn

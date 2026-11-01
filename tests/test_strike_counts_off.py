@@ -138,9 +138,10 @@ def test_live_page_hides_the_feed_and_strike_rows(counts_off):
         job_id="j", initial_status={}, live_counting_note="", strike_counts_published=False,
         asset_version="t")
     assert re.search(r'id="liveFeedCard"[^>]*\bhidden\b', html)
-    assert re.search(r'<div hidden><span>Kick attempts', html)
-    assert re.search(r'<div hidden><span>Total attempts', html)
-    assert re.search(r'<div><span>Identity lock', html)
+    # No strike rows at all since the live statistics section was removed
+    # (owner, 2026-11-01), and no live score while counts are off.
+    assert "Kick attempts" not in html and "Total attempts" not in html
+    assert 'id="liveBoard"' not in html
 
 
 def test_a_stored_estimated_score_is_withheld_on_read(counts_off):

@@ -1,23 +1,6 @@
 {% extends "base.html" %}
 {% block title %}WarriorIQ · AI Fight Analysis for Combat Sports{% endblock %}
-{% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
-(() => {
-  // The clip plays by itself and cannot be paused or controlled (owner,
-  // 2026-11-01, replacing click to play): no controls and no taps on it, and
-  // anything that stops it - the tab coming back, a phone that held autoplay
-  // back - starts it again. Only a reduced-motion setting on the device keeps
-  // it still, on its poster.
-  const clip = document.getElementById('heroClip');
-  if (!clip) return;
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { clip.removeAttribute('autoplay'); clip.pause(); return; }
-  const play = () => { if (clip.paused) clip.play().catch(() => {}); };
-  clip.addEventListener('pause', () => setTimeout(play, 50));
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) play(); });
-  // A phone in low-power mode refuses autoplay until the page is touched.
-  ['touchstart', 'pointerdown', 'scroll'].forEach(type => window.addEventListener(type, play, { passive: true, once: true }));
-  play();
-})();
-</script>{% endblock %}
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}" src="/static/hero-clip.js?v={{asset_version}}" defer></script>{% endblock %}
 {% block description %}Upload a kickboxing, boxing, Muay Thai, taekwondo or MMA fight. WarriorIQ measures how both fighters moved{% if features.scoring.on %}, estimates the round-by-round score under your sport's rules,{% endif %} and builds a four-week training plan from your own numbers.{% endblock %}
 {% block content %}
 {#- The glass homepage (owner, 2026-10-28): straight to the point. One line,
@@ -42,7 +25,7 @@
       by itself and cannot be paused (owner, 2026-11-01). -#}
   <figure class="home-preview glass-panel">
     <div class="home-clip">
-      <video id="heroClip" src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline autoplay preload="auto" disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback" tabindex="-1" aria-label="An MMA exchange with WarriorIQ tracking both fighters: a box and a skeleton on each"></video>
+      <video id="heroClip" data-tracking-clip src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline autoplay preload="auto" disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback" tabindex="-1" aria-label="An MMA exchange with WarriorIQ tracking both fighters: a box and a skeleton on each"></video>
       <span class="home-clip-live" aria-hidden="true"><i></i>WarriorIQ live</span>
     </div>
     <figcaption><span><i class="home-dot home-dot-a"></i>Fighter A</span><span><i class="home-dot home-dot-b"></i>Fighter B</span><span class="home-clip-note">Real WarriorIQ tracking on a stock clip</span></figcaption>
@@ -105,7 +88,7 @@
     {% if item.counted %}<p><strong>Counted, as rough estimates:</strong> {{ item.counted }}.</p>{% else %}<p><strong>Strike counts:</strong> not shown at the moment.</p>{% endif %}
     {% if item.unobserved %}<p class="muted"><strong>Not seen:</strong> {{ item.unobserved }}.</p>{% endif %}
   </div>{% endfor %}</div>
-</details><details><summary>Is WarriorIQ an official judge?</summary><p>No. {% if features.scoring.on %}Scorecards are evidence-gated estimates for training and review, not replacements for licensed officials.{% else %}WarriorIQ does not score fights yet; when score estimates arrive they will be training estimates, not a replacement for licensed officials.{% endif %}</p></details><details><summary>Can I analyse a fight without an account?</summary><p>No. A fight belongs to a workspace &mdash; your footage, the athletes in it and your upload allowance are all attached to an account &mdash; so WarriorIQ asks you to create one first. It is free, and your fights stay private to you.</p></details><details><summary>Can under-18s use it?</summary><p>Yes: accounts are open to every age. Under {{request.state.minimum_account_age}}, a parent or guardian approves the account by email before any fight is uploaded. Junior athletes can appear in footage only when the uploader has all required rights and appropriate parent or guardian permission.</p></details><details><summary>How accurate are the strike counts?</summary><p>Not accurate enough to treat as exact. They are labelled as rough estimates everywhere they appear; the <a class="text-link" href="/accuracy">accuracy checks</a> are why.</p></details><details><summary>Can I see a report before signing up?</summary><p>Yes. The <a class="text-link" href="/sample-report">sample report</a> shows the layout with made-up fighters and numbers.</p></details><details><summary>What happens when the AI is uncertain?</summary><p>A quick quality check catches hard-to-see footage first. After that, the analysis leaves out anything the video cannot support and says so on the report. When it cannot tell the two fighters apart, the report asks you to point them out again on a clear picture.</p></details>
+</details><details><summary>Is WarriorIQ an official judge?</summary><p>No. {% if features.scoring.on %}Scorecards are evidence-gated estimates for training and review, not replacements for licensed officials.{% else %}WarriorIQ does not score fights yet; when score estimates arrive they will be training estimates, not a replacement for licensed officials.{% endif %}</p></details><details><summary>Can I analyse a fight without an account?</summary><p>No. A fight belongs to a workspace &mdash; your footage, the athletes in it and your upload allowance are all attached to an account &mdash; so WarriorIQ asks you to create one first. It is free, and your fights stay private to you.</p></details><details><summary>Can under-18s use it?</summary><p>Yes: accounts are open to every age. Under {{request.state.minimum_account_age}}, a parent or guardian approves the account by email before any fight is uploaded. Junior athletes can appear in footage only when the uploader has all required rights and appropriate parent or guardian permission.</p></details><details><summary>How accurate are the strike counts?</summary><p>Not accurate enough to treat as exact. They are labelled as rough estimates everywhere they appear; the <a class="text-link" href="/accuracy">accuracy checks</a> are why.</p></details><details><summary>Can I see a report before signing up?</summary><p>Yes. The <a class="text-link" href="/sample-report">sample report</a> is a real WarriorIQ analysis of a free stock fight clip, every number from the analysis.</p></details><details><summary>What happens when the AI is uncertain?</summary><p>A quick quality check catches hard-to-see footage first. After that, the analysis leaves out anything the video cannot support and says so on the report. When it cannot tell the two fighters apart, the report asks you to point them out again on a clear picture.</p></details>
 {% if not payments_enabled %}<details><summary>Is billing open?</summary><p>Not yet. The free plan is free; paid prices apply once billing opens. <a class="text-link" href="/pricing">See the plans</a>.</p></details>{% endif %}
 <p class="faq-guides small">Guides: <a class="text-link" href="/how-to-record-a-fight-for-analysis">Record a clearer fight</a> · <a class="text-link" href="/kickboxing-fight-analysis">How fight analysis works</a> · <a class="text-link" href="/k1-fight-analysis">K-1 review</a> · <a class="text-link" href="/fight-video-analysis-for-coaches">For coaches</a> · <a class="text-link" href="/accuracy">Accuracy</a></p>
 </section>

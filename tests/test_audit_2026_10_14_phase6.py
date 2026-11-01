@@ -62,7 +62,7 @@ def test_a_chapter_brings_the_video_into_view():
 
 def test_both_skeletons_are_drawn_with_a_marker_for_a_lost_fighter():
     page = (TEMPLATES / "replay.html").read_text(encoding="utf-8")
-    assert "for(const[key,label,color]of[['fighter_A','A','#55a7ff'],['fighter_B','B','#f1b84b']])" in page
+    assert "for(const[key,label,color]of[['fighter_A','A','#55a7ff'],['fighter_B','B','#ff6470']])" in page
     assert "not tracked here" in page and "not tracked at this moment" in page
     assert "if(target==='A'||target==='BOTH')skeleton(" not in page
 

@@ -94,9 +94,27 @@ def _movement_rows(metrics: dict, report: dict) -> list[dict]:
     return [row for row in rows if row]
 
 
+def _counted_strikes(report: dict) -> list[dict]:
+    """The strikes the report's totals count, each with a "t" in seconds.
+
+    The totals are built from the live strike feed after one de-duplication
+    (core.fight_stats.summarize_fight_events), not from every detected event:
+    plotting report["events"] drew 24 strikes beside a total of 18 on the
+    sample fight. A report written before the feed existed falls back to the
+    attempted events.
+    """
+    feed = report.get("event_feed")
+    if isinstance(feed, list) and feed:
+        from core.fight_stats import _deduplicate
+
+        return [{**item, "t": item.get("time_seconds")} for item in _deduplicate(feed)]
+    return [{**e, "t": e.get("peak_time")} for e in (report.get("events") or [])
+            if isinstance(e, dict) and e.get("attempted")]
+
+
 def _timeline(report: dict, families: list[str]) -> dict | None:
-    events = [e for e in (report.get("events") or []) if isinstance(e, dict) and e.get("attempted")
-              and e.get("fighter") in SIDES and e.get("family") in families and _num(e.get("peak_time")) is not None]
+    events = [{**e, "peak_time": e["t"]} for e in _counted_strikes(report)
+              if e.get("fighter") in SIDES and e.get("family") in families and _num(e.get("t")) is not None]
     if not events:
         return None
     end = max(_num((r or {}).get("end_seconds")) or 0.0 for r in (report.get("rounds") or [{}]))

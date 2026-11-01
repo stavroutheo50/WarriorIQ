@@ -82,3 +82,37 @@ def test_the_live_board_puts_each_fighter_on_the_side_they_were_picked_on(monkey
         state.delete_job(job_id)
     assert web._board_sides({"fighter_a_box": [0, 0, 10, 10], "fighter_b_box": [50, 0, 60, 10]}) == ["A", "B"]
     assert web._board_sides({}) == ["A", "B"]
+
+
+def _landed(fighter, t, round_number=1, technique="jab"):
+    from core.types import StrikeEvent
+
+    return StrikeEvent(fighter=fighter, opponent="B" if fighter == "A" else "A", round_number=round_number,
+                       start_frame=int(t * 30) - 3, peak_frame=int(t * 30), end_frame=int(t * 30) + 3,
+                       start_time=t - .1, peak_time=t, end_time=t + .1, technique=technique, family="punch",
+                       limb="lead_hand", outcome="likely_landed", landed=True, confidence=.8, contact_confidence=.7)
+
+
+def test_the_live_score_comes_from_the_reports_scorer(monkeypatch):
+    """Owner, 2026-11-01: a live score per fighter, not a live strike count."""
+    from core import analyzer
+    from core.scoring import score_fight
+
+    monkeypatch.setattr(analyzer, "STRIKE_COUNTS_PUBLISHED", True)
+    monkeypatch.setattr(analyzer, "STRIKE_COUNTS_PRECISION_VALIDATED", False)
+    events = [_landed("A", 2.0), _landed("A", 5.0), _landed("B", 8.0)]
+    live = analyzer._live_score(events, "BOXING", "BOTH", 1)
+    card = score_fight(events, "BOXING", [1], [], reliable=True, estimated=True)
+    assert live["totals"] == card["totals"] and live["status"] == "provisional"
+    assert live["current_round"]["round"] == 1
+    # No opponent's points in a one-fighter analysis, and nothing before a round is known.
+    assert analyzer._live_score(events, "BOXING", "A", 1) is None
+    assert analyzer._live_score([], "BOXING", "BOTH", None) is None
+
+
+def test_the_live_page_shows_points_and_no_statistics_section():
+    template = (web.ROOT / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
+    assert 'aria-label="Live score, provisional"' in template and '<b id="boardLabel">Points</b>' in template
+    assert "total_strikes" not in template[template.index("function renderBoard"):]
+    assert 'class="live-stats"' not in template and "Statistics update as footage is processed" not in template
+    assert 'id="liveFeedCard"' in template

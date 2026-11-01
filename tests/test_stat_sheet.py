@@ -83,3 +83,12 @@ def test_the_pace_graph_is_drawn_from_both_fighters_series():
 
 def test_an_empty_report_has_no_sheet():
     assert build_stat_sheet({}, ["punch"], True)["available"] is False
+
+
+def test_the_timeline_counts_the_same_strikes_as_the_totals():
+    feed = [{"kind": "strike", "fighter": "A", "family": "punch", "time_seconds": 1.0, "confidence": .5},
+            {"kind": "strike", "fighter": "A", "family": "punch", "time_seconds": 1.2, "confidence": .6},   # the same punch twice
+            {"kind": "strike", "fighter": "B", "family": "kick", "time_seconds": 12.0, "confidence": .5}]
+    report = _report(event_feed=feed)
+    timeline = build_stat_sheet(report, ["punch", "kick"], True)["timeline"]
+    assert sum(b["A"] for b in timeline["buckets"]) == 1 and sum(b["B"] for b in timeline["buckets"]) == 1

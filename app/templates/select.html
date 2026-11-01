@@ -272,7 +272,7 @@ function startReasonText(valid){
 }
 function draw(){
   // CSS pixels, not canvas.width/height - the context is scaled in fit().
-  ctx.clearRect(0,0,cssWidth,cssHeight);labelSlots.length=0;drawCandidates();drawBox(boxA,`A \u00b7 ${tagFor('A')}`,'#55a7ff');drawBox(boxB,`B \u00b7 ${tagFor('B')}`,'#f1b84b');
+  ctx.clearRect(0,0,cssWidth,cssHeight);labelSlots.length=0;drawCandidates();drawBox(boxA,`A \u00b7 ${tagFor('A')}`,'#55a7ff');drawBox(boxB,`B \u00b7 ${tagFor('B')}`,'#ff6470');
   if(boxA&&mode!=='A_DRAW')drawLockCorners(boxA,'#9ad1ff');if(boxB&&mode==='READY')drawLockCorners(boxB,'#ffd987');if(tempBox)drawBox(toVideo(tempBox),mode==='A_DRAW'?'Drawing A':'Drawing B','#ffffff');drawReticle();
   const valid=selectionIsValid(),detected=valid&&detectorMatch(boxA)&&(solo||detectorMatch(boxB));startBtn.disabled=starting||!valid;startReason.textContent=startReasonText(valid);startReason.hidden=!startReason.textContent;redrawB.hidden=!boxA||solo;redrawA.hidden=!boxA&&!tempBox;
   // The side cards follow the boxes. They said "Draw this fighter first" with

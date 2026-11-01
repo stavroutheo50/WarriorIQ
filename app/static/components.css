@@ -1005,7 +1005,7 @@ body.replay-theatre-open{overflow:hidden}
 .mark-tap span{font-weight:700;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mark-tap b{font-size:34px;line-height:1.1;font-variant-numeric:tabular-nums}
 .mark-tap small{opacity:.7}
-.mark-a{border-color:#55a7ff}.mark-b{border-color:#f1b84b}
+.mark-a{border-color:#55a7ff}.mark-b{border-color:#ff6470}
 .mark-tap.flash{animation:mark-flash .25s ease-out}
 @keyframes mark-flash{from{background:rgba(255,255,255,.28)}to{background:rgba(255,255,255,.04)}}
 .mark-tools{display:flex;align-items:center;gap:12px;margin-bottom:16px}
@@ -1013,7 +1013,7 @@ body.replay-theatre-open{overflow:hidden}
 .mark-result-grid div{display:flex;flex-direction:column}.mark-result-grid b{font-size:28px;font-variant-numeric:tabular-nums}.mark-result-grid span{font-size:13px;opacity:.8}
 .mark-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
 .mark-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 10px;border-radius:12px;border-left:4px solid;background:rgba(255,255,255,.04)}
-.mark-row-a{border-left-color:#55a7ff}.mark-row-b{border-left-color:#f1b84b}
+.mark-row-a{border-left-color:#55a7ff}.mark-row-b{border-left-color:#ff6470}
 .mark-time{border:0;background:none;color:inherit;text-decoration:underline;cursor:pointer;padding:4px 0}
 .mark-who{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:9em}
 .mark-chips{display:flex;gap:4px}

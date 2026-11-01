@@ -233,7 +233,10 @@ from core.preflight import Preflight
 from core.preflight import probe as probe_video
 from core.pose_smoothing import JointGate
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
-from core.report import build_report, identity_tracking, not_a_fight, withhold_for_not_a_fight, write_report
+from core.report import (
+    STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, build_report, identity_tracking, not_a_fight,
+    withhold_for_not_a_fight, write_report,
+)
 from core.progress_eta import StageEta
 from core.camera_motion import GlobalMotion
 from core.rtm_pose import refine as refine_fighter_pose
@@ -241,7 +244,7 @@ from core.edgetam_recovery import build_recovery
 from core.sam_recovery import SweepInBackground, nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
 from core.scoring import (
-    RULESETS, collapse_simultaneous_labels, is_legal_event, normalize_ruleset,
+    RULESETS, collapse_simultaneous_labels, is_legal_event, normalize_ruleset, score_fight,
     sport_counted_families, sport_of,
 )
 
@@ -497,6 +500,37 @@ def _provisional_stats(
     return summarize_fight_events(
         live_events, found, analyzed_frames, all_verified, processed_seconds,
     )
+
+
+def _live_score(events: list, ruleset: str, analysis_target: str, current_round: int | None) -> dict | None:
+    """The score so far, for the live page (owner, 2026-11-01).
+
+    "Do not use a live strike count, use a live score": the same scorer the
+    report's estimated scorecard uses (core.report.build_preliminary_scorecard)
+    over the strikes already judged to be fight footage. It is provisional by
+    construction - identity and tracking coverage are only checked once the
+    whole fight is in, and the report can still withhold its score - and is
+    labelled so. A one-fighter analysis has no opponent's points to count.
+    """
+    if (analysis_target or "BOTH").upper() != "BOTH":
+        return None
+    rounds = {int(event.round_number) for event in events if event.round_number is not None}
+    if current_round is not None:
+        rounds.add(int(current_round))
+    if not rounds:
+        return None
+    estimated = STRIKE_COUNTS_PUBLISHED and not STRIKE_COUNTS_PRECISION_VALIDATED
+    card = score_fight(events, ruleset, sorted(rounds), [], reliable=True, estimated=estimated)
+    latest = next((item for item in card["rounds"] if item["round"] == current_round), None)
+    return {
+        "totals": {"A": card["totals"]["A"], "B": card["totals"]["B"]},
+        "mode": card["mode"],
+        "ruleset_label": card["ruleset_label"],
+        "current_round": None if latest is None else {
+            "round": latest["round"], "A": latest["fighter_A"], "B": latest["fighter_B"]},
+        "rounds_scored": len(card["rounds"]),
+        "status": "provisional",
+    }
 
 
 def _live_keypoints(observation, width: int, height: int) -> list[list[float] | None] | None:
@@ -1801,6 +1835,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 live_stats["diagnostics"] = _live_event_diagnostics(
                     live_candidates, req.ruleset, live_action_trusted, all_live_event_data,
                 )
+                live_stats["score"] = _live_score(live_candidates, req.ruleset, req.analysis_target, round_number)
                 progress(
                     "Analysing fight",
                     percent,

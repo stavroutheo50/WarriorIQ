@@ -1,0 +1,484 @@
+{
+ "source": {
+  "title": "Two women fighting mixed martial arts",
+  "page_url": "https://mixkit.co/free-stock-video/two-women-fighting-mixed-martial-arts-40979/",
+  "licence": "Mixkit Stock Video Free License",
+  "licence_url": "https://mixkit.co/license/#videoFree"
+ },
+ "scorecard": {
+  "sport": "mma",
+  "sport_label": "MMA",
+  "ruleset": "MMA",
+  "available": false
+ },
+ "statistics": {
+  "fighters": {
+   "A": {
+    "punch_attempts": 6,
+    "kick_attempts": 2,
+    "knee_attempts": 0,
+    "activity_rate": 34.04255319148936,
+    "observation_coverage": 0.7619047619047619
+   },
+   "B": {
+    "punch_attempts": 9,
+    "kick_attempts": 1,
+    "knee_attempts": 0,
+    "activity_rate": 42.5531914893617,
+    "observation_coverage": 0.9809523809523809
+   }
+  }
+ },
+ "metrics": {
+  "A": {
+   "footwork_body_lengths_per_second": 0.39802004418493836,
+   "pressure_index": -0.1024825315341934,
+   "ring_center_control": 0.39832672476768494,
+   "balance_index": 0.6307724739269908,
+   "pose_coverage": 0.7619047619047619,
+   "guard_index": null,
+   "numbers": {
+    "distance_body_lengths": 4.5,
+    "forward_seconds": 2.6,
+    "backward_seconds": 2.2,
+    "hands_up_share": null,
+    "off_balance_count": 1,
+    "seen_seconds": 11.9,
+    "series": {
+     "points": [
+      {
+       "t": 0.0,
+       "speed": 0.37
+      },
+      {
+       "t": 5.0,
+       "speed": 0.38
+      },
+      {
+       "t": 10.0,
+       "speed": 0.72
+      }
+     ]
+    }
+   }
+  },
+  "B": {
+   "footwork_body_lengths_per_second": 0.5611838216619307,
+   "pressure_index": 0.22987831983860438,
+   "ring_center_control": 0.36185067892074585,
+   "balance_index": 0.6367901124509008,
+   "pose_coverage": 0.9809523809523809,
+   "guard_index": null,
+   "numbers": {
+    "distance_body_lengths": 7.8,
+    "forward_seconds": 3.0,
+    "backward_seconds": 1.9,
+    "hands_up_share": null,
+    "off_balance_count": 2,
+    "seen_seconds": 14.2,
+    "series": {
+     "points": [
+      {
+       "t": 0.0,
+       "speed": 0.4
+      },
+      {
+       "t": 5.0,
+       "speed": 0.43
+      },
+      {
+       "t": 10.0,
+       "speed": 0.9
+      }
+     ]
+    }
+   }
+  }
+ },
+ "events": [
+  {
+   "fighter": "B",
+   "peak_time": 0.3333333333333333,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 0.3333333333333333,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 0.75,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 1.4166666666666665,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 1.3333333333333333,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 2.0833333333333335,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 2.5,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 3.1666666666666665,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 3.25,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 4.166666666666667,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 5.5,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 6.166666666666666,
+   "family": "kick",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 6.5,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 6.833333333333333,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 7.333333333333333,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 6.833333333333333,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 9.333333333333332,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 10.0,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 10.833333333333332,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "A",
+   "peak_time": 10.666666666666666,
+   "family": "kick",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 10.666666666666666,
+   "family": "kick",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 11.0,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 13.333333333333332,
+   "family": "punch",
+   "attempted": true
+  },
+  {
+   "fighter": "B",
+   "peak_time": 13.666666666666666,
+   "family": "punch",
+   "attempted": true
+  }
+ ],
+ "event_feed": [
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 0.3333333333333333,
+   "confidence": 0.42905185487535263
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 0.3333333333333333,
+   "confidence": 0.5534275684091781
+  },
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 0.75,
+   "confidence": 0.5571043279435899
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 1.3333333333333333,
+   "confidence": 0.5824233180946774
+  },
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 1.4166666666666665,
+   "confidence": 0.4777020414670308
+  },
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 2.0833333333333335,
+   "confidence": 0.5310548901557923
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 2.5,
+   "confidence": 0.46707499722639717
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 3.1666666666666665,
+   "confidence": 0.4097718060016632
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 3.25,
+   "confidence": 0.44413446916474236
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 4.166666666666667,
+   "confidence": 0.6152438561121623
+  },
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 5.5,
+   "confidence": 0.5437255322933197
+  },
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "kick",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 6.166666666666666,
+   "confidence": 0.5975862913661533
+  },
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 6.5,
+   "confidence": 0.5874104837576548
+  },
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 6.833333333333333,
+   "confidence": 0.5760036256578234
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 6.833333333333333,
+   "confidence": 0.6383515768580967
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 7.333333333333333,
+   "confidence": 0.43097028533617654
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 9.333333333333332,
+   "confidence": 0.5000295033057531
+  },
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 10.0,
+   "confidence": 0.8719379091262818
+  },
+  {
+   "kind": "strike",
+   "fighter": "A",
+   "family": "kick",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 10.666666666666666,
+   "confidence": 0.6735566821363237
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "kick",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 10.666666666666666,
+   "confidence": 0.5532396607928806
+  },
+  {
+   "kind": "strike",
+   "fighter": "B",
+   "family": "punch",
+   "limb": null,
+   "technique": null,
+   "time_seconds": 11.0,
+   "confidence": 0.7459374690055847
+  }
+ ],
+ "defenses": [
+  {
+   "fighter": "B"
+  },
+  {
+   "fighter": "A"
+  },
+  {
+   "fighter": "A"
+  },
+  {
+   "fighter": "B"
+  },
+  {
+   "fighter": "B"
+  },
+  {
+   "fighter": "B"
+  },
+  {
+   "fighter": "A"
+  },
+  {
+   "fighter": "A"
+  },
+  {
+   "fighter": "A"
+  },
+  {
+   "fighter": "B"
+  },
+  {
+   "fighter": "A"
+  }
+ ],
+ "rounds": [
+  {
+   "number": 1,
+   "start_seconds": 0.0,
+   "end_seconds": 14.1
+  }
+ ],
+ "integrity": {
+  "identity_evidence_trusted": true
+ },
+ "tracking": {
+  "fighter_A_coverage": 0.7619047619047619,
+  "fighter_B_coverage": 0.9809523809523809
+ }
+}
