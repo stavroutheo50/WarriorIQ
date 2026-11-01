@@ -87,11 +87,13 @@ def test_the_hero_shows_a_real_tracking_example():
     page = BrowserClient(web.app).get("/").text
     assert 'id="heroClip" src="/static/hero-fight.mp4' in page
     assert "Real WarriorIQ tracking on a stock clip" in page
-    # Click to play (owner, 2026-11-01): no autoplay, nothing fetched up front,
-    # and the button stays hidden until the script that drives it has run.
+    # It plays by itself and cannot be paused or controlled (owner,
+    # 2026-11-01, replacing click to play): no controls, no play button.
     clip = page[page.index('id="heroClip"'):page.index("></video>")]
-    assert "autoplay" not in clip and 'preload="none"' in clip
-    assert 'id="heroClipPlay" type="button" hidden' in page
+    assert "autoplay" in clip and "muted" in clip and "controls " not in clip and "controls>" not in clip
+    assert "heroClipPlay" not in page
+    css = (web.ROOT / "app" / "static" / "glass.css").read_text(encoding="utf-8")
+    assert ".home-clip video { pointer-events: none;" in css
     # The clip shows tracking only (owner, 2026-11-01): its strike names were
     # wrong too often, so neither the clip nor its description may claim them.
     assert "strike named" not in page and "each strike" not in clip

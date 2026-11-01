@@ -131,3 +131,4 @@ dataset/public/
 # tracks are rebuilt with tools/make_stock_strikes.py (identifiable athletes,
 # public repository).
 dataset/stock_strikes/*/track.jsonl.gz
+dataset/stock_strikes/*/features_check.npz
