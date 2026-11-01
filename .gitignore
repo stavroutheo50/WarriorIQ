@@ -135,3 +135,7 @@ dataset/stock_strikes/*/track.jsonl.gz
 # committed, the pose tracks and the video itself never are.
 dataset/own_sparring/*/track.jsonl.gz
 dataset/own_sparring/**/*.mp4
+# Frames drawn by tools/make_stock_strikes.py to check the A/B tracking:
+# pictures of identifiable people, local only.
+dataset/stock_strikes/*/check/
+dataset/own_sparring/*/check/
