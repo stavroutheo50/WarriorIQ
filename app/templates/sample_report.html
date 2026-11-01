@@ -1,56 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Sample fight report (made-up data) · WarriorIQ{% endblock %}
-{% block description %}What a WarriorIQ fight report looks like, shown with invented fighters and numbers. Not a real fight.{% endblock %}
+{% block title %}Sample fight report: a real analysis · WarriorIQ{% endblock %}
+{% block description %}A real WarriorIQ analysis of a free stock MMA clip: both fighters tracked, strikes counted, movement measured, every number from the analysis.{% endblock %}
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}" src="/static/hero-clip.js?v={{asset_version}}" defer></script>{% endblock %}
 {% block content %}
-{#- Audit 2026-10-14 (#54). Everything on this page is invented
-    (core/sample_report.py) and says so twice: in the banner, and on the
-    measurements themselves. -#}
-<div class="notice sample-notice" role="note"><strong>{{ notice }}</strong></div>
-<section class="numbers-first-report sample-report">
-  <header>
-    <div><div class="eyebrow">Sample report · {{ report.sport }} · {{ report.ruleset }} · {{ report.rounds }} × {{ report.round_minutes }} min</div>
-    <h1>Sample fight report</h1></div>
-  </header>
-
-  <section class="fighter-comparison" aria-labelledby="sampleTracking">
-    <div class="numbers-section-heading"><div><div class="eyebrow">Checked first</div><h2 id="sampleTracking">How well both fighters were followed</h2></div><span>Made-up numbers</span></div>
-    <p class="small muted">A real report shows this before any measurement. When a fighter was not seen for long enough, the numbers that depend on it are withheld rather than guessed.</p>
-    <div class="trust-checks">
-      <span>{{ report.fighters.A }} seen {{ (report.tracking.seen_A * 100)|round|int }}% of the fight</span>
-      <span>{{ report.fighters.B }} seen {{ (report.tracking.seen_B * 100)|round|int }}% of the fight</span>
-      <span>Fighters told apart {{ (report.tracking.told_apart * 100)|round|int }}% of the time</span>
+{#- Show, don't tell (owner, 2026-11-01). The sample report was invented
+    fighters and numbers with a note saying so; it is now WarriorIQ's own
+    analysis of the free-licence stock clip on the homepage (Mixkit 40979),
+    built by tools/make_sample_report.py into app/sample_fight.json. Every
+    number on the page comes from that analysis through the same stats sheet
+    a customer's report uses (core/stat_sheet.py). -#}
+<section class="home-hero sample-hero">
+  <div class="home-hero-copy">
+    <p class="glass-chip">Sample report · {{ sport_label }} · a real analysis</p>
+    <h1>This is what<br><em>you get back.</em></h1>
+    <p class="home-lead">WarriorIQ analysed this {{ seconds }}-second {{ sport_label }} exchange. Everything below is what it measured: both fighters tracked, every strike counted, every step of movement read. Nothing was typed in by hand.</p>
+    <div class="home-actions">{% if request.state.account %}<a class="btn btn-lead" href="/analyze">Analyse my video <span aria-hidden="true">&#8594;</span></a>{% else %}<a class="btn btn-lead" href="/signup?next=/analyze">Analyse your own fight <span aria-hidden="true">&#8594;</span></a>{% endif %}</div>
+  </div>
+  <figure class="home-preview glass-panel">
+    <div class="home-clip">
+      <video data-tracking-clip src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline autoplay preload="auto" disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback" tabindex="-1" aria-label="The analysed MMA exchange with WarriorIQ tracking both fighters: a box and a skeleton on each"></video>
+      <span class="home-clip-live" aria-hidden="true"><i></i>As WarriorIQ tracked it</span>
     </div>
-  </section>
+    <figcaption><span><i class="home-dot home-dot-a"></i>{{ names.A }}</span><span><i class="home-dot home-dot-b"></i>{{ names.B }}</span><span class="home-clip-note">Followed {{ coverage.A }}% and {{ coverage.B }}% of the clip</span></figcaption>
+  </figure>
+</section>
 
-  <section class="fighter-comparison" aria-labelledby="sampleMeasures">
-    <div class="numbers-section-heading"><div><div class="eyebrow">Measured</div><h2 id="sampleMeasures">How each fighter moved</h2></div><span>Made-up numbers</span></div>
-    <table class="sample-table">
-      <thead><tr><th scope="col">Measure</th><th scope="col">{{ report.fighters.A }}</th><th scope="col">{{ report.fighters.B }}</th></tr></thead>
-      <tbody>
-      {% for row in rows %}
-        <tr><th scope="row">{{ row.metric.name }}{% if row.metric.experimental %} {{ experimental_badge }}{% endif %}<small>{{ row.metric.definition }}</small></th><td>{{ row.A }}</td><td>{{ row.B }}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    <p class="small muted">{{ experimental_note }}</p>
-  </section>
+{% if stat_sheet.available %}{% include "_stat_sheet.html" %}{% endif %}
 
-  <section class="simple-rounds" aria-labelledby="sampleRounds">
-    <div class="numbers-section-heading"><div><div class="eyebrow">Round by round</div><h2 id="sampleRounds">What changed between rounds</h2></div></div>
-    {% for r in report.rounds_detail %}<article><header><strong>Round {{ r.round }}</strong></header><div><span>{{ r.note }}</span></div></article>{% endfor %}
-    <p class="small muted">No score is shown here. A real report estimates a round-by-round score only when both fighters were tracked steadily enough for a fair one, and it is an estimate for training, not official judging.</p>
-  </section>
-
-  <section class="simple-rounds" aria-labelledby="samplePriorities">
-    <div class="numbers-section-heading"><div><div class="eyebrow">Coaching</div><h2 id="samplePriorities">What to work on first</h2></div></div>
-    {% for title, why in report.priorities %}<article><header><strong>{{ title }}</strong></header><div><span>{{ why }}</span></div></article>{% endfor %}
-  </section>
-
-  <section class="simple-rounds" aria-labelledby="samplePlan">
-    <div class="numbers-section-heading"><div><div class="eyebrow">Training</div><h2 id="samplePlan">A four-week plan from the numbers</h2></div></div>
-    {% for week, work in report.plan %}<article><header><strong>{{ week }}</strong></header><div><span>{{ work }}</span></div></article>{% endfor %}
-  </section>
-
-  <div class="hero-actions">{% if request.state.account %}<a class="btn" href="/analyze">Analyse my own fight</a>{% else %}<a class="btn" href="/signup?next=/analyze">Create a free account to analyse your fight</a>{% endif %}<a class="btn secondary" href="/">Back to the home page</a></div>
+<section class="home-section sample-notes">
+  <h2>Read it like a coach.</h2>
+  <div class="home-cards">
+    <article class="home-card"><h3>Strike counts</h3><p class="home-drill">Rough estimates</p><small>Counted automatically and not checked by a person. Our <a class="text-link" href="/accuracy">accuracy checks</a> show how far to trust them.</small></article>
+    <article class="home-card"><h3>Round score</h3><p class="home-drill">Not given here</p><small>{{ seconds }} seconds is too short a round to score fairly, so the analysis withholds it, as it would on any report.</small></article>
+    <article class="home-card"><h3>Your report</h3><p class="home-drill">Goes further</p><small>A full round adds the estimated score, the replay with every strike marked, what to fix first and a four-week plan.</small></article>
+  </div>
+  <p class="small muted sample-source">The clip: <a class="text-link" href="{{ source.page_url }}" rel="noopener" target="_blank">“{{ source.title }}”</a> from Mixkit, used under the <a class="text-link" href="{{ source.licence_url }}" rel="noopener" target="_blank">{{ source.licence }}</a>. The clip above shows its first seven seconds; the numbers cover the whole {{ seconds }} seconds.</p>
 </section>
 {% endblock %}

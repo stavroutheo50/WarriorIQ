@@ -85,7 +85,7 @@ def test_the_hero_shows_a_real_tracking_example():
     # The empty interface preview became a real example (owner, 2026-10-28):
     # a stock clip with WarriorIQ's own tracking drawn on it, never a placeholder.
     page = BrowserClient(web.app).get("/").text
-    assert 'id="heroClip" src="/static/hero-fight.mp4' in page
+    assert 'id="heroClip" data-tracking-clip src="/static/hero-fight.mp4' in page
     assert "Real WarriorIQ tracking on a stock clip" in page
     # It plays by itself and cannot be paused or controlled (owner,
     # 2026-11-01, replacing click to play): no controls, no play button.
@@ -103,13 +103,18 @@ def test_the_hero_shows_a_real_tracking_example():
 
 
 # --------------------------------------------------------------------- #54
-def test_the_sample_report_is_public_and_labelled():
+def test_the_sample_report_is_public_and_real():
+    # Show, don't tell (owner, 2026-11-01): a real analysis of a free stock
+    # clip, not invented numbers, with its source and licence named.
     response = BrowserClient(web.app).get("/sample-report")
     assert response.status_code == 200
-    assert "Sample report with made-up data" in response.text
-    assert "They are not from a real fight." in response.text
-    assert response.text.count("Made-up numbers") == 2
-    assert "Experimental" in response.text                  # the guard keeps its label
+    page = response.text
+    assert "a real analysis" in page and 'id="statSheet"' in page
+    assert "Mixkit Stock Video Free License" in page
+    assert "made-up" not in page.lower()
+    assert "Rough estimates" in page and page.count(">estimate<") >= 1   # the counts keep their label
+    assert "Guard up" not in page or "experimental" in page
+    assert "Strikes thrown" in page and "Strikes thrown, every 10 seconds" in page
 
 
 def test_the_sample_shows_only_measurements_a_report_publishes():

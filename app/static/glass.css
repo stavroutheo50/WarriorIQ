@@ -575,3 +575,7 @@ body {
    (owner, 2026-11-01). */
 .home-clip video { pointer-events: none; user-select: none; -webkit-user-select: none; }
 .home-clip video::-webkit-media-controls, .home-clip video::-webkit-media-controls-start-playback-button { display: none !important; -webkit-appearance: none; }
+
+/* --- Sample report (sample_report.html) --- */
+.sample-notes .home-cards { margin-top: 18px; }
+.sample-source { margin-top: 22px; }

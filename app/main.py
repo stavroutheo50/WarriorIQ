@@ -101,7 +101,6 @@ from core.fight_presence import attach_plausibility
 from core.features import FEATURES
 from core.features import is_on as feature_is_on
 from core.features import status as feature_status
-from core.sample_report import SAMPLE_NOTICE, SAMPLE_REPORT, sample_rows
 from core.payments import comparison_rows as plan_comparison, roster_capacity, PLANS, allowance_column, allowance_text, cancel_subscription_at_period_end, create_checkout, effective_plan_key, plan_for_key, subscription_change, verify_webhook
 from core.legal import LEGAL_DOCUMENTS, launch_readiness, resolve_document
 from core import feed, social, worker_alerts
@@ -9449,11 +9448,31 @@ def accuracy_page(request: Request):
     return templates.TemplateResponse(request=request, name="accuracy.html", context={"request": request})
 
 
+SAMPLE_FIGHT_PATH = ROOT / "app" / "sample_fight.json"
+
+
 @app.get("/sample-report", response_class=HTMLResponse)
 def sample_report_page(request: Request):
-    """A report anyone can open, with invented data that says so (audit 2026-10-14, #54)."""
+    """A report anyone can open: WarriorIQ's real analysis of a free stock clip.
+
+    It showed invented fighters and numbers (audit 2026-10-14, #54); show,
+    don't tell (owner, 2026-11-01). app/sample_fight.json comes from
+    tools/make_sample_report.py, and the stats sheet is built exactly as a
+    customer's report builds it.
+    """
+    fight = json.loads(SAMPLE_FIGHT_PATH.read_text(encoding="utf-8"))
+    scorecard = fight.get("scorecard") or {}
+    trusted = bool((fight.get("integrity") or {}).get("identity_evidence_trusted", True))
+    ends = [float(r.get("end_seconds") or 0) - float(r.get("start_seconds") or 0) for r in fight.get("rounds") or []]
+    tracking = fight.get("tracking") or {}
     return templates.TemplateResponse(request=request, name="sample_report.html", context={
-        "request": request, "report": SAMPLE_REPORT, "rows": sample_rows(), "notice": SAMPLE_NOTICE,
+        "request": request,
+        "names": {"A": "Fighter A", "B": "Fighter B"},
+        "stat_sheet": build_stat_sheet(fight, published_families(scorecard.get("sport"), fight), trusted),
+        "sport_label": scorecard.get("sport_label") or "MMA",
+        "seconds": int(round(sum(ends))) if ends else None,
+        "coverage": {side: int(round(float(tracking.get(f"fighter_{side}_coverage") or 0) * 100)) for side in ("A", "B")},
+        "source": fight.get("source") or {},
     })
 
 
