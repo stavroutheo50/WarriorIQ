@@ -2,16 +2,20 @@
 {% block title %}WarriorIQ · AI Fight Analysis for Combat Sports{% endblock %}
 {% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
 (() => {
-  // Click to play (owner, 2026-11-01). Nothing moves or downloads until the
-  // visitor asks; without this script the poster stands and no button shows.
-  const clip = document.getElementById('heroClip'), button = document.getElementById('heroClipPlay');
-  if (!clip || !button) return;
-  const label = button.querySelector('.preview-play-label'), figure = clip.closest('.home-preview');
-  const show = playing => { figure.classList.toggle('is-playing', playing); label.textContent = playing ? 'Pause clip' : 'Play clip'; };
-  clip.addEventListener('play', () => show(true));
-  clip.addEventListener('pause', () => show(false));
-  button.addEventListener('click', () => { if (clip.paused) clip.play().catch(() => show(false)); else clip.pause(); });
-  button.hidden = false;
+  // The clip plays by itself and cannot be paused or controlled (owner,
+  // 2026-11-01, replacing click to play): no controls and no taps on it, and
+  // anything that stops it - the tab coming back, a phone that held autoplay
+  // back - starts it again. Only a reduced-motion setting on the device keeps
+  // it still, on its poster.
+  const clip = document.getElementById('heroClip');
+  if (!clip) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { clip.removeAttribute('autoplay'); clip.pause(); return; }
+  const play = () => { if (clip.paused) clip.play().catch(() => {}); };
+  clip.addEventListener('pause', () => setTimeout(play, 50));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) play(); });
+  // A phone in low-power mode refuses autoplay until the page is touched.
+  ['touchstart', 'pointerdown', 'scroll'].forEach(type => window.addEventListener(type, play, { passive: true, once: true }));
+  play();
 })();
 </script>{% endblock %}
 {% block description %}Upload a kickboxing, boxing, Muay Thai, taekwondo or MMA fight. WarriorIQ measures how both fighters moved{% if features.scoring.on %}, estimates the round-by-round score under your sport's rules,{% endif %} and builds a four-week training plan from your own numbers.{% endblock %}
@@ -34,14 +38,12 @@
       own analysis drawn on it - the boxes and skeletons are the analyser's
       pose tracking, nothing added by hand. Strike names were taken off
       (owner, 2026-11-01): they were wrong too often. Rebuilt with
-      tools/make_hero_clip.py, which records the source and licence. Click to play (owner,
-      2026-11-01): the poster shows until the visitor presses play, and the
-      2 MB clip is not fetched before then. -#}
+      tools/make_hero_clip.py, which records the source and licence. It plays
+      by itself and cannot be paused (owner, 2026-11-01). -#}
   <figure class="home-preview glass-panel">
     <div class="home-clip">
-      <video id="heroClip" src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline preload="none" aria-label="An MMA exchange with WarriorIQ tracking both fighters: a box and a skeleton on each"></video>
+      <video id="heroClip" src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline autoplay preload="auto" disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback" tabindex="-1" aria-label="An MMA exchange with WarriorIQ tracking both fighters: a box and a skeleton on each"></video>
       <span class="home-clip-live" aria-hidden="true"><i></i>WarriorIQ live</span>
-      <button class="preview-play" id="heroClipPlay" type="button" hidden><span aria-hidden="true" class="preview-play-icon"></span><span class="preview-play-label">Play clip</span></button>
     </div>
     <figcaption><span><i class="home-dot home-dot-a"></i>Fighter A</span><span><i class="home-dot home-dot-b"></i>Fighter B</span><span class="home-clip-note">Real WarriorIQ tracking on a stock clip</span></figcaption>
   </figure>

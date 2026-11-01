@@ -571,3 +571,7 @@ body {
 .home-dot-a { background: #8cc2ff; }
 .home-dot-b { background: #f7c96b; }
 .home-clip-note { margin-left: auto; color: var(--glass-text-faint); }
+/* Nothing to tap on the homepage clip: no pause, no controls, no full screen
+   (owner, 2026-11-01). */
+.home-clip video { pointer-events: none; user-select: none; -webkit-user-select: none; }
+.home-clip video::-webkit-media-controls, .home-clip video::-webkit-media-controls-start-playback-button { display: none !important; -webkit-appearance: none; }
