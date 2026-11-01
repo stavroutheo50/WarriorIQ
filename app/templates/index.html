@@ -31,13 +31,15 @@
   {#- A real example instead of two empty boxes (owner, 2026-10-28): seven
       seconds of a free-licence stock clip (Mixkit 40979, "Two women fighting
       mixed martial arts", Mixkit Stock Video Free License) with WarriorIQ's
-      own analysis drawn on it - the boxes, skeletons and strike names are
-      the analyser's output, nothing added by hand. Click to play (owner,
+      own analysis drawn on it - the boxes and skeletons are the analyser's
+      pose tracking, nothing added by hand. Strike names were taken off
+      (owner, 2026-11-01): they were wrong too often. Rebuilt with
+      tools/make_hero_clip.py, which records the source and licence. Click to play (owner,
       2026-11-01): the poster shows until the visitor presses play, and the
       2 MB clip is not fetched before then. -#}
   <figure class="home-preview glass-panel">
     <div class="home-clip">
-      <video id="heroClip" src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline preload="none" aria-label="An MMA exchange with WarriorIQ following both fighters: a box and skeleton on each, and each strike named as it is thrown"></video>
+      <video id="heroClip" src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline preload="none" aria-label="An MMA exchange with WarriorIQ tracking both fighters: a box and a skeleton on each"></video>
       <span class="home-clip-live" aria-hidden="true"><i></i>WarriorIQ live</span>
       <button class="preview-play" id="heroClipPlay" type="button" hidden><span aria-hidden="true" class="preview-play-icon"></span><span class="preview-play-label">Play clip</span></button>
     </div>
