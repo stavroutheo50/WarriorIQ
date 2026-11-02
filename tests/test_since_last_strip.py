@@ -28,8 +28,10 @@ class SinceLastStripTests(unittest.TestCase):
     def test_arrows_and_both_links(self):
         page = self._page(PROGRESS)
         strip = re.search(r'<nav class="since-last".*?</nav>', page, re.S).group(0)
-        self.assertIn("Pressure</b> <span aria-hidden=\"true\">▲</span> higher", strip)
-        self.assertIn("Centre</b> <span aria-hidden=\"true\">▼</span> lower", strip)
+        # Words, not arrow glyphs (owner, 2026-11-02: no emojis).
+        self.assertIn("Pressure</b> higher", strip)
+        self.assertIn("Centre</b> lower", strip)
+        self.assertNotIn("▲", strip)
         self.assertIn("steady", strip)
         self.assertIn('href="#report-progress"', strip)
         self.assertIn('href="/compare?a=prevjob123&amp;b=thisjob"', strip)

@@ -1675,7 +1675,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         page = self.client.get("/camp").text
         self.assertEqual(sum(p["points"] for p in database.list_points(profile_id)), 145)
         self.assertIn("improved", page)
-        self.assertIn("Improved ✓", page)
+        self.assertIn("Improved", page)
+        self.assertNotIn("✓", page)        # no emojis or check glyphs (owner, 2026-11-02)
         self.assertNotIn("Next fight: <b class=\"wiq-num\">15.0%</b>", page)
         self.assertIn("Level", page)
 

@@ -9,7 +9,7 @@
   <p>Every plan uses the same fight-analysis engine. Higher plans unlock more analyses and a deeper performance report.</p>
   {#- "No video filename shown" was removed (QA, 2026-10-07): the Pending list
       and library search show and search the filename, which is how people
-      find their own fights. -#}<div class="pricing-promise"><span>✓ Your footage stays private</span><span>✓ Upgrade when you need more</span></div>
+      find their own fights. -#}<div class="pricing-promise"><span>Your footage stays private</span><span>Upgrade when you need more</span></div>
 </header>
 
 {#- What a visitor needs to know is that they cannot be charged, not which
@@ -131,7 +131,7 @@
     </details>
     <p class="muted plan-description">{{plan.description}}</p>
     <div class="plan-entitlement"><strong>{{plan.limit_label}}</strong><span>{{plan.report_label}}</span></div>
-    <ul class="plan-features">{% for feature in plan.features %}<li><span aria-hidden="true">✓</span>{{feature}}</li>{% endfor %}</ul>
+    <ul class="plan-features">{% for feature in plan.features %}<li>{{feature}}</li>{% endfor %}</ul>
     {% if key == 'gym' %}<div class="gym-note"><strong>Built to stay out of the way.</strong><span>Run every athlete through the same repeatable review workflow without counting each upload.</span></div>{% endif %}
 
     {% if key == current_plan_key %}
@@ -149,7 +149,7 @@
           had selected Coach 30 and had not. Registering interest is the only
           thing this card can actually do, so it is the only button on it, and
           it says which plan it is for rather than "this". -#}
-      {% if key in plans_wanted %}<p class="small muted plan-wanted">✓ Noted — you are on the list for {{plan.label}}. We will email you when billing opens.</p>
+      {% if key in plans_wanted %}<p class="small muted plan-wanted">Noted — you are on the list for {{plan.label}}. We will email you when billing opens.</p>
       {% else %}<form method="post" action="/plan-interest/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="/pricing"><button class="btn" type="submit">Tell us you want {{plan.label}}</button></form>{% endif %}
     {% else %}
       {% if payments_enabled %}<a class="btn secondary" href="/signup?next=/camp">Create account first</a>
@@ -169,5 +169,5 @@
 </section>
 
 <section class="trust-panel pricing-trust"><div><div class="eyebrow">Honest billing foundation</div><h2>No charge before checkout is ready</h2><p>Nobody can be billed while paid subscriptions are switched off, and no card details are collected anywhere on this site. Your analysis allowance is counted per account, and an analysis that fails gives its use back rather than spending it.</p></div><div class="trust-checks">{#- Checkout and webhook badges only once billing is open: while it is
-    closed there is no checkout to be secure and no webhook to verify (QA, 2026-10-04). -#}{% if payments_enabled %}<span>✓ Secure hosted checkout</span><span>✓ Signed webhook verification</span>{% endif %}<span>✓ Account-linked allowances</span><span>✓ Failed analyses are returned</span></div></section>
+    closed there is no checkout to be secure and no webhook to verify (QA, 2026-10-04). -#}{% if payments_enabled %}<span>Secure hosted checkout</span><span>Signed webhook verification</span>{% endif %}<span>Account-linked allowances</span><span>Failed analyses are returned</span></div></section>
 {% endblock %}

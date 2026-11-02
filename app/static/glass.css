@@ -762,3 +762,9 @@ textarea { border-radius: 18px !important; }
 .analysis-stage.is-error, .analysis-stage[data-state=error] { background: rgba(255, 100, 112, .12) !important; }
 .allowance-strip > div, .strike-strip article { border-radius: 18px !important; }
 .fight-select { border-radius: 999px !important; }
+/* No emojis or symbol glyphs (owner, 2026-11-02): the filming examples say
+   Good / Avoid in a pill, and menu carets are drawn, not typed. */
+.film-shot figcaption b { width: auto !important; height: auto !important; padding: 2px 10px; border-radius: 999px !important; font-size: 12px !important; }
+.menu-caret { display: inline-block; width: 7px; height: 7px; margin: 0 2px 3px 6px; border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor; transform: rotate(45deg); opacity: .7; }
+.sport-menu-tick { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }

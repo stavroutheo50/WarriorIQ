@@ -2758,7 +2758,7 @@ class SmallUiConsistencyTests(unittest.TestCase):
         against three others that draw a +/- of their own."""
         css = (self.root / "app" / "static" / "fixes.css").read_text(encoding="utf-8")
         self.assertIn(".faq summary::-webkit-details-marker{display:none}", css)
-        self.assertIn('.faq summary:after{content:"＋"', css)
+        self.assertIn('.faq summary:after{content:"+"', css)
         self.assertIn('.faq details[open] summary:after{content:"−"}', css)
 
     def test_the_sport_chip_is_absent_where_sport_means_nothing(self):
@@ -4338,11 +4338,10 @@ class BackNavigationTests(unittest.TestCase):
         for name in self.FLOW_TEMPLATES:
             with self.subTest(template=name):
                 page = (templates / name).read_text(encoding="utf-8")
-                # Any of the three shapes the flow pages use: the quiet-back
-                # class, a back-arrow link, or a named return to the report.
+                # Either shape the flow pages use: the quiet-back class or a
+                # named return to the report. No arrow glyphs (owner, 2026-11-02).
                 self.assertTrue(
                     "quiet-back" in page
-                    or "← " in page
                     or "Back to report" in page,
                     f"{name} has no inline way back and the pill is gone")
 

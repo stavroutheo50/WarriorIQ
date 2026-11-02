@@ -10,7 +10,7 @@
     an iPhone opened every video in its own player, without them). -#}
 <div class="replay-wrap" id="wrap"><video id="video" controls playsinline webkit-playsinline controlslist="nofullscreen" disablepictureinpicture preload="auto" src="/media/{{job_id}}"></video><canvas id="canvas" aria-hidden="true"></canvas><button class="replay-fs" id="replayFs" type="button" aria-label="Full screen with skeletons" aria-pressed="false"><span aria-hidden="true">&#x26F6;</span></button></div>
 <p class="small muted" id="replay-status">{% if identity_safe %}Loading tracking evidence…{% else %}Skeleton hidden: WarriorIQ is not confident which fighter is which in this analysis. <a class="text-link" href="/select/{{job_id}}">Choose the fighters again</a> to restore it.{% endif %}</p>
-<div class="replay-actions"><button class="btn" id="playFull" type="button" data-time="{{replay_chapters[0].time if replay_chapters else report.setup.start_seconds|default(0)}}">▶ Play the whole fight</button><span class="small muted">Plays full screen with the skeletons. Tap <b aria-hidden="true">&#x26F6;</b> on the video to go in or out of full screen; the video controls pause and seek.</span></div>
+<div class="replay-actions"><button class="btn" id="playFull" type="button" data-time="{{replay_chapters[0].time if replay_chapters else report.setup.start_seconds|default(0)}}">Play the whole fight</button><span class="small muted">Plays full screen with the skeletons. Tap <b aria-hidden="true">&#x26F6;</b> on the video to go in or out of full screen; the video controls pause and seek.</span></div>
 {#- The report's own coaching points, each beside the moments that show it
     (core.report.coaching_moments). One card per point; its times play the
     video, with the skeleton, a second before the moment. -#}
@@ -27,7 +27,7 @@
       <h4>{{card.title}}</h4>
       <p>{{card.detail}}</p>
       <div class="moment-times"><span class="small muted">Seen at</span>{% for t in card.times %}<button type="button" class="moment-time wiq-num" data-time="{{t}}">{{'%d:%02d'|format((t//60)|int, (t%60)|int)}}</button>{% endfor %}</div>
-      <button class="btn moment-watch" type="button" data-time="{{card.times[0]}}">▶ Watch it</button>
+      <button class="btn moment-watch" type="button" data-time="{{card.times[0]}}">Watch it</button>
     </li>
     {% endfor %}
   </ol>

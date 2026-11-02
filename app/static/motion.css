@@ -111,7 +111,7 @@ body[data-page=home] .hero-copy>.trust-row{--hero-order:5}
 .analysis-stage[data-state=active] i{border-color:#7690ff;color:#9edaff;animation:wiq-stage-pulse 1.2s ease-in-out infinite}
 .analysis-stage[data-state=done]{color:#aadfce}
 .analysis-stage[data-state=done] i{border-color:#407864;background:#143128;color:#6fe1ba}
-.analysis-stage[data-state=done] i:before{content:"✓"}.analysis-stage[data-state=done] i{font-size:0}.analysis-stage[data-state=done] i:before{font-size:12px}
+.analysis-stage[data-state=done] i:before{content:""}.analysis-stage[data-state=done] i{font-size:0}.analysis-stage[data-state=done] i:before{font-size:12px}
 .analysis-stage[data-state=error]{color:#ff9eac;background:#321722}
 .analysis-stage-note{margin:15px 4px 0;color:#74829a;font-size:12px;line-height:1.55}
 .analysis-page.analysis-complete .analysis-console{border-color:#3f7b68;animation:wiq-complete 420ms var(--wiq-ease-impact)}
