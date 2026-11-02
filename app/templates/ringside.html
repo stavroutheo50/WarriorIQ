@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Free Ringside Scorer for kickboxing, boxing, Muay Thai, taekwondo and MMA · WarriorIQ{% endblock %}
+{% block description %}Score a fight from ringside on your phone: tap each landed strike for the blue or red corner and get the score under K-1, Kick Light, Point Fighting, boxing, Muay Thai, taekwondo or MMA rules. Free, no account.{% endblock %}
+{% block content %}
+{#- The free Ringside Scorer (owner, 2026-11-02). Scoring is core/ringside.py,
+    which calls the report's own scorer; this page only records taps. Taps are
+    kept in this browser (localStorage) so a refresh at ringside loses nothing. -#}
+<section class="ringside" id="ringside">
+  <header class="ringside-head">
+    <p class="glass-chip">Free · no account · works on your phone</p>
+    <h1>Ringside Scorer</h1>
+    <p class="home-lead">Tap a button each time a fighter lands. WarriorIQ keeps the score under the rules you pick, round by round.</p>
+  </header>
+
+  <div class="ringside-setup glass-panel" id="scorerSetup">
+    <label class="ringside-label" for="scorerSport">Sport</label>
+    <div class="ringside-chips" id="scorerSport" role="radiogroup" aria-label="Sport">
+      {% for sport in scorer_sports %}<button type="button" role="radio" class="ringside-chip" data-sport="{{ sport.key }}" aria-checked="false">{{ sport.label }}</button>{% endfor %}
+    </div>
+    <div class="ringside-field" id="scorerRulesetField">
+      <label class="ringside-label" for="scorerRuleset">Rules</label>
+      <select id="scorerRuleset"></select>
+    </div>
+    <p class="ringside-summary" id="scorerSummary"></p>
+    <div class="ringside-names">
+      <label><span class="ringside-dot ringside-dot-a"></span>Blue corner<input id="nameA" maxlength="24" placeholder="Blue" autocomplete="off"></label>
+      <label><span class="ringside-dot ringside-dot-b"></span>Red corner<input id="nameB" maxlength="24" placeholder="Red" autocomplete="off"></label>
+    </div>
+    <button class="btn btn-lead ringside-start" type="button" id="scorerStart">Start scoring</button>
+  </div>
+
+  <div class="ringside-live" id="scorerLive" hidden>
+    <div class="ringside-board glass-panel" aria-live="polite">
+      <div class="ringside-side ringside-a"><span id="boardNameA">Blue</span><strong id="boardScoreA">0</strong><small id="boardLandedA">0 landed</small></div>
+      <div class="ringside-mid"><b id="boardRound">Round 1</b><small id="boardRules"></small></div>
+      <div class="ringside-side ringside-b"><span id="boardNameB">Red</span><strong id="boardScoreB">0</strong><small id="boardLandedB">0 landed</small></div>
+    </div>
+    <p class="ringside-offline" id="scorerOffline" hidden>No connection: your taps are kept and the score updates when you are back online.</p>
+    <div class="ringside-pads">
+      <div class="ringside-pad ringside-pad-a" id="padA" aria-label="Blue corner strikes"></div>
+      <div class="ringside-pad ringside-pad-b" id="padB" aria-label="Red corner strikes"></div>
+    </div>
+    <div class="ringside-actions">
+      <button class="btn secondary" type="button" id="scorerUndo">Undo last tap</button>
+      <button class="btn" type="button" id="scorerNextRound">End round</button>
+      <button class="btn secondary" type="button" id="scorerFinish">Finish fight</button>
+    </div>
+  </div>
+
+  <div class="ringside-result glass-panel" id="scorerResult" hidden>
+    <p class="glass-chip" id="resultRules"></p>
+    <h2 id="resultHeadline">Final score</h2>
+    <div class="ringside-final"><span class="ringside-a" id="resultNameA"></span><strong id="resultScore"></strong><span class="ringside-b" id="resultNameB"></span></div>
+    <table class="ringside-table"><thead><tr><th>Round</th><th id="resultColA">Blue</th><th id="resultColB">Red</th></tr></thead><tbody id="resultRounds"></tbody></table>
+    <p class="small muted">Scored from the strikes you tapped, with WarriorIQ's scoring under these rules. It is an unofficial scorecard, not a judges' decision.</p>
+    <div class="ringside-actions">
+      <button class="btn btn-lead" type="button" id="scorerShare">Share scorecard</button>
+      <a class="btn secondary" id="scorerWhatsApp" href="#" target="_blank" rel="noopener">Send on WhatsApp</a>
+      <button class="btn secondary" type="button" id="scorerBack">Back to scoring</button>
+      <button class="btn secondary" type="button" id="scorerNew">New fight</button>
+    </div>
+  </div>
+
+  <section class="home-section ringside-more">
+    <h2>Want it done from the video?</h2>
+    <p class="home-lead">Upload the fight and WarriorIQ follows both fighters, counts strikes, measures movement and gives an estimated score, with the replay marked.</p>
+    <div class="home-actions"><a class="btn btn-lead" href="/analyze">Analyse a fight video <span aria-hidden="true">&#8594;</span></a><a class="btn secondary" href="/sample-report">See a sample report</a></div>
+  </section>
+</section>
+{% endblock %}
+{% block scripts %}
+<script nonce="{{ request.state.csp_nonce }}">window.WIQ_SCORER = {{ scorer_sports|tojson }};</script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/ringside.js?v={{asset_version}}" defer></script>
+{% endblock %}
