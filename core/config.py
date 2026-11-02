@@ -971,6 +971,15 @@ class Settings:
     # that tells the two fighters apart (core/kit.py HandoffKitCheck). Only for
     # clearly different kits; 0 counts every suspicious hand-off, as before.
     handoff_kit_check: bool = env_bool("WARRIORIQ_HANDOFF_KIT_CHECK", True)
+    # A person the referee probe calls an official is still taken for the
+    # missing fighter when they wear that fighter's kit - read where the boxes
+    # were drawn, in every region the two fighters' kits clearly differ
+    # (core/kit.py HandoffKitCheck.matches). The probe was fitted on
+    # tournament footage (pale shirt, dark trousers vs singlets); on sparring
+    # in T-shirts and track trousers it scored the real fighter 0.68-0.99 and
+    # the analysis refused him on hundreds of frames with no referee present
+    # (owner, 2026-11-02). Only applies when the kits clearly differ.
+    official_kit_override: bool = env_bool("WARRIORIQ_OFFICIAL_KIT_OVERRIDE", True)
     # Run the SAM2 sweep beside the frame pass rather than before it
     # (core/sam_recovery.py SweepInBackground). Measured 2026-10-21 on the
     # owner's RTX 5060: 75 s of sweep, then 120 s of frame pass, for a 197 s

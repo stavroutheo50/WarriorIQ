@@ -1339,6 +1339,11 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         ((seed_kit or {}).get("colours") if seed_kit is not None else
          {"A": region_colours(first_frame, req.fighter_a_box), "B": region_colours(first_frame, req.fighter_b_box)})
         if SETTINGS.handoff_kit_check else None)
+    if SETTINGS.official_kit_override:
+        official_kit = handoff_kit if SETTINGS.handoff_kit_check else HandoffKitCheck(
+            (seed_kit or {}).get("colours") if seed_kit is not None else
+            {"A": region_colours(first_frame, req.fighter_a_box), "B": region_colours(first_frame, req.fighter_b_box)})
+        manager.kit_reference = official_kit if official_kit.enabled else None
     histogram_similarity = fighter_pair_similarity(*(seed_pair or (initial_a, initial_b)))
     pair_similarity = kit["similarity"] if kit is not None else histogram_similarity
     manager.prime_track_history(warm_samples)
@@ -2088,6 +2093,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # Suspicious hand-offs the fighter's own kit showed were them, taken
         # off the counts above (core/kit.py HandoffKitCheck).
         "handoff_kit_check_regions": sorted(handoff_kit.apart),
+        # Candidates the referee probe called an official but who wore the
+        # fighter's own kit (SETTINGS.official_kit_override).
+        "fighter_A_official_kit_overrides": manager.official_kit_overrides["A"],
+        "fighter_B_official_kit_overrides": manager.official_kit_overrides["B"],
         "fighter_A_kit_confirmed_handoffs": handoff_kit.confirmed["A"],
         "fighter_B_kit_confirmed_handoffs": handoff_kit.confirmed["B"],
         "identity_swaps_corrected": int(manager.swaps_corrected),

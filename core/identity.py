@@ -287,6 +287,11 @@ class IdentityManager:
         # a third-person class that is never assigned to A or B. See _official_track.
         self._track_referee: dict[int, deque] = {}
         self.official_tracks: set[int] = set()
+        # The fighters' kits where the boxes were drawn (core/kit.py
+        # HandoffKitCheck), set by the analyser; a candidate wearing the
+        # missing fighter's kit is not refused as an official.
+        self.kit_reference = None
+        self.official_kit_overrides = {"A": 0, "B": 0}
         # The camera's accumulated translation, so per-track travel is measured
         # against the ground rather than the picture (core/camera_motion.py).
         self._camera_offset = np.zeros(2, dtype=np.float64)
@@ -355,6 +360,21 @@ class IdentityManager:
             and int(candidate.track_id) in self.official_tracks
             and (candidate.referee_prob is None
                  or candidate.referee_prob >= SETTINGS.official_track_floor_probability))
+
+    def _wears_own_kit(self, state: FighterState, candidate: PersonObservation) -> bool:
+        """Does a candidate the referee probe would refuse wear this fighter's kit?
+
+        See SETTINGS.official_kit_override. Counted, so the report shows how
+        often the probe was overruled.
+        """
+        if (self.kit_reference is None or candidate.kit_colours is None
+                or not self.kit_reference.matches(candidate.kit_colours, state.name)):
+            return False
+        official = self._official_track(candidate) or (
+            candidate.referee_prob is not None and candidate.referee_prob >= SETTINGS.min_referee_probability)
+        if official:
+            self.official_kit_overrides[state.name] += 1
+        return True
 
     def _missing_seconds(self, state: FighterState) -> float:
         return max(0, self._current_frame - int(state.last_seen_source_frame)) / self.source_fps
@@ -563,7 +583,8 @@ class IdentityManager:
 
     def _score(self, state: FighterState, candidate: PersonObservation, keep_id_bonus: bool = True) -> float:
         # An official is a third person, never Fighter A or B.
-        if not state.anchor_is_referee and self._official_track(candidate):
+        wears_own_kit = self._wears_own_kit(state, candidate)
+        if not state.anchor_is_referee and not wears_own_kit and self._official_track(candidate):
             return self._refuse(state, "official")
         reference = self._predicted_box(state)
         distance = normalized_distance(reference, candidate.box)
@@ -625,7 +646,7 @@ class IdentityManager:
         # Unless the person originally selected scored as the official himself,
         # in which case the user meant to follow him and this filter has no
         # business refusing the very person they picked.
-        if (not state.anchor_is_referee
+        if (not state.anchor_is_referee and not wears_own_kit
                 and candidate.referee_prob is not None
                 and candidate.referee_prob >= SETTINGS.min_referee_probability):
             return self._refuse(state, "referee")

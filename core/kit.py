@@ -210,7 +210,21 @@ class HandoffKitCheck:
         if not self.enabled or box is None or float(box[3]) - float(box[1]) < HANDOFF_MIN_BOX_HEIGHT:
             return False
         self.checked[fighter] += 1
-        seen = region_colours(image, box)
+        if not self.matches(region_colours(image, box), fighter):
+            return False
+        self.confirmed[fighter] += 1
+        return True
+
+    def matches(self, seen: dict | None, fighter: str) -> bool:
+        """Do these region colours wear this fighter's kit and not the opponent's?
+
+        Every region that tells the two apart must be read, within
+        HANDOFF_OWN_SHARE of the A-to-B difference of this fighter's colour,
+        and nearer to it than to the opponent's. Nothing to compare - kits too
+        alike, a region unread - is never a match.
+        """
+        if not self.enabled or not seen:
+            return False
         other = "B" if fighter == "A" else "A"
         for region, delta in self.apart.items():
             if region not in seen:
@@ -220,5 +234,4 @@ class HandoffKitCheck:
             opponent = float(np.linalg.norm(colour - self.reference[other][region]))
             if own > HANDOFF_OWN_SHARE * delta or own >= opponent:
                 return False
-        self.confirmed[fighter] += 1
         return True

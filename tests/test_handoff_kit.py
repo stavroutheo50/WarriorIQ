@@ -81,3 +81,34 @@ def test_a_confirmed_hand_off_comes_off_the_suspicious_count():
     manager.confirm_handoff("A")
     manager.confirm_handoff("A")
     assert manager.suspicious_handoffs["A"] == 0
+
+
+def _scored(manager, state, person):
+    before = dict(manager.rejections)
+    manager._score(state, person)
+    return {k: v - before.get(k, 0) for k, v in manager.rejections.items() if v != before.get(k, 0)}
+
+
+def test_a_fighter_in_their_own_kit_is_not_refused_as_the_referee():
+    """Owner, 2026-11-02: sparring in a T-shirt and track trousers read as the
+    referee's uniform (0.68-0.99) and the real fighter was refused hundreds of
+    times with no referee present. Their own kit overrules the probe."""
+    from test_identity_swap import _person
+    from core.identity import IdentityManager
+
+    check = _check()
+    manager = IdentityManager(_person(1, 100, 200, 1.0), _person(2, 400, 500, 0.0), 0)
+    manager.kit_reference = check
+    seen = region_colours(_frame(((600, 120, 660, 320), BLUE, WHITE)), (600, 120, 660, 320))
+    fighter = _person(9, 400, 500, 0.0)
+    fighter.referee_prob, fighter.kit_colours = 0.9, seen
+    assert "referee" not in _scored(manager, manager.b, fighter)
+    assert manager.official_kit_overrides["B"] == 1
+    # The same probe score on someone in neither fighter's kit is still refused,
+    stranger = _person(10, 400, 500, 0.0)
+    stranger.referee_prob = 0.9
+    stranger.kit_colours = region_colours(_frame(((600, 120, 660, 320), WHITE, BLACK)), (600, 120, 660, 320))
+    assert _scored(manager, manager.b, stranger).get("referee") == 1
+    # and so is anyone at all when there is no kit reference to check against.
+    manager.kit_reference = None
+    assert _scored(manager, manager.b, fighter).get("referee") == 1
