@@ -579,10 +579,6 @@ body {
 .home-clip video { pointer-events: none; user-select: none; -webkit-user-select: none; }
 .home-clip video::-webkit-media-controls, .home-clip video::-webkit-media-controls-start-playback-button { display: none !important; -webkit-appearance: none; }
 
-/* --- Sample report (sample_report.html) --- */
-.sample-notes .home-cards { margin-top: 18px; }
-.sample-source { margin-top: 22px; }
-
 /* --- Upload form: one step at a time (analyze.html) ------------------------
    The button styles set display, which beat the hidden attribute: Back and
    the upload button showed on the first step. */
@@ -687,3 +683,82 @@ body {
 }
 .ringside.is-scoring .ringside-head, .ringside.is-scoring .ringside-more { display: none; }
 .ringside.is-scoring .ringside-board { margin-top: 4px; }
+
+/* ===========================================================================
+   Rounded glass everywhere (owner, 2026-11-02: "everything should look like
+   glass ... no squares, no square buttons; text in a circle stays a circle").
+   Found by scanning every page at phone and desktop width for visible boxes
+   and controls with corners under 10 px (scratch tool, 2026-11-02).
+   =========================================================================== */
+/* Every button is a pill. Round icon buttons keep their circle. */
+button, .btn, input[type="submit"], input[type="button"], a.btn, .ringside-tap, .ringside-chip,
+.record-delete, .selection-edit-button, .chip, .pill, .tab, [role="tab"] {
+  border-radius: 999px !important;
+}
+.share-card-x, .icon-button, .nav-toggle, .menu-toggle, .profile-avatar, button.avatar { border-radius: 50% !important; }
+/* Text fields: soft, Apple-style rounded rectangles. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select { border-radius: 16px !important; }
+textarea { border-radius: 18px !important; }
+/* Panels, cards and notes: rounded glass. */
+.stat, .stat-band, .stat-support, .plan-entitlement, .plan-banner, .gym-note, .table-wrap, .setup-coverage,
+.setup-solo, .fight-vitals, .fight-vitals > article, .strike-strip, .strike-strip-note, .analysed-span-note,
+.fighter-stage-panel, .fighter-lock-guide, .solo-toggle, .fighter-key-item, .fight-thumb, .fight-record,
+.trust-checks, .keep-fix-row, .result-overview, .numbers-first-report, .report-details-body, .notice,
+.share-panel, .metric, .live-board, .live-feed-card, .live-video-card, .analysis-process-card,
+.archive-hero, .result-hero, .accuracy-section, .measured-grid article, nav[aria-label="Keep learning"],
+.search-guide nav, .current-plan > div, .plan-current > div, .stat-sheet, .home-clip, .ringside-board, details {
+  border-radius: 22px !important;
+}
+.fight-thumb, .home-clip, .live-video-wrap, .table-wrap { overflow: hidden; }
+.plan-banner { border-radius: 999px !important; }
+.notice, .strike-strip-note, .analysed-span-note, .setup-coverage, .setup-solo {
+  border: 1px solid var(--glass-edge-side) !important;
+  background: var(--glass-tint, rgba(255, 255, 255, .04)) !important;
+}
+/* Small labels and badges: pills. */
+.console-badge, .capability-strip span, .graph-marker, .badge, .badge-experimental, .tag, .glass-chip,
+.status-pill, .plan-badge { border-radius: 999px !important; }
+/* Letters and short marks inside a circle stay a circle, centred. */
+.fighter-letter, .sport-crest, .sport-switch-mark, .fighter-key-item > span, .workflow-steps li > span:first-child,
+.upload-steps li b, .home-dot, .ringside-dot {
+  border-radius: 50% !important;
+  display: inline-grid; place-items: center; aspect-ratio: 1 / 1; text-align: center;
+}
+/* Bars: rounded ends. */
+.h2h-fill, .momentum-bar, .momentum-a, .momentum-b, .stack-bar, .split-bar, .split-bar i, .stat-bar,
+.stat-bar i, .progress-shell, .progress-bar, .analysis-timeline { border-radius: 999px !important; }
+.momentum-bar, .stack-bar, .split-bar, .stat-bar, .progress-shell { overflow: hidden; }
+/* Fighter selection (frame-picker.css) was solid navy with 5-10 px corners. */
+.frame-workbench, .fighter-lock-layout, .analysis-choice, .local-picker, .capture-readout,
+.fighter-lock-guide .selection-status, .fighter-key-item {
+  border-radius: 22px !important;
+  border: 1px solid var(--glass-edge-side) !important;
+  background: var(--glass-fill) !important;
+}
+.frame-player-panel, .fighter-stage-panel, .frame-guidance, .fighter-lock-guide { background: transparent !important; }
+.fighter-stage-panel .select-stage, .frame-player-panel video, .local-picker video { border-radius: 18px !important; }
+.live-indicator, .manual-badge, .capture-meta span, .analysis-choice .target-options span { border-radius: 999px !important; }
+.analysis-choice .target-options span i { border-radius: 50% !important; }
+.workflow-steps { border: 0 !important; gap: 8px; }
+.workflow-steps li { border: 1px solid var(--glass-edge-side) !important; border-radius: 999px !important;
+  background: var(--glass-tint, rgba(255, 255, 255, .04)); padding-left: 14px !important; }
+.workflow-steps .active:after { display: none; }
+.workflow-steps .active { border-color: rgba(255, 255, 255, .35) !important; }
+/* Containers that were still solid boxes: the same glass as .card. */
+.legal-toc, .sport-card, .console-allowance, .allowance-strip, .plan-entitlement, .gym-note,
+.pending-fights, .pending-item, .archive-search, .assignment-builder, .stat-band, .stat-support, .stat,
+.feed-search, .compare-option, .result-score-top, .fight-vitals, .vitals-note, .report-deep-dive, .report-path,
+.report-details, .live-evidence-note, .analysis-stage, .search-guide nav, .fight-vitals > article,
+.accuracy-section article {
+  border: 1px solid var(--glass-edge-side) !important;
+  border-top-color: var(--glass-edge-top) !important;
+  border-bottom-color: var(--glass-edge-bottom) !important;
+  background: var(--glass-fill) !important;
+  box-shadow: var(--glass-shine) !important;
+  border-radius: 22px !important;
+}
+.archive-search { border-radius: 999px !important; }
+.fight-vitals > article, .stat, .vitals-note { box-shadow: none !important; }
+.analysis-stage.is-error, .analysis-stage[data-state=error] { background: rgba(255, 100, 112, .12) !important; }
+.allowance-strip > div, .strike-strip article { border-radius: 18px !important; }
+.fight-select { border-radius: 999px !important; }

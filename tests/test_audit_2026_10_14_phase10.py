@@ -103,28 +103,14 @@ def test_the_hero_shows_a_real_tracking_example():
 
 
 # --------------------------------------------------------------------- #54
-def test_the_sample_report_is_public_and_real():
-    # Show, don't tell (owner, 2026-11-01): a real analysis of a free stock
-    # clip, not invented numbers, with its source and licence named.
-    response = BrowserClient(web.app).get("/sample-report")
-    assert response.status_code == 200
-    page = response.text
-    assert "a real analysis" in page and 'id="statSheet"' in page
-    assert "Mixkit Stock Video Free License" in page
-    assert "made-up" not in page.lower()
-    assert "Rough estimates" in page and page.count(">estimate<") >= 1   # the counts keep their label
-    assert "Guard up" not in page or "experimental" in page
-    assert "Strikes thrown" in page and "Strikes thrown, every 10 seconds" in page
-
-
-def test_the_sample_shows_only_measurements_a_report_publishes():
-    from core.metric_catalog import CATALOG
-    from core.sample_report import SAMPLE_REPORT
-
-    known = {metric.key for metric in CATALOG}
-    for side in ("A", "B"):
-        assert set(SAMPLE_REPORT["metrics"][side]) <= known
-    assert "score" not in SAMPLE_REPORT and "strikes" not in SAMPLE_REPORT
+def test_there_is_no_sample_report():
+    # Owner, 2026-11-02: "no sample reports should exist". Old links go home.
+    client = BrowserClient(web.app)
+    response = client.get("/sample-report", follow_redirects=False)
+    assert response.status_code == 301 and response.headers["location"] == "/"
+    home = client.get("/").text
+    assert "/sample-report" not in home and "Sample report" not in home
+    assert not (web.ROOT / "app" / "templates" / "sample_report.html").exists()
 
 
 # --------------------------------------------------------------------- #55

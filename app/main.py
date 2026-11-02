@@ -1996,7 +1996,7 @@ STATIC_PUBLIC_PAGES = frozenset({
     "/", "/legal", "/terms", "/cookies", "/acceptable-use", "/refunds", "/video-upload-policy",
     "/sports-medical-disclaimer", "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
     "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
-    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis", "/sample-report", "/accuracy",
+    "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis", "/accuracy",
 })
 STATIC_PUBLIC_MAX_AGE = 300
 
@@ -9448,32 +9448,11 @@ def accuracy_page(request: Request):
     return templates.TemplateResponse(request=request, name="accuracy.html", context={"request": request})
 
 
-SAMPLE_FIGHT_PATH = ROOT / "app" / "sample_fight.json"
-
-
-@app.get("/sample-report", response_class=HTMLResponse)
-def sample_report_page(request: Request):
-    """A report anyone can open: WarriorIQ's real analysis of a free stock clip.
-
-    It showed invented fighters and numbers (audit 2026-10-14, #54); show,
-    don't tell (owner, 2026-11-01). app/sample_fight.json comes from
-    tools/make_sample_report.py, and the stats sheet is built exactly as a
-    customer's report builds it.
-    """
-    fight = json.loads(SAMPLE_FIGHT_PATH.read_text(encoding="utf-8"))
-    scorecard = fight.get("scorecard") or {}
-    trusted = bool((fight.get("integrity") or {}).get("identity_evidence_trusted", True))
-    ends = [float(r.get("end_seconds") or 0) - float(r.get("start_seconds") or 0) for r in fight.get("rounds") or []]
-    tracking = fight.get("tracking") or {}
-    return templates.TemplateResponse(request=request, name="sample_report.html", context={
-        "request": request,
-        "names": {"A": "Fighter A", "B": "Fighter B"},
-        "stat_sheet": build_stat_sheet(fight, published_families(scorecard.get("sport"), fight), trusted),
-        "sport_label": scorecard.get("sport_label") or "MMA",
-        "seconds": int(round(sum(ends))) if ends else None,
-        "coverage": {side: int(round(float(tracking.get(f"fighter_{side}_coverage") or 0) * 100)) for side in ("A", "B")},
-        "source": fight.get("source") or {},
-    })
+@app.get("/sample-report", include_in_schema=False)
+def sample_report_page() -> RedirectResponse:
+    """Removed (owner, 2026-11-02: "no sample reports should exist"). Old
+    links and search results land on the homepage instead of a 404."""
+    return RedirectResponse("/", status_code=301)
 
 
 class RingsidePayload(BaseModel):
