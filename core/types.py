@@ -87,6 +87,9 @@ class PersonObservation:
     # Share of skin on the torso, for telling a clothed official from bare
     # fighters. See core/referee.py torso_skin_share.
     torso_skin: float | None = None
+    # Median kit colour per region (core/kit.py region_colours), read only
+    # for people the referee probe leans towards calling an official.
+    kit_colours: dict | None = None
     pose_signature: np.ndarray | None = None
 
 
