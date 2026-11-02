@@ -628,3 +628,62 @@ body {
 .live-event-item.fighter-a button { border-left-color: #5aa0ff; }
 .warmup-a { color: #5aa0ff; }
 .preview-b { color: #ffe3e6; }
+
+/* Ringside Scorer (owner, 2026-11-02): app/templates/ringside.html. Built for
+   a phone held at ringside: big targets, blue corner left, red corner right. */
+.ringside { max-width: 960px; margin: 0 auto; padding: 24px 0 40px; }
+.ringside-head h1 { margin: 12px 0 0; font-size: clamp(40px, 7vw, 64px); font-weight: 850; letter-spacing: -.03em; }
+.ringside-setup, .ringside-result { margin-top: 24px; padding: 22px; border-radius: 22px; }
+.ringside-label { display: block; margin: 0 0 8px; color: var(--glass-text-faint); font-size: 14px; font-weight: 700; }
+.ringside-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.ringside-chip { min-height: 44px; padding: 8px 16px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px;
+  background-color: rgba(255, 255, 255, .04); color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.ringside-chip[aria-checked="true"] { border-color: rgba(255, 255, 255, .6); background-color: rgba(255, 255, 255, .14); }
+.ringside-field { margin-bottom: 12px; }
+.ringside-field[hidden] { display: none !important; }
+.ringside-field select, .ringside-names input { width: 100%; min-height: 46px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .16); background-color: rgba(5, 9, 16, .6); color: inherit; font: inherit; }
+.ringside-summary { margin: 4px 0 18px; color: var(--glass-text-soft); font-size: 15px; line-height: 1.45; }
+.ringside-names { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.ringside-names label { display: grid; gap: 6px; color: var(--glass-text-faint); font-size: 14px; font-weight: 700; }
+.ringside-dot { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; }
+.ringside-dot-a { background: #8cc2ff; } .ringside-dot-b { background: #ff6470; }
+.ringside-start { width: 100%; justify-content: center; }
+.ringside-board { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; margin-top: 20px;
+  padding: 14px 16px; border-radius: 20px; position: sticky; top: 72px; z-index: 5; }
+.ringside-side { display: grid; text-align: center; }
+.ringside-side span { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ringside-side strong { font-size: clamp(44px, 12vw, 72px); line-height: 1; font-weight: 900; }
+.ringside-side small, .ringside-mid small { color: var(--glass-text-faint); font-size: 13px; }
+.ringside-a, .ringside-a strong { color: #8cc2ff; } .ringside-b, .ringside-b strong { color: #ff6470; }
+.ringside-mid { display: grid; text-align: center; }
+.ringside-offline { margin: 10px 0 0; color: #ffc9ce; font-size: 14px; }
+.ringside-offline[hidden] { display: none !important; }
+.ringside-pads { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.ringside-pad { display: grid; gap: 8px; align-content: start; }
+.ringside-pad-name { margin: 0; font-weight: 800; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ringside-pad-a .ringside-pad-name { color: #8cc2ff; } .ringside-pad-b .ringside-pad-name { color: #ff6470; }
+.ringside-tap { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 58px;
+  padding: 10px 12px; border-radius: 14px; font: inherit; font-weight: 750; color: #fff; text-align: left; cursor: pointer;
+  touch-action: manipulation; transition: transform .08s ease; }
+.ringside-pad-a .ringside-tap { border: 1px solid rgba(140, 194, 255, .45); background-color: rgba(140, 194, 255, .14); }
+.ringside-pad-b .ringside-tap { border: 1px solid rgba(255, 100, 112, .45); background-color: rgba(255, 100, 112, .14); }
+.ringside-tap small { opacity: .75; font-weight: 800; }
+.ringside-tap:active, .ringside-tap.is-hit { transform: scale(.96); }
+.ringside-knockdown { min-height: 48px; font-size: 14px; opacity: .85; }
+.ringside-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.ringside-actions .btn { flex: 1 1 140px; justify-content: center; }
+.ringside-live[hidden], .ringside-setup[hidden], .ringside-result[hidden] { display: none !important; }
+.ringside-result h2 { margin: 12px 0 4px; font-size: clamp(28px, 6vw, 40px); }
+.ringside-final { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin: 14px 0; text-align: center; font-weight: 800; }
+.ringside-final strong { font-size: clamp(44px, 12vw, 72px); font-weight: 900; }
+.ringside-table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 15px; }
+.ringside-table th, .ringside-table td { padding: 8px 6px; border-bottom: 1px solid rgba(255, 255, 255, .08); text-align: center; }
+.ringside-more { margin-top: 30px; }
+@media (max-width: 480px) {
+  .ringside-setup, .ringside-result { padding: 16px; }
+  .ringside-tap { min-height: 54px; padding: 8px 10px; font-size: 15px; }
+  .ringside-board { top: 60px; }
+}
+.ringside.is-scoring .ringside-head, .ringside.is-scoring .ringside-more { display: none; }
+.ringside.is-scoring .ringside-board { margin-top: 4px; }

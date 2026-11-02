@@ -507,7 +507,7 @@ PUBLIC_INDEX_ROUTES = (
     "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
     "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
     "/analyze", "/analyze/kickboxing", "/analyze/boxing", "/analyze/muay_thai",
-    "/analyze/taekwondo", "/analyze/mma",
+    "/analyze/taekwondo", "/analyze/mma", "/scorer",
 )
 # Pages where the sport chip is noise rather than navigation. Kept next to the
 # other route groupings so it is obvious there are three of them. Plans,
@@ -9474,6 +9474,38 @@ def sample_report_page(request: Request):
         "coverage": {side: int(round(float(tracking.get(f"fighter_{side}_coverage") or 0) * 100)) for side in ("A", "B")},
         "source": fight.get("source") or {},
     })
+
+
+class RingsidePayload(BaseModel):
+    ruleset: str
+    rounds: list[dict] = []
+
+
+@app.get("/scorer", response_class=HTMLResponse)
+def ringside_scorer_page(request: Request):
+    """The free Ringside Scorer (owner, 2026-11-02): tap each landed strike at
+    ringside on a phone; core/ringside.py scores it with the report's scorer.
+    Works with no upload and no analysis computer."""
+    from core import ringside
+
+    sports = [{"key": sport, "label": RULESET_SPORTS[sport],
+               "rulesets": [{"key": key, "label": RULESET_LABELS[key], "buttons": ringside.buttons(key),
+                             "summary": ringside.rules_summary(key),
+                             "ten_point_must": RULESETS[key].ten_point_must} for key in keys]}
+              for sport, keys in SPORTS.items()]
+    return templates.TemplateResponse(request=request, name="ringside.html", context={
+        "request": request, "scorer_sports": sports})
+
+
+@app.post("/api/ringside/score", dependencies=[Depends(require_csrf)])
+def ringside_score(request: Request, payload: RingsidePayload):
+    from core import ringside
+
+    _enforce_rate_limit(request, "ringside", 1200, 600)
+    try:
+        return ringside.score(payload.ruleset, payload.rounds)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/kickboxing-fight-analysis", response_class=HTMLResponse)
