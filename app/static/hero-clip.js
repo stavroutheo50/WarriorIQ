@@ -1,4 +1,4 @@
-/* The tracking clip on the homepage and the sample report (owner, 2026-11-01).
+/* The tracking clip on the homepage (owner, 2026-11-01).
  *
  * It plays by itself and cannot be paused or controlled: no controls and no
  * taps on it (glass.css), and anything that stops it - the tab coming back,
