@@ -115,6 +115,7 @@ labelpack/
 
 # The single-worker heartbeat. Machine-local state, never shared.
 worker.lock
+worker.lock.*.part
 
 # Generated signing key when WARRIORIQ_OAUTH_STATE_SECRET is unset. Never commit.
 session-secret.txt
