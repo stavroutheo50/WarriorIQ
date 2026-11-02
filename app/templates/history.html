@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}History · WarriorIQ{% endblock %}
 {% block content %}
-<header class="archive-hero" data-reveal><div><div class="eyebrow">Private fight archive</div><h1>Your fight library.</h1><p>Every saved analysis, ready for the next review.</p></div>{% if signed_in %}<div class="hero-actions">{% if fights|length > 1 %}<a class="btn secondary" href="/compare">Compare fights</a>{% endif %}<a class="btn" data-motion-primary href="/analyze">{% if fights %}Analyse another fight{% else %}Analyse a fight{% endif %} <span aria-hidden="true">→</span></a></div>{% endif %}</header>
+<header class="archive-hero" data-reveal><div><div class="eyebrow">Private fight archive</div><h1>Your fight library.</h1><p>Every saved analysis, ready for the next review.</p></div>{% if signed_in %}<div class="hero-actions">{% if fights|length > 1 %}<a class="btn secondary" href="/compare">Compare fights</a>{% endif %}<a class="btn" data-motion-primary href="/analyze">{% if fights %}Analyse another fight{% else %}Analyse a fight{% endif %}</a></div>{% endif %}</header>
 {% if cancelled_notice %}<div class="notice" id="library-notice" role="status" tabindex="-1"><strong>Upload cancelled.</strong> Its video was deleted and it no longer counts towards your pending fights.</div>{% endif %}
 {% if signed_in and pending %}
 <section class="pending-fights" id="pending" aria-labelledby="pendingHeading" data-reveal>
@@ -20,8 +20,8 @@
 </section>
 {% endif %}
 <section class="fight-archive" aria-label="Saved fight analyses">
-{% if not signed_in %}<div class="empty-workspace empty-state"><span class="empty-state-mark" aria-hidden="true">⌁</span><div><div class="eyebrow">Private by design</div><h2>Sign in to open your private fight library</h2><p>Every fight you analyse is saved here, and only you can open it.</p><div class="hero-actions"><a class="btn" href="/signup?next=/history">Create account</a><a class="btn secondary" href="/login?next=/history">Sign in</a></div></div></div>{% else %}
-{% if fights %}<div class="archive-tools" data-reveal><label class="archive-search" for="historySearch"><span aria-hidden="true">⌕</span><input id="historySearch" type="search" placeholder="Search by name, date, ruleset or type" autocomplete="off"></label><label class="archive-sort">Sort <select id="historySort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+{% if not signed_in %}<div class="empty-workspace empty-state"><div><div class="eyebrow">Private by design</div><h2>Sign in to open your private fight library</h2><p>Every fight you analyse is saved here, and only you can open it.</p><div class="hero-actions"><a class="btn" href="/signup?next=/history">Create account</a><a class="btn secondary" href="/login?next=/history">Sign in</a></div></div></div>{% else %}
+{% if fights %}<div class="archive-tools" data-reveal><label class="archive-search" for="historySearch"><input id="historySearch" type="search" placeholder="Search by name, date, ruleset or type" autocomplete="off"></label><label class="archive-sort">Sort <select id="historySort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
 {#- Filters and bulk delete (audit 2026-10-14, #33). -#}
 <label class="archive-sort">Status <select id="historyStatus" data-history-select="status"><option value="">All</option><option value="ready">Report ready</option><option value="attention">Needs attention</option><option value="missing">Report unavailable</option></select></label>
 {% if filter_sports|length > 1 %}<label class="archive-sort">Sport <select id="historySport" data-history-select="sport"><option value="">All</option>{% for sport in filter_sports %}<option value="{{ sport }}">{{ sport|replace('_', ' ')|title }}</option>{% endfor %}</select></label>{% endif %}

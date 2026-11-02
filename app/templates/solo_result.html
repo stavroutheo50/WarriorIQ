@@ -7,7 +7,7 @@
 {% block content %}
 {% set m = report.metrics.A|default({}, true) %}
 {% set trusted = report.integrity.identity_evidence_trusted|default(false) %}
-<a class="quiet-back" href="/history">← Fight library</a>
+<a class="quiet-back" href="/history">Fight library</a>
 <div class="section-title result-hero">
   <div><div class="eyebrow">{% if trusted %}Analysis complete{% else %}Needs one quick step{% endif %} · Solo session</div><h1 class="result-title">{% if subject_name %}{{ subject_name }}'s session{% else %}Solo session report{% endif %}</h1></div>
 </div>

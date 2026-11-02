@@ -17,4 +17,4 @@ def test_the_length_line_keeps_the_size_advice():
 
 
 def test_the_advice_names_the_setting_that_makes_the_next_video_smaller():
-    assert "Settings → Camera → Formats → High Efficiency" in PAGE
+    assert "Settings > Camera > Formats > High Efficiency" in PAGE
