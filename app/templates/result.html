@@ -302,6 +302,16 @@
   {% if seen and seen.measured_frames %}
   <p class="vitals-basis small muted">Measured across {{'{:,}'.format(seen.measured_frames)}} of {{'{:,}'.format(seen.analyzed_frames)}} analysed frames{% if not seen.confident %} &mdash; just over {{'%.0f'|format(seen.share * 100)}}% of the fight, so read these as the part of the round WarriorIQ could see rather than the whole of it{% endif %}.</p>
   {% endif %}
+{% if ground_time and not identity_failed %}
+{#- MMA: time on the ground (owner, 2026-11-02; core/ground_time.py). Measured
+    on five labelled pankration bouts, each judged by a model fitted on the
+    others; it is time on the ground, not who controlled it. -#}
+<section class="ground-strip glass-panel" id="groundTime" aria-label="Time on the ground">
+  <div><span class="eyebrow">Grappling</span><strong class="wiq-num">{{ ground_time.clock }}</strong><small>on the ground, {{ ground_time.share }}% of the {{ ground_time.read_clock }} WarriorIQ could read</small></div>
+  {% if ground_time.rounds %}<ul class="ground-rounds">{% for r in ground_time.rounds %}<li>Round {{ r.round }}: <b>{{ r.clock }}</b> ({{ r.share }}%)</li>{% endfor %}</ul>{% endif %}
+  <p class="small muted">Estimated from the video. Who was on top and takedowns are not measured yet.</p>
+</section>
+{% endif %}
 {% if lead_with_numbers %}
 {#- Strike counts up top (2026-10-13, owner request), beside the six numbers:
     each fighter's attempts by family, from the same statistics block as every

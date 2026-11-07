@@ -2443,6 +2443,27 @@ def _wrong_sport(report: dict, job: dict) -> dict | None:
     return {**grappling, "chosen": RULESET_SPORTS.get(sport, sport)}
 
 
+def _ground_time_view(report: dict) -> dict | None:
+    """Time on the ground for an MMA report (core/ground_time.py), or None.
+
+    Shown only where the analysis read it: MMA, with a fitted head, and
+    enough seconds read. It is time on the ground, not who controlled it.
+    """
+    ground = report.get("ground_time") or {}
+    read = int(ground.get("read_seconds") or 0)
+    if read < 10:
+        return None
+    rounds = []
+    for number, line in sorted((ground.get("rounds") or {}).items(), key=lambda kv: str(kv[0])):
+        seen = int(line.get("read_seconds") or 0)
+        if seen:
+            rounds.append({"round": number, "clock": _clock(int(line.get("ground_seconds") or 0)),
+                           "share": round(100 * int(line.get("ground_seconds") or 0) / seen)})
+    seconds = int(ground.get("ground_seconds") or 0)
+    return {"clock": _clock(seconds), "read_clock": _clock(read), "share": round(100 * seconds / read),
+            "rounds": rounds if len(rounds) > 1 else []}
+
+
 def _went_down(job_id: str, report: dict) -> list[dict]:
     """The moments someone went down (core.ground), with the owner's answers.
 
@@ -6362,6 +6383,7 @@ def result_page(request: Request, job_id: str):
         # admins only. A customer is never asked (owner, 2026-10-20).
         "can_check_strikes": _is_admin(request),
         "went_down": _went_down(job_id, report),
+        "ground_time": _ground_time_view(report),
         "wrong_sport": _wrong_sport(report, job),
         # Kicks or knees found in a boxing upload: a suggestion only (#19).
         "kicks_in_boxing": None if _wrong_sport(report, job) else sport_check.kicks_in_boxing(report),

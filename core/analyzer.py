@@ -32,6 +32,7 @@ from core.slow_watch import SlowRunWatch
 from core.kit_attribution import active as kit_attribution_active
 from core.referee import torso_skin_share
 from core.ground import DownWatch
+from core.ground_time import GroundWatch
 from core.round_detect import RoundDetector
 from core.contact import (
     assess_selection,
@@ -1465,6 +1466,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     travel = {"A": _Travel(), "B": _Travel()}
     fighter_finder = FighterFinder()
     down_watch = DownWatch()
+    # MMA only: time on the ground from the whole scene (core/ground_time.py).
+    ground_watch = GroundWatch(info.width, info.height) if sport_of(normalize_ruleset(req.ruleset)) == "mma" else None
     round_detector = RoundDetector()
     # Is this stretch two people fighting? Decided per window from the frames
     # below; metrics and strike counts are then taken from fight footage only.
@@ -1778,6 +1781,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             fighter_finder.observe(seconds, people)
             fighter_finder.observe_selected(fighter_a, fighter_b)
             down_watch.observe(seconds, people, fighter_a, fighter_b)
+            if ground_watch is not None:
+                ground_watch.observe(seconds, people, round_number, frame)
             round_detector.observe(seconds, _pair_separation(fighter_a, fighter_b))
             kit_attribution.observe(seconds, frame, fighter_a, fighter_b)
             file_started = time.perf_counter()
@@ -2313,6 +2318,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # Moments someone went down, against the rounds as finally found. Not
     # attributed to a fighter and not scored; see core/ground.py.
     report["went_down"] = down_watch.summary(rounds)
+    if ground_watch is not None:
+        report["ground_time"] = ground_watch.summary()
     progress(
         "Finalizing coaching priorities", 99.2, time.perf_counter() - wall_start, segment_duration,
         manager, None, quality, stage="report", live_events_snapshot=final_live_events,

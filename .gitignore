@@ -102,6 +102,8 @@ fights/*
 # weights fitted by tools/fit_strike_check.py. The 127 MB backbone it sits on
 # is downloaded by torchvision on first use and is not stored here.
 !models/strike_check_head.npz
+# The MMA ground-time head (core/ground_time.py), fitted by tools/fit_ground_time.py.
+!models/ground_time_head.npz
 
 # Same reasoning: the tracker config is measured settings, not weights. It had
 # been sitting untracked on one machine, which meant the thresholds every
