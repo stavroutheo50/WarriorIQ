@@ -768,3 +768,9 @@ textarea { border-radius: 18px !important; }
 .menu-caret { display: inline-block; width: 7px; height: 7px; margin: 0 2px 3px 6px; border-right: 2px solid currentColor;
   border-bottom: 2px solid currentColor; transform: rotate(45deg); opacity: .7; }
 .sport-menu-tick { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }
+/* MMA time on the ground (result.html, core/ground_time.py). */
+.ground-strip { margin: 18px 0; padding: 18px 20px; border-radius: 22px !important; display: grid; gap: 10px; }
+.ground-strip > div { display: grid; gap: 2px; }
+.ground-strip strong { font-size: clamp(34px, 7vw, 48px); font-weight: 900; }
+.ground-rounds { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ground-rounds li { padding: 6px 12px; border: 1px solid var(--glass-edge-side); border-radius: 999px; }

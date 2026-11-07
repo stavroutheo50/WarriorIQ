@@ -1419,6 +1419,17 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn("About this recording.", header)
         self.assertIn("160x90", header)
 
+    def test_mma_ground_time_renders_with_its_rounds(self):
+        from app.main import _ground_time_view
+
+        view = _ground_time_view({"ground_time": {"read_seconds": 600, "ground_seconds": 150, "rounds": {
+            1: {"read_seconds": 300, "ground_seconds": 30}, 2: {"read_seconds": 300, "ground_seconds": 120}}}})
+        page = self._render_result({}, context={"ground_time": view})
+        self.assertIn('id="groundTime"', page)
+        self.assertIn("on the ground, 25% of the", page)
+        self.assertIn("Round 2: <b>", page)
+        self.assertNotIn('id="groundTime"', self._render_result({}))
+
     def _render_identity(self, trusted):
         return self._render_identity_context(trusted)
 
