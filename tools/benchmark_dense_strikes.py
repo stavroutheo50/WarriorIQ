@@ -77,6 +77,39 @@ def _inside(t: float, spans) -> bool:
     return any(start <= t <= end for start, end in spans)
 
 
+LABEL_CHECKS = PROJECT_ROOT / "dataset" / "regression" / "label_check"
+
+
+def owner_checked(fight_name: str, strikes: list[dict]) -> list[dict]:
+    """The labels with a person's answers applied (dataset/regression/label_check).
+
+    A strike they saw no strike at is dropped, and one they saw the other
+    fighter throw is moved to that fighter. Labels nobody checked are kept.
+    """
+    verdicts: dict[tuple[float, str], str] = {}
+    for key_path in sorted(LABEL_CHECKS.glob("*.json")):
+        if key_path.name.endswith(".answers.json"):
+            continue
+        answers_path = key_path.with_name(key_path.stem + ".answers.json")
+        if not answers_path.exists():
+            continue
+        answers = json.loads(answers_path.read_text(encoding="utf-8"))["answers"]
+        for item in json.loads(key_path.read_text(encoding="utf-8")):
+            # S04K and S07K are S04 and S07 re-tracked: the same labels.
+            if (item.get("kind") == "strike" and fight_name in (item.get("source"), f"{item.get('source')}K")
+                    and item["id"] in answers):
+                verdicts[(round(float(item["t"]), 2), item["fighter"])] = answers[item["id"]]
+    out = []
+    for strike in strikes:
+        verdict = verdicts.get((round(float(strike["t"]), 2), strike["fighter"]))
+        if verdict == "no":
+            continue
+        if verdict == "other":
+            strike = {**strike, "fighter": "B" if strike["fighter"] == "A" else "A"}
+        out.append(strike)
+    return out
+
+
 def score(events: list, truth: dict) -> dict:
     start, end = truth["covered"]
     spans = truth.get("unreadable") or []
@@ -252,6 +285,7 @@ def run(ruleset: str | None, video: bool = False) -> dict:
     total: dict = {}
     for fight in dense_fights():
         truth = json.loads((fight / "strikes.json").read_text(encoding="utf-8"))
+        truth["strikes"] = owner_checked(fight.name, truth["strikes"])
         # Only where the analysis runs the check (core.strike_verifier.SPORTS).
         if video and (fight / "source.json").exists() and _check_applies(ruleset or _fight_ruleset(fight)):
             events = _video_checked(fight, truth)
