@@ -131,6 +131,10 @@ class FighterState:
     # did, the referee filter stands down for this fighter rather than
     # refusing every candidate who is actually the person the user picked.
     anchor_is_referee: bool = False
+    # What the referee probe scored the person selected. A candidate is refused
+    # as an official only when the probe reads them clearly more like one than
+    # this (core.identity.IdentityManager._refuse_as_official).
+    anchor_referee_prob: float = 0.0
     anchor_pose: np.ndarray | None = None
     switches_rejected: int = 0
     # Why the *last* candidate scored was refused. Diagnostics only - it is
