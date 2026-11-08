@@ -158,17 +158,14 @@ HELD_OUT = False
 
 
 def _held_out_head(fight_name: str):
-    """A head fitted without this fight's judged punches (tools/fit_strike_check.py),
+    """A head fitted without anything from this fight's video (tools/fit_strike_check.py),
     so a fight the shipped head was fitted on is not scored by it."""
     import numpy as np
 
     from tools import fit_strike_check
 
-    folders = [p for p in fit_strike_check.ROOT.iterdir() if (p / "features_r3d18.npz").exists()
-               and not p.name.startswith(fight_name)]
-    X = np.concatenate([np.load(p / "features_r3d18.npz")["features"] for p in folders])
-    y = np.concatenate([np.load(p / "features_r3d18.npz")["labels"] for p in folders])
-    head = fit_strike_check.fit(X, y)
+    head = fit_strike_check.fit(*fit_strike_check.training_rows(exclude_video=fit_strike_check.video_of(
+        next(f for f in dense_fights() if f.name == fight_name))))
     return lambda features: fit_strike_check.predict(head, np.atleast_2d(features))[0]
 
 
@@ -231,6 +228,12 @@ def _video_checked(fight: Path, truth: dict) -> list:
     return kept
 
 
+def _check_applies(ruleset: str | None) -> bool:
+    from core import strike_verifier
+
+    return strike_verifier.applies_to(ruleset)
+
+
 def _fight_ruleset(fight: Path) -> str | None:
     """The sport the fight was fought under, from its source.json.
 
@@ -249,7 +252,8 @@ def run(ruleset: str | None, video: bool = False) -> dict:
     total: dict = {}
     for fight in dense_fights():
         truth = json.loads((fight / "strikes.json").read_text(encoding="utf-8"))
-        if video and (fight / "source.json").exists():
+        # Only where the analysis runs the check (core.strike_verifier.SPORTS).
+        if video and (fight / "source.json").exists() and _check_applies(ruleset or _fight_ruleset(fight)):
             events = _video_checked(fight, truth)
         else:
             events = replay(fight / "track.jsonl.gz")

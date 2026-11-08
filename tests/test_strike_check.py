@@ -150,3 +150,26 @@ def test_one_pass_reads_the_same_frames_as_seeking(tmp_path):
     capture.release()
     for a, b in zip(seeking, one_pass):
         assert all(np.array_equal(x, y) for x, y in zip(a, b))
+
+
+def test_the_shipped_head_matches_the_fit_tool():
+    from tools import fit_strike_check
+
+    head = check.Head()
+    assert head.projection.shape[1] == fit_strike_check.DIMENSIONS == 32
+    assert 0.0 < head.probability(np.zeros(head.mean.shape[0])) < 1.0
+
+
+def test_the_benchmark_checks_punches_only_where_the_analysis_does():
+    from tools import benchmark_dense_strikes
+
+    assert benchmark_dense_strikes._check_applies("BOXING")
+    assert not benchmark_dense_strikes._check_applies("MUAY_THAI")
+    assert not benchmark_dense_strikes._check_applies("MMA")
+
+
+def test_the_default_threshold_is_the_measured_one():
+    from pathlib import Path
+
+    config = Path(__file__).resolve().parents[1] / "core" / "config.py"
+    assert 'os.getenv("WARRIORIQ_PUNCH_CHECK", "0.4")' in config.read_text(encoding="utf-8")

@@ -11,11 +11,18 @@ Each fight folder in dataset/public/strike_judged/ holds:
 dataset/public/ is not in Git: pose tracks of identifiable athletes stay out
 of a public repository. Only punches answered "yes" or "no" are used.
 
+The fights where every strike is labelled (tools/benchmark_dense_strikes.py)
+add their punch proposals too: one is a real punch when a sure labelled punch
+by the same fighter is within the benchmark's matching window, not one when
+no label of either kind is near, and is left out when only an unsure label
+is. Their features are the ones `benchmark_dense_strikes.py --video` caches
+(features_check.npz); run that first.
+
     python tools/fit_strike_check.py             # held-out scores only
     python tools/fit_strike_check.py --write     # also store models/strike_check_head.npz
 
-Every fight is scored by a head fitted on the others, so no fight is judged by
-weights that saw it; that is the number to read. Features are computed by the
+Every video is scored by a head fitted on the others, so no fight is judged by
+weights that saw any of its frames; that is the number to read. Features are computed by the
 same function the analysis uses (core.strike_verifier.clip_features) and are
 cached beside each fight, keyed by the backbone, so refitting is quick.
 """
@@ -37,7 +44,10 @@ if str(PROJECT_ROOT) not in sys.path:
 from core import strike_verifier  # noqa: E402
 
 ROOT = PROJECT_ROOT / "dataset" / "public" / "strike_judged"
-DIMENSIONS = 16
+# 16 until 2026-11-08. With the dense labels added, 32 was better on the
+# strike benchmark (tools/benchmark_dense_strikes.py --video --held-out):
+# at the same real strikes found, about a quarter fewer false ones.
+DIMENSIONS = 32
 L2 = 10.0
 
 
@@ -70,6 +80,61 @@ def fight_rows(fight: Path) -> tuple[np.ndarray, np.ndarray]:
     return features, labels
 
 
+def video_of(fight: Path) -> str:
+    source = json.loads((fight / "source.json").read_text(encoding="utf-8"))
+    return source.get("video") or source.get("download_url") or fight.name
+
+
+def dense_rows(fight: Path) -> tuple[np.ndarray, np.ndarray] | None:
+    """Punch proposals in a densely labelled fight, as (features, real or not)."""
+    from tools import benchmark_dense_strikes as dense
+
+    cache_path = fight / "features_check.npz"
+    if not cache_path.exists() or not (fight / "source.json").exists():
+        return None
+    cache = np.load(cache_path)
+    truth = json.loads((fight / "strikes.json").read_text(encoding="utf-8"))
+    start, end = truth["covered"]
+    spans = truth.get("unreadable") or []
+    X, y = [], []
+    for event in dense._thrown(fight / "track.jsonl.gz"):
+        moment = float(event.peak_time)
+        if event.family != "punch" or not start <= moment <= end or dense._inside(moment, spans):
+            continue
+        key = f"{event.fighter}:{float(event.evidence.get('action_peak_time', event.peak_time)):.3f}"
+        if key not in cache:
+            continue
+        near = [s for s in truth["strikes"]
+                if s["fighter"] == event.fighter and abs(s["t"] - moment) <= dense.MATCH_SECONDS]
+        if any(s.get("sure", True) and s.get("family", "punch") == "punch" for s in near):
+            y.append(1.0)
+        elif near:
+            continue
+        else:
+            y.append(0.0)
+        X.append(cache[key])
+    return (np.array(X), np.array(y)) if X else None
+
+
+def all_rows() -> dict[str, list[tuple[str, np.ndarray, np.ndarray]]]:
+    """Every training row, grouped by the video it came from."""
+    from tools import benchmark_dense_strikes as dense
+
+    groups: dict[str, list] = {}
+    for fight in sorted(p for p in ROOT.iterdir() if (p / "judged.json").exists() and (p / "source.json").exists()):
+        groups.setdefault(video_of(fight), []).append((fight.name, *fight_rows(fight)))
+    for fight in dense.dense_fights():
+        rows = dense_rows(fight)
+        if rows is not None:
+            groups.setdefault(video_of(fight), []).append((fight.name, *rows))
+    return groups
+
+
+def training_rows(exclude_video: str | None = None) -> tuple[np.ndarray, np.ndarray]:
+    parts = [(X, y) for video, rows in all_rows().items() if video != exclude_video for _, X, y in rows]
+    return np.concatenate([p[0] for p in parts]), np.concatenate([p[1] for p in parts])
+
+
 def fit(X: np.ndarray, y: np.ndarray) -> dict:
     mean = X.mean(0)
     _, _, vt = np.linalg.svd(X - mean, full_matrices=False)
@@ -99,21 +164,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--write", action="store_true", help="store the head fitted on every fight")
     args = parser.parse_args()
-    fights = sorted(p for p in ROOT.iterdir() if (p / "judged.json").exists() and (p / "source.json").exists())
-    data = {fight.name: fight_rows(fight) for fight in fights}
-    names = list(data)
-    for name in names:
-        rest_X = np.concatenate([data[o][0] for o in names if o != name])
-        rest_y = np.concatenate([data[o][1] for o in names if o != name])
-        X, y = data[name]
-        print(f"{name:10} {len(y):4} judged punches ({int(y.sum())} real)  "
-              f"held-out AUC {auc(predict(fit(rest_X, rest_y), X), y):.3f}")
+    groups = all_rows()
+    for video, rows in groups.items():
+        rest = [(X, y) for other, more in groups.items() if other != video for _, X, y in more]
+        head = fit(np.concatenate([r[0] for r in rest]), np.concatenate([r[1] for r in rest]))
+        X = np.concatenate([r[1] for r in rows])
+        y = np.concatenate([r[2] for r in rows])
+        names = ", ".join(r[0] for r in rows)
+        score = f"{auc(predict(head, X), y):.3f}" if 0 < y.sum() < len(y) else "n/a"
+        print(f"{names:24} {len(y):4} punch proposals ({int(y.sum())} real)  held-out AUC {score}")
     if args.write:
-        X = np.concatenate([data[n][0] for n in names])
-        y = np.concatenate([data[n][1] for n in names])
+        X, y = training_rows()
         np.savez(strike_verifier.HEAD_PATH, **fit(X, y))
         print(f"head written to {strike_verifier.HEAD_PATH.relative_to(PROJECT_ROOT)} "
-              f"({len(y)} punches, {int(y.sum())} real, {len(names)} fights)")
+              f"({len(y)} punches, {int(y.sum())} real, {len(groups)} videos)")
     return 0
 
 
