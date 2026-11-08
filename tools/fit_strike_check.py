@@ -11,11 +11,13 @@ Each fight folder in dataset/public/strike_judged/ holds:
 dataset/public/ is not in Git: pose tracks of identifiable athletes stay out
 of a public repository. Only punches answered "yes" or "no" are used.
 
-The fights where every strike is labelled (tools/benchmark_dense_strikes.py)
-add their punch proposals too: one is a real punch when a sure labelled punch
-by the same fighter is within the benchmark's matching window, not one when
-no label of either kind is near, and is left out when only an unsure label
-is. Their features are the ones `benchmark_dense_strikes.py --video` caches
+With --dense, the fights where every strike is labelled
+(tools/benchmark_dense_strikes.py) add their punch proposals too. Off by
+default: those labels are Claude's, and the owner confirmed only 10 of 30
+sampled ones (dataset/regression/label_check, 2026-11-08). A proposal is a
+real punch when a sure labelled punch by the same fighter is within the
+benchmark's matching window, not one when no label of either kind is near,
+and is left out when only an unsure label is. Their features are the ones `benchmark_dense_strikes.py --video` caches
 (features_check.npz); run that first.
 
     python tools/fit_strike_check.py             # held-out scores only
@@ -44,10 +46,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core import strike_verifier  # noqa: E402
 
 ROOT = PROJECT_ROOT / "dataset" / "public" / "strike_judged"
-# 16 until 2026-11-08. With the dense labels added, 32 was better on the
-# strike benchmark (tools/benchmark_dense_strikes.py --video --held-out):
-# at the same real strikes found, about a quarter fewer false ones.
-DIMENSIONS = 32
+DIMENSIONS = 16
 L2 = 10.0
 
 
@@ -116,22 +115,22 @@ def dense_rows(fight: Path) -> tuple[np.ndarray, np.ndarray] | None:
     return (np.array(X), np.array(y)) if X else None
 
 
-def all_rows() -> dict[str, list[tuple[str, np.ndarray, np.ndarray]]]:
+def all_rows(with_dense: bool = False) -> dict[str, list[tuple[str, np.ndarray, np.ndarray]]]:
     """Every training row, grouped by the video it came from."""
     from tools import benchmark_dense_strikes as dense
 
     groups: dict[str, list] = {}
     for fight in sorted(p for p in ROOT.iterdir() if (p / "judged.json").exists() and (p / "source.json").exists()):
         groups.setdefault(video_of(fight), []).append((fight.name, *fight_rows(fight)))
-    for fight in dense.dense_fights():
+    for fight in (dense.dense_fights() if with_dense else []):
         rows = dense_rows(fight)
         if rows is not None:
             groups.setdefault(video_of(fight), []).append((fight.name, *rows))
     return groups
 
 
-def training_rows(exclude_video: str | None = None) -> tuple[np.ndarray, np.ndarray]:
-    parts = [(X, y) for video, rows in all_rows().items() if video != exclude_video for _, X, y in rows]
+def training_rows(exclude_video: str | None = None, with_dense: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    parts = [(X, y) for video, rows in all_rows(with_dense).items() if video != exclude_video for _, X, y in rows]
     return np.concatenate([p[0] for p in parts]), np.concatenate([p[1] for p in parts])
 
 
@@ -163,8 +162,9 @@ def auc(scores: np.ndarray, y: np.ndarray) -> float:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--write", action="store_true", help="store the head fitted on every fight")
+    parser.add_argument("--dense", action="store_true", help="also learn from the densely labelled fights (unchecked labels)")
     args = parser.parse_args()
-    groups = all_rows()
+    groups = all_rows(args.dense)
     for video, rows in groups.items():
         rest = [(X, y) for other, more in groups.items() if other != video for _, X, y in more]
         head = fit(np.concatenate([r[0] for r in rest]), np.concatenate([r[1] for r in rest]))
@@ -174,7 +174,7 @@ def main() -> int:
         score = f"{auc(predict(head, X), y):.3f}" if 0 < y.sum() < len(y) else "n/a"
         print(f"{names:24} {len(y):4} punch proposals ({int(y.sum())} real)  held-out AUC {score}")
     if args.write:
-        X, y = training_rows()
+        X, y = training_rows(with_dense=args.dense)
         np.savez(strike_verifier.HEAD_PATH, **fit(X, y))
         print(f"head written to {strike_verifier.HEAD_PATH.relative_to(PROJECT_ROOT)} "
               f"({len(y)} punches, {int(y.sum())} real, {len(groups)} videos)")

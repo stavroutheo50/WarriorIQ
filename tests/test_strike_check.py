@@ -156,7 +156,7 @@ def test_the_shipped_head_matches_the_fit_tool():
     from tools import fit_strike_check
 
     head = check.Head()
-    assert head.projection.shape[1] == fit_strike_check.DIMENSIONS == 32
+    assert head.projection.shape[1] == fit_strike_check.DIMENSIONS == 16
     assert 0.0 < head.probability(np.zeros(head.mean.shape[0])) < 1.0
 
 
@@ -168,8 +168,27 @@ def test_the_benchmark_checks_punches_only_where_the_analysis_does():
     assert not benchmark_dense_strikes._check_applies("MMA")
 
 
-def test_the_default_threshold_is_the_measured_one():
+def test_the_default_threshold_is_the_one_measured_on_judged_punches():
     from pathlib import Path
 
     config = Path(__file__).resolve().parents[1] / "core" / "config.py"
-    assert 'os.getenv("WARRIORIQ_PUNCH_CHECK", "0.4")' in config.read_text(encoding="utf-8")
+    assert 'os.getenv("WARRIORIQ_PUNCH_CHECK", "0.5")' in config.read_text(encoding="utf-8")
+
+
+def test_the_benchmark_applies_a_persons_label_checks(tmp_path, monkeypatch):
+    import json
+
+    from tools import benchmark_dense_strikes
+
+    (tmp_path / "x.json").write_text(json.dumps([
+        {"id": "s1", "kind": "strike", "source": "S04", "t": 1.0, "fighter": "A"},
+        {"id": "s2", "kind": "strike", "source": "S04", "t": 2.0, "fighter": "B"},
+        {"id": "s3", "kind": "strike", "source": "S04", "t": 3.0, "fighter": "A"}]))
+    (tmp_path / "x.answers.json").write_text(json.dumps({"answers": {"s1": "no", "s2": "other", "s3": "yes"}}))
+    monkeypatch.setattr(benchmark_dense_strikes, "LABEL_CHECKS", tmp_path)
+    labels = [{"t": 1.0, "fighter": "A"}, {"t": 2.0, "fighter": "B"}, {"t": 3.0, "fighter": "A"},
+              {"t": 4.0, "fighter": "B"}]
+    for fight in ("S04", "S04K"):
+        assert benchmark_dense_strikes.owner_checked(fight, labels) == [
+            {"t": 2.0, "fighter": "A"}, {"t": 3.0, "fighter": "A"}, {"t": 4.0, "fighter": "B"}]
+    assert benchmark_dense_strikes.owner_checked("S07", labels) == labels

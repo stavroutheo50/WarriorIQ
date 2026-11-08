@@ -721,14 +721,12 @@ class Settings:
     # Each clip scored by a head fitted without it, through these gates
     # (2026-10-23): V18 real 17 -> 35, false 15 -> 17; VID real 39 -> 46,
     # false 21 -> 19. 0.6 removed more false punches but cost VID 5 real ones.
-    # 2026-11-08: the head refitted with every densely labelled fight (32
-    # dimensions, tools/fit_strike_check.py). On the 411 labelled boxing
-    # strikes, each video scored by a head that never saw it
-    # (tools/benchmark_dense_strikes.py --video --held-out): old head at 0.5
-    # real 124, false 88; new head at 0.5 real 112, false 55; at 0.4 real 134,
-    # false 81. 0.4 finds more real punches and fewer false ones than before.
+    # 2026-11-08: a head refitted on Claude's dense strike labels, with 0.4,
+    # looked better against those same labels, but the owner confirmed only 10
+    # of 30 sampled labels (dataset/regression/label_check), so that gain was
+    # unproven and the head and threshold went back to these.
     # 0 turns the check off and the rules back on.
-    punch_check_threshold: float = float(os.getenv("WARRIORIQ_PUNCH_CHECK", "0.4"))
+    punch_check_threshold: float = float(os.getenv("WARRIORIQ_PUNCH_CHECK", "0.5"))
     min_leg_visible_share: float = 0.8
 
     # ------------------------------------------------------------
