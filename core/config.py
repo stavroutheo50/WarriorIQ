@@ -501,6 +501,15 @@ class Settings:
     # Fighter A or B - and refused even on frames where the per-frame score
     # dips, as long as that frame is not clearly a fighter's (fighters measured
     # at most 0.084). Audit 2026-10-14, #2.
+    # The probe's reading of a fighter depends on their kit and the venue: on
+    # four of eight measured phone clips it scored the fighter the person
+    # picked 0.17-0.27 (S01's grey T-shirt then read 0.26-0.59 from frame to
+    # frame, his track was classed an official and he was lost for seconds at
+    # a time). So a candidate is refused as an official only when the probe
+    # rates them at least this much above the fighter's own score at
+    # selection, as well as above min_referee_probability. A fighter who
+    # scored under 0.15 at selection is judged exactly as before.
+    official_margin_over_fighter: float = float(os.getenv("WARRIORIQ_OFFICIAL_MARGIN", "0.35"))
     official_track_min_sightings: int = 3
     official_track_floor_probability: float = 0.15
     max_missing_analyzed_frames: int = 20

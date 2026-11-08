@@ -112,3 +112,42 @@ def test_a_fighter_in_their_own_kit_is_not_refused_as_the_referee():
     # and so is anyone at all when there is no kit reference to check against.
     manager.kit_reference = None
     assert _scored(manager, manager.b, fighter).get("referee") == 1
+
+
+def test_a_fighter_the_probe_already_reads_high_is_not_refused_as_the_official():
+    """S01 (2026-11-08): the picked boxer, grey T-shirt and dark trousers,
+    scored 0.25 at selection and 0.26-0.59 afterwards, so his own track was
+    classed an official. A candidate must read clearly more official than the
+    fighter did at selection to be refused."""
+    from test_identity_swap import _person
+    from core.config import SETTINGS
+    from core.identity import IdentityManager
+
+    picked = _person(1, 100, 200, 1.0)
+    picked.referee_prob = 0.25
+    manager = IdentityManager(picked, _person(2, 400, 500, 0.0), 0)
+    assert manager.a.anchor_referee_prob == 0.25 and not manager.a.anchor_is_referee
+    level = 0.25 + SETTINGS.official_margin_over_fighter
+    same_man = _person(1, 100, 200, 1.0)
+    same_man.referee_prob = 0.55
+    manager._track_referee[1] = __import__("collections").deque([0.55] * 4)
+    manager.official_tracks.add(1)
+    assert not ({"official", "referee"} & set(_scored(manager, manager.a, same_man)))
+    # Someone the probe rates clearly above him is still refused.
+    official = _person(5, 100, 200, 1.0)
+    official.referee_prob = level + 0.05
+    assert _scored(manager, manager.a, official).get("referee") == 1
+
+
+def test_a_fighter_the_probe_reads_as_a_fighter_is_judged_as_before():
+    from test_identity_swap import _person
+    from core.config import SETTINGS
+    from core.identity import IdentityManager
+
+    picked = _person(1, 100, 200, 1.0)
+    picked.referee_prob = 0.02
+    manager = IdentityManager(picked, _person(2, 400, 500, 0.0), 0)
+    assert manager._official_level(manager.a) == SETTINGS.min_referee_probability
+    official = _person(5, 100, 200, 1.0)
+    official.referee_prob = SETTINGS.min_referee_probability
+    assert _scored(manager, manager.a, official).get("referee") == 1

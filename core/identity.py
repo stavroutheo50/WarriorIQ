@@ -185,6 +185,7 @@ class IdentityManager:
             state.anchor_pose = signature
         if observation.referee_prob is not None:
             state.anchor_is_referee = bool(observation.referee_prob >= SETTINGS.min_referee_probability)
+            state.anchor_referee_prob = float(observation.referee_prob)
 
     def __init__(self, initial_a: PersonObservation, initial_b: PersonObservation, source_frame: int = 0, source_fps: float = 30.0):
         self.a = FighterState(
@@ -199,6 +200,7 @@ class IdentityManager:
             anchor_is_referee=bool(
                 initial_a.referee_prob is not None
                 and initial_a.referee_prob >= SETTINGS.min_referee_probability),
+            anchor_referee_prob=float(initial_a.referee_prob or 0.0),
             anchor_pose=pose_signature(initial_a.keypoints, initial_a.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
@@ -215,6 +217,7 @@ class IdentityManager:
             anchor_is_referee=bool(
                 initial_b.referee_prob is not None
                 and initial_b.referee_prob >= SETTINGS.min_referee_probability),
+            anchor_referee_prob=float(initial_b.referee_prob or 0.0),
             anchor_pose=pose_signature(initial_b.keypoints, initial_b.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
@@ -360,6 +363,20 @@ class IdentityManager:
             and int(candidate.track_id) in self.official_tracks
             and (candidate.referee_prob is None
                  or candidate.referee_prob >= SETTINGS.official_track_floor_probability))
+
+    def _official_level(self, state: FighterState) -> float:
+        """How official a candidate must read to be refused for this fighter.
+
+        See SETTINGS.official_margin_over_fighter.
+        """
+        return max(SETTINGS.min_referee_probability,
+                   state.anchor_referee_prob + SETTINGS.official_margin_over_fighter)
+
+    def _refuse_as_official_track(self, state: FighterState, candidate: PersonObservation) -> bool:
+        if not self._official_track(candidate):
+            return False
+        verdicts = self._track_referee.get(int(candidate.track_id)) or ()
+        return not verdicts or float(np.mean(verdicts)) >= self._official_level(state)
 
     def _wears_own_kit(self, state: FighterState, candidate: PersonObservation) -> bool:
         """Does a candidate the referee probe would refuse wear this fighter's kit?
@@ -584,7 +601,7 @@ class IdentityManager:
     def _score(self, state: FighterState, candidate: PersonObservation, keep_id_bonus: bool = True) -> float:
         # An official is a third person, never Fighter A or B.
         wears_own_kit = self._wears_own_kit(state, candidate)
-        if not state.anchor_is_referee and not wears_own_kit and self._official_track(candidate):
+        if not state.anchor_is_referee and not wears_own_kit and self._refuse_as_official_track(state, candidate):
             return self._refuse(state, "official")
         reference = self._predicted_box(state)
         distance = normalized_distance(reference, candidate.box)
@@ -648,7 +665,7 @@ class IdentityManager:
         # business refusing the very person they picked.
         if (not state.anchor_is_referee and not wears_own_kit
                 and candidate.referee_prob is not None
-                and candidate.referee_prob >= SETTINGS.min_referee_probability):
+                and candidate.referee_prob >= self._official_level(state)):
             return self._refuse(state, "referee")
         # An official the uniform probe does not know - the UFC dresses them
         # in black - is still the only upright person on the canvas wearing a
