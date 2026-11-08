@@ -550,7 +550,7 @@ class IdentityManager:
         if not history or len(history) < 40:
             return None
         span_frames = history[-1][0] - history[0][0]
-        if span_frames <= 0 or span_frames / fps < 6.0:
+        if span_frames <= 0 or span_frames / fps < SETTINGS.switch_spread_min_seconds:
             return None
         points = np.array([(item[1], item[2]) for item in history], dtype=np.float64)
         spread = float(np.sqrt(((points - points.mean(axis=0)) ** 2).sum(axis=1).mean()))

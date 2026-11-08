@@ -1034,6 +1034,14 @@ class Settings:
     # window measured and still catches the people who never move at all.
     max_stationary_spread_short: float = float(
         os.getenv("WARRIORIQ_MAX_STATIONARY_SPREAD_SHORT", "0.02"))
+    # How long a track must have been watched before its spread
+    # (core.identity.IdentityManager._recent_spread) may refuse a switch onto
+    # it. Was a fixed 6 s. 3 s measured 2026-11-08 and not kept: on S01 it
+    # kept fighter A off a coach outside the ring (62 -> 19 frames on him),
+    # but on S07 it refused the real fighter A, picked up again on a new track
+    # while standing his ground, for about 10 s (A held 689 -> 587 of 841
+    # frames, 7 of 8 sampled dropped frames were him).
+    switch_spread_min_seconds: float = float(os.getenv("WARRIORIQ_SWITCH_SPREAD_SECONDS", "6.0"))
     stationary_short_seconds: float = float(
         os.getenv("WARRIORIQ_STATIONARY_SHORT_SECONDS", "1.5"))
     # Seconds of video immediately before the round to run through the tracker
