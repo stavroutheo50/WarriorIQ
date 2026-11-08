@@ -1,0 +1,685 @@
+[
+ {
+  "id": "s01",
+  "kind": "strike",
+  "clip": "clips/s01.mp4",
+  "source": "S01",
+  "t": 7.25,
+  "fighter": "A",
+  "family": "punch",
+  "who": "grey T-shirt, blue headgear",
+  "other": "navy long sleeve, red headgear"
+ },
+ {
+  "id": "s02",
+  "kind": "strike",
+  "clip": "clips/s02.mp4",
+  "source": "S01",
+  "t": 8.38,
+  "fighter": "B",
+  "family": "punch",
+  "who": "navy long sleeve, red headgear",
+  "other": "grey T-shirt, blue headgear"
+ },
+ {
+  "id": "s03",
+  "kind": "strike",
+  "clip": "clips/s03.mp4",
+  "source": "S01",
+  "t": 4.5,
+  "fighter": "A",
+  "family": "punch",
+  "who": "grey T-shirt, blue headgear",
+  "other": "navy long sleeve, red headgear"
+ },
+ {
+  "id": "s04",
+  "kind": "strike",
+  "clip": "clips/s04.mp4",
+  "source": "S01",
+  "t": 10.25,
+  "fighter": "A",
+  "family": "punch",
+  "who": "grey T-shirt, blue headgear",
+  "other": "navy long sleeve, red headgear"
+ },
+ {
+  "id": "s05",
+  "kind": "strike",
+  "clip": "clips/s05.mp4",
+  "source": "S01",
+  "t": 3.5,
+  "fighter": "A",
+  "family": "punch",
+  "who": "grey T-shirt, blue headgear",
+  "other": "navy long sleeve, red headgear"
+ },
+ {
+  "id": "s06",
+  "kind": "strike",
+  "clip": "clips/s06.mp4",
+  "source": "S04",
+  "t": 36.05,
+  "fighter": "B",
+  "family": "punch",
+  "who": "grey shirt, blue headgear",
+  "other": "blue shirt, red headgear"
+ },
+ {
+  "id": "s07",
+  "kind": "strike",
+  "clip": "clips/s07.mp4",
+  "source": "S04",
+  "t": 46.75,
+  "fighter": "B",
+  "family": "punch",
+  "who": "grey shirt, blue headgear",
+  "other": "blue shirt, red headgear"
+ },
+ {
+  "id": "s08",
+  "kind": "strike",
+  "clip": "clips/s08.mp4",
+  "source": "S04",
+  "t": 14.87,
+  "fighter": "B",
+  "family": "punch",
+  "who": "grey shirt, blue headgear",
+  "other": "blue shirt, red headgear"
+ },
+ {
+  "id": "s09",
+  "kind": "strike",
+  "clip": "clips/s09.mp4",
+  "source": "S04",
+  "t": 53.75,
+  "fighter": "B",
+  "family": "punch",
+  "who": "grey shirt, blue headgear",
+  "other": "blue shirt, red headgear"
+ },
+ {
+  "id": "s10",
+  "kind": "strike",
+  "clip": "clips/s10.mp4",
+  "source": "S04",
+  "t": 51.0,
+  "fighter": "B",
+  "family": "punch",
+  "who": "grey shirt, blue headgear",
+  "other": "blue shirt, red headgear"
+ },
+ {
+  "id": "s11",
+  "kind": "strike",
+  "clip": "clips/s11.mp4",
+  "source": "S07",
+  "t": 32.0,
+  "fighter": "B",
+  "family": "punch",
+  "who": "red vest, red headgear",
+  "other": "dark grey top, blue headgear"
+ },
+ {
+  "id": "s12",
+  "kind": "strike",
+  "clip": "clips/s12.mp4",
+  "source": "S07",
+  "t": 8.0,
+  "fighter": "B",
+  "family": "punch",
+  "who": "red vest, red headgear",
+  "other": "dark grey top, blue headgear"
+ },
+ {
+  "id": "s13",
+  "kind": "strike",
+  "clip": "clips/s13.mp4",
+  "source": "S07",
+  "t": 53.0,
+  "fighter": "A",
+  "family": "punch",
+  "who": "dark grey top, blue headgear",
+  "other": "red vest, red headgear"
+ },
+ {
+  "id": "s14",
+  "kind": "strike",
+  "clip": "clips/s14.mp4",
+  "source": "S07",
+  "t": 9.75,
+  "fighter": "B",
+  "family": "punch",
+  "who": "red vest, red headgear",
+  "other": "dark grey top, blue headgear"
+ },
+ {
+  "id": "s15",
+  "kind": "strike",
+  "clip": "clips/s15.mp4",
+  "source": "S07",
+  "t": 6.12,
+  "fighter": "A",
+  "family": "punch",
+  "who": "dark grey top, blue headgear",
+  "other": "red vest, red headgear"
+ },
+ {
+  "id": "s16",
+  "kind": "strike",
+  "clip": "clips/s16.mp4",
+  "source": "SERI",
+  "t": 30.0,
+  "fighter": "B",
+  "family": "punch",
+  "who": "dark camo top, blue headgear",
+  "other": "navy top, red headgear"
+ },
+ {
+  "id": "s17",
+  "kind": "strike",
+  "clip": "clips/s17.mp4",
+  "source": "SERI",
+  "t": 23.0,
+  "fighter": "B",
+  "family": "punch",
+  "who": "dark camo top, blue headgear",
+  "other": "navy top, red headgear"
+ },
+ {
+  "id": "s18",
+  "kind": "strike",
+  "clip": "clips/s18.mp4",
+  "source": "SERI",
+  "t": 52.62,
+  "fighter": "B",
+  "family": "punch",
+  "who": "dark camo top, blue headgear",
+  "other": "navy top, red headgear"
+ },
+ {
+  "id": "s19",
+  "kind": "strike",
+  "clip": "clips/s19.mp4",
+  "source": "SERI",
+  "t": 30.62,
+  "fighter": "A",
+  "family": "punch",
+  "who": "navy top, red headgear",
+  "other": "dark camo top, blue headgear"
+ },
+ {
+  "id": "s20",
+  "kind": "strike",
+  "clip": "clips/s20.mp4",
+  "source": "SERI",
+  "t": 35.62,
+  "fighter": "B",
+  "family": "punch",
+  "who": "dark camo top, blue headgear",
+  "other": "navy top, red headgear"
+ },
+ {
+  "id": "s21",
+  "kind": "strike",
+  "clip": "clips/s21.mp4",
+  "source": "V16",
+  "t": 11.2,
+  "fighter": "B",
+  "family": "punch",
+  "who": "blue t-shirt",
+  "other": "navy tank top"
+ },
+ {
+  "id": "s22",
+  "kind": "strike",
+  "clip": "clips/s22.mp4",
+  "source": "V16",
+  "t": 27.2,
+  "fighter": "B",
+  "family": "punch",
+  "who": "blue t-shirt",
+  "other": "navy tank top"
+ },
+ {
+  "id": "s23",
+  "kind": "strike",
+  "clip": "clips/s23.mp4",
+  "source": "V16",
+  "t": 36.1,
+  "fighter": "A",
+  "family": "punch",
+  "who": "navy tank top",
+  "other": "blue t-shirt"
+ },
+ {
+  "id": "s24",
+  "kind": "strike",
+  "clip": "clips/s24.mp4",
+  "source": "V16",
+  "t": 45.8,
+  "fighter": "A",
+  "family": "punch",
+  "who": "navy tank top",
+  "other": "blue t-shirt"
+ },
+ {
+  "id": "s25",
+  "kind": "strike",
+  "clip": "clips/s25.mp4",
+  "source": "V16",
+  "t": 6.6,
+  "fighter": "B",
+  "family": "punch",
+  "who": "blue t-shirt",
+  "other": "navy tank top"
+ },
+ {
+  "id": "s26",
+  "kind": "strike",
+  "clip": "clips/s26.mp4",
+  "source": "V17",
+  "t": 20.4,
+  "fighter": "A",
+  "family": "punch",
+  "who": "navy tank top",
+  "other": "blue t-shirt"
+ },
+ {
+  "id": "s27",
+  "kind": "strike",
+  "clip": "clips/s27.mp4",
+  "source": "V17",
+  "t": 49.2,
+  "fighter": "A",
+  "family": "punch",
+  "who": "navy tank top",
+  "other": "blue t-shirt"
+ },
+ {
+  "id": "s28",
+  "kind": "strike",
+  "clip": "clips/s28.mp4",
+  "source": "V17",
+  "t": 27.4,
+  "fighter": "A",
+  "family": "punch",
+  "who": "navy tank top",
+  "other": "blue t-shirt"
+ },
+ {
+  "id": "s29",
+  "kind": "strike",
+  "clip": "clips/s29.mp4",
+  "source": "V17",
+  "t": 18.2,
+  "fighter": "A",
+  "family": "punch",
+  "who": "navy tank top",
+  "other": "blue t-shirt"
+ },
+ {
+  "id": "s30",
+  "kind": "strike",
+  "clip": "clips/s30.mp4",
+  "source": "V17",
+  "t": 13.5,
+  "fighter": "B",
+  "family": "punch",
+  "who": "blue t-shirt",
+  "other": "navy tank top"
+ },
+ {
+  "id": "s31",
+  "kind": "strike",
+  "clip": "clips/s31.mp4",
+  "source": "V18",
+  "t": 17.9,
+  "fighter": "A",
+  "family": "punch",
+  "who": "red vest, red headgear",
+  "other": "dark grey top, blue headgear"
+ },
+ {
+  "id": "s32",
+  "kind": "strike",
+  "clip": "clips/s32.mp4",
+  "source": "V18",
+  "t": 17.4,
+  "fighter": "A",
+  "family": "punch",
+  "who": "red vest, red headgear",
+  "other": "dark grey top, blue headgear"
+ },
+ {
+  "id": "s33",
+  "kind": "strike",
+  "clip": "clips/s33.mp4",
+  "source": "V18",
+  "t": 22.2,
+  "fighter": "B",
+  "family": "punch",
+  "who": "dark grey top, blue headgear",
+  "other": "red vest, red headgear"
+ },
+ {
+  "id": "s34",
+  "kind": "strike",
+  "clip": "clips/s34.mp4",
+  "source": "V18",
+  "t": 39.4,
+  "fighter": "B",
+  "family": "punch",
+  "who": "dark grey top, blue headgear",
+  "other": "red vest, red headgear"
+ },
+ {
+  "id": "s35",
+  "kind": "strike",
+  "clip": "clips/s35.mp4",
+  "source": "V18",
+  "t": 12.5,
+  "fighter": "A",
+  "family": "punch",
+  "who": "red vest, red headgear",
+  "other": "dark grey top, blue headgear"
+ },
+ {
+  "id": "s36",
+  "kind": "strike",
+  "clip": "clips/s36.mp4",
+  "source": "VID",
+  "t": 7.0,
+  "fighter": "A",
+  "family": "punch",
+  "who": "blue t-shirt, red headgear",
+  "other": "grey t-shirt, blue headgear"
+ },
+ {
+  "id": "s37",
+  "kind": "strike",
+  "clip": "clips/s37.mp4",
+  "source": "VID",
+  "t": 35.3,
+  "fighter": "B",
+  "family": "punch",
+  "who": "grey t-shirt, blue headgear",
+  "other": "blue t-shirt, red headgear"
+ },
+ {
+  "id": "s38",
+  "kind": "strike",
+  "clip": "clips/s38.mp4",
+  "source": "VID",
+  "t": 48.3,
+  "fighter": "B",
+  "family": "punch",
+  "who": "grey t-shirt, blue headgear",
+  "other": "blue t-shirt, red headgear"
+ },
+ {
+  "id": "s39",
+  "kind": "strike",
+  "clip": "clips/s39.mp4",
+  "source": "VID",
+  "t": 12.3,
+  "fighter": "A",
+  "family": "punch",
+  "who": "blue t-shirt, red headgear",
+  "other": "grey t-shirt, blue headgear"
+ },
+ {
+  "id": "s40",
+  "kind": "strike",
+  "clip": "clips/s40.mp4",
+  "source": "VID",
+  "t": 38.1,
+  "fighter": "B",
+  "family": "punch",
+  "who": "grey t-shirt, blue headgear",
+  "other": "blue t-shirt, red headgear"
+ },
+ {
+  "id": "g41",
+  "kind": "ground",
+  "clip": "clips/g41.mp4",
+  "source": "Ma477",
+  "second": 71,
+  "label": "GA",
+  "ground": true
+ },
+ {
+  "id": "g42",
+  "kind": "ground",
+  "clip": "clips/g42.mp4",
+  "source": "MMA297",
+  "second": 13,
+  "label": "GA",
+  "ground": true
+ },
+ {
+  "id": "g43",
+  "kind": "ground",
+  "clip": "clips/g43.mp4",
+  "source": "Ma374",
+  "second": 98,
+  "label": "GB",
+  "ground": true
+ },
+ {
+  "id": "g44",
+  "kind": "ground",
+  "clip": "clips/g44.mp4",
+  "source": "Ma374",
+  "second": 84,
+  "label": "C",
+  "ground": false
+ },
+ {
+  "id": "g45",
+  "kind": "ground",
+  "clip": "clips/g45.mp4",
+  "source": "Ma477",
+  "second": 73,
+  "label": "GA",
+  "ground": true
+ },
+ {
+  "id": "g46",
+  "kind": "ground",
+  "clip": "clips/g46.mp4",
+  "source": "Ma374",
+  "second": 178,
+  "label": "GB",
+  "ground": true
+ },
+ {
+  "id": "g47",
+  "kind": "ground",
+  "clip": "clips/g47.mp4",
+  "source": "MMA297",
+  "second": 37,
+  "label": "GA",
+  "ground": true
+ },
+ {
+  "id": "g48",
+  "kind": "ground",
+  "clip": "clips/g48.mp4",
+  "source": "Ma374",
+  "second": 141,
+  "label": "GB",
+  "ground": true
+ },
+ {
+  "id": "g49",
+  "kind": "ground",
+  "clip": "clips/g49.mp4",
+  "source": "Ma374",
+  "second": 46,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g50",
+  "kind": "ground",
+  "clip": "clips/g50.mp4",
+  "source": "Ma477",
+  "second": 72,
+  "label": "GA",
+  "ground": true
+ },
+ {
+  "id": "g51",
+  "kind": "ground",
+  "clip": "clips/g51.mp4",
+  "source": "Ma374",
+  "second": 6,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g52",
+  "kind": "ground",
+  "clip": "clips/g52.mp4",
+  "source": "Ma604",
+  "second": 212,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g53",
+  "kind": "ground",
+  "clip": "clips/g53.mp4",
+  "source": "Ma640",
+  "second": 107,
+  "label": "GB",
+  "ground": true
+ },
+ {
+  "id": "g54",
+  "kind": "ground",
+  "clip": "clips/g54.mp4",
+  "source": "Ma640",
+  "second": 103,
+  "label": "GB",
+  "ground": true
+ },
+ {
+  "id": "g55",
+  "kind": "ground",
+  "clip": "clips/g55.mp4",
+  "source": "Ma604",
+  "second": 187,
+  "label": "GN",
+  "ground": true
+ },
+ {
+  "id": "g56",
+  "kind": "ground",
+  "clip": "clips/g56.mp4",
+  "source": "Ma640",
+  "second": 12,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g57",
+  "kind": "ground",
+  "clip": "clips/g57.mp4",
+  "source": "Ma477",
+  "second": 24,
+  "label": "C",
+  "ground": false
+ },
+ {
+  "id": "g58",
+  "kind": "ground",
+  "clip": "clips/g58.mp4",
+  "source": "Ma640",
+  "second": 11,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g59",
+  "kind": "ground",
+  "clip": "clips/g59.mp4",
+  "source": "Ma604",
+  "second": 20,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g60",
+  "kind": "ground",
+  "clip": "clips/g60.mp4",
+  "source": "Ma604",
+  "second": 160,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g61",
+  "kind": "ground",
+  "clip": "clips/g61.mp4",
+  "source": "Ma640",
+  "second": 82,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g62",
+  "kind": "ground",
+  "clip": "clips/g62.mp4",
+  "source": "Ma477",
+  "second": 18,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g63",
+  "kind": "ground",
+  "clip": "clips/g63.mp4",
+  "source": "Ma477",
+  "second": 4,
+  "label": "S",
+  "ground": false
+ },
+ {
+  "id": "g64",
+  "kind": "ground",
+  "clip": "clips/g64.mp4",
+  "source": "Ma604",
+  "second": 171,
+  "label": "GB",
+  "ground": true
+ },
+ {
+  "id": "g65",
+  "kind": "ground",
+  "clip": "clips/g65.mp4",
+  "source": "Ma604",
+  "second": 194,
+  "label": "GA",
+  "ground": true
+ },
+ {
+  "id": "g66",
+  "kind": "ground",
+  "clip": "clips/g66.mp4",
+  "source": "Ma640",
+  "second": 99,
+  "label": "GB",
+  "ground": true
+ },
+ {
+  "id": "g67",
+  "kind": "ground",
+  "clip": "clips/g67.mp4",
+  "source": "MMA297",
+  "second": 4,
+  "label": "GA",
+  "ground": true
+ }
+]
