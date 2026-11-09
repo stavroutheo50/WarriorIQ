@@ -929,3 +929,68 @@ body:has(.hx-hero) { overflow-x: clip; }
 .hx-title em { color: transparent !important; -webkit-text-fill-color: transparent; }
 .hx-title em { background-image: linear-gradient(90deg, #5aa9ff, #c9d6ea 35%, #ff5d68 65%, #5aa9ff) !important; background-size: 300% 100% !important;
   -webkit-background-clip: text !important; background-clip: text !important; }
+
+/* ===== Fight report (owner, 2026-11-09, from the approved mock-up) ========
+   A report that worked opens on the face-off: both corners, the score
+   between them, the fight under the score. The stat sheet's bars grow from
+   the middle, and the coaching row reads as cards. */
+.rx-faceoff { display: grid; gap: 22px; margin: 18px 0 8px; padding: 28px !important; border-radius: 34px !important; }
+.rx-versus { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 18px; }
+.rx-corner { display: grid; justify-items: center; gap: 10px; text-align: center; animation: rx-in-left 1s cubic-bezier(.16, 1, .3, 1) both; }
+.rx-corner:last-child { animation-name: rx-in-right; }
+.rx-corner b { font-size: 20px; font-weight: 850; }
+.rx-corner small { font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.rx-corner.rx-blue { --rx-c: #5aa9ff; } .rx-corner.rx-red { --rx-c: #ff5d68; }
+.rx-corner small { color: var(--rx-c); }
+.rx-avatar { width: 112px; height: 112px; overflow: hidden; border-radius: 50%; border: 3px solid var(--rx-c); background: #0d1424;
+  box-shadow: 0 0 0 6px rgba(0, 0, 0, .25), 0 0 40px -6px var(--rx-c); }
+.rx-avatar img { width: 100%; height: 100%; object-fit: cover; object-position: center 12%; }
+.rx-score { display: grid; justify-items: center; gap: 6px; text-align: center; animation: rx-pop 1s cubic-bezier(.16, 1, .3, 1) .2s both; }
+.rx-score-label { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  color: #cfe2ff; background: rgba(61, 127, 240, .16); border: 1px solid rgba(90, 169, 255, .3); }
+.rx-digits { display: flex; align-items: center; gap: 14px; font-size: clamp(64px, 10vw, 110px); font-weight: 900; line-height: 1; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
+.rx-digits i { font-style: normal; font-size: .6em; color: rgba(255, 255, 255, .35); }
+.rx-digits .rx-blue { color: #5aa9ff; text-shadow: 0 0 40px rgba(90, 169, 255, .45); }
+.rx-digits .rx-red { color: #ff5d68; text-shadow: 0 0 40px rgba(255, 93, 104, .45); }
+.rx-score small { color: #c3cad8; font-size: 14px; }
+.rx-score .result-scoreline { display: grid; justify-items: center; gap: 4px; text-align: center; }
+.rx-score .result-scoreline strong { font-size: clamp(30px, 5vw, 44px) !important; }
+.rx-video { width: 100%; max-height: 560px; border-radius: 22px; background: #02050b; border: 1px solid rgba(255, 255, 255, .1); }
+
+/* Head to head: each fighter's bar grows out from the middle. */
+.stat-sheet { padding: 26px !important; border-radius: 30px !important; }
+.stat-row dd.stat-a { color: #5aa9ff; } .stat-row dd.stat-b { color: #ff5d68; }
+.stat-row dd { font-size: 24px; font-weight: 850; }
+.stat-bar { display: grid !important; grid-template-columns: 1fr 1fr; gap: 6px; height: 10px; }
+.stat-bar i { position: relative; width: 100% !important; overflow: hidden; border-radius: 999px; background: rgba(255, 255, 255, .06) !important; }
+.stat-bar i::after { content: ""; position: absolute; top: 0; bottom: 0; width: var(--share); border-radius: 999px; }
+.stat-bar-a::after { right: 0; background: linear-gradient(90deg, rgba(90, 169, 255, .35), #5aa9ff); }
+.stat-bar-b::after { left: 0; background: linear-gradient(90deg, #ff5d68, rgba(255, 93, 104, .35)); }
+.stat-sheet.is-armed .stat-bar-a::after { transform-origin: right; } .stat-sheet.is-armed .stat-bar-b::after { transform-origin: left; }
+.stat-sheet.is-armed .stat-bar i { transform: none !important; }
+.stat-sheet.is-armed .stat-bar i::after { transform: scaleX(0); }
+.stat-sheet.is-armed .is-in .stat-bar i::after { transform: scaleX(1); transition: transform 1.2s cubic-bezier(.16, 1, .3, 1); }
+.stat-pace polyline { stroke-width: 3; }
+
+/* Keep doing / fix next as two cards. */
+.keep-fix-row { gap: 16px !important; }
+.keep-fix-row article { padding: 22px 24px !important; border-radius: 26px !important; border: 1px solid rgba(255, 255, 255, .12) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .08), rgba(255, 255, 255, .03)) !important; }
+
+@keyframes rx-in-left { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: none; } }
+@keyframes rx-in-right { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
+@keyframes rx-pop { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+@media (max-width: 760px) {
+  .rx-faceoff { padding: 18px !important; }
+  .rx-versus { grid-template-columns: 1fr 1fr; }
+  .rx-score { grid-column: 1 / -1; order: -1; }
+  .rx-avatar { width: 84px; height: 84px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rx-corner, .rx-score { animation: none !important; }
+  .stat-sheet.is-armed .stat-bar i::after { transform: none; }
+}
+/* The pace lines drew in with pathLength dashes, which Chrome ignores on a
+   non-scaling stroke: the line showed as broken pieces. They fade in instead. */
+.stat-sheet.is-armed .stat-pace polyline { stroke-dasharray: none !important; stroke-dashoffset: 0 !important; opacity: 0; }
+.stat-sheet.is-armed .is-in .stat-pace polyline { opacity: 1; transition: opacity 1.2s ease-out; }

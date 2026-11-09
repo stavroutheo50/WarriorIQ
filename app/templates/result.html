@@ -262,7 +262,22 @@
     (core/fight_presence.py): the notice above says so instead. -#}
 {% if numbers.state != 'no_fight' %}
 {% set rough = identity_failed and numbers.state != 'movement_only' %}
-{% if lead_with_numbers %}<section class="result-score-top" aria-label="Score">{{ score_html }}</section>{% endif %}
+{#- A report that worked opens on the face-off (owner, 2026-11-09, from the
+    approved mock-up): both fighters in their corner colours, the score
+    between them, and the fight itself under the score. Every other report
+    keeps the plain score at the top. -#}
+{% set faceoff = lead_with_numbers and not identity_failed and numbers.state == 'ok' %}
+{% if faceoff %}
+{% set colour_a = 'red' if corners and corners.A and 'Red' in corners.A else 'blue' %}{% set colour_b = 'blue' if colour_a == 'red' else 'red' %}
+<section class="rx-faceoff glass-panel" id="faceoff" aria-label="Score">
+  <div class="rx-versus">
+    <div class="rx-corner rx-{{ colour_a }}"><div class="rx-avatar"><img src="/fighter-portrait/{{job_id}}/A" alt="{{ names.A }}" data-hide-on-error></div><b>{{ names.A }}</b><small>{{ corners.A if corners and corners.A else colour_a|title ~ ' corner' }}</small></div>
+    <div class="rx-score">{% if report.scorecard.available and not (features is defined and features.scoring and not features.scoring.on) %}<span class="rx-score-label">{% if report.scorecard.status == 'preliminary_unvalidated' %}Preliminary estimate{% else %}Estimated score{% endif %}</span><div class="rx-digits" aria-label="{{ names.A }} {{ report.scorecard.totals.A }}, {{ names.B }} {{ report.scorecard.totals.B }}"><span class="rx-{{ colour_a }}">{{ report.scorecard.totals.A }}</span><i aria-hidden="true">:</i><span class="rx-{{ colour_b }}">{{ report.scorecard.totals.B }}</span></div><small>{% if report.scorecard.winner_estimate %}{{ names.get(report.scorecard.winner_estimate, 'Fighter ' ~ report.scorecard.winner_estimate) }} ahead on the estimate{% else %}Even on the estimate{% endif %} &middot; not an official decision</small>{% else %}{{ score_html }}{% endif %}</div>
+    <div class="rx-corner rx-{{ colour_b }}"><div class="rx-avatar"><img src="/fighter-portrait/{{job_id}}/B" alt="{{ names.B }}" data-hide-on-error></div><b>{{ names.B }}</b><small>{{ corners.B if corners and corners.B else colour_b|title ~ ' corner' }}</small></div>
+  </div>
+  {% if not report.video_removed %}<video class="rx-video" src="/media/{{job_id}}" poster="/selection-image/{{job_id}}" controls playsinline preload="metadata" aria-label="Your fight video"></video>{% endif %}
+</section>
+{% elif lead_with_numbers %}<section class="result-score-top" aria-label="Score">{{ score_html }}</section>{% endif %}
 {% if rough %}<details class="report-all rough-numbers" id="roughNumbers"><summary><span><strong>Rough numbers (may be wrong)</strong><small>What we measured, which may include other people</small></span><b aria-hidden="true">+</b></summary>
 {% if recording_warnings %}<div class="notice" role="note" id="recordingWarnings"><strong>About this recording.</strong><ul class="list-clean">{% for text in recording_warnings %}<li>{{ text }}</li>{% endfor %}</ul></div>{% endif %}
 {% endif %}
@@ -274,6 +289,9 @@
 {% set vitals_focus = report.video.focus_fighter|default(report.video.analysis_target|default('A'), true) %}
 {% set vitals_primary = vitals_focus if vitals_focus in ['A','B'] else 'A' %}
 {% set m = report.metrics[vitals_primary] if report.metrics and vitals_primary in report.metrics else {} %}
+{#- With the face-off, every one of these numbers is in the head-to-head
+    below for both fighters, so the one-fighter tiles are not shown twice. -#}
+{% if not (faceoff and stat_sheet and stat_sheet.available) %}
   {% if numbers.state == 'unverified' %}<p class="vitals-unverified-label">Unverified &mdash; may include other people</p>{% endif %}
   <div class="fight-vitals"{% if numbers.state == 'unverified' %} data-unverified="true" aria-label="Unverified measurements; they may include other people"{% endif %}>
     {#- Each number with one plain sentence that uses it (2026-10-11: "Pressure
@@ -302,6 +320,7 @@
   {% if seen and seen.measured_frames %}
   <p class="vitals-basis small muted">Measured across {{'{:,}'.format(seen.measured_frames)}} of {{'{:,}'.format(seen.analyzed_frames)}} analysed frames{% if not seen.confident %} &mdash; just over {{'%.0f'|format(seen.share * 100)}}% of the fight, so read these as the part of the round WarriorIQ could see rather than the whole of it{% endif %}.</p>
   {% endif %}
+{% endif %}
 {% if ground_time and not identity_failed %}
 {#- MMA: time on the ground (owner, 2026-11-02; core/ground_time.py). Measured
     on five labelled pankration bouts, each judged by a model fitted on the
@@ -318,7 +337,7 @@
     other count on this page, labelled as estimates. Only when the counts are
     published for this sport and the fighters were told apart. -#}
 {% set strip_stats = (report.statistics|default({}, true)).fighters|default({}, true) %}
-{% if strike_counts_published and families_shown and numbers.state == 'ok' and strip_stats %}
+{% if strike_counts_published and families_shown and numbers.state == 'ok' and strip_stats and not (faceoff and stat_sheet and stat_sheet.available) %}
 {% set strip_shown = true %}
 <section class="strike-strip" id="strikeStrip" aria-label="Strikes thrown, estimated">
   {% for who in ['A', 'B'] %}{% set st = strip_stats.get(who, {}) %}{% set total = namespace(n=0) %}{% for family in families_shown %}{% set total.n = total.n + (st.get(family ~ '_attempts')|default(0, true)) %}{% endfor %}
