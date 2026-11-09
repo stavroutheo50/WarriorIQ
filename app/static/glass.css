@@ -994,3 +994,61 @@ body:has(.hx-hero) { overflow-x: clip; }
    non-scaling stroke: the line showed as broken pieces. They fade in instead. */
 .stat-sheet.is-armed .stat-pace polyline { stroke-dasharray: none !important; stroke-dashoffset: 0 !important; opacity: 0; }
 .stat-sheet.is-armed .is-in .stat-pace polyline { opacity: 1; transition: opacity 1.2s ease-out; }
+
+/* --- Upload pages in the home page's look (owner, 2026-11-09) -------------- */
+/* The sport picker: each card is a still from that sport's home clip. */
+.ux-chooser .chooser-head h1 { font-size: clamp(42px, 6.4vw, 84px); font-weight: 900; line-height: .95; letter-spacing: -.045em; text-wrap: balance; }
+.ux-chooser .sport-grid { gap: 16px; }
+.ux-chooser .sport-card { isolation: isolate; justify-content: flex-end; min-height: 340px; padding: 22px; border-radius: 30px; background: #0a0f18 !important; color: #ffffff; }
+.ux-chooser .sport-card-photo { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; transition: transform .9s cubic-bezier(.16, 1, .3, 1); }
+.ux-chooser .sport-card::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(10, 15, 24, .15) 0%, rgba(10, 15, 24, .55) 45%, rgba(10, 15, 24, .96) 100%); }
+.ux-chooser .sport-card:hover { transform: translateY(-4px); border-color: rgba(255, 255, 255, .35); }
+.ux-chooser .sport-card:hover .sport-card-photo { transform: scale(1.06); }
+.ux-chooser .sport-card .sport-crest { position: absolute; top: 18px; left: 18px; }
+.ux-chooser .sport-card h2 { font-size: 28px; font-weight: 850; letter-spacing: -.03em; }
+.ux-chooser .sport-card-decided { margin: 0; color: #d3d9e4; font-size: 14px; line-height: 1.45; }
+.ux-chooser .sport-card-rules { color: #a9b3c4; }
+.ux-chooser .sport-card-coverage { align-self: flex-start; margin-top: 8px; padding: 5px 12px; border-radius: 999px; background: rgba(61, 220, 151, .14); border: 1px solid rgba(61, 220, 151, .3); }
+.ux-chooser .sport-card-coverage[data-covered="no"] { background: rgba(255, 196, 92, .12); border-color: rgba(255, 196, 92, .3); }
+@media (min-width: 1180px) { .ux-chooser .sport-card { min-height: 380px; } }
+
+/* One sport's setup: a big title, the sport's clip beside the upload card. */
+.ux-setup .setup-head h1 { font-size: clamp(38px, 4.6vw, 64px); font-weight: 900; line-height: .95; letter-spacing: -.045em; text-wrap: balance; }
+.setup-clip { margin: 26px 0 0; overflow: hidden; border-radius: 28px; border: 1px solid rgba(255, 255, 255, .12); background: #050810; aspect-ratio: 16 / 10; }
+.setup-clip video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.ux-setup .setup-card { padding: clamp(20px, 2.6vw, 30px); border-radius: 30px; }
+.ux-setup .console-head h2 { font-size: clamp(24px, 2.4vw, 30px); font-weight: 850; letter-spacing: -.03em; }
+.ux-setup .console-allowance { border-radius: 999px; padding: 10px 16px; background: rgba(255, 255, 255, .05); border-color: rgba(255, 255, 255, .12); }
+.ux-setup .upload-steps li { border-radius: 999px; }
+.ux-setup .upload-steps li[aria-current="step"] { background: linear-gradient(180deg, rgba(90, 169, 255, .32), rgba(47, 111, 237, .22)); border-color: rgba(90, 169, 255, .45); }
+.ux-setup .upload-steps li[aria-current="step"] b { background: #5aa9ff; color: #06121a; }
+.ux-setup .file-button { min-height: 150px !important; border-radius: 24px !important; border: 1.5px dashed rgba(90, 169, 255, .45) !important;
+  background: radial-gradient(120% 140% at 50% 0%, rgba(90, 169, 255, .16), rgba(10, 15, 24, .4) 70%) !important; }
+.ux-setup .file-button b { font-size: 17px; font-weight: 800; }
+.ux-setup .file-button:hover { border-color: rgba(90, 169, 255, .8) !important; }
+.ux-setup .file-button.uploaded { border-style: solid !important; border-color: rgba(61, 220, 151, .5) !important; background: radial-gradient(120% 140% at 50% 0%, rgba(61, 220, 151, .16), rgba(10, 15, 24, .4) 70%) !important; }
+.ux-setup .upload-step-nav .btn, .ux-setup .upload-submit { min-height: 48px; border-radius: 999px !important; }
+
+/* Below: the filming guide across the page, the two notes side by side. */
+.ux-setup .setup-notes { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 40px; }
+.ux-setup .film-guide { grid-column: 1 / -1; margin: 0 0 8px; }
+.ux-setup .film-guide h2 { font-size: clamp(28px, 3.4vw, 42px); font-weight: 850; letter-spacing: -.035em; }
+.ux-setup .film-shots { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.ux-setup .film-shot { border-radius: 26px; }
+.ux-setup .film-shot figcaption { display: grid; gap: 8px; padding: 14px 16px 18px; }
+.ux-setup .film-shot figcaption b { justify-self: start; }
+.ux-setup .film-shot figcaption strong { font-size: 16px; margin-bottom: 2px; }
+.ux-setup .setup-coverage, .ux-setup .setup-solo { margin: 0; padding: 18px 20px; border-radius: 24px; font-size: 14px; line-height: 1.55; }
+@media (max-width: 980px) {
+  .setup-clip { display: none; }
+  .ux-setup .setup-notes { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .ux-setup .film-shots { grid-template-columns: 1fr; }
+  .ux-setup .film-shot { display: grid; grid-template-columns: 42% 1fr; }
+  .ux-setup .film-shot img { height: 100%; aspect-ratio: auto; }
+  .ux-chooser .sport-card { min-height: 230px; }
+  .ux-chooser .sport-grid { grid-template-columns: 1fr; }
+}
+.ux-setup .setup-credits { grid-column: 1 / -1; order: 9; margin: 8px 0 0; }
+.ux-chooser .hx-credits { margin-top: 20px; }
