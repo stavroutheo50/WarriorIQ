@@ -4,7 +4,9 @@
 (function () {
   'use strict';
   var SPORTS = window.WIQ_SCORER || [];
-  var KEY = 'wiq-ringside-v1';
+  // v2: rounds hold points and deductions per corner (owner, 2026-11-09), not
+  // the technique taps v1 stored, so a v1 fight in this browser is not reused.
+  var KEY = 'wiq-ringside-v2';
   var $ = function (id) { return document.getElementById(id); };
   var state = load() || fresh();
   var pending = null, lastScore = null;
@@ -13,7 +15,7 @@
     return { sport: SPORTS[0] && SPORTS[0].key, ruleset: null, names: { A: '', B: '' },
              rounds: [blankRound()], current: 0, history: [], view: 'setup' };
   }
-  function blankRound() { return { A: [], B: [], knockdowns: { A: 0, B: 0 } }; }
+  function blankRound() { return { A: { points: 0, deductions: 0 }, B: { points: 0, deductions: 0 } }; }
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* private mode */ } }
   function sport() { return SPORTS.find(function (s) { return s.key === state.sport; }) || SPORTS[0]; }
@@ -54,34 +56,34 @@
 
   // ---- scoring -------------------------------------------------------------
   function drawPads() {
-    var r = rules();
     ['A', 'B'].forEach(function (side) {
       var pad = $('pad' + side);
       pad.innerHTML = '';
       var heading = document.createElement('p');
       heading.className = 'ringside-pad-name'; heading.textContent = name(side); pad.appendChild(heading);
-      r.buttons.forEach(function (button) {
+      var row = document.createElement('div');
+      row.className = 'ringside-plus';
+      [1, 2].forEach(function (value) {
         var b = document.createElement('button');
-        b.type = 'button'; b.className = 'ringside-tap';
-        b.innerHTML = '<span></span><small></small>';
-        b.firstChild.textContent = button.label;
-        b.lastChild.textContent = button.points ? '+' + button.points : '';
-        b.addEventListener('click', function () { tap(side, button.key, b); });
-        pad.appendChild(b);
+        b.type = 'button'; b.className = 'ringside-tap ringside-point';
+        b.textContent = '+' + value;
+        b.setAttribute('aria-label', '+' + value + ' for ' + name(side));
+        b.addEventListener('click', function () { tap(side, 'points', value, b); });
+        row.appendChild(b);
       });
-      if (r.ten_point_must) {
-        var kd = document.createElement('button');
-        kd.type = 'button'; kd.className = 'ringside-tap ringside-knockdown';
-        kd.innerHTML = '<span>Knockdown scored</span><small></small>';
-        kd.addEventListener('click', function () { tap(side, 'knockdown', kd); });
-        pad.appendChild(kd);
-      }
+      pad.appendChild(row);
+      var minus = document.createElement('button');
+      minus.type = 'button'; minus.className = 'ringside-tap ringside-deduction';
+      minus.textContent = 'Point deduction';
+      minus.setAttribute('aria-label', 'Take a point off ' + name(side));
+      minus.addEventListener('click', function () { tap(side, 'deductions', 1, minus); });
+      pad.appendChild(minus);
     });
   }
-  function tap(side, key, element) {
+  function tap(side, kind, value, element) {
     var round = state.rounds[state.current];
-    if (key === 'knockdown') round.knockdowns[side] += 1; else round[side].push(key);
-    state.history.push({ round: state.current, side: side, key: key });
+    round[side][kind] += value;
+    state.history.push({ round: state.current, side: side, kind: kind, value: value });
     if (navigator.vibrate) { try { navigator.vibrate(18); } catch (e) { /* not allowed */ } }
     if (element) { element.classList.add('is-hit'); setTimeout(function () { element.classList.remove('is-hit'); }, 120); }
     save(); drawBoard(); requestScore();
@@ -89,9 +91,8 @@
   $('scorerUndo').addEventListener('click', function () {
     var last = state.history.pop();
     if (!last) return;
-    var round = state.rounds[last.round];
-    if (last.key === 'knockdown') round.knockdowns[last.side] = Math.max(0, round.knockdowns[last.side] - 1);
-    else round[last.side].pop();
+    var corner = state.rounds[last.round][last.side];
+    corner[last.kind] = Math.max(0, corner[last.kind] - last.value);
     state.current = last.round;
     save(); drawBoard(); requestScore();
   });
@@ -104,16 +105,16 @@
   $('scorerBack').addEventListener('click', function () { state.view = 'live'; save(); show(); });
   $('scorerNew').addEventListener('click', function () { state.view = 'setup'; save(); show(); });
 
-  function landed(side) {
-    return state.rounds.reduce(function (n, round) { return n + round[side].length; }, 0);
+  function tapped(side) {
+    return state.rounds.reduce(function (n, round) { return n + round[side].points; }, 0);
   }
   function drawBoard() {
     $('boardNameA').textContent = name('A'); $('boardNameB').textContent = name('B');
     $('boardRound').textContent = 'Round ' + (state.current + 1);
     $('boardRules').textContent = rules().label;
     ['A', 'B'].forEach(function (side) {
-      var n = landed(side);
-      $('boardLanded' + side).textContent = n + ' landed';
+      var n = tapped(side);
+      $('boardLanded' + side).textContent = n + (n === 1 ? ' point' : ' points') + ' tapped';
       $('boardScore' + side).textContent = lastScore ? lastScore.totals[side] : '–';
     });
   }
@@ -152,7 +153,8 @@
     var body = $('resultRounds'); body.innerHTML = '';
     lastScore.rounds.forEach(function (row) {
       var tr = document.createElement('tr');
-      [String(row.round), row.A + ' (' + row.landed_A + ' landed)', row.B + ' (' + row.landed_B + ' landed)']
+      [String(row.round), row.A + ' (' + row.points_A + ' tapped' + (row.deductions_A ? ', -' + row.deductions_A : '') + ')',
+       row.B + ' (' + row.points_B + ' tapped' + (row.deductions_B ? ', -' + row.deductions_B : '') + ')']
         .forEach(function (text) { var td = document.createElement('td'); td.textContent = text; tr.appendChild(td); });
       body.appendChild(tr);
     });

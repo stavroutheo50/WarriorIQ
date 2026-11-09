@@ -811,3 +811,8 @@ textarea { border-radius: 18px !important; }
 .plan-more > summary span { display: flex; flex-direction: column; gap: 2px; }
 .plan-more > summary small { color: #8b97aa; font-size: 12px; font-weight: 550; }
 .plan-more .billing-facts { display: grid; gap: 6px; margin: 0 0 12px; color: #99a7ba; }
+/* Ringside Scorer: +1 / +2 per corner and a deduction under them (owner, 2026-11-09). */
+.ringside-plus { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ringside-tap.ringside-point { justify-content: center; min-height: 84px; font-size: 30px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.ringside-tap.ringside-deduction { justify-content: center; min-height: 48px; font-size: 14px; font-weight: 800;
+  border: 1px solid rgba(255, 255, 255, .16) !important; background-color: rgba(255, 255, 255, .05) !important; color: #c3cad8; }

@@ -9516,13 +9516,13 @@ class RingsidePayload(BaseModel):
 
 @app.get("/scorer", response_class=HTMLResponse)
 def ringside_scorer_page(request: Request):
-    """The free Ringside Scorer (owner, 2026-11-02): tap each landed strike at
-    ringside on a phone; core/ringside.py scores it with the report's scorer.
+    """The free Ringside Scorer (owner, 2026-11-02; +1 / +2 and a deduction per
+    corner since 2026-11-09): scored by core/ringside.py under the rules picked.
     Works with no upload and no analysis computer."""
     from core import ringside
 
     sports = [{"key": sport, "label": RULESET_SPORTS[sport],
-               "rulesets": [{"key": key, "label": RULESET_LABELS[key], "buttons": ringside.buttons(key),
+               "rulesets": [{"key": key, "label": RULESET_LABELS[key],
                              "summary": ringside.rules_summary(key),
                              "ten_point_must": RULESETS[key].ten_point_must} for key in keys]}
               for sport, keys in SPORTS.items()]
