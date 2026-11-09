@@ -791,3 +791,23 @@ textarea { border-radius: 18px !important; }
 .check.legal-check { border-radius: 22px !important; }
 /* The Good / Avoid pill stretched to the caption's full height on a phone. */
 .film-shot figcaption b { align-self: flex-start; line-height: 1.6; }
+/* Pricing (walkthrough, 2026-11-09): each card's detail folds under "What's
+   included", styled like its Billing details row. */
+.plan-more { margin: 10px 0 14px; border-bottom: 1px solid var(--glass-edge-side); }
+.plan-more > summary { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 14px; color: #c3cad8; font-size: 13px; font-weight: 780; cursor: pointer; list-style: none; }
+.plan-more > summary::-webkit-details-marker { display: none; }
+.plan-more > summary::marker { content: ""; }
+.plan-more[open] > summary b { transform: rotate(45deg); }
+.plan-more > summary b { transition: transform .2s; }
+.plan-more .plan-features { margin-bottom: 12px; }
+/* "What changes between reports" as three compact rows on a phone. */
+@media (max-width: 700px) {
+  .report-levels .grid3 { gap: 8px; }
+  .report-levels .grid3 > .card { min-height: 0; padding: 14px 16px; }
+  .report-levels .report-dot { margin-bottom: 8px; }
+  .report-levels .grid3 > .card h3 { margin: 4px 0 2px; font-size: 16px; }
+  .report-levels .grid3 > .card p { margin: 0; font-size: 13px; }
+}
+.plan-more > summary span { display: flex; flex-direction: column; gap: 2px; }
+.plan-more > summary small { color: #8b97aa; font-size: 12px; font-weight: 550; }
+.plan-more .billing-facts { display: grid; gap: 6px; margin: 0 0 12px; color: #99a7ba; }
