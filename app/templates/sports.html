@@ -3,7 +3,7 @@
 {% block description %}Pick the combat sport you compete in — kickboxing, boxing, Muay Thai, taekwondo or MMA — and WarriorIQ scores the bout under that sport's own rules.{% endblock %}
 {% block content %}
 {% if not signed_in %}<section class="empty-workspace card"><h1 class="workspace-required-title">Fight analysis belongs to your private athlete workspace</h1><p class="muted">WarriorIQ does not analyse a fight without an account. Your footage, the athletes in it and your upload allowance all belong to a workspace, so there is nowhere to put an analysis until you have one. It is free to create, and your fights stay private to you.</p><div class="hero-actions"><a class="btn" href="/signup?next=/analyze">Create account</a><a class="btn secondary" href="/login?next=/analyze">Sign in</a></div></section>{% else %}
-<section class="chooser">
+<section class="chooser ux-chooser">
   <header class="chooser-head" data-reveal>
     <div class="eyebrow">Step 1 of 4 · Upload · Your sport</div>
     <h1>Which sport are we watching?</h1>
@@ -17,6 +17,9 @@
     {% for sport, name in sports.items() %}
     <a class="sport-card" href="/analyze/{{sport}}" data-sport="{{sport}}"
        style="--sport-accent:{{identities[sport].accent}};--sport-accent-soft:{{identities[sport].accent_soft}}">
+      {#- A still from the same sport's clip on the home page (owner, 2026-11-09:
+          the upload pages in the home page's look). -#}
+      <img class="sport-card-photo" src="/static/home/{{ sport|replace('_', '') }}.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async">
       <span class="sport-card-mark" aria-hidden="true"></span>
       <span class="sport-crest" aria-hidden="true">{{identities[sport].mark}}</span>
       <h2>{{name}}</h2>
@@ -39,6 +42,8 @@
     something the analysis cannot observe, the card says so here and the report
     repeats it beside the score.
   </p>
+  {#- Card stills: the home page's clips (sources listed in index.html). -#}
+  <p class="hx-credits small muted">Photos: Mixkit (Mixkit Free License); US Marine Corps (public domain); Thierry Gilletto training and Taekwondo England vs Korea (CC0); Muay Thai sparring, Subfighter.com via archive.org (<a class="text-link" href="https://creativecommons.org/licenses/by/2.0/" rel="noopener">CC BY 2.0</a>).</p>
 </section>
 {% endif %}
 {% endblock %}
