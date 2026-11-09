@@ -31,6 +31,8 @@ from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPExceptio
                      Request, UploadFile)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 from pydantic import BaseModel
@@ -1143,6 +1145,10 @@ class RateLimited(Exception):
         self.detail = detail
 
 
+LOGIN_ATTEMPTS_PER_ACCOUNT = 10
+LOGIN_ACCOUNT_WINDOW_SECONDS = 900
+
+
 def _take_rate_slot(scope: str, client: str, limit: int, window_seconds: int) -> int | None:
     """Count one request. Returns None if it may proceed, else seconds to wait."""
     now = time.monotonic()
@@ -2251,6 +2257,24 @@ async def http_error_page(request: Request, exc: StarletteHTTPException):
         status_code=exc.status_code,
         headers=exc.headers,
     )
+
+
+INVALID_REQUEST_DETAIL = ("Some information in that request was missing or not valid. "
+                          "Reload the page and try again.")
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(request: Request, exc: RequestValidationError):
+    """A request whose fields did not validate, said in a sentence.
+
+    FastAPI's own answer puts a list of objects in `detail`, and every page
+    shows `detail` as text: the selection page read "[object Object],[object
+    Object]" (walkthrough, 2026-11-09). The list stays available as `errors`.
+    """
+    if _wants_json(request) or request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": INVALID_REQUEST_DETAIL, "errors": jsonable_encoder(exc.errors())},
+                            status_code=422)
+    return await http_error_page(request, StarletteHTTPException(400, INVALID_REQUEST_DETAIL))
 
 
 @app.exception_handler(Exception)
@@ -3567,6 +3591,14 @@ def login(
     the accounts whose version is behind - see /policies.
     """
     _enforce_rate_limit(request, "login", 30, 300)
+    # And per account, so guesses spread over many addresses still meet a
+    # limit (walkthrough, 2026-11-09). Counted for any email, registered or
+    # not, so the limit says nothing about which accounts exist.
+    account_key = token_digest(email.strip().lower())[:32]
+    wait = _take_rate_slot("login-account", account_key, LOGIN_ATTEMPTS_PER_ACCOUNT, LOGIN_ACCOUNT_WINDOW_SECONDS)
+    if wait is not None:
+        _report_rate_limit_once("login-account", account_key, LOGIN_ACCOUNT_WINDOW_SECONDS)
+        raise HTTPException(429, _rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))})
     account = authenticate(email, password)
     if not account:
         record_security_event("login_failed", severity="warning", metadata={"email_hash": token_digest(email.strip().lower())[:16]})
