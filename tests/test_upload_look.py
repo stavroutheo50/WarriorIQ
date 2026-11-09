@@ -22,3 +22,9 @@ def test_the_templates_use_them_and_credit_cc_by():
     assert 'class="sport-card-photo"' in picker and "CC BY 2.0" in picker
     assert 'class="setup-clip"' in setup and "data-home-clip" in setup and "/static/home.js" in setup
     assert "sport == 'muay_thai'" in setup and "CC BY 2.0" in setup
+
+
+def test_the_scorer_head_plays_the_ringside_clip_and_credits_it():
+    page = (ROOT / "app" / "templates" / "ringside.html").read_text(encoding="utf-8")
+    assert 'class="ringside-head-clip" data-home-clip' in page and "/static/home.js" in page
+    assert "CC BY 3.0" in page
