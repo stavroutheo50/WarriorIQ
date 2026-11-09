@@ -1,8 +1,11 @@
-"""The free Ringside Scorer (owner, 2026-11-02): core/ringside.py and /scorer."""
+"""The free Ringside Scorer: core/ringside.py and /scorer.
+
++1 / +2 per corner and a point deduction (owner, 2026-11-09)."""
 
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -10,46 +13,42 @@ from core import ringside
 from core.scoring import RULESETS
 
 
-def _keys(ruleset):
-    return [button["key"] for button in ringside.buttons(ruleset)]
+def _round(a=0, b=0, minus_a=0, minus_b=0):
+    return {"A": {"points": a, "deductions": minus_a}, "B": {"points": b, "deductions": minus_b}}
 
 
-def test_every_ruleset_offers_only_what_its_scorer_counts():
-    assert _keys("BOXING") == ["punch_head", "punch_body"]                 # no kicks in boxing
-    assert "punch_head" not in _keys("WT_TAEKWONDO")                       # head punches illegal in WT
-    assert "knee_body" not in _keys("LOW_KICK")                            # no knees in Low Kick
-    assert "kick_leg" not in _keys("ITF_TAEKWONDO")                        # a leg scores nothing in ITF
-    assert "elbow" in _keys("MUAY_THAI") and "elbow" not in _keys("MUAY_THAI_NO_ELBOWS")
+def test_every_ruleset_has_a_summary():
     for key in RULESETS:
-        assert ringside.buttons(key), key
         assert ringside.rules_summary(key)
 
 
-def test_points_rulesets_use_the_federation_table():
-    values = {b["key"]: b["points"] for b in ringside.buttons("KICK_LIGHT")}
-    assert values["punch_head"] == 1 and values["kick_head"] == 2 and values["jump_kick_head"] == 3
-    card = ringside.score("KICK_LIGHT", [{"A": ["punch_head", "kick_head"], "B": ["kick_body"]}])
-    assert card["totals"] == {"A": 3, "B": 1} and card["winner"] == "A"
-    wt = {b["key"]: b["points"] for b in ringside.buttons("WT_TAEKWONDO")}
-    assert wt["turn_kick_head"] == 6
+def test_points_rules_add_up_taps_less_deductions():
+    card = ringside.score("KICK_LIGHT", [_round(5, 3, minus_a=1), _round(2, 4)])
+    assert [(r["A"], r["B"]) for r in card["rounds"]] == [(4, 3), (2, 4)]
+    assert card["totals"] == {"A": 6, "B": 7} and card["winner"] == "B"
 
 
-def test_ten_point_must_rounds_and_knockdowns():
-    card = ringside.score("BOXING", [{"A": ["punch_head"] * 6, "B": ["punch_body"] * 3},
-                                     {"A": ["punch_head"], "B": ["punch_head"] * 2, "knockdowns": {"A": 1}}])
-    assert [(r["A"], r["B"]) for r in card["rounds"]] == [(10, 9), (10, 8)]   # a knockdown wins the round
-    assert card["totals"] == {"A": 20, "B": 17}
-    muay_thai = ringside.score("MUAY_THAI", [{"A": ["kick_body"] * 10, "B": ["punch_body"]}])
-    assert (muay_thai["rounds"][0]["A"], muay_thai["rounds"][0]["B"]) == (10, 8)  # IFMA: a lead of 9 is 10-8
-    even = ringside.score("MMA", [{"A": ["punch_body"], "B": ["punch_body"]}])
-    assert even["rounds"][0]["winner"] == "EVEN"
+def test_ten_point_must_rounds_and_deductions():
+    card = ringside.score("BOXING", [_round(6, 3), _round(2, 2), _round(1, 4, minus_b=1)])
+    assert [(r["A"], r["B"]) for r in card["rounds"]] == [(10, 9), (10, 10), (9, 9)]
+    assert [r["winner"] for r in card["rounds"]] == ["A", "EVEN", "EVEN"]
+    assert card["totals"] == {"A": 29, "B": 28}
+    assert ringside.score("MMA", [_round(1, 1)])["rounds"][0]["winner"] == "EVEN"
 
 
-def test_unknown_taps_are_ignored_and_bad_rulesets_refused():
-    card = ringside.score("BOXING", [{"A": ["kick_head", "punch_head"], "B": []}])
-    assert card["rounds"][0]["landed_A"] == 1
+def test_bad_input_is_ignored_and_bad_rulesets_refused():
+    card = ringside.score("BOXING", [{"A": {"points": "x", "deductions": -3}, "B": ["old", "taps"]}])
+    assert card["rounds"][0]["points_A"] == 0 and card["rounds"][0]["deductions_A"] == 0
+    assert card["rounds"][0]["points_B"] == 0
+    assert len(ringside.score("K1", [_round()] * 40)["rounds"]) == ringside.MAX_ROUNDS
     with pytest.raises(ValueError):
         ringside.score("NOT_A_SPORT", [])
+
+
+def test_the_page_only_offers_points_and_a_deduction():
+    script = (Path(__file__).resolve().parents[1] / "app" / "static" / "ringside.js").read_text(encoding="utf-8")
+    assert "[1, 2].forEach" in script and "Point deduction" in script
+    assert "knockdown" not in script.lower() and "button.label" not in script
 
 
 def test_the_page_and_the_score_api():
@@ -64,6 +63,6 @@ def test_the_page_and_the_score_api():
     refused = client.post("/api/ringside/score", json={"ruleset": "BOXING", "rounds": []})
     assert refused.status_code in {400, 403}                            # needs the CSRF token
     meta = re.search(r'name="csrf-token" content="([^"]+)"', page.text)
-    scored = client.post("/api/ringside/score", json={"ruleset": "K1", "rounds": [{"A": ["kick_leg"], "B": []}]},
+    scored = client.post("/api/ringside/score", json={"ruleset": "KICK_LIGHT", "rounds": [_round(2, 0)]},
                          headers={"X-CSRF-Token": meta.group(1)})
-    assert scored.status_code == 200 and scored.json()["totals"] == {"A": 1, "B": 0}
+    assert scored.status_code == 200 and scored.json()["totals"] == {"A": 2, "B": 0}
