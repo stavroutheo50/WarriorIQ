@@ -81,7 +81,8 @@ class PageTests(unittest.TestCase):
         self.assertNotIn('id="fix-first"', page)
         self.assertIn('id="reportAll"', page)
         self.assertLess(page.index('class="keep-fix-row"'), page.index('id="reportAll"'))
-        self.assertLess(page.index('class="result-score-top"'), page.index('class="fight-vitals"'))
+        # The face-off opens a report that worked (owner, 2026-11-09).
+        self.assertLess(page.index('id="faceoff"'), page.index('class="keep-fix-row"'))
 
     def test_the_score_is_at_the_top_with_both_names(self):
         # Owner, 2026-10-20: "make it larger so I can read it, put it at the top".
@@ -89,12 +90,30 @@ class PageTests(unittest.TestCase):
         report.setdefault("scorecard", {}).update(
             {"available": True, "totals": {"A": 29, "B": 28}, "winner_estimate": "A", "status": "estimated"})
         page = self._page(report)
-        top = page.index('class="result-score-top"')
-        self.assertLess(top, page.index('class="fight-vitals"'))
-        self.assertIn("<strong>29 : 28</strong><small>Fighter A : Fighter B &middot; Fighter A ahead on the estimate",
-                      page[top:])
+        # A report that worked opens on the face-off (owner, 2026-11-09): both
+        # names in their corners and the score between them, large.
+        top = page.index('id="faceoff"')
+        face = page[top:page.index("</section>", top)]
+        self.assertIn('<span class="rx-blue">29</span>', face)
+        self.assertIn('<span class="rx-red">28</span>', face)
+        self.assertIn("Fighter A ahead on the estimate", face)
+        self.assertIn(">Fighter A</b>", face)
+        self.assertIn(">Fighter B</b>", face)
         # Said once: not again in the folded fight summary.
-        self.assertEqual(page.count('class="result-scoreline"'), 1)
+        self.assertEqual(page.count('class="rx-digits"'), 1)
+        self.assertEqual(page.count('class="result-scoreline"'), 0)
+
+    def test_the_fight_plays_under_the_score(self):
+        # Owner, 2026-11-09: the video goes under the score, not behind it.
+        report = _report()
+        report.setdefault("scorecard", {}).update(
+            {"available": True, "totals": {"A": 10, "B": 9}, "winner_estimate": "A", "status": "estimated"})
+        page = self._page(report)
+        face = page[page.index('id="faceoff"'):]
+        self.assertLess(face.index('class="rx-digits"'), face.index('class="rx-video"'))
+        self.assertIn('src="/media/', face)
+        report["video_removed"] = True
+        self.assertNotIn('class="rx-video"', self._page(report))
 
     def test_links_into_a_fold_open_it(self):
         source = (ROOT / "app" / "templates" / "result.html").read_text(encoding="utf-8")
