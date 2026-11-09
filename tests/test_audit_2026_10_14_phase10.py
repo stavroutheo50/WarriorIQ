@@ -97,7 +97,8 @@ def test_the_hero_shows_a_real_tracking_example():
     # The clip shows tracking only (owner, 2026-11-01): its strike names were
     # wrong too often, so neither the clip nor its description may claim them.
     assert "strike named" not in page and "each strike" not in clip
-    assert "From a real WarriorIQ report" in page
+    # Removed entirely, not replaced (owner, 2026-11-09).
+    assert "From a real WarriorIQ report" not in page and "home-proof" not in page
     assert "Demo clip coming soon" not in page and "goes here" not in page
     assert (web.ROOT / "app" / "static" / "hero-fight.mp4").stat().st_size < 4_000_000
 

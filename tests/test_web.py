@@ -1035,7 +1035,9 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('/assets/base.css', shell)
         self.assertIn("product.css", CSS_BUNDLES["base"])
         self.assertIn("In numbers.", home)
-        self.assertIn('class="home-proof"', home)
+        # The report excerpt is gone (owner, 2026-11-09): its strike numbers
+        # were a selling point the counts cannot yet support.
+        self.assertNotIn('class="home-proof"', home)
         self.assertIn('class="home-steps"', home)
         self.assertIn("glass.css", CSS_BUNDLES["shell"])
         self.assertEqual("a11y.css", CSS_BUNDLES["shell"][-1])
