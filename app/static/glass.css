@@ -1052,3 +1052,66 @@ body:has(.hx-hero) { overflow-x: clip; }
 }
 .ux-setup .setup-credits { grid-column: 1 / -1; order: 9; margin: 8px 0 0; }
 .ux-chooser .hx-credits { margin-top: 20px; }
+
+/* --- Ringside Scorer in the home page's look (owner, 2026-11-09) ----------- */
+.ringside { max-width: 1040px; }
+.ringside-head { position: relative; display: grid; align-items: end; min-height: 380px; margin-top: 8px; overflow: hidden; isolation: isolate; border-radius: 36px; border: 1px solid rgba(255, 255, 255, .12); background: #050810; }
+.ringside-head-clip { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; }
+.ringside-head::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgba(10, 15, 24, .94) 0%, rgba(10, 15, 24, .7) 50%, rgba(10, 15, 24, .2) 100%), linear-gradient(0deg, rgba(10, 15, 24, .7), rgba(10, 15, 24, 0) 60%); }
+.ringside-head-text { display: grid; gap: 12px; max-width: 560px; padding: 40px; }
+.ringside-head-text h1 { margin: 0; font-size: clamp(44px, 7vw, 84px); font-weight: 900; line-height: .95; letter-spacing: -.045em; }
+.ringside-head-text .glass-chip { justify-self: start; margin: 0; }
+.ringside-head-text .home-lead { margin: 0; color: #c3cad8; }
+.ringside-setup, .ringside-result { padding: clamp(20px, 3vw, 32px); border-radius: 30px; }
+.ringside-chip[aria-checked="true"] { border-color: rgba(90, 169, 255, .6); background: linear-gradient(180deg, rgba(90, 169, 255, .32), rgba(47, 111, 237, .22)); color: #ffffff; }
+.ringside-start { min-height: 54px; font-size: 17px; }
+.ringside-board { padding: 22px 18px; border-radius: 30px; }
+.ringside-side strong, .ringside-final strong { font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+.ringside-a strong { text-shadow: 0 0 36px rgba(90, 169, 255, .45); } .ringside-b strong { text-shadow: 0 0 36px rgba(255, 93, 104, .45); }
+.ringside-pad-a .ringside-tap { background-image: linear-gradient(180deg, rgba(90, 169, 255, .26), rgba(47, 111, 237, .12)); }
+.ringside-pad-b .ringside-tap { background-image: linear-gradient(180deg, rgba(255, 93, 104, .26), rgba(200, 40, 60, .12)); }
+.ringside-tap.ringside-point { min-height: 104px; border-radius: 26px; font-size: 36px; }
+.ringside-tap.ringside-deduction { border-radius: 999px; }
+.ringside-actions .btn { min-height: 50px; border-radius: 999px !important; }
+.ringside-final { margin: 20px 0; }
+.ringside-final strong { font-size: clamp(56px, 13vw, 96px); }
+.ringside-table { border-radius: 18px; overflow: hidden; }
+.ringside-table thead th { color: var(--glass-text-faint); font-size: 13px; font-weight: 700; }
+.ringside-more { margin-top: 56px; padding: clamp(24px, 4vw, 44px); border-radius: 36px; border: 1px solid rgba(255, 255, 255, .12);
+  background: radial-gradient(120% 140% at 0% 0%, rgba(90, 169, 255, .14), rgba(10, 15, 24, 0) 60%), var(--glass-fill); }
+.ringside-more h2 { margin: 0 0 10px; font-size: clamp(30px, 4.4vw, 50px); font-weight: 850; letter-spacing: -.035em; }
+.ringside-credits { margin-top: 20px; }
+.ringside.is-scoring ~ * .ringside-credits, .ringside.is-scoring .ringside-credits { display: none; }
+@media (max-width: 700px) {
+  .ringside-head { min-height: 300px; border-radius: 28px; }
+  .ringside-head-text { padding: 24px 20px; }
+  .ringside-tap.ringside-point { min-height: 92px; }
+}
+
+/* --- Fight Camp in the home page's look (owner, 2026-11-09) ----------------- */
+[data-page="camp"] .athlete-head h1 { font-size: clamp(40px, 5.6vw, 72px); font-weight: 900; line-height: .95; letter-spacing: -.045em; }
+[data-page="camp"] .athlete-avatar { width: 64px; height: 64px; font-size: 26px; }
+[data-page="camp"] .athlete-actions .btn { min-height: 48px; border-radius: 999px !important; }
+[data-page="camp"] .camp-today { gap: 20px 28px; padding: clamp(22px, 3vw, 36px); border-radius: 36px; border-color: rgba(90, 169, 255, .3);
+  background: radial-gradient(90% 120% at 0% 0%, rgba(90, 169, 255, .18), rgba(10, 15, 24, 0) 65%), var(--glass-fill); box-shadow: var(--glass-shine), var(--glass-shadow); }
+[data-page="camp"] .camp-next h2 { font-size: clamp(30px, 3.8vw, 48px); font-weight: 850; line-height: 1.02; letter-spacing: -.035em; }
+[data-page="camp"] .camp-next p { font-size: 16px; }
+[data-page="camp"] .camp-next-actions .btn { min-height: 50px; padding-inline: 24px; border-radius: 999px !important; }
+[data-page="camp"] .camp-standing { padding: 20px; border-radius: 28px; background: rgba(5, 8, 16, .45); }
+[data-page="camp"] .camp-rank { font-size: 28px; font-weight: 900; letter-spacing: -.03em; }
+[data-page="camp"] .camp-level-bar { height: 10px; border-radius: 999px; }
+[data-page="camp"] .camp-standing .btn { border-radius: 999px !important; }
+[data-page="camp"] .camp-jump { margin: 18px 0 22px; }
+[data-page="camp"] .camp-jump a { padding: 10px 18px; font-weight: 700; background: rgba(255, 255, 255, .04); }
+[data-page="camp"] main .card { border-radius: 32px; padding: clamp(20px, 3vw, 34px); }
+[data-page="camp"] main .card h2, [data-page="camp"] .section-title h2 { font-size: clamp(30px, 3.8vw, 48px); font-weight: 850; line-height: 1.02; letter-spacing: -.035em; }
+[data-page="camp"] .section-title { margin-top: 72px; }
+[data-page="camp"] .mission-card { border-radius: 26px; }
+[data-page="camp"] .mission-card h3 { font-size: 24px; font-weight: 850; letter-spacing: -.02em; }
+[data-page="camp"] .stat-band, [data-page="camp"] .stat-support { border-radius: 30px; }
+[data-page="camp"] .stat-lead .wiq-num, [data-page="camp"] .stat-lead strong { letter-spacing: -.04em; }
+@media (max-width: 700px) {
+  [data-page="camp"] .camp-today { border-radius: 28px; }
+  [data-page="camp"] main .card { border-radius: 26px; }
+}
+[data-page="camp"] .camp-squad-summary h2 { font-size: clamp(30px, 3.8vw, 48px); font-weight: 850; line-height: 1.02; letter-spacing: -.035em; }
