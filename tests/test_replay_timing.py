@@ -36,3 +36,25 @@ process.stdout.write(JSON.stringify({before,middle,after,gap,future,current,old}
     assert values["future"] is False
     assert values["current"] is True
     assert values["old"] is False
+
+
+def test_replay_draws_every_frame_the_analysis_measured():
+    """Owner, 2026-11-10: fighters "never shown almost all the time". The
+    analysis keeps a fighter from an identity score of 0.46 (core/identity.py)
+    and measures him there; the replay hid him below 0.52."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is required to exercise the actual browser timing functions")
+    replay = (Path(__file__).resolve().parents[1] / "app" / "templates" / "replay.html").read_text(encoding="utf-8")
+    functions = [line for line in replay.splitlines() if line.startswith(("function surrounding(", "function poseAt("))]
+    script = "\n".join(functions) + """
+const frame=(t,x,c)=>({time_seconds:t,fighter_A:{identity_confidence:c,observation:{keypoints:[[x,x]]}}});
+let frames=[frame(2,10,.47),frame(2.1,30,.49)];
+const kept=poseAt('fighter_A',2.05);
+frames=[{time_seconds:2,fighter_A:{identity_confidence:0,observation:null}},{time_seconds:2.1,fighter_A:{identity_confidence:0,observation:null}}];
+const lost=poseAt('fighter_A',2.05);
+process.stdout.write(JSON.stringify({kept,lost}));
+"""
+    values = json.loads(subprocess.run([node, "-e", script], capture_output=True, text=True, check=True).stdout)
+    assert values["kept"][0] == pytest.approx([20, 20])
+    assert values["lost"] is None

@@ -1146,3 +1146,14 @@ body:has(.hx-hero) { overflow-x: clip; }
 }
 @media (prefers-reduced-motion: reduce) { .pricing-hero h1 em { animation: none; } }
 .fight-records { border-top: 0 !important; }
+
+/* Fighter A in the red corner (owner, 2026-11-10): the live page follows the
+   corner chosen on the selection page, as the report does. */
+.a-red-corner .fighter-overlay.fighter-a { border-color: #ff6470; }
+.a-red-corner .fighter-overlay.fighter-a b, .a-red-corner .analysis-markers button.fighter-a { background: #ff6470; }
+.a-red-corner .fighter-overlay.fighter-b { border-color: #5aa0ff; }
+.a-red-corner .fighter-overlay.fighter-b b, .a-red-corner .analysis-markers button.fighter-b { background: #5aa0ff; }
+.a-red-corner .live-event-item.fighter-a button { border-left-color: #ff6470; }
+.a-red-corner .live-event-item.fighter-b button { border-left-color: #5aa0ff; }
+.a-red-corner .live-board-side.fighter-a strong, .a-red-corner .warmup-a { color: #ff6470; }
+.a-red-corner .live-board-side.fighter-b strong, .a-red-corner .warmup-b { color: #8cc2ff; }
