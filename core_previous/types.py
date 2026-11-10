@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+import numpy as np
+
+
+@dataclass
+class VideoInfo:
+    path: str
+    fps: float
+    frame_count: int
+    width: int
+    height: int
+    duration: float
+
+
+@dataclass
+class RoundSpec:
+    number: int
+    start_seconds: float
+    end_seconds: float
+    selected: bool = True
+
+
+@dataclass
+class AnalysisRequest:
+    video_path: str
+    fighter_a_box: list[float]
+    fighter_b_box: list[float]
+    original_name: str | None = None
+    analysis_target: str = "BOTH"
+    focus_fighter: str | None = None
+    fight_type: str = "competition"
+    ruleset: str = "K1"
+    start_seconds: float = 0.0
+    round_count: int = 3
+    round_duration_seconds: float = 120.0
+    break_duration_seconds: float = 60.0
+    selected_rounds: list[int] | None = None
+    end_seconds: float | None = None
+    job_id: str = "cli"
+    profile_id: int = 1
+    persist_result: bool = True
+    openai_identity_recovery: bool = False
+    # Which fighter on the workspace roster this bout is about. None for a
+    # fight analysed before the roster existed, or by a guest.
+    fighter_id: int | None = None
+    # Optional run staging directory; the orchestrator publishes it atomically.
+    output_dir: str | None = None
+    # Where the person told WarriorIQ who is who (the fighter-selection frame),
+    # in seconds. The boxes above were drawn on this frame. None means the
+    # boxes belong to start_seconds, which is how every request was read before
+    # the two were separated - the selection frame used to *be* the start, so a
+    # frame picked at 0:30 threw away the first thirty seconds. See
+    # core/backtrack.py.
+    selection_seconds: float | None = None
+    # One person - shadowboxing, bag or pad work (core/solo.py). Only
+    # fighter_a_box is used; fighter_b_box may be empty.
+    solo: bool = False
+    # Quarter turn (clockwise degrees) applied to every frame as it is decoded:
+    # a sideways video turned on the selection page, or one whose file could
+    # not be tagged (core/video.py decoding_rotation). Boxes are drawn on the
+    # turned frame, so they are in its coordinates.
+    rotate_clockwise: int = 0
+    # The video still looks sideways after any turn; guard and balance are
+    # then not measurements of an upright body and are withheld.
+    sideways: bool = False
+
+
+@dataclass
+class PersonObservation:
+    track_id: int | None
+    box: np.ndarray
+    confidence: float
+    keypoints: np.ndarray | None = None
+    keypoint_conf: np.ndarray | None = None
+    appearance: np.ndarray | None = None
+    # A learned appearance vector, computed once per frame for every person and
+    # compared like the histogram beside it. See core/reid.py.
+    reid: np.ndarray | None = None
+    # Whether this detection is the official rather than a fighter, scored on
+    # the frame where the pixels are so the identity manager never needs it.
+    # See core/referee.py.
+    referee_prob: float | None = None
+    # Share of skin on the torso, for telling a clothed official from bare
+    # fighters. See core/referee.py torso_skin_share.
+    torso_skin: float | None = None
+    # Median kit colour per region (core/kit.py region_colours), read only
+    # for people the referee probe leans towards calling an official.
+    kit_colours: dict | None = None
+    pose_signature: np.ndarray | None = None
+
+
+@dataclass
+class FighterState:
+    name: str
+    current_track_id: int | None = None
+    last_box: np.ndarray | None = None
+    prev_box: np.ndarray | None = None
+    velocity: np.ndarray | None = None
+    last_keypoints: np.ndarray | None = None
+    appearance: np.ndarray | None = None
+    pose_signature: np.ndarray | None = None
+    identity_confidence: float = 0.0
+    missing_frames: int = 0
+    last_seen_source_frame: int = 0
+    recovery_count: int = 0
+    sam_recovery_count: int = 0
+    last_sam_attempt_analyzed_frame: int = -10_000
+    # What the fighter looked like in the frame the user drew the box on, kept
+    # unchanged for the whole fight. `appearance` above is a rolling average and
+    # therefore drifts: if tracking slides onto a referee for a few frames the
+    # average becomes the referee and the swap is permanent, with confidence
+    # still reading high because it is scored against the drifted template.
+    # The anchor is the only thing that still remembers the real fighter.
+    anchor_appearance: np.ndarray | None = None
+    # The learned appearance of the person actually selected, which like
+    # anchor_appearance never updates - it is the only thing that still
+    # remembers the real fighter after a gradual slide.
+    anchor_reid: np.ndarray | None = None
+    # The first few looks at the person originally selected, averaged. One crop
+    # of somebody sixty pixels tall does not describe them well enough to
+    # recognise them again; see core/reid.py.
+    anchor_reid_samples: list = field(default_factory=list)
+    # Box areas of the last committed sightings, for the size gate in
+    # core.identity.IdentityManager._score.
+    recent_areas: list = field(default_factory=list)
+    # Whether the person originally selected scored as the official. If they
+    # did, the referee filter stands down for this fighter rather than
+    # refusing every candidate who is actually the person the user picked.
+    anchor_is_referee: bool = False
+    # What the referee probe scored the person selected. A candidate is refused
+    # as an official only when the probe reads them clearly more like one than
+    # this (core.identity.IdentityManager._refuse_as_official).
+    anchor_referee_prob: float = 0.0
+    anchor_pose: np.ndarray | None = None
+    switches_rejected: int = 0
+    # Why the *last* candidate scored was refused. Diagnostics only - it is
+    # overwritten constantly and means nothing on its own. It exists so the
+    # recovery path can report which gate turned away the person standing
+    # where the fighter was, which the aggregate counts cannot: those are per
+    # candidate per frame, so with fifteen people in shot they are dominated
+    # by the crowd being correctly ignored and cannot identify a binding gate.
+    last_refusal: str | None = None
+
+
+@dataclass
+class PoseFrame:
+    source_frame: int
+    time_seconds: float
+    round_number: int | None
+    fighter: str
+    box: list[float] | None
+    keypoints: list[list[float]] | None
+    keypoint_conf: list[float] | None
+    identity_confidence: float
+    visible: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class StrikeEvent:
+    fighter: str
+    opponent: str
+    round_number: int | None
+    start_frame: int
+    peak_frame: int
+    end_frame: int
+    start_time: float
+    peak_time: float
+    end_time: float
+    technique: str
+    family: str
+    limb: str
+    attempted: bool = True
+    outcome: str = "uncertain"  # clean, blocked, checked, missed, likely_landed, uncertain
+    landed: bool = False
+    target: str | None = None  # head, body, leg
+    confidence: float = 0.0
+    contact_confidence: float = 0.0
+    model_source: str = "temporal_rules"
+    evidence: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class DefenseEvent:
+    fighter: str
+    opponent: str
+    round_number: int | None
+    time_seconds: float
+    source_frame: int
+    defense: str  # block, parry, slip, evade, check, guard
+    confidence: float
+    against_technique: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class KnockdownEvent:
+    fighter: str
+    caused_by: str | None
+    round_number: int | None
+    source_frame: int
+    time_seconds: float
+    confidence: float
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class AnalysisProgress:
+    percent: float
+    message: str
+    elapsed_seconds: float
+    processed_video_seconds: float
+    speed: float
+    eta_seconds: float | None
+    fighter_a_confidence: float = 0.0
+    fighter_b_confidence: float = 0.0
+    current_round: int | None = None
+    quality_mode: str = "balanced"
+    stage: str = "preparing"
+    video_duration_seconds: float = 0.0
+    live_event_mode: str = "withheld"
+    live_events: list[dict[str, Any]] = field(default_factory=list)
+    provisional_stats: dict[str, Any] = field(default_factory=dict)
+    latest_observation: dict[str, Any] | None = None
+    # Where in the video the analysed span begins. The live page places its
+    # frontier at this plus processed_video_seconds, so it has to be the start
+    # actually used rather than the one requested.
+    analysed_from_seconds: float = 0.0
+    # How far through the *current* stage the run is (0-1), and how much video
+    # the identity pass has covered. The live page shows one stage at a time
+    # (core/progress_view.py), so these have to come from the stage itself.
+    stage_fraction: float | None = None
+    tracked_video_seconds: float | None = None
+    # "stage" when eta_seconds covers only the pass that is running (a later
+    # pass has not measured its own speed yet), "job" when it covers the rest.
+    eta_scope: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

@@ -1,0 +1,828 @@
+from __future__ import annotations
+
+from collections import deque
+from dataclasses import dataclass, field
+from math import acos, degrees
+
+import numpy as np
+
+from core.config import SETTINGS
+
+# The range the rule-based confidence above can actually produce. FLOOR is a
+# trigger that fired with no corroborating speed or extension; CEILING is the
+# most any rule-based event is allowed to claim, reserving certainty for a
+# trained model. Anything gating on this confidence must derive its threshold
+# from these two numbers rather than hard-coding one: a fixed 0.86 gate
+# outlived a rescale of this formula and silently hid all but 5 of 309 real
+# detections across six fights.
+CONFIDENCE_FLOOR = 0.30
+CONFIDENCE_CEILING = 0.94
+
+from core.temporal_model import TemporalModel
+from core.types import PersonObservation, StrikeEvent
+
+# COCO 17-keypoint indices
+NOSE = 0
+L_SHOULDER, R_SHOULDER = 5, 6
+L_ELBOW, R_ELBOW = 7, 8
+L_WRIST, R_WRIST = 9, 10
+L_HIP, R_HIP = 11, 12
+L_KNEE, R_KNEE = 13, 14
+L_ANKLE, R_ANKLE = 15, 16
+
+
+@dataclass
+class Sample:
+    frame: int
+    time: float
+    round_number: int | None
+    box: np.ndarray
+    keypoints: np.ndarray
+    conf: np.ndarray | None
+    opponent_box: np.ndarray | None
+    opponent_keypoints: np.ndarray | None
+    opponent_conf: np.ndarray | None
+    identity_confidence: float
+    opponent_identity_confidence: float
+
+
+@dataclass
+class ActiveLimb:
+    fighter: str
+    limb: str
+    family: str
+    start_sample: Sample
+    peak_sample: Sample
+    max_speed: float
+    start_extension: float
+    peak_extension: float
+    frames_active: int = 1
+    # Every frame's speed, so the action can be judged on sustained movement
+    # rather than its single fastest frame.
+    speeds: list[float] = field(default_factory=list)
+    # The shoulder line's angle on every frame of the action, so a turn can be
+    # told from a relabelling. See _is_spinning.
+    shoulder_angles: list[float] = field(default_factory=list)
+
+    def sustained_speed(self) -> float:
+        """Median frame speed across the action.
+
+        A strike is fast for several frames together. A mislabelled keypoint is
+        fast for exactly one, and taking the maximum let that one frame define
+        the whole event - which is how a limb came to be travelling at 47 body
+        lengths a second.
+        """
+        if len(self.speeds) < 3:
+            # A median over one or two frames is not a median. It also matters
+            # for the side-correction path: when the pose model swaps ankle
+            # labels the tracked limb is the still one, and judging a real kick
+            # by that limb's speed would throw the kick away.
+            return self.max_speed
+        ordered = sorted(self.speeds)
+        return ordered[len(ordered) // 2]
+
+
+def _point(kp: np.ndarray | None, idx: int) -> np.ndarray | None:
+    if kp is None or len(kp) <= idx:
+        return None
+    p = np.asarray(kp[idx], dtype=np.float32)
+    if p.size < 2 or float(p[0]) <= 0 or float(p[1]) <= 0:
+        return None
+    return p[:2]
+
+
+def _joint_seen(sample: "Sample", idx: int) -> bool:
+    """Whether the pose model was confident it saw this joint.
+
+    A joint with no confidence recorded is not counted as seen: the legs are
+    the joints the model guesses most when they are out of the picture.
+    """
+    if _point(sample.keypoints, idx) is None or sample.conf is None or len(sample.conf) <= idx:
+        return False
+    return float(sample.conf[idx]) >= SETTINGS.min_leg_keypoint_confidence
+
+
+def arm_confidence(samples: list["Sample"], side: str) -> float | None:
+    """How surely the pose model saw this arm over an action, 0 to 1.
+
+    The mean over the action's samples of the weaker of elbow and wrist. A
+    punch is read from where the wrist goes; when the model could not see the
+    arm it still places a wrist, and the guess jitters - which reads as an arm
+    shooting out. None when no sample carries confidences.
+    """
+    elbow, wrist = (L_ELBOW, L_WRIST) if side == "left" else (R_ELBOW, R_WRIST)
+    seen = [min(float(item.conf[elbow]), float(item.conf[wrist])) for item in samples
+            if item.conf is not None and len(item.conf) > max(elbow, wrist)]
+    return float(np.mean(seen)) if seen else None
+
+
+def legs_visible(samples: list["Sample"], side: str | None = None) -> bool:
+    """Were a knee and its ankle confidently seen across this window?
+
+    ``side`` names the leg ("left"/"right"); None accepts either leg. Required
+    on SETTINGS.min_leg_visible_share of the samples, so one confident frame in
+    a waist-up shot is not enough to call a kick.
+    """
+    if not samples:
+        return False
+    legs = {"left": (L_KNEE, L_ANKLE), "right": (R_KNEE, R_ANKLE)}
+    sides = [side] if side in legs else list(legs)
+    for name in sides:
+        knee, ankle = legs[name]
+        seen = sum(1 for sample in samples if _joint_seen(sample, knee) and _joint_seen(sample, ankle))
+        if seen / len(samples) >= SETTINGS.min_leg_visible_share:
+            return True
+    return False
+
+
+def _body_length(kp: np.ndarray | None, box: np.ndarray | None) -> float:
+    if kp is not None:
+        ls, rs, lh, rh = (_point(kp, i) for i in (L_SHOULDER, R_SHOULDER, L_HIP, R_HIP))
+        if all(p is not None for p in (ls, rs, lh, rh)):
+            shoulders = (ls + rs) / 2.0
+            hips = (lh + rh) / 2.0
+            torso = float(np.linalg.norm(shoulders - hips))
+            if torso > 5:
+                return torso * 2.15
+    if box is not None:
+        x1, y1, x2, y2 = map(float, box)
+        return max(20.0, y2 - y1)
+    return 100.0
+
+
+def _center(box) -> np.ndarray | None:
+    if box is None:
+        return None
+    x1, y1, x2, y2 = map(float, box)
+    return np.array([(x1 + x2) / 2, (y1 + y2) / 2], dtype=np.float32)
+
+
+def _angle(a: np.ndarray | None, b: np.ndarray | None, c: np.ndarray | None) -> float | None:
+    if a is None or b is None or c is None:
+        return None
+    u, v = a - b, c - b
+    nu, nv = float(np.linalg.norm(u)), float(np.linalg.norm(v))
+    if nu < 1e-6 or nv < 1e-6:
+        return None
+    cosine = float(np.clip(np.dot(u, v) / (nu * nv), -1.0, 1.0))
+    return degrees(acos(cosine))
+
+
+def _toward_opponent_velocity(p_now, p_prev, opponent_box, dt: float, body: float) -> tuple[float, float]:
+    if p_now is None or p_prev is None or dt <= 0 or body <= 0:
+        return 0.0, 0.0
+    velocity = (p_now - p_prev) / dt
+    speed = float(np.linalg.norm(velocity) / body)
+    opp = _center(opponent_box)
+    if opp is None:
+        return speed, 0.5
+    direction = opp - p_prev
+    nd = float(np.linalg.norm(direction))
+    nv = float(np.linalg.norm(velocity))
+    if nd < 1e-6 or nv < 1e-6:
+        return speed, 0.0
+    toward = float(np.dot(velocity / nv, direction / nd))
+    return speed, toward
+
+
+def _limb_indices(limb: str):
+    if limb == "left_hand":
+        return L_SHOULDER, L_ELBOW, L_WRIST
+    if limb == "right_hand":
+        return R_SHOULDER, R_ELBOW, R_WRIST
+    if limb == "left_leg":
+        return L_HIP, L_KNEE, L_ANKLE
+    if limb == "right_leg":
+        return R_HIP, R_KNEE, R_ANKLE
+    if limb == "left_knee":
+        return L_HIP, L_KNEE, L_ANKLE
+    return R_HIP, R_KNEE, R_ANKLE
+
+
+def _extension(sample: Sample, limb: str) -> float:
+    root_i, joint_i, end_i = _limb_indices(limb)
+    root, end = _point(sample.keypoints, root_i), _point(sample.keypoints, end_i)
+    if root is None or end is None:
+        return 0.0
+    return float(np.linalg.norm(end - root) / _body_length(sample.keypoints, sample.box))
+
+
+def _lead_hand(sample: Sample) -> str:
+    """Estimate lead side from which shoulder is closer to opponent."""
+    opp = _center(sample.opponent_box)
+    ls, rs = _point(sample.keypoints, L_SHOULDER), _point(sample.keypoints, R_SHOULDER)
+    if opp is None or ls is None or rs is None:
+        return "left_hand"
+    return "left_hand" if np.linalg.norm(ls - opp) <= np.linalg.norm(rs - opp) else "right_hand"
+
+
+def _classify_punch(start: Sample, peak: Sample, limb: str) -> str:
+    _, elbow_i, wrist_i = _limb_indices(limb)
+    shoulder_i = L_SHOULDER if limb == "left_hand" else R_SHOULDER
+    start_wrist, peak_wrist = _point(start.keypoints, wrist_i), _point(peak.keypoints, wrist_i)
+    if start_wrist is None or peak_wrist is None:
+        return "jab" if limb == _lead_hand(peak) else "cross"
+    delta = peak_wrist - start_wrist
+    body = _body_length(peak.keypoints, peak.box)
+    upward = -float(delta[1]) / body
+    horizontal = abs(float(delta[0])) / body
+    elbow_angle = _angle(_point(peak.keypoints, shoulder_i), _point(peak.keypoints, elbow_i), peak_wrist)
+    side = "left" if limb == "left_hand" else "right"
+    if upward > 0.12 and upward > horizontal * 0.55:
+        return f"{side}_uppercut"
+    if elbow_angle is not None and elbow_angle < 128 and horizontal > 0.08:
+        return f"{side}_hook"
+    return "jab" if limb == _lead_hand(peak) else "cross"
+
+
+# How much further one kind of limb must travel before the named family is
+# overruled. Measured on real footage, the clear contradictions sit well above
+# this; below it an arm swinging with a kick, or a step taken with a punch,
+# would start flipping honest labels.
+FAMILY_MARGIN = 1.6
+
+
+# How far the shoulder line must swing for a kick to count as turning. A round
+# kick thrown square moves it well under this; a turning kick puts the back to
+# the opponent and takes it past a right angle.
+_SPIN_DEGREES = 100.0
+# A body cannot rotate further than this between two frames at 15fps or more.
+# Anything larger is the pose model swapping left and right shoulders, which it
+# does whenever a fighter turns away from the camera.
+_MAX_DEGREES_PER_FRAME = 45.0
+# How far the supporting foot must climb, as a share of the athlete's own body
+# length, before both feet are treated as off the floor.
+_JUMP_BODY_SHARE = 0.12
+# ...and how big the athlete has to be on screen before that share is worth
+# more than the noise. Rotation and airtime do not survive low resolution
+# equally. A turning kick swings the shoulder line past a right angle, and with
+# shoulders twenty pixels apart a couple of pixels of keypoint jitter is about
+# six degrees of angle error - nowhere near the threshold. Airtime is a
+# translation: on the tournament footage this is built for, fighters stand
+# about eighty pixels tall, so twelve percent of body length is nine pixels,
+# which is ankle jitter. Measured on 3.mp4, every airborne call at that size
+# was wrong - one was a fighter walking past the referee between rounds. Below
+# this height WarriorIQ does not claim to see a jump, which is the honest
+# answer rather than a bonus point awarded to a footstep.
+_MIN_BODY_PIXELS_FOR_AIRTIME = 110.0
+
+
+def _shoulder_angle(kp) -> float | None:
+    ls, rs = _point(kp, L_SHOULDER), _point(kp, R_SHOULDER)
+    if ls is None or rs is None:
+        return None
+    delta = rs - ls
+    if float(np.hypot(float(delta[0]), float(delta[1]))) < 4.0:
+        return None                      # shoulders on top of each other: no angle to read
+    return float(np.degrees(np.arctan2(float(delta[1]), float(delta[0]))))
+
+
+def _is_spinning(angles: list[float]) -> bool:
+    """Did the athlete turn their back into the technique?
+
+    A turning kick rotates the torso, and the anatomical shoulder vector turns
+    with it, because COCO keypoints follow the body: the left shoulder is still
+    the left shoulder after the athlete has spun.
+
+    Comparing only the first and last frame does not work, and measuring it
+    that way called a third of the kicks in a taekwondo bout "turning". Pose
+    estimators swap left and right shoulders when someone faces away from the
+    camera, which is most of a taekwondo exchange, and that swap flips the
+    vector by 180 degrees in a single frame - identical to a spin if the frames
+    between are never looked at.
+
+    So the rotation has to add up smoothly. A real turn passes through the
+    angles on the way round, a few degrees per frame; a relabelling jumps the
+    whole way at once. Any step too large to be a body is treated as the
+    artefact it is and does not count towards the total.
+    """
+    if len(angles) < 4:
+        return False
+    travelled = 0.0
+    for before, after in zip(angles, angles[1:]):  # noqa: B905 - consecutive pairs
+        step = (after - before + 180.0) % 360.0 - 180.0
+        if abs(step) > _MAX_DEGREES_PER_FRAME:
+            continue                     # a keypoint swap, not a hip turn
+        travelled += step                # signed: a turn goes one way
+    return abs(travelled) >= _SPIN_DEGREES
+
+
+def _foot_lift(sample: Sample, limb: str) -> float | None:
+    """How far the kicking foot is above the standing one, in torso lengths.
+
+    A kick takes a foot off the floor. A step does not, and that is the whole
+    difference between the two - so this is the physical evidence that a kick
+    happened at all, rather than a fighter shifting their weight.
+
+    Returns None when the pose does not support the measurement, which must be
+    read as "cannot tell" and never as "it happened".
+    """
+    kicking_index = L_ANKLE if limb.startswith("left") else R_ANKLE
+    standing_index = R_ANKLE if limb.startswith("left") else L_ANKLE
+    kicking = _point(sample.keypoints, kicking_index)
+    standing = _point(sample.keypoints, standing_index)
+    shoulders = [_point(sample.keypoints, i) for i in (L_SHOULDER, R_SHOULDER)]
+    hips = [_point(sample.keypoints, i) for i in (L_HIP, R_HIP)]
+    shoulders = [float(p[1]) for p in shoulders if p is not None]
+    hips = [float(p[1]) for p in hips if p is not None]
+    if kicking is None or standing is None or not shoulders or not hips:
+        return None
+    torso = (sum(hips) / len(hips)) - (sum(shoulders) / len(shoulders))
+    if torso <= 4.0:
+        return None
+    return (float(standing[1]) - float(kicking[1])) / torso
+
+
+def _is_jumping(start: Sample, peak: Sample) -> bool:
+    """Did both feet leave the floor?
+
+    Every kick lifts one foot, so a raised ankle proves nothing on its own.
+    The supporting foot is the evidence: follow the lower of the two ankles -
+    the one still carrying the athlete - and see whether it climbed as well.
+    Measured against the athlete's own body length so it reads the same at any
+    camera distance.
+    """
+    def supporting_foot(sample: Sample) -> float | None:
+        left, right = _point(sample.keypoints, L_ANKLE), _point(sample.keypoints, R_ANKLE)
+        if left is None or right is None:
+            return None
+        return max(float(left[1]), float(right[1]))    # image y grows downward
+
+    before, after = supporting_foot(start), supporting_foot(peak)
+    if before is None or after is None:
+        return False
+    body = _body_length(start.keypoints, start.box)
+    if body < _MIN_BODY_PIXELS_FOR_AIRTIME:
+        return False
+    return (before - after) >= _JUMP_BODY_SHARE * body
+
+
+def _classify_kick(start: Sample, peak: Sample, limb: str) -> str:
+    hip_i, knee_i, ankle_i = _limb_indices(limb)
+    start_ankle, peak_ankle = _point(start.keypoints, ankle_i), _point(peak.keypoints, ankle_i)
+    body = _body_length(peak.keypoints, peak.box)
+    side = "left" if limb.startswith("left") else "right"
+    if start_ankle is None or peak_ankle is None:
+        return f"{side}_round_kick"
+    delta = peak_ankle - start_ankle
+    horizontal = abs(float(delta[0])) / body
+    vertical = abs(float(delta[1])) / body
+    knee_angle = _angle(_point(peak.keypoints, hip_i), _point(peak.keypoints, knee_i), peak_ankle)
+    # Straighter extension and mostly opponent-directed path -> front/push kick.
+    if knee_angle is not None and knee_angle > 145 and horizontal >= vertical * 0.70:
+        opp = _center(peak.opponent_box)
+        forward_alignment = 0.0
+        if opp is not None:
+            direction = opp - start_ankle
+            nd, nv = float(np.linalg.norm(direction)), float(np.linalg.norm(delta))
+            if nd > 1e-6 and nv > 1e-6:
+                forward_alignment = float(np.dot(delta / nv, direction / nd))
+        extension = _extension(peak, limb)
+        if forward_alignment > 0.82 and extension > 0.62:
+            return f"{side}_push_kick"
+        return f"{side}_front_kick"
+    return f"{side}_round_kick"
+
+
+def _classify_knee(peak: Sample, limb: str) -> str:
+    return "left_knee" if limb.startswith("left") else "right_knee"
+
+
+def _feature_vector(sample: Sample, previous: Sample | None) -> np.ndarray:
+    """102-dim vector: 17*(x,y,conf) + 17*(vx,vy,speed)."""
+    kp = sample.keypoints
+    box = sample.box
+    x1, y1, x2, y2 = map(float, box)
+    bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
+    body = _body_length(kp, box)
+    values: list[float] = []
+    velocities: list[float] = []
+    dt = sample.time - previous.time if previous is not None else 0.0
+    for i in range(17):
+        p = _point(kp, i)
+        conf = float(sample.conf[i]) if sample.conf is not None and i < len(sample.conf) else (1.0 if p is not None else 0.0)
+        if p is None:
+            values += [0.0, 0.0, 0.0]
+            velocities += [0.0, 0.0, 0.0]
+            continue
+        values += [(float(p[0]) - x1) / bw, (float(p[1]) - y1) / bh, conf]
+        prev_p = _point(previous.keypoints, i) if previous is not None else None
+        if prev_p is None or dt <= 0:
+            velocities += [0.0, 0.0, 0.0]
+        else:
+            v = (p - prev_p) / dt / body
+            velocities += [float(v[0]), float(v[1]), float(np.linalg.norm(v))]
+    return np.asarray(values + velocities, dtype=np.float32)
+
+
+class FighterActionState:
+    def __init__(self):
+        self.samples: deque[Sample] = deque(maxlen=max(SETTINGS.action_window * 2, 24))
+        self.features: deque[np.ndarray] = deque(maxlen=SETTINGS.action_window)
+        self.active: dict[str, ActiveLimb] = {}
+        self.last_event_time: dict[str, float] = {}
+        self.last_family_event_time: dict[str, float] = {}
+        # Kick and knee candidates dropped because the leg was not visible.
+        self.legs_hidden_discards = 0
+
+
+class ActionEngine:
+    """Multi-frame strike candidate detector.
+
+    A strike requires acceleration/extension toward the opponent, a peak, and
+    retraction. No single frame can create an event. A trained WarriorIQ
+    temporal checkpoint, when available, can override the heuristic technique
+    label while the same temporal/contact safeguards remain in force.
+    """
+
+    LIMBS = (
+        ("left_hand", "punch", L_WRIST),
+        ("right_hand", "punch", R_WRIST),
+        ("left_leg", "kick", L_ANKLE),
+        ("right_leg", "kick", R_ANKLE),
+        ("left_knee", "knee", L_KNEE),
+        ("right_knee", "knee", R_KNEE),
+    )
+
+    def __init__(self):
+        self.states = {"A": FighterActionState(), "B": FighterActionState()}
+        self.temporal = TemporalModel()
+
+    def interrupt(self, fighter_name: str) -> None:
+        """Discard unfinished actions when observation or active fighting stops."""
+        state = self.states[fighter_name]
+        state.samples.clear()
+        state.features.clear()
+        state.active.clear()
+
+    def _make_sample(
+        self,
+        frame: int,
+        seconds: float,
+        round_number: int | None,
+        fighter: PersonObservation,
+        opponent: PersonObservation | None,
+        identity_confidence: float,
+        opponent_identity_confidence: float,
+    ) -> Sample:
+        return Sample(
+            frame=frame,
+            time=seconds,
+            round_number=round_number,
+            box=fighter.box.copy(),
+            keypoints=fighter.keypoints.copy(),
+            conf=None if fighter.keypoint_conf is None else fighter.keypoint_conf.copy(),
+            opponent_box=None if opponent is None else opponent.box.copy(),
+            opponent_keypoints=None if opponent is None or opponent.keypoints is None else opponent.keypoints.copy(),
+            opponent_conf=None if opponent is None or opponent.keypoint_conf is None else opponent.keypoint_conf.copy(),
+            identity_confidence=float(max(0.0, min(1.0, identity_confidence))),
+            opponent_identity_confidence=float(max(0.0, min(1.0, opponent_identity_confidence))),
+        )
+
+    def update(
+        self,
+        fighter_name: str,
+        frame: int,
+        seconds: float,
+        round_number: int | None,
+        fighter: PersonObservation | None,
+        opponent: PersonObservation | None,
+        identity_confidence: float = 1.0,
+        opponent_identity_confidence: float = 1.0,
+    ) -> list[StrikeEvent]:
+        if fighter is None or fighter.keypoints is None or len(fighter.keypoints) < 17:
+            self.interrupt(fighter_name)
+            return []
+        state = self.states[fighter_name]
+        previous = state.samples[-1] if state.samples else None
+        if previous is not None and (
+            round_number != previous.round_number
+            or seconds <= previous.time
+            # Time ran forward further than the sampler can legitimately skip,
+            # so whatever the limb did in between was never looked at. The
+            # existing checks only caught the round changing and time going
+            # backwards; a forward gap read as one continuous action, and a
+            # wind-up seen before it was completed by a retraction seen after.
+            or seconds - previous.time > SETTINGS.max_observation_gap_seconds
+        ):
+            self.interrupt(fighter_name)
+        sample = self._make_sample(
+            frame,
+            seconds,
+            round_number,
+            fighter,
+            opponent,
+            identity_confidence,
+            opponent_identity_confidence,
+        )
+        previous = state.samples[-1] if state.samples else None
+        state.samples.append(sample)
+        state.features.append(_feature_vector(sample, previous))
+        if previous is None:
+            return []
+
+        events: list[StrikeEvent] = []
+        body = _body_length(sample.keypoints, sample.box)
+        dt = max(1e-4, sample.time - previous.time)
+
+        for limb, family, endpoint_idx in self.LIMBS:
+            # Keep the dictionary key immutable. Pose-side confirmation may
+            # change the event limb, but it must never pop/update another
+            # active candidate and leave this one contaminating later events.
+            active_key = limb
+            p_now, p_prev = _point(sample.keypoints, endpoint_idx), _point(previous.keypoints, endpoint_idx)
+            speed, toward = _toward_opponent_velocity(p_now, p_prev, sample.opponent_box, dt, body)
+            ext = _extension(sample, limb)
+            prev_ext = _extension(previous, limb)
+            active = state.active.get(limb)
+
+            # Knee strikes use knee speed, but require a bent leg so normal
+            # walking/ring movement is not promoted to a strike.
+            if family == "knee":
+                hip_i, knee_i, ankle_i = _limb_indices(limb)
+                knee_angle = _angle(_point(sample.keypoints, hip_i), _point(sample.keypoints, knee_i), _point(sample.keypoints, ankle_i))
+                knee_shape_ok = knee_angle is not None and knee_angle < 125
+            else:
+                knee_shape_ok = True
+
+            plausible = speed <= SETTINGS.max_plausible_limb_speed_body_lengths_per_s
+            start_condition = (
+                plausible
+                and speed >= SETTINGS.min_strike_speed_body_lengths_per_s
+                and toward >= 0.12
+                and ext - prev_ext >= SETTINGS.min_extension_gain * 0.35
+                and knee_shape_ok
+            )
+
+            if active is None:
+                last_time = state.last_event_time.get(limb, -999.0)
+                if start_condition and seconds - last_time >= SETTINGS.min_event_gap_seconds:
+                    state.active[limb] = ActiveLimb(
+                        fighter=fighter_name,
+                        limb=limb,
+                        family=family,
+                        start_sample=previous,
+                        peak_sample=sample,
+                        max_speed=speed,
+                        speeds=[speed],
+                        start_extension=prev_ext,
+                        peak_extension=ext,
+                    )
+                continue
+
+            active.frames_active += 1
+            active.max_speed = max(active.max_speed, speed)
+            active.speeds.append(speed)
+            angle = _shoulder_angle(sample.keypoints)
+            if angle is not None:
+                active.shoulder_angles.append(angle)
+            if ext > active.peak_extension:
+                active.peak_extension = ext
+                active.peak_sample = sample
+
+            extension_gain = active.peak_extension - active.start_extension
+            retracting = ext < active.peak_extension - max(0.035, SETTINGS.min_extension_gain * 0.45)
+            timed_out = active.frames_active >= max(6, SETTINGS.action_window)
+
+            if (retracting and active.frames_active >= 3) or timed_out:
+                start_sample = active.start_sample
+                peak_sample = active.peak_sample
+
+                sustained = active.sustained_speed()
+                valid = (
+                    active.frames_active >= 3
+                    and sustained >= SETTINGS.min_strike_speed_body_lengths_per_s
+                    and extension_gain >= SETTINGS.min_extension_gain
+                )
+                if family == "knee":
+                    # Knees naturally have less endpoint extension.
+                    valid = active.frames_active >= 3 and sustained >= SETTINGS.min_strike_speed_body_lengths_per_s * 0.82
+
+                if valid:
+                    # Pose models occasionally swap left/right ankle labels for
+                    # a frame during crossings. Confirm the named leg against
+                    # which ankle actually travelled farther over the action.
+                    event_limb = limb
+                    # The same question one level up: not which side, but
+                    # whether it was an arm or a leg at all. Measured across
+                    # three bouts, 23 of 61 events named a family that the
+                    # movement contradicts - a "right hook" whose foot
+                    # travelled three and a half times further than the hand.
+                    # The limb that moved is the limb that acted.
+                    # Path length over the whole action, not start-to-peak
+                    # displacement. A kick's foot goes out and comes back, so
+                    # where it ends up says little; how far it travelled says
+                    # everything. Measured both ways on the same events, the
+                    # displacement version disagreed with the path version
+                    # often enough to be the weaker signal.
+                    action_samples = [
+                        item for item in state.samples
+                        if start_sample.frame <= item.frame <= sample.frame
+                    ]
+
+                    leg_joints = {L_KNEE, R_KNEE, L_ANKLE, R_ANKLE}
+
+                    def _travel(index: int) -> float:
+                        # A leg joint the model only guessed at moves as much
+                        # as its guesses jitter; it is no evidence a leg moved.
+                        points = [_point(item.keypoints, index) for item in action_samples
+                                  if index not in leg_joints or _joint_seen(item, index)]
+                        points = [q for q in points if q is not None]
+                        if len(points) < 2:
+                            return 0.0
+                        return float(sum(
+                            np.linalg.norm(points[i + 1] - points[i])
+                            for i in range(len(points) - 1)
+                        ))
+
+                    hand_travel = max(_travel(L_WRIST), _travel(R_WRIST))
+                    # Knees included: a knee strike drives the knee forward
+                    # while the ankle stays tucked, so measuring feet alone
+                    # reads a knee as though the leg never moved.
+                    foot_travel = max(_travel(L_ANKLE), _travel(R_ANKLE),
+                                      _travel(L_KNEE), _travel(R_KNEE))
+                    # What the detector proposed, before the travel ratio gets a
+                    # vote. Recorded on the event because this rule is the one
+                    # place a leg action can become a hand action and vice
+                    # versa, and it is the only family decision nothing else in
+                    # the pipeline can audit after the fact. The reported kick
+                    # count is kick_attempts + knee_attempts, so every flip here
+                    # moves a number the report shows into one it withholds, or
+                    # the other way round, with no trace.
+                    seed_family = family
+                    family_ratio = (
+                        float(hand_travel) / max(0.01, float(foot_travel))
+                        if foot_travel or hand_travel else None
+                    )
+                    if family == "punch" and foot_travel > FAMILY_MARGIN * max(0.01, hand_travel):
+                        family = "kick"
+                        side = "left" if _travel(L_ANKLE) >= _travel(R_ANKLE) else "right"
+                        event_limb = f"{side}_leg"
+                    elif family in {"kick", "knee"} and hand_travel > FAMILY_MARGIN * max(0.01, foot_travel):
+                        family = "punch"
+                        side = "left" if _travel(L_WRIST) >= _travel(R_WRIST) else "right"
+                        event_limb = f"{side}_hand"
+                    if family in {"kick", "knee"}:
+                        left_idx = L_KNEE if family == "knee" else L_ANKLE
+                        right_idx = R_KNEE if family == "knee" else R_ANKLE
+                        left_start, left_peak = _point(start_sample.keypoints, left_idx), _point(peak_sample.keypoints, left_idx)
+                        right_start, right_peak = _point(start_sample.keypoints, right_idx), _point(peak_sample.keypoints, right_idx)
+                        left_travel = 0.0 if left_start is None or left_peak is None else float(np.linalg.norm(left_peak - left_start))
+                        right_travel = 0.0 if right_start is None or right_peak is None else float(np.linalg.norm(right_peak - right_start))
+                        if max(left_travel, right_travel) > 1.25 * max(1.0, min(left_travel, right_travel)):
+                            side = "left" if left_travel > right_travel else "right"
+                            event_limb = f"{side}_{'knee' if family == 'knee' else 'leg'}"
+
+                    if family in {"kick", "knee"} and not legs_visible(
+                            action_samples, "left" if event_limb.startswith("left") else "right"):
+                        # No visible leg, no kick or knee - see
+                        # SETTINGS.min_leg_visible_share.
+                        state.legs_hidden_discards += 1
+                        state.active.pop(active_key, None)
+                        continue
+
+                    if family == "punch":
+                        technique = _classify_punch(start_sample, peak_sample, event_limb)
+                    elif family == "kick":
+                        technique = _classify_kick(start_sample, peak_sample, event_limb)
+                    else:
+                        technique = _classify_knee(peak_sample, event_limb)
+
+                    foot_lift = _foot_lift(peak_sample, event_limb) if family == "kick" else None
+                    spinning = family in {"kick", "knee"} and _is_spinning(active.shoulder_angles)
+                    jumping = family in {"kick", "knee"} and _is_jumping(start_sample, peak_sample)
+
+                    model_source = "temporal_rules"
+                    temporal_decision = {"status": "unavailable", "reason": self.temporal.status}
+                    confidence = min(
+                        CONFIDENCE_CEILING,
+                        CONFIDENCE_FLOOR
+                        + 0.30 * min(1.0, sustained / 6.0)
+                        + 0.34 * min(1.0, extension_gain / 0.45),
+                    )
+
+                    # Optional trained model gets a vote only when a complete
+                    # sequence is available and its confidence is strong.
+                    if self.temporal.available and len(state.features) >= SETTINGS.action_window:
+                        sequence = np.stack(list(state.features)[-SETTINGS.action_window :], axis=0)
+                        decision = self.temporal.predict_decision(sequence)
+                        temporal_decision = {"status": decision.status, "reason": decision.reason,
+                                             "label": decision.label, "confidence": decision.confidence}
+                        if decision.status == "no_action":
+                            state.active.pop(active_key, None)
+                            continue
+                        if decision.status == "strike":
+                            label, model_conf = decision.label, decision.confidence
+                            # Only allow same-family overrides; this stops a
+                            # noisy model from turning a kick candidate into a punch.
+                            same_family = (
+                                family == "punch" and any(x in label for x in ("jab", "cross", "hook", "uppercut", "backfist"))
+                            ) or (family == "kick" and "kick" in label) or (family == "knee" and "knee" in label)
+                            event_side = "left" if event_limb.startswith("left") else "right"
+                            label_side = "left" if label.startswith("left_") else "right" if label.startswith("right_") else None
+                            side_consistent = label_side is None or label_side == event_side
+                            if same_family and side_consistent:
+                                technique = label
+                                confidence = model_conf
+                                model_source = "warrioriq_temporal_model"
+                            else:
+                                temporal_decision["status"] = "uncertain"
+                                temporal_decision["reason"] = "family_or_side_disagreement"
+                    elif self.temporal.available:
+                        temporal_decision = {"status": "unavailable", "reason": "incomplete_window"}
+
+                    opponent_name = "B" if fighter_name == "A" else "A"
+                    # Keep a compact temporal contact trajectory separate from
+                    # technique classification. Contact/target logic later
+                    # evaluates several samples around the strike instead of
+                    # declaring contact from one peak frame.
+                    contact_samples = []
+                    for s in state.samples:
+                        if start_sample.frame <= s.frame <= sample.frame:
+                            contact_samples.append({
+                                "frame": int(s.frame),
+                                "time": float(s.time),
+                                "attacker_keypoints": s.keypoints.tolist(),
+                                "attacker_conf": None if s.conf is None else s.conf.tolist(),
+                                "attacker_identity_confidence": float(s.identity_confidence),
+                                "opponent_box": None if s.opponent_box is None else s.opponent_box.tolist(),
+                                "opponent_keypoints": None if s.opponent_keypoints is None else s.opponent_keypoints.tolist(),
+                                "opponent_conf": None if s.opponent_conf is None else s.opponent_conf.tolist(),
+                                "opponent_identity_confidence": float(s.opponent_identity_confidence),
+                            })
+
+                    event = StrikeEvent(
+                        fighter=fighter_name,
+                        opponent=opponent_name,
+                        round_number=peak_sample.round_number,
+                        start_frame=start_sample.frame,
+                        peak_frame=peak_sample.frame,
+                        end_frame=sample.frame,
+                        start_time=start_sample.time,
+                        peak_time=peak_sample.time,
+                        end_time=sample.time,
+                        technique=technique,
+                        family=family,
+                        limb=event_limb,
+                        confidence=float(max(0.0, min(1.0, confidence))),
+                        model_source=model_source,
+                        evidence={
+                            "peak_attacker_box": peak_sample.box.tolist(),
+                            "peak_attacker_keypoints": peak_sample.keypoints.tolist(),
+                            "peak_attacker_conf": None if peak_sample.conf is None else peak_sample.conf.tolist(),
+                            "peak_opponent_box": None if peak_sample.opponent_box is None else peak_sample.opponent_box.tolist(),
+                            "peak_opponent_keypoints": None if peak_sample.opponent_keypoints is None else peak_sample.opponent_keypoints.tolist(),
+                            "peak_opponent_conf": None if peak_sample.opponent_conf is None else peak_sample.opponent_conf.tolist(),
+                            "contact_samples": contact_samples,
+                            # How many samples of this action saw the opponent
+                            # at all. A strike is an act aimed at somebody, so
+                            # an action with none of them was not observed to
+                            # be one - see thrown_at_opponent.
+                            "opponent_observed_samples": sum(
+                                1 for item in contact_samples if item.get("opponent_box")),
+                            "max_speed_body_lengths_per_s": float(active.max_speed),
+                            "extension_gain": float(extension_gain),
+                            # The family before and after the travel-ratio rule,
+                            # and the ratio that decided it. Diagnostic only -
+                            # nothing reads these to classify anything - so that
+                            # "this kick was counted as a punch" can be checked
+                            # against a number instead of argued about.
+                            "family_seed": seed_family,
+                            "family_flipped": seed_family != family,
+                            "family_travel_ratio": family_ratio,
+                            # See arm_confidence; read by the attempt gate
+                            # (core/analyzer.py PUNCH_ARM_CONFIDENCE).
+                            "arm_confidence": arm_confidence(
+                                action_samples, "left" if event_limb.startswith("left") else "right"),
+                            # Turning and jumping are separately scored actions
+                            # in several rulesets - a turning kick to the head
+                            # is worth 5 in WT taekwondo against 3 for the same
+                            # kick thrown square - so they are recorded as
+                            # properties of the technique rather than folded
+                            # into its name. Only kicks and knees can carry
+                            # them; a spinning punch is a backfist and is
+                            # already classified as one.
+                            "spinning": spinning,
+                            "jumping": jumping,
+                            # Evidence that a kick was a kick. See _foot_lift:
+                            # None means the pose could not say.
+                            "foot_lift_torsos": foot_lift,
+                            "temporal_decision": temporal_decision,
+                        },
+                    )
+                    events.append(event)
+                    state.last_event_time[active_key] = seconds
+
+                state.active.pop(active_key, None)
+
+        # A single technique can trigger several limb candidates as joints
+        # retract on adjacent frames. Keep only the strongest same-family
+        # candidate inside one physical-action window.
+        accepted: list[StrikeEvent] = []
+        for event in sorted(events, key=lambda item: item.confidence, reverse=True):
+            last_family = state.last_family_event_time.get(event.family, -999.0)
+            if event.peak_time - last_family < 0.30:
+                continue
+            accepted.append(event)
+            state.last_family_event_time[event.family] = event.peak_time
+        return sorted(accepted, key=lambda item: item.peak_time)

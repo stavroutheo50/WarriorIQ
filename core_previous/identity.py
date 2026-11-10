@@ -1,0 +1,1328 @@
+from __future__ import annotations
+
+import cv2
+from collections import deque
+
+import numpy as np
+
+from core.config import SETTINGS
+from core.reid import pool as reid_pool
+from core.reid import similarity as reid_similarity
+from core.referee import BARE_TORSO_MIN, looks_like_a_clothed_official
+from core.types import FighterState, PersonObservation
+
+
+# The size gate in IdentityManager._score: a candidate under this share of the
+# fighter's median box area over their last RECENT_AREA_SIGHTINGS sightings is
+# not them. Needs MIN_SIGHTINGS_FOR_SIZE_GATE sightings before it judges.
+MIN_AREA_SHARE_OF_RECENT = 0.35
+RECENT_AREA_SIGHTINGS = 30
+MIN_SIGHTINGS_FOR_SIZE_GATE = 5
+
+
+def box_area(box) -> float:
+    if box is None:
+        return 0.0
+    x1, y1, x2, y2 = map(float, box)
+    return max(0.0, x2 - x1) * max(0.0, y2 - y1)
+
+
+def box_center(box) -> np.ndarray:
+    x1, y1, x2, y2 = map(float, box)
+    return np.array([(x1 + x2) / 2.0, (y1 + y2) / 2.0], dtype=np.float32)
+
+
+def box_iou(a, b) -> float:
+    if a is None or b is None:
+        return 0.0
+    ax1, ay1, ax2, ay2 = map(float, a)
+    bx1, by1, bx2, by2 = map(float, b)
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    union = box_area(a) + box_area(b) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def normalized_distance(a, b) -> float:
+    if a is None or b is None:
+        return 999.0
+    ca, cb = box_center(a), box_center(b)
+    d = float(np.linalg.norm(ca - cb))
+    ax1, ay1, ax2, ay2 = map(float, a)
+    bx1, by1, bx2, by2 = map(float, b)
+    scale = max(ax2 - ax1, ay2 - ay1, bx2 - bx1, by2 - by1, 1.0)
+    return d / scale
+
+
+def pair_separation(a, b) -> float:
+    """Distance between two people's centres, in their average body height."""
+    if a is None or b is None:
+        return 999.0
+    ca, cb = box_center(a), box_center(b)
+    body = max(20.0, ((float(a[3]) - float(a[1])) + (float(b[3]) - float(b[1]))) / 2.0)
+    return float(np.linalg.norm(ca - cb)) / body
+
+
+def size_similarity(a, b) -> float:
+    aa, bb = box_area(a), box_area(b)
+    if aa <= 0 or bb <= 0:
+        return 0.0
+    return min(aa, bb) / max(aa, bb)
+
+
+def appearance_hist(frame: np.ndarray, box) -> np.ndarray | None:
+    """Compact clothing/appearance descriptor.
+
+    We intentionally use torso-biased HSV histograms because they are cheap
+    enough for every analyzed frame. The identity manager treats this only as
+    evidence, never as an absolute identity decision.
+    """
+    if frame is None or box is None:
+        return None
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = map(float, box)
+    bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
+    # Bias toward upper/mid body and avoid gloves/shorts dominating.
+    tx1 = int(max(0, x1 + 0.15 * bw))
+    tx2 = int(min(w, x2 - 0.15 * bw))
+    ty1 = int(max(0, y1 + 0.15 * bh))
+    ty2 = int(min(h, y1 + 0.65 * bh))
+    if tx2 - tx1 < 8 or ty2 - ty1 < 8:
+        return None
+    crop = frame[ty1:ty2, tx1:tx2]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], None, [24, 24], [0, 180, 0, 256])
+    cv2.normalize(hist, hist)
+    return hist.reshape(-1).astype(np.float32)
+
+
+def appearance_similarity(a: np.ndarray | None, b: np.ndarray | None) -> float:
+    if a is None or b is None or a.size != b.size:
+        return 0.5
+    return float(max(0.0, min(1.0, cv2.compareHist(a.astype(np.float32), b.astype(np.float32), cv2.HISTCMP_CORREL) * 0.5 + 0.5)))
+
+
+def fighter_pair_similarity(observation_a, observation_b) -> float | None:
+    """How alike the two chosen fighters look, or None if it cannot be judged.
+
+    Every other check in this module asks whether a candidate is the fighter.
+    This asks something the analysis has never asked: whether the two fighters
+    can be distinguished from each other *in this particular video at all*.
+
+    When they cannot, no threshold anywhere downstream rescues it. Measured on
+    a crowded hall where the two competitors score 0.89 against each other, the
+    identity manager will hand one fighter's strikes to the other and report
+    high coverage while doing it, because coverage measures whether somebody
+    was followed and not whether it was the right somebody. Saying so at
+    selection is worth more than any amount of work afterwards.
+    """
+    if observation_a is None or observation_b is None:
+        return None
+    if observation_a.appearance is None or observation_b.appearance is None:
+        return None
+    return appearance_similarity(observation_a.appearance, observation_b.appearance)
+
+
+def pose_signature(keypoints: np.ndarray | None, box) -> np.ndarray | None:
+    if keypoints is None or box is None or len(keypoints) < 17:
+        return None
+    x1, y1, x2, y2 = map(float, box)
+    bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
+    sig = np.zeros((17, 2), dtype=np.float32)
+    sig[:, 0] = (keypoints[:17, 0] - x1) / bw
+    sig[:, 1] = (keypoints[:17, 1] - y1) / bh
+    return sig.reshape(-1)
+
+
+def pose_similarity(a: np.ndarray | None, b: np.ndarray | None) -> float:
+    if a is None or b is None or a.shape != b.shape:
+        return 0.5
+    diff = float(np.mean(np.abs(a - b)))
+    return float(max(0.0, min(1.0, 1.0 - diff)))
+
+
+def ema(old: np.ndarray | None, new: np.ndarray | None, alpha: float) -> np.ndarray | None:
+    if new is None:
+        return old
+    if old is None or old.shape != new.shape:
+        return new.copy()
+    return (alpha * old + (1.0 - alpha) * new).astype(np.float32)
+
+
+# Refusals that say who a candidate is, not where or how they moved, so the
+# propagated fighter mask may not overrule them (IdentityManager.update).
+NOT_REOPENED_BY_THE_MASK = frozenset({"looks_like_a_known_bystander"})
+
+
+class IdentityManager:
+    """Owns stable WarriorIQ identities A/B independent of tracker IDs.
+
+    A BoT-SORT ID is treated as temporary evidence. When it disappears or
+    becomes implausible, candidates are scored using motion, IoU, size,
+    appearance and pose. Ambiguous recovery returns None rather than assigning
+    a referee/coach. This implements the project's rule: missing briefly is
+    better than tracking the wrong human.
+    """
+
+    def adopt_anchor(self, state: FighterState, observation: PersonObservation | None) -> None:
+        """Take a fighter's fixed identity anchor from another observation.
+
+        Used when the run starts before the frame the person drew the boxes
+        on: tracking begins where the fighters were followed back to, while
+        the anchor still describes them as they looked on the chosen frame.
+        Only fields the observation actually has are replaced.
+        """
+        if observation is None:
+            return
+        if observation.appearance is not None:
+            state.anchor_appearance = observation.appearance.copy()
+        if observation.reid is not None:
+            state.anchor_reid = np.asarray(observation.reid).copy()
+            state.anchor_reid_samples = [np.asarray(observation.reid, dtype=np.float32).ravel()]
+        signature = pose_signature(observation.keypoints, observation.box)
+        if signature is not None:
+            state.anchor_pose = signature
+        if observation.referee_prob is not None:
+            state.anchor_is_referee = bool(observation.referee_prob >= SETTINGS.min_referee_probability)
+            state.anchor_referee_prob = float(observation.referee_prob)
+
+    def __init__(self, initial_a: PersonObservation, initial_b: PersonObservation, source_frame: int = 0, source_fps: float = 30.0):
+        self.a = FighterState(
+            name="A",
+            current_track_id=initial_a.track_id,
+            last_box=initial_a.box.copy(),
+            last_keypoints=None if initial_a.keypoints is None else initial_a.keypoints.copy(),
+            appearance=None if initial_a.appearance is None else initial_a.appearance.copy(),
+            pose_signature=pose_signature(initial_a.keypoints, initial_a.box),
+            anchor_appearance=None if initial_a.appearance is None else initial_a.appearance.copy(),
+            anchor_reid=None if initial_a.reid is None else np.asarray(initial_a.reid).copy(),
+            anchor_is_referee=bool(
+                initial_a.referee_prob is not None
+                and initial_a.referee_prob >= SETTINGS.min_referee_probability),
+            anchor_referee_prob=float(initial_a.referee_prob or 0.0),
+            anchor_pose=pose_signature(initial_a.keypoints, initial_a.box),
+            identity_confidence=1.0,
+            last_seen_source_frame=source_frame,
+        )
+        self.b = FighterState(
+            name="B",
+            current_track_id=initial_b.track_id,
+            last_box=initial_b.box.copy(),
+            last_keypoints=None if initial_b.keypoints is None else initial_b.keypoints.copy(),
+            appearance=None if initial_b.appearance is None else initial_b.appearance.copy(),
+            pose_signature=pose_signature(initial_b.keypoints, initial_b.box),
+            anchor_appearance=None if initial_b.appearance is None else initial_b.appearance.copy(),
+            anchor_reid=None if initial_b.reid is None else np.asarray(initial_b.reid).copy(),
+            anchor_is_referee=bool(
+                initial_b.referee_prob is not None
+                and initial_b.referee_prob >= SETTINGS.min_referee_probability),
+            anchor_referee_prob=float(initial_b.referee_prob or 0.0),
+            anchor_pose=pose_signature(initial_b.keypoints, initial_b.box),
+            identity_confidence=1.0,
+            last_seen_source_frame=source_frame,
+        )
+        # Recent path of every tracked person, so a candidate can be asked the
+        # one question that separates a fighter from the people around the mat:
+        # did you move? Measured across every fight so far, fighters cover 24 to
+        # 65 body lengths a minute; a man standing at the mat edge covered 9.6.
+        self._track_history: dict[int, deque] = {}
+        # Tracks proven to be scenery. A fighter released for standing
+        # perfectly still must not be re-acquired on the next frame, or
+        # the manager spends the fight letting go of the same chair.
+        self._furniture: set[int] = set()
+        self._track_reid: dict[int, deque] = {}
+        # Tracks readmitted after moving again, so the effect of the
+        # ban lapsing is visible rather than inferred.
+        self.forgiven_furniture = 0
+        # How often each fighter's identity moved from one tracker track to a
+        # different one. Stand-ins (-1001/-1002) are not tracks and are not
+        # counted. See SETTINGS.max_identity_handoffs_per_minute.
+        self.track_handoffs = {"A": 0, "B": 0}
+        self._last_real_track: dict[str, int | None] = {"A": None, "B": None}
+        # The hand-offs above that look like a different person: colour
+        # changed or the box jumped. See SETTINGS.max_suspicious_handoffs_per_minute.
+        self.suspicious_handoffs = {"A": 0, "B": 0}
+        # Suspicious hand-offs of the current frame, for the frame pass to
+        # check against the fighters' kit (core/kit.py HandoffKitCheck).
+        self.handoffs_to_check: list[tuple[str, np.ndarray]] = []
+        self._last_real_obs: dict[str, tuple | None] = {"A": None, "B": None}
+        # Both fighters bare-chested at selection, so an upright clothed
+        # person is the official. See core/referee.py.
+        self.clothed_official_filter = bool(
+            SETTINGS.clothed_official_filter_enabled
+            and all(o.torso_skin is not None and o.torso_skin >= BARE_TORSO_MIN for o in (initial_a, initial_b)))
+        # A and B put back the right way round. See _correct_swap.
+        self.swaps_corrected = 0
+        self._cross_match = 0.0
+        self._cross_match_frames = 0
+        # Why identities were refused, not merely how often. A bare total
+        # cannot tell an appearance gate rejecting the real fighter from a
+        # motion gate correctly refusing a spectator, and those need
+        # opposite fixes.
+        self.rejections: dict[str, int] = {}
+        # The same question asked per *lost fighter* rather than per candidate.
+        # See _recover for why the two differ and why this one is the useful one.
+        self.blocked_recovery: dict[str, int] = {}
+        # The same counts, kept apart by fighter.
+        #
+        # blocked_recovery above pools A and B, which cannot answer the
+        # question that matters most about coverage: the red corner is tracked
+        # worse than the blue one on every fight sampled - 64-74% against
+        # 82-88% - and a pooled total of "why somebody was lost" says nothing
+        # about which of them it was. A reason that is 60% of A's losses and
+        # 5% of B's looks identical, pooled, to one evenly split between them,
+        # and those two need opposite fixes.
+        self.blocked_recovery_by_fighter: dict[str, dict[str, int]] = {"A": {}, "B": {}}
+        # Frames each fighter was unassigned, so the reasons above have a
+        # denominator and the two fighters' shares can be compared directly.
+        self.missing_frames_by_fighter: dict[str, int] = {"A": 0, "B": 0}
+        # Frames where A and B were equally plausible either way round.
+        self.confusions = 0
+        self.last_confusion_frame: int | None = None
+        self.source_fps = max(1.0, float(source_fps))
+        # People seen beside the fighters while both were held with confidence,
+        # by track: how often, and what they look like. See _learn_bystanders.
+        self._bystanders: dict[int, dict] = {}
+        # The frame being resolved, for how long a fighter has been missing.
+        self._current_frame = int(source_frame)
+        # Referee probabilities per track, and the tracks classed as officials:
+        # a third-person class that is never assigned to A or B. See _official_track.
+        self._track_referee: dict[int, deque] = {}
+        self.official_tracks: set[int] = set()
+        # The fighters' kits where the boxes were drawn (core/kit.py
+        # HandoffKitCheck), set by the analyser; a candidate wearing the
+        # missing fighter's kit is not refused as an official.
+        self.kit_reference = None
+        self.official_kit_overrides = {"A": 0, "B": 0}
+        # The camera's accumulated translation, so per-track travel is measured
+        # against the ground rather than the picture (core/camera_motion.py).
+        self._camera_offset = np.zeros(2, dtype=np.float64)
+        self.camera_compensations = 0
+        # Fighters re-identified by appearance after leaving the picture.
+        self.reentries = {"A": 0, "B": 0}
+
+    def _remember_positions(self, people: list[PersonObservation], source_frame: int) -> None:
+        for person in people:
+            if person.track_id is None or person.box is None:
+                continue
+            if person.reid is not None:
+                # A rolling window per track, so the comparison is made against
+                # several looks at somebody rather than one noisy crop.
+                seen = self._track_reid.setdefault(int(person.track_id), deque(
+                    maxlen=max(1, SETTINGS.reid_pool_size)))
+                seen.append(np.asarray(person.reid, dtype=np.float32).ravel())
+            if person.referee_prob is not None:
+                verdicts = self._track_referee.setdefault(int(person.track_id), deque(maxlen=12))
+                verdicts.append(float(person.referee_prob))
+                if (len(verdicts) >= SETTINGS.official_track_min_sightings
+                        and float(np.mean(verdicts)) >= SETTINGS.min_referee_probability):
+                    self.official_tracks.add(int(person.track_id))
+            history = self._track_history.setdefault(int(person.track_id), deque(maxlen=450))
+            box = person.box
+            # In ground coordinates: a pan must not make a still spectator
+            # look like somebody covering the mat.
+            history.append((
+                source_frame,
+                float((box[0] + box[2]) / 2.0) - float(self._camera_offset[0]),
+                float((box[1] + box[3]) / 2.0) - float(self._camera_offset[1]),
+                max(1.0, float(box[3] - box[1])),
+            ))
+
+    def compensate_camera(self, shift) -> bool:
+        """Move what is remembered about A and B with the camera (core/camera_motion.py).
+
+        Called before update() for each analysed frame. Only the remembered
+        positions move; the fighters' appearance and anchors do not depend on
+        where the camera points. True when a significant shift was applied.
+        """
+        if shift is None or not SETTINGS.camera_motion_compensation or not shift.significant:
+            return False
+        for state in (self.a, self.b):
+            if state.last_box is not None:
+                state.last_box = shift.apply_box(state.last_box)
+            if state.prev_box is not None:
+                state.prev_box = shift.apply_box(state.prev_box)
+        self._camera_offset += np.asarray([shift.dx, shift.dy], dtype=np.float64)
+        self.camera_compensations += 1
+        return True
+
+    def _official_track(self, candidate: PersonObservation) -> bool:
+        """Is this candidate a track already classed as an official?
+
+        The per-frame referee gate refuses frames scored at or above
+        min_referee_probability; an official's score dips on some frames
+        (p10 0.657 on the measured referee, lower when half-hidden), and those
+        were the frames he could be taken for a fighter. Once his track is
+        classed an official it stays refused - unless this frame's score is
+        clearly a fighter's, which is what a track id handed to a fighter
+        after a crossing would look like.
+        """
+        return bool(
+            candidate.track_id is not None
+            and int(candidate.track_id) in self.official_tracks
+            and (candidate.referee_prob is None
+                 or candidate.referee_prob >= SETTINGS.official_track_floor_probability))
+
+    def _official_level(self, state: FighterState) -> float:
+        """How official a candidate must read to be refused for this fighter.
+
+        See SETTINGS.official_margin_over_fighter.
+        """
+        return max(SETTINGS.min_referee_probability,
+                   state.anchor_referee_prob + SETTINGS.official_margin_over_fighter)
+
+    def _refuse_as_official_track(self, state: FighterState, candidate: PersonObservation) -> bool:
+        if not self._official_track(candidate):
+            return False
+        verdicts = self._track_referee.get(int(candidate.track_id)) or ()
+        return not verdicts or float(np.mean(verdicts)) >= self._official_level(state)
+
+    def _wears_own_kit(self, state: FighterState, candidate: PersonObservation) -> bool:
+        """Does a candidate the referee probe would refuse wear this fighter's kit?
+
+        See SETTINGS.official_kit_override. Counted, so the report shows how
+        often the probe was overruled.
+        """
+        if (self.kit_reference is None or candidate.kit_colours is None
+                or not self.kit_reference.matches(candidate.kit_colours, state.name)):
+            return False
+        official = self._official_track(candidate) or (
+            candidate.referee_prob is not None and candidate.referee_prob >= SETTINGS.min_referee_probability)
+        if official:
+            self.official_kit_overrides[state.name] += 1
+        return True
+
+    def _missing_seconds(self, state: FighterState) -> float:
+        return max(0, self._current_frame - int(state.last_seen_source_frame)) / self.source_fps
+
+    def _reappears_by_appearance(self, state: FighterState, candidate: PersonObservation) -> bool:
+        """After a long absence, does the candidate look like the fighter the user tapped?
+
+        The pooled ReID embedding against the one captured at selection when
+        there is one, else the kit-colour histogram against the selection's.
+        Either threshold is stricter than the everyday gate, because position
+        no longer helps rule anybody out.
+        """
+        if self._missing_seconds(state) < SETTINGS.reentry_after_seconds:
+            return False
+        learned = reid_similarity(
+            reid_pool(state.anchor_reid_samples) if state.anchor_reid_samples else state.anchor_reid,
+            self._pooled_reid(candidate.track_id))
+        if learned is not None:
+            return learned >= SETTINGS.reentry_min_reid_similarity
+        if state.anchor_appearance is None or candidate.appearance is None:
+            return False
+        return appearance_similarity(state.anchor_appearance, candidate.appearance) >= \
+            SETTINGS.reentry_min_appearance_similarity
+
+    def _recent_travel(self, track_id: int | None, fps: float) -> float | None:
+        """Body lengths a minute over this track's recent history.
+
+        None when there is not enough of a look to judge - a track seen for a
+        moment must never be refused for standing still.
+        """
+        if track_id is None or fps <= 0:
+            return None
+        history = self._track_history.get(int(track_id))
+        if not history or len(history) < 20:
+            return None
+        span_frames = history[-1][0] - history[0][0]
+        if span_frames <= 0:
+            return None
+        seconds = span_frames / fps
+        if seconds < 3.0:
+            return None
+        distance = sum(
+            float(np.hypot(b[1] - a[1], b[2] - a[2]))
+            for a, b in zip(history, list(history)[1:])  # noqa: B905 - consecutive pairs, lengths differ by one on purpose
+        )
+        body = sorted(item[3] for item in history)[len(history) // 2]
+        return distance / body / (seconds / 60.0)
+
+    def prime_track_history(self, samples) -> None:
+        """Give the motion guards a look at the ring before the round starts.
+
+        Every guard that separates a fighter from the furniture asks how much a
+        track has moved lately, and none of them can answer about a track they
+        have only just met. That is not a tuning problem: for the opening
+        seconds of any analysis there is genuinely nothing to measure, so a
+        spectator picked up there is held until enough history accumulates.
+
+        Watching the seconds before the round costs one short pass and removes
+        the blind window entirely. Positions only - no identity decision is
+        made from these frames, and none of them is scored or reported.
+        """
+        for source_frame, people in samples:
+            self._remember_positions(people, source_frame)
+
+    def _pooled_reid(self, track_id) -> np.ndarray | None:
+        """This track's averaged appearance, or None until it has been seen enough.
+
+        None rather than a weak answer: a track met a moment ago has no usable
+        description, and refusing somebody on that basis is exactly the mistake
+        the short-window motion guard is written to avoid.
+        """
+        if track_id is None:
+            return None
+        seen = self._track_reid.get(int(track_id))
+        if seen is None or len(seen) < SETTINGS.reid_min_pool:
+            return None
+        return reid_pool(seen)
+
+    def _recent_spread_short(self, track_id: int | None, fps: float) -> float | None:
+        """Spread over the last second and a half, not over the whole history.
+
+        The 6 s reading exists so a fighter briefly held against the ropes is
+        never mistaken for furniture, and it is right to be that patient about
+        a marginal case. But it means a track cannot be judged at all until it
+        has been watched for six seconds, and a seated spectator acquired in
+        the meantime is held for exactly that long - measured, frames 216 to
+        386 of the reference bout, while the bout went on without the fighter.
+
+        Someone who has not moved *at all* does not need six seconds to
+        establish. This reads the recent window instead, against a threshold
+        several times stricter, so it can only ever fire on a person who is
+        genuinely motionless.
+        """
+        if track_id is None or fps <= 0:
+            return None
+        history = self._track_history.get(int(track_id))
+        if not history:
+            return None
+        window = SETTINGS.stationary_short_seconds * fps
+        recent = [item for item in history if history[-1][0] - item[0] <= window]
+        if len(recent) < 12:
+            return None
+        # Nine tenths of the intended look, not all of it. Frames are sampled
+        # every other frame, so the oldest sample inside a window of exactly
+        # this length sits just under it and an equality test here would never
+        # be satisfied at all.
+        if (recent[-1][0] - recent[0][0]) < 0.9 * window:
+            return None
+        points = np.array([(item[1], item[2]) for item in recent], dtype=np.float64)
+        spread = float(np.sqrt(((points - points.mean(axis=0)) ** 2).sum(axis=1).mean()))
+        body = sorted(item[3] for item in recent)[len(recent) // 2]
+        return spread / body
+
+    def _is_motionless(self, track_id: int | None, fps: float) -> bool:
+        """Has this track not moved at all over the recent short window?"""
+        short = self._recent_spread_short(track_id, fps)
+        return short is not None and short < SETTINGS.max_stationary_spread_short
+
+    def _blocked(self, reason: str, fighter: str | None = None) -> None:
+        """Record why one fighter is unassigned in one frame. Diagnostics only.
+
+        `fighter` is which of them it was. It is optional only so that a call
+        site without a state in scope cannot crash a paid run over a counter;
+        every current caller passes it.
+        """
+        self.blocked_recovery[reason] = self.blocked_recovery.get(reason, 0) + 1
+        if fighter in self.blocked_recovery_by_fighter:
+            side = self.blocked_recovery_by_fighter[fighter]
+            side[reason] = side.get(reason, 0) + 1
+
+    def _refuse(self, state: FighterState, reason: str) -> float:
+        """Record a refused identity takeover and why."""
+        state.switches_rejected += 1
+        state.last_refusal = reason
+        self.rejections[reason] = self.rejections.get(reason, 0) + 1
+        return -999.0
+
+    def _recent_spread(self, track_id: int | None, fps: float) -> float | None:
+        """How far a track roams around its own average position, in body lengths.
+
+        Path length cannot separate a fighter from a spectator. Detection noise
+        on a seated person accumulates - a box trembling two pixels a frame adds
+        up to a respectable distance over ten seconds - and that is precisely
+        how identity walked off into the crowd while passing the travel test.
+
+        Spread does not accumulate. Someone sitting still has a small one no
+        matter how much their box shakes, because every sample stays near the
+        same mean. A fighter covers ground and cannot help but have a large one.
+
+        None until there is a long enough look to be certain, so a fighter held
+        briefly against the ropes is never mistaken for furniture.
+        """
+        if track_id is None or fps <= 0:
+            return None
+        history = self._track_history.get(int(track_id))
+        if not history or len(history) < 40:
+            return None
+        span_frames = history[-1][0] - history[0][0]
+        if span_frames <= 0 or span_frames / fps < SETTINGS.switch_spread_min_seconds:
+            return None
+        points = np.array([(item[1], item[2]) for item in history], dtype=np.float64)
+        spread = float(np.sqrt(((points - points.mean(axis=0)) ** 2).sum(axis=1).mean()))
+        body = sorted(item[3] for item in history)[len(history) // 2]
+        return spread / body
+
+    @staticmethod
+    def _by_track_id(people: list[PersonObservation], track_id: int | None) -> PersonObservation | None:
+        if track_id is None:
+            return None
+        for person in people:
+            if person.track_id == track_id:
+                return person
+        return None
+
+    def expected_boxes(self) -> dict:
+        """Where each fighter should be on this frame, for a closer look.
+
+        The detector works on the whole picture squashed into one square, so a
+        fighter 76 px tall in a 480-wide phone copy arrives at the network
+        about 100 px tall - the row of core/preflight.py's table where it finds
+        almost nobody. Measured on fight 1: fighter B was missing on 279 of 713
+        frames and 238 of those had nobody detected where B was expected. Not
+        an identity failure. The detector simply never saw them.
+
+        A crop around this box, inferred at its own size, puts the same fighter
+        in the hundreds of pixels instead. That machinery already exists in
+        PoseTracker.recover_from_guidance; it was only ever pointed at what the
+        SAM sweep found, which is a fraction of frames. This points it at the
+        tracker's own prediction for the rest.
+
+        Returns None for a fighter with no position yet - the first frames,
+        before anybody has been locked on - because there is nowhere to look.
+        """
+        return {"A": self._predicted_box(self.a), "B": self._predicted_box(self.b)}
+
+    @staticmethod
+    def _predicted_box(state: FighterState) -> np.ndarray | None:
+        if state.last_box is None:
+            return None
+        if state.velocity is None:
+            return state.last_box
+        predicted = state.last_box.copy()
+        predicted[[0, 2]] += float(state.velocity[0])
+        predicted[[1, 3]] += float(state.velocity[1])
+        return predicted
+
+    def _score(self, state: FighterState, candidate: PersonObservation, keep_id_bonus: bool = True) -> float:
+        # An official is a third person, never Fighter A or B.
+        wears_own_kit = self._wears_own_kit(state, candidate)
+        if not state.anchor_is_referee and not wears_own_kit and self._refuse_as_official_track(state, candidate):
+            return self._refuse(state, "official")
+        reference = self._predicted_box(state)
+        distance = normalized_distance(reference, candidate.box)
+        reentry = False
+        if state.last_box is not None and distance > SETTINGS.max_normalized_jump:
+            # Out of sight long enough to have left the picture or been lost
+            # to the camera turning: wherever they come back, appearance decides.
+            reentry = self._reappears_by_appearance(state, candidate)
+            if not reentry:
+                # Recorded like every other refusal. Measured on one round, this is
+                # the largest single reason a candidate is turned away - 623 of
+                # them, more than the referee filter - and it was the only refusal
+                # that never appeared in the diagnostics, so it was never looked at
+                # while every other guard was tuned around it.
+                return self._refuse(state, "too_far_to_be_them")
+        iou = box_iou(reference, candidate.box)
+        if state.last_box is None or reentry:
+            # No positional anchor, because one was just discarded as wrong.
+            # "Unknown" has to score neutral: the helpers return 999.0 for the
+            # distance to nothing, which would make position and size vote
+            # against every candidate in the frame and leave appearance unable
+            # to outvote them. Neutral values rank all candidates equally on
+            # position, so who is chosen is decided by who they look like.
+            position = size = 0.5
+        else:
+            position = 1.0 / (1.0 + distance)
+            size = size_similarity(state.last_box, candidate.box)
+        appearance = appearance_similarity(state.appearance, candidate.appearance)
+        candidate_sig = candidate.pose_signature if candidate.pose_signature is not None else pose_signature(candidate.keypoints, candidate.box)
+        pose = pose_similarity(state.pose_signature, candidate_sig)
+        det = float(candidate.confidence)
+        # Similarity to the originally selected fighter, which never updates.
+        # Without this every term above is relative to the previous frame, so a
+        # gradual slide onto another person in the ring is invisible: each step
+        # looks like a small, plausible move.
+        anchor = appearance_similarity(state.anchor_appearance, candidate.appearance)
+        anchor_pose_match = pose_similarity(state.anchor_pose, candidate_sig)
+        score = (
+            0.18 * iou
+            + 0.22 * position
+            + 0.10 * size
+            + 0.14 * appearance
+            + 0.10 * pose
+            + 0.06 * det
+            + 0.14 * anchor
+            + 0.06 * anchor_pose_match
+        )
+        # A candidate that matches where the fighter should be but looks nothing
+        # like the fighter the user picked is the exact shape of a referee walking
+        # through. Refusing is correct here: this manager's rule is that missing
+        # briefly beats tracking the wrong human.
+        # The official is refused outright, before any similarity is consulted.
+        # He defeats every comparative guard honestly: he is on the mat, the
+        # right size, lit the same, and he moves like an athlete because he is
+        # one. There is no threshold on resemblance that admits a tiring
+        # fighter and refuses him, so the question has to change from "how
+        # similar is he" to "what is he". See core/referee.py.
+        #
+        # Unless the person originally selected scored as the official himself,
+        # in which case the user meant to follow him and this filter has no
+        # business refusing the very person they picked.
+        if (not state.anchor_is_referee and not wears_own_kit
+                and candidate.referee_prob is not None
+                and candidate.referee_prob >= self._official_level(state)):
+            return self._refuse(state, "referee")
+        # An official the uniform probe does not know - the UFC dresses them
+        # in black - is still the only upright person on the canvas wearing a
+        # shirt when both fighters are bare-chested.
+        if self.clothed_official_filter and looks_like_a_clothed_official(candidate):
+            return self._refuse(state, "clothed_official")
+        # The same question for an official in no recognisable uniform: is this
+        # somebody already seen standing beside the two fighters?
+        if SETTINGS.bystander_memory and self._looks_like_a_bystander(state, candidate, anchor):
+            return self._refuse(state, "looks_like_a_known_bystander")
+        # A stand-in is a crop searched where one named fighter was expected
+        # (see core/pose_tracker.py), so it is evidence about that fighter
+        # only. Handing B's stand-in to A swapped them twice in the close-up of
+        # a real bout.
+        if candidate.track_id in (-1001, -1002) and candidate.track_id != (-1001 if state.name == "A" else -1002):
+            return self._refuse(state, "other_fighters_stand_in")
+        # A fighter does not shrink to a fraction of their size between two
+        # sightings; a spectator or the next mat's bout behind them is that
+        # small. Measured on a handheld pankration bout (identity_pankration
+        # ma640): most frames where a fighter's box sat on someone else, that
+        # someone was 15-30 px wide against a fighter's 50 - a fifth of the area.
+        # Judged against the fighter's own recent sightings, so a camera zoom,
+        # which changes size gradually, moves the reference with it; and on
+        # area, so a crouch - shorter but wider - is not refused.
+        if SETTINGS.identity_size_gate and len(state.recent_areas) >= MIN_SIGHTINGS_FOR_SIZE_GATE:
+            typical = float(np.median(state.recent_areas))
+            if box_area(candidate.box) < MIN_AREA_SHARE_OF_RECENT * typical:
+                return self._refuse(state, "too_small_to_be_them")
+        # A learned appearance space when one is available, and the colour
+        # histogram when it is not. Measured on real footage the histogram
+        # cannot separate a referee from a fighter at all - their similarity
+        # ranges overlap almost completely - while the embedding puts the
+        # referee at 0.695-0.741 and the fighters at 0.724-0.828. Whichever
+        # answers, only one gate runs: asking both would reimpose the weaker
+        # one's mistakes on top of the stronger one's judgement.
+        learned = reid_similarity(
+            reid_pool(state.anchor_reid_samples) if state.anchor_reid_samples else state.anchor_reid,
+            self._pooled_reid(candidate.track_id))
+        if learned is not None:
+            if learned < SETTINGS.min_anchor_reid_similarity:
+                return self._refuse(state, "appearance_reid")
+        elif state.anchor_appearance is not None and candidate.appearance is not None:
+            if anchor < SETTINGS.min_anchor_appearance_similarity:
+                return self._refuse(state, "appearance")
+        # Refuse to move onto somebody who has been standing still. Coaches,
+        # the referee and the officials at the table all sit near the action
+        # and all look plausible for a frame; what none of them do is cover
+        # ground. Fighters measured 24 to 65 body lengths a minute across every
+        # bout so far, a man at the mat edge 9.6.
+        #
+        # One-directional on purpose. This can block a switch to a new track; it
+        # can never drop the track already being followed, so a fighter who
+        # pauses between exchanges is never given away.
+        #
+        # Applied during a recovery too, which it was not before.
+        #
+        # Skipping it there was meant to let a fighter who paused between
+        # exchanges be re-acquired, and it did - along with everyone sitting
+        # down. Drawing the tracked boxes back onto a bout showed fighter A
+        # lost at 25 seconds and locked onto a spectator in a chair for the
+        # remaining two and a half minutes, while coverage reported 96%,
+        # because coverage counts accepted observations and cannot tell a
+        # fighter from a seated man where a fighter used to be. Every number
+        # published for that fighter described the spectator.
+        #
+        # The reason the gate was added no longer holds: it was compensating
+        # for a six-second history window, since widened to thirty, so a brief
+        # pause no longer erases the travel that proves somebody is fighting.
+        # Same bout with this applied during recovery: 1 of 8 sampled frames
+        # correct becomes 5 of 8, and attempts rise from 9 and 8 to 47 and 42.
+        # Coverage falls from 96% to 81% because it now declines to follow
+        # furniture, which is this manager's own rule - missing briefly beats
+        # tracking the wrong human.
+        if (
+            candidate.track_id is not None
+            and candidate.track_id != state.current_track_id
+        ):
+            if int(candidate.track_id) in self._furniture:
+                # A ban is a statement about the past, and the past can be
+                # contradicted. Furniture stays still, so a track that has since
+                # started covering ground is not furniture and is let back in.
+                # Without this the ban was permanent: two fighters clinching for
+                # six seconds was enough to end one of them for the rest of the
+                # round, and the refusal then repeated on every later frame -
+                # 910 of them on one fight, more than half of all rejections.
+                later = self._recent_spread(candidate.track_id, self.source_fps)
+                if later is None or later < SETTINGS.min_switch_spread_body_lengths:
+                    return self._refuse(state, "known_furniture")
+                self._furniture.discard(int(candidate.track_id))
+                self.forgiven_furniture += 1
+            # A person who has not moved at all needs no long look. Without
+            # this, a spectator acquired early is held for the full six
+            # seconds the patient reading needs before it may speak.
+            if self._is_motionless(candidate.track_id, self.source_fps):
+                return self._refuse(state, "motionless")
+            # Unless they clearly look like the fighter picked at selection.
+            # See SETTINGS.still_override_anchor_similarity.
+            if anchor < SETTINGS.still_override_anchor_similarity:
+                travel = self._recent_travel(candidate.track_id, self.source_fps)
+                if travel is not None and travel < SETTINGS.min_switch_travel_per_minute:
+                    return self._refuse(state, "too_still_travel")
+                spread = self._recent_spread(candidate.track_id, self.source_fps)
+                if spread is not None and spread < SETTINGS.min_switch_spread_body_lengths:
+                    return self._refuse(state, "too_still_spread")
+        if keep_id_bonus and candidate.track_id is not None and candidate.track_id == state.current_track_id:
+            score += SETTINGS.track_id_bonus
+        return float(score)
+
+    def _learn_bystanders(self, people: list[PersonObservation], a_obs: PersonObservation | None,
+                          b_obs: PersonObservation | None) -> None:
+        """Remember who stands beside the fighters while both are surely held.
+
+        The referee filter (core/referee.py) recognises an official by the
+        uniform the rulebooks prescribe. An official in anything else - on the
+        pankration benchmark a black shirt and khaki shorts, close to the
+        fighters' own kit - scores near nothing, stands right beside a fighter
+        all bout, and is the person the fighter's box goes to.
+
+        What he cannot hide is that while both fighters are visibly held, he is
+        a third person beside them. Learnt only from frames where both are held
+        at SETTINGS.bystander_min_confidence or better, and only from people
+        seen there on SETTINGS.bystander_min_sightings frames, so a single
+        frame where a box is already on the wrong person teaches nothing.
+        """
+        if a_obs is None or b_obs is None:
+            return
+        if min(self.a.identity_confidence, self.b.identity_confidence) < SETTINGS.bystander_min_confidence:
+            return
+        for person in people:
+            if person is a_obs or person is b_obs or person.appearance is None:
+                continue
+            if person.track_id is None or int(person.track_id) < 0:
+                continue
+            near = min(pair_separation(person.box, a_obs.box), pair_separation(person.box, b_obs.box))
+            if near > SETTINGS.bystander_near_body_lengths:
+                continue
+            # Never learn somebody who looks at least as much like a fighter
+            # picked as the person now holding that fighter's box: if the box
+            # is on the wrong man, this is the real fighter. On the PC's ma604
+            # recording the real fighter A had been learnt 42 times this way
+            # by 168 s, and was then refused.
+            if any(appearance_similarity(state.anchor_appearance, person.appearance)
+                   >= appearance_similarity(state.anchor_appearance, held.appearance)
+                   for state, held in ((self.a, a_obs), (self.b, b_obs))):
+                continue
+            seen = self._bystanders.setdefault(int(person.track_id), {"sightings": 0, "appearance": None})
+            seen["sightings"] += 1
+            seen["appearance"] = ema(seen["appearance"], person.appearance, SETTINGS.appearance_ema)
+
+    def _looks_like_a_bystander(self, state: FighterState, candidate: PersonObservation, like_fighter: float) -> bool:
+        """Is the candidate a person already seen standing beside both fighters?
+
+        Judged by the tracker's track, not by colour. On the pankration
+        benchmark the colour histogram put the referee at 0.79 and 0.84 against
+        the two fighters while they scored 0.76 against each other, so "looks
+        like the referee" would have refused the fighters themselves. A track
+        that has spent many confident frames as a third person beside them is
+        a far more specific statement. It is set aside only when the candidate
+        clearly looks more like the fighter picked than like that person, which
+        is what a fighter inheriting the track after an occlusion would show.
+        """
+        if candidate.track_id is None or int(candidate.track_id) < 0:
+            return False
+        seen = self._bystanders.get(int(candidate.track_id))
+        if seen is None or seen["sightings"] < SETTINGS.bystander_min_sightings:
+            return False
+        if candidate.appearance is None or state.anchor_appearance is None or seen["appearance"] is None:
+            return True
+        like_bystander = appearance_similarity(seen["appearance"], candidate.appearance)
+        return like_fighter - like_bystander < SETTINGS.bystander_margin
+
+    def _commit(self, state: FighterState, obs: PersonObservation, source_frame: int, score: float, recovered: bool = False) -> PersonObservation:
+        if (state.last_box is not None and self._missing_seconds(state) >= SETTINGS.reentry_after_seconds
+                and normalized_distance(self._predicted_box(state), obs.box) > SETTINGS.max_normalized_jump):
+            self.reentries[state.name] = self.reentries.get(state.name, 0) + 1
+        old_center = box_center(state.last_box) if state.last_box is not None else None
+        new_center = box_center(obs.box)
+        if old_center is not None:
+            delta = new_center - old_center
+            state.velocity = delta if state.velocity is None else (0.65 * state.velocity + 0.35 * delta).astype(np.float32)
+        state.prev_box = None if state.last_box is None else state.last_box.copy()
+        state.last_box = obs.box.copy()
+        state.last_keypoints = None if obs.keypoints is None else obs.keypoints.copy()
+        state.appearance = ema(state.appearance, obs.appearance, SETTINGS.appearance_ema)
+        sig = obs.pose_signature if obs.pose_signature is not None else pose_signature(obs.keypoints, obs.box)
+        state.pose_signature = ema(state.pose_signature, sig, SETTINGS.pose_ema)
+        if recovered and obs.track_id != state.current_track_id:
+            state.recovery_count += 1
+        # A crop found where this fighter was expected carries a stand-in id
+        # (-1001 / -1002, see core/pose_tracker.py), not a tracker track. It
+        # must not replace the real track: it did, and on the next frame the
+        # fighter's own track came back as a stranger and met the stillness
+        # gates meant for new tracks. Measured on a real Kick Light bout, A was
+        # refused as "too still" on 123 frames of a referee stoppage and the
+        # fighting after it, while standing exactly where A had been.
+        if obs.track_id is None or obs.track_id >= 0 or state.current_track_id is None:
+            state.current_track_id = obs.track_id
+        if obs.track_id is not None and obs.track_id >= 0:
+            last = self._last_real_track.get(state.name)
+            if last is not None and last != obs.track_id:
+                self.track_handoffs[state.name] = self.track_handoffs.get(state.name, 0) + 1
+                before = self._last_real_obs.get(state.name)
+                if before is not None and (
+                        appearance_similarity(before[0], obs.appearance) < 0.8
+                        or normalized_distance(before[1], obs.box) > 0.8):
+                    self.suspicious_handoffs[state.name] = self.suspicious_handoffs.get(state.name, 0) + 1
+                    self.handoffs_to_check.append((state.name, obs.box.copy()))
+            self._last_real_track[state.name] = int(obs.track_id)
+            self._last_real_obs[state.name] = (obs.appearance, obs.box.copy())
+        elif (SETTINGS.handoff_from_latest_sighting and obs.track_id is not None
+              and self._last_real_obs.get(state.name) is not None):
+            # Followed between tracker tracks by a crop found where SAM2 said
+            # they were (-1001/-1002): the next hand-off is judged against
+            # where they were last seen, not where the last track left them
+            # (SETTINGS.handoff_from_latest_sighting).
+            seen_look = self._last_real_obs[state.name][0]
+            self._last_real_obs[state.name] = (
+                obs.appearance if obs.appearance is not None else seen_look, obs.box.copy())
+        state.identity_confidence = float(max(0.0, min(1.0, score)))
+        state.missing_frames = 0
+        if (obs.reid is not None
+                and len(state.anchor_reid_samples) < SETTINGS.reid_pool_size):
+            state.anchor_reid_samples.append(
+                np.asarray(obs.reid, dtype=np.float32).ravel())
+        state.recent_areas.append(box_area(obs.box))
+        del state.recent_areas[:-RECENT_AREA_SIGHTINGS]
+        state.last_seen_source_frame = source_frame
+        return obs
+
+    def _recover(self, state: FighterState, people: list[PersonObservation], forbidden_id: int | None) -> tuple[PersonObservation | None, float]:
+        # Which gate turned away the person standing closest to where this
+        # fighter was last seen. `self.rejections` cannot answer that: it counts
+        # every candidate in every frame, so on a multi-mat hall with fifteen
+        # people in shot it is dominated by the crowd being correctly refused
+        # for distance, and the reason with the largest count is not the reason
+        # the fighter was lost. Measured on fight 3: `too_far_to_be_them` is 68%
+        # of all refusals, and yet a detection sits within 1.65 body lengths of
+        # the last known box in **100%** of untracked frames. Counting per
+        # candidate answers a question nobody asked.
+        #
+        # This counts once per failed recovery, against the nearest candidate
+        # only, so the denominator is "times this fighter was lost".
+        reference = self._predicted_box(state)
+        nearest = None
+        if reference is not None and people:
+            nearest = min(people, key=lambda p: normalized_distance(reference, p.box))
+
+        scored: list[tuple[float, PersonObservation]] = []
+        nearest_refusal: str | None = None
+        for candidate in people:
+            if forbidden_id is not None and candidate.track_id == forbidden_id:
+                if candidate is nearest:
+                    nearest_refusal = "held_by_the_other_fighter"
+                continue
+            state.last_refusal = None
+            score = self._score(state, candidate, keep_id_bonus=False)
+            if candidate is nearest and score <= -100:
+                nearest_refusal = state.last_refusal or "refused"
+            if score > -100:
+                scored.append((score, candidate))
+
+        if not scored:
+            self._blocked(nearest_refusal or "no_candidates", state.name)
+            return None, 0.0
+        scored.sort(key=lambda item: item[0], reverse=True)
+        best_score, best = scored[0]
+        second = scored[1][0] if len(scored) > 1 else -999.0
+        # Neither of these two was recorded anywhere before. A refusal invisible
+        # to the diagnostics is one nobody tunes around - the same way
+        # `too_far_to_be_them` went unexamined while every other guard was
+        # adjusted.
+        if best_score < SETTINGS.min_reid_score:
+            self._blocked(nearest_refusal or "below_min_reid_score", state.name)
+            return None, best_score
+        if len(scored) > 1 and best_score - second < SETTINGS.min_reid_margin:
+            self._blocked(nearest_refusal or "two_candidates_too_alike", state.name)
+            return None, best_score
+        if nearest is not None and best is not nearest:
+            # Recovered, but onto somebody other than the person standing where
+            # the fighter was. Worth seeing separately: it is the shape of a
+            # lock sliding onto a bystander.
+            self._blocked("recovered_onto_someone_else", state.name)
+        return best, best_score
+
+    def _update_one(self, state: FighterState, people: list[PersonObservation], source_frame: int, forbidden_id: int | None) -> PersonObservation | None:
+        current = self._by_track_id(people, state.current_track_id)
+        if current is not None and current.track_id != forbidden_id:
+            score = self._score(state, current, keep_id_bonus=True)
+            # A tracker ID can still jump to another human. Keep only if its
+            # combined evidence remains plausible.
+            if score >= 0.46:
+                return self._commit(state, current, source_frame, score, recovered=False)
+            state.switches_rejected += 1
+
+        recovered, score = self._recover(state, people, forbidden_id)
+        if recovered is not None:
+            return self._commit(state, recovered, source_frame, score, recovered=True)
+
+        state.missing_frames += 1
+        state.identity_confidence = 0.0
+        return None
+
+    def update(
+        self,
+        people: list[PersonObservation],
+        source_frame: int,
+        sam_guidance: dict[str, np.ndarray | None] | None = None,
+    ) -> tuple[PersonObservation | None, PersonObservation | None]:
+        """Resolve A and B together so tracker-ID swaps cannot swap fighters.
+
+        BoT-SORT IDs are useful continuity hints, but combatants cross and
+        occlude frequently. Joint assignment prioritizes the selected clothing
+        appearance plus motion and rejects an ambiguous A/B permutation.
+        """
+        self._current_frame = int(source_frame)
+        self._remember_positions(people, source_frame)
+        if not people:
+            self.a.missing_frames += 1
+            self.b.missing_frames += 1
+            self.a.identity_confidence = self.b.identity_confidence = 0.0
+            return None, None
+
+        def candidate_score(state: FighterState, obs: PersonObservation) -> float:
+            base = self._score(state, obs, keep_id_bonus=False)
+            guide = None if sam_guidance is None else sam_guidance.get(state.name)
+            if base < -100:
+                # A long disappearance can make the motion gate reject the
+                # correct reappearance. Strong agreement with the propagated
+                # fighter mask is allowed to reopen that gate.
+                if guide is None or box_iou(guide, obs.box) < 0.18:
+                    return base
+                # But not a refusal about *who* the candidate is. A fighter
+                # hidden behind the referee leaves a mask the referee overlaps,
+                # and this reopened him: on the analysis PC's ma604 recording
+                # every frame where a fighter's box went to the remembered
+                # bystander came through here (2026-10-06).
+                if state.last_refusal in NOT_REOPENED_BY_THE_MASK:
+                    return base
+                base = 0.36 + 0.28 * box_iou(guide, obs.box)
+            appearance = appearance_similarity(state.appearance, obs.appearance)
+            # An ID receives only a small bonus when clothing evidence agrees.
+            if obs.track_id is not None and obs.track_id == state.current_track_id and appearance >= 0.68:
+                base += 0.08
+            score = base + 0.20 * (appearance - 0.5)
+            if guide is not None:
+                overlap = box_iou(guide, obs.box)
+                distance = normalized_distance(guide, obs.box)
+                # A propagated mask is strong independent evidence, but the
+                # detector observation is still required for pose and events.
+                score += 0.60 * overlap + 0.18 / (1.0 + distance)
+                if overlap < 0.02 and distance > 0.75:
+                    score -= 0.55
+            return score
+
+        def scored_with_reasons(state: FighterState) -> tuple[list[float], list[str | None]]:
+            scores: list[float] = []
+            reasons: list[str | None] = []
+            for person in people:
+                state.last_refusal = None
+                scores.append(candidate_score(state, person))
+                reasons.append(state.last_refusal)
+            return scores, reasons
+
+        scores_a, reasons_a = scored_with_reasons(self.a)
+        scores_b, reasons_b = scored_with_reasons(self.b)
+        assignments: list[tuple[float, int | None, int | None]] = []
+        for ai in [None, *range(len(people))]:
+            for bi in [None, *range(len(people))]:
+                if ai is not None and bi is not None and ai == bi:
+                    continue
+                # An empty slot is worth the weakest match that would have
+                # been accepted, not nothing. Scoring it zero made following
+                # the wrong person strictly better than admitting a gap: at
+                # frame 206 of the reference bout, A's fighter - a 0.3
+                # confidence detection - simply was not detected, and
+                # "A on B's man, B pushed onto a stranger" scored 1.136
+                # against 1.091 for "A holds nobody, B keeps his own man".
+                # A wrong assignment is worth about +0.57 and honesty was
+                # worth 0, so the optimiser manufactured one every time a
+                # fighter went undetected.
+                #
+                # This was invisible while the referee was available: A landed
+                # on him instead, and B was left alone. Refusing A the referee
+                # removed the sink, not the cause.
+                sa = SETTINGS.min_reid_score if ai is None else scores_a[ai]
+                sb = SETTINGS.min_reid_score if bi is None else scores_b[bi]
+                if ai is not None and sa < SETTINGS.min_reid_score:
+                    continue
+                if bi is not None and sb < SETTINGS.min_reid_score:
+                    continue
+                assignments.append((sa + sb, ai, bi))
+        assignments.sort(reverse=True, key=lambda x: x[0])
+        _, ai, bi = assignments[0] if assignments else (0.0, None, None)
+
+        ambiguous = False
+        # If the opposite permutation is almost equally plausible, do not
+        # guess. Missing evidence is safer than silently exchanging A and B.
+        if ai is not None and bi is not None:
+            swapped = scores_a[bi] + scores_b[ai]
+            chosen = scores_a[ai] + scores_b[bi]
+            if chosen - swapped < 0.06:
+                # Not "we lost them" but "we cannot tell which is which". The
+                # difference matters to whoever is watching: the first needs
+                # better footage, the second needs a person to say who is who.
+                self.confusions += 1
+                self.last_confusion_frame = source_frame
+                ai = bi = None
+                ambiguous = True
+
+        a_obs = self._commit(self.a, people[ai], source_frame, scores_a[ai], recovered=people[ai].track_id != self.a.current_track_id) if ai is not None else None
+        b_obs = self._commit(self.b, people[bi], source_frame, scores_b[bi], recovered=people[bi].track_id != self.b.current_track_id) if bi is not None else None
+        for state, obs in ((self.a, a_obs), (self.b, b_obs)):
+            if obs is None:
+                state.missing_frames += 1
+                state.identity_confidence = 0.0
+        furniture_a = self._release_if_furniture(self.a)
+        furniture_b = self._release_if_furniture(self.b)
+        a_obs = None if furniture_a else a_obs
+        b_obs = None if furniture_b else b_obs
+        a_obs, b_obs = self._correct_swap(a_obs, b_obs)
+        if SETTINGS.bystander_memory and not ambiguous:
+            self._learn_bystanders(people, a_obs, b_obs)
+
+        # Why *this fighter* is unassigned in *this frame*, judged against the
+        # one person standing closest to where they were last seen. Counted
+        # once per lost fighter per frame, so the denominator is "frames this
+        # fighter was missing" and the shares are comparable. `self.rejections`
+        # cannot answer this - it counts every candidate against every fighter,
+        # so on a hall with fifteen people in shot it is dominated by the crowd
+        # being correctly refused for distance. Measured on fight 3:
+        # `too_far_to_be_them` is 68% of those refusals while a detection sits
+        # within the jump limit of the last known box in 100% of missing frames.
+        for state, obs, scores, reasons, furniture in (
+                (self.a, a_obs, scores_a, reasons_a, furniture_a),
+                (self.b, b_obs, scores_b, reasons_b, furniture_b)):
+            if obs is not None:
+                continue
+            if state.name in self.missing_frames_by_fighter:
+                self.missing_frames_by_fighter[state.name] += 1
+            if furniture:
+                self._blocked("released_as_furniture", state.name)
+                continue
+            if ambiguous:
+                self._blocked("cannot_tell_a_from_b", state.name)
+                continue
+            reference = self._predicted_box(state)
+            if reference is None:
+                self._blocked("no_anchor_to_search_from", state.name)
+                continue
+            k = min(range(len(people)),
+                    key=lambda i: normalized_distance(reference, people[i].box))
+            if scores[k] < -100:
+                self._blocked(reasons[k] or "refused_by_a_gate", state.name)
+            elif scores[k] < SETTINGS.min_reid_score:
+                # Nothing refused them outright; they simply did not look enough
+                # like the fighter to beat an empty slot. This one is invisible
+                # in every existing counter.
+                self._blocked("scored_below_empty_slot", state.name)
+            else:
+                self._blocked("lost_to_the_other_fighter", state.name)
+        return a_obs, b_obs
+
+    # What A and B carry between frames. Everything that describes who they
+    # were chosen as (anchors, counts) stays put.
+    _FOLLOWED_FIELDS = ("current_track_id", "last_box", "prev_box", "velocity", "last_keypoints",
+                        "appearance", "pose_signature", "identity_confidence", "missing_frames",
+                        "last_seen_source_frame")
+
+    def decide_clothed_official_filter(self, skin_a: float | None, skin_b: float | None) -> None:
+        """Set the clothed-official filter from the torso skin measured where the fighters were picked."""
+        self.clothed_official_filter = bool(
+            SETTINGS.clothed_official_filter_enabled
+            and skin_a is not None and skin_b is not None
+            and skin_a >= BARE_TORSO_MIN and skin_b >= BARE_TORSO_MIN)
+
+    def _correct_swap(self, a_obs: PersonObservation | None,
+                      b_obs: PersonObservation | None) -> tuple[PersonObservation | None, PersonObservation | None]:
+        """Swap A and B back when each looks like the other's selection.
+
+        See SETTINGS.swap_correction_margin. Compared with the colours picked
+        at selection, which never drift, rather than with the last frame,
+        which follows a swap as readily as the right person.
+        """
+        if a_obs is None or b_obs is None:
+            return a_obs, b_obs
+        anchor_a, anchor_b = self.a.anchor_appearance, self.b.anchor_appearance
+        if anchor_a is None or anchor_b is None or a_obs.appearance is None or b_obs.appearance is None:
+            return a_obs, b_obs
+        if appearance_similarity(anchor_a, anchor_b) >= SETTINGS.max_fighter_pair_similarity:
+            return a_obs, b_obs
+        cross = (appearance_similarity(anchor_b, a_obs.appearance)
+                 + appearance_similarity(anchor_a, b_obs.appearance)
+                 - appearance_similarity(anchor_a, a_obs.appearance)
+                 - appearance_similarity(anchor_b, b_obs.appearance))
+        keep = SETTINGS.swap_correction_smoothing
+        self._cross_match = keep * self._cross_match + (1.0 - keep) * cross
+        if self._cross_match > SETTINGS.swap_correction_margin:
+            self._cross_match_frames += 1
+        else:
+            self._cross_match_frames = 0
+        if self._cross_match_frames < SETTINGS.swap_correction_frames:
+            return a_obs, b_obs
+        for name in self._FOLLOWED_FIELDS:
+            value_a, value_b = getattr(self.a, name), getattr(self.b, name)
+            setattr(self.a, name, value_b)
+            setattr(self.b, name, value_a)
+        for held in (self._last_real_track, self._last_real_obs):
+            held["A"], held["B"] = held["B"], held["A"]
+        self._cross_match = -self._cross_match
+        self._cross_match_frames = 0
+        self.swaps_corrected += 1
+        return b_obs, a_obs
+
+    def confirm_handoff(self, name: str) -> None:
+        """A suspicious hand-off the fighter's own kit showed was them."""
+        if self.suspicious_handoffs.get(name, 0) > 0:
+            self.suspicious_handoffs[name] -= 1
+
+    def _release_if_furniture(self, state: FighterState) -> bool:
+        """Let go of a fighter that has turned out to be a seated spectator.
+
+        Refusing to switch onto scenery cannot help when the fighter was
+        acquired as scenery: a track is created with no history, so nothing is
+        known about it at the moment it is taken, and the guard only ever runs
+        on candidates. Measured on real tournament footage, B held one seated
+        man for an entire round and the analysis called it 98% coverage - which
+        is the trap, because a person in a chair is trivially easy to keep
+        covered. High coverage was evidence of the failure, not of success.
+
+        Six seconds of continuous history with almost no spread is not a
+        fighter under any reading, so the identity is dropped and recovery is
+        allowed to look again. The track is remembered so the next frame does
+        not simply pick the same chair back up.
+        """
+        track_id = state.current_track_id
+        if track_id is None:
+            return False
+        # Standing beside the other fighter, both seen within the last second:
+        # a referee stoppage or a count, not a spectator. See
+        # SETTINGS.furniture_partner_body_lengths for the measurements. "The
+        # same frame" was too strict: as a bout restarts one fighter is often
+        # hidden behind the other for a single analysed frame, and on the real
+        # bout that released A at 9.2 s and then B, since A was gone.
+        other = self.b if state is self.a else self.a
+        if (other.current_track_id is not None
+                and abs(other.last_seen_source_frame - state.last_seen_source_frame) <= self.source_fps
+                and pair_separation(state.last_box, other.last_box)
+                <= SETTINGS.furniture_partner_body_lengths):
+            return False
+        spread = self._recent_spread(track_id, self.source_fps)
+        # `max_release_spread_body_lengths`, not the switch threshold. Letting
+        # go of a fighter and refusing to take a new track are different
+        # decisions with different costs, and sharing one number meant the
+        # cautious value chosen for the second was dropping athletes all
+        # through the first. See core/config.py for the measured populations.
+        #
+        # Six seconds is the right amount of patience for a fighter who might
+        # merely be resting. It is far too much for a person in a chair, and
+        # the wait is not free: it is a wait spent measuring the wrong human
+        # and attributing the result to a fighter.
+        patient = spread is not None and spread < SETTINGS.max_release_spread_body_lengths
+        # **`_is_motionless` is deliberately not consulted here**, though it is
+        # still consulted when a new track wants to *take* an identity, above.
+        #
+        # This module already states the principle for the travel gate: refusing
+        # a switch is cheap and being wrong about it is not, so those gates
+        # "only block moving onto a new track, never drop the one already held".
+        # The short motionless reading was breaking that rule, and it cost more
+        # than everything else left.
+        #
+        # Measured 2026-09-15 on the user's own bout, after the release
+        # threshold was separated out: 78 releases remained, all of them in the
+        # opening 1.5-7.3 s, on the two tracks holding the two fighters, whose
+        # boxes moved about 80 px in six seconds. Their short spread ran
+        # 0.008-0.012 against a 0.02 threshold whose calibration note says "the
+        # least mobile fighter never goes below 0.029". **That was measured
+        # mid-round.** At the start of a bout the athletes stand still while the
+        # referee sets them - genuinely motionless, and not furniture.
+        #
+        # What is lost: a spectator acquired early can now be held for up to the
+        # six seconds the patient reading needs, instead of 1.5. That is a
+        # bounded cost on a rare case. What is gained is not dropping both
+        # fighters through the opening of every bout.
+        if not patient:
+            return False
+        self._furniture.add(int(track_id))
+        state.current_track_id = None
+        # And forget where we were, because where we were is the chair. The
+        # anchor is what every later candidate is judged against for distance,
+        # so leaving it in place quietly converts "we followed the wrong
+        # person" into "the right person is now unreachable": measured on the
+        # reference bout, B sat on a spectator at the right of frame, was
+        # released here, and then refused the real fighter 250 px away on the
+        # left as an implausible jump on every remaining frame of the round -
+        # holding one seated man's track from frame 386 to 1786.
+        state.last_box = None
+        state.prev_box = None
+        state.velocity = None
+        state.identity_confidence = 0.0
+        state.missing_frames += 1
+        state.switches_rejected += 1
+        return True
+
+    def merged_into_other(self, state: FighterState) -> bool:
+        """Did this fighter vanish into the other fighter's box on this frame?
+
+        In a clinch the detector often returns one box around both fighters:
+        one is "found" in it and the other is missing. Waiting
+        missing_before_recovery frames then loses the start of every clinch,
+        so a merge asks for the SAM2 mask at once (audit 2026-10-14, #2).
+        """
+        other = self.b if state is self.a else self.a
+        if state.missing_frames < 1 or state.last_box is None or other.last_box is None:
+            return False
+        if int(other.last_seen_source_frame) != self._current_frame:
+            return False
+        own = state.last_box
+        inter = (max(0.0, min(own[2], other.last_box[2]) - max(own[0], other.last_box[0]))
+                 * max(0.0, min(own[3], other.last_box[3]) - max(own[1], other.last_box[1])))
+        return inter / max(1.0, box_area(own)) >= 0.6
+
+    def needs_recovery(self, state: FighterState, analyzed_index: int) -> bool:
+        waited = state.missing_frames >= SETTINGS.missing_before_recovery or self.merged_into_other(state)
+        return (
+            SETTINGS.sam_recovery_enabled
+            and waited
+            and analyzed_index - state.last_sam_attempt_analyzed_frame >= SETTINGS.sam_cooldown_analyzed_frames
+            and state.last_box is not None
+        )
+
+    def apply_ai_assignment(self, people: list[PersonObservation], a_index: int, b_index: int, source_frame: int, confidence: float) -> tuple[PersonObservation | None, PersonObservation | None]:
+        """Commit a high-confidence joint assignment from the visual referee."""
+        if a_index == b_index or not (0 <= a_index < len(people)) or not (0 <= b_index < len(people)):
+            return None, None
+        a_candidate, b_candidate = people[a_index], people[b_index]
+        # The external decision may resolve a crossing, but candidates must
+        # still be physically plausible relative to the last known tracks.
+        if self._score(self.a, a_candidate, keep_id_bonus=False) < 0.36:
+            return None, None
+        if self._score(self.b, b_candidate, keep_id_bonus=False) < 0.36:
+            return None, None
+        a = self._commit(self.a, a_candidate, source_frame, confidence, recovered=True)
+        b = self._commit(self.b, b_candidate, source_frame, confidence, recovered=True)
+        return a, b
+
+    def apply_external_recovery(self, state: FighterState, recovered_box, people: list[PersonObservation], source_frame: int) -> PersonObservation | None:
+        if recovered_box is None:
+            return None
+        # Match a current detector observation to the externally recovered box.
+        best, best_score = None, -999.0
+        for person in people:
+            overlap = box_iou(recovered_box, person.box)
+            dist = normalized_distance(recovered_box, person.box)
+            score = 0.72 * overlap + 0.28 * (1.0 / (1.0 + dist))
+            if score > best_score:
+                best, best_score = person, score
+        if best is None or best_score < 0.42:
+            return None
+        state.sam_recovery_count += 1
+        return self._commit(state, best, source_frame, max(0.55, best_score), recovered=True)

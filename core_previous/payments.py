@@ -1,0 +1,559 @@
+from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
+
+from core.config import SETTINGS
+from core.features import is_on as feature_on
+
+
+# What each plan's feature list is written in. Two lines are never typed by
+# hand, because typing them is how they went wrong (QA, 2026-10-07):
+#   DAILY    the plan's daily_limit - the Coach 15 card left its 20 a day out
+#            while the comparison table, which reads daily_limit, had it;
+#   MOMENTS  the plan's evidence_limit as key moments - listed while key
+#            moments were switched off on every report.
+# A (feature, text, text_while_off) entry follows core/features.py: "while
+# off" text, or nothing when that is None.
+DAILY = "daily"
+MOMENTS = "moments"
+
+
+# How many fighters a workspace may hold, and who each plan is for.
+#
+# This is the line between the two products. An athlete analyses one person -
+# themselves - so their plans hold one fighter and are priced for one person. A
+# coach analyses a squad, and what they are buying is room for more names on
+# the roster, because that is what decides how much work the account does.
+# roster_limit of None means no ceiling.
+#
+# audience decides which plans a workspace is shown: a coach is not offered a
+# one-fighter plan, and an athlete is not sold seats they will never use.
+PLANS = {
+    "free": {
+        "label": "Starter",
+        "price": "€0",
+        "period": "forever",
+        "description": "A simple daily check-in for athletes getting started.",
+        "limit_label": "1 analysis every day",
+        "report_label": "Compact report",
+        "feature_spec": [DAILY, "Compact performance summary", MOMENTS, "1 coaching priority"],
+        "daily_limit": 1,
+        "monthly_limit": None,
+        "unlimited": False,
+        "report_tier": "compact",
+        "evidence_limit": 3,
+        "coaching_items": 1,
+        "training_items": 0,
+        "can_share": False,
+        "can_correct": False,
+        "credits": 0,
+        "roster_limit": 1,
+        "audience": "athlete",
+        "stripe_price_id": "",
+        "mode": "none",
+    },
+    "athlete": {
+        "label": "Athlete",
+        "price": "€9.99",
+        "period": "per month",
+        "description": "For athletes reviewing training and competition every day.",
+        "limit_label": "3 analyses every day",
+        "report_label": "Expanded report",
+        "feature_spec": [DAILY, "Expanded performance report",
+                         ("scoring", "Scorecard and core coaching", "Core coaching"), MOMENTS,
+                         "Private report sharing"],
+        "daily_limit": 3,
+        "monthly_limit": None,
+        "unlimited": False,
+        "report_tier": "expanded",
+        "evidence_limit": 8,
+        "coaching_items": 2,
+        "training_items": 2,
+        "can_share": True,
+        "can_correct": False,
+        "credits": 0,
+        "roster_limit": 1,
+        "audience": "athlete",
+        "stripe_price_id": os.getenv("STRIPE_PRICE_ATHLETE", ""),
+        "mode": "subscription",
+    },
+    "athlete_pro": {
+        "label": "Athlete Pro",
+        "price": "€24.99",
+        "period": "per month",
+        "description": "The complete WarriorIQ experience for active competitors.",
+        "limit_label": "10 analyses every day",
+        "report_label": "Complete report",
+        "feature_spec": [DAILY, "Complete performance analysis", "Full coach report and training plan",
+                         ("illegal_moves", "Full evidence replay and legality review", "Full skeleton replay"),
+                         # "Corrections" are one-tap checks on counted strikes,
+                         # which only exist while strike counts are on (E3, QA
+                         # 2026-10-11): the bullet follows the same switch.
+                         ("strike_counts", "Fight comparisons and corrections", "Fight comparisons")],
+        "daily_limit": 10,
+        "monthly_limit": None,
+        "unlimited": False,
+        "report_tier": "full",
+        "evidence_limit": None,
+        "coaching_items": None,
+        "training_items": None,
+        "can_share": True,
+        "can_correct": True,
+        # "Most flexible" described nothing. Athlete Pro is the same single
+        # fighter and the same features as Athlete; what it buys is ten
+        # analyses a day against three. Volume is the difference, so volume is
+        # what the badge says.
+        "highlight": "Most analyses",
+        "credits": 0,
+        "roster_limit": 1,
+        "audience": "athlete",
+        "stripe_price_id": os.getenv("STRIPE_PRICE_ATHLETE_PRO", os.getenv("STRIPE_PRICE_PRO", "")),
+        "mode": "subscription",
+    },
+    # The coach ladder. Priced by how many fighters the roster holds, because
+    # that is the thing a coach is actually buying and the thing that decides
+    # how much analysis the account does. Everything above the seat count is
+    # identical - a coach with five fighters needs the same reports as one with
+    # thirty, just fewer of them.
+    "coach_5": {
+        "label": "Coach 5",
+        "price": "€29.99",
+        "period": "per month",
+        "description": "For a corner working with a handful of fighters.",
+        "limit_label": "Up to 5 fighters",
+        "report_label": "Complete report",
+        "feature_spec": ["Up to 5 fighters on the roster", DAILY,
+                         "Complete report for every fighter", "Squad view and per-fighter trends",
+                         ("illegal_moves", "Full evidence replay and legality review", "Full skeleton replay")],
+        "daily_limit": 10,
+        "monthly_limit": None,
+        "unlimited": False,
+        "report_tier": "full",
+        "evidence_limit": None,
+        "coaching_items": None,
+        "training_items": None,
+        "can_share": True,
+        "can_correct": True,
+        "credits": 0,
+        "roster_limit": 5,
+        "audience": "coach",
+        "stripe_price_id": os.getenv("STRIPE_PRICE_COACH_5", ""),
+        "mode": "subscription",
+    },
+    "coach_15": {
+        "label": "Coach 15",
+        "price": "€54.99",
+        "period": "per month",
+        "description": "For a club squad training through a season.",
+        "limit_label": "Up to 15 fighters",
+        "report_label": "Complete report",
+        "feature_spec": ["Up to 15 fighters on the roster", DAILY, "Everything in Coach 5",
+                         "Squad view and per-fighter trends", "Fight comparisons across the roster"],
+        "daily_limit": 20,
+        "monthly_limit": None,
+        "unlimited": False,
+        "report_tier": "full",
+        "evidence_limit": None,
+        "coaching_items": None,
+        "training_items": None,
+        "can_share": True,
+        "can_correct": True,
+        # Was "Most clubs", which claimed a popularity that cannot exist:
+        # checkout is closed, nobody is on any paid plan, and the only route
+        # onto one is a grant made by hand. A claim about how many people
+        # chose this is a statistic about an empty population.
+        #
+        # What is true is the roster size - fifteen fighters covers a typical
+        # club - so the badge claims that instead.
+        "highlight": "Fits most club rosters",
+        "credits": 0,
+        "roster_limit": 15,
+        "audience": "coach",
+        "stripe_price_id": os.getenv("STRIPE_PRICE_COACH_15", ""),
+        "mode": "subscription",
+    },
+    "coach_30": {
+        "label": "Coach 30",
+        "price": "€74.99",
+        "period": "per month",
+        "description": "For a full team with several coaches working from it.",
+        "limit_label": "Up to 30 fighters",
+        "report_label": "Complete report",
+        "feature_spec": ["Up to 30 fighters on the roster", DAILY, "Everything in Coach 15"],
+        "daily_limit": 40,
+        "monthly_limit": None,
+        "unlimited": False,
+        "report_tier": "full",
+        "evidence_limit": None,
+        "coaching_items": None,
+        "training_items": None,
+        "can_share": True,
+        "can_correct": True,
+        "credits": 0,
+        "roster_limit": 30,
+        "audience": "coach",
+        "stripe_price_id": os.getenv("STRIPE_PRICE_COACH_30", ""),
+        "mode": "subscription",
+    },
+    "gym": {
+        "label": "Gym",
+        "price": "€89.99",
+        "period": "per month",
+        "description": "The unlimited WarriorIQ suite for busy gyms and fight teams.",
+        "limit_label": "Unlimited fighters",
+        "report_label": "Complete report",
+        "feature_spec": [DAILY, "Everything in Coach 30", "Complete reports for every fight", "Coach assignments and private sharing", "Saved fight library and comparisons", "Priority gym onboarding"],
+        "daily_limit": None,
+        "monthly_limit": None,
+        "unlimited": True,
+        "report_tier": "full",
+        "evidence_limit": None,
+        "coaching_items": None,
+        "training_items": None,
+        "can_share": True,
+        "can_correct": True,
+        "highlight": "Best for teams",
+        "credits": 0,
+        "roster_limit": None,
+        "audience": "coach",
+        "stripe_price_id": os.getenv("STRIPE_PRICE_GYM", ""),
+        "mode": "subscription",
+    },
+}
+
+
+# How a plan's allowance is counted (audit 2026-10-14, #51).
+#
+#   day            daily_limit analyses each UTC day - the default, and the
+#                  limits every plan above has today;
+#   month          monthly_limit analyses each calendar month;
+#   video_minutes  monthly_video_minutes minutes of analysed video each month.
+#
+# Chosen per plan with "allowance_period", or for every plan at once with
+# WARRIORIQ_ALLOWANCE_PERIOD. A plan without the number its period needs keeps
+# counting per day, so switching the setting can never leave a plan without a
+# limit. The numbers for month and video_minutes are the owner's to set.
+ALLOWANCE_PERIODS = ("day", "month", "video_minutes")
+DEFAULT_ALLOWANCE_PERIOD = os.getenv("WARRIORIQ_ALLOWANCE_PERIOD", "day").strip().lower()
+
+
+def allowance(plan: dict) -> dict:
+    """{"period": "day" | "month" | "video_minutes" | "unlimited" | "unavailable", "amount": n}."""
+    if plan.get("unlimited"):
+        return {"period": "unlimited", "amount": None}
+    wanted = str(plan.get("allowance_period") or DEFAULT_ALLOWANCE_PERIOD)
+    if wanted == "month" and plan.get("monthly_limit") is not None:
+        return {"period": "month", "amount": int(plan["monthly_limit"])}
+    if wanted == "video_minutes" and plan.get("monthly_video_minutes") is not None:
+        return {"period": "video_minutes", "amount": int(plan["monthly_video_minutes"])}
+    if plan.get("daily_limit") is not None:
+        return {"period": "day", "amount": int(plan["daily_limit"])}
+    if plan.get("monthly_limit") is not None:
+        return {"period": "month", "amount": int(plan["monthly_limit"])}
+    return {"period": "unavailable", "amount": 0}
+
+
+def allowance_text(plan: dict, *, every: bool = False) -> str:
+    """"3 analyses per day", "30 analyses per month", "120 video minutes per month"."""
+    rule = allowance(plan)
+    amount = rule["amount"]
+    if rule["period"] == "unlimited" or (rule["period"] != "unavailable" and amount is None):
+        return "Unlimited fight analyses"
+    if rule["period"] == "video_minutes":
+        return f"{amount} video minute{'' if amount == 1 else 's'} {'every' if every else 'per'} month"
+    noun = f"{amount} analys{'is' if amount == 1 else 'es'}"
+    if rule["period"] == "month":
+        return f"{noun} {'every' if every else 'per'} month"
+    if rule["period"] == "day":
+        return f"{noun} {'every' if every else 'per'} day"
+    return "No analyses"
+
+
+ALLOWANCE_COLUMN = {
+    "day": ("Analyses per day", "Per day"),
+    "month": ("Analyses per month", "Per month"),
+    "video_minutes": ("Minutes of video per month", "Video min / month"),
+}
+
+
+def allowance_column() -> tuple[str, str]:
+    """The pricing table's allowance heading, (full title, short label)."""
+    return ALLOWANCE_COLUMN.get(DEFAULT_ALLOWANCE_PERIOD, ALLOWANCE_COLUMN["day"])
+
+
+def allowance_cell(plan: dict) -> str:
+    """The pricing table's allowance cell: the number when the plan counts by
+    the column's period, else with its own unit ("30 / month")."""
+    rule = allowance(plan)
+    if rule["period"] == "unlimited":
+        return "Unlimited"
+    column = DEFAULT_ALLOWANCE_PERIOD if DEFAULT_ALLOWANCE_PERIOD in ALLOWANCE_COLUMN else "day"
+    if rule["period"] == column:
+        return str(rule["amount"])
+    if rule["period"] == "video_minutes":
+        return f"{rule['amount']} min / month"
+    if rule["period"] in {"day", "month"}:
+        return f"{rule['amount']} / {rule['period']}"
+    return "0"
+
+
+def plan_features(plan: dict) -> list[str]:
+    """A plan's feature list, from its own limits and the feature switches."""
+    out: list[str] = []
+    for item in plan.get("feature_spec") or []:
+        if item == DAILY:
+            out.append(allowance_text(plan))
+        elif item == MOMENTS:
+            if not feature_on("key_moments"):
+                continue
+            limit = plan.get("evidence_limit")
+            out.append("All verified key moments" if limit is None
+                       else f"{limit} verified key moments" if plan.get("report_tier") == "compact"
+                       else f"Up to {limit} verified key moments")
+        elif isinstance(item, tuple):
+            key, text, off = item
+            if feature_on(key):
+                out.append(text)
+            elif off:
+                out.append(off)
+        else:
+            out.append(str(item))
+    return out
+
+
+for _plan in PLANS.values():
+    _plan["features"] = plan_features(_plan)
+
+
+# The Coach plan was withdrawn. Anyone already carrying that key keeps
+# equivalent access rather than silently dropping to the free tier, which is
+# what an unknown key would otherwise do.
+LEGACY_PLAN_ALIASES = {"coach": "athlete_pro"}
+
+
+def plan_for_key(plan_key: str | None) -> dict:
+    """Return a complete, safe entitlement contract for an account plan."""
+    key = str(plan_key or "free").lower()
+    return PLANS.get(LEGACY_PLAN_ALIASES.get(key, key), PLANS["free"])
+
+
+def effective_plan_key(plan: str | None, plan_override: str | None, email: str | None = None) -> str:
+    """Resolve the plan an account actually holds.
+
+    A complimentary grant is an operator decision recorded in configuration
+    rather than in the accounts table, so it survives a database restore and
+    needs no manual row edit on the live host. It outranks the stored plan
+    because it is issued deliberately.
+    """
+    granted = SETTINGS.complimentary_plans.get(str(email or "").strip().lower())
+    if granted and granted in PLANS:
+        return granted
+    return str(plan_override or plan or "free")
+
+
+def create_checkout(plan_key: str, success_url: str, cancel_url: str, account_id: int, email: str) -> str:
+    if not SETTINGS.payments_enabled:
+        raise RuntimeError("Payments are disabled. Set WARRIORIQ_PAYMENTS=1 after configuring a lawful Stripe account.")
+    plan = PLANS.get(plan_key)
+    if not plan or plan.get("mode") not in {"payment", "subscription"} or not plan["stripe_price_id"]:
+        raise RuntimeError("This plan does not have a Stripe price ID configured.")
+    secret = os.getenv("STRIPE_SECRET_KEY", "")
+    if not secret:
+        raise RuntimeError("STRIPE_SECRET_KEY is not configured.")
+    import stripe
+
+    stripe.api_key = secret
+    session = stripe.checkout.Session.create(
+        mode=plan["mode"],
+        line_items=[{"price": plan["stripe_price_id"], "quantity": 1}],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        customer_email=email,
+        client_reference_id=str(account_id),
+        metadata={"warrioriq_account_id": str(account_id), "warrioriq_plan": plan_key},
+    )
+    return str(session.url)
+
+
+def verify_webhook(payload: bytes, signature: str):
+    secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    if not SETTINGS.payments_enabled or not secret:
+        raise RuntimeError("Stripe webhooks are not configured.")
+    import stripe
+
+    return stripe.Webhook.construct_event(payload, signature, secret)
+
+
+# Stripe events that change what an account already paid for. Checkout is
+# how a plan starts; these are how it continues, changes and ends. Without
+# them a cancelled, unpaid, refunded or disputed subscription kept its plan
+# for ever: the cancel button schedules the end at Stripe, and the event
+# that says it has ended was never read.
+SUBSCRIPTION_EVENTS = frozenset({
+    "customer.subscription.updated", "customer.subscription.deleted",
+    "invoice.paid", "invoice.payment_failed",
+    "charge.refunded", "charge.dispute.created",
+})
+# Stripe statuses that mean the customer is not paying and will not be.
+# past_due is not here: Stripe is still retrying the card, and the plan stays
+# until it gives up, which arrives as "unpaid" or "canceled".
+_ENDED_STATUSES = frozenset({"canceled", "unpaid", "incomplete_expired"})
+
+
+def _plan_for_price(price_id: str | None) -> str | None:
+    if not price_id:
+        return None
+    return next((key for key, plan in PLANS.items() if plan.get("stripe_price_id") == price_id), None)
+
+
+def _period_end(subscription: dict) -> str | None:
+    """current_period_end, on the subscription or (newer API) on its first item."""
+    stamp = subscription.get("current_period_end")
+    if stamp is None:
+        items = ((subscription.get("items") or {}).get("data") or [])
+        stamp = items[0].get("current_period_end") if items else None
+    if not stamp:
+        return None
+    return datetime.fromtimestamp(int(stamp), tz=timezone.utc).isoformat()
+
+
+def subscription_change(event: dict) -> dict | None:
+    """What a verified Stripe event does to the account it belongs to.
+
+    {"subscription_id", "customer_id", "status", "plan", "period_end",
+    "reason"}, where plan is the plan to set ("free" to end access, a paid
+    key when the price changed, None to keep it). None for events that change
+    nothing. Pure, so every case is tested without Stripe.
+    """
+    kind = event.get("type")
+    obj = (event.get("data") or {}).get("object") or {}
+    if kind not in SUBSCRIPTION_EVENTS:
+        return None
+    if kind.startswith("customer.subscription."):
+        status = str(obj.get("status") or "")
+        items = ((obj.get("items") or {}).get("data") or [])
+        price = ((items[0].get("price") or {}).get("id")) if items else None
+        change = {"subscription_id": obj.get("id"), "customer_id": obj.get("customer"),
+                  "period_end": _period_end(obj), "plan": None, "status": status, "reason": kind}
+        if kind == "customer.subscription.deleted" or status in _ENDED_STATUSES:
+            change.update(plan="free", status="cancelled")
+        else:
+            change["plan"] = _plan_for_price(price)
+            if obj.get("cancel_at_period_end") and status in {"active", "trialing"}:
+                change["status"] = "cancel_at_period_end"
+        return change
+    if kind in {"invoice.paid", "invoice.payment_failed"}:
+        lines = ((obj.get("lines") or {}).get("data") or [])
+        end = ((lines[0].get("period") or {}).get("end")) if lines else None
+        return {"subscription_id": obj.get("subscription"), "customer_id": obj.get("customer"),
+                "period_end": datetime.fromtimestamp(int(end), tz=timezone.utc).isoformat() if end else None,
+                "plan": None, "status": "active" if kind == "invoice.paid" else "past_due", "reason": kind}
+    if kind == "charge.refunded":
+        # A partial refund (a goodwill credit) leaves the plan; a full one ends it.
+        if int(obj.get("amount_refunded") or 0) < int(obj.get("amount") or 0):
+            return None
+        return {"subscription_id": None, "customer_id": obj.get("customer"), "period_end": None,
+                "plan": "free", "status": "refunded", "reason": kind}
+    # charge.dispute.created: the money is being clawed back through the bank.
+    return {"subscription_id": None, "customer_id": obj.get("customer"), "period_end": None,
+            "plan": "free", "status": "disputed", "reason": kind}
+
+
+def cancel_subscription_at_period_end(subscription_id: str) -> dict:
+    """Schedule cancellation with Stripe; never claim success without its response."""
+    if not SETTINGS.payments_enabled:
+        raise RuntimeError("Payments are not configured.")
+    secret = os.getenv("STRIPE_SECRET_KEY", "")
+    if not secret or not subscription_id:
+        raise RuntimeError("No active Stripe subscription is connected to this account.")
+    import stripe
+
+    stripe.api_key = secret
+    subscription = stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
+    return {
+        "id": str(subscription.get("id") or subscription_id),
+        "status": str(subscription.get("status") or "active"),
+        "cancel_at_period_end": bool(subscription.get("cancel_at_period_end")),
+        "current_period_end": subscription.get("current_period_end"),
+    }
+
+
+def roster_capacity(plan: dict, current: int) -> dict:
+    """Whether this workspace may add another fighter.
+
+    The seat count is what a coach's plan actually sells, so it has to be
+    enforced rather than described. Archived fighters do not count: someone who
+    has left the gym should not hold a seat, and the fights they were in still
+    resolve to their name.
+    """
+    limit = plan.get("roster_limit")
+    if limit is None:
+        return {"limit": None, "used": current, "remaining": None, "can_add": True}
+    remaining = max(0, int(limit) - int(current))
+    return {
+        "limit": int(limit),
+        "used": int(current),
+        "remaining": remaining,
+        "can_add": remaining > 0,
+    }
+
+
+def plans_for(audience: str) -> list[tuple[str, dict]]:
+    """The plans worth showing this kind of workspace.
+
+    A coach is never offered a one-fighter plan and an athlete is not sold
+    seats they will not use, so each side sees a ladder that reads as a ladder
+    rather than a catalogue with half of it irrelevant.
+    """
+    wanted = "coach" if str(audience).strip().lower() == "coach" else "athlete"
+    return [(key, plan) for key, plan in PLANS.items() if plan.get("audience") == wanted]
+
+
+# What "Complete report" and friends are called in one word, for a table cell
+# that has about six characters to work with on a phone.
+_REPORT_WORD = {"compact": "Compact", "expanded": "Expanded", "full": "Complete"}
+
+
+def comparison_rows() -> list[dict]:
+    """Every plan as one row, so they can be read side by side.
+
+    Seven plans stacked as cards is about 7,500 px on a phone. Comparing two
+    of them means scrolling past the other five and remembering, which is not
+    comparing - and the cards cannot be made short enough to fix it, because
+    what makes them long is the detail somebody wants once they have chosen.
+
+    So the choosing happens here, in four numbers a phone shows at once, and
+    the cards stay for the detail. Each row links to its own card.
+
+    The fields are the ones that actually separate the plans. `limit_label`
+    was not usable: it says "3 analyses every day" for an athlete plan and
+    "Up to 5 fighters" for a coach one, so a column of it compares two
+    different quantities.
+    """
+    rows = []
+    for key, plan in PLANS.items():
+        unlimited = bool(plan.get("unlimited"))
+        roster = plan.get("roster_limit")
+        rows.append({
+            "key": key,
+            "label": plan.get("label"),
+            "price": plan.get("price"),
+            "period": plan.get("period"),
+            # "Unlimited" rather than a blank: an empty cell in a comparison
+            # reads as "this plan does not have that".
+            "fighters": "Unlimited" if (unlimited or roster is None) else str(roster),
+            # Named "daily" for the template; it is whatever period the plan counts by (#51).
+            "daily": allowance_cell(plan),
+            "report": _REPORT_WORD.get(str(plan.get("report_tier")), "Complete"),
+            "audience": plan.get("audience"),
+        })
+    return rows
+
+
+# An athlete plan's headline is its allowance, so it follows the counting
+# period rather than being typed by hand (#51). A coach plan's headline is its
+# roster ("Up to 5 fighters") and is left as written.
+for _plan in PLANS.values():
+    if _plan.get("audience") == "athlete":
+        _plan["limit_label"] = allowance_text(_plan, every=True)

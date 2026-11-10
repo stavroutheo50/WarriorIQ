@@ -1,0 +1,386 @@
+from __future__ import annotations
+
+import shlex
+import subprocess
+import json
+import shutil
+import time
+import asyncio
+from pathlib import Path
+
+from starlette.formparsers import MultiPartException
+from starlette.responses import JSONResponse
+
+from core.config import OUTPUTS, UPLOADS, SETTINGS
+from core.db import connection
+from core.payments import effective_plan_key, plan_for_key
+
+
+class UploadCapacityError(RuntimeError):
+    def __init__(self, status: int, detail: str):
+        super().__init__(detail)
+        self.status = status
+
+
+FIGHT_UPLOAD_PATH = "/upload"
+
+
+def is_fight_upload(scope) -> bool:
+    """The one definition of the route that upload admission control guards.
+
+    Both the body-limit middleware and the admission middleware have to agree
+    with the router about which request this is. They ran off a literal path
+    instead, so an application served under a mount prefix would have let the
+    upload reach the handler with no storage lease and no reserved analysis -
+    and the handler would have raised AttributeError looking for the job id
+    that admission never set. Matching after the prefix keeps the three in step.
+    """
+    if scope.get("type") != "http" or scope.get("method") != "POST":
+        return False
+    path = scope.get("path") or ""
+    root = (scope.get("root_path") or "").rstrip("/")
+    if root and path.startswith(root):
+        path = path[len(root):] or "/"
+    return path == FIGHT_UPLOAD_PATH
+
+
+# Every other route that takes a file, with its own ceiling: (exact path or
+# prefix ending in "/", byte limit). Without an entry, a route's multipart body
+# is spooled to disk in full before the handler's own size check runs, so a
+# single request could fill the disk however small the handler's limit is.
+# Registered by app.main next to the limits themselves (limit_upload_route).
+_OTHER_UPLOAD_ROUTES: list[tuple[str, int]] = []
+
+
+def limit_upload_route(path: str, byte_limit: int) -> None:
+    """Bound this route's request body while it streams in, not after."""
+    _OTHER_UPLOAD_ROUTES.append((path, int(byte_limit)))
+
+
+def upload_body_limit(scope) -> int | None:
+    """The body ceiling for this request, or None when it is not an upload route."""
+    if is_fight_upload(scope):
+        return min(SETTINGS.max_fight_bytes, SETTINGS.max_upload_bytes) + 1024 * 1024
+    if scope.get("type") != "http" or scope.get("method") != "POST":
+        return None
+    path = scope.get("path") or ""
+    root = (scope.get("root_path") or "").rstrip("/")
+    if root and path.startswith(root):
+        path = path[len(root):] or "/"
+    for route, byte_limit in _OTHER_UPLOAD_ROUTES:
+        if path == route or (route.endswith("/") and path.startswith(route)):
+            return byte_limit + 1024 * 1024      # room for the form fields around the file
+    return None
+
+
+class UploadBodyLimitMiddleware:
+    """Bound multipart spooling, including requests with no Content-Length."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        limit = upload_body_limit(scope)
+        if limit is None:
+            return await self.app(scope, receive, send)
+        headers = dict(scope.get("headers", []))
+        try:
+            too_large = int(headers.get(b"content-length", b"0")) > limit
+        except ValueError:
+            too_large = True
+        if too_large:
+            return await JSONResponse({"detail": "This upload exceeds the maximum allowed size."}, status_code=413)(scope, receive, send)
+        received = 0
+        exceeded = False
+        timed_out = False
+        responded = False
+        deadline = time.monotonic() + SETTINGS.upload_timeout_seconds
+
+        async def limited_receive():
+            nonlocal received, exceeded, timed_out
+            try:
+                message = await asyncio.wait_for(receive(), timeout=max(0, deadline - time.monotonic()))
+            except asyncio.TimeoutError as exc:
+                timed_out = True
+                raise MultiPartException("The upload took too long. Please retry on a stable connection.") from exc
+            received += len(message.get("body", b""))
+            if received > limit:
+                exceeded = True
+                # The multipart parser closes its temporary files on this error.
+                raise MultiPartException("This upload exceeds the maximum allowed size.")
+            return message
+
+        async def limited_send(message):
+            nonlocal responded
+            if message["type"] == "http.response.start":
+                responded = True
+                if exceeded:
+                    message = {**message, "status": 413}
+            await send(message)
+
+        # Rewriting the status on the way out only works when something
+        # downstream turns the exception into a response, and only the
+        # multipart parser does. A raw body - which is what a chunked upload
+        # sends, and what a misbehaving client sends - has nobody to catch it,
+        # so the MultiPartException escaped as a **500**.
+        #
+        # That is not a hypothetical. max_upload_bytes' own comment records the
+        # live symptom as "refused at exactly 130 MiB, three times running,
+        # with a 500 rather than a 413", blames the web host for it, and sets
+        # the ceiling to match. The same symptom reproduces here with no host
+        # involved, on any body that arrives without a Content-Length to
+        # pre-check.
+        #
+        # So the refusal is answered here rather than hoping somebody
+        # downstream does it. `responded` guards the one case where it would be
+        # wrong: if the application has already begun a response, the status is
+        # on the wire and the exception has to travel.
+        try:
+            await self.app(scope, limited_receive, limited_send)
+        except MultiPartException:
+            if responded or not (exceeded or timed_out):
+                raise
+            if exceeded:
+                await JSONResponse(
+                    {"detail": "This upload exceeds the maximum allowed size."},
+                    status_code=413)(scope, receive, send)
+            else:
+                await JSONResponse(
+                    {"detail": "The upload took too long. Please retry on a stable connection."},
+                    status_code=408)(scope, receive, send)
+
+
+# Job states that are a real fight still waiting on its owner or on the
+# analysis machine. An upload that was begun and never finished is not one of
+# them: it is not a job at all, and counting it is what locked people out.
+PENDING_JOB_STATUSES = frozenset({"selecting", "queued", "running", "preparing"})
+
+
+def _pending_limit_for(con, account_id: int) -> int | None:
+    """How many fights this account may have waiting at once; None is no cap.
+
+    The Gym plan is sold as unlimited, and a cap of two waiting fights refused
+    its third upload with 429 (QA, 2026-10-11). Every other plan keeps the
+    configured ceiling.
+    """
+    row = con.execute("SELECT plan,plan_override,email FROM accounts WHERE id=?", (account_id,)).fetchone()
+    if row is not None and plan_for_key(effective_plan_key(row["plan"], row["plan_override"], row["email"])).get("unlimited"):
+        return None
+    return SETTINGS.max_pending_uploads
+
+
+def _pending_job_ids(account_id: int) -> set[str]:
+    pending = set()
+    for session in OUTPUTS.glob("*/analysis-session.json"):
+        try:
+            job = json.loads(session.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(job, dict) and job.get("account_id") == account_id and job.get("status") in PENDING_JOB_STATUSES:
+            pending.add(session.parent.name)
+    return pending
+
+
+def pending_upload_status(account_id: int) -> dict:
+    """The waiting-fight count and its ceiling, for the upload page to show
+    before a file is picked rather than only after the upload is refused."""
+    with connection() as con:
+        limit = _pending_limit_for(con, int(account_id))
+    count = len(_pending_job_ids(int(account_id)))
+    return {"count": count, "limit": limit, "full": limit is not None and count >= limit}
+
+
+def reserve_upload_storage(account_id: int, job_id: str, byte_limit: int) -> None:
+    """Serialize admission across processes before receiving or copying a video."""
+    now = time.time()
+    # Abandoned chunked sessions first, so what they hold is free before the
+    # account's storage is added up below.
+    from core.chunked_upload import release_idle_sessions
+
+    release_idle_sessions(account_id, now=now)
+    with connection() as con:
+        con.execute("BEGIN IMMEDIATE")
+        for row in con.execute("SELECT job_id FROM upload_leases WHERE expires_epoch < ?", (now,)):
+            if not (OUTPUTS / row["job_id"] / "analysis-session.json").exists() and not con.execute(
+                "SELECT 1 FROM fights WHERE job_id=?", (row["job_id"],),
+            ).fetchone():
+                con.execute("DELETE FROM analysis_usage WHERE job_id=?", (row["job_id"],))
+        con.execute("DELETE FROM upload_leases WHERE expires_epoch < ?", (now,))
+        leases = con.execute("SELECT * FROM upload_leases").fetchall()
+        own_leases = [row for row in leases if row["account_id"] == account_id]
+        paths: set[Path] = set()
+        pending = set()
+        for session in OUTPUTS.glob("*/analysis-session.json"):
+            try:
+                job = json.loads(session.read_text(encoding="utf-8"))
+                if job.get("account_id") != account_id:
+                    continue
+                if job.get("status") in PENDING_JOB_STATUSES:
+                    pending.add(session.parent.name)
+                if job.get("video_path"):
+                    paths.add(Path(job["video_path"]).resolve())
+            except (OSError, ValueError, TypeError):
+                continue
+        rows = con.execute(
+            "SELECT video_path FROM fights WHERE profile_id=(SELECT profile_id FROM accounts WHERE id=?)",
+            (account_id,),
+        ).fetchall()
+        paths.update(Path(row["video_path"]).resolve() for row in rows if row["video_path"])
+        # Leases are deliberately not counted here. A lease is an upload in
+        # flight, and one whose owner gave up is reclaimed above; counting them
+        # made a closed tab indistinguishable from a fight waiting for its
+        # fighters. Storage below still accounts for every lease.
+        pending_limit = _pending_limit_for(con, account_id)
+        if pending_limit is not None and len(pending) >= pending_limit:
+            raise UploadCapacityError(
+                429,
+                f"You already have {len(pending)} fight{'s' if len(pending) != 1 else ''} waiting, "
+                f"and your plan allows {pending_limit} at a time - "
+                "uploaded and waiting for you to pick the fighters, or being analysed. "
+                "Finish or cancel one in your fight library (Pending), then upload this video.")
+        used = 0
+        for path in paths:
+            if path.parent != UPLOADS.resolve():
+                continue
+            for candidate in {path, path.with_name(f"{path.stem}_web.mp4")}:
+                try:
+                    used += candidate.stat().st_size
+                except FileNotFoundError:
+                    pass
+        # Room for the original and its browser-compatible derivative.
+        own_reserved = sum(row["reserved_bytes"] for row in own_leases)
+        if used + own_reserved + byte_limit * 2 > SETTINGS.account_storage_bytes:
+            raise UploadCapacityError(413, "Your private video storage is full. Delete an old fight video before uploading another.")
+        # A transfer can temporarily occupy spool + original + derivative space.
+        reserved = sum(row["reserved_bytes"] for row in leases)
+        free = shutil.disk_usage(UPLOADS).free
+        if free - reserved - byte_limit * 3 < int(SETTINGS.minimum_free_storage_gb * 1024**3):
+            raise UploadCapacityError(507, "Fight uploads are temporarily paused while storage capacity is restored.")
+        con.execute("INSERT INTO upload_leases VALUES(?,?,?,?)", (
+            job_id, account_id, byte_limit * 3, now + SETTINGS.upload_timeout_seconds + 900,
+        ))
+
+
+def release_upload_storage(job_id: str) -> None:
+    with connection() as con:
+        con.execute("DELETE FROM upload_leases WHERE job_id=?", (job_id,))
+
+
+def scan_upload(path: str | Path) -> dict:
+    """Scan one generated upload path with a configured antivirus command.
+
+    ClamAV's clamdscan/clamdscan.exe contract is supported directly: exit 0 is
+    clean, 1 is infected, and any other exit code means the scanner failed.
+    The command comes only from trusted deployment configuration and is never
+    built from the original user filename.
+    """
+    command = shlex.split(SETTINGS.malware_scan_command, posix=False)
+    if not command:
+        return {
+            "status": "unavailable" if SETTINGS.malware_scan_required else "skipped",
+            "clean": not SETTINGS.malware_scan_required,
+        }
+    try:
+        result = subprocess.run(
+            [*command, "--no-summary", str(Path(path).resolve())],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"status": "unavailable", "clean": False}
+    if result.returncode == 0:
+        return {"status": "clean", "clean": True}
+    if result.returncode == 1:
+        return {"status": "infected", "clean": False}
+    return {"status": "unavailable", "clean": False}
+
+
+# The fight-video formats WarriorIQ accepts, in one place.
+#
+# This existed three times and they did not agree: the server refused anything
+# outside this set, the file picker was `accept="video/*"`, and the line under
+# it was a hand-typed sentence. video/* let the picker offer .wmv, .flv, .3gp
+# and .mpg - happily selected, uploaded over a phone connection, and only then
+# refused. The drift is the bug, so the extensions, the picker filter and the
+# sentence are all derived from this tuple and cannot disagree again.
+#
+# The MIME types are what a browser reports for these containers; the picker
+# gets both them and the extensions, because a browser that does not recognise
+# a container reports an empty type and would otherwise filter the file out.
+#
+# This is the *fight* video list. The profile video in /profile is deliberately
+# a narrower set - it is played back in a <video> element, where MKV and AVI
+# would not play - and is not derived from here.
+FIGHT_VIDEO_FORMATS: tuple[tuple[str, str], ...] = (
+    (".mp4", "video/mp4"),
+    (".mov", "video/quicktime"),
+    (".mkv", "video/x-matroska"),
+    (".avi", "video/x-msvideo"),
+    (".m4v", "video/x-m4v"),
+    (".webm", "video/webm"),
+    # Ogg Theora, as Wikimedia Commons and some screen recorders write it.
+    # Decoded by the same bundled FFmpeg as everything above; anything OpenCV
+    # cannot read is converted on the analysis machine (core.analyzer).
+    (".ogv", "video/ogg"),
+    (".ogg", "video/ogg"),
+)
+
+# What the upload route refuses on.
+FIGHT_VIDEO_EXTENSIONS: frozenset[str] = frozenset(
+    suffix for suffix, _ in FIGHT_VIDEO_FORMATS)
+
+# What the file picker offers. Extensions first: Safari and Firefox match on
+# those when the MIME type is unknown to them.
+FIGHT_VIDEO_ACCEPT: str = ",".join(
+    [suffix for suffix, _ in FIGHT_VIDEO_FORMATS]
+    + [mime for _, mime in FIGHT_VIDEO_FORMATS])
+
+# What the reader is told, built from the same tuple: "MP4, MOV, ... or WEBM".
+_NAMES = [suffix.lstrip(".").upper() for suffix, _ in FIGHT_VIDEO_FORMATS]
+FIGHT_VIDEO_LABEL: str = ", ".join(_NAMES[:-1]) + f" or {_NAMES[-1]}"
+
+
+# The container signatures WarriorIQ accepts, as (offset, bytes) pairs. A file
+# matching none of them is not a video whatever it is called.
+#
+#   ISO base media (MP4, MOV, M4V): a box-size word, then the type "ftyp".
+#   EBML (MKV, WEBM):               the EBML magic at byte 0.
+#   RIFF (AVI):                     "RIFF", a size word, then "AVI ".
+#   Ogg (OGV, OGG):                 "OggS" at byte 0. An audio-only .ogg has
+#                                   the same magic; it fails at the decoder,
+#                                   which reports no video track.
+_VIDEO_SIGNATURES: tuple[tuple[tuple[int, bytes], ...], ...] = (
+    ((4, b"ftyp"),),
+    ((0, b"\x1a\x45\xdf\xa3"),),
+    ((0, b"RIFF"), (8, b"AVI ")),
+    ((0, b"OggS"),),
+)
+
+# Enough to reach the furthest signature offset with room to spare.
+_HEADER_BYTES = 16
+
+
+def looks_like_video(path: str | Path) -> bool:
+    """Whether the bytes on disk are one of the containers we accept.
+
+    The upload route checked the filename suffix and nothing else, so an
+    eleven-byte text file renamed to .mp4 was accepted as a fight: the drop
+    zone turned green, the submit button enabled, and the failure arrived much
+    later from the decoder, by which time the reader had been told their fight
+    was uploading.
+
+    Deliberately a container check, not a "can this decode" check. Answering
+    that means starting a decoder on an untrusted file, which is the thing a
+    format check exists to avoid; a file that passes here and still will not
+    decode is caught by the probe that follows, with a real error to show.
+    """
+    try:
+        with open(path, "rb") as handle:
+            header = handle.read(_HEADER_BYTES)
+    except OSError:
+        return False
+    return any(
+        all(header[at:at + len(magic)] == magic for at, magic in signature)
+        for signature in _VIDEO_SIGNATURES
+    )

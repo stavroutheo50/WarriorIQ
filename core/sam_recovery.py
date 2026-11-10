@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import shutil
 import tempfile
 import threading
@@ -74,20 +75,103 @@ class _DecodedClip:
     def full(self) -> bool:
         return self.count >= int(self.images.shape[0])
 
-    def add(self, frame_bgr: np.ndarray) -> None:
-        if self.full:
-            return
+    @staticmethod
+    def prepare(frame_bgr: np.ndarray, image_size: int) -> np.ndarray:
+        """The per-frame image work, apart so the sweep's helper thread can do it."""
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         # PIL resizes with bicubic by default, which is what SAM2's loader got
         # from Image.resize, so the model sees the filter it was tuned on.
-        resized = cv2.resize(rgb, (self.image_size, self.image_size),
-                             interpolation=cv2.INTER_CUBIC)
-        frame = torch.from_numpy(np.ascontiguousarray(resized))
+        return np.ascontiguousarray(cv2.resize(rgb, (int(image_size), int(image_size)),
+                                               interpolation=cv2.INTER_CUBIC))
+
+    def add(self, frame_bgr: np.ndarray) -> None:
+        self.add_prepared(self.prepare(frame_bgr, self.image_size))
+
+    def add_prepared(self, resized_rgb: np.ndarray) -> None:
+        if self.full:
+            return
+        frame = torch.from_numpy(resized_rgb)
         self.images[self.count] = frame.permute(2, 0, 1).float().div_(255.0)
         self.count += 1
 
     def taken(self) -> torch.Tensor:
         return self.images[: self.count]
+
+
+_END = object()
+
+
+class _SampledFrames:
+    """The frames the sweep keeps, decoded and prepared on a helper thread.
+
+    2026-10-20, measured on the owner's RTX 5060: the sweep was 43 s of an
+    84 s analysis (52%) and 70 s of 213 s. It read() every source frame -
+    decode and colour conversion - to keep one in `stride` (about one in
+    fifteen), and decoded while the card waited. The frame pass already
+    grab()s the frames it skips and decodes ahead (core/frame_feed.py; grab
+    measured -61% on 1080p60). This brings the sweep the same two things.
+
+    The results do not change: the same frames, in the same order, stopping
+    at the same frame a read() loop would stop at, prepared by the same code.
+    OpenCV and torch release the GIL, so decoding runs beside propagation.
+    """
+
+    def __init__(self, cap, start_frame: int, end_frame: int, stride: int, image_size: int,
+                 depth: int = 16):
+        self._cap, self._start, self._end = cap, int(start_frame), int(end_frame)
+        self._stride, self._image_size = max(1, int(stride)), int(image_size)
+        self._queue: queue.Queue = queue.Queue(maxsize=max(1, depth))
+        self._stopped = threading.Event()
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(target=self._run, name="warrioriq-sam-frames", daemon=True)
+        self._thread.start()
+
+    def _put(self, item) -> bool:
+        while not self._stopped.is_set():
+            try:
+                self._queue.put(item, timeout=0.2)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def _run(self) -> None:
+        try:
+            source = self._start
+            while source < self._end and not self._stopped.is_set():
+                # read() is grab() + retrieve(); a failed grab is where read()
+                # would have stopped too.
+                if not self._cap.grab():
+                    break
+                if (source - self._start) % self._stride == 0:
+                    ok, frame = self._cap.retrieve()
+                    if not ok or frame is None:
+                        break
+                    if not self._put((source, _DecodedClip.prepare(frame, self._image_size), frame.shape[:2])):
+                        return
+                source += 1
+        except BaseException as exc:  # noqa: BLE001 - handed to the reading thread
+            self._error = exc
+        finally:
+            self._put(_END)
+
+    def __iter__(self):
+        while True:
+            item = self._queue.get()
+            if item is _END:
+                if self._error is not None:
+                    raise self._error
+                return
+            yield item
+
+    def close(self) -> None:
+        self._stopped.set()
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+        self._thread.join(timeout=5.0)
 
 
 def _install_in_memory_loader() -> None:
@@ -230,6 +314,8 @@ class SamRecovery:
         self.failure_reason = None
         self.continuous_frames = 0
         self.continuous_failure_reason = None
+        # Told each frame the sweep finishes, in order (SweepInBackground).
+        self.frame_done = None
         # Where the sweep's time goes (2026-10-13): on an RTX 5060 it took
         # 0.23 s a frame, more than the 0.173 s the stride planner assumes,
         # and the report could not say whether decoding, SAM2's own frame
@@ -269,6 +355,28 @@ class SamRecovery:
         _park(predictor)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+    @staticmethod
+    def _logits_to_box(logits: torch.Tensor) -> np.ndarray | None:
+        """_mask_to_box, worked out where the mask already is.
+
+        2026-10-20, the owner's RTX 5060: turning masks into boxes was 7.4 s
+        of a 37 s sweep - 0.1 s a mask - because each full-resolution mask was
+        copied off the card and every pixel searched with numpy. On the card
+        the same answer is four numbers and a count: the same box, the same
+        "fewer than four pixels is no box" rule.
+        """
+        mask = (logits.detach() > 0.0).squeeze()
+        if mask.ndim != 2:
+            return None
+        rows = torch.nonzero(mask.any(dim=1)).flatten()
+        cols = torch.nonzero(mask.any(dim=0)).flatten()
+        if rows.numel() == 0:
+            return None
+        found = torch.stack([mask.sum(), cols[0], rows[0], cols[-1], rows[-1]]).cpu().numpy()
+        if int(found[0]) < 4:
+            return None
+        return found[1:].astype(np.float32)
 
     @staticmethod
     def _mask_to_box(mask) -> np.ndarray | None:
@@ -366,13 +474,15 @@ class SamRecovery:
                     guided: dict[str, np.ndarray] = {}
                     boxing_started = time.perf_counter()
                     for j, object_id in enumerate(object_ids):
-                        box = self._mask_to_box((mask_logits[j] > 0.0).detach().cpu().numpy())
+                        box = self._logits_to_box(mask_logits[j])
                         if box is not None:
                             guided["A" if int(object_id) == 1 else "B"] = box
                     boxing += time.perf_counter() - boxing_started
                     if guided:
                         tracks[source_frames[int(frame_index)]] = guided
                         last_guided = guided
+                    if self.frame_done is not None:
+                        self.frame_done(source_frames[int(frame_index)], guided or None)
                     if progress_callback is not None and int(frame_index) % 15 == 0:
                         progress_callback(min(total, completed + int(frame_index) + 1), total)
             for name in ("A", "B"):
@@ -434,33 +544,32 @@ class SamRecovery:
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            source = start_frame
             saved = 0
             completed = 0
             clip = None
             chunk_sources: list[int] = []
-            while source < end_frame:
-                decoding_started = time.perf_counter()
-                ok, frame = cap.read()
-                if not ok or frame is None:
-                    break
-                if (source - start_frame) % stride == 0:
+            frames = _SampledFrames(cap, start_frame, end_frame, stride, image_size)
+            try:
+                # "decoding" is now the time the sweep waited for its next
+                # frame; decoding that overlapped propagation costs nothing.
+                waiting_since = time.perf_counter()
+                for source, prepared, shape in frames:
+                    self.sweep_seconds["decoding"] += time.perf_counter() - waiting_since
                     if clip is None:
                         capacity = min(chunk_frames, max(1, expected - saved))
-                        clip = _DecodedClip(image_size, capacity,
-                                            height or frame.shape[0], width or frame.shape[1])
+                        clip = _DecodedClip(image_size, capacity, height or shape[0], width or shape[1])
                         chunk_sources = []
-                    clip.add(frame)
+                    clip.add_prepared(prepared)
                     chunk_sources.append(source)
                     saved += 1
-                self.sweep_seconds["decoding"] += time.perf_counter() - decoding_started
-                if (source - start_frame) % stride == 0:
                     if clip.full:
                         self._propagate_clip(clip, chunk_sources, seeds, tracks,
                                              progress_callback, completed, expected)
                         completed += len(chunk_sources)
                         clip, chunk_sources = None, []
-                source += 1
+                    waiting_since = time.perf_counter()
+            finally:
+                frames.close()
             if clip is not None and clip.count:
                 self._propagate_clip(clip, chunk_sources, seeds, tracks,
                                      progress_callback, completed, expected)
@@ -483,3 +592,94 @@ def nearest_guidance(
         return None
     nearest = min(tracks, key=lambda frame: abs(frame - source_frame))
     return tracks[nearest] if abs(nearest - source_frame) <= max(0, tolerance) else None
+
+
+class SweepInBackground:
+    """The continuous sweep on a helper thread while the frame pass runs.
+
+    2026-10-21, the owner's RTX 5060: a 197 s fight took 200 s - the sweep
+    75 s, then the frame pass 120 s, one after the other. The frame pass keeps
+    the card busy about 40% of each frame; the rest is CPU work. Running the
+    sweep beside it fills that gap.
+
+    The frame pass gets exactly the guidance it would have got: guidance()
+    waits until the sweep has finished every frame up to `source_frame +
+    tolerance`, so nearest_guidance sees every key that could be the answer
+    (keys further on are further than the tolerance). Frames are finished in
+    order. When the sweep is over, the answer comes from its returned tracks
+    - which are empty if it failed, as they were when it ran first.
+
+    The predictor is released on the sweep's own thread before the sweep is
+    marked over, so a frame-pass rescue (only after an empty sweep) never
+    meets a running sweep. One difference from running first, and only on a
+    sweep that fails part-way or finds nothing at all: frames analysed before
+    that was known used the guidance there was, and the fallback frame buffer
+    for rescues was not kept.
+    """
+
+    def __init__(self, recovery: SamRecovery, video_path: str, start_frame: int, end_frame: int,
+                 source_fps: float, fighter_a_box, fighter_b_box):
+        self._recovery = recovery
+        self._condition = threading.Condition()
+        self._tracks: dict[int, dict[str, np.ndarray]] = {}
+        self._reached = int(start_frame) - 1
+        self._done = False
+        self.result: dict[int, dict[str, np.ndarray]] = {}
+        self.available: bool | None = None
+        self.breakdown: dict[str, float] = {}
+        self.frames = 0
+        self.seconds = 0.0
+        self.waited = 0.0
+        recovery.frame_done = self._frame_done
+        self._thread = threading.Thread(
+            target=self._run, name="warrioriq-sam-sweep", daemon=True,
+            args=(video_path, start_frame, end_frame, source_fps, fighter_a_box, fighter_b_box))
+        self._thread.start()
+
+    def _frame_done(self, source_frame: int, guided) -> None:
+        with self._condition:
+            if guided:
+                self._tracks[int(source_frame)] = guided
+            self._reached = max(self._reached, int(source_frame))
+            self._condition.notify_all()
+
+    def _run(self, *args) -> None:
+        started = time.perf_counter()
+        result: dict = {}
+        try:
+            result = self._recovery.track_segment(*args) or {}
+        except Exception as exc:  # noqa: BLE001 - the frame pass must still finish
+            self._recovery.continuous_failure_reason = f"{type(exc).__name__}: {exc}"
+            result = {}
+        finally:
+            self._recovery.frame_done = None
+            available = self._recovery.available
+            breakdown = dict(getattr(self._recovery, "sweep_seconds", {}) or {})
+            frames = int(getattr(self._recovery, "continuous_frames", 0) or 0)
+            try:
+                self._recovery.release()
+            finally:
+                with self._condition:
+                    self.result = result
+                    self.available, self.breakdown, self.frames = available, breakdown, frames
+                    self.seconds = time.perf_counter() - started
+                    self._done = True
+                    self._condition.notify_all()
+
+    def guidance(self, source_frame: int, tolerance: int) -> dict[str, np.ndarray] | None:
+        """nearest_guidance, once every frame that could be the answer is finished."""
+        started = time.perf_counter()
+        target = int(source_frame) + max(0, int(tolerance))
+        with self._condition:
+            self._condition.wait_for(lambda: self._done or self._reached >= target)
+            self.waited += time.perf_counter() - started
+            return nearest_guidance(self.result if self._done else self._tracks, source_frame, tolerance)
+
+    def finished_empty(self) -> bool:
+        """The sweep is over and found nothing: what "no tracks" meant before."""
+        with self._condition:
+            return self._done and not self.result
+
+    def join(self) -> dict[int, dict[str, np.ndarray]]:
+        self._thread.join()
+        return self.result

@@ -1,0 +1,254 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+from core.config import SETTINGS
+
+LOGGER = logging.getLogger("warrioriq.temporal")
+
+ACTION_CLASSES = [
+    "none",
+    "jab",
+    "cross",
+    "left_hook",
+    "right_hook",
+    "left_uppercut",
+    "right_uppercut",
+    "backfist",
+    "spinning_backfist",
+    "left_round_kick",
+    "right_round_kick",
+    "left_front_kick",
+    "right_front_kick",
+    "left_push_kick",
+    "right_push_kick",
+    "left_knee",
+    "right_knee",
+]
+
+
+@dataclass(frozen=True)
+class TemporalDecision:
+    status: str
+    label: str | None = None
+    confidence: float | None = None
+    reason: str | None = None
+
+
+def build_temporal_network(architecture: str, input_dim: int, classes: int):
+    """Create the checkpoint-compatible temporal network.
+
+    `pose_transformer_v2` is the current training target. `gru_v1` remains
+    supported so an older WarriorIQ checkpoint can still be loaded rather than
+    silently becoming incompatible.
+    """
+    import torch
+    import torch.nn as nn
+
+    if architecture == "gru_v1":
+        class GRUNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                hidden = 192
+                self.gru = nn.GRU(
+                    input_dim,
+                    hidden,
+                    num_layers=2,
+                    batch_first=True,
+                    dropout=0.15,
+                    bidirectional=True,
+                )
+                self.norm = nn.LayerNorm(hidden * 2)
+                self.head = nn.Sequential(
+                    nn.Linear(hidden * 2, 192),
+                    nn.GELU(),
+                    nn.Dropout(0.10),
+                    nn.Linear(192, classes),
+                )
+
+            def forward(self, x):
+                y, _ = self.gru(x)
+                return self.head(self.norm(y[:, -1]))
+
+        return GRUNet()
+
+    if architecture != "pose_transformer_v2":
+        raise ValueError(f"Unknown temporal architecture: {architecture}")
+
+    class PoseTransformer(nn.Module):
+        def __init__(self):
+            super().__init__()
+            embed = 192
+            self.input_norm = nn.LayerNorm(input_dim)
+            self.input_projection = nn.Linear(input_dim, embed)
+            self.cls_token = nn.Parameter(torch.zeros(1, 1, embed))
+            # Action windows are intentionally short for real-time inference;
+            # keep extra room for future longer checkpoints.
+            self.position = nn.Parameter(torch.zeros(1, 65, embed))
+            layer = nn.TransformerEncoderLayer(
+                d_model=embed,
+                nhead=6,
+                dim_feedforward=512,
+                dropout=0.12,
+                activation="gelu",
+                batch_first=True,
+                norm_first=True,
+            )
+            self.encoder = nn.TransformerEncoder(layer, num_layers=4, norm=nn.LayerNorm(embed))
+            self.head = nn.Sequential(
+                nn.LayerNorm(embed),
+                nn.Linear(embed, 192),
+                nn.GELU(),
+                nn.Dropout(0.10),
+                nn.Linear(192, classes),
+            )
+            nn.init.trunc_normal_(self.cls_token, std=0.02)
+            nn.init.trunc_normal_(self.position, std=0.02)
+
+        def forward(self, x):
+            b, t, _ = x.shape
+            if t + 1 > self.position.shape[1]:
+                raise ValueError(f"Sequence length {t} exceeds model capacity")
+            y = self.input_projection(self.input_norm(x))
+            cls = self.cls_token.expand(b, -1, -1)
+            y = torch.cat([cls, y], dim=1)
+            y = y + self.position[:, : t + 1]
+            y = self.encoder(y)
+            return self.head(y[:, 0])
+
+    return PoseTransformer()
+
+
+def checkpoint_sha256(path) -> str:
+    """SHA-256 of a checkpoint file: the identity the strike exam is tied to."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+class TemporalModel:
+    """Optional trained WarriorIQ kickboxing temporal classifier.
+
+    A neural checkpoint is used only if a real trained checkpoint exists. Until
+    WarriorIQ has a properly labeled kickboxing dataset with held-out complete
+    fights, the analyzer falls back to its deterministic multi-frame action
+    engine. Random/untrained weights are never exposed as analysis facts.
+    """
+
+    def __init__(self):
+        self.available = False
+        self.model = None
+        self.device = None
+        self.architecture = None
+        self.validation = {}
+        self.status = "checkpoint_missing"
+        self.error_type = None
+        self.inference_failures = 0
+        self.input_dim = 102
+        # Which exact file this is, recorded in every report so the accuracy
+        # exam's verdict applies only to the model it examined
+        # (core/strike_exam.py). None until a checkpoint loads.
+        self.checkpoint_sha256 = None
+        checkpoint = Path(SETTINGS.temporal_checkpoint)
+        if not checkpoint.exists():
+            LOGGER.warning("temporal_model_unavailable reason=checkpoint_missing")
+            return
+        try:
+            import torch
+
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            payload = torch.load(checkpoint, map_location=self.device, weights_only=True)
+            input_dim = int(payload.get("input_dim", 102)) if isinstance(payload, dict) else 102
+            if input_dim != 102:
+                raise ValueError("Checkpoint input dimensions do not match the pose feature contract")
+            state = payload.get("state_dict", payload) if isinstance(payload, dict) else payload
+            architecture = payload.get("architecture", "gru_v1") if isinstance(payload, dict) else "gru_v1"
+            classes = payload.get("classes", ACTION_CLASSES) if isinstance(payload, dict) else ACTION_CLASSES
+            if list(classes) != ACTION_CLASSES:
+                raise ValueError("Checkpoint action classes do not match this WarriorIQ build")
+            self.model = build_temporal_network(architecture, input_dim, len(ACTION_CLASSES)).to(self.device)
+            self.model.load_state_dict(state)
+            self.model.eval()
+            self.architecture = architecture
+            if isinstance(payload, dict):
+                self.validation = {
+                    "val_accuracy": payload.get("val_accuracy"),
+                    "held_out_fights": payload.get("held_out_fights"),
+                    "dataset_version": payload.get("dataset_version"),
+                    "per_class_validation_accuracy": payload.get("per_class_validation_accuracy"),
+                    "test_accuracy": payload.get("test_accuracy"),
+                    "held_out_test_fights": payload.get("held_out_test_fights"),
+                    "per_class_test_accuracy": payload.get("per_class_test_accuracy"),
+                    "per_class_test_precision": payload.get("per_class_test_precision"),
+                    "per_class_test_f1": payload.get("per_class_test_f1"),
+                    "macro_test_f1": payload.get("macro_test_f1"),
+                    "macro_action_test_f1": payload.get("macro_action_test_f1"),
+                    "end_to_end_validation": payload.get("end_to_end_validation"),
+                }
+            self.checkpoint_sha256 = checkpoint_sha256(checkpoint)
+            self.available = True
+            self.input_dim = input_dim
+            self.status = "ready"
+            LOGGER.info("temporal_model_loaded architecture=%s", architecture)
+        except Exception as exc:
+            self.available = False
+            self.model = None
+            self.status = "checkpoint_load_failed"
+            self.error_type = type(exc).__name__
+            LOGGER.error("temporal_model_unavailable reason=checkpoint_load_failed error_type=%s", self.error_type)
+
+    def diagnostics(self) -> dict:
+        return {
+            "status": self.status,
+            "error_type": self.error_type,
+            "inference_failures": self.inference_failures,
+        }
+
+    def predict_decision(self, sequence: np.ndarray) -> TemporalDecision:
+        if not self.available or self.model is None:
+            return TemporalDecision("unavailable", reason=self.status)
+        try:
+            import torch
+
+            if sequence.ndim != 2 or sequence.shape[0] == 0 or sequence.shape[1] != self.input_dim:
+                raise ValueError("Temporal input does not match the pose feature contract")
+            if not np.isfinite(sequence).all():
+                raise ValueError("Temporal input contains non-finite pose features")
+            tensor = torch.from_numpy(sequence.astype(np.float32, copy=False))[None].to(self.device)
+            with torch.inference_mode():
+                logits = self.model(tensor)
+                if logits.shape != (1, len(ACTION_CLASSES)) or not torch.isfinite(logits).all():
+                    raise ValueError("Temporal output does not match the action class contract")
+                probs = torch.softmax(logits, dim=-1)[0]
+            confidence, index = torch.max(probs, dim=0)
+            label = ACTION_CLASSES[int(index)]
+            value = float(confidence)
+            if value < SETTINGS.temporal_probability_threshold:
+                return TemporalDecision("uncertain", label, value, "below_threshold")
+            if label == "none":
+                return TemporalDecision("no_action", label, value)
+            return TemporalDecision("strike", label, value)
+        except Exception as exc:
+            # Stop retrying a broken checkpoint for every strike and revoke its
+            # release status for this run. The report retains the reason.
+            self.available = False
+            self.status = "inference_failed"
+            self.error_type = type(exc).__name__
+            self.inference_failures += 1
+            LOGGER.error("temporal_inference_failed error_type=%s", self.error_type)
+            return TemporalDecision("unavailable", reason=self.status)
+
+    def predict(self, sequence: np.ndarray) -> tuple[str, float] | None:
+        """Retain the existing tuple-or-None interface for older callers."""
+        decision = self.predict_decision(sequence)
+        if decision.status == "strike":
+            return decision.label, decision.confidence
+        return None

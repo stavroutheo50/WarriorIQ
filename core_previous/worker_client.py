@@ -1,0 +1,274 @@
+from __future__ import annotations
+
+import http.client
+import json
+import os
+import re
+import shutil
+import socket
+import ssl
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+
+from app.state import AnalysisRunLost
+
+
+class RemoteWorkerError(RuntimeError):
+    pass
+
+
+class WorkerRefused(RemoteWorkerError):
+    """The web app answered, and will not give this worker fights: its code differs."""
+
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+# How long to wait for the web side to answer.
+#
+# Was 30 seconds, and that is not enough for the host this actually talks to.
+# Measured against warrioriq.eu on 2026-09-07: /health answered in 8.4 to 26.9
+# seconds across repeated warm requests. The application is not what is slow -
+# the `Server-Timing: app;dur=` header it sets from its own clock reads 24 to
+# 46 **milliseconds**, and a static favicon takes just as long as a rendered
+# page. The seconds are spent in front of the app, on the shared host.
+#
+# So the worker was timing out on a site that was going to answer, logging
+# "Worker API connection failed: TimeoutError" and sleeping - which is why no
+# job was being claimed. A worker that waits a minute for a slow host costs
+# nothing; one that gives up at thirty seconds does not run the fight at all.
+WORKER_HTTP_TIMEOUT_SECONDS = float(os.getenv("WARRIORIQ_WORKER_HTTP_TIMEOUT", "90"))
+
+
+class RemoteWorkerClient:
+    """Small authenticated client for the WarriorIQ web/GPU boundary."""
+
+    def __init__(self, base_url: str, token: str, worker_id: str):
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.worker_id = worker_id
+
+    def _request(self, method: str, path: str, payload: dict | None = None, *, timeout: float | None = None):
+        data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}{path}", data=data, method=method,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/json",
+                **({"Content-Type": "application/json"} if data is not None else {}),
+            },
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=WORKER_HTTP_TIMEOUT_SECONDS if timeout is None else timeout,
+            ) as response:
+                body = response.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            if exc.code == 409:
+                raise AnalysisRunLost(detail) from exc
+            raise RemoteWorkerError(f"Worker API returned HTTP {exc.code}: {detail}") from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise RemoteWorkerError(f"Worker API connection failed: {type(exc).__name__}") from exc
+        return json.loads(body) if body else {}
+
+    def heartbeat(self) -> None:
+        self._request("POST", "/api/worker/heartbeat", {"worker_id": self.worker_id})
+
+    def claim(self) -> dict | None:
+        from core.build_info import ANALYSIS_VERSION, analysis_file_hashes, analysis_fingerprint
+
+        response = self._request("POST", "/api/worker/claim", {
+            "worker_id": self.worker_id, "analysis_version": ANALYSIS_VERSION,
+            "analysis_fingerprint": analysis_fingerprint(), "analysis_files": analysis_file_hashes()})
+        if response.get("refused") == "worker_code_differs":
+            differences = response.get("differences") or {}
+            named = "; ".join(f"{label}: {', '.join(differences[key])}" for key, label in (
+                ("changed", "different here"), ("missing_on_worker", "missing here"))
+                if differences.get(key))
+            raise WorkerRefused(
+                "The web app refused this worker: its analysis code is not the same as the "
+                f"website's (worker {analysis_fingerprint()}, website {response.get('required_fingerprint')}). "
+                + (f"Files in this worker's core folder - {named}. " if named else "")
+                + "Update the worker and the website to the same version from GitHub, then restart the worker.",
+                "worker_code_differs")
+        if response.get("refused"):
+            # The server is newer than this code. Saying so is the only useful
+            # thing a stale worker can do; analysing would produce a report
+            # the server will not accept.
+            raise WorkerRefused(
+                f"The web app refused this worker ({response['refused']}): it needs analysis "
+                f"version {response.get('required_analysis_version')}, this worker is "
+                f"{ANALYSIS_VERSION}. Redeploy the worker from the current code.",
+                str(response["refused"]))
+        return response.get("job")
+
+    def analysis_code(self) -> dict:
+        """The web app's own core/*.py, so a refused worker can match it exactly."""
+        return self._request("GET", "/api/worker/analysis-code", timeout=max(WORKER_HTTP_TIMEOUT_SECONDS, 180))
+
+    def progress(self, job_id: str, analysis_run_id: str, patch: dict) -> None:
+        self._request("POST", f"/api/worker/jobs/{job_id}/progress", {
+            "worker_id": self.worker_id,
+            "analysis_run_id": analysis_run_id,
+            "patch": patch,
+        })
+
+    def failed(self, job_id: str, analysis_run_id: str, error_code: str) -> None:
+        self._request("POST", f"/api/worker/jobs/{job_id}/failed", {
+            "worker_id": self.worker_id,
+            "analysis_run_id": analysis_run_id,
+            "error_code": error_code,
+        })
+
+    def download_video(self, job: dict, destination: Path) -> None:
+        query = urllib.parse.urlencode({
+            "worker_id": self.worker_id,
+            "analysis_run_id": job["analysis_run_id"],
+        })
+        request = urllib.request.Request(
+            f"{self.base_url}/api/worker/jobs/{job['job_id']}/video?{query}",
+            headers={"Authorization": f"Bearer {self.token}"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response, destination.open("wb") as output:
+                expected = response.headers.get("Content-Length")
+                shutil.copyfileobj(response, output, length=1024 * 1024)
+            # A dropped connection ends copyfileobj quietly and leaves a
+            # truncated file behind. Nothing checked, so the analysis started
+            # on half a video and died on cv2.VideoCapture with "Could not open
+            # fight video" - which reads as a broken upload, when the upload was
+            # complete and it was this download that stopped early.
+            if expected is not None:
+                written = destination.stat().st_size
+                if written != int(expected):
+                    destination.unlink(missing_ok=True)
+                    raise RemoteWorkerError(
+                        f"Video download stopped early: received {written} of {expected} bytes."
+                    )
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            if exc.code == 409:
+                raise AnalysisRunLost(detail) from exc
+            raise RemoteWorkerError(f"Video download returned HTTP {exc.code}: {detail}") from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            destination.unlink(missing_ok=True)
+            raise RemoteWorkerError(f"Video download failed: {type(exc).__name__}") from exc
+
+    def complete(self, job_id: str, analysis_run_id: str, archive_path: Path) -> None:
+        boundary = f"warrioriq-{uuid.uuid4().hex}"
+        fields = {
+            "worker_id": self.worker_id,
+            "analysis_run_id": analysis_run_id,
+        }
+        parts = []
+        for name, value in fields.items():
+            parts.append(
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+            )
+        file_header = (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"archive\"; "
+            f"filename=\"worker-result.zip\"\r\nContent-Type: application/zip\r\n\r\n"
+        ).encode()
+        closing = f"\r\n--{boundary}--\r\n".encode()
+        content_length = sum(map(len, parts)) + len(file_header) + archive_path.stat().st_size + len(closing)
+        parsed = urllib.parse.urlsplit(self.base_url)
+        target = f"{parsed.path.rstrip('/')}/api/worker/jobs/{job_id}/complete"
+        connection_class = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+        connection = connection_class(
+            parsed.hostname, parsed.port,
+            timeout=180,
+            **({"context": ssl.create_default_context()} if parsed.scheme == "https" else {}),
+        )
+        try:
+            connection.putrequest("POST", target)
+            connection.putheader("Authorization", f"Bearer {self.token}")
+            connection.putheader("Accept", "application/json")
+            connection.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
+            connection.putheader("Content-Length", str(content_length))
+            connection.endheaders()
+            for part in parts:
+                connection.send(part)
+            connection.send(file_header)
+            with archive_path.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    connection.send(chunk)
+            connection.send(closing)
+            response = connection.getresponse()
+            body = response.read().decode("utf-8", errors="replace")[:500]
+            if response.status == 409:
+                raise AnalysisRunLost(body)
+            if response.status not in {200, 201}:
+                raise RemoteWorkerError(f"Artifact upload returned HTTP {response.status}: {body}")
+        except (http.client.HTTPException, TimeoutError, OSError) as exc:
+            raise RemoteWorkerError(f"Artifact upload failed: {type(exc).__name__}") from exc
+        finally:
+            connection.close()
+
+
+def send_magic_packet(mac: str, host: str, port: int = 9, timeout: float = 4.0) -> bool:
+    """Wake a sleeping analysis machine over the network.
+
+    The analysis GPU lives on a home connection behind NAT, so the queue cannot
+    reach in and the machine cannot poll while it is asleep. A Wake-on-LAN magic
+    packet is the one thing a sleeping network card still listens for: six 0xFF
+    bytes followed by the target MAC repeated sixteen times, sent as UDP.
+
+    Best effort by design. The fight is already queued durably and the scheduled
+    drain still collects it, so a blocked port or a changed address must never
+    fail an upload -- it only costs the visitor the wait until the next drain.
+    """
+    digits = re.sub(r"[^0-9a-fA-F]", "", mac or "")
+    if len(digits) != 12 or not host:
+        return False
+    payload = b"\xff" * 6 + bytes.fromhex(digits) * 16
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.sendto(payload, (host, int(port)))
+        return True
+    except OSError:
+        return False
+
+
+def wake_remote_worker(wake_url: str, token: str, job_id: str, timeout: float = 8.0) -> bool:
+    """Ask a scale-to-zero GPU to start and drain the queue.
+
+    Best effort by design. The fight is already queued durably, so a failed or
+    slow wake must never fail the uploader's request; the worker still picks the
+    fight up on its next start either way.
+    """
+    if not wake_url:
+        return False
+    request = urllib.request.Request(
+        wake_url,
+        data=json.dumps({"job_id": job_id}, separators=(",", ":")).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return 200 <= response.status < 300
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
+def retry_heartbeat(client: RemoteWorkerClient, attempts: int = 3) -> None:
+    for attempt in range(attempts):
+        try:
+            client.heartbeat()
+            return
+        except RemoteWorkerError:
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(1.0 + attempt)

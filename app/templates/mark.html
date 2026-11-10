@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Mark the strikes · WarriorIQ{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
+{% block content %}
+{#- The owner watches their fight and taps each strike as it is thrown
+    (app.main.strike_marks_page, core/strike_marks.py). Their marks are what
+    the automatic strike count is measured against. -#}
+<a class="quiet-back" href="/replay/{{job_id}}">← Back to the replay</a>
+<div class="section-title"><div><div class="eyebrow">Teach WarriorIQ to count</div><h1 class="page-h1">Mark the strikes</h1></div></div>
+<p class="mark-intro">Play the fight and tap a fighter&rsquo;s button every time they throw a strike, landed or not. Half speed makes it easier. Every tap is saved straight away; you can stop and come back.</p>
+{% if video_removed %}
+<div class="notice" role="status">The video for this fight has been removed, so it cannot be marked. <a class="text-link" href="/result/{{job_id}}">Open the report</a></div>
+{% else %}
+<div class="mark-player">
+  <video id="markVideo" controls playsinline webkit-playsinline preload="auto" src="/media/{{job_id}}"></video>
+  <div class="mark-speed" role="group" aria-label="Playback speed"><span class="small muted">Speed</span>{% for rate in [0.25, 0.5, 0.75, 1] %}<button type="button" class="btn secondary tiny" data-rate="{{rate}}" aria-pressed="{{ 'true' if rate == 0.5 else 'false' }}">{{ rate }}&times;</button>{% endfor %}</div>
+</div>
+<div class="mark-buttons">
+  <button type="button" class="mark-tap mark-a" data-fighter="A"><span>{{ names.A }}</span><b data-count="A">0</b><small>Tap or press 1</small></button>
+  <button type="button" class="mark-tap mark-b" data-fighter="B"><span>{{ names.B }}</span><b data-count="B">0</b><small>Tap or press 2</small></button>
+</div>
+<div class="mark-tools"><button type="button" class="btn secondary tiny" id="markUndo" disabled>Undo last</button><span class="small muted" id="markSaved" aria-live="polite"></span></div>
+
+<section class="card mark-result" aria-labelledby="markResultTitle">
+  <h2 id="markResultTitle">How WarriorIQ&rsquo;s count compares</h2>
+  <p class="small muted">Up to <b data-covered>0:00</b>, the part of the video you have watched here.</p>
+  <div class="mark-result-grid">
+    <div><b data-r="marked">0</b><span>strikes you marked</span></div>
+    <div><b data-r="counted">0</b><span>strikes WarriorIQ counted</span></div>
+    <div><b data-r="matched">0</b><span>found by both</span></div>
+  </div>
+  <p data-r-sentence></p>
+</section>
+
+<details class="mark-list-fold"><summary>Your marks &middot; <span data-total>0</span> &middot; add the type or whether it landed</summary>
+  <p class="small muted">Optional. Tap a time to see that moment again.</p>
+  <ol class="mark-list" id="markList"></ol>
+</details>
+{% endif %}
+<script type="application/json" id="markData">{{ {"marks": marks, "covered": covered_seconds, "comparison": comparison, "start": start_seconds, "names": names}|tojson }}</script>
+{% endblock %}
+{% block scripts %}{% if not video_removed %}
+<script nonce="{{ request.state.csp_nonce }}">
+(()=>{
+const jobId={{ job_id|tojson }},data=JSON.parse(document.getElementById('markData').textContent);
+const video=document.getElementById('markVideo'),list=document.getElementById('markList'),undo=document.getElementById('markUndo'),saved=document.getElementById('markSaved');
+let added=[],marks=data.marks.slice(),covered=data.covered||0,rate=0.5,timer=null,inFlight=false,again=false;
+const clock=s=>{s=Math.max(0,s);return `${Math.floor(s/60)}:${(s%60).toFixed(1).padStart(4,'0')}`};
+video.addEventListener('loadedmetadata',()=>{video.playbackRate=rate;if(data.start&&video.currentTime<data.start)video.currentTime=data.start});
+document.querySelectorAll('[data-rate]').forEach(b=>b.addEventListener('click',()=>{rate=Number(b.dataset.rate);video.playbackRate=rate;document.querySelectorAll('[data-rate]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)))}));
+video.addEventListener('timeupdate',()=>{if(!video.seeking&&!video.paused&&video.currentTime>covered){covered=video.currentTime;queue()}});
+function render(comparison){
+  for(const who of ['A','B'])document.querySelector(`[data-count="${who}"]`).textContent=marks.filter(m=>m.fighter===who).length;
+  document.querySelector('[data-total]').textContent=marks.length;undo.disabled=!added.some(m=>marks.includes(m));
+  list.innerHTML='';
+  [...marks].map((m,i)=>[m,i]).reverse().forEach(([m,i])=>{
+    const li=document.createElement('li');li.className='mark-row mark-row-'+m.fighter.toLowerCase();
+    const t=document.createElement('button');t.type='button';t.className='mark-time wiq-num';t.textContent=clock(m.t);t.onclick=()=>{video.currentTime=Math.max(0,m.t-1.5);video.play().catch(()=>{})};
+    const who=document.createElement('span');who.className='mark-who';who.textContent=data.names[m.fighter]||('Fighter '+m.fighter);
+    li.append(t,who);
+    const chips=(key,values,labels)=>{const g=document.createElement('span');g.className='mark-chips';values.forEach((v,k)=>{const c=document.createElement('button');c.type='button';c.className='mark-chip';c.textContent=labels[k];c.setAttribute('aria-pressed',String(m[key]===v));c.onclick=()=>{m[key]=m[key]===v?null:v;render();queue()};g.append(c)});return g};
+    li.append(chips('family',['punch','kick','knee'],['Punch','Kick','Knee']),chips('landed',[true,false],['Landed','Missed']));
+    const del=document.createElement('button');del.type='button';del.className='mark-del';del.setAttribute('aria-label','Remove this mark');del.textContent='×';del.onclick=()=>{marks.splice(i,1);render();queue()};li.append(del);
+    list.append(li)});
+  if(comparison)showComparison(comparison);
+}
+function showComparison(c){
+  document.querySelector('[data-covered]').textContent=clock(c.covered_seconds||0);
+  for(const key of ['marked','counted','matched'])document.querySelector(`[data-r="${key}"]`).textContent=c[key];
+  const s=document.querySelector('[data-r-sentence]');
+  if(!c.marked&&!c.counted){s.textContent='Mark some strikes to see how the automatic count compares.';return}
+  const pct=v=>v==null?'—':Math.round(v*100)+'%';
+  const parts=[];
+  parts.push(c.counted?`Of the ${c.counted} strikes WarriorIQ counted, ${pct(c.counted_real_share)} were ones you marked.`:'WarriorIQ counted no strikes in this part of the video.');
+  if(c.marked)parts.push(`Of the ${c.marked} you marked, WarriorIQ found ${pct(c.marked_found_share)}.`);
+  if(c.type_checked)parts.push(`Where you gave the type, it was right ${c.type_right} of ${c.type_checked} times.`);
+  s.textContent=parts.join(' ');
+}
+// Saves at most every 600 ms. Not reset by later changes: while the video
+// plays, timeupdate fires every quarter second and a debounce never fired.
+function queue(){if(!timer)timer=setTimeout(()=>{timer=null;save()},600)}
+async function save(){
+  if(inFlight){again=true;return}inFlight=true;saved.textContent='Saving…';
+  try{
+    const r=await fetch(`/api/strike-marks/${jobId}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),credentials:'same-origin',body:JSON.stringify({marks,covered_seconds:covered,playback_rate:rate})});
+    const body=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(body.detail||`HTTP ${r.status}`);
+    saved.textContent=`Saved · ${body.saved} mark${body.saved===1?'':'s'}`;showComparison(body.comparison);
+  }catch(err){saved.textContent='Not saved yet: '+err.message+'. It retries on your next tap.'}
+  finally{inFlight=false;if(again){again=false;queue()}}
+}
+function tap(fighter){
+  if(!video.readyState)return;
+  const mark={t:Math.round(video.currentTime*1000)/1000,fighter,family:null,landed:null};marks.push(mark);added.push(mark);
+  marks.sort((a,b)=>a.t-b.t);
+  if(video.currentTime>covered)covered=video.currentTime;
+  const b=document.querySelector(`.mark-tap[data-fighter="${fighter}"]`);b.classList.remove('flash');void b.offsetWidth;b.classList.add('flash');
+  render();queue();
+}
+document.querySelectorAll('.mark-tap').forEach(b=>b.addEventListener('click',()=>tap(b.dataset.fighter)));
+document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,select'))return;if(e.key==='1'){e.preventDefault();tap('A')}else if(e.key==='2'){e.preventDefault();tap('B')}else if(e.key===' '&&e.target===document.body){e.preventDefault();video.paused?video.play():video.pause()}});
+// Undo takes back the last tap on this visit, wherever it sits in the fight.
+undo.addEventListener('click',()=>{while(added.length){const m=added.pop(),i=marks.indexOf(m);if(i>=0){marks.splice(i,1);break}}render();queue()});
+render(data.comparison);
+})();
+</script>
+{% endif %}{% endblock %}

@@ -260,6 +260,8 @@ def resolve_simultaneous_attribution(events: list) -> tuple[list, int]:
                 break
             if other in dropped or events[other].fighter == events[index].fighter:
                 continue
+            if any((events[i].evidence or {}).get("video_punch_probability") is not None for i in (index, other)):
+                continue          # the video check has judged it (core/strike_verifier.py)
             here, there = reach(events[index]), reach(events[other])
             if here is None or there is None:
                 continue

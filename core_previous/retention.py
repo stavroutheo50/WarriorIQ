@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import json
+import logging
+import shutil
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from core.config import OUTPUTS, UPLOADS
+from core.video import owning_stem, remove_derivative
+
+
+GUEST_RETENTION_HOURS = 2
+LOGGER = logging.getLogger("warrioriq.retention")
+
+
+def mark_guest_job(job_id: str, guest_id: str, video_path: str) -> dict:
+    created = datetime.now(timezone.utc)
+    metadata = {
+        "job_id": job_id,
+        "guest_id": guest_id,
+        "video_path": video_path,
+        "created_at": created.isoformat(),
+        "expires_at": (created + timedelta(hours=GUEST_RETENTION_HOURS)).isoformat(),
+    }
+    folder = OUTPUTS / job_id
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "guest.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    return metadata
+
+
+def guest_job(job_id: str) -> dict | None:
+    path = OUTPUTS / job_id / "guest.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def guest_job_valid(job_id: str, guest_id: str) -> bool:
+    metadata = guest_job(job_id)
+    if not metadata or metadata.get("guest_id") != guest_id:
+        return False
+    try:
+        return datetime.fromisoformat(metadata["expires_at"]) > datetime.now(timezone.utc)
+    except (KeyError, ValueError, TypeError):
+        return False
+
+
+def cleanup_expired_guest_jobs(protected_job_ids: set[str] | None = None) -> list[str]:
+    protected_job_ids = protected_job_ids or set()
+    removed: list[str] = []
+    now = datetime.now(timezone.utc)
+    outputs_root = OUTPUTS.resolve()
+    uploads_root = UPLOADS.resolve()
+    for marker in OUTPUTS.glob("*/guest.json"):
+        if marker.parent.name in protected_job_ids:
+            continue
+        try:
+            metadata = json.loads(marker.read_text(encoding="utf-8"))
+            expired = datetime.fromisoformat(metadata["expires_at"]) <= now
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            expired = True
+            metadata = {}
+        if not expired:
+            continue
+        job_dir = marker.parent.resolve()
+        video_text = metadata.get("video_path")
+        if video_text:
+            video = Path(video_text).resolve()
+            if video.parent == uploads_root:
+                try:
+                    remove_derivative(video)
+                    video.unlink(missing_ok=True)
+                except OSError:
+                    # A browser or decoder may still hold the file on Windows.
+                    # Keep the marker so the next cleanup can retry safely.
+                    continue
+        if job_dir.parent == outputs_root:
+            try:
+                shutil.rmtree(job_dir)
+            except OSError as exc:
+                LOGGER.warning(
+                    "guest_cleanup_deferred job_id=%s error=%s",
+                    marker.parent.name, type(exc).__name__,
+                )
+                continue
+        removed.append(marker.parent.name)
+    return removed
+
+
+def cleanup_abandoned_processing_files(
+    protected_job_ids: set[str],
+    saved_job_ids: set[str],
+    *,
+    older_than_hours: int,
+) -> list[str]:
+    """Remove only old, unowned processing artifacts inside the two storage roots."""
+    cutoff = datetime.now(timezone.utc).timestamp() - max(1, older_than_hours) * 3600
+    protected = set(protected_job_ids) | set(saved_job_ids)
+    removed: set[str] = set()
+    uploads_root = UPLOADS.resolve()
+    outputs_root = OUTPUTS.resolve()
+    for video in UPLOADS.iterdir():
+        # A derivative belongs to its original: "<job>_web" is not "<job>",
+        # so matching on stem alone ages out a live fight's playable copy
+        # while correctly keeping the original.
+        if not video.is_file() or owning_stem(video) in protected:
+            continue
+        try:
+            if video.stat().st_mtime <= cutoff and video.resolve().parent == uploads_root:
+                video.unlink(missing_ok=True)
+                removed.add(video.stem)
+        except OSError:
+            continue
+    for folder in OUTPUTS.iterdir():
+        if not folder.is_dir() or folder.name in protected or (folder / "guest.json").exists():
+            continue
+        try:
+            if folder.stat().st_mtime <= cutoff and folder.resolve().parent == outputs_root:
+                shutil.rmtree(folder)
+                if not folder.exists():
+                    removed.add(folder.name)
+        except OSError as exc:
+            LOGGER.warning(
+                "abandoned_output_cleanup_deferred job_id=%s error=%s",
+                folder.name, type(exc).__name__,
+            )
+            continue
+    return sorted(removed)

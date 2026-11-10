@@ -1,0 +1,1564 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DATA_ROOT = Path(os.getenv("WARRIORIQ_DATA_DIR", str(ROOT))).expanduser().resolve()
+# The three things this build *writes* can each be pointed somewhere else on
+# their own, rather than only by moving DATA_ROOT wholesale. Two reasons, one
+# of them measured. The web host and the GPU worker do not share a disk, so
+# uploads and outputs genuinely belong on separate volumes. And the test suite
+# had no isolation at all: it wrote into the development database and the real
+# job queue, which by 2026-09-13 held 196 test accounts and 725 phantom jobs -
+# each of the latter a session file the worker would claim and fail on, naming
+# a video in a temp directory Windows had long since cleared. tests/conftest.py
+# now points these at a scratch directory. MODELS and DATASET stay on
+# DATA_ROOT deliberately: they are read, not written, and a test that needs the
+# pose engine must still find it.
+UPLOADS = Path(os.getenv("WARRIORIQ_UPLOADS_DIR", str(DATA_ROOT / "uploads"))).expanduser()
+OUTPUTS = Path(os.getenv("WARRIORIQ_OUTPUTS_DIR", str(DATA_ROOT / "outputs"))).expanduser()
+MODELS = DATA_ROOT / "models"
+DATASET = DATA_ROOT / "dataset"
+DB_PATH = Path(os.getenv("WARRIORIQ_DB_PATH", str(DATA_ROOT / "warrioriq.sqlite3"))).expanduser()
+ULTRALYTICS_CONFIG = DATA_ROOT / ".ultralytics"
+HUGGINGFACE_CACHE = DATA_ROOT / ".huggingface"
+
+# Keep Ultralytics settings inside the project. This avoids roaming-profile
+# permission failures and keeps the local build's configuration self-contained.
+os.environ.setdefault("YOLO_CONFIG_DIR", str(ULTRALYTICS_CONFIG))
+os.environ.setdefault("HF_HOME", str(HUGGINGFACE_CACHE))
+
+for path in (UPLOADS, OUTPUTS, MODELS, DATASET, ULTRALYTICS_CONFIG, HUGGINGFACE_CACHE):
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def env_secret(name: str, default: str = "") -> str:
+    """Read a shared secret, tolerating how hosting panels mangle pasted values.
+
+    A secret is usually copied by hand from a control panel into a .env file or
+    back again, and it commonly arrives wrapped: angle brackets left over from a
+    placeholder like <token>, or quotes added to be safe. The wrapper is never
+    part of the secret, but it makes authentication fail with a bare 401 that
+    looks identical to a wrong password, so it is stripped here rather than
+    debugged again at every call site.
+    """
+    value = os.getenv(name, default).strip()
+    while len(value) >= 2 and value[0] in "<\"'" and value[-1] in ">\"'":
+        value = value[1:-1].strip()
+    return value
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _legal_identity() -> dict[str, str]:
+    """WARRIORIQ_LEGAL_IDENTITY: the operator's legal details as ONE value.
+
+    Audit 2026-10-14 (#9): the entity, its address and its contact addresses
+    were seven separate settings, so a change of company or mailbox meant
+    finding every one. This JSON object sets them together, and every legal
+    page reads the fields it fills:
+
+        {"name": "WarriorIQ Ltd", "address": "...", "registration": "...",
+         "vat": "...", "country": "Cyprus", "support_email": "support@warrioriq.eu",
+         "privacy_email": "privacy@warrioriq.eu", "dmca_email": "copyright@warrioriq.eu"}
+
+    A key it carries wins over the older single setting
+    (WARRIORIQ_OPERATOR_NAME and the rest), which still work on their own.
+    Malformed JSON is ignored rather than half-applied.
+    """
+    import json
+
+    raw = os.getenv("WARRIORIQ_LEGAL_IDENTITY", "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): str(v).strip() for k, v in value.items() if isinstance(v, (str, int, float)) and str(v).strip()}
+
+
+LEGAL_IDENTITY = _legal_identity()
+
+
+def legal_value(key: str, env_name: str) -> str:
+    return LEGAL_IDENTITY.get(key) or os.getenv(env_name, "").strip()
+
+
+IS_RENDER = env_bool("RENDER", False)
+
+
+@dataclass(frozen=True)
+class Settings:
+    # ------------------------------------------------------------
+    # Core vision stack
+    # ------------------------------------------------------------
+    # YOLO26m Pose is the default compromise for an RTX 5060 8 GB and
+    # the hard <= 1x video-duration budget. If a TensorRT engine exists,
+    # WarriorIQ automatically prefers it.
+    pose_model_pt: str = os.getenv("WARRIORIQ_POSE_MODEL", "yolo26m-pose.pt")
+    pose_model_engine: str = os.getenv(
+        "WARRIORIQ_POSE_ENGINE",
+        str(MODELS / "yolo26m-pose.engine"),
+    )
+    tracker: str = os.getenv("WARRIORIQ_TRACKER", str(MODELS / "warrioriq_botsort.yaml"))
+    # "auto" selects CUDA when available and CPU everywhere else.
+    device: str = os.getenv("WARRIORIQ_DEVICE", "auto")
+    # SQLite's default rollback journal takes an exclusive lock for every
+    # write, so a reader is blocked for the whole of it. WAL lets readers
+    # continue against the last committed state while a write is in progress.
+    # Measured here, six writers x 25 writes: 2.68s on the rollback journal
+    # against 1.84s on WAL, with no failures either way.
+    #
+    # Off by a switch rather than assumed, because WAL needs shared memory
+    # beside the database file and is unreliable on a network filesystem -
+    # which a cheap shared host may well be using for the home directory. If
+    # the live site ever reports "database is locked" or "disk I/O error" after
+    # this, set WARRIORIQ_SQLITE_WAL=0 and it returns to the old journal.
+    sqlite_wal: bool = env_bool("WARRIORIQ_SQLITE_WAL", True)
+    # How long a blocked writer waits before giving up, in milliseconds.
+    # This is not a new guard: sqlite3.connect() already applies five seconds
+    # when no timeout is passed, which is why contention was not producing
+    # "database is locked" before. Naming it makes it configurable and stops
+    # the value being an accident of the driver's default.
+    sqlite_busy_timeout_ms: int = int(os.getenv("WARRIORIQ_SQLITE_BUSY_TIMEOUT_MS", "5000"))
+    # A ceiling on requests per minute from one address, across every page and
+    # API route (static files, /health and /healthz are not counted). Answered
+    # with a 429 page that says how long to wait - never a dropped connection.
+    # Generous on purpose: a person browsing quickly makes 20-60 a minute and a
+    # live progress page about 110 (status poll plus stills); a gym's members
+    # can share one address. This exists for a runaway client, not them.
+    # 0 switches it off.
+    request_rate_limit_per_minute: int = max(0, int(os.getenv("WARRIORIQ_REQUEST_RATE_LIMIT_PER_MINUTE", "600")))
+    default_imgsz: int = int(os.getenv("WARRIORIQ_IMGSZ", "640"))
+    min_imgsz: int = int(os.getenv("WARRIORIQ_MIN_IMGSZ", "512"))
+    # Fighters in a wide or low-resolution recording occupy very few pixels.
+    # Inferring a 480px-wide video at 640 barely upscales it and the athletes
+    # stay under the size the detector resolves reliably, so a small source is
+    # analysed at a larger inference size instead.
+    low_resolution_edge: int = int(os.getenv("WARRIORIQ_LOW_RES_EDGE", "960"))
+    # Measured on real 480x220 tournament footage, frame by frame. At 1280 the
+    # athletes are detected at 0.24 to 0.32 confidence - at or under BoT-SORT's
+    # new_track_thresh of 0.30 - so the tracker never starts a track for them
+    # and identity is left choosing between the referee and the spectators. At
+    # 1600 the same fighters come in at 0.55 to 0.86 and clear it comfortably.
+    # 1920 is worse, not better: the peaks do not improve and it adds a tail of
+    # 0.12 to 0.19 detections for the tracker to trip over.
+    low_resolution_imgsz: int = int(os.getenv("WARRIORIQ_LOW_RES_IMGSZ", "1600"))
+    # Measured 2026-10-12, UFC 326 round 1 (480x220, imgsz 1600, stride
+    # pinned): lowering this to BoT-SORT's own track_low_thresh (0.08), so
+    # the tracker could keep a fighter through a tangle on low-confidence
+    # boxes, did not add a single frame with both fighters boxed (722 -> 723),
+    # found no more ground control, and put fighter A's box on somebody in a
+    # shirt - the referee or the crowd - 15.2% of the time instead of 8.5%.
+    # Kept at 0.20.
+    detection_conf: float = float(os.getenv("WARRIORIQ_DET_CONF", "0.20"))
+    # Refuse joint positions no body could reach between two sampled frames.
+    # The pose model fails by returning a confident wrong skeleton rather than
+    # an uncertain one, so no confidence threshold downstream can catch it;
+    # speed can. Limits are per joint and measured - see core/pose_smoothing.py.
+    pose_gate_enabled: bool = env_bool("WARRIORIQ_POSE_GATE", True)
+    # Fighter drawing is fully manual. Candidate detection is only a visual
+    # advisory, so free-tier web instances can skip loading YOLO on this page.
+    selection_detection_enabled: bool = env_bool("WARRIORIQ_SELECTION_DETECTION", not IS_RENDER)
+
+    # ------------------------------------------------------------
+    # Performance target
+    # ------------------------------------------------------------
+    target_tracking_fps: float = float(os.getenv("WARRIORIQ_TARGET_FPS", "15"))
+    # The floor the budget governor may sample down to. Measured on fight 1,
+    # full video, the two candidates were:
+    #
+    #   10.4 fps   1.91x realtime   A 0.619  B 0.645   123 events   0 confusions
+    #    6.2 fps   1.47x realtime   A 0.642  B 0.745   121 events   2 confusions
+    #
+    # 6 costs two identity confusions and two events, and buys 23% of the run
+    # back. It is the right trade while punch counting is off and kicks are 29%
+    # precise: what the report actually publishes is movement, which is an
+    # average over tracked frames and clears min_metric_samples at either rate.
+    # Absolute tracked frames do fall by about 38%, so revisit this the moment
+    # strike timing starts being measured rather than estimated.
+    min_tracking_fps: float = float(os.getenv("WARRIORIQ_MIN_FPS", "6"))
+    max_tracking_fps: float = float(os.getenv("WARRIORIQ_MAX_FPS", "30"))
+    # Frames handed to the pose model in one call where the frames are known
+    # ahead of time (the backward identity pass). One call per frame paid the
+    # GPU's launch and transfer overhead per frame. 1 switches batching off.
+    # A TensorRT engine accepts batches only up to the size it was built for,
+    # so the engine is built for this size too (core/trt_engine.py).
+    #
+    # Off (1) by default since 2026-10-19: a larger batch changes the cached
+    # engine's file name (_b8), and the analysis PC builds no engine of its
+    # own, so it no longer found the engine it had and fell back to the much
+    # slower PyTorch model on the first fight after the update. To use
+    # batching, build the batch engine on the PC first
+    # (tools/export_pose_tensorrt.py with WARRIORIQ_POSE_BATCH set), then set
+    # WARRIORIQ_POSE_BATCH there.
+    pose_batch_size: int = max(1, int(os.getenv("WARRIORIQ_POSE_BATCH", "1")))
+    # Hold the analysis to the length of the video by planning the sampling
+    # stride once, early, from measured throughput. Until 2026-09-10 this
+    # setting was defined here and **read nowhere in the codebase** - a switch
+    # named for the product's headline performance promise that did nothing,
+    # while a two-minute video took five and a half minutes. See
+    # QualityController.plan_for_budget: it never samples below
+    # min_tracking_fps, and when the floor is not enough it says so in the
+    # report rather than quietly returning a worse analysis.
+    hard_realtime_budget: bool = env_bool("WARRIORIQ_HARD_REALTIME", True)
+    # Pin the sampling stride and skip planning entirely. The governor decides
+    # from measured throughput, and measured throughput moves with machine load,
+    # so a video whose required stride sits near a rounding boundary could be
+    # planned differently on two runs. Everything this project concludes is
+    # decided by A/B, and an A/B across a changed frame path is worthless - set
+    # this for that work. 0 means plan normally.
+    force_tracking_stride: int = int(os.getenv("WARRIORIQ_FORCE_STRIDE", "0"))
+    # What one analysed frame costs on this machine, in seconds. Planning needs
+    # this number; the only question is where it comes from. Measuring it
+    # inside the run reads a clock, and that made the same video plan stride 3
+    # on some runs and stride 4 on others - worth 0.468 of fighter B's coverage
+    # on one fight and 0.138 the other way on another. Set this to state the
+    # figure outright; leave it 0 and core/machine_profile.py measures it once
+    # and reuses it, which is deterministic from the second analysis onward.
+    frame_cost_seconds: float = float(os.getenv("WARRIORIQ_FRAME_COST_S", "0"))
+    # Fixed sampling is the reproducible default. Adaptive sampling depends on
+    # momentary machine load and can make identical fights follow different
+    # frame paths; it remains available as an explicit speed opt-in.
+    adaptive_quality: bool = env_bool("WARRIORIQ_ADAPTIVE_QUALITY", False)
+    progress_interval_frames: int = 40
+
+    # ------------------------------------------------------------
+    # Identity manager
+    # ------------------------------------------------------------
+    # A manual fighter selection must substantially overlap a detector box
+    # before that detector identity is allowed to replace the user's box.
+    # Low-overlap, center-near candidates are commonly referees.
+    min_initial_iou: float = 0.35
+    track_id_bonus: float = 0.34
+    # How much a candidate must still resemble the fighter the user selected.
+    # Real footage puts three to eleven people in frame - referees, corners,
+    # crowd - at sizes close enough that position alone cannot separate them.
+    # **This gate cannot tell the two fighters apart, and the numbers that said
+    # it could were measured on one bout.** That comment read: "the same
+    # fighter scores 0.67 at worst and 0.94 typically; two different people
+    # score 0.56 typically and 0.48 at the low end" - a clean gap, with this
+    # threshold sitting safely under it.
+    #
+    # Re-measured on 926 comparisons across all six fighter tracks in the three
+    # reference fights:
+    #
+    #     same fighter    median 0.789   min 0.494
+    #     other fighter   median 0.683   max 0.964
+    #
+    # The worst same-fighter score is 0.494, not 0.67 - every track dips below
+    # the claimed floor - and **100% of impostor scores land above it**. As a
+    # discriminator the histogram is AUC 0.667, which is barely a signal at
+    # all. No threshold separates these distributions, so do not go tuning this
+    # number expecting one to.
+    #
+    # What 0.55 actually is: a floor that refuses the crowd, who look nothing
+    # like either athlete. It refuses the *correct* fighter in 2-9% of frames
+    # as the cost of that. Raising it refuses more of the right person;
+    # lowering it admits more of the wrong one. Telling the two athletes apart
+    # is not this gate's job and it never managed it - see
+    # project-validated-on-three-fights for the pooled-ReID equivalent, which
+    # is 0.89-0.90 between the two fighters and no better.
+    min_anchor_appearance_similarity: float = float(
+        os.getenv("WARRIORIQ_MIN_ANCHOR_SIMILARITY", "0.55"))
+    # How alike the two selected fighters may look before per-fighter results
+    # stop meaning anything. This is a different question from every other
+    # threshold here: not "is this candidate the fighter" but "can these two be
+    # told apart at all in this video", and it is answerable in a second, at
+    # selection, before anything is analysed.
+    #
+    # Measured on three bouts, comparing the two chosen fighters to each other:
+    # the two where identity holds score 0.613 and 0.640, and the one where it
+    # cannot be made to work scores 0.891. The learned embedding is no use for
+    # this - it says 0.89 to 0.91 for all three alike - because it is trained
+    # to describe a person, and two people in similar kit genuinely are similar.
+    # Colour is cruder and, for this one question, better.
+    #
+    # Deliberately nearer the failing case: a false warning costs a user a
+    # re-selection, while a missed one costs them a scorecard that names the
+    # wrong fighter.
+    max_fighter_pair_similarity: float = float(
+        os.getenv("WARRIORIQ_MAX_PAIR_SIMILARITY", "0.78"))
+    # The kit comparison the selection warning and the report use (core/kit.py):
+    # per-region L*a*b* colour on the centre line of each fighter, compared by
+    # Delta E, 1.0 for identical. 0.75 is Delta E 10 in the most different
+    # region - two halves of one kit under one light differ by 2-8. The
+    # histogram threshold above stays where it was: it now only steers the
+    # identity manager's internal swap check.
+    max_kit_similarity: float = float(os.getenv("WARRIORIQ_MAX_KIT_SIMILARITY", "0.75"))
+    # For a pair in matching kit, how many moments a minute the identity
+    # manager may say "cannot tell which is which" (it drops the frame rather
+    # than guess) before the fight's identity is not trusted. Matching kit is
+    # handled by position and motion; this is the evidence that it worked.
+    max_lookalike_confusions_per_minute: float = float(
+        os.getenv("WARRIORIQ_MAX_LOOKALIKE_CONFUSIONS_PER_MINUTE", "2.0"))
+    # A learned appearance space for the same gate. The histogram above cannot
+    # separate a referee from a fighter - measured, their ranges overlap almost
+    # completely - while an embedding puts the referee at 0.695-0.741 and the
+    # fighters at 0.724-0.828. See core/reid.py.
+    #
+    # **Default off since 2026-09-14: it was measured end to end and it changes
+    # nothing, for up to 30% of the runtime.** Two bouts, each run with the
+    # encoder on and off, everything else identical:
+    #
+    #     iPhone 1080p, 36.7 s   130.0 s -> 90.2 s   (30.6% faster)
+    #     fight 1, 480x220, 100 s   150.1 s -> 136.5 s   (9.0% faster)
+    #
+    # and in both cases `tracking.jsonl` came back **byte-identical** - same
+    # md5, not merely the same coverage number, which this project has learned
+    # not to trust on its own.
+    #
+    # The mechanism, which is why this is expected to generalise rather than
+    # being a property of two clips: the encoder does refuse candidates - 8
+    # `appearance_reid` refusals on fight 1 - but those candidates are refused
+    # anyway by a gate that costs nothing. Turning it off moved exactly those 8
+    # onto other reasons (+3 known_furniture, +4 lost_to_the_other_fighter, +1
+    # too_still_travel) and the refusal total stayed at 408. Appearance was
+    # deciding nothing that geometry had not already decided.
+    #
+    # That is consistent with what core/reid.py measured when it was built: two
+    # athletes in the same uniform under the same lights are not separable by
+    # appearance, and 62% of candidates clear the geometric gate before
+    # appearance is ever consulted.
+    #
+    # The cost grew with the footage. It is ~10 ms per person on a 60 px crop
+    # and far more on a 300 px one, so the better the video gets the more this
+    # charges for an answer nobody uses. The machinery is kept and
+    # `WARRIORIQ_REID=1` restores it: the claim is that it is redundant on the
+    # footage measured, not that a learned appearance gate can never help.
+    reid_enabled: bool = env_bool("WARRIORIQ_REID", False)
+    # A purpose-trained re-identification encoder, not the detector. The old
+    # default here was "yolo26m.pt", which is the detector: Ultralytics routes
+    # a .pt through the YOLO predictor and reads the second-to-last layer, so
+    # what came back described "this is a person" rather than "this is *which*
+    # person". That is why two attempts at a learned appearance gate failed.
+    # It was also far slower, because the predictor path runs a full detection
+    # per call; the .onnx assets go through AutoBackend at 10.4 ms per person.
+    #
+    # The nano encoder is used deliberately: measured on real footage it
+    # separates better than the medium one (pooled AUC 0.996 against 0.989)
+    # and costs the same, since the time goes on cropping rather than on the
+    # network. There is not enough detail in a 60-pixel-tall person for the
+    # larger model's extra capacity to describe.
+    reid_model: str = os.getenv("WARRIORIQ_REID_MODEL", "yolo26n-reid.onnx").strip()
+    # Embeddings are pooled over a track before being compared. One crop of a
+    # person this small is too noisy to identify anybody: measured on the
+    # busiest bout, single crops separate the same person from a different one
+    # at AUC 0.689, and the mean of three at 0.996. Same encoder, same frames -
+    # the descriptor was never the problem, the sample size was.
+    reid_pool_size: int = int(os.getenv("WARRIORIQ_REID_POOL", "6"))
+    reid_min_pool: int = int(os.getenv("WARRIORIQ_REID_MIN_POOL", "3"))
+    reid_device: str = os.getenv("WARRIORIQ_REID_DEVICE", "").strip()
+    # Against pooled embeddings, not single crops. Measured across three bouts:
+    # the same person scores a median of 0.93 to 0.98 and a different person
+    # 0.56 to 0.82. The tails overlap, so this cannot be set to separate them
+    # cleanly and the value is a chosen trade, measured by eye on all three:
+    #
+    #   0.72  the quiet bout keeps 11/12 and 10/12; the crowded one collapses
+    #         to 5/12, barely better than having no gate at all
+    #   0.78  the quiet bout 10/12 and 10/12; the crowded one 9/12, with its
+    #         wrong boxes down from roughly 800 to 220
+    #   0.85  the crowded one reaches 10/12 and loses half its coverage
+    #
+    # 0.78 is the middle. Raising it buys precision on a busy hall and costs
+    # frames everywhere; lowering it gives the crowd back.
+    #
+    # **Lowering it was tried properly on 2026-09-09 and it is a downgrade at
+    # every value tested. Do not try it again.** This gate is the binding
+    # constraint on coverage - measured per lost fighter rather than per
+    # candidate, it accounts for **61%** of the frames where a fighter is
+    # unassigned (753 of ~1,243 on fight 3), far ahead of the referee filter at
+    # 9%. So relaxing it looks like the obvious move, and the coverage numbers
+    # agree loudly. They are wrong.
+    #
+    #     threshold   A coverage   B coverage   both held
+    #     0.78          0.445        0.199       83 frames
+    #     0.70          0.492        0.475      ---
+    #     0.60          0.529        0.611      243 frames
+    #
+    # Twelve gained boxes per run were rendered with the boxes drawn and judged
+    # by eye - the only test that has ever caught this:
+    #
+    #     0.60   8 of 12 right overall, but split by fighter A is 7/8 and B is
+    #            1/4: B's tripled coverage is a kneeling official, a coach by
+    #            the chairs, a spectator in red.
+    #     0.70   B is right in about 2 of 12, and the dominant failure is new -
+    #            **B locks onto fighter A**. Frames 896, 1206, 1214, 1222, 1224
+    #            and 1240 all put B's box on A's man.
+    #
+    # That last line is why this stays where it is. Hand labelling all 178 clips
+    # at 0.78 found ten referees, eight bystanders, six id-swaps and **zero**
+    # A-versus-B confusions; lowering the gate manufactures the one failure the
+    # product had never made. An A/B swap is the worst outcome available here,
+    # because it silently credits one fighter's work to the other and coverage
+    # rises while it happens.
+    #
+    # The asymmetry is not a tuning accident. Fighter A wears light blue and
+    # white; fighter B wears black in a hall where the officials, the coaches
+    # and half the crowd wear black. Compared against every other person
+    # detected in the opening exchange, 17% of them clear this gate against B's
+    # anchor and only 5% against A's. A single global number cannot serve both
+    # fighters of the same bout, and the honest fix - if there is one - is a
+    # per-fighter gate set from how separable that fighter is from the room,
+    # not a different constant. (Those two percentages are single-crop
+    # comparisons, while the gate itself compares pooled embeddings, so treat
+    # them as the direction of the effect and not its size.)
+    min_anchor_reid_similarity: float = float(
+        os.getenv("WARRIORIQ_MIN_ANCHOR_REID", "0.78"))
+    # A categorical refusal rather than another threshold on similarity. The
+    # referee passes every comparative guard honestly, so the only thing that
+    # separates him is what he is wearing. See core/referee.py for why this
+    # feature is deliberately four numbers wide and per-federation.
+    referee_filter_enabled: bool = env_bool("WARRIORIQ_REFEREE_FILTER", True)
+    # Refuse an upright, clothed person as a fighter when both selected
+    # fighters are bare-chested (an official in black, as in the UFC, whom the
+    # uniform probe cannot recognise). Stands down by itself otherwise. See
+    # core/referee.py looks_like_a_clothed_official.
+    clothed_official_filter_enabled: bool = env_bool("WARRIORIQ_CLOTHED_OFFICIAL_FILTER", True)
+    referee_probe_path: str = os.getenv(
+        "WARRIORIQ_REFEREE_PROBE", "models/referee_probe.npz").strip()
+    # Was 0.50, on the reasoning that "the official scores 0.56 to 0.997 and
+    # everyone else 0.003 to 0.091, so the midpoint costs nothing". That gap
+    # was real on the 58 crops it was measured on - all from one bout - and it
+    # is not the gap on other footage.
+    #
+    # Re-measured on **178 hand-labelled clips across all three fights**, ten
+    # of them the official. The probe still *ranks* beautifully (AUC 0.993),
+    # but referees score anywhere from 0.06 to 0.99, so at 0.50 it caught only
+    # five of ten. What separates them is not a wide margin, it is that
+    # everyone else scores lower still:
+    #
+    # The gate is applied to **every candidate during tracking**, not just the
+    # seed, so the cost of lowering it is real fighter observations refused.
+    # Both sides were measured - officials against the ten hand-labelled ones,
+    # cost against all 469 tracked fighter boxes across the three fights:
+    #
+    #     threshold   officials caught   real fighter boxes refused
+    #        0.50           5 / 10             1 / 469  (0.2%)
+    #        0.16           5 / 10            11 / 469  (2.3%)
+    #        0.15           8 / 10            12 / 469  (2.6%)
+    #        0.12           8 / 10            15 / 469  (3.2%)
+    #        0.05          10 / 10            far more
+    #
+    # **0.15 was tried on that evidence and reverted.** Do not try it again
+    # without reading this.
+    #
+    # The table above is real but it is the wrong table. Both columns were
+    # measured on boxes the tracker had already *chosen* - and this gate does
+    # not filter chosen boxes, it filters every candidate offered during
+    # tracking. Two full runs of fight 1, identical code, only the threshold
+    # different, then the frames where they disagreed rendered and looked at:
+    #
+    #     89 frames changed. Only 6 of them were the referee being removed.
+    #     51 lost their box entirely. Of six sampled by eye, one dropped an
+    #     official and three dropped a real fighter.
+    #
+    # Coverage said it was a wash (A 0.192 -> 0.235, B 0.397 -> 0.360), which
+    # is exactly why coverage is not the test. Three athletes lost for one
+    # official removed is a bad trade, so the gate stays where it was.
+    #
+    # What survives from the measurement: the probe *ranks* officials well
+    # (AUC 0.993 across three venues) and 0.50 catches only five of ten. The
+    # five it misses are not reachable by moving this number - they need a
+    # probe trained across venues. See project-detector-measured-on-178-clips.
+    min_referee_probability: float = float(
+        os.getenv("WARRIORIQ_MIN_REFEREE_PROB", "0.50"))
+    # Fighter motion between sampled frames is often larger than generic
+    # pedestrian motion. These values still reject distant bystanders, while
+    # allowing a fighter to be recovered after a tracker-ID reset.
+    min_reid_score: float = 0.48
+    min_reid_margin: float = 0.05
+    max_normalized_jump: float = 1.65
+    # A fighter who has been out of sight this long may come back anywhere in
+    # the picture - they left the frame, or the camera turned - so the
+    # distance gate above stops applying and appearance alone decides: the
+    # pooled ReID embedding against the one captured where the user tapped
+    # them must clear reentry_min_reid_similarity (stricter than the ordinary
+    # gate), or without an embedding the kit histogram must clear
+    # reentry_min_appearance_similarity. Audit 2026-10-14, #2.
+    reentry_after_seconds: float = float(os.getenv("WARRIORIQ_REENTRY_AFTER_SECONDS", "1.0"))
+    reentry_min_reid_similarity: float = float(os.getenv("WARRIORIQ_REENTRY_MIN_REID", "0.84"))
+    reentry_min_appearance_similarity: float = float(os.getenv("WARRIORIQ_REENTRY_MIN_APPEARANCE", "0.70"))
+    # Move the remembered boxes with the camera before matching
+    # (core/camera_motion.py). Audit 2026-10-14, #2.
+    camera_motion_compensation: bool = env_bool("WARRIORIQ_CAMERA_MOTION", True)
+    # Read the real file type of every upload with ffprobe (core.video
+    # has_video_stream; audit 2026-10-14, #17). Stands down by itself on a
+    # host with neither ffprobe nor ffmpeg.
+    upload_stream_probe: bool = env_bool("WARRIORIQ_UPLOAD_STREAM_PROBE", True)
+    # A track whose referee probability, pooled over its sightings, says
+    # official is held as an official - a third-person class never assigned to
+    # Fighter A or B - and refused even on frames where the per-frame score
+    # dips, as long as that frame is not clearly a fighter's (fighters measured
+    # at most 0.084). Audit 2026-10-14, #2.
+    # The probe's reading of a fighter depends on their kit and the venue: on
+    # four of eight measured phone clips it scored the fighter the person
+    # picked 0.17-0.27 (S01's grey T-shirt then read 0.26-0.59 from frame to
+    # frame, his track was classed an official and he was lost for seconds at
+    # a time). So a candidate is refused as an official only when the probe
+    # rates them at least this much above the fighter's own score at
+    # selection, as well as above min_referee_probability. A fighter who
+    # scored under 0.15 at selection is judged exactly as before.
+    official_margin_over_fighter: float = float(os.getenv("WARRIORIQ_OFFICIAL_MARGIN", "0.35"))
+    official_track_min_sightings: int = 3
+    official_track_floor_probability: float = 0.15
+    max_missing_analyzed_frames: int = 20
+    missing_before_recovery: int = 4
+    appearance_ema: float = 0.85
+    pose_ema: float = 0.82
+
+    # ------------------------------------------------------------
+    # SAM recovery
+    # ------------------------------------------------------------
+    # SAM2 propagates the two user-selected identities through the segment.
+    # YOLO pose/ReID must still confirm a person before metrics are accepted.
+    sam_recovery_enabled: bool = env_bool("WARRIORIQ_SAM_RECOVERY", not IS_RENDER)
+    # Continuous mode propagates SAM2 masks across the whole segment before the
+    # main pass. **On by default since 2026-09-10.** It was off, on this:
+    #
+    #   continuous on   188.8s   coverage A 0.997  B 0.916
+    #   continuous off   62.6s   coverage A 0.985  B 0.987
+    #
+    # Those are 98-99% coverage figures, which is what this project reported
+    # while it was following a seated spectator - see
+    # project-coverage-can-mean-failure. The comparison that retired this
+    # feature was measuring the wrong people, and "fighter B was tracked better
+    # without it" was a spectator being held more steadily than an athlete.
+    #
+    # Turning it on also crashed until today (see recover_from_guidance in
+    # core/pose_tracker.py), so nobody could have checked.
+    #
+    # Re-measured across all three reference fights, one variable, same seeds
+    # and windows:
+    #
+    #     fight   A off -> on      B off -> on       time
+    #     fam3    0.198 -> 0.637   0.459 -> 0.671    159 -> 179s
+    #     f2      0.182 -> 0.438   0.105 -> 0.213    106 -> 148s
+    #     f3      0.445 -> 0.605   0.199 -> 0.544    223 -> 264s
+    #
+    # Coverage is not the reason. The changed frames were rendered and looked at
+    # in **both** directions, which is what the referee-threshold A/B further up
+    # this file did and what makes the difference:
+    #
+    #   * gained boxes are mostly the right fighter - on f3, five of six, one
+    #     of them inside the 58.6-59.6s knockdown the old settings missed
+    #     entirely
+    #   * **every one of six sampled lost boxes was on the wrong person** - two
+    #     bystanders and a seated spectator in the chairs. The coverage the old
+    #     settings reported was partly crowd, and this drops it
+    #   * moved boxes stay on the correct athlete
+    #
+    # The cost is 13-40% more time, not the doubling above; that figure is as
+    # stale as the coverage it sits beside.
+    #
+    # Known costs, not hidden: degenerate narrow boxes rise from 0% to 6% on
+    # fam3 and 3% to 6% on f2 (a mask collapsing to a sliver), fam3 gains one
+    # identity confusion where it had none, and one sampled fam3 box landed on
+    # the referee. None of that outweighs dropping spectators, but it is the
+    # thing to look at next.
+    #
+    # This does **not** unlock scoring: 0.54-0.67 is still under the 0.85
+    # min_tracking_coverage_for_score gate.
+    sam_continuous_enabled: bool = env_bool("WARRIORIQ_SAM_CONTINUOUS", True)
+    sam_continuous_fps: float = float(os.getenv("WARRIORIQ_SAM_FPS", "4"))
+    sam_continuous_max_frames: int = int(os.getenv("WARRIORIQ_SAM_MAX_FRAMES", "360"))
+    # The most of the realtime budget SAM2's continuous pass may spend.
+    #
+    # sam_continuous_fps is four samples per second of FOOTAGE, which does not
+    # scale with anything. The product's budget is the video's own length, so a
+    # fixed sampling rate takes a fixed fraction of it - and at 0.173 s per SAM
+    # frame that fraction is enormous on exactly the short fights where the
+    # budget is tightest. Computed across lengths:
+    #
+    #      30s video   112 SAM frames    19s    65% of the whole budget
+    #      70s video   262 SAM frames    45s    65%
+    #     302s video   348 SAM frames    60s    20%
+    #    1200s video   360 SAM frames    62s     5%
+    #
+    # A seventy second round spent forty-five seconds in SAM2 and had
+    # twenty-five left for the pose pass, the tracker and everything else. That
+    # is most of the reason an analysis of a short clip cannot finish inside
+    # its own length.
+    #
+    # This caps the continuous pass at a share of the budget instead, so it
+    # scales with the footage. It only ever RAISES the stride, so a long fight
+    # is untouched - the cap does not bind there - and recovery is not affected
+    # at all: sam_recovery_enabled and the on-demand rescue of a fighter the
+    # detector lost are separate and stay exactly as they were. This is the
+    # sweep, not the safety net.
+    sam_budget_fraction: float = float(os.getenv("WARRIORIQ_SAM_BUDGET_FRACTION", "0.35"))
+    # What one SAM2 propagation frame costs on this machine. Measured under
+    # production settings on the RTX 5060: 263 frames in 45.4 s wall, peak VRAM
+    # 1.56 GB. Used only to turn the fraction above into a frame count; a wrong
+    # value makes the cap loose or tight, never incorrect.
+    sam_frame_cost_seconds: float = float(os.getenv("WARRIORIQ_SAM_FRAME_COST", "0.173"))
+    # Keep the bounded two-minute guidance pass in one memory state. Short
+    # chunk resets were faster but could drift when reseeded during a crossing.
+    # How many sampled frames SAM2 holds at once. This is a host-memory
+    # decision, not a quality one: _DecodedClip allocates
+    # chunk x 3 x 1024 x 1024 float32 in system RAM, so 360 frames is 4.5 GB
+    # and a 70-second clip's 263 frames is 3.3 GB - on a 16 GB machine also
+    # running a browser, that is enough to start swapping, which looks exactly
+    # like a slow GPU and reports no error.
+    #
+    # Left at 360 deliberately, which keeps the whole SAM2 pass inside one
+    # chunk - the invariant test_sam_sampling_obeys_absolute_work_budget
+    # asserts, chunk_frames >= sam_continuous_max_frames.
+    #
+    # Lowering it is not free, and the cost was measured rather than assumed.
+    # At 120 the pass runs at the same speed (50.4s against 51.8s over 263
+    # frames) and the buffer drops to 1.41 GB, but SAM2 re-seeds each chunk
+    # from the previous chunk's last good boxes, so more chunks means more
+    # re-seeds: 244 of 600 boxes landed within 2px of the single-chunk path
+    # and the median difference was 4.00 px. These boxes are identity guidance
+    # only and downstream still needs a detection overlapping at IoU 0.12, so
+    # 4px changes no answer - but it is a different path, and one chunk is
+    # the reproducible one.
+    #
+    # Lower this if a machine is short of memory and the warning in
+    # core/analyzer.py says so. It is a memory decision, not a quality one.
+    sam_continuous_chunk_frames: int = int(os.getenv("WARRIORIQ_SAM_CHUNK_FRAMES", "360"))
+    sam_model_id: str = os.getenv("WARRIORIQ_SAM_MODEL", "facebook/sam2.1-hiera-small")
+    # Keep the built SAM2 predictor between jobs, parked in host memory while
+    # the frame pass needs the card (core/sam_recovery.py). Every job used to
+    # rebuild it from disk, and a frame-pass rescue after the sweep rebuilt it
+    # again mid-job (QA, 2026-10-07, item 26). Off restores rebuild-per-use.
+    sam_keep_warm: bool = env_bool("WARRIORIQ_SAM_KEEP_WARM", True)
+    # Which model runs the continuous sweep: "sam2" or "edgetam".
+    #
+    # EdgeTAM is 2.5x faster on this footage - 0.078 s/frame against 0.197,
+    # measured on fight 1 with the same seeds and the same sampled frames,
+    # holding both fighters on 60 of 60 frames. The sweep is over half of a
+    # short round, so that is the largest speed change available here.
+    #
+    # **Measured 2026-09-21 with tools/measure_identity.py --sam-backend, and
+    # it does not ship.** The per-frame number is real and end-to-end it buys
+    # nothing, because the sweep is a small share of the frames analysed - 64
+    # of 620 on athens_hd:
+    #
+    #     fight        sam2              edgetam
+    #     athens_hd    86s  A 1.000      84s  A 1.000   byte-identical tracking
+    #     1mp4         76s  A .874 B .609   91s  A .860 B .638   20% SLOWER
+    #
+    # A repeat of the sam2 arm on 1mp4 was bit-identical to the first, so the
+    # difference is the backend and not run-to-run noise. Swapping a model for
+    # 2% on good footage and -20% on bad, while moving identity in both
+    # directions, is not an upgrade.
+    #
+    # What the same measurement DID establish is that the sweep itself earns
+    # its time. With it off, 1mp4 runs in 36s instead of 76s and fighter B
+    # collapses from 0.609 to 0.139. The sweep is not overhead to be tuned
+    # away; it is most of what holds the harder fighter.
+    sam_backend: str = os.getenv("WARRIORIQ_SAM_BACKEND", "sam2").strip().lower()
+    # The HuggingFace port, not facebookresearch/EdgeTAM - that repository is a
+    # fork of SAM2 and installs over the `sam2` package this project pins,
+    # which would replace a working path to add an experimental one. This one
+    # lives in `transformers` and shares nothing with sam2 at runtime.
+    edgetam_model_id: str = os.getenv("WARRIORIQ_EDGETAM_MODEL", "yonigozlan/EdgeTAM-hf")
+    sam_buffer_frames: int = int(os.getenv("WARRIORIQ_SAM_BUFFER", "18"))
+    sam_cooldown_analyzed_frames: int = 24
+    openai_identity_model: str = os.getenv("WARRIORIQ_OPENAI_MODEL", "gpt-5.6-terra")
+    openai_identity_min_confidence: float = float(os.getenv("WARRIORIQ_OPENAI_ID_MIN_CONF", "0.82"))
+    openai_identity_cooldown_seconds: float = 10.0
+    openai_identity_audit_seconds: float = 15.0
+
+    # ------------------------------------------------------------
+    # Temporal action recognition
+    # ------------------------------------------------------------
+    temporal_checkpoint: str = os.getenv(
+        "WARRIORIQ_TEMPORAL_MODEL",
+        str(MODELS / "warrioriq_temporal_best.pt"),
+    )
+    action_window: int = 12
+    min_event_gap_seconds: float = 0.22
+    # How long a fighter can go unseen before an action in flight is abandoned
+    # rather than joined across the gap.
+    #
+    # Derived, not chosen: the stride governor never samples slower than
+    # min_tracking_fps, which is 6, so consecutive observations of one fighter
+    # are at most about 0.167s apart in normal running. Anything past this is
+    # three times that floor - long enough that the whole of a strike could have
+    # happened inside it unseen, and the engine would otherwise pair a wind-up
+    # from before the gap with a retraction from after it and publish the two as
+    # one action.
+    max_observation_gap_seconds: float = 0.5
+    min_strike_speed_body_lengths_per_s: float = 0.90
+    # A limb cannot move this fast. Measured on one real fight, candidate peak
+    # speeds ran to 47.6 body lengths a second - roughly 80 m/s - because the
+    # trigger read a single frame-to-frame displacement, and one jittery
+    # keypoint is indistinguishable from a strike. A human limb peaks around
+    # 6-9, so anything past this is tracking noise and the frame is ignored
+    # rather than allowed to start or define an action.
+    max_plausible_limb_speed_body_lengths_per_s: float = float(
+        os.getenv("WARRIORIQ_MAX_LIMB_SPEED", "12.0")
+    )
+    min_extension_gain: float = 0.07
+    temporal_probability_threshold: float = 0.60
+    # A kick or knee needs the leg that threw it to be seen. QA, 2026-10-04: a
+    # waist-up boxing clip produced 33 kicks and 14 knees for one fighter,
+    # because the pose model still returns knee and ankle positions for legs
+    # outside the picture - guesses, at low confidence, that jitter like
+    # strikes. A leg joint counts as seen at this confidence or above, and the
+    # knee and ankle of the leg must both be seen on this share of an action's
+    # samples, or no kick or knee is emitted for it.
+    min_leg_keypoint_confidence: float = float(os.getenv("WARRIORIQ_MIN_LEG_KEYPOINT_CONF", "0.5"))
+    # A punch counts only when the arm that threw it was seen this surely
+    # (core/analyzer.py PUNCH_ARM_CONFIDENCE). 0 turns the check off.
+    punch_arm_confidence: float = float(os.getenv("WARRIORIQ_PUNCH_ARM_CONFIDENCE", "0.3"))
+    # A punch the video check scored (core/strike_verifier.py) counts when it
+    # gives at least this probability of a punch, and the skeleton rules it
+    # replaces - thrown at nothing, the pair rule - no longer apply to it.
+    # Each clip scored by a head fitted without it, through these gates
+    # (2026-10-23): V18 real 17 -> 35, false 15 -> 17; VID real 39 -> 46,
+    # false 21 -> 19. 0.6 removed more false punches but cost VID 5 real ones.
+    # 2026-11-08: a head refitted on Claude's dense strike labels, with 0.4,
+    # looked better against those same labels, but the owner confirmed only 10
+    # of 30 sampled labels (dataset/regression/label_check), so that gain was
+    # unproven and the head and threshold went back to these.
+    # 0 turns the check off and the rules back on.
+    punch_check_threshold: float = float(os.getenv("WARRIORIQ_PUNCH_CHECK", "0.5"))
+    min_leg_visible_share: float = 0.8
+
+    # ------------------------------------------------------------
+    # Contact / outcome
+    # ------------------------------------------------------------
+    # Beyond this separation the opponent simply cannot be reached, so an action
+    # fired here was not thrown at them. Measured across four real fights: the
+    # two tracked fighters were a median 2.78 body lengths apart when a strike
+    # was detected, and only 18% of detections happened inside 1.5 - so most
+    # counted "attempts" were thrown at nobody and dragged every accuracy figure
+    # down with them. A kick reaches roughly 1.5-2 body lengths; 2.5 is generous.
+    max_engagement_body_lengths: float = float(os.getenv("WARRIORIQ_MAX_ENGAGEMENT", "2.5"))
+    # Analyse twice as many frames while the two fighters are within striking
+    # range. A punch lasts 0.1-0.3 s, so at the usual 6-15 analysed frames a
+    # second it is seen in one to four of them. OFF by default and not yet
+    # measured: core/action.py counts some of its limits in frames (an action
+    # times out after max(6, action_window) samples), so doubling the sampling
+    # changes what it detects as well as how much it sees. Turn on, compare
+    # with tools/compare_official_stats.py or a labelled fight, and keep only
+    # if the counts get closer.
+    dense_exchange_sampling: bool = env_bool("WARRIORIQ_DENSE_EXCHANGES", False)
+    # Refuse a candidate far smaller than the fighter's recent sightings - a
+    # spectator or the next mat's bout behind them (core/identity.py, the size
+    # gate in IdentityManager._score). Off until measured on every identity
+    # benchmark clip: tools/run_identity_benchmark.py compares both settings.
+    identity_size_gate: bool = env_bool("WARRIORIQ_IDENTITY_SIZE_GATE", False)
+    # Remember the people (tracker tracks) who stand beside the two fighters
+    # while both are held with confidence - in practice the referee - and
+    # refuse to hand a fighter's box to one of them (core/identity.py,
+    # IdentityManager._learn_bystanders and _looks_like_a_bystander).
+    # The referee filter (core/referee.py) knows only the white-over-dark
+    # uniform; on identity_pankration ma604 the referee wears a black shirt
+    # and khaki shorts, scored ~0, and took the fighters' boxes in 4-6 of the
+    # 7 "other person" frames measured on the analysis PC (2026-10-06).
+    # Off until measured: tools/run_identity_benchmark.py compares both.
+    bystander_memory: bool = env_bool("WARRIORIQ_BYSTANDER_MEMORY", False)
+    # Who counts as beside the fighters: centre within this many body heights
+    # of either one.
+    bystander_near_body_lengths: float = float(os.getenv("WARRIORIQ_BYSTANDER_NEAR", "1.5"))
+    # Both fighters must be held at least this confidently for a frame to
+    # teach anything, so a frame where a fighter's box is already on the wrong
+    # person cannot teach that the real fighter is a bystander.
+    bystander_min_confidence: float = float(os.getenv("WARRIORIQ_BYSTANDER_MIN_CONFIDENCE", "0.6"))
+    # Frames a person must be seen beside the fighters before they count.
+    bystander_min_sightings: int = int(os.getenv("WARRIORIQ_BYSTANDER_MIN_SIGHTINGS", "15"))
+    # A known bystander's track is still let through when the candidate looks
+    # this much more like the fighter picked than like that bystander - a
+    # fighter who inherited the track after an occlusion.
+    bystander_margin: float = float(os.getenv("WARRIORIQ_BYSTANDER_MARGIN", "0.05"))
+    # Centres closer than this many body heights count as an exchange.
+    dense_exchange_body_lengths: float = float(os.getenv("WARRIORIQ_DENSE_EXCHANGE_BODY_LENGTHS", "1.5"))
+    # The fighters being close is not the same as the strike reaching. Measured
+    # on real footage: strikes labelled kick-to-leg finished a median 2.46 body
+    # lengths from any target, and punches with no target at all made up a
+    # quarter of what was counted - leg movement and feints read as strikes.
+    # An arm reaches about 0.5 body lengths and a kick about 0.8, so 1.0 is
+    # generous. This removes non-strikes from the denominator; it never turns a
+    # miss into a landed strike.
+    max_strike_reach_body_lengths: float = float(os.getenv("WARRIORIQ_MAX_STRIKE_REACH", "1.0"))
+    # Whether the two people picked are actually the two fighters. Measured on
+    # Whether an action may be reported as a strike when the opponent was never
+    # seen during it. Measured on real footage: of 81 proposed actions, only 9
+    # had the opponent in frame at the peak and 31 never saw them at all, in a
+    # bout where the fighters are on the mat together throughout. Those are not
+    # strikes that missed, they are actions with no observed target - a fighter
+    # shadow-boxing at a gap in the tracking - and they were the bulk of what a
+    # human reviewer called "nothing happening".
+    require_observed_opponent: bool = env_bool("WARRIORIQ_REQUIRE_OPPONENT", True)
+    # three real tournament fights, each analysed twice - once with the real
+    # When a strike lands, the fighter receiving it moves too - the guard is
+    # driven back, the head turns, an arm is displaced - and the detector reads
+    # that as an action by the defender. Measured on three bouts: 72% to 86% of
+    # accepted events sit in a pair with the other fighter peaking within a
+    # third of a second, which is what that looks like from outside.
+    #
+    # Real simultaneous exchanges also happen, so the pair is only split when
+    # one limb clearly got closer to the opponent than the other. At a margin
+    # of 0.2 body lengths that is about half of pairs; the rest are left alone.
+    resolve_simultaneous_attribution: bool = env_bool("WARRIORIQ_RESOLVE_ATTRIBUTION", True)
+    simultaneous_window_seconds: float = float(
+        os.getenv("WARRIORIQ_SIMULTANEOUS_WINDOW", "0.35"))
+    attribution_reach_margin: float = float(
+        os.getenv("WARRIORIQ_ATTRIBUTION_MARGIN", "0.20"))
+    # pair and once with a plausible mistake (a ringside coach, or the referee):
+    #
+    #   fight       correct pair   mistaken pair
+    #   2.mp4          0.76           2.84 (coach)
+    #   3.mp4          2.55           3.25 (referee)
+    #   0-02-05        1.90           2.71 (coach)
+    #
+    # The mistaken pair always sits further apart, but correct tops out at 2.55
+    # and mistaken starts at 2.71, so there is no room to separate them on
+    # distance alone. This threshold therefore sits above every correct pair
+    # measured and is paired with "nothing landed at all" below. That catches
+    # the unmissable case - a fighter matched with someone who never fights
+    # back - and stays silent otherwise. It is deliberately not tuned to catch
+    # every mistake: a false accusation on a real fight is the worse error.
+    max_median_separation_body_lengths: float = float(
+        os.getenv("WARRIORIQ_MAX_MEDIAN_SEPARATION", "2.6")
+    )
+    # Below this many observed actions there is nothing to judge, and a quiet
+    # fight must not be accused of being the wrong two people.
+    min_actions_to_judge_selection: int = int(
+        os.getenv("WARRIORIQ_MIN_SELECTION_ACTIONS", "12")
+    )
+    # Fighters move; ringside does not. Measured in body lengths travelled per
+    # minute, so it means the same at any camera distance. Across every real run
+    # recorded so far - correct pairs and mis-picked ones alike - both tracked
+    # people covered 24 to 65 per minute. A live job that had latched onto
+    # someone standing at the edge of the mat covered 9.6. This sits below every
+    # real observation and well above that, and it catches the case a separation
+    # test cannot: two wrong people who happen to stand near each other.
+    min_fighter_travel_per_minute: float = float(
+        os.getenv("WARRIORIQ_MIN_TRAVEL_PER_MINUTE", "15")
+    )
+    # Below this, a track is not allowed to take a fighter's identity from
+    # another track. Lower than the reporting floor above because refusing a
+    # switch is cheap and being wrong about it is not: a fighter resting in a
+    # corner should still never be handed to the referee. Only blocks moving
+    # onto a new track, never drops the one already held.
+    min_switch_travel_per_minute: float = float(
+        os.getenv("WARRIORIQ_MIN_SWITCH_TRAVEL", "12")
+    )
+    # How far a track must roam around its own average position, in body
+    # lengths, before it may take a fighter's identity. The travel test above
+    # measures path length, which detection noise on a seated spectator quietly
+    # accumulates; this one does not accumulate, so a trembling box in the
+    # crowd stays small however long it is watched. Only applied after six
+    # seconds of continuous history, so a fighter pinned on the ropes is never
+    # read as furniture.
+    min_switch_spread_body_lengths: float = float(
+        os.getenv("WARRIORIQ_MIN_SWITCH_SPREAD", "0.5")
+    )
+    # A person who clearly looks like the fighter picked at selection is not
+    # refused by the two gates above. The motionless check still applies, so
+    # somebody sitting perfectly still is refused whatever they wear.
+    #
+    # Travel and spread are measured in body lengths, and were calibrated on
+    # wide shots where a fighter is small. In a phone close-up of sparring
+    # the fighters fill the frame, so the same footwork is fewer body lengths:
+    # measured 2026-09-30, the real fighter refused as "too still" read 9.8 to
+    # 11.2 a minute against 12, while matching their selection at 0.75 to
+    # 0.93. On 4 handheld phone clips labelled by eye
+    # (dataset/regression/identity_phone), right frames 73 -> 93 of 104 and
+    # none swapped. On the two pankration bouts 37 -> 39 right. On the Kick
+    # Light reference 6 of 589 frames change: blue is found as B at 81.3 s
+    # where he was missing, and at 81.5 and 81.7 s the box that had been
+    # called A on the blue athlete becomes B - both corrections; at 83.0 s B
+    # lands on the pair with red in front, which is doubtful. Nobody at the
+    # mat edge is picked up at any threshold tried. 0.80 gained more on the
+    # phone clips and swapped more on pankration.
+    still_override_anchor_similarity: float = float(
+        os.getenv("WARRIORIQ_STILL_OVERRIDE_ANCHOR", "0.85")
+    )
+    # The same measurement, but for *releasing* a fighter already held rather
+    # than for letting a new track take the identity. It needs its own number
+    # and much lower, and using the 0.5 above for both was the single largest
+    # source of lost fighters on real phone footage.
+    #
+    # Measured 2026-09-15 on the user's own 1080p bout, every track with six
+    # seconds of history:
+    #
+    #     spectators, large boxes at the frame edges   0.048 - 0.077
+    #     the fighters                                 0.26 - 0.87
+    #
+    # 0.5 sits above every fighter in that bout, so both were released
+    # constantly: 376 releases across 378 frames, 167 of them the same track.
+    # It reads as one wrong judgement and is a loop. `_recent_spread` measures
+    # the track's whole history, so spread *grows* over a track's life - a
+    # fighter's young track is always small, gets released, is re-acquired, and
+    # is small again. Every released box was checked by eye: all were athletes,
+    # several mid-technique, none a spectator or the referee.
+    #
+    # Why 0.5 was ever reasonable: it was calibrated on 480x220 broadcast
+    # captures, where the camera is tight on one mat and a fighter sweeps a
+    # large share of a small frame. Film the same bout from the back of a hall
+    # and the athlete barely moves relative to their own height, while the
+    # threshold does not know the difference.
+    #
+    # 0.12 sits between the two populations with margin either side. Releasing
+    # is still worth doing - see _release_if_furniture for the seated spectator
+    # held at "98% coverage" - but it must be rare and certain, and the short
+    # motionless test below is the one calibrated to be both.
+    max_release_spread_body_lengths: float = float(
+        os.getenv("WARRIORIQ_MAX_RELEASE_SPREAD", "0.12")
+    )
+    # A fighter standing this close to the other fighter is never released as
+    # furniture, however still. The release exists for an identity that has
+    # slid onto a seated spectator, and spectators are not on the mat.
+    #
+    # Measured 2026-09-26 on a real 94-second WAKO Kick Light bout: all four
+    # releases were the two athletes standing through a referee stoppage, 0.87
+    # to 0.96 body lengths apart, on tracks only six seconds old. Both stayed
+    # banned from 57 s to 87 s, including 13 s of fighting after the restart.
+    # Across the bout the pair stood 0.91 apart at the median and 1.23 at the
+    # 90th percentile; the mistaken pairs (fighter with coach or referee)
+    # measured in max_median_separation_body_lengths sat 2.71 to 3.25 apart.
+    furniture_partner_body_lengths: float = float(
+        os.getenv("WARRIORIQ_FURNITURE_PARTNER_DISTANCE", "1.5")
+    )
+    # Above this many hand-offs a minute - the fighter's identity moving from
+    # one tracker track to a different one - who the numbers belong to cannot
+    # be vouched for, and the identity check fails.
+    #
+    # Measured 2026-09-26, by eye on boxes drawn every few seconds:
+    #
+    #     WAKO Kick Light, fixed broadcast camera     6.4 / 7.0   right person
+    #     Athens European Cup, handheld from stands  21.4 / 25.7  mostly wrong
+    #
+    # On the second the camera panned throughout (4.97% of the frame against
+    # 0.13%) with about fifteen people in shot, and the tracker re-created
+    # people so often that recovery kept choosing spectators, coaches and the
+    # opponent - while coverage read 82% and the check passed. Two fights is
+    # thin; 15 sits well inside the gap and should be revisited as more real
+    # footage is checked.
+    max_identity_handoffs_per_minute: float = float(
+        os.getenv("WARRIORIQ_MAX_IDENTITY_HANDOFFS_PER_MINUTE", "15")
+    )
+    # The same gate, counting only the hand-offs that look like a different
+    # person: the fighter before and after differ in colour (histogram
+    # similarity under 0.8) or the box jumped more than 0.8 body lengths.
+    # Used instead of the plain count above whenever a report carries it.
+    #
+    # A handheld phone makes the tracker drop and re-create people all the
+    # time, and most of those hand-offs land back on the same fighter. The
+    # plain count cannot tell those apart, and held back phone fights that
+    # were followed correctly. Measured 2026-09-29, suspicious per minute
+    # (plain count in brackets), boxes checked by eye:
+    #
+    #     Kick Light, fixed camera            2.6 / 5.1    (6.4 / 8.3)    right
+    #     4 handheld phone sparring clips   1.1 to 10.4   (4.3 to 19.5)  right
+    #     Athens, handheld from the stands   15.0 / 21.7  (21.4 / 25.7)  wrong
+    #     2 pankration bouts, 320x240       20.1 to 38.3  (24.6 to 47.9) wrong
+    #
+    # One phone clip that was followed correctly (A right 9 times of 11) read
+    # 19.5 on the plain count and would have been held back. 12 sits between
+    # the highest right fight and the lowest wrong one. (Measured with
+    # still_override_anchor_similarity in place; Athens was measured before
+    # it, from the video, and could not be replayed.) The phone clips are
+    # public-domain sparring (archive.org item "boxingsparring"); their
+    # labels are in dataset/regression/identity_phone/.
+    max_suspicious_handoffs_per_minute: float = float(
+        os.getenv("WARRIORIQ_MAX_SUSPICIOUS_HANDOFFS_PER_MINUTE", "12")
+    )
+    # Judge a hand-off against the fighter's latest sighting, including the
+    # stand-in crops found where SAM2 said they were (track ids -1001/-1002),
+    # not against the last tracker track - which can be seconds old after a
+    # SAM2-guided stretch, so a correct re-find read as a jump. The owner's
+    # handheld bout (568x320, ~17 people in shot) had 194 guided recoveries
+    # for B and read 14.9 suspicious hand-offs a minute. A setting so
+    # tools/run_identity_benchmark.py can compare the two.
+    handoff_from_latest_sighting: bool = env_bool("WARRIORIQ_HANDOFF_FROM_LATEST", True)
+    # A suspicious hand-off is taken back when the person picked up wears the
+    # fighter's own kit, read where the person drew the boxes, in every region
+    # that tells the two fighters apart (core/kit.py HandoffKitCheck). Only for
+    # clearly different kits; 0 counts every suspicious hand-off, as before.
+    handoff_kit_check: bool = env_bool("WARRIORIQ_HANDOFF_KIT_CHECK", True)
+    # A person the referee probe calls an official is still taken for the
+    # missing fighter when they wear that fighter's kit - read where the boxes
+    # were drawn, in every region the two fighters' kits clearly differ
+    # (core/kit.py HandoffKitCheck.matches). The probe was fitted on
+    # tournament footage (pale shirt, dark trousers vs singlets); on sparring
+    # in T-shirts and track trousers it scored the real fighter 0.68-0.99 and
+    # the analysis refused him on hundreds of frames with no referee present
+    # (owner, 2026-11-02). Only applies when the kits clearly differ.
+    official_kit_override: bool = env_bool("WARRIORIQ_OFFICIAL_KIT_OVERRIDE", True)
+    # Run the SAM2 sweep beside the frame pass rather than before it
+    # (core/sam_recovery.py SweepInBackground). Measured 2026-10-21 on the
+    # owner's RTX 5060: 75 s of sweep, then 120 s of frame pass, for a 197 s
+    # fight. The frame pass waits for the sweep wherever it needs it, so the
+    # guidance is the same. WARRIORIQ_SAM_OVERLAP=0 runs them one after the
+    # other, as before.
+    sam_overlap_sweep: bool = env_bool("WARRIORIQ_SAM_OVERLAP", True)
+    # Putting A and B back the right way round after the tracker swapped them.
+    #
+    # When a fighter is lost for a moment - a clinch, the phone swinging past -
+    # the tracker can hand the track to the other fighter, and from then on
+    # every check that compares a person with how they looked a frame ago
+    # agrees with the swap. The colours picked at selection do not drift, so
+    # when A's box looks like B's selection AND B's box looks like A's, held
+    # over a second of frames, they are swapped back. Only runs when the two
+    # selected fighters are separable in colour (max_fighter_pair_similarity).
+    #
+    # Measured 2026-09-29 on 4 handheld phone clips labelled by eye: frames
+    # with the fighters swapped 19 -> 5, correct frames 60 -> 73, and no
+    # change on the three clips that never swapped. On the Kick Light
+    # reference it never fires (the signal peaks at -0.07), so that bout is
+    # unchanged.
+    swap_correction_margin: float = float(os.getenv("WARRIORIQ_SWAP_CORRECTION_MARGIN", "0.10"))
+    swap_correction_smoothing: float = 0.8
+    swap_correction_frames: int = 6
+    # A second, much stricter reading of the same measurement over a much
+    # shorter look. The 6 s guard above is calibrated to catch marginal cases
+    # and so must wait; somebody who has not moved at all is decidable sooner.
+    #
+    # Calibrated on *rolling* 1.5 s windows, which is what the guard actually
+    # reads. Measuring each track's opening 1.5 s instead suggested a clean gap
+    # at 0.04 and there is none: a fighter in a clinch or between exchanges is
+    # far stiller mid-round than when first seen, and 0.04 refused one in five
+    # of their windows. Across a full round, per track: seated spectators and
+    # the referee bottom out at 0.003 to 0.031 body lengths, while the least
+    # mobile fighter never goes below 0.029. This sits under every fighter
+    # window measured and still catches the people who never move at all.
+    max_stationary_spread_short: float = float(
+        os.getenv("WARRIORIQ_MAX_STATIONARY_SPREAD_SHORT", "0.02"))
+    # How long a track must have been watched before its spread
+    # (core.identity.IdentityManager._recent_spread) may refuse a switch onto
+    # it. Was a fixed 6 s. 3 s measured 2026-11-08 and not kept: on S01 it
+    # kept fighter A off a coach outside the ring (62 -> 19 frames on him),
+    # but on S07 it refused the real fighter A, picked up again on a new track
+    # while standing his ground, for about 10 s (A held 689 -> 587 of 841
+    # frames, 7 of 8 sampled dropped frames were him).
+    switch_spread_min_seconds: float = float(os.getenv("WARRIORIQ_SWITCH_SPREAD_SECONDS", "6.0"))
+    stationary_short_seconds: float = float(
+        os.getenv("WARRIORIQ_STATIONARY_SHORT_SECONDS", "1.5"))
+    # Seconds of video immediately before the round to run through the tracker
+    # for its motion history alone. Without it the guards above cannot judge
+    # anybody until the round is already this far along, and a spectator
+    # acquired in that window is held until they can. Costs one short pass at
+    # the analysis stride; 0 disables it.
+    identity_warmup_seconds: float = float(
+        os.getenv("WARRIORIQ_IDENTITY_WARMUP_SECONDS", "2.0"))
+    # A second opinion on the two fighters' joints, from a top-down pose model.
+    # The fused detector regresses keypoints from whole-frame features and
+    # collapses on small or unusual bodies - measured on real footage it
+    # squeezed a fighter's torso to a sliver and put both legs on one point
+    # while reporting 0.93 ankle confidence. RTMPose receives the fighter
+    # cropped and rescaled to its full input and gets it right.
+    #
+    # On, and the cost is smaller than it first looked. 15.7 ms per person with
+    # no batching benefit reads like a doubling, but only the two committed
+    # fighters are refined and the rest of the pipeline dominates: measured end
+    # to end on a 60 s bout, 109.1 s against 122.8 s, or 12.6%. That overruns
+    # the 10 s budget this was asked to fit in, and is worth saying plainly -
+    # but the detector's own head returns skeletons with the torso squeezed to
+    # a sliver and both legs converging on one point while reporting 0.93
+    # ankle confidence, and every metric downstream reads those joints.
+    #
+    # What this does not yet prove is that the techniques it names are more
+    # often right. It resolves twice as many distinct techniques - uppercuts,
+    # low kicks and knees appear where there were none - which is consistent
+    # with better joints and is not evidence of correctness. That needs labels.
+    rtm_pose_enabled: bool = env_bool("WARRIORIQ_RTM_POSE", True)
+    rtm_pose_device: str = os.getenv("WARRIORIQ_RTM_POSE_DEVICE", "cuda").strip()
+    rtm_pose_model: str = os.getenv(
+        "WARRIORIQ_RTM_POSE_MODEL",
+        "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/"
+        "rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip",
+    ).strip()
+    # How often the analysis was looking at one of the two people who actually
+    # fought. Set once measured on real runs; a correct run loses its fighters
+    # to occlusion and pans, so this only has to separate "followed the fight"
+    # from "followed somebody else entirely".
+    min_followed_share: float = float(os.getenv("WARRIORIQ_MIN_FOLLOWED_SHARE", "0.35"))
+    # Who the pair-finder will consider at all. Lower than the warning floor
+    # above on purpose: this only decides who is eligible to be one of the two
+    # fighters, and the pairing does the real work. Set equal to the warning
+    # floor, whole fights produced no candidate pair and the check said nothing.
+    min_candidate_travel_per_minute: float = float(
+        os.getenv("WARRIORIQ_MIN_CANDIDATE_TRAVEL", "8")
+    )
+    contact_threshold_body_lengths: float = 0.24
+    likely_contact_threshold_body_lengths: float = 0.33
+    contact_confirmation_frames: int = 2
+    block_proximity_body_lengths: float = 0.18
+
+    # ------------------------------------------------------------
+    # Reports / evidence
+    # ------------------------------------------------------------
+    min_pose_coverage_for_metric: float = 0.60
+    # Below this many observed frames there is genuinely too little to average,
+    # and a mean of a handful of frames is noise wearing a number's clothes.
+    # This is a sample floor and not a coverage one: a fighter observed for
+    # four hundred frames of a round is measurable, and the report says so by
+    # carrying the sample size rather than by hiding the result.
+    min_metric_samples: int = int(os.getenv("WARRIORIQ_MIN_METRIC_SAMPLES", "60"))
+    # A score remains explicitly estimated, but 85% verified coverage for
+    # both fighters is sufficient when each counted action also passes the
+    # stricter technique/contact evidence thresholds in scoring.py.
+    min_tracking_coverage_for_score: float = float(os.getenv("WARRIORIQ_SCORE_COVERAGE", "0.85"))
+    # A ten-point-must round is a judgement about who controlled a round, and
+    # two detected actions cannot support one. Measured on real 480x220
+    # tournament footage: 244 actions detected, 2 of them verified, and the
+    # scorer still published a 9-10 round with a named winner. The score is
+    # withheld below this; every movement measurement is kept.
+    min_verified_actions_for_score: int = int(os.getenv("WARRIORIQ_MIN_SCORING_ACTIONS", "6"))
+    evidence_pre_seconds: float = 1.0
+    evidence_post_seconds: float = 1.0
+    save_tracking_jsonl: bool = True
+    # Decode the next frames on a helper thread while the current one is
+    # analysed (core/frame_feed.py). Same frames, same results; off only to
+    # compare against the old inline decoding.
+    decode_ahead: bool = env_bool("WARRIORIQ_DECODE_AHEAD", True)
+    save_debug_video: bool = False
+
+    # ------------------------------------------------------------
+    # Product
+    # ------------------------------------------------------------
+    brand_name: str = "WarriorIQ"
+    version: str = "1.0"
+    default_profile_name: str = "My Athlete"
+    payments_enabled: bool = env_bool("WARRIORIQ_PAYMENTS", False)
+    # The launch checklist names the operator details still missing - company
+    # name, registration number, copyright agent. Useful to whoever is setting
+    # WarriorIQ up, and to a visitor it reads as "this company does not exist
+    # yet". Off unless the operator deliberately turns it on.
+    show_launch_checklist: bool = env_bool("WARRIORIQ_SHOW_LAUNCH_CHECKLIST", False)
+    # Whether the legal text still carries "not yet reviewed by a lawyer".
+    #
+    # This was written into legal_document.html, so it appeared on the twelve
+    # documents that template renders and on neither /privacy nor /legal, and
+    # clearing it once counsel had read the text meant editing markup on a live
+    # site. It is a claim about the documents, not about the deployment, which
+    # is why it is separate from launch_readiness(): text can be reviewed while
+    # the operator fields are still empty, and the reverse.
+    #
+    # TO CLEAR IT, once counsel has actually read the text:
+    #   set WARRIORIQ_LEGAL_DRAFT=0 in the host environment and restart.
+    #   cPanel's Python App panel wins over .env - load_dotenv() defaults to
+    #   override=False and skips any key already in the environment - so set it
+    #   in the panel, not only in the file.
+    #
+    # It is read in exactly one place, app/main.py setting
+    # request.state.legal_is_draft, and rendered by three templates:
+    # legal.html, privacy.html and legal_document.html, the last of which
+    # covers all twelve documents it renders. So one flag clears every page.
+    #
+    # **Do not flip it for a partial review.** One flag covering every document
+    # is the right shape for "counsel has read the set" and the wrong shape for
+    # "counsel has read Terms and Privacy". If the review comes back covering
+    # some documents and not others, the honest change is to make this
+    # per-document before clearing anything - clearing it globally would put
+    # "reviewed by a lawyer" on pages no lawyer has seen, which is a worse
+    # claim than the banner it removes.
+    #
+    # An audit asked for the banner to come off outright. Declined on
+    # 2026-09-18: the review had not happened yet, and removing a disclaimer
+    # you cannot back is a false implied claim, not a fix. The audit also
+    # looked for the exact string "DRAFT FOR COUNSEL REVIEW" - that string does
+    # not exist; the eyebrow reads "draft for counsel review" in lower case and
+    # the banner text is the sentence in the three templates above.
+    legal_is_draft: bool = env_bool("WARRIORIQ_LEGAL_DRAFT", True)
+
+    # Social sign-in is opt-in per provider. A provider is exposed only when
+    # both credentials and a stable state-signing secret are configured.
+    oauth_state_secret: str = os.getenv("WARRIORIQ_OAUTH_STATE_SECRET", "").strip()
+    google_client_id: str = os.getenv("WARRIORIQ_GOOGLE_CLIENT_ID", "").strip()
+    google_client_secret: str = os.getenv("WARRIORIQ_GOOGLE_CLIENT_SECRET", "").strip()
+    facebook_client_id: str = os.getenv("WARRIORIQ_FACEBOOK_CLIENT_ID", "").strip()
+    facebook_client_secret: str = os.getenv("WARRIORIQ_FACEBOOK_CLIENT_SECRET", "").strip()
+    microsoft_client_id: str = os.getenv("WARRIORIQ_MICROSOFT_CLIENT_ID", "").strip()
+    microsoft_client_secret: str = os.getenv("WARRIORIQ_MICROSOFT_CLIENT_SECRET", "").strip()
+    github_client_id: str = os.getenv("WARRIORIQ_GITHUB_CLIENT_ID", "").strip()
+    github_client_secret: str = os.getenv("WARRIORIQ_GITHUB_CLIENT_SECRET", "").strip()
+
+    # Analysis jobs can run inside the web process for a local/PyCharm build,
+    # or be claimed by a separate GPU worker in production.  External mode is
+    # deliberately opt-in so existing local installs keep working unchanged.
+    analysis_worker_mode: str = os.getenv("WARRIORIQ_WORKER_MODE", "inprocess").strip().lower()
+    worker_poll_seconds: float = max(0.2, float(os.getenv("WARRIORIQ_WORKER_POLL_SECONDS", "1.0")))
+    worker_lease_seconds: int = max(30, int(os.getenv("WARRIORIQ_WORKER_LEASE_SECONDS", "180")))
+    worker_stale_seconds: int = max(60, int(os.getenv("WARRIORIQ_WORKER_STALE_SECONDS", "300")))
+    # Email the administrators when a fight has waited this long with no
+    # analysis worker connected, and again when it connects (core/worker_alerts.py).
+    # 0 switches it off.
+    worker_alert_seconds: int = max(0, int(os.getenv("WARRIORIQ_WORKER_ALERT_SECONDS", "600")))
+    # Remote mode lets a GPU machine claim jobs over HTTPS instead of requiring
+    # the web server and worker to share a filesystem. The token must be the
+    # same high-entropy secret on both machines and is never sent to browsers.
+    # A detached worker keeps the queue durable, so a fight can be accepted while
+    # the analysis machine is switched off and claimed when it next connects.
+    # Turn this off to refuse uploads whenever no worker is currently online.
+    accept_deferred_analysis: bool = env_bool("WARRIORIQ_ACCEPT_DEFERRED_ANALYSIS", True)
+    # Optional wake hook for a scale-to-zero GPU. When a fight is queued with no
+    # worker online, the web process pings this URL so a serverless GPU starts,
+    # drains the queue and shuts down again. Polling a GPU would bill idle time;
+    # waking one on demand bills only the analysis itself.
+    worker_wake_url: str = os.getenv("WARRIORIQ_WORKER_WAKE_URL", "").strip()
+    # Wake-on-LAN for an analysis machine that sleeps between fights. The queue
+    # cannot reach a sleeping PC and a sleeping PC cannot poll, so the web
+    # process sends a magic packet the network card still listens for. Needs the
+    # router to forward this UDP port to the LAN broadcast address. Purely an
+    # accelerator: the scheduled drain still collects the fight if it fails.
+    wol_mac: str = os.getenv("WARRIORIQ_WOL_MAC", "").strip()
+    wol_host: str = os.getenv("WARRIORIQ_WOL_HOST", "").strip()
+    wol_port: int = int(os.getenv("WARRIORIQ_WOL_PORT", "9"))
+    # How often deploy/drain-queue.ps1 is scheduled to wake the machine. This is
+    # the guaranteed ceiling on how long a fight waits when the magic packet
+    # never arrives, and it is what the uploader is promised before any real
+    # wake latency has been observed.
+    wake_drain_interval_seconds: int = int(os.getenv("WARRIORIQ_DRAIN_INTERVAL", "300"))
+    worker_remote_url: str = os.getenv("WARRIORIQ_WORKER_REMOTE_URL", "").rstrip("/")
+    worker_token: str = env_secret("WARRIORIQ_WORKER_TOKEN")
+    worker_artifact_max_bytes: int = max(
+        10 * 1024 * 1024,
+        int(os.getenv("WARRIORIQ_WORKER_ARTIFACT_MAX_BYTES", str(256 * 1024 * 1024))),
+    )
+    minimum_free_storage_gb: float = max(0.25, float(os.getenv("WARRIORIQ_MIN_FREE_STORAGE_GB", "2")))
+    account_storage_bytes: int = max(1, int(os.getenv("WARRIORIQ_ACCOUNT_STORAGE_BYTES", str(8 * 1024**3))))
+    max_pending_uploads: int = max(1, int(os.getenv("WARRIORIQ_MAX_PENDING_UPLOADS", "2")))
+    upload_timeout_seconds: int = max(60, int(os.getenv("WARRIORIQ_UPLOAD_TIMEOUT_SECONDS", "900")))
+    max_fight_bytes: int = max(
+        50 * 1024 * 1024,
+        int(os.getenv("WARRIORIQ_MAX_FIGHT_BYTES", str(2 * 1024 * 1024 * 1024))),
+    )
+    # What one request body may carry. **This was attributed to the web host
+    # and the attribution is doubtful.**
+    #
+    # The comment here used to read: "Measured against the live server: the
+    # body is refused at exactly 130 MiB, three times running, with a 500
+    # rather than a 413." Every part of that is also explained by WarriorIQ
+    # refusing its own upload:
+    #
+    #   * 130 MiB is exactly this default. No web host picks that number.
+    #   * UploadBodyLimitMiddleware produced that exact 500 on any body with
+    #     no Content-Length to pre-check, with no host involved. Fixed now -
+    #     it answers 413 - so the symptom that set this ceiling is gone.
+    #   * The live host answers 100 Continue to a declared 200 MiB on /upload,
+    #     so Apache is not refusing on size before the body arrives.
+    #   * a2wsgi passes Content-Length through and streams the body.
+    #
+    # **Settled 2026-09-22: the host has no such limit.** A 136 MiB body was
+    # pushed at the live /upload; 134 MiB crossed the wire and the application
+    # answered 401 on its own terms, with nothing in front of it refusing.
+    #
+    # This value is therefore WarriorIQ's own choice and not a constraint, and
+    # it is now the same 512 MB the chunked path accepts.
+    #
+    # Matched deliberately, because the page states one limit - the copy under
+    # the file picker and the client's own size check both read
+    # min(max_fight_bytes, max_upload_bytes) - and a fallback that accepts
+    # less than the main path would make that number a lie for whoever fell
+    # back. The audit's case is the one this fixes: a phone filming two
+    # minutes of 1080p produces 140-260 MB, which 130 MiB refused outright.
+    #
+    # What is proven is 134 MiB through the live host. 512 MB in a single
+    # request is not, and while chunked_upload_enabled is off this is the only
+    # path there is - so that unproven size is what a user actually gets, with
+    # no resume if it fails.
+    #
+    # Kept at 512 MB anyway, because the alternative is worse: 130 MiB refused
+    # a two-minute 1080p round outright, which is the complaint that started
+    # all of this. A large upload that might fail beats one that cannot be
+    # attempted. The real fix is turning the chunked path on, and until that
+    # happens this number is carrying more weight than it was chosen to.
+    #
+    # max_fight_bytes above says 2 GB and cannot be honoured while this is
+    # smaller. The chunked upload path does not go through this limit at all -
+    # each of its requests is one chunk - so raising this is about the legacy
+    # single-request /upload only.
+    max_upload_bytes: int = max(
+        8 * 1024 * 1024,
+        int(os.getenv("WARRIORIQ_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024))),
+    )
+    # A disposable endpoint that measures what this host will actually accept
+    # in one request body, and how it delivers it.
+    #
+    # The 130 MiB ceiling above is attributed to the host, but the evidence
+    # for that is thinner than it looks: the recorded symptom - refused at
+    # exactly 130 MiB with a 500 rather than a 413 - is reproduced exactly by
+    # WarriorIQ's own UploadBodyLimitMiddleware when a body arrives without a
+    # Content-Length, and 130 MiB is exactly this application's default. The
+    # live host, asked directly, returns 100 Continue for a declared 200 MiB.
+    #
+    # So before an upload architecture is designed around that ceiling, the
+    # ceiling gets measured. Off by default, admin-only, writes nothing to
+    # disk; turn it on, measure, turn it off.
+    # Squeeze the concatenated stylesheets before serving them. On by
+    # default; the switch exists because a minifier is the kind of thing that
+    # breaks one page on one browser, and the first question then is whether
+    # it was the minifier. Turning this off answers that in a restart instead
+    # of a deploy.
+    css_minify_enabled: bool = env_bool("WARRIORIQ_CSS_MINIFY", True)
+    upload_probe_enabled: bool = env_bool("WARRIORIQ_UPLOAD_PROBE", False)
+
+    # ------------------------------------------------------------
+    # Chunked upload
+    # ------------------------------------------------------------
+    # A phone films 1080p at 8-17 Mbps, so two minutes is 140-260 MB, and a
+    # single POST of that has nothing to resume from.
+    #
+    # How long it takes is not knowable in advance. The same path to the live
+    # host measured 183 KiB/s and 3.5 MiB/s within an hour: twenty-three
+    # minutes and seventy seconds for the same file. Neither sample came from
+    # a phone on mobile data at a venue, which is the connection this serves.
+    # A design that only works at the fast end fails the people at the slow
+    # end, and splitting the transfer removes the question - a dropped
+    # connection costs one chunk rather than the fight.
+    # Off by default, so the first deploy carrying this ships it inert.
+    #
+    # Nothing about the chunked path has run against the real host: not
+    # Passenger's behaviour with a PUT body, not a2wsgi's delivery of one, not
+    # a phone on a venue's connection. It is well covered by tests and
+    # verified locally end to end, and neither of those is the thing it has to
+    # survive. Turning it on is one env var and a restart, and turning it off
+    # again is the same - which is worth more on the day it misbehaves than
+    # shipping it hot is worth today.
+    #
+    # The page falls back to the single-request /upload whenever begin answers
+    # 404, which is exactly what this default produces, so a deploy with this
+    # off behaves as the site does now.
+    chunked_upload_enabled: bool = env_bool("WARRIORIQ_CHUNKED_UPLOAD", False)
+    # 8 MiB. Far below any plausible request-body ceiling, so the host's limit
+    # stops being the thing that decides whether a fight can be uploaded; large
+    # enough that a 260 MB round is about 33 requests rather than hundreds;
+    # small enough that a failed chunk costs seconds of a phone's uplink
+    # instead of minutes.
+    #
+    # tools/probe_upload_limits.py reports whether this host streams a body or
+    # buffers it whole. If it buffers, this is also what it holds in memory per
+    # request, and that is the number to lower.
+    upload_chunk_bytes: int = max(
+        256 * 1024,
+        min(32 * 1024 * 1024,
+            int(os.getenv("WARRIORIQ_UPLOAD_CHUNK_BYTES", str(8 * 1024 * 1024)))),
+    )
+    # The largest fight a chunked upload may assemble. Deliberately far below
+    # max_fight_bytes' 2 GB: every byte accepted is disk on a shared host with
+    # an 8 GB per-account budget and a 2 GB free-space reserve, and then GPU
+    # minutes on the analysis that follows. 512 MB covers a two-minute 1080p
+    # round several times over. Raise it when something has been measured
+    # against it, not before.
+    max_chunked_upload_bytes: int = max(
+        8 * 1024 * 1024,
+        int(os.getenv("WARRIORIQ_MAX_CHUNKED_UPLOAD_BYTES", str(512 * 1024 * 1024))),
+    )
+    max_video_duration_seconds: int = max(60, int(os.getenv("WARRIORIQ_MAX_VIDEO_SECONDS", "10800")))
+    max_video_pixels: int = max(640 * 360, int(os.getenv("WARRIORIQ_MAX_VIDEO_PIXELS", str(3840 * 2160))))
+    malware_scan_command: str = os.getenv("WARRIORIQ_MALWARE_SCAN_COMMAND", "").strip()
+    malware_scan_required: bool = env_bool("WARRIORIQ_MALWARE_SCAN_REQUIRED", False)
+
+    # ------------------------------------------------------------
+    # Public-launch and legal identity
+    # ------------------------------------------------------------
+    # These values intentionally have no made-up defaults. Paid checkout is
+    # blocked until the real operator has supplied every launch-critical item.
+    # 2026-10-19: /subprocessors now names Render, Google and Stripe
+    # with purpose, location and data (audit 2026-10-14 #10).
+    policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-10-19")
+    public_base_url: str = os.getenv("WARRIORIQ_PUBLIC_BASE_URL", "").rstrip("/")
+    # Serve replay video through a CDN (Cloudflare in front of this site, or
+    # any pull CDN). Off unless both are set. /media then redirects to
+    # <media_cdn_base_url>/media-signed/<job>?exp=..&sig=.., a URL that is
+    # unguessable, expires, and may therefore be cached publicly; the CDN pulls
+    # it from this server once. Audit 2026-10-14, #25. See OPS_TODO.md.
+    media_cdn_base_url: str = os.getenv("WARRIORIQ_MEDIA_CDN_BASE_URL", "").rstrip("/")
+    media_signing_key: str = os.getenv("WARRIORIQ_MEDIA_SIGNING_KEY", "")
+    # How long a signed media URL lives. Expiry is rounded up to a whole
+    # period, so one viewer's URL stays the same - and cached - for a while.
+    media_url_seconds: int = int(os.getenv("WARRIORIQ_MEDIA_URL_SECONDS", "3600"))
+    allowed_hosts: tuple[str, ...] = tuple(
+        value.strip().lower() for value in os.getenv("WARRIORIQ_ALLOWED_HOSTS", "").split(",")
+        if value.strip()
+    )
+    operator_name: str = legal_value("name", "WARRIORIQ_OPERATOR_NAME")
+    operator_address: str = legal_value("address", "WARRIORIQ_OPERATOR_ADDRESS")
+    operator_registration: str = legal_value("registration", "WARRIORIQ_OPERATOR_REGISTRATION")
+    operator_vat: str = legal_value("vat", "WARRIORIQ_OPERATOR_VAT")
+    governing_country: str = legal_value("country", "WARRIORIQ_GOVERNING_COUNTRY")
+    support_email: str = legal_value("support_email", "WARRIORIQ_SUPPORT_EMAIL")
+    privacy_email: str = legal_value("privacy_email", "WARRIORIQ_PRIVACY_EMAIL")
+    dmca_email: str = legal_value("dmca_email", "WARRIORIQ_DMCA_EMAIL")
+    dmca_agent_name: str = os.getenv("WARRIORIQ_DMCA_AGENT_NAME", "").strip()
+    minimum_account_age: int = int(os.getenv("WARRIORIQ_MINIMUM_AGE", "18"))
+    saved_video_retention_days: int = max(1, int(os.getenv("WARRIORIQ_VIDEO_RETENTION_DAYS", "30")))
+    failed_upload_retention_hours: int = max(1, int(os.getenv("WARRIORIQ_FAILED_UPLOAD_RETENTION_HOURS", "2")))
+    # Complimentary plan grants as "email:plan_key" pairs, comma separated.
+    # Kept in configuration rather than as a row edit on the live database so a
+    # grant is visible, reviewable and survives a restore.
+    #
+    # No default. The owner's own address was hardcoded here, which published a
+    # personal email in a public repository and named the account holding a free
+    # plan. Grants belong in the server's environment, not in source.
+    complimentary_plans: dict[str, str] = field(default_factory=lambda: {
+        email.strip().lower(): plan.strip().lower()
+        for entry in os.getenv("WARRIORIQ_COMPLIMENTARY_PLANS", "").split(",")
+        if entry.strip() and ":" in entry
+        for email, plan in [entry.split(":", 1)]
+    })
+    admin_emails: tuple[str, ...] = tuple(
+        email.strip().lower()
+        for email in os.getenv("WARRIORIQ_ADMIN_EMAILS", "").split(",")
+        if email.strip()
+    )
+    # Google Analytics. The tag is rendered only for visitors who accept
+    # analytics cookies; leaving this empty disables analytics entirely and
+    # keeps the strict Content-Security-Policy.
+    #
+    # **This wants the Google tag id (GT-...), not the GA4 measurement id.**
+    # Deployed value: GT-MQJ4F2RF, working since 2026-09-16.
+    #
+    # Empty by default, like WARRIORIQ_SITE_VERIFICATION and for the same
+    # reason. The previous default, G-5V5Q4H30LD, is known not to load, so
+    # falling back to it rendered a tag that 404s - installed to the eye,
+    # measuring nothing, and indistinguishable from a working one without
+    # opening the network panel. Empty disables analytics cleanly and keeps
+    # the strict Content-Security-Policy.
+    #
+    # The obvious advice - GA4 Admin -> Data streams -> Measurement ID, top
+    # right - gives G-5V5Q4H30LD, and **that id cannot be loaded**:
+    # `googletagmanager.com/gtag/js?id=G-5V5Q4H30LD` returns **404**, checked
+    # 2026-09-09 and again 2026-09-16. It is not a typo and not a dead
+    # property: the id appears 18 times inside the live tag scripts. This
+    # property's tag is owned by a Google tag created through Google Ads,
+    # which makes the measurement id a *destination* rather than something
+    # independently servable. Installing the GT- id routes to it - verified in
+    # the browser, the site sends `/g/collect` with
+    # `tid=G-5V5Q4H30LD&en=page_view&gcs=G101` (ads denied, analytics granted).
+    #
+    # **Two baselines before concluding anything from a status code here**,
+    # because both endpoints answer misleadingly:
+    #   - `gtag/js?id=` returns **200 and a working ~429 KB script for ids
+    #     invented on the spot**, so a 404 means actively rejected, not
+    #     unknown. That is a strong, specific signal - do not read it as a
+    #     wrong id and go hunting for a different one.
+    #   - `/g/collect?tid=` returns **204 for every tid**, real or invented,
+    #     so a 204 proves nothing whatsoever.
+    # The only real check is the browser:
+    # `performance.getEntriesByType('resource')` and look for the /g/collect
+    # entry carrying the tid. A week was lost to trusting the status codes.
+    #
+    # This Google tag also carries the Ads destination AW-18419565750, which
+    # fires `pagead2.googlesyndication.com/ccm/collect` on page view with
+    # `npa=1` and ad storage denied. No ad cookies, but Google Ads does
+    # receive a signal. A standalone GA4 web stream, not tied to the Ads tag,
+    # is the alternative if Ads must not fire at all.
+    #
+    # An audit reported that ccm/collect answers 503 on every page load and
+    # asked for the tag to be fixed or removed. Neither is a code change, and
+    # the reason is worth being precise about: **AW-18419565750 does not appear
+    # anywhere in this repository**. Confirmed in the browser against the live
+    # site - the only id in the markup is GT-MQJ4F2RF, and the AW- id shows up
+    # solely inside the outgoing request, because it is a destination attached
+    # to that tag in the Google Tag account. There is no line here to delete.
+    #
+    # The status code could not be confirmed either way, and the earlier
+    # warning in this comment applies twice over: these are cross-origin
+    # requests with no Timing-Allow-Origin, so PerformanceResourceTiming
+    # reports responseStatus 0 for all of them - including gtag/js, which
+    # demonstrably works. A 503 on ccm/collect is in any case a refused
+    # fire-and-forget beacon: nothing renders differently and no user sees it.
+    #
+    # To actually stop it, remove the Ads destination from tag GT-MQJ4F2RF in
+    # the Google Tag interface. GA4 keeps working - the /g/collect hit carrying
+    # tid=G-5V5Q4H30LD is sent by the same tag and is independent of Ads.
+    #
+    # Set WARRIORIQ_ANALYTICS_ID on the deployment rather than editing this
+    # line. **cPanel's Python App panel wins over .env**, because
+    # `load_dotenv()` defaults to `override=False` and skips any key already
+    # in the environment - an edit to .env alone can silently do nothing.
+    analytics_measurement_id: str = os.getenv("WARRIORIQ_ANALYTICS_ID", "").strip()
+    # Search Console ownership token: the `content` value of the
+    # <meta name="google-site-verification"> tag Google offers under
+    # "HTML tag" verification. Empty renders no tag, which is the honest
+    # default - an empty or invented token fails verification silently and
+    # looks identical to not having tried.
+    site_verification_token: str = os.getenv("WARRIORIQ_SITE_VERIFICATION", "").strip()
+    # Google Tag Manager container. GTM loads whatever tags the container holds,
+    # so if a GA4 tag inside it uses the same measurement ID as
+    # WARRIORIQ_ANALYTICS_ID, every page view is counted twice. Run one or the
+    # other: set this to let the container own analytics, or leave it empty and
+    # let the direct gtag.js tag own it.
+    #
+    # Empty by default, because the direct tag owns analytics here. Checked
+    # 2026-09-16: the container that used to be the default, GTM-PFCW27J2,
+    # holds **no tags at all** - 332 KB of Tag Manager runtime fetched on every
+    # page view with not one G-, UA-, AW- or DC- ID inside it, so it fired
+    # nothing while costing every visitor the download. Setting this again also
+    # re-widens frame-src, which is why that is only widened when a container
+    # is actually loaded.
+    gtm_container_id: str = os.getenv("WARRIORIQ_GTM_ID", "").strip()
+    # How email is sent: "smtp" switches sending on (core/notifications.py).
+    # A transport, not a company - /subprocessors printed it literally as the
+    # email provider's name (QA, 2026-10-07). The company is named below.
+    email_provider: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER", "").strip()
+    # The company that delivers WarriorIQ's email, as /subprocessors names it
+    # (for example the SMTP service's operator). tools/check_public_config.py
+    # fails while email is switched on and this is empty or a placeholder.
+    email_provider_name: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER_NAME", "").strip()
+    # The company that provides the analysis machine, if a third party does.
+    # Empty for a machine run by WarriorIQ itself, which /subprocessors then says.
+    analysis_provider_name: str = os.getenv("WARRIORIQ_ANALYSIS_PROVIDER_NAME", "").strip()
+    # Who hosts the website, its database and the uploaded fights, named on
+    # /subprocessors. Render sets RENDER on its own services, so a Render
+    # deployment names itself; any other host is named here.
+    hosting_provider: str = os.getenv("WARRIORIQ_HOSTING_PROVIDER", "Render" if IS_RENDER else "").strip()
+    # Where each provider processes data, as /subprocessors states it (E2,
+    # QA 2026-10-11), e.g. "Frankfurt, Germany (EU)". Empty until supplied:
+    # nothing here is guessed.
+    hosting_location: str = os.getenv("WARRIORIQ_HOSTING_LOCATION", "").strip()
+    analysis_provider_location: str = os.getenv("WARRIORIQ_ANALYSIS_PROVIDER_LOCATION", "").strip()
+    email_provider_location: str = os.getenv("WARRIORIQ_EMAIL_PROVIDER_LOCATION", "").strip()
+    # The domain WarriorIQ's own support and privacy addresses must be on (E1).
+    public_email_domain: str = os.getenv("WARRIORIQ_PUBLIC_EMAIL_DOMAIN", "warrioriq.eu").strip().lower()
+    require_email_verification: bool = env_bool("WARRIORIQ_REQUIRE_EMAIL_VERIFICATION", False)
+
+
+SETTINGS = Settings()
+
+# Rule labels shown everywhere in the product.
+# Grouped by sport for the upload form. The key order here is the order a
+# visitor sees, so the discipline most people arrive for stays first.
+RULESET_SPORTS = {
+    "kickboxing": "Kickboxing",
+    "boxing": "Boxing",
+    "muay_thai": "Muay Thai",
+    "taekwondo": "Taekwondo",
+    "mma": "MMA",
+}
+
+RULESET_LABELS = {
+    "K1": "K-1",
+    "LOW_KICK": "Low Kick",
+    "FULL_CONTACT": "Full Contact",
+    "POINT_FIGHTING": "Point Fighting",
+    "LIGHT_CONTACT": "Light Contact",
+    "KICK_LIGHT": "Kick Light",
+    "BOXING": "Boxing",
+    "MUAY_THAI": "Full rules (elbows allowed)",
+    "MUAY_THAI_NO_ELBOWS": "No elbows",
+    "ITF_TAEKWONDO": "ITF · International Taekwon-Do Federation (traditional)",
+    "WT_TAEKWONDO": "WT · World Taekwondo (Olympic)",
+    "MMA": "MMA (standing exchanges)",
+}
+
+RULESET_SHORT = {
+    "ITF_TAEKWONDO": "ITF",
+    "WT_TAEKWONDO": "WT",
+    "MUAY_THAI": "Full rules",
+    "MUAY_THAI_NO_ELBOWS": "No elbows",
+    "MMA": "Standing exchanges",
+}
+
+FIGHT_TYPES = ("competition", "sparring")
+ANALYSIS_TARGETS = ("A", "B", "BOTH")

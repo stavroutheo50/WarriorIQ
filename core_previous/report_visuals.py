@@ -1,0 +1,251 @@
+"""Turn a finished report into things a fighter can read without reading.
+
+The report had roughly six numbers and ten thousand characters of prose, and
+the analysis underneath it was already computing far more than that. Defence
+counts, combination lengths, which targets a fighter was caught on, the exact
+seconds their guard dropped - all measured, all stored, none of it shown.
+
+So this adds no measurement. It reshapes what is already in the report into
+five things that carry their meaning in position, length and place on a body
+rather than in sentences:
+
+  head-to-head   the opponent as the benchmark, which beats any invented
+                 target band because it came from the same fight
+  body maps      where strikes arrived, on a silhouette
+  timeline       when things happened, yours above the line and theirs below
+  defence mix    which defences the fighter actually used
+  combinations   how long their chains ran
+
+Computed at render time rather than written into the report, so every analysis
+already on disk gains it without being re-run.
+
+**What it may not show.** Punch counting is switched off - checked against
+video, the count was overstated by eleven in two bouts of three. A body map
+fed from the raw event stream would quietly republish exactly that number in
+a new shape. So everything here counts kicks only, from the same
+`ARRIVED_OUTCOMES` set the published timeline uses, and the page says so.
+
+Knees are excluded too, which is less obvious. They were folded in with kicks
+because both are a leg arriving, so a misnamed one was harmless. Labelling the
+HD bout at family level found five proposed knees and not one real knee: three
+were kicks and two were punches. Keeping the bucket would publish the withheld
+family under another name, so it goes.
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+
+from core.evidence_trust import report_actions_trusted
+from core.report import ARRIVED_OUTCOMES
+
+# The families that may be counted. Punches are excluded deliberately, and
+# knees with them because the knee bucket was measured to contain punches;
+# see the module docstring and core/report.py's
+# STRIKE_COUNTS_PRECISION_VALIDATED.
+COUNTABLE = ("kick",)
+
+# Body zones, in the order a person reads a body.
+ZONES = ("head", "body", "leg")
+
+
+def _countable(event: dict) -> bool:
+    """A kick that arrived, which is the only thing safe to count."""
+    technique = str(event.get("technique") or "").lower()
+    if not any(word in technique for word in COUNTABLE):
+        return False
+    return str(event.get("outcome") or "") in ARRIVED_OUTCOMES
+
+
+def _zones(events: list[dict]) -> dict[str, int]:
+    counted = Counter(str(e.get("target") or "") for e in events)
+    return {zone: int(counted.get(zone, 0)) for zone in ZONES}
+
+
+def _percent(value) -> int | None:
+    return None if value is None else int(round(float(value) * 100))
+
+
+def head_to_head(metrics: dict, mine: str, theirs: str, landed: dict) -> list[dict]:
+    """Every published measurement as a pair, with the opponent as the scale.
+
+    A bare "Guard 14%" tells a fighter nothing. The same 14% beside an
+    opponent's 31% tells them everything, and needs no threshold anybody had
+    to invent.
+
+    `absolute` decides the scale. A percentage is read against 0-100, because
+    "guard up 11% of the round" is small in a way worth seeing; a count or a
+    rate is read against the pair, because there is no natural ceiling.
+    """
+    a, b = metrics.get(mine) or {}, metrics.get(theirs) or {}
+    rows = [
+        {"key": "landed", "label": "Kicks landed", "sub": "kicks only",
+         "a": landed.get(mine, 0), "b": landed.get(theirs, 0), "absolute": False},
+        {"key": "guard", "label": "Guard up", "sub": "% of the time seen",
+         "a": _percent(a.get("guard_index")), "b": _percent(b.get("guard_index")),
+         "absolute": True, "suffix": "%"},
+        {"key": "balance", "label": "Balanced", "sub": "% of the round",
+         "a": _percent(a.get("balance_index")), "b": _percent(b.get("balance_index")),
+         "absolute": True, "suffix": "%"},
+        {"key": "centre", "label": "Held the centre", "sub": "% of the round",
+         "a": _percent(a.get("ring_center_control")), "b": _percent(b.get("ring_center_control")),
+         "absolute": True, "suffix": "%"},
+        {"key": "movement", "label": "Movement", "sub": "body lengths/sec",
+         "a": _round(a.get("footwork_body_lengths_per_second")),
+         "b": _round(b.get("footwork_body_lengths_per_second")), "absolute": False},
+    ]
+    out = []
+    for row in rows:
+        # A measurement that is missing for either fighter is not a comparison,
+        # and drawing one bar against an empty space reads as a win.
+        if row["a"] is None or row["b"] is None:
+            continue
+        ceiling = 100.0 if row["absolute"] else max(row["a"], row["b"]) * 1.15
+        row["a_width"] = _width(row["a"], ceiling)
+        row["b_width"] = _width(row["b"], ceiling)
+        row["leader"] = "a" if row["a"] > row["b"] else "b" if row["b"] > row["a"] else ""
+        out.append(row)
+    return out
+
+
+def _round(value) -> float | None:
+    return None if value is None else round(float(value), 2)
+
+
+def _width(value: float, ceiling: float) -> float:
+    if ceiling <= 0:
+        return 3.0
+    # A floor of 3%, so a zero is still a visible mark rather than nothing at
+    # all - "they landed none" is a result and should look like one.
+    return max(3.0, min(100.0, float(value) / ceiling * 100.0))
+
+
+def build(report: dict, focus: str = "A", outcomes_counted: bool = True) -> dict | None:
+    """Everything the visual sections need, or None when there is nothing.
+
+    `outcomes_counted` is whether this report's statistics validated strike
+    outcomes. When they did not, the page says "whether a kick landed is not
+    counted yet" - and this section then printed "Kicks landed 7" and filled
+    "You hit / You got hit" maps from the raw event list's unvalidated
+    outcomes, directly under it. So without counted outcomes nothing here
+    says what landed: no landed row, no body maps, no strike timeline. The
+    movement rows and the guard-drop markers are measured from pose and stay.
+
+    A sport with no kicks (boxing) gets the same treatment, since a kicks-only
+    count there is a row of zeros that reads as "nobody landed anything".
+    """
+    metrics = report.get("metrics") or {}
+    if focus not in metrics:
+        return None
+    other = "B" if focus == "A" else "A"
+    sport = str((report.get("scorecard") or {}).get("sport") or "")
+    action_ready = outcomes_counted and (
+        report_actions_trusted(report) if "integrity" in report else True
+    )
+    strikes_shown = action_ready and sport != "boxing"
+    source = report.get("key_moments") if (report.get("integrity") or {}).get("human_review_complete") else report.get("events")
+    events = [e for e in (source or []) if _countable(e)] if strikes_shown else []
+    landed_events = [e for e in events if str(e.get("outcome") or "") in {"clean", "likely_landed", "landed"}]
+
+    landed_by = {
+        side: len([e for e in landed_events if str(e.get("fighter")) == side])
+        for side in (focus, other)
+    }
+    mine = metrics.get(focus) or {}
+
+    combinations = (mine.get("combinations") or {}) if action_ready else {}
+    # Each combination's evidence is the list of times its strikes happened,
+    # so its length is the chain length. Longest first: the best chain is the
+    # one worth looking at.
+    chains = sorted(
+        (len(times) for times in (combinations.get("evidence") or []) if times),
+        reverse=True)
+
+    rounds = report.get("rounds") or []
+    span = max((float(r.get("end_seconds") or 0) for r in rounds), default=0.0)
+
+    timeline = []
+    for event in (source or []):
+        if not _countable(event) and str(event.get("outcome") or "") in ARRIVED_OUTCOMES:
+            # A punch that arrived is deliberately absent rather than drawn as
+            # "unknown" - an outline on the timeline is still a claim that
+            # something happened then.
+            continue
+        if not _countable(event):
+            continue
+        if not strikes_shown:
+            continue
+        timeline.append({
+            "at": round(float(event.get("peak_time") or 0.0), 2),
+            "mine": str(event.get("fighter")) == focus,
+            "arrived": str(event.get("outcome") or "") in {"clean", "likely_landed", "landed"},
+        })
+
+    moments = (mine.get("moments") or {}).get("guard_index") or {}
+    # Only marks that land on the timeline. A moment outside the drawn span
+    # was clipped off its end, and the block then showed a heading over an
+    # empty bar (QA, 2026-10-04).
+    guard_low = [round(float(t), 1) for t in (moments.get("low") or [])
+                 if span > 0 and 0.0 <= float(t) <= span]
+    timeline = [mark for mark in timeline if span > 0 and 0.0 <= mark["at"] <= span]
+    # The stretches the hands were mostly down, from the same per-step guard
+    # readings as the hands-up share. Four "guard dropped" marks on a fight
+    # with the guard down 93% of the time read as four drops (QA,
+    # 2026-10-11); the marks are the clearest examples, the bands are the time.
+    guard_down = _guard_down_stretches(mine, span)
+    numbers = mine.get("numbers") or {}
+    share = numbers.get("hands_up_share")
+
+    defences = {k: int(v) for k, v in (mine.get("defenses") or {}).items() if v} if action_ready else {}
+
+    rows = head_to_head(metrics, focus, other, landed_by)
+    if not strikes_shown:
+        rows = [row for row in rows if row["key"] != "landed"]
+    return {
+        "focus": focus,
+        "action_ready": action_ready,
+        "opponent": other,
+        "strikes_shown": strikes_shown,
+        "head_to_head": rows,
+        "landed": _zones([e for e in landed_events if str(e.get("fighter")) == focus]) if action_ready else None,
+        "taken": _zones([e for e in landed_events if str(e.get("fighter")) == other]) if action_ready else None,
+        "defences": dict(sorted(defences.items(), key=lambda kv: -kv[1])),
+        "defence_total": sum(defences.values()),
+        "defence_max": max(defences.values()) if defences else 0,
+        "chains": chains,
+        "chain_count": int(combinations.get("count") or len(chains)),
+        "chain_longest": int(combinations.get("max_length") or (chains[0] if chains else 0)),
+        "timeline": timeline,
+        "guard_low": guard_low,
+        "guard_down": guard_down,
+        "hands_down_percent": None if share is None else round((1.0 - float(share)) * 100),
+        "span_seconds": round(span, 1) if span > 0 else 0.0,
+        # Said once, in one place, so every section below inherits it rather
+        # than repeating a disclaimer five times.
+        "counts": ("Kicks only. Hands and knees are not counted yet." if strikes_shown else
+                   "Movement only. Whether strikes landed is not counted yet, so nothing "
+                   "here says who landed what."),
+    }
+
+
+def _guard_down_stretches(own: dict, span: float) -> list[dict]:
+    """Merged stretches (seconds) in which the hands were down more than up,
+    read from the guard series core/fight_numbers.py stores."""
+    series = ((own.get("numbers") or {}).get("series") or {})
+    step = float(series.get("step_seconds") or 0.0)
+    if step <= 0 or span <= 0:
+        return []
+    out: list[dict] = []
+    for point in series.get("points") or []:
+        up = point.get("hands_up")
+        if up is None or float(up) >= 0.5:
+            continue
+        start = max(0.0, float(point["t"]))
+        end = min(span, start + step)
+        if end <= start:
+            continue
+        if out and abs(out[-1]["end"] - start) < 1e-6:
+            out[-1]["end"] = end
+        else:
+            out.append({"start": start, "end": end})
+    return [{"start": round(item["start"], 1), "end": round(item["end"], 1)} for item in out]

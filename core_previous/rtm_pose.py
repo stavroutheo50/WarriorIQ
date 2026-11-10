@@ -1,0 +1,171 @@
+"""Second-opinion keypoints for the two fighters, from a top-down pose model.
+
+Why this exists, measured on real 480x220 tournament footage rather than
+argued. The detector and the keypoint head are one fused model: it regresses
+joints from whole-frame features, so a fighter who is small, blurred or in an
+unusual configuration collapses toward the prior. On frames 450 and 2056 the
+resulting skeleton has the torso squeezed to a sliver and both legs converging
+on a single point - while reporting ankle confidence of 0.93 to 0.97. It is not
+uncertain, it is confidently wrong, which is why no threshold downstream can
+catch it.
+
+RTMPose is top-down. It receives the fighter already cropped and rescaled to
+its full 192x256 input, so a person forty pixels tall in the source arrives at
+a workable size. On the same two frames it returns shoulders spread across the
+torso, both arms with bent elbows, and both legs resolved separately to
+distinct ankles.
+
+It outputs seventeen COCO keypoints in the COCO order, which is the same
+contract core/metrics.py, core/action.py, core/contact.py and core/defense.py
+already read. Nothing downstream needs to know which backend produced them.
+
+The cost is real and linear: 15.7 ms per person, with no batching benefit - the
+library loops internally. That is why only the two committed fighters are
+refined and never every detection in the frame; refining all four people on a
+typical frame costs 63 ms rather than 31 ms and buys nothing, because the
+referee's joint positions are not measured by anything.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+
+import numpy as np
+
+from core.config import SETTINGS
+from core.types import PersonObservation
+
+LOGGER = logging.getLogger("warrioriq.rtm_pose")
+
+_refiner: "_Refiner | None" = None
+_unavailable = False
+
+
+class _Refiner:
+    """Holds the loaded model. Built once, on first use, never at import."""
+
+    def __init__(self) -> None:
+        # Import torch before onnxruntime builds its session, or this model
+        # silently runs on the CPU.
+        #
+        # onnxruntime's CUDA provider needs cublasLt64_12.dll, which this venv
+        # has - inside torch/lib, which is not on the Windows DLL search path.
+        # Importing torch puts it there, and does so by actually loading those
+        # libraries: `os.add_dll_directory` on the same folder was measured and
+        # is **not** enough. All three were tried on 2026-09-14:
+        #
+        #     onnxruntime first   ['CPUExecutionProvider']
+        #     torch first         ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        #     add_dll_directory   ['CPUExecutionProvider']
+        #
+        # core/analyzer.py already imports torch above this module, so
+        # production happened to be one line-ordering away from working. That
+        # is not a guarantee - a tool or a test importing core.rtm_pose
+        # directly would not get it - so the dependency is stated here, where
+        # the session is actually created.
+        #
+        # None of this raises. A wrong onnxruntime build just falls back to the
+        # CPU and says so in a log line nobody reads, which is how RTMPose ran
+        # at 15.6 ms per person for months while `rtm_pose_device` said "cuda".
+        import torch  # noqa: F401
+        from rtmlib import RTMPose
+
+        self.model = RTMPose(
+            onnx_model=SETTINGS.rtm_pose_model,
+            model_input_size=(192, 256),
+            backend="onnxruntime",
+            device=SETTINGS.rtm_pose_device,
+        )
+
+    def __call__(self, frame, boxes: np.ndarray):
+        return self.model(frame, bboxes=boxes)
+
+
+def _get() -> "_Refiner | None":
+    """Load on demand, and give up permanently rather than retrying per frame."""
+    global _refiner, _unavailable
+    if _unavailable:
+        return None
+    if _refiner is None:
+        try:
+            _refiner = _Refiner()
+        except Exception as exc:                                    # noqa: BLE001
+            _unavailable = True
+            LOGGER.warning(
+                "rtm_pose_unavailable error=%s detail=%s "
+                "falling back to the detector's own keypoints",
+                type(exc).__name__, str(exc)[:160],
+            )
+            return None
+    return _refiner
+
+
+def warmup() -> bool:
+    """Pay the first ONNX inference cost while a long-lived worker is idle."""
+    if not SETTINGS.rtm_pose_enabled:
+        return False
+    refiner = _get()
+    if refiner is None:
+        return False
+    started = time.perf_counter()
+    try:
+        frame = np.zeros((256, 192, 3), dtype=np.uint8)
+        box = np.asarray([[0, 0, 191, 255]], dtype=np.float32)
+        refiner(frame, box)
+    except Exception as exc:  # noqa: BLE001 - a warmup must not stop the worker
+        LOGGER.warning("rtm_pose_warmup_failed error=%s", type(exc).__name__)
+        return False
+    LOGGER.info("rtm_pose_warmup_complete seconds=%.3f", time.perf_counter() - started)
+    return True
+
+
+def refine(frame, observations: list[PersonObservation | None]) -> int:
+    """Replace the keypoints of these observations in place.
+
+    Boxes, track IDs and appearance are untouched: this changes what the joints
+    say, not who the person is. Identity has already been decided by the time
+    this runs, deliberately, so a refinement can never move a fighter onto
+    somebody else.
+
+    Returns how many were refined, and refines nothing at all if the model is
+    switched off or could not be loaded - an analysis without this is the
+    analysis WarriorIQ ran before it existed, not a broken one.
+    """
+    if not SETTINGS.rtm_pose_enabled or frame is None:
+        return 0
+    targets = [obs for obs in observations if obs is not None and obs.box is not None]
+    if not targets:
+        return 0
+    refiner = _get()
+    if refiner is None:
+        return 0
+    boxes = np.asarray([np.asarray(obs.box, dtype=np.float32) for obs in targets], dtype=np.float32)
+    try:
+        keypoints, scores = refiner(frame, boxes)
+    except Exception as exc:                                        # noqa: BLE001
+        LOGGER.warning("rtm_pose_failed error=%s", type(exc).__name__)
+        return 0
+    if len(keypoints) != len(targets) or len(scores) != len(targets):
+        # Not fatal - the detector's own keypoints are still there - but it
+        # would otherwise refine some fighters and quietly skip others, which
+        # is worse than refining none because the difference is invisible.
+        LOGGER.warning("rtm_pose_shape_mismatch targets=%d keypoints=%d scores=%d",
+                       len(targets), len(keypoints), len(scores))
+        return 0
+    refined = 0
+    for obs, kp, sc in zip(targets, keypoints, scores, strict=True):
+        points = np.asarray(kp, dtype=np.float32)
+        if points.shape[0] < 17:
+            continue
+        obs.keypoints = points[:17, :2]
+        obs.keypoint_conf = np.asarray(sc, dtype=np.float32)[:17]
+        refined += 1
+    return refined
+
+
+def reset_for_tests() -> None:
+    """Forget the loaded model so a test can exercise the failure path."""
+    global _refiner, _unavailable
+    _refiner = None
+    _unavailable = False

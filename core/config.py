@@ -501,6 +501,15 @@ class Settings:
     # Fighter A or B - and refused even on frames where the per-frame score
     # dips, as long as that frame is not clearly a fighter's (fighters measured
     # at most 0.084). Audit 2026-10-14, #2.
+    # The probe's reading of a fighter depends on their kit and the venue: on
+    # four of eight measured phone clips it scored the fighter the person
+    # picked 0.17-0.27 (S01's grey T-shirt then read 0.26-0.59 from frame to
+    # frame, his track was classed an official and he was lost for seconds at
+    # a time). So a candidate is refused as an official only when the probe
+    # rates them at least this much above the fighter's own score at
+    # selection, as well as above min_referee_probability. A fighter who
+    # scored under 0.15 at selection is judged exactly as before.
+    official_margin_over_fighter: float = float(os.getenv("WARRIORIQ_OFFICIAL_MARGIN", "0.35"))
     official_track_min_sightings: int = 3
     official_track_floor_probability: float = 0.15
     max_missing_analyzed_frames: int = 20
@@ -703,6 +712,21 @@ class Settings:
     # knee and ankle of the leg must both be seen on this share of an action's
     # samples, or no kick or knee is emitted for it.
     min_leg_keypoint_confidence: float = float(os.getenv("WARRIORIQ_MIN_LEG_KEYPOINT_CONF", "0.5"))
+    # A punch counts only when the arm that threw it was seen this surely
+    # (core/analyzer.py PUNCH_ARM_CONFIDENCE). 0 turns the check off.
+    punch_arm_confidence: float = float(os.getenv("WARRIORIQ_PUNCH_ARM_CONFIDENCE", "0.3"))
+    # A punch the video check scored (core/strike_verifier.py) counts when it
+    # gives at least this probability of a punch, and the skeleton rules it
+    # replaces - thrown at nothing, the pair rule - no longer apply to it.
+    # Each clip scored by a head fitted without it, through these gates
+    # (2026-10-23): V18 real 17 -> 35, false 15 -> 17; VID real 39 -> 46,
+    # false 21 -> 19. 0.6 removed more false punches but cost VID 5 real ones.
+    # 2026-11-08: a head refitted on Claude's dense strike labels, with 0.4,
+    # looked better against those same labels, but the owner confirmed only 10
+    # of 30 sampled labels (dataset/regression/label_check), so that gain was
+    # unproven and the head and threshold went back to these.
+    # 0 turns the check off and the rules back on.
+    punch_check_threshold: float = float(os.getenv("WARRIORIQ_PUNCH_CHECK", "0.5"))
     min_leg_visible_share: float = 0.8
 
     # ------------------------------------------------------------
@@ -947,6 +971,35 @@ class Settings:
     max_suspicious_handoffs_per_minute: float = float(
         os.getenv("WARRIORIQ_MAX_SUSPICIOUS_HANDOFFS_PER_MINUTE", "12")
     )
+    # Judge a hand-off against the fighter's latest sighting, including the
+    # stand-in crops found where SAM2 said they were (track ids -1001/-1002),
+    # not against the last tracker track - which can be seconds old after a
+    # SAM2-guided stretch, so a correct re-find read as a jump. The owner's
+    # handheld bout (568x320, ~17 people in shot) had 194 guided recoveries
+    # for B and read 14.9 suspicious hand-offs a minute. A setting so
+    # tools/run_identity_benchmark.py can compare the two.
+    handoff_from_latest_sighting: bool = env_bool("WARRIORIQ_HANDOFF_FROM_LATEST", True)
+    # A suspicious hand-off is taken back when the person picked up wears the
+    # fighter's own kit, read where the person drew the boxes, in every region
+    # that tells the two fighters apart (core/kit.py HandoffKitCheck). Only for
+    # clearly different kits; 0 counts every suspicious hand-off, as before.
+    handoff_kit_check: bool = env_bool("WARRIORIQ_HANDOFF_KIT_CHECK", True)
+    # A person the referee probe calls an official is still taken for the
+    # missing fighter when they wear that fighter's kit - read where the boxes
+    # were drawn, in every region the two fighters' kits clearly differ
+    # (core/kit.py HandoffKitCheck.matches). The probe was fitted on
+    # tournament footage (pale shirt, dark trousers vs singlets); on sparring
+    # in T-shirts and track trousers it scored the real fighter 0.68-0.99 and
+    # the analysis refused him on hundreds of frames with no referee present
+    # (owner, 2026-11-02). Only applies when the kits clearly differ.
+    official_kit_override: bool = env_bool("WARRIORIQ_OFFICIAL_KIT_OVERRIDE", True)
+    # Run the SAM2 sweep beside the frame pass rather than before it
+    # (core/sam_recovery.py SweepInBackground). Measured 2026-10-21 on the
+    # owner's RTX 5060: 75 s of sweep, then 120 s of frame pass, for a 197 s
+    # fight. The frame pass waits for the sweep wherever it needs it, so the
+    # guidance is the same. WARRIORIQ_SAM_OVERLAP=0 runs them one after the
+    # other, as before.
+    sam_overlap_sweep: bool = env_bool("WARRIORIQ_SAM_OVERLAP", True)
     # Putting A and B back the right way round after the tracker swapped them.
     #
     # When a fighter is lost for a moment - a clinch, the phone swinging past -
@@ -979,6 +1032,14 @@ class Settings:
     # window measured and still catches the people who never move at all.
     max_stationary_spread_short: float = float(
         os.getenv("WARRIORIQ_MAX_STATIONARY_SPREAD_SHORT", "0.02"))
+    # How long a track must have been watched before its spread
+    # (core.identity.IdentityManager._recent_spread) may refuse a switch onto
+    # it. Was a fixed 6 s. 3 s measured 2026-11-08 and not kept: on S01 it
+    # kept fighter A off a coach outside the ring (62 -> 19 frames on him),
+    # but on S07 it refused the real fighter A, picked up again on a new track
+    # while standing his ground, for about 10 s (A held 689 -> 587 of 841
+    # frames, 7 of 8 sampled dropped frames were him).
+    switch_spread_min_seconds: float = float(os.getenv("WARRIORIQ_SWITCH_SPREAD_SECONDS", "6.0"))
     stationary_short_seconds: float = float(
         os.getenv("WARRIORIQ_STATIONARY_SHORT_SECONDS", "1.5"))
     # Seconds of video immediately before the round to run through the tracker

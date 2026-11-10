@@ -14,6 +14,7 @@ from core.preflight import TARGET_SUBJECT_PX
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
 from core.identity import appearance_hist, pose_signature
+from core.kit import HANDOFF_MIN_BOX_HEIGHT, region_colours
 from core.referee import referee_probabilities, torso_skin_share
 from core.reid import embed
 from core.types import PersonObservation
@@ -722,6 +723,13 @@ class PoseTracker:
                 person.referee_prob = verdict
                 if SETTINGS.clothed_official_filter_enabled:
                     person.torso_skin = torso_skin_share(frame, person.box)
+                # Kit colours for anyone the identity manager might refuse as
+                # an official, so it can check whether they wear a fighter's
+                # kit (SETTINGS.official_kit_override).
+                if (SETTINGS.official_kit_override and verdict is not None
+                        and float(verdict) >= SETTINGS.official_track_floor_probability
+                        and float(person.box[3] - person.box[1]) >= HANDOFF_MIN_BOX_HEIGHT):
+                    person.kit_colours = region_colours(frame, person.box)
         self.timing["appearance"] += time.perf_counter() - appearance_started
         return people
 

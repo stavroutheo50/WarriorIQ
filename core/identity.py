@@ -185,6 +185,7 @@ class IdentityManager:
             state.anchor_pose = signature
         if observation.referee_prob is not None:
             state.anchor_is_referee = bool(observation.referee_prob >= SETTINGS.min_referee_probability)
+            state.anchor_referee_prob = float(observation.referee_prob)
 
     def __init__(self, initial_a: PersonObservation, initial_b: PersonObservation, source_frame: int = 0, source_fps: float = 30.0):
         self.a = FighterState(
@@ -199,6 +200,7 @@ class IdentityManager:
             anchor_is_referee=bool(
                 initial_a.referee_prob is not None
                 and initial_a.referee_prob >= SETTINGS.min_referee_probability),
+            anchor_referee_prob=float(initial_a.referee_prob or 0.0),
             anchor_pose=pose_signature(initial_a.keypoints, initial_a.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
@@ -215,6 +217,7 @@ class IdentityManager:
             anchor_is_referee=bool(
                 initial_b.referee_prob is not None
                 and initial_b.referee_prob >= SETTINGS.min_referee_probability),
+            anchor_referee_prob=float(initial_b.referee_prob or 0.0),
             anchor_pose=pose_signature(initial_b.keypoints, initial_b.box),
             identity_confidence=1.0,
             last_seen_source_frame=source_frame,
@@ -240,6 +243,9 @@ class IdentityManager:
         # The hand-offs above that look like a different person: colour
         # changed or the box jumped. See SETTINGS.max_suspicious_handoffs_per_minute.
         self.suspicious_handoffs = {"A": 0, "B": 0}
+        # Suspicious hand-offs of the current frame, for the frame pass to
+        # check against the fighters' kit (core/kit.py HandoffKitCheck).
+        self.handoffs_to_check: list[tuple[str, np.ndarray]] = []
         self._last_real_obs: dict[str, tuple | None] = {"A": None, "B": None}
         # Both fighters bare-chested at selection, so an upright clothed
         # person is the official. See core/referee.py.
@@ -284,6 +290,11 @@ class IdentityManager:
         # a third-person class that is never assigned to A or B. See _official_track.
         self._track_referee: dict[int, deque] = {}
         self.official_tracks: set[int] = set()
+        # The fighters' kits where the boxes were drawn (core/kit.py
+        # HandoffKitCheck), set by the analyser; a candidate wearing the
+        # missing fighter's kit is not refused as an official.
+        self.kit_reference = None
+        self.official_kit_overrides = {"A": 0, "B": 0}
         # The camera's accumulated translation, so per-track travel is measured
         # against the ground rather than the picture (core/camera_motion.py).
         self._camera_offset = np.zeros(2, dtype=np.float64)
@@ -352,6 +363,35 @@ class IdentityManager:
             and int(candidate.track_id) in self.official_tracks
             and (candidate.referee_prob is None
                  or candidate.referee_prob >= SETTINGS.official_track_floor_probability))
+
+    def _official_level(self, state: FighterState) -> float:
+        """How official a candidate must read to be refused for this fighter.
+
+        See SETTINGS.official_margin_over_fighter.
+        """
+        return max(SETTINGS.min_referee_probability,
+                   state.anchor_referee_prob + SETTINGS.official_margin_over_fighter)
+
+    def _refuse_as_official_track(self, state: FighterState, candidate: PersonObservation) -> bool:
+        if not self._official_track(candidate):
+            return False
+        verdicts = self._track_referee.get(int(candidate.track_id)) or ()
+        return not verdicts or float(np.mean(verdicts)) >= self._official_level(state)
+
+    def _wears_own_kit(self, state: FighterState, candidate: PersonObservation) -> bool:
+        """Does a candidate the referee probe would refuse wear this fighter's kit?
+
+        See SETTINGS.official_kit_override. Counted, so the report shows how
+        often the probe was overruled.
+        """
+        if (self.kit_reference is None or candidate.kit_colours is None
+                or not self.kit_reference.matches(candidate.kit_colours, state.name)):
+            return False
+        official = self._official_track(candidate) or (
+            candidate.referee_prob is not None and candidate.referee_prob >= SETTINGS.min_referee_probability)
+        if official:
+            self.official_kit_overrides[state.name] += 1
+        return True
 
     def _missing_seconds(self, state: FighterState) -> float:
         return max(0, self._current_frame - int(state.last_seen_source_frame)) / self.source_fps
@@ -510,7 +550,7 @@ class IdentityManager:
         if not history or len(history) < 40:
             return None
         span_frames = history[-1][0] - history[0][0]
-        if span_frames <= 0 or span_frames / fps < 6.0:
+        if span_frames <= 0 or span_frames / fps < SETTINGS.switch_spread_min_seconds:
             return None
         points = np.array([(item[1], item[2]) for item in history], dtype=np.float64)
         spread = float(np.sqrt(((points - points.mean(axis=0)) ** 2).sum(axis=1).mean()))
@@ -560,7 +600,8 @@ class IdentityManager:
 
     def _score(self, state: FighterState, candidate: PersonObservation, keep_id_bonus: bool = True) -> float:
         # An official is a third person, never Fighter A or B.
-        if not state.anchor_is_referee and self._official_track(candidate):
+        wears_own_kit = self._wears_own_kit(state, candidate)
+        if not state.anchor_is_referee and not wears_own_kit and self._refuse_as_official_track(state, candidate):
             return self._refuse(state, "official")
         reference = self._predicted_box(state)
         distance = normalized_distance(reference, candidate.box)
@@ -622,9 +663,9 @@ class IdentityManager:
         # Unless the person originally selected scored as the official himself,
         # in which case the user meant to follow him and this filter has no
         # business refusing the very person they picked.
-        if (not state.anchor_is_referee
+        if (not state.anchor_is_referee and not wears_own_kit
                 and candidate.referee_prob is not None
-                and candidate.referee_prob >= SETTINGS.min_referee_probability):
+                and candidate.referee_prob >= self._official_level(state)):
             return self._refuse(state, "referee")
         # An official the uniform probe does not know - the UFC dresses them
         # in black - is still the only upright person on the canvas wearing a
@@ -831,8 +872,18 @@ class IdentityManager:
                         appearance_similarity(before[0], obs.appearance) < 0.8
                         or normalized_distance(before[1], obs.box) > 0.8):
                     self.suspicious_handoffs[state.name] = self.suspicious_handoffs.get(state.name, 0) + 1
+                    self.handoffs_to_check.append((state.name, obs.box.copy()))
             self._last_real_track[state.name] = int(obs.track_id)
             self._last_real_obs[state.name] = (obs.appearance, obs.box.copy())
+        elif (SETTINGS.handoff_from_latest_sighting and obs.track_id is not None
+              and self._last_real_obs.get(state.name) is not None):
+            # Followed between tracker tracks by a crop found where SAM2 said
+            # they were (-1001/-1002): the next hand-off is judged against
+            # where they were last seen, not where the last track left them
+            # (SETTINGS.handoff_from_latest_sighting).
+            seen_look = self._last_real_obs[state.name][0]
+            self._last_real_obs[state.name] = (
+                obs.appearance if obs.appearance is not None else seen_look, obs.box.copy())
         state.identity_confidence = float(max(0.0, min(1.0, score)))
         state.missing_frames = 0
         if (obs.reid is not None
@@ -1127,6 +1178,11 @@ class IdentityManager:
         self._cross_match_frames = 0
         self.swaps_corrected += 1
         return b_obs, a_obs
+
+    def confirm_handoff(self, name: str) -> None:
+        """A suspicious hand-off the fighter's own kit showed was them."""
+        if self.suspicious_handoffs.get(name, 0) > 0:
+            self.suspicious_handoffs[name] -= 1
 
     def _release_if_furniture(self, state: FighterState) -> bool:
         """Let go of a fighter that has turned out to be a seated spectator.

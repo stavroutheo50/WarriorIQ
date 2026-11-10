@@ -25,12 +25,14 @@ from core.fighter_suggest import FighterFinder, analysis_missed_the_fight
 from core.frame_feed import FrameFeed
 from core.generalship import judge_fight
 from core.fight_presence import FightPresence
-from core.kit import kit_similarity
+from core import strike_verifier
+from core.kit import HandoffKitCheck, kit_similarity, region_colours
 from core.kit_attribution import KitAttribution, box_shorts_dark_share, darker_at_selection_boxes
 from core.slow_watch import SlowRunWatch
 from core.kit_attribution import active as kit_attribution_active
 from core.referee import torso_skin_share
 from core.ground import DownWatch
+from core.ground_time import GroundWatch
 from core.round_detect import RoundDetector
 from core.contact import (
     assess_selection,
@@ -68,6 +70,16 @@ from core.build_info import stamp as build_stamp
 # (real 0.40-0.81, non-events 0.41-0.77). A tenth still rejects a trigger with
 # essentially nothing behind it, which is all this gate is for.
 ATTEMPT_CONFIDENCE = CONFIDENCE_FLOOR + 0.10 * (CONFIDENCE_CEILING - CONFIDENCE_FLOOR)
+
+# A punch is counted only when the pose model saw the arm that threw it
+# (core/action.py arm_confidence). When the arm is hidden or blurred the model
+# still places a wrist, the guess jumps from frame to frame, and the detector
+# reads the jump as a punch. Measured 2026-10-23 against every strike labelled
+# in four public-domain phone sparring clips (tools/benchmark_dense_strikes.py,
+# 128 sure strikes): real punches' arms averaged 0.84, falsely counted ones
+# 0.47. Kicks are left alone: legs were seen as surely on false kicks as on
+# real ones, and their own visibility gate already applies.
+PUNCH_ARM_CONFIDENCE = SETTINGS.punch_arm_confidence
 
 LOGGER = logging.getLogger("warrioriq.analysis")
 
@@ -204,21 +216,36 @@ ANALYSIS_PHASE_SPAN = 63.0
 # and the bar sat still long enough to look frozen.
 PROGRESS_MAX_SILENCE_SECONDS = 5.0
 
+
+def _backtrack_progress_due(last_sent_at: float | None, now: float, fraction: float) -> bool:
+    """Send the backward pass's progress at its start, its end and every few seconds.
+
+    It reported after every sample, and a worker from before the background
+    progress sender (worker.py _ProgressSender) waits for the website's answer
+    to each report: about 1,060 reports of 1-2 seconds each, so 26 of a
+    29-minute analysis of a 3-minute clip were spent waiting (live walkthrough,
+    2026-10-26; the pass itself took 2 minutes).
+    """
+    return last_sent_at is None or fraction >= 1.0 or now - last_sent_at >= PROGRESS_MAX_SILENCE_SECONDS
+
 from core.identity import IdentityManager, fighter_pair_similarity
 from core.metrics import MetricsAccumulator
 from core.preflight import Preflight
 from core.preflight import probe as probe_video
 from core.pose_smoothing import JointGate
 from core.pose_tracker import PoseTracker, QualityController, find_initial_people
-from core.report import build_report, identity_tracking, not_a_fight, withhold_for_not_a_fight, write_report
+from core.report import (
+    STRIKE_COUNTS_PRECISION_VALIDATED, STRIKE_COUNTS_PUBLISHED, build_report, identity_tracking, not_a_fight,
+    withhold_for_not_a_fight, write_report,
+)
 from core.progress_eta import StageEta
 from core.camera_motion import GlobalMotion
 from core.rtm_pose import refine as refine_fighter_pose
 from core.edgetam_recovery import build_recovery
-from core.sam_recovery import nearest_guidance, sam_sampling_stride
+from core.sam_recovery import SweepInBackground, nearest_guidance, sam_sampling_stride
 from core.openai_identity import OpenAIIdentityReferee
 from core.scoring import (
-    RULESETS, collapse_simultaneous_labels, is_legal_event, normalize_ruleset,
+    RULESETS, collapse_simultaneous_labels, is_legal_event, normalize_ruleset, score_fight,
     sport_counted_families, sport_of,
 )
 
@@ -277,6 +304,29 @@ def _punch_thrown_at_nothing(event) -> bool:
         return False
     guard = (getattr(event, "evidence", None) or {}).get("defender_guard_distance")
     return not (guard is not None and float(guard) <= MISSED_PUNCH_REACHED_GUARD)
+
+
+def _punch_arm_not_seen(event) -> bool:
+    """A punch read from an arm the pose model could not see. See PUNCH_ARM_CONFIDENCE."""
+    if getattr(event, "family", None) != "punch":
+        return False
+    seen = (getattr(event, "evidence", None) or {}).get("arm_confidence")
+    return seen is not None and float(seen) < PUNCH_ARM_CONFIDENCE
+
+
+def _video_checked(event) -> float | None:
+    """The video check's probability that this was a punch, if it scored it
+    (core/strike_verifier.py, after the frame pass)."""
+    if getattr(event, "family", None) != "punch" or SETTINGS.punch_check_threshold <= 0.0:
+        return None
+    value = (getattr(event, "evidence", None) or {}).get("video_punch_probability")
+    return None if value is None else float(value)
+
+
+def _not_a_punch(event) -> bool:
+    """The video check says a person would not call this proposal a punch."""
+    probability = _video_checked(event)
+    return probability is not None and probability < SETTINGS.punch_check_threshold
 
 
 def _live_attempt_reliable(event, ruleset: str | None = None) -> bool:
@@ -405,7 +455,14 @@ def _attempt_drop_reason(event, ruleset: str | None = None) -> str | None:
         return "not_a_strike"
     if float(getattr(event, "confidence", 0.0)) < ATTEMPT_CONFIDENCE:
         return "too_faint"
-    if _punch_thrown_at_nothing(event):
+    if _punch_arm_not_seen(event):
+        return "arm_not_seen"
+    if _not_a_punch(event):
+        return "not_a_punch"
+    # A punch the video check scored is judged by it alone: on fighters it had
+    # not seen it found twice the real punches these skeleton rules kept, with
+    # no more false ones (tools/fit_strike_check.py, V18).
+    if _video_checked(event) is None and _punch_thrown_at_nothing(event):
         return "thrown_at_nothing"
     if (float(event.metadata.get("attacker_identity_confidence", 1.0)) < 0.76
             or float(event.metadata.get("opponent_identity_confidence", 1.0)) < 0.76):
@@ -444,6 +501,37 @@ def _provisional_stats(
     return summarize_fight_events(
         live_events, found, analyzed_frames, all_verified, processed_seconds,
     )
+
+
+def _live_score(events: list, ruleset: str, analysis_target: str, current_round: int | None) -> dict | None:
+    """The score so far, for the live page (owner, 2026-11-01).
+
+    "Do not use a live strike count, use a live score": the same scorer the
+    report's estimated scorecard uses (core.report.build_preliminary_scorecard)
+    over the strikes already judged to be fight footage. It is provisional by
+    construction - identity and tracking coverage are only checked once the
+    whole fight is in, and the report can still withhold its score - and is
+    labelled so. A one-fighter analysis has no opponent's points to count.
+    """
+    if (analysis_target or "BOTH").upper() != "BOTH":
+        return None
+    rounds = {int(event.round_number) for event in events if event.round_number is not None}
+    if current_round is not None:
+        rounds.add(int(current_round))
+    if not rounds:
+        return None
+    estimated = STRIKE_COUNTS_PUBLISHED and not STRIKE_COUNTS_PRECISION_VALIDATED
+    card = score_fight(events, ruleset, sorted(rounds), [], reliable=True, estimated=estimated)
+    latest = next((item for item in card["rounds"] if item["round"] == current_round), None)
+    return {
+        "totals": {"A": card["totals"]["A"], "B": card["totals"]["B"]},
+        "mode": card["mode"],
+        "ruleset_label": card["ruleset_label"],
+        "current_round": None if latest is None else {
+            "round": latest["round"], "A": latest["fighter_A"], "B": latest["fighter_B"]},
+        "rounds_scored": len(card["rounds"]),
+        "status": "provisional",
+    }
 
 
 def _live_keypoints(observation, width: int, height: int) -> list[list[float] | None] | None:
@@ -727,6 +815,8 @@ def _seed_frame_kit(video_path: str, frame_index: int, box_a, box_b) -> dict | N
         # Whose shorts are darker, read where the boxes are known to be right
         # (core/kit_attribution.py).
         kit["shorts_dark"] = {"A": box_shorts_dark_share(frame, box_a), "B": box_shorts_dark_share(frame, box_b)}
+        # Each fighter's kit colours, for checking hand-offs (core/kit.py HandoffKitCheck).
+        kit["colours"] = {"A": region_colours(frame, box_a), "B": region_colours(frame, box_b)}
     return kit
 
 
@@ -814,14 +904,16 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     is reached by following both fighters backwards from it (core/backtrack.py)
     and the result is checked when the forward pass arrives back at it.
 
-    The analysis always starts at the requested start (0:00 unless a later one
-    was asked for). It used to restart at the chosen frame whenever the
-    backward pass stopped short or the check failed, which silently cut the
-    opening off the report (QA, 2026-10-04: 0:08 of a 0:10 clip analysed as
-    "Analysis complete"). Now, when the fighters cannot be followed all the
-    way back, the forward pass still starts at the beginning and the check at
-    the chosen frame decides whether its identities can be trusted; if not,
-    the report says so rather than leaving footage out.
+    The analysis starts at the requested start (0:00 unless a later one was
+    asked for) whenever the fighters were followed back that far. When they
+    were not, it starts at the earliest frame they were followed to, and the
+    report states which part is left out and why (_analysed_span) - never
+    silently, which was the complaint in QA 2026-10-04 (0:08 of a 0:10 clip
+    analysed as "Analysis complete"). Starting at 0:00 anyway, seeded with
+    boxes from a different moment, put the identities on the wrong people and
+    cost the whole report instead (owner, 2026-11-01; see
+    _analyze_with_backtrack). The check at the chosen frame still decides
+    whether the identities can be trusted.
     """
     wrapper_started = time.perf_counter()
     seed_seconds = req.selection_seconds
@@ -839,12 +931,17 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
 
     backtrack_span = max(0.001, seed_seconds - requested_start)
     backtrack_eta = StageEta(fps)
+    last_progress_sent: list[float | None] = [None]
 
     def report_progress(fraction: float) -> None:
         if progress_callback is None:
             return
         fraction = max(0.0, min(1.0, fraction))
-        elapsed = time.perf_counter() - wrapper_started
+        now = time.perf_counter()
+        if not _backtrack_progress_due(last_progress_sent[0], now, fraction):
+            return
+        last_progress_sent[0] = now
+        elapsed = now - wrapper_started
         eta = backtrack_eta.update("backtrack", fraction * backtrack_span, backtrack_span, elapsed)
         progress_callback(AnalysisProgress(
             percent=0.5 + 0.5 * fraction,
@@ -924,15 +1021,31 @@ def _analyze_with_backtrack(req: AnalysisRequest, progress_callback: ProgressCal
         handoff = _backtrack.Handoff(seed_frame=seed_frame, requested_start_frame=start_frame,
                                      frame=seed_frame, reason="unavailable")
     handoff_record = handoff.as_dict(fps)
+    # The forward pass starts at the earliest frame where who is who is known:
+    # the requested start when the backward pass got there, otherwise the
+    # frame it stopped at (or the chosen frame, when it could not start).
+    #
+    # It used to start at the requested start regardless, seeded with boxes
+    # from wherever the backward pass stopped - a different moment of the
+    # fight. On V18 (dataset/regression/identity_phone) picked at 1:38 it
+    # stopped at 1:31, the run began at 0:00 with 1:31's boxes, neither
+    # matched anybody there, and 10 of the 22 labelled checks before the pick
+    # were the two fighters swapped; the report then had to withhold
+    # everything as "not sure which fighter was which" (owner, 2026-11-01).
+    # The opening is now left out and the report says so and why
+    # (_analysed_span), rather than every number being in doubt.
+    excluded_reason = None
     if handoff.moved:
-        # Seeded where the backward pass got to. That is the requested start
-        # whenever it succeeded; when it stopped short the forward pass still
-        # begins there, at the start, with the boxes from the earliest frame
-        # both fighters were followed to as its best guess.
         start_boxes = (list(handoff.a_box), list(handoff.b_box))
-        forward_start = handoff.frame / fps if handoff.reason is None else requested_start
+        forward_start = handoff.frame / fps
     else:
         start_boxes = (list(req.fighter_a_box), list(req.fighter_b_box))
+        forward_start = seed_frame / fps if handoff.reason is not None else requested_start
+    if forward_start - requested_start >= 1.0:
+        excluded_reason = handoff.reason
+    elif not handoff.moved:
+        # The chosen frame is within a second of the start: the boxes drawn
+        # on it still fit there.
         forward_start = requested_start
     forward = replace(
         req, start_seconds=forward_start, selection_seconds=None,
@@ -940,10 +1053,8 @@ def _analyze_with_backtrack(req: AnalysisRequest, progress_callback: ProgressCal
     seed_check = {"frame": seed_frame, "a_box": list(req.fighter_a_box), "b_box": list(req.fighter_b_box),
                   "window_frames": int(round(1.5 * fps))}
     seed_pair = (handoff.seed_a, handoff.seed_b) if handoff.seed_a is not None and handoff.seed_b is not None else None
-    # The reason is kept for the record only: no footage is excluded any more,
-    # so it is not passed on as an exclusion.
     return _analyze(forward, progress_callback, seed_seconds=seed_seconds,
-                    handoff=handoff_record, seed_check=seed_check,
+                    handoff=handoff_record, seed_check=seed_check, excluded_reason=excluded_reason,
                     seed_pair=seed_pair, measured_footage=measured, seed_kit=seed_kit,
                     budget_spent_before=time.perf_counter() - wrapper_started)
 
@@ -1225,6 +1336,15 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "A": box_shorts_dark_share(first_frame, req.fighter_a_box),
         "B": box_shorts_dark_share(first_frame, req.fighter_b_box)}
     shorts_dark = shorts_dark or {}
+    handoff_kit = HandoffKitCheck(
+        ((seed_kit or {}).get("colours") if seed_kit is not None else
+         {"A": region_colours(first_frame, req.fighter_a_box), "B": region_colours(first_frame, req.fighter_b_box)})
+        if SETTINGS.handoff_kit_check else None)
+    if SETTINGS.official_kit_override:
+        official_kit = handoff_kit if SETTINGS.handoff_kit_check else HandoffKitCheck(
+            (seed_kit or {}).get("colours") if seed_kit is not None else
+            {"A": region_colours(first_frame, req.fighter_a_box), "B": region_colours(first_frame, req.fighter_b_box)})
+        manager.kit_reference = official_kit if official_kit.enabled else None
     histogram_similarity = fighter_pair_similarity(*(seed_pair or (initial_a, initial_b)))
     pair_similarity = kit["similarity"] if kit is not None else histogram_similarity
     manager.prime_track_history(warm_samples)
@@ -1234,31 +1354,43 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
 
     progress("Following both fighters", 1.0, time.perf_counter() - wall_start, 0.0, manager, None, quality, stage="tracking")
     sweep_start = time.perf_counter()
-    sam_tracks = sam_recovery.track_segment(
-        req.video_path,
-        start_frame,
-        end_frame,
-        info.fps,
-        canonical_a_box,
-        canonical_b_box,
-        progress_callback=lambda completed, total: progress(
-            "Following both fighters",
-            2.0 + 33.0 * completed / max(1, total),
-            time.perf_counter() - wall_start,
-            segment_duration * completed / max(1, total),
-            manager,
-            None,
-            quality,
-            stage="tracking",
-            stage_fraction=completed / max(1, total),
-            tracked_seconds=segment_duration * completed / max(1, total),
-        ),
-    )
-    sam_was_available = sam_recovery.available
-    sam_sweep_breakdown = dict(getattr(sam_recovery, "sweep_seconds", {}) or {})
-    sam_sweep_frames = int(getattr(sam_recovery, "continuous_frames", 0) or 0)
-    sam_recovery.release()
-    sam_sweep_seconds = time.perf_counter() - sweep_start
+    # The sweep beside the frame pass when SAM2 is there to run it
+    # (SETTINGS.sam_overlap_sweep); otherwise first, as it always was.
+    background_sweep = None
+    if SETTINGS.sam_overlap_sweep and SETTINGS.sam_continuous_enabled and sam_recovery._load():
+        background_sweep = SweepInBackground(
+            sam_recovery, req.video_path, start_frame, end_frame, info.fps, canonical_a_box, canonical_b_box)
+        sam_tracks = {}
+        sam_was_available = True
+        sam_sweep_breakdown: dict = {}
+        sam_sweep_frames = 0
+        sam_sweep_seconds = 0.0
+    else:
+        sam_tracks = sam_recovery.track_segment(
+            req.video_path,
+            start_frame,
+            end_frame,
+            info.fps,
+            canonical_a_box,
+            canonical_b_box,
+            progress_callback=lambda completed, total: progress(
+                "Following both fighters",
+                2.0 + 33.0 * completed / max(1, total),
+                time.perf_counter() - wall_start,
+                segment_duration * completed / max(1, total),
+                manager,
+                None,
+                quality,
+                stage="tracking",
+                stage_fraction=completed / max(1, total),
+                tracked_seconds=segment_duration * completed / max(1, total),
+            ),
+        )
+        sam_was_available = sam_recovery.available
+        sam_sweep_breakdown = dict(getattr(sam_recovery, "sweep_seconds", {}) or {})
+        sam_sweep_frames = int(getattr(sam_recovery, "continuous_frames", 0) or 0)
+        sam_recovery.release()
+        sam_sweep_seconds = time.perf_counter() - sweep_start
     # The bar reserves 0-35% for SAM2. Without a GPU SAM2 is skipped at once,
     # and the bar used to sit at 1% until the first frame-pass update, then
     # jump past 50%. Mark the start of the frame pass as soon as it begins.
@@ -1285,7 +1417,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     camera_motion = GlobalMotion() if SETTINGS.camera_motion_compensation else None
     if camera_motion is not None:
         camera_motion.update(first_frame, [p.box for p in first_people])
-    fallback_buffer_enabled = _fallback_buffer_needed(sam_tracks, sam_was_available)
+    # A running sweep counts as guidance coming, exactly as finished tracks did.
+    fallback_buffer_enabled = (False if background_sweep is not None
+                               else _fallback_buffer_needed(sam_tracks, sam_was_available))
     frame_buffer: deque[tuple[int, np.ndarray]] = deque(maxlen=max(SETTINGS.sam_buffer_frames + 4, 24))
     if fallback_buffer_enabled:
         frame_buffer.append((start_frame, first_frame.copy()))
@@ -1332,6 +1466,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     travel = {"A": _Travel(), "B": _Travel()}
     fighter_finder = FighterFinder()
     down_watch = DownWatch()
+    # MMA only: time on the ground from the whole scene (core/ground_time.py).
+    ground_watch = GroundWatch(info.width, info.height) if sport_of(normalize_ruleset(req.ruleset)) == "mma" else None
     round_detector = RoundDetector()
     # Is this stretch two people fighting? Decided per window from the frames
     # below; metrics and strike counts are then taken from fight footage only.
@@ -1346,6 +1482,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     kit_attribution = KitAttribution(
         seed_seconds, darker_at_selection_boxes(shorts_dark.get("A"), shorts_dark.get("B")))
     metric_frames: list[tuple[float, int | None, PersonObservation | None, PersonObservation | None]] = []
+    # Where each fighter's box was on every analysed frame, for the video
+    # check's crops after the frame pass (core/strike_verifier.py).
+    box_track: list[tuple[float, list | None, list | None]] = []
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
     # Decoding runs a step ahead on a helper thread; see core/frame_feed.py.
     feed = FrameFeed(
@@ -1421,7 +1560,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 feed.allow_through(next_inference_frame)
 
                 people = pose_tracker.track(frame, current_imgsz, frame_index=source_frame)
-                guidance = nearest_guidance(sam_tracks, source_frame, sam_stride)
+                guidance = (background_sweep.guidance(source_frame, sam_stride) if background_sweep is not None
+                            else nearest_guidance(sam_tracks, source_frame, sam_stride))
                 search_started = time.perf_counter()
                 focused = pose_tracker.recover_from_guidance(frame, guidance, people)
                 for observation in focused:
@@ -1479,7 +1619,9 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 recovery_allowed = quality.mode != "deadline" or speed_now >= 0.90
 
                 for state, name in ((manager.a, "A"), (manager.b, "B")):
-                    if recovery_allowed and not sam_tracks and manager.needs_recovery(state, analyzed_frames):
+                    no_sweep_tracks = (background_sweep.finished_empty() if background_sweep is not None
+                                       else not sam_tracks)
+                    if recovery_allowed and no_sweep_tracks and manager.needs_recovery(state, analyzed_frames):
                         state.last_sam_attempt_analyzed_frame = analyzed_frames
                         buffered = _buffer_since_last_seen(frame_buffer, state.last_seen_source_frame)
                         recovered_box = sam_recovery.recover(buffered, state.last_box)
@@ -1506,6 +1648,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                         )
                         fighter_a = recovered_a or fighter_a
                         fighter_b = recovered_b or fighter_b
+
+            # A fighter picked up again by someone wearing their own kit was
+            # not lost: take that hand-off back off the suspicious count.
+            for name, box in manager.handoffs_to_check:
+                if handoff_kit.confirms(frame, box, name):
+                    manager.confirm_handoff(name)
+            manager.handoffs_to_check.clear()
 
             seconds = first_seconds if source_frame == start_frame else decoded_seconds
             spec = round_at_time(rounds, seconds)
@@ -1571,6 +1720,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             presence.observe(seconds, fighter_a, fighter_b, people)
             strikes_started = time.perf_counter()
             step_seconds["pose_measures"] += strikes_started - measures_started
+            box_track.append((seconds, None if fighter_a is None else fighter_a.box.tolist(),
+                              None if fighter_b is None else fighter_b.box.tolist()))
             if active_selected_round:
                 active_analyzed_frames += 1
                 # Measured once the whole fight is classified, so footage that
@@ -1630,6 +1781,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             fighter_finder.observe(seconds, people)
             fighter_finder.observe_selected(fighter_a, fighter_b)
             down_watch.observe(seconds, people, fighter_a, fighter_b)
+            if ground_watch is not None:
+                ground_watch.observe(seconds, people, round_number, frame)
             round_detector.observe(seconds, _pair_separation(fighter_a, fighter_b))
             kit_attribution.observe(seconds, frame, fighter_a, fighter_b)
             file_started = time.perf_counter()
@@ -1708,6 +1861,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                 live_stats["diagnostics"] = _live_event_diagnostics(
                     live_candidates, req.ruleset, live_action_trusted, all_live_event_data,
                 )
+                live_stats["score"] = _live_score(live_candidates, req.ruleset, req.analysis_target, round_number)
                 progress(
                     "Analysing fight",
                     percent,
@@ -1731,6 +1885,15 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         cap.release()
         if tracking_file is not None:
             tracking_file.close()
+        # The sweep beside the frame pass finishes, and releases SAM2 itself,
+        # before anything else touches the predictor.
+        if background_sweep is not None:
+            sam_tracks = background_sweep.join()
+            sam_was_available = background_sweep.available
+            sam_sweep_breakdown = {**background_sweep.breakdown,
+                                   "in_background": round(background_sweep.seconds, 2),
+                                   "frame_pass_waited": round(background_sweep.waited, 2)}
+            sam_sweep_frames = background_sweep.frames
         # A rescue during the frame pass loads SAM2 again; park it for the next
         # job instead of dropping it with this run (core/sam_recovery.py).
         sam_recovery.release()
@@ -1788,6 +1951,16 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # 5 meant it, and re-cutting the fight underneath them would be wrong.
     # Both fighters move when one of them is hit. Decide which of the two was
     # the aggressor before anything downstream counts, scores or reports them.
+    # A second look at every proposed punch, from the pixels around it. Done
+    # before the pair rule below, which leaves the punches it scored alone.
+    if SETTINGS.punch_check_threshold <= 0.0:
+        strike_check = {"scored": 0, "reason": "off"}
+    elif not strike_verifier.applies_to(req.ruleset):
+        strike_check = {"scored": 0, "reason": "not_measured_for_this_sport"}
+    else:
+        strike_check = strike_verifier.score_punches(
+            req.video_path, events, strike_verifier.boxes_from_track(box_track))
+    LOGGER.info("strike_check %s", json.dumps(strike_check))
     events, defender_actions = resolve_simultaneous_attribution(events)
     kit_proposals = kit_attribution.proposals(events, apply=kit_attribution_active())
 
@@ -1922,6 +2095,15 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             manager.suspicious_handoffs["A"] / (segment_duration / 60.0), 2),
         "fighter_B_suspicious_handoffs_per_minute": round(
             manager.suspicious_handoffs["B"] / (segment_duration / 60.0), 2),
+        # Suspicious hand-offs the fighter's own kit showed were them, taken
+        # off the counts above (core/kit.py HandoffKitCheck).
+        "handoff_kit_check_regions": sorted(handoff_kit.apart),
+        # Candidates the referee probe called an official but who wore the
+        # fighter's own kit (SETTINGS.official_kit_override).
+        "fighter_A_official_kit_overrides": manager.official_kit_overrides["A"],
+        "fighter_B_official_kit_overrides": manager.official_kit_overrides["B"],
+        "fighter_A_kit_confirmed_handoffs": handoff_kit.confirmed["A"],
+        "fighter_B_kit_confirmed_handoffs": handoff_kit.confirmed["B"],
         "identity_swaps_corrected": int(manager.swaps_corrected),
         # Audit 2026-10-14, #2: re-identified after leaving the picture, frames
         # where the camera's move was compensated, and officials held apart.
@@ -1929,6 +2111,7 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         "camera_motion_compensated_frames": int(manager.camera_compensations),
         "official_tracks": len(manager.official_tracks),
         "kit_attribution": kit_proposals,
+        "strike_check": strike_check,
         "clothed_official_filter": bool(manager.clothed_official_filter),
         "fighter_A_sam_recoveries": manager.a.sam_recovery_count,
         "fighter_B_sam_recoveries": manager.b.sam_recovery_count,
@@ -2135,6 +2318,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # Moments someone went down, against the rounds as finally found. Not
     # attributed to a fighter and not scored; see core/ground.py.
     report["went_down"] = down_watch.summary(rounds)
+    if ground_watch is not None:
+        report["ground_time"] = ground_watch.summary()
     progress(
         "Finalizing coaching priorities", 99.2, time.perf_counter() - wall_start, segment_duration,
         manager, None, quality, stage="report", live_events_snapshot=final_live_events,
@@ -2200,10 +2385,18 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     })
     # One line per analysis with every stage's time and the realtime ratio, so a
     # slow run can be read from the worker's log without opening the report.
-    LOGGER.info("analysis_stage_seconds job=%s video_seconds=%.2f analysis_seconds=%.2f ratio=%.2f stages=%s",
+    # The sweep's own split and the frame pass per frame ride along (2026-10-20):
+    # the owner's log was the measurement the sweep speed-up was chosen from.
+    LOGGER.info("analysis_stage_seconds job=%s video_seconds=%.2f analysis_seconds=%.2f ratio=%.2f stages=%s "
+                "sweep=%s sweep_frames=%d frame_pass_per_frame=%s backtrack=%s",
                 req.job_id, segment_duration, analysis_seconds,
                 analysis_seconds / max(1e-6, segment_duration),
-                json.dumps(report["performance"]["stage_seconds"], separators=(",", ":")))
+                json.dumps(report["performance"]["stage_seconds"], separators=(",", ":")),
+                json.dumps(report["performance"].get("sam_sweep_breakdown") or {}, separators=(",", ":")),
+                int(report["performance"].get("sam_sweep_frames") or 0),
+                json.dumps(report["performance"].get("frame_pass_breakdown_per_frame") or {}, separators=(",", ":")),
+                json.dumps({key: (handoff or {}).get(key) for key in ("samples", "seconds_spent", "time_split")},
+                           separators=(",", ":")))
     # Not recognised as a fight: the saved file and the progress snapshot hold
     # measured movement only, as every page that reads them will show it.
     implausible = not_a_fight(report)
