@@ -1,0 +1,25 @@
+{
+ "clip": "mixkit_40968",
+ "covered": [
+  0.0,
+  7.5
+ ],
+ "unreadable": [],
+ "strikes": [
+  {
+   "t": 2.454,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 6.02,
+   "fighter": "B",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  }
+ ],
+ "notes": "Labelled by a person on the WarriorIQ labelling page (labeller u_K4bPSC3npI7afpgxuMxFEw, saved 2026-11-10T14:02:10.794Z), watching the video. A is the fighter boxed blue on the page's still, B the one boxed red. Outcomes were not asked."
+}

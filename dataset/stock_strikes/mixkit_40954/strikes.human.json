@@ -1,0 +1,116 @@
+{
+ "clip": "mixkit_40954",
+ "covered": [
+  0.0,
+  7.3
+ ],
+ "unreadable": [],
+ "strikes": [
+  {
+   "t": 0.137,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 1.161,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 2.052,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 2.406,
+   "fighter": "B",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 3.362,
+   "fighter": "B",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 3.614,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 4.091,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 4.215,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 4.558,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 5.332,
+   "fighter": "B",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 5.414,
+   "fighter": "B",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 5.914,
+   "fighter": "B",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 6.076,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 6.621,
+   "fighter": "A",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  },
+  {
+   "t": 7.257,
+   "fighter": "B",
+   "family": "punch",
+   "outcome": "unclear",
+   "sure": true
+  }
+ ],
+ "notes": "Labelled by a person on the WarriorIQ labelling page (labeller u_K4bPSC3npI7afpgxuMxFEw, saved 2026-11-10T14:03:02.974Z), watching the video. A is the fighter boxed blue on the page's still, B the one boxed red. Outcomes were not asked."
+}
