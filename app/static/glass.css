@@ -1115,3 +1115,34 @@ body:has(.hx-hero) { overflow-x: clip; }
   [data-page="camp"] main .card { border-radius: 26px; }
 }
 [data-page="camp"] .camp-squad-summary h2 { font-size: clamp(30px, 3.8vw, 48px); font-weight: 850; line-height: 1.02; letter-spacing: -.035em; }
+
+/* --- Fight library and plans in the home page's look (owner, 2026-11-10) --- */
+.archive-hero h1, .pricing-hero h1 { font-weight: 900; letter-spacing: -.045em; text-wrap: balance; }
+.archive-hero { border-bottom: 0; }
+.fight-records { display: grid; gap: 16px; margin-top: 8px; }
+.fight-record { padding: 18px !important; border-radius: 30px; border: 1px solid var(--glass-edge-side); border-top-color: var(--glass-edge-top);
+  background: var(--glass-fill); box-shadow: var(--glass-shine), var(--glass-shadow); }
+.fight-record > .fight-select { top: 30px; left: 30px; border-radius: 50%; }
+.fight-record .fight-thumb, .fight-record .fight-thumb img { border-radius: 22px; }
+.fight-record-main h2 { font-size: clamp(22px, 2.4vw, 30px); font-weight: 850; letter-spacing: -.025em; }
+.fight-result strong { font-size: 40px; font-weight: 900; letter-spacing: -.03em; }
+.fight-record-actions .btn { border-radius: 999px !important; min-height: 46px; }
+.archive-tools select, .archive-search input { min-height: 46px; }
+
+/* Plans: the gradient line from the home hero, two clean rows (the three
+   athlete plans, then the four team plans) instead of 3 + 3 + a lone Gym. */
+.pricing-hero h1 em { font-style: normal; background-image: linear-gradient(90deg, #5aa9ff, #c9d6ea 35%, #ff5d68 65%, #5aa9ff) !important;
+  background-size: 300% 100%; -webkit-background-clip: text !important; background-clip: text !important; color: transparent !important;
+  -webkit-text-fill-color: transparent; animation: hx-shimmer 9s linear infinite; }
+.pricing-card { border-radius: 30px; }
+.pricing-card .btn { border-radius: 999px !important; min-height: 48px; }
+.plan-price { letter-spacing: -.03em; }
+.pricing-promise, .plan-compare-wrap, .allowance-strip { border-radius: 26px; }
+.pricing-trust { border-radius: 36px; }
+@media (min-width: 1180px) {
+  .pricing-grid .pricing-card { grid-column: span 4; min-height: 0; }
+  .pricing-grid .pricing-card[data-plan^="coach"], .pricing-grid .pricing-card.gym-featured { grid-column: span 3; padding: 24px; }
+  .pricing-grid .pricing-card[data-plan^="coach"] .plan-price, .pricing-grid .gym-featured .plan-price { font-size: 34px; }
+}
+@media (prefers-reduced-motion: reduce) { .pricing-hero h1 em { animation: none; } }
+.fight-records { border-top: 0 !important; }
