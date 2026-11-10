@@ -1,11 +1,12 @@
 """Rebuild app/static/hero-fight.mp4 and hero-fight.jpg, the homepage clip.
 
-Source: Mixkit stock video 40979, "Two women fighting mixed martial arts",
-https://mixkit.co/free-stock-video/two-women-fighting-mixed-martial-arts-40979/
+Source (owner, 2026-11-10: two men instead of the two women of Mixkit 40979):
+Mixkit stock video 40951, "Practice fight between boxers",
+https://mixkit.co/free-stock-video/practice-fight-between-boxers-40951/
 under the Mixkit Stock Video Free License (https://mixkit.co/license/#videoFree),
-both checked on 2026-11-01. Download the 720p file and pass its path:
+checked on 2026-11-10. Download the 720p file and pass its path:
 
-    python tools/make_hero_clip.py 40979-720.mp4
+    python tools/make_hero_clip.py 40951-720.mp4
 
 The overlay is the analyser's own pose model and tracker settings
 (SETTINGS.pose_model_pt, SETTINGS.tracker, SETTINGS.detection_conf,
@@ -14,11 +15,12 @@ names are deliberately not drawn (owner, 2026-11-01): they were wrong too
 often to put on the homepage. Nothing is added or corrected by hand; a
 fighter the model did not see in a frame is simply not drawn.
 
-The window is the one stretch (3.75 s to 10.8 s) where both fighters keep a
-single unbroken track: fighter A is lost behind B at 2.5-3.7 s and comes
-back under a new id, and after 10.8 s they are on the ground. The script
-prints every track's span so a different window or tracker version can be
-checked before the ids below are trusted.
+Two stretches of the clip are used, joined by one cut: 0-1.7 s and
+3.8-6.1 s. In between the camera pans across an almost empty ring. The
+boxer on the left is tracked as id 2 before the pan and id 5 after it,
+when he walks back in from the same side; there are only two people in
+the ring, so both ids are the red corner. The script prints every track's span so a
+different tracker version can be checked before the ids below are trusted.
 """
 
 from __future__ import annotations
@@ -34,9 +36,9 @@ import cv2  # noqa: E402
 
 from core.config import SETTINGS  # noqa: E402
 
-START, END = 90, 259          # frames at 24 fps: 3.75 s to 10.8 s
-POSTER_SECONDS = 2.33         # into the cut: A's kick, both fighters in view
-FIGHTERS = {9: ("A", (255, 194, 140)), 2: ("B", (112, 100, 255))}  # BGR of #8cc2ff (blue), #ff6470 (red)
+WINDOWS = [(0, 41), (92, 147)]  # frames at 24 fps: 0-1.7 s and 3.8-6.1 s
+POSTER_SECONDS = 2.8          # into the cut: both fighters in view, mid-exchange
+FIGHTERS = {1: ("A", (255, 194, 140)), 2: ("B", (112, 100, 255)), 5: ("B", (112, 100, 255))}  # BGR of #8cc2ff (blue), #ff6470 (red)
 EDGES = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),
          (11, 13), (13, 15), (12, 14), (14, 16), (0, 5), (0, 6)]
 SEEN = .5                     # keypoint confidence below which nothing is drawn
@@ -98,17 +100,18 @@ def main(argv: list[str]) -> int:
     print_spans(frames)
     draft = STATIC / "hero-fight-draft.mp4"
     cap = cv2.VideoCapture(str(source))
-    cap.set(cv2.CAP_PROP_POS_FRAMES, START)
     size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
     out = cv2.VideoWriter(str(draft), cv2.VideoWriter_fourcc(*"mp4v"), cap.get(cv2.CAP_PROP_FPS), size)
-    for index in range(START, END):
-        ok, frame = cap.read()
-        if not ok:
-            break
-        for person in frames[index]:
-            if person["id"] in FIGHTERS:
-                draw(frame, person, *FIGHTERS[person["id"]])
-        out.write(frame)
+    for start, end in WINDOWS:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start)
+        for index in range(start, end):
+            ok, frame = cap.read()
+            if not ok:
+                break
+            for person in frames[index]:
+                if person["id"] in FIGHTERS:
+                    draw(frame, person, *FIGHTERS[person["id"]])
+            out.write(frame)
     out.release()
     clip = STATIC / "hero-fight.mp4"
     try:
