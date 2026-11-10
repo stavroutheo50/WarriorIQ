@@ -11,7 +11,8 @@ Each fight folder in dataset/public/strike_judged/ holds:
 dataset/public/ is not in Git: pose tracks of identifiable athletes stay out
 of a public repository. Only punches answered "yes" or "no" are used.
 
-With --dense, the fights where every strike is labelled
+Fights a person labelled on the labelling page (strikes.human.json, from
+tools/import_human_strikes.py) always join. With --dense, the fights where every strike is labelled
 (tools/benchmark_dense_strikes.py) add their punch proposals too. Off by
 default: those labels are Claude's, and the owner confirmed only 10 of 30
 sampled ones (dataset/regression/label_check, 2026-11-08). A proposal is a
@@ -92,7 +93,7 @@ def dense_rows(fight: Path) -> tuple[np.ndarray, np.ndarray] | None:
     if not cache_path.exists() or not (fight / "source.json").exists():
         return None
     cache = np.load(cache_path)
-    truth = json.loads((fight / "strikes.json").read_text(encoding="utf-8"))
+    truth = dense.load_truth(fight)
     start, end = truth["covered"]
     spans = truth.get("unreadable") or []
     X, y = [], []
@@ -122,7 +123,9 @@ def all_rows(with_dense: bool = False) -> dict[str, list[tuple[str, np.ndarray, 
     groups: dict[str, list] = {}
     for fight in sorted(p for p in ROOT.iterdir() if (p / "judged.json").exists() and (p / "source.json").exists()):
         groups.setdefault(video_of(fight), []).append((fight.name, *fight_rows(fight)))
-    for fight in (dense.dense_fights() if with_dense else []):
+    # A person's labels (strikes.human.json) are trusted, so those fights
+    # always join; Claude's own labels only with --dense.
+    for fight in (f for f in dense.dense_fights() if with_dense or dense.labelled_by_person(f)):
         rows = dense_rows(fight)
         if rows is not None:
             groups.setdefault(video_of(fight), []).append((fight.name, *rows))

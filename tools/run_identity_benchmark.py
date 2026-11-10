@@ -52,6 +52,13 @@ def _video_url(truth: dict) -> tuple[str, str]:
 
 
 def _download(truth: dict) -> Path:
+    # The owner's own fights (dataset/regression/identity_owner) are never
+    # downloaded: they are on this machine or not at all.
+    if "video" in truth:
+        for candidate in truth["video"]:
+            if (PROJECT_ROOT / candidate).is_file():
+                return PROJECT_ROOT / candidate
+        raise FileNotFoundError(f"none of {truth['video']} is on this machine")
     url, name = _video_url(truth)
     target = WORK / "identity_clips" / name
     if not target.exists():
@@ -97,6 +104,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="how much of each phone clip to analyse (default 55, as measured before)")
     args = parser.parse_args(argv)
     chosen = [p for p in TRUTH if not args.clips or p.stem in args.clips]
+    # A fight whose video is not on this machine is skipped, not fatal.
+    chosen = [p for p in chosen if "video" not in json.loads(p.read_text(encoding="utf-8"))
+              or any((PROJECT_ROOT / v).is_file() for v in json.loads(p.read_text(encoding="utf-8"))["video"])]
 
     runs = WORK / "identity_runs"
     os.environ.update({
