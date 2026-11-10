@@ -5663,6 +5663,9 @@ def progress_page(request: Request, job_id: str):
         # The live scoreboard puts each fighter's count on the side of the
         # screen they stood on when picked (owner, 2026-10-28).
         "board_sides": _board_sides(job),
+        # The corner each fighter is in, as the selection page was told, so
+        # the live colours match the report (owner, 2026-11-10).
+        "a_red_corner": (_corner_labels(job).get("A") or "").startswith("Red"),
     })
 
 
@@ -6992,6 +6995,8 @@ def replay_page(
             "moments": coaching_moments(report, _moment_fighters(report),
                                         str(plan.get("report_tier") or ""), plan.get("coaching_items")),
             "names": _fighter_names(request, _authorized_job(request, job_id) or {}, report),
+            # Skeleton colours follow the corners, as on the report.
+            "corners": _corner_labels(_authorized_job(request, job_id) or {}),
             # The strike-marking tool is internal (admins only, 2026-10-20).
             "can_mark_strikes": _is_admin(request),
             "counting_policy": policy.as_dict(),
