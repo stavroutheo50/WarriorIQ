@@ -1,0 +1,215 @@
+{
+ "video": [
+  "dataset/public/owner_fights/fb883.mp4",
+  "fights/0-02-05-b883d4f42b067f4eff1f3c2a7dfdef96c3c93531a4251b6700ab7485ab74e1e7_3b4468a3b4823ded.mp4"
+ ],
+ "what": "phone recording of a multi-mat hall; the pair on the near mat",
+ "fighter_a": "light blue top, blue trousers",
+ "fighter_b": "black kit, blue headgear",
+ "others": "referee in white; 13-18 people in shot, several bouts and seated judges",
+ "start_seconds": 146.67,
+ "end_seconds": 191.67,
+ "fighter_a_box": [
+  198.6,
+  133.4,
+  228.4,
+  210.7
+ ],
+ "fighter_b_box": [
+  241.3,
+  155.4,
+  285.1,
+  228.8
+ ],
+ "frames": [
+  {
+   "time_seconds": 146.67,
+   "source_frame": 4400,
+   "phase": "standing",
+   "A": [
+    198.6,
+    133.4,
+    228.4,
+    210.7
+   ],
+   "B": [
+    241.3,
+    155.4,
+    285.1,
+    228.8
+   ]
+  },
+  {
+   "time_seconds": 150.67,
+   "source_frame": 4520,
+   "phase": "standing",
+   "A": [
+    374.2,
+    138.2,
+    407.5,
+    222.5
+   ],
+   "B": [
+    282.9,
+    150.1,
+    314.2,
+    227.5
+   ]
+  },
+  {
+   "time_seconds": 154.67,
+   "source_frame": 4640,
+   "phase": "standing",
+   "A": null,
+   "B": [
+    299.0,
+    143.6,
+    337.8,
+    208.6
+   ]
+  },
+  {
+   "time_seconds": 158.67,
+   "source_frame": 4760,
+   "phase": "standing",
+   "A": [
+    240.6,
+    154.6,
+    268.1,
+    237.5
+   ],
+   "B": [
+    329.3,
+    151.9,
+    358.4,
+    220.0
+   ]
+  },
+  {
+   "time_seconds": 162.67,
+   "source_frame": 4880,
+   "phase": "standing",
+   "A": [
+    215.8,
+    161.0,
+    235.7,
+    251.8
+   ],
+   "B": [
+    357.1,
+    212.4,
+    396.1,
+    312.3
+   ]
+  },
+  {
+   "time_seconds": 166.67,
+   "source_frame": 5000,
+   "phase": "standing",
+   "A": [
+    189.9,
+    144.2,
+    213.5,
+    234.1
+   ],
+   "B": [
+    344.7,
+    193.9,
+    370.2,
+    294.1
+   ]
+  },
+  {
+   "time_seconds": 170.67,
+   "source_frame": 5120,
+   "phase": "standing",
+   "A": [
+    199.0,
+    153.5,
+    228.8,
+    245.1
+   ],
+   "B": [
+    313.9,
+    173.1,
+    335.3,
+    256.7
+   ]
+  },
+  {
+   "time_seconds": 174.67,
+   "source_frame": 5240,
+   "phase": "standing",
+   "A": [
+    201.8,
+    188.5,
+    244.1,
+    292.4
+   ],
+   "B": [
+    283.1,
+    180.8,
+    334.9,
+    261.2
+   ]
+  },
+  {
+   "time_seconds": 178.67,
+   "source_frame": 5360,
+   "phase": "standing",
+   "A": null,
+   "B": [
+    240.8,
+    178.2,
+    286.9,
+    240.2
+   ]
+  },
+  {
+   "time_seconds": 182.67,
+   "source_frame": 5480,
+   "phase": "standing",
+   "A": [
+    338.4,
+    119.6,
+    373.3,
+    212.0
+   ],
+   "B": [
+    323.9,
+    101.7,
+    347.1,
+    162.5
+   ]
+  },
+  {
+   "time_seconds": 186.67,
+   "source_frame": 5600,
+   "phase": "standing",
+   "A": [
+    190.6,
+    115.1,
+    223.6,
+    200.0
+   ],
+   "B": [
+    263.3,
+    127.7,
+    297.2,
+    204.6
+   ]
+  },
+  {
+   "time_seconds": 190.67,
+   "source_frame": 5720,
+   "phase": "standing",
+   "A": [
+    217.5,
+    115.3,
+    251.5,
+    205.5
+   ],
+   "B": null
+  }
+ ]
+}

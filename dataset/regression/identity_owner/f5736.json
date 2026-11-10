@@ -1,0 +1,307 @@
+{
+ "video": [
+  "dataset/public/owner_fights/f5736.mp4",
+  "fights/0-02-05-5736bb3acb024e3772ad5fd6341d0b6768ccece93b7c329dcfa26f3ec1478f00_d242ef68be9b3ffe.mp4"
+ ],
+ "what": "WAKO broadcast, one mat, wide camera; coaches seated beside the mat",
+ "fighter_a": "blue kit",
+ "fighter_b": "red kit",
+ "others": "referee in white; seated coaches at the right edge of the mat",
+ "start_seconds": 23.33,
+ "end_seconds": 92.33,
+ "fighter_a_box": [
+  194.6,
+  24.8,
+  225.2,
+  97.3
+ ],
+ "fighter_b_box": [
+  241.5,
+  15.6,
+  292.6,
+  97.0
+ ],
+ "frames": [
+  {
+   "time_seconds": 23.33,
+   "source_frame": 700,
+   "phase": "standing",
+   "A": [
+    194.6,
+    24.8,
+    225.2,
+    97.3
+   ],
+   "B": [
+    241.5,
+    15.6,
+    292.6,
+    97.0
+   ]
+  },
+  {
+   "time_seconds": 27.33,
+   "source_frame": 820,
+   "phase": "standing",
+   "A": [
+    212.6,
+    37.1,
+    245.4,
+    121.7
+   ],
+   "B": [
+    256.7,
+    23.0,
+    295.3,
+    99.8
+   ]
+  },
+  {
+   "time_seconds": 31.33,
+   "source_frame": 940,
+   "phase": "standing",
+   "A": [
+    247.2,
+    32.6,
+    278.3,
+    98.6
+   ],
+   "B": [
+    298.6,
+    49.1,
+    333.9,
+    112.7
+   ]
+  },
+  {
+   "time_seconds": 35.33,
+   "source_frame": 1060,
+   "phase": "standing",
+   "A": [
+    221.4,
+    39.1,
+    253.7,
+    121.7
+   ],
+   "B": [
+    276.1,
+    28.1,
+    320.3,
+    109.6
+   ]
+  },
+  {
+   "time_seconds": 39.33,
+   "source_frame": 1180,
+   "phase": "standing",
+   "A": [
+    299.0,
+    21.7,
+    326.7,
+    92.1
+   ],
+   "B": [
+    226.5,
+    23.8,
+    272.2,
+    96.0
+   ]
+  },
+  {
+   "time_seconds": 43.33,
+   "source_frame": 1300,
+   "phase": "standing",
+   "A": [
+    207.8,
+    22.5,
+    230.8,
+    88.7
+   ],
+   "B": [
+    232.6,
+    32.0,
+    261.0,
+    117.6
+   ]
+  },
+  {
+   "time_seconds": 47.33,
+   "source_frame": 1420,
+   "phase": "down",
+   "A": null,
+   "B": null
+  },
+  {
+   "time_seconds": 51.33,
+   "source_frame": 1540,
+   "phase": "standing",
+   "A": [
+    188.3,
+    49.9,
+    216.7,
+    99.9
+   ],
+   "B": [
+    270.8,
+    23.0,
+    288.9,
+    103.5
+   ]
+  },
+  {
+   "time_seconds": 55.33,
+   "source_frame": 1660,
+   "phase": "standing",
+   "A": [
+    193.2,
+    38.2,
+    221.2,
+    124.1
+   ],
+   "B": [
+    265.9,
+    17.4,
+    290.9,
+    104.0
+   ]
+  },
+  {
+   "time_seconds": 59.33,
+   "source_frame": 1780,
+   "phase": "standing",
+   "A": [
+    183.6,
+    42.7,
+    222.2,
+    134.4
+   ],
+   "B": [
+    247.4,
+    31.4,
+    277.1,
+    117.9
+   ]
+  },
+  {
+   "time_seconds": 63.33,
+   "source_frame": 1900,
+   "phase": "standing",
+   "A": [
+    215.1,
+    38.4,
+    241.3,
+    128.5
+   ],
+   "B": [
+    270.7,
+    27.1,
+    296.9,
+    107.7
+   ]
+  },
+  {
+   "time_seconds": 67.33,
+   "source_frame": 2020,
+   "phase": "standing",
+   "A": [
+    179.5,
+    39.5,
+    216.7,
+    120.8
+   ],
+   "B": [
+    280.1,
+    26.2,
+    298.2,
+    102.7
+   ]
+  },
+  {
+   "time_seconds": 71.33,
+   "source_frame": 2140,
+   "phase": "standing",
+   "A": [
+    198.7,
+    35.8,
+    224.5,
+    120.8
+   ],
+   "B": null
+  },
+  {
+   "time_seconds": 75.33,
+   "source_frame": 2260,
+   "phase": "standing",
+   "A": [
+    234.6,
+    33.8,
+    263.5,
+    119.5
+   ],
+   "B": [
+    270.1,
+    19.4,
+    289.6,
+    90.0
+   ]
+  },
+  {
+   "time_seconds": 79.33,
+   "source_frame": 2380,
+   "phase": "standing",
+   "A": [
+    277.2,
+    28.6,
+    315.4,
+    97.5
+   ],
+   "B": [
+    215.6,
+    26.3,
+    248.0,
+    104.8
+   ]
+  },
+  {
+   "time_seconds": 83.33,
+   "source_frame": 2500,
+   "phase": "standing",
+   "A": null,
+   "B": null
+  },
+  {
+   "time_seconds": 87.33,
+   "source_frame": 2620,
+   "phase": "standing",
+   "A": [
+    157.3,
+    28.2,
+    186.3,
+    92.8
+   ],
+   "B": [
+    129.4,
+    31.0,
+    163.0,
+    105.9
+   ]
+  },
+  {
+   "time_seconds": 91.33,
+   "source_frame": 2740,
+   "phase": "standing",
+   "A": [
+    91.2,
+    50.0,
+    147.4,
+    139.2
+   ],
+   "B": [
+    169.6,
+    37.8,
+    209.4,
+    125.4
+   ]
+  }
+ ]
+}

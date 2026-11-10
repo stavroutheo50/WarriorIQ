@@ -79,6 +79,27 @@ def _inside(t: float, spans) -> bool:
 
 LABEL_CHECKS = PROJECT_ROOT / "dataset" / "regression" / "label_check"
 
+# A person's labels for the same stretch (tools/import_human_strikes.py, from
+# the labelling page): every strike a paid labeller marked while watching.
+# They replace Claude's strikes.json wherever they exist, because the owner
+# confirmed only 18 of 40 sampled Claude labels (2026-11-08/09).
+HUMAN_LABELS = "strikes.human.json"
+
+
+def load_truth(fight: Path) -> dict:
+    """The labels to score against: a person's where they exist, else Claude's
+    with the owner's checks applied (owner_checked)."""
+    human = fight / HUMAN_LABELS
+    if human.exists():
+        return json.loads(human.read_text(encoding="utf-8"))
+    truth = json.loads((fight / "strikes.json").read_text(encoding="utf-8"))
+    truth["strikes"] = owner_checked(fight.name, truth["strikes"])
+    return truth
+
+
+def labelled_by_person(fight: Path) -> bool:
+    return (fight / HUMAN_LABELS).exists()
+
 
 def owner_checked(fight_name: str, strikes: list[dict]) -> list[dict]:
     """The labels with a person's answers applied (dataset/regression/label_check).
@@ -284,8 +305,7 @@ def run(ruleset: str | None, video: bool = False) -> dict:
     results = {}
     total: dict = {}
     for fight in dense_fights():
-        truth = json.loads((fight / "strikes.json").read_text(encoding="utf-8"))
-        truth["strikes"] = owner_checked(fight.name, truth["strikes"])
+        truth = load_truth(fight)
         # Only where the analysis runs the check (core.strike_verifier.SPORTS).
         if video and (fight / "source.json").exists() and _check_applies(ruleset or _fight_ruleset(fight)):
             events = _video_checked(fight, truth)

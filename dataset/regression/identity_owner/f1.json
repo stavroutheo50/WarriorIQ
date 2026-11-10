@@ -1,0 +1,220 @@
+{
+ "video": [
+  "dataset/public/owner_fights/f1.mp4",
+  "fights/1.mp4"
+ ],
+ "what": "broadcast, one mat; a seated coach beside the mat is the most visible person",
+ "fighter_a": "blue kit",
+ "fighter_b": "black kit",
+ "others": "referee in white; a coach seated in a chair at the right of the mat the whole bout",
+ "start_seconds": 48.05,
+ "end_seconds": 113.05,
+ "fighter_a_box": [
+  222.9,
+  54.8,
+  260.8,
+  131.4
+ ],
+ "fighter_b_box": [
+  175.0,
+  51.2,
+  204.2,
+  113.4
+ ],
+ "frames": [
+  {
+   "time_seconds": 48.05,
+   "source_frame": 1500,
+   "phase": "standing",
+   "A": [
+    222.9,
+    54.8,
+    260.8,
+    131.4
+   ],
+   "B": [
+    175.0,
+    51.2,
+    204.2,
+    113.4
+   ]
+  },
+  {
+   "time_seconds": 52.05,
+   "source_frame": 1625,
+   "phase": "standing",
+   "A": [
+    239.8,
+    46.3,
+    268.0,
+    98.6
+   ],
+   "B": null
+  },
+  {
+   "time_seconds": 56.05,
+   "source_frame": 1750,
+   "phase": "standing",
+   "A": null,
+   "B": null
+  },
+  {
+   "time_seconds": 60.05,
+   "source_frame": 1875,
+   "phase": "standing",
+   "A": [
+    234.7,
+    53.8,
+    264.0,
+    128.8
+   ],
+   "B": null
+  },
+  {
+   "time_seconds": 64.05,
+   "source_frame": 2000,
+   "phase": "standing",
+   "A": null,
+   "B": null
+  },
+  {
+   "time_seconds": 68.05,
+   "source_frame": 2124,
+   "phase": "standing",
+   "A": null,
+   "B": null
+  },
+  {
+   "time_seconds": 72.05,
+   "source_frame": 2249,
+   "phase": "standing",
+   "A": null,
+   "B": [
+    201.1,
+    39.4,
+    227.0,
+    103.3
+   ]
+  },
+  {
+   "time_seconds": 76.05,
+   "source_frame": 2374,
+   "phase": "standing",
+   "A": [
+    239.2,
+    47.1,
+    262.1,
+    109.8
+   ],
+   "B": null
+  },
+  {
+   "time_seconds": 80.05,
+   "source_frame": 2499,
+   "phase": "standing",
+   "A": [
+    232.4,
+    44.2,
+    260.8,
+    107.7
+   ],
+   "B": null
+  },
+  {
+   "time_seconds": 84.05,
+   "source_frame": 2624,
+   "phase": "standing",
+   "A": null,
+   "B": [
+    166.9,
+    56.0,
+    199.2,
+    118.9
+   ]
+  },
+  {
+   "time_seconds": 88.05,
+   "source_frame": 2749,
+   "phase": "standing",
+   "A": [
+    243.7,
+    45.0,
+    262.1,
+    106.1
+   ],
+   "B": null
+  },
+  {
+   "time_seconds": 92.05,
+   "source_frame": 2874,
+   "phase": "standing",
+   "A": null,
+   "B": null
+  },
+  {
+   "time_seconds": 96.05,
+   "source_frame": 2999,
+   "phase": "standing",
+   "A": [
+    212.3,
+    40.4,
+    231.3,
+    93.8
+   ],
+   "B": null
+  },
+  {
+   "time_seconds": 100.05,
+   "source_frame": 3123,
+   "phase": "standing",
+   "A": [
+    243.3,
+    46.1,
+    264.1,
+    109.8
+   ],
+   "B": null
+  },
+  {
+   "time_seconds": 104.05,
+   "source_frame": 3248,
+   "phase": "standing",
+   "A": [
+    236.1,
+    43.1,
+    260.5,
+    102.8
+   ],
+   "B": null
+  },
+  {
+   "time_seconds": 108.05,
+   "source_frame": 3373,
+   "phase": "standing",
+   "A": [
+    243.9,
+    42.7,
+    261.2,
+    100.0
+   ],
+   "B": [
+    181.8,
+    49.1,
+    201.5,
+    110.3
+   ]
+  },
+  {
+   "time_seconds": 112.05,
+   "source_frame": 3498,
+   "phase": "standing",
+   "A": [
+    195.7,
+    49.7,
+    214.8,
+    120.9
+   ],
+   "B": null
+  }
+ ]
+}

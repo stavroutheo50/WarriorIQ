@@ -67,7 +67,7 @@ def judge(fight: Path) -> dict | None:
     source = fight / "source.json"
     if not source.exists():
         return None
-    truth = json.loads((fight / "strikes.json").read_text(encoding="utf-8"))
+    truth = dense.load_truth(fight)
     video = dense._local_video(fight)
     proposals = [e for e in dense._thrown(fight / "track.jsonl.gz") if e.family == "punch"]
     rows = []
