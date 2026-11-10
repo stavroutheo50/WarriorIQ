@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from core import features
@@ -28,14 +29,21 @@ class ConfigTests(unittest.TestCase):
     def test_everything_built_on_strike_counts_follows_them(self):
         self.assertFalse(any(item["on"] for item in OFF.values()))
         on = _status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "1"})
-        self.assertTrue(all(item["on"] for item in on.values()))
+        # Key moments are off by default since 2026-11-10 (owner's labels:
+        # totals hold up, individual moments do not); the rest follow counts.
+        self.assertTrue(all(item["on"] for key, item in on.items() if key != "key_moments"))
+        self.assertFalse(on["key_moments"]["on"])
+        self.assertTrue(_status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "1",
+                                 "WARRIORIQ_FEATURE_KEY_MOMENTS": "1"})["key_moments"]["on"])
 
     def test_a_feature_can_be_held_off_on_its_own_but_never_on_without_counts(self):
         held = _status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "1", "WARRIORIQ_FEATURE_SCORING": "0"})
         self.assertFalse(held["scoring"]["on"])
-        self.assertTrue(held["key_moments"]["on"])
-        forced = _status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "0", "WARRIORIQ_FEATURE_SCORING": "1"})
+        self.assertTrue(held["illegal_moves"]["on"])
+        forced = _status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "0", "WARRIORIQ_FEATURE_SCORING": "1",
+                          "WARRIORIQ_FEATURE_KEY_MOMENTS": "1"})
         self.assertFalse(forced["scoring"]["on"])
+        self.assertFalse(forced["key_moments"]["on"])
 
     def test_the_report_reads_the_same_switch(self):
         from core.report import STRIKE_COUNTS_PUBLISHED
@@ -130,3 +138,14 @@ class ReportWhileOffTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_no_page_lists_individual_counted_strikes_by_default(monkeypatch):
+    """Owner, 2026-11-10: totals stay, individual moments go (core/features.py key_moments)."""
+    import app.main as web
+
+    assert not features.is_on("key_moments")
+    job = {"live_events": [{"fighter": "A", "time_seconds": 1.0}], "status": "running"}
+    assert web._public_job_status("abcdef123456", job)["live_events"] == []
+    page = (Path(__file__).resolve().parents[1] / "app" / "templates" / "progress.html").read_text(encoding="utf-8")
+    assert "or not live_moments %} hidden" in page

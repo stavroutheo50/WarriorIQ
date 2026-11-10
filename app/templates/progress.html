@@ -61,7 +61,7 @@
       <p class="playback-ahead" id="playbackAhead" hidden>The video is ahead of the analysis frontier. Playback can continue; new detections will appear only after WarriorIQ reaches this moment.</p>
     </section>
 
-    <aside class="live-feed-card" id="liveFeedCard" data-event-mode="connecting" aria-labelledby="feedTitle"{% if not strike_counts_published %} hidden{% endif %}>
+    <aside class="live-feed-card" id="liveFeedCard" data-event-mode="connecting" aria-labelledby="feedTitle"{% if not strike_counts_published or not live_moments %} hidden{% endif %}>
       <div class="live-feed-heading"><div><div class="eyebrow" id="feedModeLabel">Live observations</div><h2 id="feedTitle">Fight feed</h2></div><span id="eventCount">0 moments</span></div>
       <div class="current-analysis-panel" aria-live="polite"><span>Current analysis</span><strong id="currentAnalysis">Reconnecting to live analysis…</strong><small id="currentAnalysisTime">Waiting for the latest measured update</small></div>
       <ol class="live-event-feed" id="eventFeed" aria-live="polite">

@@ -815,7 +815,8 @@
   </section>
 
   {#- Key moments are counted strikes (core/features.py). -#}
-  {% if features is defined and features.key_moments and not features.key_moments.on %}<section class="card complete-report-section" id="report-key-moments"><div class="numbers-section-heading"><div><span class="eyebrow">Key moments</span><h2>Coming</h2></div></div><p class="muted">{{ features.key_moments.coming }}</p></section>{% else %}
+  {#- Off: no section at all (owner, 2026-11-10), rather than a "Coming" card. -#}
+  {% if features is defined and features.key_moments and not features.key_moments.on %}{% else %}
   <section class="card complete-report-section" id="report-key-moments">
     <div class="numbers-section-heading"><div><span class="eyebrow">Key moments</span><h2>Replay the most important supported actions</h2></div><span>Replay begins one second early</span></div>
     {% set moments=namespace(count=0) %}{% for moment in report.key_moments|default([]) %}{% if focus == 'BOTH' or moment.fighter == primary %}{% set moments.count=moments.count+1 %}<a class="event" href="/replay/{{job_id}}?t={{moment.peak_time}}"><div>R{{moment.round_number or '—'}}</div><div class="time">{{'%.2f'|format(moment.peak_time)}}s</div><div><strong>{{ names.get(moment.fighter, 'Fighter ' ~ moment.fighter) }}</strong> · {{moment.technique|replace('_',' ')|title}}</div><div>{{moment.outcome|replace('_',' ')|title}}</div><div class="small muted">{{moment.target|default('Target not classified',true)|title}}</div></a>{% endif %}{% endfor %}{% if moments.count == 0 %}<p class="muted">No single moment was read clearly enough to feature here. Use the full skeleton replay instead.</p>{% endif %}
