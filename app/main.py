@@ -5655,6 +5655,8 @@ def progress_page(request: Request, job_id: str):
         # live view cannot claim "leg strikes only" above a feed of punches.
         "live_counting_note": counting_policy(_job_sport(job)).live_note,
         "strike_counts_published": STRIKE_COUNTS_PUBLISHED,
+        # The feed of individual strike moments (core/features.py key_moments).
+        "live_moments": feature_is_on("key_moments"),
         # The families this sport's report counts, so the boxing live page
         # does not list kick statistics.
         "live_families": published_families(_job_sport(job)),
@@ -5687,6 +5689,11 @@ def _public_job_status(job_id: str, job: dict) -> dict:
         "eta_scope",
     }
     payload = {key: value for key, value in job.items() if key in public_fields}
+    if not feature_is_on("key_moments"):
+        # The live strike feed is a list of individual counted moments, which
+        # are not reliable (core/features.py key_moments); the live score and
+        # totals below still come through.
+        payload["live_events"] = []
     if not STRIKE_COUNTS_PUBLISHED:
         # No strike counts on the live page while they are switched off: no
         # event feed, and of the provisional statistics only how much of each
@@ -6412,8 +6419,11 @@ def result_page(request: Request, job_id: str):
         # The one rule every page uses (core.report.strike_numbers_shown).
         "strike_counts_published": bool(published_families(
             (report.get("scorecard") or {}).get("sport") or _job_sport(job), report)),
-        "counted_strikes": _with_checks(job_id, _counted_strikes(report, strike_numbers_shown(
-            report, (report.get("scorecard") or {}).get("sport") or _job_sport(job)))),
+        # Listed only while individual strike moments are published
+        # (core/features.py key_moments): the totals are close, the moments are not.
+        "counted_strikes": (_with_checks(job_id, _counted_strikes(report, strike_numbers_shown(
+            report, (report.get("scorecard") or {}).get("sport") or _job_sport(job))))
+            if feature_is_on("key_moments") else []),
         # "Was this right?" and "Who went down?" are manual work: internal,
         # admins only. A customer is never asked (owner, 2026-10-20).
         "can_check_strikes": _is_admin(request),
@@ -6955,7 +6965,7 @@ def replay_page(
     )
     sport = (report.get("scorecard") or {}).get("sport") or _job_sport(_authorized_job(request, job_id) or {})
     policy = counting_policy(sport, report=report)
-    if replay_mode == "movement_chapters" and strike_numbers_shown(report, sport):
+    if replay_mode == "movement_chapters" and strike_numbers_shown(report, sport) and feature_is_on("key_moments"):
         # The report lists every counted strike ("Watch every counted strike")
         # while this page said no action had passed. The same list is offered
         # here, labelled as what it is: automatic counts, estimates.
@@ -6990,6 +7000,8 @@ def replay_page(
                 "rotated_clockwise", (_authorized_job(request, job_id) or {}).get("rotate_clockwise"))),
             "replay_chapters": replay_chapters,
             "replay_mode": replay_mode,
+            # Totals are in the report even while the moments are not listed.
+            "strike_totals_shown": bool(strike_numbers_shown(report, sport)),
             # The report's coaching points that carry moments, as cards beside
             # the skeleton video. Same identity and plan rules as the report.
             "moments": coaching_moments(report, _moment_fighters(report),

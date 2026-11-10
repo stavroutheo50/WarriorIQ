@@ -118,7 +118,12 @@ def test_replay_offers_counted_strikes_as_estimates(tmp_path, monkeypatch):
     # The video is still there (a removed one gets a message instead of the player).
     monkeypatch.setattr(web, "_video_removed", lambda job_id: False)
     with BrowserClient(web.app) as client:
+        # Off by default since 2026-11-10: no chapter per counted strike.
+        default = client.get("/replay/abcdef123456").text
+        monkeypatch.setattr(web, "feature_is_on", lambda key: True)
         page = client.get("/replay/abcdef123456").text
+    assert "Counted automatically (estimate)" not in default and "0:03.0 · Fighter A · Kick" not in default
+    assert "No strike was counted" not in default and "strike total is in the report" in default
     assert "No action label passed the verification gate" not in page
     assert "Counted automatically (estimate)" in page
     assert "0:03.0 · Fighter A · Kick" in page

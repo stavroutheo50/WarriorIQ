@@ -45,8 +45,8 @@ def _load() -> dict[str, Feature]:
     # estimates. WARRIORIQ_PUBLISH_STRIKE_COUNTS=0 switches them off again.
     counts = _env_on("WARRIORIQ_PUBLISH_STRIKE_COUNTS", "1")
 
-    def built_on_counts(key: str) -> bool:
-        return counts and _env_on(f"WARRIORIQ_FEATURE_{key.upper()}", "1")
+    def built_on_counts(key: str, default: str = "1") -> bool:
+        return counts and _env_on(f"WARRIORIQ_FEATURE_{key.upper()}", default)
 
     features = (
         Feature("strike_counts", "Strike counts", counts,
@@ -57,9 +57,18 @@ def _load() -> dict[str, Feature]:
                 "Round-by-round score estimate under your sport's rules",
                 "Round-by-round score estimates are coming: a score is built from strike counts, "
                 "which are not accurate enough yet."),
-        Feature("key_moments", "Key moments", built_on_counts("key_moments"),
+        # Off by default since 2026-11-10 (owner): a person marked every strike
+        # on 9 clips, and each fighter's total came out close (correlation
+        # 0.83, typically 2 off), but only 38% of the individual counted
+        # moments were a strike the person marked (dataset/regression/
+        # human_strikes). So reports show totals, and no page lists or jumps
+        # to individual counted strikes: the report's key moments and "watch
+        # every counted strike", the replay's strike chapters and the live
+        # page's strike feed. WARRIORIQ_FEATURE_KEY_MOMENTS=1 brings them back.
+        Feature("key_moments", "Key moments", built_on_counts("key_moments", "0"),
                 "Verified key moments to replay",
-                "Key moments are coming: they are counted strikes, which are not accurate enough yet."),
+                "Key moments are coming: each counted strike's exact moment is not reliable yet, "
+                "though the totals are."),
         Feature("illegal_moves", "Illegal-move flags", built_on_counts("illegal_moves"),
                 "Illegal-move flags under your ruleset",
                 "Illegal-move flags are coming: they judge counted strikes, which are not accurate "
