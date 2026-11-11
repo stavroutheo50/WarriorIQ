@@ -1174,3 +1174,18 @@ main .card, .auth-card, .empty-workspace, .trust-panel, .analysis-process-card, 
 .workflow-steps .active { border-color: rgba(90, 169, 255, .5) !important; background: linear-gradient(180deg, rgba(90, 169, 255, .22), rgba(47, 111, 237, .12)) !important; }
 .workflow-steps .active > span:first-child { background: #5aa9ff !important; color: #06121a !important; }
 @media (max-width: 700px) { main .card, .auth-card, .empty-workspace { border-radius: 26px; } }
+
+/* --- The hidden attribute always hides (walkthrough, 2026-11-11). Classes
+   that set display (flex, grid) beat the browser's own [hidden] rule, so the
+   live page showed "View completed results" while the analysis was still
+   running, and the strike feed card when it was switched off. --------------- */
+[hidden] { display: none !important; }
+/* With the strike feed off, the video card takes the full width. */
+.live-analysis-grid:has(> .live-feed-card[hidden]) { grid-template-columns: 1fr; }
+/* Phones: the status label sat on top of the fighter name tags. */
+@media (max-width: 700px) {
+  .live-video-status { top: auto !important; bottom: 8px; left: 8px; right: auto; max-width: calc(100% - 16px); padding: 6px 10px !important; }
+  .live-video-status small { display: none; }
+  /* While warming up, the panel's own words say it; the label sat on them. */
+  .live-video-wrap.is-warming .live-video-status { display: none; }
+}
