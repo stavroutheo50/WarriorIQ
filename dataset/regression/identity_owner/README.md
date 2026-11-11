@@ -22,6 +22,17 @@ was detected (yolo26m-pose, imgsz 1280, conf 0.12, because the fighters are
 50-70 pixels tall) and A and B were picked by kit colour on a numbered sheet.
 `null` means that fighter was hidden, merged with someone else, or not
 detected on that frame; those frames are not scored for that fighter.
+
+f1 has a variable frame rate. Its frames were read the way the analysis
+reads them (one seek to the first marked frame, then forward), because a seek
+straight to each frame lands on a different picture in such a file: the
+first version of f1.json was marked that way and scored the analysis 7 of 15
+when it was really 15 of 17.
+
+Replayed from the analysis PC's recording (identity-recording-20261110-1813)
+through core/identity.py on 2026-11-11: f1 15/17, f5736 31/31, fb883 20/21
+right, no swaps and no box on a coach, referee or spectator; the misses are
+frames with no box at all.
 Marked by Claude from the sheets; identity by kit colour (blue against red or
 black) is an easy question, unlike judging strikes.
 
