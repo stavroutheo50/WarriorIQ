@@ -1161,3 +1161,16 @@ body:has(.hx-hero) { overflow-x: clip; }
 /* --- Report stat sheet: a line under each group's title (owner, 2026-11-11) - */
 .stat-group-lede { margin: -4px 0 10px; color: var(--glass-text-faint); font-size: 13px; line-height: 1.5; }
 .stat-group:not(:first-of-type) { margin-top: 34px; padding-top: 26px; border-top: 1px solid rgba(255, 255, 255, .08); }
+
+/* --- One headline voice and one card shape on every page (owner, 2026-11-11:
+   "professional and aesthetic"). The home page, report, upload, camp and
+   scorer set these page by page; the rest (selection, live analysis, compare,
+   profile, settings, sign-in, legal) read lighter beside them. -------------- */
+main h1 { font-weight: 900; letter-spacing: -.04em; text-wrap: balance; }
+main h2 { letter-spacing: -.025em; }
+main .card, .auth-card, .empty-workspace, .trust-panel, .analysis-process-card, .selection-panel, .live-feed-card { border-radius: 30px; }
+[data-page="profile"] .athlete-head h1 { font-size: clamp(36px, 4.6vw, 60px); line-height: .98; }
+[data-page="profile"] .athlete-avatar { width: 60px; height: 60px; font-size: 24px; }
+.workflow-steps .active { border-color: rgba(90, 169, 255, .5) !important; background: linear-gradient(180deg, rgba(90, 169, 255, .22), rgba(47, 111, 237, .12)) !important; }
+.workflow-steps .active > span:first-child { background: #5aa9ff !important; color: #06121a !important; }
+@media (max-width: 700px) { main .card, .auth-card, .empty-workspace { border-radius: 26px; } }
