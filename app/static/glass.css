@@ -1157,3 +1157,7 @@ body:has(.hx-hero) { overflow-x: clip; }
 .a-red-corner .live-event-item.fighter-b button { border-left-color: #5aa0ff; }
 .a-red-corner .live-board-side.fighter-a strong, .a-red-corner .warmup-a { color: #ff6470; }
 .a-red-corner .live-board-side.fighter-b strong, .a-red-corner .warmup-b { color: #8cc2ff; }
+
+/* --- Report stat sheet: a line under each group's title (owner, 2026-11-11) - */
+.stat-group-lede { margin: -4px 0 10px; color: var(--glass-text-faint); font-size: 13px; line-height: 1.5; }
+.stat-group:not(:first-of-type) { margin-top: 34px; padding-top: 26px; border-top: 1px solid rgba(255, 255, 255, .08); }

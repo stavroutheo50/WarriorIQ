@@ -71,26 +71,30 @@ def _movement_rows(metrics: dict, report: dict) -> list[dict]:
         value = _num(value)
         return None if value is None else (value + 1.0) / 2.0 * 100.0   # the report's 0-100 scale
 
+    # Best-measured first (owner, 2026-11-11: the report leads with what the
+    # analysis reads well): where each fighter stood and who pressed, then how
+    # they moved, then the two softer rows. Defences are read off counted
+    # strikes, so they sit last and say so.
     rows = [
+        _row("Pressure", pressure(a.get("pressure_index")), pressure(b.get("pressure_index")), "{:.0f}", unit="of 100"),
+        _row("Time in the centre", pct(a.get("ring_center_control")), pct(b.get("ring_center_control")), "{:.0f}%"),
+        _row("Time going forward", _num(na.get("forward_seconds")), _num(nb.get("forward_seconds")), "{:.0f}s"),
+        _row("Time backing off", _num(na.get("backward_seconds")), _num(nb.get("backward_seconds")), "{:.0f}s"),
         _row("Distance covered", _num(na.get("distance_body_lengths")), _num(nb.get("distance_body_lengths")),
              "{:.0f}", unit="body lengths"),
         _row("Movement speed", _num(a.get("footwork_body_lengths_per_second")),
              _num(b.get("footwork_body_lengths_per_second")), "{:.1f}", unit="body lengths/sec"),
-        _row("Time going forward", _num(na.get("forward_seconds")), _num(nb.get("forward_seconds")), "{:.0f}s"),
-        _row("Time backing off", _num(na.get("backward_seconds")), _num(nb.get("backward_seconds")), "{:.0f}s"),
-        _row("Pressure", pressure(a.get("pressure_index")), pressure(b.get("pressure_index")), "{:.0f}", unit="of 100"),
-        _row("Time in the centre", pct(a.get("ring_center_control")), pct(b.get("ring_center_control")), "{:.0f}%"),
         _row("Balance", pct(a.get("balance_index")), pct(b.get("balance_index")), "{:.0f}%"),
-        _row("Guard up", pct(na.get("hands_up_share")), pct(nb.get("hands_up_share")), "{:.0f}%", note="experimental"),
         _row("Off-balance moments", _num(na.get("off_balance_count")), _num(nb.get("off_balance_count")), "{:.0f}",
              count=True),
+        _row("Guard up", pct(na.get("hands_up_share")), pct(nb.get("hands_up_share")), "{:.0f}%", note="experimental"),
         _row("Seen by the camera", pct(a.get("pose_coverage")), pct(b.get("pose_coverage")), "{:.0f}%"),
     ]
     defences = report.get("defenses")
     if isinstance(defences, list) and defences:
         counts = [sum(1 for d in defences if isinstance(d, dict) and d.get("fighter") == side) for side in SIDES]
-        rows.insert(0, _row("Defences seen", float(counts[0]), float(counts[1]), "{:.0f}",
-                            note="slips, blocks and evasions", count=True))
+        rows.append(_row("Defences seen", float(counts[0]), float(counts[1]), "{:.0f}",
+                         note="estimate: slips, blocks and evasions", count=True))
     return [row for row in rows if row]
 
 
