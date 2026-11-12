@@ -137,6 +137,28 @@ def _fernet():
         return None
 
 
+def storage_status() -> dict:
+    """Whether new authenticator secrets will be encrypted, for the admin page.
+
+    Looks at the two things that decide it (the key is set, the package is
+    importable) without opening a box or logging, so viewing the page is free.
+    Shows a yes or a reason, never the key.
+    """
+    import importlib.util
+
+    key_set = bool(os.getenv("WARRIORIQ_TWO_FACTOR_KEY", "").strip())
+    library = importlib.util.find_spec("cryptography") is not None
+    if key_set and library:
+        reason = ""
+    elif key_set:
+        reason = "the key is set but the cryptography package is not installed"
+    elif library:
+        reason = "WARRIORIQ_TWO_FACTOR_KEY is not set"
+    else:
+        reason = "WARRIORIQ_TWO_FACTOR_KEY is not set and the cryptography package is not installed"
+    return {"encrypting": key_set and library, "key_set": key_set, "library": library, "reason": reason}
+
+
 def seal(secret: str) -> str:
     box = _fernet()
     if box is None:

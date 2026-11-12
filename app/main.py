@@ -58,7 +58,7 @@ from core import two_factor
 from core.db import (
     begin_two_factor_setup, count_two_factor_attempt, create_two_factor_challenge, delete_two_factor_challenge,
     disable_two_factor, enable_two_factor, get_two_factor_challenge, list_account_sessions, replace_recovery_codes,
-    revoke_session_by_id, two_factor_row, use_recovery_code, use_two_factor_step,
+    revoke_session_by_id, two_factor_row, two_factor_storage_counts, use_recovery_code, use_two_factor_step,
 )
 from core.identity import fighter_pair_similarity
 from core.kit import alike_reason as kit_alike_reason, kit_similarity
@@ -9116,6 +9116,8 @@ def admin_page(request: Request, q: str = ""):
             # Set while a worker is being refused for running other code.
             "worker_version_flag": worker_alerts.version_mismatch_flag(OUTPUTS),
             "release": release_version(),
+            "two_factor_storage": two_factor.storage_status(),
+            "two_factor_counts": two_factor_storage_counts(),
         },
     )
 

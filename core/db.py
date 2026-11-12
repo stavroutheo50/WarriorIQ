@@ -1338,6 +1338,19 @@ def replace_recovery_codes(account_id: int, recovery_hashes: list[str]) -> None:
                     (json.dumps(recovery_hashes), int(account_id)))
 
 
+def two_factor_storage_counts() -> dict:
+    """How many accounts have two-step on, and how their secrets are stored. Counts only."""
+    init_db()
+    with connection() as con:
+        row = con.execute(
+            "SELECT COUNT(*) AS total, "
+            "COALESCE(SUM(totp_secret LIKE 'fernet:%'),0) AS encrypted, "
+            "COALESCE(SUM(totp_secret LIKE 'plain:%'),0) AS plain "
+            "FROM accounts WHERE totp_secret IS NOT NULL AND totp_enabled_at IS NOT NULL"
+        ).fetchone()
+    return {"total": int(row["total"]), "encrypted": int(row["encrypted"]), "plain": int(row["plain"])}
+
+
 def create_two_factor_challenge(account_id: int, next_path: str, token_hash: str, minutes: int = 5) -> None:
     init_db()
     now = datetime.now(timezone.utc)

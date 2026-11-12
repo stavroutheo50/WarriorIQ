@@ -259,3 +259,47 @@ def test_deleting_an_account_removes_its_second_step_and_pending_sign_ins():
     with db.connection() as con:
         assert con.execute("SELECT COUNT(*) FROM two_factor_challenges WHERE account_id=?", (created["id"],)).fetchone()[0] == 0
         assert con.execute("SELECT COUNT(*) FROM accounts WHERE id=?", (created["id"],)).fetchone()[0] == 0
+
+
+# --- the admin page says whether secrets are encrypted ------------------------
+
+def _admin_client(monkeypatch):
+    from core.config import SETTINGS
+
+    created, email = _account()
+    object.__setattr__(SETTINGS, "admin_emails", (email.lower(),))     # SETTINGS is frozen, so as the other tests do
+    return created, _signed_in_client(created)
+
+
+def test_the_admin_page_says_whether_two_step_secrets_are_encrypted(monkeypatch):
+    from core.config import SETTINGS
+
+    previous = SETTINGS.admin_emails
+    try:
+        created, client = _admin_client(monkeypatch)
+        monkeypatch.delenv("WARRIORIQ_TWO_FACTOR_KEY", raising=False)
+        page = client.get("/admin").text
+        assert "Two-step sign-in storage" in page and "Not encrypted" in page and "WARRIORIQ_TWO_FACTOR_KEY is not set" in page
+        monkeypatch.setenv("WARRIORIQ_TWO_FACTOR_KEY", "a long private passphrase")
+        page = client.get("/admin").text
+        assert "Encrypted" in page and "Not encrypted" not in page
+        assert "a long private passphrase" not in page                      # the key is never shown
+        # A key without the package is said out loud, not silently treated as fine.
+        monkeypatch.setattr("importlib.util.find_spec", lambda name, *a, **k: None if name == "cryptography" else object())
+        page = client.get("/admin").text
+        assert "Not encrypted" in page and "cryptography package is not installed" in page
+    finally:
+        object.__setattr__(SETTINGS, "admin_emails", previous)
+
+
+def test_the_counts_split_encrypted_from_plain_and_ignore_half_finished_setups(monkeypatch):
+    created, client = _account()[0], None
+    monkeypatch.setenv("WARRIORIQ_TWO_FACTOR_KEY", "a long private passphrase")
+    before = db.two_factor_storage_counts()
+    enc_client = _signed_in_client(created)
+    _turn_on(created, enc_client)
+    after = db.two_factor_storage_counts()
+    assert after["total"] == before["total"] + 1 and after["encrypted"] == before["encrypted"] + 1
+    half, _ = _account()
+    db.begin_two_factor_setup(half["id"], two_factor.seal("ABCDEFGH"))          # not switched on
+    assert db.two_factor_storage_counts() == after
