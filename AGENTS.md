@@ -29,6 +29,7 @@ Warrior IQ is an existing production-oriented combat-sports analysis product. It
 - `core/report.py` and `coaching.py`: evidence-gated report and training output. They must consume real analysis results only.
 - `core/db.py`: SQLite persistence and explicit compatibility migrations; do not change schema casually.
 - `core/config.py`: environment-backed configuration and runtime data roots.
+- Production hosting: OuiHeberg cPanel (Passenger), DNS at Namecheap, deployed from GitHub with cPanel Git Version Control (`.cpanel.yml`); environment variables live in cPanel's Setup Python App and win over `.env`. It is **not** Render (`render.yaml` is a leftover). Analysis runs on the owner's own GPU PC.
 - `tests/`: focused unit and application regression tests. `tools/verify_project.py` is the broad local verification entry point.
 
 Correct fighter identity and evidence integrity take priority over speed. Optimize only measured waste such as duplicate decoding, model initialization, inference, copying, or I/O; do not lower analysis quality to improve timing.
