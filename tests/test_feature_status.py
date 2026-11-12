@@ -29,17 +29,24 @@ class ConfigTests(unittest.TestCase):
     def test_everything_built_on_strike_counts_follows_them(self):
         self.assertFalse(any(item["on"] for item in OFF.values()))
         on = _status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "1"})
-        # Key moments are off by default since 2026-11-10 (owner's labels:
-        # totals hold up, individual moments do not); the rest follow counts.
-        self.assertTrue(all(item["on"] for key, item in on.items() if key != "key_moments"))
-        self.assertFalse(on["key_moments"]["on"])
-        self.assertTrue(_status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "1",
-                                 "WARRIORIQ_FEATURE_KEY_MOMENTS": "1"})["key_moments"]["on"])
+        # Key moments (2026-11-10) and illegal-move flags (2026-11-12) are off by
+        # default: the owner's labels showed totals hold up but individual
+        # counted moments do not, and both features rest on individual moments.
+        by_moment = {"key_moments", "illegal_moves"}
+        self.assertTrue(all(item["on"] for key, item in on.items() if key not in by_moment))
+        self.assertFalse(on["key_moments"]["on"] or on["illegal_moves"]["on"])
+        brought_back = _status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "1", "WARRIORIQ_FEATURE_KEY_MOMENTS": "1",
+                                "WARRIORIQ_FEATURE_ILLEGAL_MOVES": "1"})
+        self.assertTrue(brought_back["key_moments"]["on"] and brought_back["illegal_moves"]["on"])
+        # ...and still never without strike counts.
+        self.assertFalse(_status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "0", "WARRIORIQ_FEATURE_ILLEGAL_MOVES": "1"})["illegal_moves"]["on"])
 
     def test_a_feature_can_be_held_off_on_its_own_but_never_on_without_counts(self):
         held = _status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "1", "WARRIORIQ_FEATURE_SCORING": "0"})
         self.assertFalse(held["scoring"]["on"])
-        self.assertTrue(held["illegal_moves"]["on"])
+        self.assertFalse(held["illegal_moves"]["on"])           # off by default, not by the scoring switch
+        self.assertTrue(_status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "1", "WARRIORIQ_FEATURE_SCORING": "0",
+                                 "WARRIORIQ_FEATURE_ILLEGAL_MOVES": "1"})["illegal_moves"]["on"])
         forced = _status({"WARRIORIQ_PUBLISH_STRIKE_COUNTS": "0", "WARRIORIQ_FEATURE_SCORING": "1",
                           "WARRIORIQ_FEATURE_KEY_MOMENTS": "1"})
         self.assertFalse(forced["scoring"]["on"])
@@ -124,9 +131,11 @@ class ReportWhileOffTests(unittest.TestCase):
         self.assertNotIn("10 - 9", page)
         self.assertNotIn("10–9", page)
 
-    def test_flags_read_as_coming(self):
+    def test_flags_are_left_out_while_off(self):
+        # No section and no "coming" line (owner, 2026-11-12), like key moments.
         _report, page = self._page(scoring_on=False)
-        self.assertIn(OFF["illegal_moves"]["coming"], page)
+        self.assertNotIn(OFF["illegal_moves"]["coming"], page)
+        self.assertNotIn("Illegal moves", page)
         self.assertNotIn("Replay the most important supported actions", page)
 
     def test_the_withheld_reason_names_the_switch(self):
