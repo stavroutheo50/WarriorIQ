@@ -1622,6 +1622,11 @@ class PublicPageTests(unittest.TestCase):
 
         templates = Path(__file__).resolve().parents[1] / "app" / "templates"
         env = _real_template_env(templates)
+        # The flags are off by default (core/features.py, 2026-11-12); this test
+        # is about the gating when they are on, so switch them on here.
+        from core import features as feature_switches
+
+        env.globals["features"] = {key: {**item, "on": True} for key, item in feature_switches.status().items()}
         fixture = Path(__file__).resolve().parent / "fixtures" / "report_sample.json"
         base = json.loads(fixture.read_text(encoding="utf-8"))
 

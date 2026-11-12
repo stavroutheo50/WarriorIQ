@@ -69,10 +69,15 @@ def _load() -> dict[str, Feature]:
                 "Verified key moments to replay",
                 "Key moments are coming: each counted strike's exact moment is not reliable yet, "
                 "though the totals are."),
-        Feature("illegal_moves", "Illegal-move flags", built_on_counts("illegal_moves"),
+        # Off by default since 2026-11-12, for the reason key moments are: a flag
+        # names one fighter for a foul at one second, and only 38% of individual
+        # counted moments matched a strike a person marked
+        # (dataset/regression/human_strikes). WARRIORIQ_FEATURE_ILLEGAL_MOVES=1
+        # brings the flags back.
+        Feature("illegal_moves", "Illegal-move flags", built_on_counts("illegal_moves", "0"),
                 "Illegal-move flags under your ruleset",
-                "Illegal-move flags are coming: they judge counted strikes, which are not accurate "
-                "enough yet."),
+                "Illegal-move flags are coming: they name a fighter for a foul at a specific moment, "
+                "and individual counted moments are not reliable enough yet."),
     )
     return {feature.key: feature for feature in features}
 

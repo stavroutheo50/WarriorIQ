@@ -1428,7 +1428,8 @@
     a whole card saying so. The fouls themselves stay gated as before. -#}
 {% set illegal_feature_off = features is defined and features.illegal_moves and not features.illegal_moves.on %}
 {% set illegal_gated = not action_ready or report.scorecard.status == 'identity_integrity_failed' %}
-{% if illegal_feature_off or illegal_gated %}
+{#- Off by default (core/features.py illegal_moves): no section and no "coming" line, rather than a placeholder. -#}
+{% if illegal_feature_off %}{% elif illegal_gated %}
 <p class="small muted illegal-moves-off"><b>Illegal moves · {{report.scorecard.ruleset_label}}:</b> {% if illegal_feature_off %}{{ features.illegal_moves.coming }}{% else %}Illegal-move flags are switched off for this fight. {% if report.scorecard.status == 'identity_integrity_failed' %}WarriorIQ could not tell the two fighters apart well enough, so putting a foul on one of them would be a guess.{% else %}WarriorIQ cannot read strikes accurately enough yet to call a foul on anyone, so it does not.{% endif %}{% endif %}</p>
 {% else %}
 <section class="card">

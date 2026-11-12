@@ -357,7 +357,7 @@ RULESETS: dict[str, RuleProfile] = {
         family_value=(("punch", 1.0), ("kick", 1.15), ("knee", 1.2)),
         unobserved=(
             "takedowns and takedown defence",
-            "ground position and control time",
+            "who controls the ground",     # time on the ground is measured (core/ground_time.py), not who is on top
             "ground-and-pound",
             "submission attempts",
             "elbow strikes",
