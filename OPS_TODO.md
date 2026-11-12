@@ -3,6 +3,15 @@
 These items can't be finished in code. Each needs the owner, a deploy,
 money, hardware or a lawyer. Nothing here has been done to any live service.
 
+**Where WarriorIQ runs (owner, 2026-11-12): OuiHeberg cPanel, not Render.**
+Namecheap holds the DNS. The code comes from GitHub through cPanel's Git Version
+Control (Update from Remote, then Deploy HEAD Commit; `.cpanel.yml` copies it and
+restarts Passenger). Environment variables go in cPanel's **Setup Python App**
+panel, which wins over `.env`. `.cpanel.yml` does not install Python packages:
+after a change to `requirements-web.txt`, run pip install in that panel. The
+analysis runs on the owner's own GPU PC. Older notes below that say "Render"
+mean "the web host".
+
 ## 1. Speed: deploy and measure on the GPU (#1, #23)
 
 - [ ] **Update your GPU worker PC:** run `deploy/update-worker.ps1` (or `update-worker.bat`) on it. It brings the worker to the code on `main` and restarts it. The pose engine for your GPU is built and cached the first time it runs.
@@ -14,8 +23,9 @@ money, hardware or a lawyer. Nothing here has been done to any live service.
 
 ## 2. Hosting (#3, #4, #25)
 
-- [ ] **Render memory:** `WEB_CONCURRENCY=4` runs four web processes, so check that the Render plan has the memory for them.
-- [ ] **ffprobe on Render:** confirm `ffprobe` (or `ffmpeg`) is in the Render image. Without either, the upload type check can't run and lets the file through.
+- [ ] **Hosting limits:** on cPanel, open Resource Usage after some real traffic and look for CPU, memory or entry-process faults (they show up as 503/508, not timeouts). `WEB_CONCURRENCY` does not apply under Passenger.
+- [ ] **ffprobe on the host:** in cPanel's Terminal run `which ffprobe ffmpeg`. Without either, the upload type check can't run and lets the file through.
+- [ ] **Backups:** confirm the cPanel backup (JetBackup or Backup Wizard) covers the data folder with the SQLite database and the reports, then restore one copy somewhere to prove it works.
 - [ ] **Optional media CDN (Cloudflare R2 or any pull CDN):**
   - Set `WARRIORIQ_MEDIA_CDN_BASE_URL` and a random `WARRIORIQ_MEDIA_SIGNING_KEY` (keep the key out of the repository).
   - Then check that replay start time drops.
@@ -36,17 +46,17 @@ money, hardware or a lawyer. Nothing here has been done to any live service.
 ## 5. Legal and company (#9, #10)
 
 - [ ] **Register the legal entity.**
-- [ ] **Set `WARRIORIQ_LEGAL_IDENTITY` on Render** as one JSON value:
+- [ ] **Set `WARRIORIQ_LEGAL_IDENTITY` in cPanel's Setup Python App** (Environment variables) as one JSON value:
   `{"name": "...", "address": "...", "registration": "...", "vat": "...", "country": "...", "support_email": "support@warrioriq.eu", "privacy_email": "privacy@warrioriq.eu", "dmca_email": "copyright@warrioriq.eu"}`
 - [ ] **Set up the mailboxes:** support@warrioriq.eu, privacy@warrioriq.eu and copyright@warrioriq.eu, then stop using the Gmail address.
   - `.env.example` still shows Gmail as the SMTP sender. Move outgoing mail to a provider on the domain and name it in `WARRIORIQ_EMAIL_PROVIDER_NAME`.
 - [ ] **Lawyer review** of every legal document.
   - Only after the whole set is reviewed, set `WARRIORIQ_LEGAL_DRAFT=0` to remove the "Draft — not yet reviewed by a lawyer" banner.
   - Don't clear it after a partial review (see the note in `core/config.py`).
-- [ ] **Policy version:** if `WARRIORIQ_POLICY_VERSION` is set in the Render dashboard, update it to `2026-10-19` or remove it so the new default applies. The cookie banner asks visitors again after a policy change; that is intended.
+- [ ] **Policy version:** if `WARRIORIQ_POLICY_VERSION` is set in cPanel's Setup Python App, update it to `2026-10-19` or remove it so the new default applies. The cookie banner asks visitors again after a policy change; that is intended.
 - [ ] **Analysis computer location:** fights are analysed on your own GPU PC, so /subprocessors lists it as WarriorIQ's own "Analysis computer", not a third party. Set `WARRIORIQ_ANALYSIS_PROVIDER_LOCATION` (e.g. the country it is in) so the page states where it is.
-- [ ] **Render environment:** if `WARRIORIQ_ANALYSIS_PROVIDER_NAME` is set in the Render dashboard (an earlier `render.yaml` set it), delete it, or /subprocessors will keep naming a third-party analysis provider.
-- [ ] **Data processing agreements** with Render now. With Stripe before billing opens, when Stripe appears on /subprocessors automatically.
+- [ ] **Old environment value:** if `WARRIORIQ_ANALYSIS_PROVIDER_NAME` is set in cPanel's Setup Python App (an earlier `render.yaml` set it), delete it, or /subprocessors will keep naming a third-party analysis provider.
+- [ ] **Data processing agreement** with OuiHeberg now (and Namecheap if it handles any personal data). With Stripe before billing opens, when Stripe appears on /subprocessors automatically.
 
 ## 6. Homepage and pricing (#51, #53, #54, #55)
 
@@ -59,6 +69,6 @@ money, hardware or a lawyer. Nothing here has been done to any live service.
 
 ## 7. Account safety (2026-11-12)
 
-- [ ] **Set `WARRIORIQ_TWO_FACTOR_KEY` on Render** to a long random passphrase, and keep a copy somewhere safe (a password manager). It encrypts every account's authenticator secret in the database. Install `cryptography` in the web image (`pip install cryptography`) or the key is ignored and secrets are stored as plain text. If the key is later lost or changed, authenticator codes stop working until the person uses a recovery code and sets two-step sign-in up again.
+- [ ] **Install the new package, then set the key.** In cPanel's Setup Python App: run pip install for `requirements-web.txt` (it now includes `cryptography`; `.cpanel.yml` does not install packages), then add `WARRIORIQ_TWO_FACTOR_KEY` as an environment variable (a long random passphrase; keep a copy in a password manager) and restart the app. The key encrypts every account's authenticator secret in the database. Without the package the key is ignored, secrets are stored as plain text and a warning is logged. If the key is later lost or changed, authenticator codes stop working until the person uses a recovery code and sets two-step sign-in up again.
 - [ ] **Try it once on the live site** with your own account: turn two-step sign-in on, sign out, sign in with a code, then with a recovery code, and check the devices list shows this browser.
 
