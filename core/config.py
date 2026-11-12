@@ -94,6 +94,20 @@ def legal_value(key: str, env_name: str) -> str:
     return LEGAL_IDENTITY.get(key) or os.getenv(env_name, "").strip()
 
 
+# The public contact addresses moved to mailboxes on the domain on 2026-11-12
+# (owner): support@, with privacy@ and copyright@ forwarding to it. The hosting
+# panel's settings still held the old Gmail address, which every legal page
+# printed. A retired address is replaced by the domain one here, so the pages
+# are right whatever the panel still says; any other configured address is
+# shown as configured.
+RETIRED_CONTACT_ADDRESSES = frozenset({"warrioriqai@gmail.com"})
+
+
+def contact_address(key: str, env_name: str, domain_address: str) -> str:
+    value = legal_value(key, env_name)
+    return domain_address if value.strip().lower() in RETIRED_CONTACT_ADDRESSES else value
+
+
 IS_RENDER = env_bool("RENDER", False)
 
 
@@ -1386,9 +1400,9 @@ class Settings:
     operator_registration: str = legal_value("registration", "WARRIORIQ_OPERATOR_REGISTRATION")
     operator_vat: str = legal_value("vat", "WARRIORIQ_OPERATOR_VAT")
     governing_country: str = legal_value("country", "WARRIORIQ_GOVERNING_COUNTRY")
-    support_email: str = legal_value("support_email", "WARRIORIQ_SUPPORT_EMAIL")
-    privacy_email: str = legal_value("privacy_email", "WARRIORIQ_PRIVACY_EMAIL")
-    dmca_email: str = legal_value("dmca_email", "WARRIORIQ_DMCA_EMAIL")
+    support_email: str = contact_address("support_email", "WARRIORIQ_SUPPORT_EMAIL", "support@warrioriq.eu")
+    privacy_email: str = contact_address("privacy_email", "WARRIORIQ_PRIVACY_EMAIL", "privacy@warrioriq.eu")
+    dmca_email: str = contact_address("dmca_email", "WARRIORIQ_DMCA_EMAIL", "copyright@warrioriq.eu")
     dmca_agent_name: str = os.getenv("WARRIORIQ_DMCA_AGENT_NAME", "").strip()
     minimum_account_age: int = int(os.getenv("WARRIORIQ_MINIMUM_AGE", "18"))
     saved_video_retention_days: int = max(1, int(os.getenv("WARRIORIQ_VIDEO_RETENTION_DAYS", "30")))
