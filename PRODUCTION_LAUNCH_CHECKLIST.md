@@ -55,7 +55,16 @@ This checklist is an engineering and operations control, not a substitute for le
 - [x] Add CSRF protection for every authenticated state-changing form and API, including login-CSRF protection.
       *(Done 2026-09-07. Double submit with an httponly cookie; a test walks the route table so a new route cannot skip it.
       Exempt: the worker API, the Stripe webhook, and the OAuth callback — each authenticates its own way and has no cookie.)*
-- [ ] Add email verification, password reset, session/device management and optional MFA before public accounts.
+- [x] Add email verification, password reset, session/device management and optional MFA before public accounts.
+      *(Email verification, password reset and password change were already in. Done 2026-11-12: optional two-step
+      sign-in with an authenticator app (`core/two_factor.py`), ten one-time recovery codes stored only as hashes, a
+      replay guard so a code works once, wrong-code lockout (5 per sign-in, 12 per account per 15 minutes), the second
+      step enforced on both password and social sign-in, and a signed-in devices list with per-device sign-out
+      (a coarse "Chrome on Windows" label; no raw user agent or address is stored). Turning it off or making new
+      recovery codes needs the password and a live code. Still open: the authenticator secret is stored encrypted only
+      if `WARRIORIQ_TWO_FACTOR_KEY` is set and `cryptography` is installed, and as plain text otherwise; set the key
+      in production and keep a copy, because without it authenticator codes stop working (recovery codes still do).
+      Not built: SMS codes and passkeys, on purpose.)*
 - [ ] Scan uploads for malware, validate decoded media, isolate media processing, keep generated storage names and enforce byte/duration/resolution limits.
 - [ ] Encrypt production data at rest and in transit; restrict staff access by role; maintain auditable access logs without logging raw video or secrets.
 - [ ] Create incident response, vulnerability disclosure, breach assessment/notification and law-enforcement request procedures with named owners.

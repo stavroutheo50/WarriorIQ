@@ -81,10 +81,10 @@ def authenticate(email: str, password: str) -> dict | None:
     return account
 
 
-def issue_session(account_id: int, days: int = 30) -> str:
+def issue_session(account_id: int, days: int = 30, device_label: str = "") -> str:
     token = session_token()
     expires = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
-    save_session(account_id, token_digest(token), expires)
+    save_session(account_id, token_digest(token), expires, device_label)
     return token
 
 

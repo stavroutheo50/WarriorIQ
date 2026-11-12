@@ -54,6 +54,12 @@ from core.auth import (
     authenticate, end_session, hash_password, verify_password, issue_session, normalize_email, register, resolve_session,
     session_token, token_digest, valid_email, valid_password,
 )
+from core import two_factor
+from core.db import (
+    begin_two_factor_setup, count_two_factor_attempt, create_two_factor_challenge, delete_two_factor_challenge,
+    disable_two_factor, enable_two_factor, get_two_factor_challenge, list_account_sessions, replace_recovery_codes,
+    revoke_session_by_id, two_factor_row, use_recovery_code, use_two_factor_step,
+)
 from core.identity import fighter_pair_similarity
 from core.kit import alike_reason as kit_alike_reason, kit_similarity
 from core.csrf import (
@@ -3278,10 +3284,13 @@ async def social_auth_callback(request: Request, provider: str):
         account_id=int(account["id"]),
         metadata={"provider": identity.provider, "created": created},
     )
+    second_step = _begin_two_factor(request, account, str(intent.get("next_path") or "/camp"))
+    if second_step is not None:
+        return second_step
     response = RedirectResponse(_safe_next(str(intent.get("next_path"))), status_code=303)
     response.set_cookie(
         SESSION_COOKIE,
-        issue_session(int(account["id"])),
+        issue_session(int(account["id"]), device_label=_device_label(request)),
         max_age=60 * 60 * 24 * 30,
         httponly=True,
         samesite="lax",
@@ -3458,7 +3467,7 @@ def signup(
     mark_email_verified(int(account["id"]))
     response = RedirectResponse(_safe_next(next_path), status_code=303)
     response.set_cookie(
-        SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
+        SESSION_COOKIE, issue_session(int(account["id"]), device_label=_device_label(request)), max_age=60 * 60 * 24 * 30,
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
@@ -3574,6 +3583,120 @@ def login_page(request: Request, next: str = "/camp"):
     return _auth_page(request, "login", next_path=next)
 
 
+TWO_FACTOR_COOKIE = "warrioriq_2fa"
+TWO_FACTOR_MAX_WRONG_CODES = 5
+
+
+def _device_label(request: Request) -> str:
+    """"Chrome on Windows": a coarse label for the signed-in devices list.
+
+    From the user agent, and only as a label: the raw string and the address
+    are never stored, so the list says enough to spot a stranger and no more.
+    """
+    agent = request.headers.get("user-agent", "")
+    browser = next((name for needle, name in (
+        ("Edg/", "Edge"), ("OPR/", "Opera"), ("Firefox/", "Firefox"), ("Chrome/", "Chrome"), ("Safari/", "Safari"),
+    ) if needle in agent), "Browser")
+    system = next((name for needle, name in (
+        ("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"), ("Windows", "Windows"),
+        ("Mac OS X", "Mac"), ("Linux", "Linux"),
+    ) if needle in agent), "")
+    return f"{browser} on {system}" if system else browser
+
+
+def _begin_two_factor(request: Request, account: dict, next_path: str):
+    """The second step of signing in, or None when the account has none.
+
+    The one place both sign-in routes (password and social) call before they
+    issue a session, so neither can skip it. The password (or the provider)
+    has already been checked; this holds the half-finished sign-in in a
+    five-minute challenge the browser carries in an HTTP-only cookie, and
+    sends the person to enter a code. No session exists until they do.
+    """
+    state = two_factor_row(int(account["id"]))
+    if not state["enabled"]:
+        return None
+    token = session_token()
+    create_two_factor_challenge(int(account["id"]), _safe_next(next_path), token_digest(token))
+    record_security_event("two_factor_required", account_id=int(account["id"]))
+    response = RedirectResponse("/login/2fa", status_code=303)
+    response.set_cookie(TWO_FACTOR_COOKIE, token, max_age=300, httponly=True, samesite="lax",
+                        secure=_request_is_secure(request))
+    return response
+
+
+def _check_second_factor(account_id: int, code: str) -> str | None:
+    """"app" or "recovery" when the code is good (and is now spent), else None."""
+    state = two_factor_row(int(account_id))
+    if not state["enabled"]:
+        return None
+    if two_factor.looks_like_recovery(code):
+        return "recovery" if use_recovery_code(int(account_id), two_factor.recovery_hash(code)) else None
+    secret = two_factor.unseal(state["secret"])
+    if not secret:
+        return None
+    step = two_factor.verify(secret, code, state["last_step"])
+    return "app" if step is not None and use_two_factor_step(int(account_id), step) else None
+
+
+def _two_factor_page(request: Request, error: str = "", status_code: int = 200):
+    return templates.TemplateResponse(
+        request=request, name="two_factor_login.html",
+        context={"request": request, "error": error}, status_code=status_code,
+    )
+
+
+@app.get("/login/2fa", response_class=HTMLResponse)
+def two_factor_login_page(request: Request):
+    token = request.cookies.get(TWO_FACTOR_COOKIE)
+    if not token or not get_two_factor_challenge(token_digest(token)):
+        return RedirectResponse("/login", status_code=303)
+    return _two_factor_page(request)
+
+
+@app.post("/login/2fa", dependencies=[Depends(require_csrf)])
+def two_factor_login(request: Request, code: str = Form("")):
+    token = request.cookies.get(TWO_FACTOR_COOKIE)
+    digest = token_digest(token) if token else ""
+    challenge = get_two_factor_challenge(digest) if token else None
+    if not challenge:
+        response = _auth_page(request, "login", "That sign-in timed out. Enter your email and password again.")
+        response.delete_cookie(TWO_FACTOR_COOKIE)
+        return response
+    _enforce_rate_limit(request, "login-2fa", 30, 300)
+    account_id = int(challenge["account_id"])
+    wait = _take_rate_slot("login-2fa-account", str(account_id), 12, 900)
+    if wait is not None:
+        raise HTTPException(429, _rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))})
+    account = get_account(account_id) or {}
+    if account.get("account_status") != "active":
+        delete_two_factor_challenge(digest)
+        response = _auth_page(request, "login", "That account cannot sign in.")
+        response.delete_cookie(TWO_FACTOR_COOKIE)
+        return response
+    method = _check_second_factor(account_id, code)
+    if method is None:
+        record_security_event("two_factor_failed", severity="warning", account_id=account_id)
+        if count_two_factor_attempt(digest) >= TWO_FACTOR_MAX_WRONG_CODES:
+            delete_two_factor_challenge(digest)
+            response = _auth_page(request, "login", "Too many wrong codes. Enter your email and password to start again.")
+            response.delete_cookie(TWO_FACTOR_COOKIE)
+            return response
+        return _two_factor_page(request, "That code is not right, or has already been used. Wait for the next one and try again.", 400)
+    delete_two_factor_challenge(digest)
+    destination = _safe_next(str(challenge["next_path"]))
+    if policies_outdated(account):
+        destination = f"/policies?next={quote(destination, safe='')}"
+    record_security_event("login_succeeded", account_id=account_id, metadata={"second_step": method})
+    response = RedirectResponse(destination, status_code=303)
+    response.delete_cookie(TWO_FACTOR_COOKIE)
+    response.set_cookie(
+        SESSION_COOKIE, issue_session(account_id, device_label=_device_label(request)), max_age=60 * 60 * 24 * 30,
+        httponly=True, samesite="lax", secure=_request_is_secure(request),
+    )
+    return response
+
+
 @app.post("/login", dependencies=[Depends(require_csrf)])
 def login(
     request: Request,
@@ -3609,13 +3732,16 @@ def login(
             "Verify your email before signing in. You can request a fresh verification link below.",
             next_path,
         )
+    second_step = _begin_two_factor(request, account, next_path)
+    if second_step is not None:
+        return second_step
     destination = _safe_next(next_path)
     if policies_outdated(account):
         destination = f"/policies?next={quote(destination, safe='')}"
     response = RedirectResponse(destination, status_code=303)
     record_security_event("login_succeeded", account_id=int(account["id"]))
     response.set_cookie(
-        SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
+        SESSION_COOKIE, issue_session(int(account["id"]), device_label=_device_label(request)), max_age=60 * 60 * 24 * 30,
         httponly=True, samesite="lax", secure=_request_is_secure(request),
     )
     return response
@@ -7513,8 +7639,23 @@ def settings_page(request: Request, section: str, notice: str = "", error: str =
                 account.get("plan"), account.get("plan_override"), account.get("email"))),
             "pending_email": pending_email_change(int(account["id"])),
             "subscription_actions": list_subscription_actions(int(account["id"])),
+            "two_factor": _two_factor_view(account),
+            "device_sessions": list_account_sessions(
+                int(account["id"]), token_digest(request.cookies.get(SESSION_COOKIE) or "") if request.cookies.get(SESSION_COOKIE) else None),
         },
     )
+
+
+def _two_factor_view(account: dict) -> dict:
+    """What the Security card shows: off, half set up (a secret to type in), or on."""
+    state = two_factor_row(int(account["id"]))
+    view = {"enabled": state["enabled"], "setup": None, "recovery_left": len(state["recovery"])}
+    if state["secret"] and not state["enabled"]:
+        secret = two_factor.unseal(state["secret"])
+        if secret:
+            view["setup"] = {"secret": two_factor.grouped(secret),
+                             "uri": two_factor.provisioning_uri(secret, str(account.get("email") or "account"))}
+    return view
 
 
 @app.post("/settings/marketing", dependencies=[Depends(require_csrf)])
@@ -7540,6 +7681,130 @@ def revoke_other_sessions(request: Request):
     revoke_account_sessions(int(account["id"]), token_digest(current) if current else None)
     record_security_event("other_sessions_revoked", account_id=int(account["id"]))
     return RedirectResponse("/settings/privacy?notice=Other+sessions+signed+out", status_code=303)
+
+
+@app.post("/settings/sessions/{session_id}/revoke", dependencies=[Depends(require_csrf)])
+def revoke_one_session(request: Request, session_id: int):
+    """Sign one other device out. Scoped to this account in the query itself."""
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    current = request.cookies.get(SESSION_COOKIE)
+    mine = {row["id"]: row for row in list_account_sessions(int(account["id"]), token_digest(current) if current else None)}
+    if session_id in mine and mine[session_id]["current"]:
+        return _settings_redirect(error="That is this browser. Use Sign out in the menu.")
+    if not revoke_session_by_id(int(account["id"]), session_id):
+        return _settings_redirect(error="That device was already signed out.")
+    record_security_event("session_revoked", account_id=int(account["id"]))
+    return _settings_redirect(notice="That device was signed out.")
+
+
+def _recovery_codes_page(request: Request, codes: list[str]):
+    """Shown once, never stored in the clear, and never cached."""
+    response = templates.TemplateResponse(
+        request=request, name="two_factor_codes.html",
+        context={"request": request, "codes": [two_factor.display_code(code) for code in codes]},
+    )
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+def _fresh_recovery_codes(account_id: int) -> list[str]:
+    codes = two_factor.new_recovery_codes()
+    replace_recovery_codes(account_id, [two_factor.recovery_hash(code) for code in codes])
+    return codes
+
+
+@app.post("/settings/2fa/start", dependencies=[Depends(require_csrf)])
+def two_factor_start(request: Request, current_password: str = Form("")):
+    """Step 1: a new secret, kept but not yet on. Needs the password."""
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    _enforce_rate_limit(request, "settings-2fa", 20, 900)
+    if two_factor_row(int(account["id"]))["enabled"]:
+        return _settings_redirect(error="Two-step sign-in is already on.")
+    if not _current_password_ok(int(account["id"]), current_password):
+        return _settings_redirect(error="That password is not right. Nothing was changed.")
+    begin_two_factor_setup(int(account["id"]), two_factor.seal(two_factor.new_secret()))
+    return _settings_redirect()
+
+
+@app.post("/settings/2fa/cancel", dependencies=[Depends(require_csrf)])
+def two_factor_cancel(request: Request):
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    if not two_factor_row(int(account["id"]))["enabled"]:
+        disable_two_factor(int(account["id"]))
+    return _settings_redirect()
+
+
+@app.post("/settings/2fa/confirm", dependencies=[Depends(require_csrf)])
+def two_factor_confirm(request: Request, code: str = Form("")):
+    """Step 2: a code from the app proves it holds the secret. Only then is it on."""
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    _enforce_rate_limit(request, "settings-2fa", 20, 900)
+    account_id = int(account["id"])
+    state = two_factor_row(account_id)
+    secret = two_factor.unseal(state["secret"])
+    if state["enabled"] or not secret:
+        return _settings_redirect(error="Start again: there is no two-step setup waiting for a code.")
+    step = two_factor.verify(secret, code)
+    if step is None:
+        return _settings_redirect(error="That code is not right. Check the time on your phone and try the next code.")
+    codes = two_factor.new_recovery_codes()
+    if not enable_two_factor(account_id, step, [two_factor.recovery_hash(c) for c in codes]):
+        return _settings_redirect(error="Two-step sign-in could not be switched on. Start again.")
+    current = request.cookies.get(SESSION_COOKIE)
+    revoke_account_sessions(account_id, token_digest(current) if current else None)
+    record_security_event("two_factor_enabled", account_id=account_id)
+    return _recovery_codes_page(request, codes)
+
+
+def _second_factor_gate(request: Request, account: dict, current_password: str, code: str, scope: str):
+    """The password and a live code, for the changes that would weaken the account. None when both are good."""
+    _enforce_rate_limit(request, scope, 20, 900)
+    account_id = int(account["id"])
+    wait = _take_rate_slot("settings-2fa-account", str(account_id), 12, 900)
+    if wait is not None:
+        raise HTTPException(429, _rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))})
+    if not _current_password_ok(account_id, current_password):
+        return _settings_redirect(error="That password is not right. Nothing was changed.")
+    if _check_second_factor(account_id, code) is None:
+        record_security_event("two_factor_failed", severity="warning", account_id=account_id)
+        return _settings_redirect(error="That code is not right, or has already been used. Nothing was changed.")
+    return None
+
+
+@app.post("/settings/2fa/disable", dependencies=[Depends(require_csrf)])
+def two_factor_disable(request: Request, current_password: str = Form(""), code: str = Form("")):
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    refused = _second_factor_gate(request, account, current_password, code, "settings-2fa")
+    if refused is not None:
+        return refused
+    account_id = int(account["id"])
+    disable_two_factor(account_id)
+    current = request.cookies.get(SESSION_COOKIE)
+    revoke_account_sessions(account_id, token_digest(current) if current else None)
+    record_security_event("two_factor_disabled", account_id=account_id)
+    return _settings_redirect(notice="Two-step sign-in is off. Every other device was signed out.")
+
+
+@app.post("/settings/2fa/recovery-codes", dependencies=[Depends(require_csrf)])
+def two_factor_new_recovery_codes(request: Request, current_password: str = Form(""), code: str = Form("")):
+    account = _account(request)
+    if not account:
+        raise HTTPException(403)
+    refused = _second_factor_gate(request, account, current_password, code, "settings-2fa")
+    if refused is not None:
+        return refused
+    record_security_event("recovery_codes_regenerated", account_id=int(account["id"]))
+    return _recovery_codes_page(request, _fresh_recovery_codes(int(account["id"])))
 
 
 def _settings_redirect(notice: str = "", error: str = "") -> RedirectResponse:
@@ -7572,8 +7837,8 @@ def change_password(request: Request, current_password: str = Form(""), new_pass
     update_password_hash(int(account["id"]), hash_password(new_password))   # ends every session
     record_security_event("password_changed", account_id=int(account["id"]))
     response = _settings_redirect(notice="Password changed. Every other device has been signed out.")
-    response.set_cookie(SESSION_COOKIE, issue_session(int(account["id"])), max_age=60 * 60 * 24 * 30,
-                        httponly=True, samesite="lax", secure=_request_is_secure(request))
+    response.set_cookie(SESSION_COOKIE, issue_session(int(account["id"]), device_label=_device_label(request)),
+                        max_age=60 * 60 * 24 * 30, httponly=True, samesite="lax", secure=_request_is_secure(request))
     return response
 
 
