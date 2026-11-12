@@ -56,3 +56,9 @@ money, hardware or a lawyer. Nothing here has been done to any live service.
   - A plan without its number keeps counting per day.
 - [ ] **Accuracy section (#55):** the figures come from measurements recorded in `core/report.py` and `core/sport_policy.py`. Update the homepage when `tools/benchmark_labelled_fight.py` or the Accuracy Lab results change.
 - [ ] **Guard (#5):** label a set of guard clips by hand. Remove `experimental=True` from the guard metric only once it has been checked against them.
+
+## 7. Account safety (2026-11-12)
+
+- [ ] **Set `WARRIORIQ_TWO_FACTOR_KEY` on Render** to a long random passphrase, and keep a copy somewhere safe (a password manager). It encrypts every account's authenticator secret in the database. Install `cryptography` in the web image (`pip install cryptography`) or the key is ignored and secrets are stored as plain text. If the key is later lost or changed, authenticator codes stop working until the person uses a recovery code and sets two-step sign-in up again.
+- [ ] **Try it once on the live site** with your own account: turn two-step sign-in on, sign out, sign in with a code, then with a recovery code, and check the devices list shows this browser.
+

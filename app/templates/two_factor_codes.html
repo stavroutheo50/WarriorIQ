@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Your recovery codes · WarriorIQ{% endblock %}
+{% block description %}Save these recovery codes: they are the way back into your WarriorIQ account if you lose your phone.{% endblock %}
+{% block content %}
+{#- Shown once, straight from the request that made them, and never cached
+    (the route sets Cache-Control: no-store). Only their hashes are stored. -#}
+<section class="empty-workspace card two-factor-codes" role="region" aria-labelledby="codesTitle">
+  <div class="eyebrow">Two-step sign-in is on</div>
+  <h1 id="codesTitle">Save your recovery codes.</h1>
+  <p class="muted">If you lose your phone, one of these signs you in. <strong>You will not see them again.</strong> Each works once. Keep them somewhere safe and separate from your password: a password manager, or paper.</p>
+  <ol class="recovery-codes">{% for code in codes %}<li>{{ code }}</li>{% endfor %}</ol>
+  <p class="small muted">Every other device was signed out when two-step sign-in was turned on.</p>
+  <div class="hero-actions"><a class="btn" href="/settings/privacy#security">I have saved them</a></div>
+</section>
+{% endblock %}

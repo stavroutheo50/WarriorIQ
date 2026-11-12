@@ -607,10 +607,32 @@ def _init_db_schema() -> None:
             "subscription_cancelled_at": "TEXT",
             "email_verified_at": "TEXT",
             "password_login_enabled": "INTEGER NOT NULL DEFAULT 1",
+            # Optional two-step sign-in (core/two_factor.py, 2026-11-12). All
+            # nullable: an account without a secret signs in exactly as before.
+            "totp_secret": "TEXT",
+            "totp_enabled_at": "TEXT",
+            "totp_last_step": "INTEGER",
+            "recovery_codes": "TEXT",
         }
         for column, definition in account_migrations.items():
             if column not in account_columns:
                 con.execute(f"ALTER TABLE accounts ADD COLUMN {column} {definition}")
+        session_columns = {row[1] for row in con.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "device_label" not in session_columns:
+            # "Chrome on Windows": a coarse label for the signed-in devices
+            # list. Never the raw user agent and never an address.
+            con.execute("ALTER TABLE sessions ADD COLUMN device_label TEXT")
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS two_factor_challenges (
+                   token_hash TEXT PRIMARY KEY,
+                   account_id INTEGER NOT NULL,
+                   next_path TEXT NOT NULL,
+                   attempts INTEGER NOT NULL DEFAULT 0,
+                   created_at TEXT NOT NULL,
+                   expires_at TEXT NOT NULL,
+                   FOREIGN KEY(account_id) REFERENCES accounts(id)
+               )"""
+        )
         fight_columns = {row[1] for row in con.execute("PRAGMA table_info(fights)").fetchall()}
         if "video_delete_after" not in fight_columns:
             con.execute("ALTER TABLE fights ADD COLUMN video_delete_after TEXT")
@@ -1217,6 +1239,138 @@ def revoke_account_sessions(account_id: int, keep_token_hash: str | None = None)
         return int(cursor.rowcount)
 
 
+def list_account_sessions(account_id: int, current_token_hash: str | None = None) -> list[dict]:
+    """The account's live sessions, newest first, with this browser's marked."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        rows = con.execute(
+            "SELECT id,token_hash,created_at,device_label FROM sessions "
+            "WHERE account_id=? AND expires_at>? ORDER BY created_at DESC",
+            (int(account_id), now),
+        ).fetchall()
+    return [{"id": int(r["id"]), "created_at": r["created_at"], "device": r["device_label"] or "Unknown device",
+             "current": bool(current_token_hash and r["token_hash"] == current_token_hash)} for r in rows]
+
+
+def revoke_session_by_id(account_id: int, session_id: int) -> bool:
+    """Sign one session out. Scoped to the account, so one person's id never reaches another's."""
+    with connection() as con:
+        cursor = con.execute("DELETE FROM sessions WHERE id=? AND account_id=?", (int(session_id), int(account_id)))
+        return cursor.rowcount == 1
+
+
+# --- Optional two-step sign-in (core/two_factor.py) -------------------------
+
+def two_factor_row(account_id: int) -> dict:
+    init_db()
+    with connection() as con:
+        row = con.execute(
+            "SELECT totp_secret,totp_enabled_at,totp_last_step,recovery_codes FROM accounts WHERE id=?",
+            (int(account_id),),
+        ).fetchone()
+    if not row:
+        return {"secret": None, "enabled": False, "last_step": None, "recovery": []}
+    try:
+        recovery = json.loads(row["recovery_codes"]) if row["recovery_codes"] else []
+    except (TypeError, ValueError):
+        recovery = []
+    return {"secret": row["totp_secret"], "enabled": bool(row["totp_enabled_at"]),
+            "last_step": row["totp_last_step"], "recovery": recovery if isinstance(recovery, list) else []}
+
+
+def begin_two_factor_setup(account_id: int, sealed_secret: str) -> None:
+    """Keep a secret that is not yet switched on (enabled_at stays empty until a code proves the app has it)."""
+    with connection() as con:
+        con.execute(
+            "UPDATE accounts SET totp_secret=?,totp_enabled_at=NULL,totp_last_step=NULL,recovery_codes=NULL WHERE id=?",
+            (sealed_secret, int(account_id)),
+        )
+
+
+def enable_two_factor(account_id: int, step: int, recovery_hashes: list[str]) -> bool:
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE accounts SET totp_enabled_at=?,totp_last_step=?,recovery_codes=? "
+            "WHERE id=? AND totp_secret IS NOT NULL AND totp_enabled_at IS NULL",
+            (datetime.now(timezone.utc).isoformat(), int(step), json.dumps(recovery_hashes), int(account_id)),
+        )
+        return cursor.rowcount == 1
+
+
+def disable_two_factor(account_id: int) -> None:
+    with connection() as con:
+        con.execute(
+            "UPDATE accounts SET totp_secret=NULL,totp_enabled_at=NULL,totp_last_step=NULL,recovery_codes=NULL WHERE id=?",
+            (int(account_id),),
+        )
+
+
+def use_two_factor_step(account_id: int, step: int) -> bool:
+    """Take a time step once. False if it, or a later one, was already used: the replay guard."""
+    with connection() as con:
+        cursor = con.execute(
+            "UPDATE accounts SET totp_last_step=? WHERE id=? AND (totp_last_step IS NULL OR totp_last_step<?)",
+            (int(step), int(account_id), int(step)),
+        )
+        return cursor.rowcount == 1
+
+
+def use_recovery_code(account_id: int, code_hash: str) -> bool:
+    """Spend one recovery code. Atomic: two requests with the same code cannot both succeed."""
+    with connection() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute("SELECT recovery_codes FROM accounts WHERE id=?", (int(account_id),)).fetchone()
+        try:
+            codes = json.loads(row["recovery_codes"]) if row and row["recovery_codes"] else []
+        except (TypeError, ValueError):
+            codes = []
+        if code_hash not in codes:
+            return False
+        codes.remove(code_hash)
+        con.execute("UPDATE accounts SET recovery_codes=? WHERE id=?", (json.dumps(codes), int(account_id)))
+        return True
+
+
+def replace_recovery_codes(account_id: int, recovery_hashes: list[str]) -> None:
+    with connection() as con:
+        con.execute("UPDATE accounts SET recovery_codes=? WHERE id=? AND totp_enabled_at IS NOT NULL",
+                    (json.dumps(recovery_hashes), int(account_id)))
+
+
+def create_two_factor_challenge(account_id: int, next_path: str, token_hash: str, minutes: int = 5) -> None:
+    init_db()
+    now = datetime.now(timezone.utc)
+    with connection() as con:
+        con.execute("DELETE FROM two_factor_challenges WHERE expires_at<=?", (now.isoformat(),))
+        con.execute(
+            "INSERT INTO two_factor_challenges(token_hash,account_id,next_path,created_at,expires_at) VALUES(?,?,?,?,?)",
+            (token_hash, int(account_id), next_path[:300], now.isoformat(), (now + timedelta(minutes=minutes)).isoformat()),
+        )
+
+
+def get_two_factor_challenge(token_hash: str) -> dict | None:
+    init_db()
+    with connection() as con:
+        row = con.execute(
+            "SELECT account_id,next_path,attempts FROM two_factor_challenges WHERE token_hash=? AND expires_at>?",
+            (token_hash, datetime.now(timezone.utc).isoformat()),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def count_two_factor_attempt(token_hash: str) -> int:
+    with connection() as con:
+        con.execute("UPDATE two_factor_challenges SET attempts=attempts+1 WHERE token_hash=?", (token_hash,))
+        row = con.execute("SELECT attempts FROM two_factor_challenges WHERE token_hash=?", (token_hash,)).fetchone()
+    return int(row["attempts"]) if row else 99
+
+
+def delete_two_factor_challenge(token_hash: str) -> None:
+    with connection() as con:
+        con.execute("DELETE FROM two_factor_challenges WHERE token_hash=?", (token_hash,))
+
+
 def update_password_hash(account_id: int, password_hash: str) -> bool:
     with connection() as con:
         cursor = con.execute(
@@ -1392,14 +1546,14 @@ def _effective_plan_key(account) -> str:
     return effective_plan_key(account["plan"], account["plan_override"], email)
 
 
-def save_session(account_id: int, token_hash: str, expires_at: str) -> None:
+def save_session(account_id: int, token_hash: str, expires_at: str, device_label: str = "") -> None:
     init_db()
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
         con.execute("DELETE FROM sessions WHERE expires_at<=?", (now,))
         con.execute(
-            "INSERT INTO sessions(account_id,token_hash,created_at,expires_at) VALUES(?,?,?,?)",
-            (account_id, token_hash, now, expires_at),
+            "INSERT INTO sessions(account_id,token_hash,created_at,expires_at,device_label) VALUES(?,?,?,?,?)",
+            (account_id, token_hash, now, expires_at, (device_label or "")[:60] or None),
         )
 
 
@@ -2337,6 +2491,7 @@ def delete_account(account_id: int) -> dict | None:
         con.execute("DELETE FROM email_verification_tokens WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM email_change_tokens WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM oauth_identities WHERE account_id=?", (account_id,))
+        con.execute("DELETE FROM two_factor_challenges WHERE account_id=?", (account_id,))
         con.execute(
             "UPDATE security_events SET account_id=NULL,metadata_json='{}' WHERE account_id=?",
             (account_id,),

@@ -1189,3 +1189,14 @@ main .card, .auth-card, .empty-workspace, .trust-panel, .analysis-process-card, 
   /* While warming up, the panel's own words say it; the label sat on them. */
   .live-video-wrap.is-warming .live-video-status { display: none; }
 }
+
+/* --- Two-step sign-in and signed-in devices (owner, 2026-11-12) ------------ */
+.two-factor-key { display: inline-block; padding: 6px 12px; border-radius: 12px; background: rgba(255, 255, 255, .07); border: 1px solid var(--glass-edge); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 15px; letter-spacing: .08em; user-select: all; word-break: break-all; }
+.recovery-codes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 22px 0; padding: 0; list-style: none; }
+.recovery-codes li { padding: 12px 14px; border-radius: 16px; background: rgba(255, 255, 255, .06); border: 1px solid var(--glass-edge); text-align: center; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 18px; letter-spacing: .06em; user-select: all; }
+.device-list { display: grid; gap: 10px; margin: 16px 0; padding: 0; list-style: none; }
+.device-list li { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 16px; border-radius: 18px; background: rgba(255, 255, 255, .04); border: 1px solid var(--glass-edge); }
+.device-list li > div { display: grid; gap: 2px; }
+.device-list form { margin: 0; }
+@media (max-width: 560px) { .recovery-codes { grid-template-columns: 1fr; } .device-list li { flex-wrap: wrap; } }
+#two-step form + form { margin-top: 10px; }
