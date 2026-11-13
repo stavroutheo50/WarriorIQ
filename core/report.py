@@ -322,6 +322,17 @@ def identity_failure(tracking: dict, required: tuple[str, ...] = ("A", "B")) -> 
                 "advice": ("If their kit differs anywhere - headgear, gloves, shorts - pick the fighters again "
                            "on a frame where that difference is visible. If it is identical, a side angle "
                            "where they cross each other less helps.")}
+    if tracking.get("identity_seed_confirmed") is False:
+        # Every check above passed but this one: arriving at the moment the
+        # person picked, the two followed fighters were not on the boxes they
+        # drew. It used to fall through to the vague "could not stay certain"
+        # below (owner, 2026-11-13), which named no cause and no fix.
+        return {"cause": "seed_moved", "failed": failed, "repick": True,
+                "headline": ("When the analysis reached the moment you picked, the two fighters it had "
+                             "followed were not where you tapped them, so it cannot be sure which one is "
+                             "which."),
+                "advice": ("Press Show me who is who and tap both fighters again, ideally on a moment "
+                           "where they stand apart and are both fully visible.")}
     low = [fighter for fighter in failed if float(tracking.get(f"fighter_{fighter}_coverage", 0.0)) < 0.45]
     if low:
         named = " and ".join(

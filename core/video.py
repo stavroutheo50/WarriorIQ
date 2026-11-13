@@ -377,6 +377,70 @@ def read_frame(path: str | Path, frame_index: int):
         cap.release()
 
 
+def _match_thumb(frame):
+    """A small grey copy for comparing two pictures of the same moment."""
+    height, width = frame.shape[:2]
+    small = cv2.resize(frame, (96, max(1, round(96 * height / max(1, width)))), interpolation=cv2.INTER_AREA)
+    return cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+
+def match_frame_index(path: str | Path, picture, guess_index: int, fps: float,
+                      clockwise: int | None = None, window_seconds: float = 4.0) -> dict | None:
+    """The frame number of this video that shows `picture`, found by looking.
+
+    A picture captured in the browser comes with the browser's clock, and
+    `seconds * average fps` is not the frame the analysis reads at that time
+    in a variable-frame-rate phone video: far into a fight it can be several
+    frames or seconds out, and boxes drawn on the browser's picture then sit
+    on people who have moved (owner, 2026-11-13: two fights failed the
+    identity check at the chosen frame, and re-tapping the same picture
+    failed again). This reads every frame within `window_seconds` of the
+    guess, the way the analysis reads them, and returns the closest:
+
+        {"index": int, "difference": float, "typical": float}
+
+    `difference` is the mean grey-level gap to the picture (0-255) and
+    `typical` the median gap across the window, so a caller can tell a real
+    match from the least-bad of many. None when nothing could be read.
+    """
+    target = _match_thumb(picture)
+    fps = float(fps) if fps and fps > 0 else 30.0
+    span = int(round(window_seconds * fps))
+    first = max(0, int(guess_index) - span)
+    last = int(guess_index) + span
+    cap = open_capture(path)
+    if not cap.isOpened():
+        return None
+    gaps: list[tuple[float, int]] = []
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, first)
+        index = first
+        while index <= last:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            frame = rotate_frame(frame, clockwise)
+            thumb = _match_thumb(frame)
+            if thumb.shape == target.shape:
+                gaps.append((float(np.mean(np.abs(thumb - target))), index))
+            index += 1
+    finally:
+        cap.release()
+    if not gaps:
+        return None
+    difference, best = min(gaps)
+    return {"index": best, "difference": difference,
+            "typical": float(np.median([gap for gap, _ in gaps]))}
+
+
+def is_same_moment(match: dict | None) -> bool:
+    """A browser JPEG of a frame differs from the decoded frame by compression
+    noise only; a different moment of a fight differs by far more."""
+    if not match:
+        return False
+    return match["difference"] <= 6.0 or match["difference"] <= 0.35 * match["typical"]
+
+
 def _usable_picture(frame) -> bool:
     """False for a black, blank or single-colour frame - a fade-in, a title
     card, or a corrupt first keyframe - which is no frame to pick fighters on."""
