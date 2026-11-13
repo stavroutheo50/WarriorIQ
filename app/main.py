@@ -172,9 +172,9 @@ from core.squad import movement_value as squad_movement_value
 from core.social_auth import SOCIAL_AUTH
 from core.types import AnalysisRequest, StrikeEvent
 from core.video import (
-    detect_shot_changes, ffmpeg_frame, get_video_info, has_video_stream, is_same_moment, match_frame_index,
-    normalize_container, opencv_decodes, playback_file, probe_upload, quarter_turn, read_frame,
-    remove_derivative, rotate_frame, selection_frame,
+    detect_shot_changes, ffmpeg_frame, get_video_info, has_video_stream, normalize_container, opencv_decodes,
+    playback_file, probe_upload, quarter_turn, read_frame, remove_derivative, rotate_frame,
+    selection_frame,
 )
 from core.video import _ffmpeg_exe
 
@@ -4755,59 +4755,6 @@ def _seek_selection_frame(job_id: str, job: dict, seconds: float, source: str = 
     return seconds, frame_number
 
 
-def _align_browser_selection(job_id: str, job: dict) -> dict:
-    """Put a browser-captured selection on the frame the analysis will read.
-
-    The browser's picture comes with the browser's clock, and the analysis
-    finds the chosen moment as `seconds * average fps`, which in variable-
-    frame-rate phone video is a different frame - far into a fight, a
-    different second. The boxes drawn on the picture then sit on people who
-    have moved, the identity check at the chosen frame fails, and every
-    number is withheld; re-tapping the same picture fails the same way
-    (owner, 2026-11-13). So the frame that actually shows the picture is
-    found by looking, and the job points at it.
-
-    Returns {"aligned": True} when it now points at the right frame,
-    {"aligned": False} when no frame near the guess shows that picture (the
-    server's own frame then replaces it, to be tapped again), or {} when
-    nothing here can decode the video, as before this check.
-    """
-    if not job.get("selection_from_browser") or job.get("selection_aligned"):
-        return {}
-    picture = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
-    if picture is None:
-        return {}
-    info = get_video_info(job["video_path"])
-    fps = float(info.fps or 0.0) or 30.0
-    seconds = float(job.get("selection_seconds") or 0.0)
-    guess = int(round(seconds * fps))
-    try:
-        match = match_frame_index(job["video_path"], picture, guess, fps, job.get("rotate_clockwise"),
-                                  window_seconds=min(8.0, max(2.0, 0.03 * seconds)))
-    except Exception as exc:                                        # noqa: BLE001
-        LOGGER.warning("selection_align_failed job=%s error=%s", job_id, type(exc).__name__)
-        match = None
-    if match is None:
-        return {}
-    if not is_same_moment(match):
-        LOGGER.warning("selection_align_no_match job=%s guess=%d best=%d diff=%.1f typical=%.1f",
-                       job_id, guess, match["index"], match["difference"], match["typical"])
-        _seek_selection_frame(job_id, job, seconds, source="chosen")
-        update_job(job_id, {"selection_from_browser": False})
-        return {"aligned": False}
-    index = int(match["index"])
-    frame = rotate_frame(read_frame(job["video_path"], index), job.get("rotate_clockwise"))
-    if frame is not None:
-        cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), frame)
-    aligned_seconds = index / fps
-    LOGGER.info("selection_aligned job=%s guess=%d frame=%d shift_frames=%d diff=%.1f",
-                job_id, guess, index, index - guess, match["difference"])
-    update_job(job_id, {"selection_frame": index, "selection_seconds": aligned_seconds,
-                        "start_seconds": aligned_seconds,
-                        "selection_aligned": True})
-    return {"aligned": True}
-
-
 # A browser-captured frame is one picture: a 4K PNG is under 25 MB, a JPEG far
 # less. Anything bigger is not what the frame picker sends.
 MAX_SELECTION_IMAGE_BYTES = 25 * 1024 * 1024
@@ -5602,14 +5549,6 @@ def start(request: Request, job_id: str, payload: StartPayload):
     if job.get("status") in {"queued", "running"}:
         return _analysis_started_response(request, job_id)
     capacity = _require_analysis_capacity()
-    # A picture taken in the browser is moved onto the frame the analysis
-    # reads before anything is started from it.
-    alignment = _align_browser_selection(job_id, job)
-    if alignment.get("aligned") is False:
-        raise HTTPException(409, (
-            "WarriorIQ could not find that exact moment in your video, so the picture has been "
-            "replaced with the video's own frame. Tap both fighters again on it."))
-    job = get_job(job_id) or job
     video_width = float(job.get("video_width") or 0)
     video_height = float(job.get("video_height") or 0)
     if quarter_turn(job.get("rotate_clockwise")) in (90, 270):
