@@ -103,9 +103,38 @@ class _TurnedCapture:
         return getattr(self._capture, name)
 
 
-def open_capture(path):
+def _decode_threads() -> int:
+    """How many threads one video decoder may start; 0 is OpenCV's own choice.
+
+    The web host sets WARRIORIQ_DECODE_THREADS (warrioriq_wsgi.py). Shared
+    hosting counts threads against a small process limit (100 on the
+    owner's host, 47 used at idle), and a decoder starting one thread per
+    core of a large shared server could not be created: the upload was then
+    refused as "could not read this file as a video" on a file that opens
+    everywhere else (owner, 2026-11-13). The analysis PC leaves it unset.
+    """
+    try:
+        return max(0, int(os.getenv("WARRIORIQ_DECODE_THREADS", "0") or 0))
+    except ValueError:
+        return 0
+
+
+def _raw_capture(path, threads: int | None = None):
+    threads = _decode_threads() if threads is None else threads
+    if threads > 0 and hasattr(cv2, "CAP_PROP_N_THREADS"):
+        try:
+            capture = cv2.VideoCapture(str(path), cv2.CAP_ANY, [cv2.CAP_PROP_N_THREADS, int(threads)])
+            if capture.isOpened():
+                return capture
+            capture.release()
+        except cv2.error:
+            pass
+    return cv2.VideoCapture(str(path))
+
+
+def open_capture(path, threads: int | None = None):
     """cv2.VideoCapture for ``path``, turned when a turn is registered for it."""
-    capture = cv2.VideoCapture(str(path))
+    capture = _raw_capture(path, threads)
     turn = rotation_for(path)
     return _TurnedCapture(capture, turn) if turn else capture
 
@@ -146,6 +175,17 @@ def get_video_info(path: str | Path) -> VideoInfo:
 
     cap = open_capture(path)
     if not cap.isOpened():
+        # Once more with a single decoding thread: a decoder that could not
+        # start its threads on a busy shared host opens with one.
+        cap.release()
+        cap = open_capture(path, threads=1)
+        if cap.isOpened():
+            LOGGER.warning("video_open_needed_single_thread path=%s", path.name)
+    if not cap.isOpened():
+        import threading
+        LOGGER.warning("video_open_failed path=%s size=%s threads_now=%d cpus=%s decode_threads=%d",
+                       path.name, path.stat().st_size, threading.active_count(), os.cpu_count(),
+                       _decode_threads())
         raise RuntimeError(f"OpenCV could not open video: {path}")
 
     fps = float(cap.get(cv2.CAP_PROP_FPS)) or 30.0
