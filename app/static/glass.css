@@ -1329,3 +1329,33 @@ select option, select optgroup { background-color: #151c29; color: #ffffff; }
   .live-analysis-page .live-video-card > .live-board .live-board-side.is-right { align-items: flex-end; }
   .live-analysis-page .live-video-card > .live-board .live-board-side span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 }
+
+/* Every clip and photo shows the fighters whole and centred (owner,
+   2026-11-13). A 16:9 fight in a tall, narrow card can only ever show one
+   fighter, so the sport cards are widescreen everywhere and full width on
+   a phone; the Ringside band puts its clip above the text on a phone
+   instead of behind it; the filming example is aimed at the two boxers. */
+.hx-sport, .hx-sport.hx-big { min-height: 0; aspect-ratio: 16 / 10; }
+.hx-sport video { object-position: center 40%; }
+.film-shot.is-good img { object-position: 32% center; }
+@media (max-width: 900px) {
+  .hx-sport, .hx-sport.hx-big, .hx-sport.hx-half { grid-column: span 2; min-height: 0; aspect-ratio: 16 / 10; }
+  .hx-sport.hx-half h3 { font-size: 28px; }
+  .hx-sport.hx-half p { display: block; }
+}
+@media (max-width: 620px) {
+  .hx-band { display: block; min-height: 0; }
+  .hx-band > video { position: relative; inset: auto; display: block; height: auto; aspect-ratio: 16 / 9; }
+  .hx-band::after { background: linear-gradient(180deg, rgba(10, 15, 24, 0) 30%, rgba(10, 15, 24, .94) 56%); }
+}
+@media (max-width: 620px) { .ringside-head-clip { object-position: 62% center; } }
+/* The sport picker: in three or five columns a card is tall and narrow, so a
+   photo filling it showed one fighter or less. From that width the photo is
+   a widescreen strip at the top of the card and the words sit under it. */
+@media (min-width: 760px) {
+  .ux-chooser .sport-card { justify-content: flex-start; min-height: 0; padding-top: calc(62.5% + 14px); }
+  .ux-chooser .sport-card-photo { inset: 0 0 auto 0; height: auto; aspect-ratio: 16 / 10; -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent); mask-image: linear-gradient(180deg, #000 72%, transparent); }
+  .ux-chooser .sport-card::after { display: none; }
+  .ux-chooser .sport-card-coverage { margin-top: auto; }
+}
+@media (min-width: 1180px) { .ux-chooser .sport-card { min-height: 0; } }

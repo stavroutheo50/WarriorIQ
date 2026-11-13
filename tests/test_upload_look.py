@@ -19,9 +19,11 @@ def test_every_sport_has_its_still_and_clip():
 def test_the_templates_use_them_and_credit_cc_by():
     picker = (ROOT / "app" / "templates" / "sports.html").read_text(encoding="utf-8")
     setup = (ROOT / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
-    assert 'class="sport-card-photo"' in picker and "CC BY 2.0" in picker
+    # The Muay Thai and kickboxing clips are Pexels since 2026-11-13 (owner:
+    # real sparring in place of gym pad work); every clip is still credited.
+    assert 'class="sport-card-photo"' in picker and "Pexels (Pexels License)" in picker
     assert 'class="setup-clip"' in setup and "data-home-clip" in setup and "/static/home.js" in setup
-    assert "sport == 'muay_thai'" in setup and "CC BY 2.0" in setup
+    assert "sport == 'muay_thai'" in setup and "Pexels (Pexels License)" in setup
 
 
 def test_the_scorer_head_plays_the_ringside_clip_and_credits_it():
