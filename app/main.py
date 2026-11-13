@@ -52,9 +52,9 @@ from app.state import (
 )
 from core.auth import (
     authenticate, end_session, hash_password, verify_password, issue_session, normalize_email, register, resolve_session,
-    session_token, token_digest, valid_email, valid_password,
+    new_password_problem, session_token, token_digest, valid_email, valid_password,
 )
-from core import two_factor
+from core import common_passwords, two_factor
 from core.db import (
     begin_two_factor_setup, count_two_factor_attempt, create_two_factor_challenge, delete_two_factor_challenge,
     disable_two_factor, enable_two_factor, get_two_factor_challenge, list_account_sessions, replace_recovery_codes,
@@ -3045,7 +3045,9 @@ def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/
         request=request,
         name="auth.html",
         context={"request": request, "mode": mode, "error": error, "next_path": _safe_next(next_path),
-                 "email": email.strip()[:254]},
+                 "email": email.strip()[:254],
+                 # The same lists the server refuses, for the live hint.
+                 "password_rules": common_passwords.page_rules() if mode == "signup" else None},
         status_code=400 if error else 200,
     )
 
@@ -3843,14 +3845,13 @@ def reset_password(request: Request, token: str, password: str = Form(...)):
     # and not realistically guessable, which is a reason to keep the limit
     # loose rather than a reason to have none.
     _enforce_rate_limit(request, "password-reset-complete", 15, 900)
-    if not valid_password(password):
+    problem = new_password_problem(password)
+    if problem:
         # Back to the form with the reason, rather than a 400 page over it.
         # The token stays in the path, so the link is still usable - which a
         # 400 page made look untrue at the moment it mattered most.
         return RedirectResponse(
-            "/reset-password/%s?%s" % (
-                quote(token, safe=""),
-                urlencode({"error": "Password must contain between 10 and 1,024 characters."})),
+            "/reset-password/%s?%s" % (quote(token, safe=""), urlencode({"error": problem})),
             status_code=303)
     account_id = consume_password_reset_token(token_digest(token))
     if account_id is None or not update_password_hash(account_id, hash_password(password)):
@@ -7832,6 +7833,8 @@ def change_password(request: Request, current_password: str = Form(""), new_pass
         return _settings_redirect(error="Your current password was not right. Nothing was changed.")
     if not valid_password(new_password):
         return _settings_redirect(error="The new password needs between 10 and 1,024 characters.")
+    if new_password_problem(new_password):
+        return _settings_redirect(error=new_password_problem(new_password) + " Nothing was changed.")
     if new_password != confirm_password:
         return _settings_redirect(error="The two new passwords do not match. Nothing was changed.")
     update_password_hash(int(account["id"]), hash_password(new_password))   # ends every session

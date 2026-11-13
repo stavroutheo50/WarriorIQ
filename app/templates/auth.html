@@ -19,9 +19,30 @@
       {#- Enter in a field presses the form's FIRST submit button, and the
           Continue with Google button comes before Sign in, so Enter after
           typing a password went to Google (live walkthrough, 2026-10-26).
-          This copy of the email button comes first, so Enter signs in. -#}
-      <button class="visually-hidden" type="submit" tabindex="-1" aria-hidden="true">{% if mode == 'signup' %}Create private workspace{% else %}Sign in{% endif %}</button>
-      <div class="auth-required-choices">
+          This copy of the email button comes first, so Enter signs in. The
+          social buttons now sit below the form (2026-11-13); this stays so
+          the order can change again without bringing that back. -#}
+      <button class="visually-hidden" type="submit" tabindex="-1" aria-hidden="true" data-keep-label="true">{% if mode == 'signup' %}Create account{% else %}Sign in{% endif %}</button>
+      <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" name="email" autocomplete="email" value="{{email}}" required></div>
+      {#- minlength is a signup rule. On sign-in it constrains a password that
+          already exists, so an account created under an older policy cannot
+          submit the form at all and is given no reason why, and the attribute
+          publishes the current policy to anyone reading the source. The note
+          below is already signup-only for the same reason.
+
+          One quiet line under the box instead of a list of rules (owner,
+          2026-11-13): it counts down while the password is short, says when
+          it is too common (the same lists the server refuses), and says Good
+          once it would be accepted. autocomplete=new-password keeps the
+          phone's "use a strong password" suggestion. -#}
+      <div class="field password-field">
+        <div class="password-label-row"><label for="authPassword">Password</label>{% if mode == 'login' %}<a class="text-link" href="/forgot-password">Forgot password?</a>{% endif %}</div>
+        <div class="password-box"><input id="authPassword" type="password" name="password" autocomplete="{% if mode == 'signup' %}new-password{% else %}current-password{% endif %}"{% if mode == 'signup' %} minlength="10" aria-describedby="authPasswordNote"{% endif %} required>
+          <button class="password-toggle" type="button" aria-controls="authPassword" aria-pressed="false" aria-label="Show password" data-keep-label="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="eye-open" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle class="eye-open" cx="12" cy="12" r="3"/><path class="eye-shut" d="M3 3l18 18M10.6 5.6A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3 3.8M6.6 6.6C3.9 8.3 2.5 12 2.5 12S6 18.5 12 18.5c1.9 0 3.5-.6 4.9-1.5M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></button>
+        </div>
+        {% if mode == 'signup' %}<p class="auth-password-note" id="authPasswordNote" aria-live="polite" data-rules='{{ password_rules|tojson }}'>At least 10 characters.</p>{% endif %}
+      </div>
+      {% if mode == 'signup' %}<div class="auth-required-choices">
         {#- Any age may sign up. Under the minimum age a parent or guardian is
             emailed to approve before any fight is uploaded (app.main /guardian). -#}
         {% if mode == 'signup' %}<fieldset class="age-group"><legend>Your age</legend>
@@ -35,13 +56,15 @@
         </div>{% endif %}
         {% if mode == 'signup' %}<label class="check legal-check"><input type="checkbox" name="accept_terms" value="true" required><span>I agree to the <a class="text-link" href="/terms" target="_blank" rel="noopener">Terms of Service</a>, <a class="text-link" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> and <a class="text-link" href="/acceptable-use" target="_blank" rel="noopener">Acceptable Use Policy</a>.</span></label>{% endif %}
         {% if mode == 'signup' %}<label class="check legal-check optional-choice"><input type="checkbox" name="marketing_consent" value="true"><span>Send product updates. <span class="muted">Optional and off by default.</span></span></label>{% endif %}
-      </div>
+      </div>{% endif %}
+      <button class="btn auth-submit" type="submit" data-loading-label="{% if mode == 'signup' %}Creating account…{% else %}Signing in…{% endif %}">{% if mode == 'signup' %}Create account{% else %}Sign in{% endif %}</button>
       {#- GitHub is offered for sign-in only, to accounts created with it (an
           account created through it may have no password to fall back on).
           It was an inline text link beside a full Google button; it is now
           a button of the same size (audit 2026-10-14 #50). Not on /signup. -#}
       {% set legacy_providers = request.state.legacy_oauth_providers if mode != 'signup' else [] %}
       {% if request.state.oauth_providers or legacy_providers %}
+      <div class="auth-divider"><span>or</span></div>
       <div class="social-auth" aria-label="Social account options">
         <p>Use an account you already trust</p>
         <div class="social-auth-grid">
@@ -63,19 +86,8 @@
         {% if mode == 'signup' %}<p class="social-auth-gate" id="socialGate">Answer the age question and accept the policies above to use these.</p><p class="social-auth-gate" id="socialMinor" hidden>Under {{request.state.minimum_account_age}}? Use the email form below, so WarriorIQ can ask your parent or guardian.</p>{% endif %}
         {% if legacy_providers %}<p class="social-auth-legacy small muted">{% for provider in legacy_providers %}{% if not loop.first %} or {% endif %}{{provider.label}}{% endfor %} sign-in is for accounts created with it.</p>{% endif %}
       </div>
-      <div class="auth-divider"><span>or continue with email</span></div>
       {% endif %}
-      <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" name="email" autocomplete="email" value="{{email}}" required></div>
-      {#- minlength is a signup rule. On sign-in it constrains a password that
-          already exists, so an account created under an older policy cannot
-          submit the form at all and is given no reason why, and the attribute
-          publishes the current policy to anyone reading the source. The note
-          below is already signup-only for the same reason. -#}
-      <div class="field"><label for="authPassword">Password</label><input id="authPassword" type="password" name="password" autocomplete="{% if mode == 'signup' %}new-password{% else %}current-password{% endif %}"{% if mode == 'signup' %} minlength="10"{% endif %} required></div>
-      {% if mode == 'signup' %}<p class="auth-password-note">At least 10 characters.</p>{% endif %}
-      <button class="btn auth-submit" type="submit">{% if mode == 'signup' %}Create private workspace{% else %}Sign in{% endif %}</button>
     </form>
-    {% if mode == 'login' %}<p class="small"><a class="text-link" href="/forgot-password">Forgot password?</a></p>{% endif %}
     <p class="small muted auth-switch">{% if mode == 'signup' %}Already have an account? <a class="text-link" href="/login?next={{next_path}}">Sign in</a>{% else %}New to WarriorIQ? <a class="text-link" href="/signup?next={{next_path}}">Create an account</a>{% endif %}</p>
   </section>
 </section>
@@ -93,6 +105,66 @@
     const password=document.getElementById('authPassword');
     if(email&&email.value&&password)password.focus({preventScroll:true});
   }
+  // Show or hide the password. It is hidden again before the form is sent,
+  // so the browser offers to save it as a password, not as plain text.
+  const passwordBox=document.getElementById('authPassword');
+  const toggle=form.querySelector('.password-toggle');
+  const setShown=shown=>{
+    if(!passwordBox||!toggle)return;
+    passwordBox.type=shown?'text':'password';
+    toggle.setAttribute('aria-pressed',String(shown));
+    toggle.setAttribute('aria-label',shown?'Hide password':'Show password');
+  };
+  if(toggle)toggle.addEventListener('click',()=>{setShown(passwordBox.type==='password');passwordBox.focus()});
+  // The one-line hint under a new password. The lists are the server's own.
+  const note=document.getElementById('authPasswordNote');
+  if(note&&passwordBox){
+    let rules={bases:[],full:[]};
+    try{rules=JSON.parse(note.dataset.rules||'{}')}catch(error){}
+    const bases=new Set(rules.bases||[]),full=new Set(rules.full||[]);
+    const common=value=>{
+      const lower=value.toLowerCase();
+      if(full.has(lower)||new Set(lower).size<=2)return true;
+      const core=lower.replace(/^[\W\d_]+|[\W\d_]+$/g,'');
+      return !core||bases.has(core);
+    };
+    const minimum=Number(passwordBox.getAttribute('minlength'))||10;
+    const update=()=>{
+      const value=passwordBox.value,left=minimum-[...value].length;
+      let state='',text='At least '+minimum+' characters.';
+      if(value&&left>0){state='short';text=left+(left===1?' more character':' more characters')}
+      else if(value&&common(value)){state='common';text='This password is too common'}
+      else if(value){state='good';text='Good'}
+      note.textContent=text;
+      note.dataset.state=state;
+      passwordBox.setCustomValidity(state==='common'?'This password is too common. Try a few unrelated words together.':'');
+    };
+    passwordBox.addEventListener('input',update);
+    update();
+  }
+  // The button says what is happening and cannot be pressed twice. base.html
+  // relabels the button that was pressed; Enter presses the hidden copy, so
+  // the visible one is relabelled here too.
+  const submit=form.querySelector('.auth-submit');
+  form.addEventListener('submit',event=>{
+    if(event.defaultPrevented)return;
+    const by=event.submitter;
+    if(by&&by.classList.contains('social-auth-button'))return;
+    setShown(false);
+    if(submit&&by!==submit){
+      submit.dataset.originalLabel=submit.textContent;
+      submit.textContent=submit.dataset.loadingLabel;
+      submit.setAttribute('aria-busy','true');
+      setTimeout(()=>{submit.disabled=true},0);
+    }
+  });
+  // Back from the next page restores this one as it was left: busy.
+  window.addEventListener('pageshow',event=>{
+    if(!event.persisted||!submit||!submit.dataset.originalLabel)return;
+    submit.textContent=submit.dataset.originalLabel;
+    submit.disabled=false;
+    submit.removeAttribute('aria-busy');
+  });
   // The guardian's details are only asked of someone under the minimum age.
   const guardian=document.getElementById('guardianFields');
   const ageChoices=[...form.querySelectorAll('input[name="age_group"]')];
