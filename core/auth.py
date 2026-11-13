@@ -7,6 +7,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from core.common_passwords import is_common
 from core.db import account_for_session, create_account, delete_session, get_account_by_email, save_session
 
 
@@ -25,6 +26,22 @@ def valid_email(value: str) -> bool:
 
 def valid_password(value: str) -> bool:
     return 10 <= len(value or "") <= 1024
+
+
+COMMON_PASSWORD_MESSAGE = "This password is too common. Try a few unrelated words together, like a short phrase."
+
+
+def new_password_problem(password: str) -> str:
+    """Why a newly chosen password is refused, or "" if it is fine.
+
+    For choosing a password only (sign-up, reset, change); sign-in checks
+    nothing but the stored hash, so an older password keeps working.
+    """
+    if not valid_password(password):
+        return "Password must contain between 10 and 1,024 characters."
+    if is_common(password):
+        return COMMON_PASSWORD_MESSAGE
+    return ""
 
 
 def hash_password(password: str) -> str:
@@ -64,6 +81,9 @@ def register(email: str, password: str) -> dict:
     email = normalize_email(email)
     if not valid_email(email):
         raise ValueError("Enter a valid email address.")
+    problem = new_password_problem(password)
+    if problem:
+        raise ValueError(problem)
     return create_account(email, hash_password(password))
 
 

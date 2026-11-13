@@ -1200,3 +1200,40 @@ main .card, .auth-card, .empty-workspace, .trust-panel, .analysis-process-card, 
 .device-list form { margin: 0; }
 @media (max-width: 560px) { .recovery-codes { grid-template-columns: 1fr; } .device-list li { flex-wrap: wrap; } }
 #two-step form + form { margin-top: 10px; }
+
+/* Sign-up and sign-in (owner, 2026-11-13): email and password first, an eye
+   button in the password box, one quiet hint line, and on a phone the form
+   starts near the top of the screen with no empty space under it. */
+.password-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.password-label-row .text-link { font-size: 13px; }
+.password-box { position: relative; }
+.password-box input { width: 100%; padding-right: 52px; }
+.password-toggle { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 12px; background: transparent; color: #8f9db1; cursor: pointer; transition: color 160ms ease, background-color 160ms ease; }
+.password-toggle:hover { color: #e6edf8; background: rgba(255, 255, 255, .06); }
+.password-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.password-toggle .eye-shut { display: none; }
+.password-toggle[aria-pressed="true"] .eye-open { display: none; }
+.password-toggle[aria-pressed="true"] .eye-shut { display: inline; }
+.auth-form .auth-password-note { margin: 2px 0 0; min-height: 18px; color: #7e8ba0; font-size: 12px; transition: color 160ms ease; }
+.auth-password-note[data-state="common"] { color: var(--wiq-warning, #edb966); }
+.auth-password-note[data-state="good"] { color: var(--wiq-success, #5fd5a6); }
+.auth-password-note[data-state="good"]::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
+.auth-form .auth-required-choices { margin: 6px 0 18px; padding: 16px 0; border-top: 1px solid var(--wiq-line-soft, rgba(255, 255, 255, .08)); border-bottom: 0; }
+.auth-form > .auth-submit + .auth-divider { margin-top: 22px; }
+.auth-submit[aria-busy="true"] { opacity: .8; cursor: progress; }
+/* The card is taller than the screen on a laptop and sat flush under the menu. */
+.auth-layout { padding: 48px 0 72px; }
+@media (max-width: 900px) {
+  .auth-layout { min-height: 0; padding: 28px 0 40px; }
+}
+@media (max-width: 620px) {
+  .auth-layout { gap: 18px; padding-top: 18px; }
+  .auth-copy h1 { font-size: 34px; margin: 10px 0 0; }
+  .auth-copy > p, .auth-copy .trust-checks { display: none; }
+  .auth-card > .eyebrow, .auth-card > h2 { display: none; }
+}
+/* The policy links inside the terms box were 44px tap targets, which split
+   the sentence over three tall lines. */
+/* product.css makes a .text-link a 44px inline-flex tap target on phones, with
+   a selector specific enough that only !important overrides it here. */
+.auth-form .legal-check .text-link { display: inline !important; min-height: 0 !important; padding: 0; }
