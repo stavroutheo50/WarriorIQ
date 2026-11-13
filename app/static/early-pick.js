@@ -164,6 +164,8 @@
       });
       if (!(video.videoWidth > 0) || !isFinite(video.duration)) throw new Error('no picture');
       panel.hidden = false; say('Finding your fighters in the video…');
+      // The upload page turns this into its own step (owner, 2026-11-13).
+      panel.dispatchEvent(new CustomEvent('wiq:pick-shown', { bubbles: true }));
       for (const share of SAMPLE_SHARES) {
         if (upload && !frames.length) break;            // the upload won the race: use the fighter page
         frames.push(await grab(Math.max(0.5, share * video.duration)));
@@ -176,7 +178,7 @@
         const chosen = frames.splice(pick, 1)[0]; frames.unshift(chosen); shown = 0; draw();
       }
     } catch (error) {
-      if (!frames.length) { abandoned = true; panel.hidden = true; }
+      if (!frames.length) { abandoned = true; panel.hidden = true; panel.dispatchEvent(new CustomEvent('wiq:pick-hidden', { bubbles: true })); }
     }
   }
 
