@@ -1237,3 +1237,95 @@ main .card, .auth-card, .empty-workspace, .trust-panel, .analysis-process-card, 
 /* product.css makes a .text-link a 44px inline-flex tap target on phones, with
    a selector specific enough that only !important overrides it here. */
 .auth-form .legal-check .text-link { display: inline !important; min-height: 0 !important; padding: 0; }
+
+/* Menus and pop-ups are solid (owner, 2026-11-13: "they are see-through, I
+   do not want them to be see-through"). The 60% glass let the page show
+   through the profile menu, the phone menu, the More and sport menus, the
+   cookie notice and dialogs. Same colours, no transparency. */
+:root { --glass-fill-solid: linear-gradient(180deg, #1c2433 0%, #0f141e 100%); }
+.mobile-menu,
+.profile-menu-panel,
+.nav-more-panel,
+.cookie-notice,
+.app-toast,
+.share-card-dialog,
+.correction-dialog,
+.wiq-confirm {
+  background: var(--glass-fill-solid) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+/* A dropdown's list of choices takes the box's own colour, which is 5%
+   white: some browsers then drew the open list see-through. */
+select option, select optgroup { background-color: #151c29; color: #ffffff; }
+
+/* Live analysis on one screen (owner, 2026-11-13: "does not fit in one
+   page"). A short header with the percentage beside the title, the video
+   capped so the facts under it stay in view, one progress bar, and the
+   list of steps folded away. */
+.live-analysis-page .live-analysis-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 8px; }
+.live-analysis-page .live-analysis-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 0 0 12px; padding: 0; min-height: 0; }
+.live-analysis-page .live-analysis-header h1 { margin: 4px 0 2px; font-size: clamp(26px, 3vw, 38px); line-height: 1.05; }
+.live-analysis-page .live-leave-note { margin: 4px 0 0; font-size: 13px; color: #9aa6b8; }
+.live-analysis-page .analysis-scoreboard { flex: 0 0 auto; text-align: right; }
+.live-analysis-page .analysis-scoreboard .big-progress { margin: 0; font-size: clamp(34px, 4vw, 50px); line-height: 1; letter-spacing: -.04em; }
+.live-analysis-page #stageCaption { display: block; margin-top: 4px; font-size: 12px; }
+.live-analysis-page .live-video-wrap { max-height: 50vh; }
+.live-analysis-page .analysis-progress-value { display: none; }
+.live-analysis-page .live-status-row { margin-top: 8px; }
+.live-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; }
+.live-facts > div { min-width: 0; padding: 10px 12px; border: 1px solid var(--glass-edge, rgba(255, 255, 255, .1)); border-radius: 16px; background: rgba(255, 255, 255, .04); }
+.live-facts dt { color: #8f9db1; font-size: 12px; font-weight: 700; }
+.live-facts dt small { font-size: 12px; font-weight: 500; opacity: .8; }
+.live-facts dd { margin: 3px 0 0; overflow: hidden; color: #ffffff; font-size: 16px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.live-facts .fact-a { color: #5aa0ff; }
+.live-facts .fact-b { color: #ff6470; }
+.a-red-corner .live-facts .fact-a { color: #ff6470; }
+.a-red-corner .live-facts .fact-b { color: #5aa0ff; }
+.live-steps { margin-top: 14px; padding: 0 !important; }
+.live-steps > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; cursor: pointer; font-weight: 700; list-style: none; }
+.live-steps > summary::-webkit-details-marker { display: none; }
+.live-steps > summary #quality { color: #8f9db1; font-size: 12px; font-weight: 600; }
+.live-steps[open] > summary { border-bottom: 1px solid var(--glass-edge, rgba(255, 255, 255, .1)); }
+.live-steps > ol, .live-steps > p { margin: 14px 18px; }
+@media (max-width: 620px) {
+  .live-analysis-page .live-analysis-header .eyebrow { display: none; }
+  .live-analysis-page .live-analysis-header h1 { font-size: 26px; }
+  .live-analysis-page .analysis-scoreboard .big-progress { font-size: 34px; }
+  .live-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .live-facts dd { font-size: 15px; }
+}
+.live-analysis-page.analysis-page { margin-top: 12px; margin-bottom: 32px; }
+/* Laptop and wider: the score, the facts and the status beside the video,
+   the bar under both, so the whole page is one screen. */
+@media (min-width: 1000px) {
+  .live-analysis-page .live-video-card { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); grid-template-rows: auto auto 1fr auto; column-gap: 18px; row-gap: 12px; align-items: start; }
+  .live-analysis-page .live-video-card > * { min-width: 0; }
+  .live-analysis-page .live-video-card > .live-board { grid-column: 2; grid-row: 1; margin: 0; }
+  .live-analysis-page .live-video-card > .live-video-wrap { grid-column: 1; grid-row: 1 / span 3; }
+  .live-analysis-page .live-video-card > .live-facts { grid-column: 2; grid-row: 2; grid-template-columns: 1fr 1fr; margin: 0; }
+  .live-analysis-page .live-video-card > .live-status-row { grid-column: 2; grid-row: 3; flex-direction: column; align-items: flex-start; gap: 4px; margin: 0; }
+  .live-analysis-page .live-video-card > .analysis-progress-row,
+  .live-analysis-page .live-video-card > .analysis-timeline,
+  .live-analysis-page .live-video-card > .playback-ahead { grid-column: 1 / -1; }
+  .live-analysis-page .live-video-card > .analysis-progress-row { grid-row: 4; margin: 0; }
+  .live-analysis-page .live-video-card:not(:has(> .live-board)) > .live-facts { grid-row: 1; }
+  .live-analysis-page .live-video-card:not(:has(> .live-board)) > .live-status-row { grid-row: 2; }
+  .live-analysis-page .live-video-wrap { max-height: 56vh; }
+}
+@media (max-width: 680px) {
+  .live-analysis-page .live-analysis-toolbar { flex-direction: row; align-items: center; margin: 6px 0; }
+  .live-analysis-page .live-analysis-header { flex-direction: row; align-items: flex-end; text-align: left; margin-bottom: 10px; }
+  .live-analysis-page .live-analysis-header > div:first-child { min-width: 0; }
+  .live-analysis-page .analysis-scoreboard { align-items: flex-end; text-align: right; }
+  .live-analysis-page .analysis-scoreboard span { text-align: right; max-width: 16ch; }
+  .live-analysis-page .live-video-card { padding: 12px !important; }
+  .live-analysis-page .live-status-row { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .live-analysis-page .live-status-row p { margin: 0; }
+}
+@media (min-width: 1000px) {
+  /* In the narrow column each name sits over its number. */
+  .live-analysis-page .live-video-card > .live-board .live-board-side { flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+  .live-analysis-page .live-video-card > .live-board .live-board-side.is-right { align-items: flex-end; }
+  .live-analysis-page .live-video-card > .live-board .live-board-side span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+}
