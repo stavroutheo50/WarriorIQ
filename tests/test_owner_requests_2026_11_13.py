@@ -38,7 +38,7 @@ def test_menus_and_popups_are_solid():
 def test_fighter_choice_is_its_own_step_after_the_rules():
     assert "const stepOrder=['video','rules','who','check'];" in ANALYZE
     steps = re.search(r'<ol class="upload-steps"[^>]*>(.*?)</ol>', ANALYZE).group(1)
-    assert re.findall(r'data-step="(\w+)"', steps) == ["video", "rules", "who", "check"]
+    assert re.findall(r'data-step="(\w+)"', steps) == ["video", "rules", "who", "check", "pick"]
     assert ">Fighter</li>" in steps and ">Rules</li>" in steps
     rules = ANALYZE.index('data-upload-step="rules"')
     assert ANALYZE.index('id="fightRuleset"', rules) < ANALYZE.index('data-upload-step="who"')
@@ -57,3 +57,17 @@ def test_live_page_shows_measured_facts_and_folds_the_step_list():
     assert "['analysis','report'].includes(d.stage)" in PROGRESS
     assert '<details class="analysis-process-card live-steps">' in PROGRESS
     assert 'id="analysisTimeline" aria-label="Detected event timeline"{% if not live_moments %} hidden{% endif %}' in PROGRESS
+
+
+def test_picking_the_fighters_is_its_own_step_during_the_upload():
+    """Owner, 2026-11-13: the picture to tap sat under the three questions
+    and needed a scroll. Once the upload starts it is the last step, the
+    answered questions fold away and the page scrolls to it."""
+    pick = (ROOT / "app" / "static" / "early-pick.js").read_text(encoding="utf-8")
+    assert "new CustomEvent('wiq:pick-shown'" in pick and "new CustomEvent('wiq:pick-hidden'" in pick
+    assert '<li data-step="pick" hidden><b>5</b>Pick</li>' in ANALYZE
+    assert "form.addEventListener('wiq:pick-shown',()=>{form.classList.add('is-picking')" in ANALYZE
+    assert "form.addEventListener('wiq:pick-hidden',()=>{form.classList.remove('is-picking')" in ANALYZE
+    assert "form.is-picking [data-upload-step]" in GLASS
+    # The phone column can shrink below its widest item, so nothing slides sideways.
+    assert ".setup { grid-template-columns: minmax(0, 1fr); }" in GLASS

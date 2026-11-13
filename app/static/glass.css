@@ -1364,3 +1364,27 @@ select option, select optgroup { background-color: #151c29; color: #ffffff; }
 .home-steps .hx-steps { grid-template-columns: 1fr; }
 .home-steps .hx-steps ol { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
 @media (max-width: 900px) { .home-steps .hx-steps ol { grid-template-columns: 1fr !important; } }
+/* Picking the fighters is the upload's last step (owner, 2026-11-13): the
+   answered questions fold away so the picture sits under the step pills. */
+form.is-picking [data-upload-step],
+form.is-picking .upload-validation,
+form.is-picking .upload-error,
+form.is-picking .upload-step-nav { display: none !important; }
+form.is-picking .early-pick { margin-top: 4px; }
+@media (max-width: 480px) {
+  .upload-steps { gap: 5px; }
+  .upload-steps li { padding-inline: 8px; font-size: 12px; }
+}
+/* The picture's drawing size is the phone's full pixel width (3x on many
+   phones); as a grid item it stretched the panel and the page past the
+   screen. The column now never grows past the panel. */
+.early-pick { grid-template-columns: minmax(0, 1fr); }
+.early-pick-stage { min-width: 0; }
+/* The upload page's single column was "1fr", which can never be narrower
+   than its widest item, so on a phone the kickboxing page (and the picking
+   step) ran 14-23 px past the screen and slid sideways. */
+@media (max-width: 980px) { .setup { grid-template-columns: minmax(0, 1fr); } }
+/* While picking, the finished steps shrink to their numbers so "Pick" and
+   its neighbours are never cut off on a phone. */
+form.is-picking .upload-steps li.is-done { flex: 0 0 auto; gap: 0; padding: 6px; font-size: 0; }
+form.is-picking .upload-steps li.is-done b { font-size: 13px; }
