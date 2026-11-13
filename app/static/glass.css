@@ -1359,3 +1359,8 @@ select option, select optgroup { background-color: #151c29; color: #ffffff; }
   .ux-chooser .sport-card-coverage { margin-top: auto; }
 }
 @media (min-width: 1180px) { .ux-chooser .sport-card { min-height: 0; } }
+/* Ground card and filming clip removed (owner, 2026-11-13): the three
+   steps run across the width on a laptop. */
+.home-steps .hx-steps { grid-template-columns: 1fr; }
+.home-steps .hx-steps ol { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+@media (max-width: 900px) { .home-steps .hx-steps ol { grid-template-columns: 1fr !important; } }
