@@ -148,13 +148,15 @@ def _request(**kw):
 INFO = SimpleNamespace(fps=FPS, duration=116.0, width=1280, height=720, frame_count=3480)
 
 
-def _run(handoff, analyze_side_effect=None):
+def _run(handoff, analyze_side_effect=None, first_result=None):
     calls = []
 
     def fake_analyze(req, progress_callback=None, **kwargs):
         calls.append((req, kwargs))
         if analyze_side_effect and len(calls) == 1:
             raise analyze_side_effect
+        if first_result is not None and len(calls) == 1:
+            return first_result
         return {"ok": True}
 
     with patch.object(analyzer, "get_video_info", return_value=INFO), \
@@ -176,15 +178,28 @@ def test_a_successful_hand_off_analyses_from_the_start_and_checks_the_seed():
     assert kwargs["seed_seconds"] == 30.0
 
 
-def test_a_failed_seed_check_never_reruns_from_the_seed():
-    # QA, 2026-10-04: a failed check used to restart the analysis at the
-    # chosen frame and drop everything before it. The check is now recorded
-    # inside the one forward pass, which keeps the whole video.
+def test_a_confirmed_seed_check_is_one_pass_over_the_whole_video():
     handoff = backtrack.Handoff(seed_frame=900, requested_start_frame=0, frame=0,
                                 a_box=[90, 80, 190, 310], b_box=[410, 80, 510, 310])
-    (req, kwargs), = _run(handoff)
+    (req, kwargs), = _run(handoff, first_result={"tracking": {"identity_seed_confirmed": True}})
     assert req.start_seconds == 0.0
     assert kwargs["seed_check"]["frame"] == 900
+
+
+def test_a_failed_seed_check_analyses_again_from_the_picked_frame():
+    # QA 2026-10-04 kept the whole video after a failed check, but since
+    # 2026-11-01 a failed check withholds every number: the owner's fights
+    # came back with nothing (2026-11-13). The second pass starts at the
+    # picked frame with the person's own boxes and says the opening is out.
+    handoff = backtrack.Handoff(seed_frame=900, requested_start_frame=0, frame=300,
+                                a_box=[90, 80, 190, 310], b_box=[410, 80, 510, 310])
+    first, second = _run(handoff, first_result={"tracking": {"identity_seed_confirmed": False}})
+    assert first[0].start_seconds == 10.0 and first[1]["seed_check"]["frame"] == 900
+    req, kwargs = second
+    assert req.start_seconds == 30.0 and req.selection_seconds is None
+    assert req.fighter_a_box == A_BOX and req.fighter_b_box == B_BOX
+    assert kwargs["excluded_reason"] == "unverified" and kwargs.get("seed_check") is None
+    assert kwargs["seed_seconds"] == 30.0
 
 
 @pytest.mark.parametrize("reason", ["camera_cut", "fighter_lost", "not_detected_at_seed", "unavailable"])
