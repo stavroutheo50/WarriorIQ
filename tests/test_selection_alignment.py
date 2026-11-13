@@ -89,15 +89,37 @@ def test_a_browser_selection_is_moved_to_the_frame_it_shows(tmp_path):
     assert web._align_browser_selection(job_id, get_job(job_id)) == {}
 
 
-def test_a_picture_that_matches_nothing_is_replaced_by_the_videos_own_frame(tmp_path):
+def test_a_picture_that_matches_nothing_changes_nothing(tmp_path):
     job_id = _browser_job(tmp_path, picture_index=50, browser_seconds=44 / FPS)
     stranger = np.full((180, 320, 3), 200, np.uint8)
     cv2.imwrite(str(OUTPUTS / job_id / "selection.jpg"), stranger)
-    assert web._align_browser_selection(job_id, get_job(job_id)) == {"aligned": False}
+    assert web._align_browser_selection(job_id, get_job(job_id)) == {}
     job = get_job(job_id)
-    assert job["selection_from_browser"] is False and job["selection_frame"] == 44
-    replaced = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
-    assert float(np.mean(np.abs(replaced.astype(float) - stranger.astype(float)))) > 20
+    assert job["selection_frame"] == 44 and abs(job["selection_seconds"] - 44 / FPS) < 1e-6
+    kept = cv2.imread(str(OUTPUTS / job_id / "selection.jpg"))
+    assert float(np.mean(np.abs(kept.astype(float) - stranger.astype(float)))) < 3
+
+
+def test_a_still_shot_is_never_moved_to_a_lookalike_moment(tmp_path):
+    """Owner, 2026-11-13: in a still broadcast shot a frame seconds away
+    looked almost the same, the picture was replaced with it and the boxes
+    the person drew then sat on empty mat."""
+    path = tmp_path / "still.avi"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), FPS, (320, 180))
+    base = np.full((180, 320, 3), 90, np.uint8)
+    cv2.rectangle(base, (40, 40), (280, 150), (60, 120, 200), -1)
+    for index in range(200):
+        frame = base.copy()
+        cv2.circle(frame, (60 + index % 3, 60), 3, (255, 255, 255), -1)     # a flicker, nothing more
+        writer.write(frame)
+    writer.release()
+    # The picture is a moment from far outside the search window: the same shot,
+    # with the fighters (two dark figures) somewhere the window never shows.
+    picture = base.copy()
+    cv2.rectangle(picture, (120, 50), (140, 140), (20, 20, 20), -1)
+    cv2.rectangle(picture, (180, 50), (200, 140), (20, 20, 20), -1)
+    match = match_frame_index(path, picture, guess_index=100, fps=FPS, window_seconds=2.0)
+    assert match is not None and not is_same_moment(match)
 
 
 def test_a_server_chosen_frame_is_left_alone(tmp_path):
@@ -112,9 +134,10 @@ def test_the_start_endpoint_aligns_before_anything_is_started():
     source = (web.__file__ and open(web.__file__, encoding="utf-8").read())
     start = source.index("def start(request: Request, job_id: str, payload: StartPayload):")
     body = source[start:start + 3000]
-    assert "alignment = _align_browser_selection(job_id, job)" in body
+    assert "_align_browser_selection(job_id, job)" in body
     assert body.index("_align_browser_selection") < body.index("_validated_fighter_box")
-    assert 'raise HTTPException(409, (\n            "WarriorIQ could not find that exact moment' in body
+    # Never refuses or replaces anything: an unsure match leaves the pick as it was.
+    assert "could not find that exact moment" not in source
 
 
 def test_a_failed_check_at_the_chosen_moment_says_so():
