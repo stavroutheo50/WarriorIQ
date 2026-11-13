@@ -968,13 +968,31 @@ def _analyze_from_seed(req: AnalysisRequest, progress_callback: ProgressCallback
     # rather than computed a second time (PoseTracker.prepare_detections).
     pose_tracker.forget_prepared()
     try:
-        return _analyze_with_backtrack(
+        result = _analyze_with_backtrack(
             req, progress_callback, info=info, fps=fps, requested_start=requested_start,
             seed_seconds=seed_seconds, seed_frame=seed_frame, start_frame=start_frame,
             pose_tracker=pose_tracker, seed_kit=seed_kit, measured=measured, imgsz=imgsz,
             stride=planned.stride, report_progress=report_progress, wrapper_started=wrapper_started)
     finally:
         pose_tracker.forget_prepared()
+    if ((result or {}).get("tracking") or {}).get("identity_seed_confirmed") is False:
+        # Arriving at the frame the person picked, the fighters followed from
+        # earlier were not on the boxes they drew. Since 2026-11-01 that
+        # withholds every number in the report, so keeping the whole video
+        # (QA 2026-10-04) left nothing to read: the owner's fights came back
+        # "not sure which fighter was which" twice in a row (2026-11-13; on
+        # one, the follow back from 0:27 lost a fighter at 0:17 among eight
+        # small people and all ten checks at 0:27 were "unknown"). Analysed
+        # again from the picked frame, seeded with the person's own boxes,
+        # the report covers the fight from there and says the opening is left
+        # out and why, instead of saying nothing at all.
+        LOGGER.warning("seed_unconfirmed_rerun_from_seed job=%s seed_seconds=%.2f",
+                       getattr(req, "job_id", None), seed_seconds)
+        return _analyze(replace(req, start_seconds=seed_seconds, selection_seconds=None),
+                        progress_callback, seed_seconds=seed_seconds, excluded_reason="unverified",
+                        measured_footage=measured, seed_kit=seed_kit,
+                        budget_spent_before=time.perf_counter() - wrapper_started)
+    return result
 
 
 def _fighters_in_range(fighter_a, fighter_b) -> bool:
