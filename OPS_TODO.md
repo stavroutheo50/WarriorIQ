@@ -65,6 +65,7 @@ mean "the web host".
   - For video minutes: add `monthly_video_minutes` and set `WARRIORIQ_ALLOWANCE_PERIOD=video_minutes`.
   - A plan without its number keeps counting per day.
 - [ ] **Accuracy section (#55):** the figures come from measurements recorded in `core/report.py` and `core/sport_policy.py`. Update the homepage when `tools/benchmark_labelled_fight.py` or the Accuracy Lab results change.
+- [ ] **Taekwondo clip licence (2026-11-13):** `app/static/home/taekwondo.mp4` was supplied by the owner from a file named "Video Project 1". Its source is not the US Army Commons video it was thought to be (that one shows a male soldier in Korea; this shows two women sparring in a French training hall). Find where it came from and confirm it can be used commercially (Pexels, Pixabay, CC BY / CC BY-SA / public domain, or written permission), then add the credit to the homepage and sports page. Replace it if that cannot be confirmed.
 - [ ] **Guard (#5):** label a set of guard clips by hand. Remove `experimental=True` from the guard metric only once it has been checked against them.
 
 ## 7. Account safety (2026-11-12)
