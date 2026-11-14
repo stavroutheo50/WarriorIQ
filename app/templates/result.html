@@ -25,6 +25,65 @@
     unlike every other control and said nothing to a screen reader about
     being unavailable. -#}<button class="btn secondary" type="button" aria-disabled="true" aria-expanded="false" aria-controls="shareUnavailableReason" data-reveal-reason>Share</button>{% endif %}{% if can_share %}<form action="/share/{{job_id}}" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn" type="submit">Create 7-day coach link</button></form>{% if sharing and sharing.links %}<form action="/shares/{{job_id}}/revoke" method="post" data-confirm="Revoke {{sharing.links|length}} coach link{{'' if sharing.links|length == 1 else 's'}}? {{'Any link' if sharing.links|length == 1 else 'Every link'}} already sent to a coach stops working immediately and cannot be restored. Creating a new link gives a new address, which you would have to send again."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Revoke {{sharing.links|length}} link{{'' if sharing.links|length == 1 else 's'}}</button></form>{% endif %}{% endif %}</div>
 </div>
+{#- Check who is who (owner, 2026-11-13): fighters in the same kit were mixed
+    up at crossings. The few crossings the analysis was least sure about are
+    shown as the frame just after them, A and B boxed; the person taps which
+    box is their fighter, and "Fix who is who" analyses the fight again with
+    those answers pinned in (core/crossings.py, /api/identity-fix). -#}
+{% if crossing_questions %}
+<section class="card who-check" id="whoCheck" data-job="{{ job_id }}" aria-labelledby="whoCheckTitle" data-reveal>
+  <div class="eyebrow">Check who is who</div>
+  <h2 id="whoCheckTitle">Which box is {{ names.A }}?</h2>
+  <p class="muted">{% if identity_anchor_count %}This report already uses {{ identity_anchor_count }} of your answers. {% endif %}These are the moments, just after the two fighters crossed, where WarriorIQ was least sure who was who. Tap the box {{ names.A }} is in. If any are the other way round, WarriorIQ fixes the whole report.</p>
+  <ol class="who-check-list">
+    {% for q in crossing_questions %}{% set frame = q.ask_frame|string %}{% set given = identity_answers.get(frame) %}
+    <li class="who-check-item" data-frame="{{ frame }}">
+      <img src="/result/{{ job_id }}/crossing/{{ frame }}.jpg" alt="The fight at {{ '%d:%02d'|format((q.ask_seconds // 60)|int, (q.ask_seconds % 60)|int) }}, with the two fighters boxed A and B" loading="lazy" width="480" height="270">
+      <div class="who-check-answer">
+        <span class="small muted">{{ '%d:%02d'|format((q.ask_seconds // 60)|int, (q.ask_seconds % 60)|int) }}</span>
+        <button class="btn secondary" type="button" data-answer="A" aria-pressed="{{ 'true' if given == 'A' else 'false' }}">{{ names.A }} is in box A</button>
+        <button class="btn secondary" type="button" data-answer="B" aria-pressed="{{ 'true' if given == 'B' else 'false' }}">{{ names.A }} is in box B</button>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  <p class="who-check-status" id="whoCheckStatus" role="status" aria-live="polite"></p>
+  <button class="btn" type="button" id="whoCheckFix" hidden>Fix who is who</button>
+</section>
+<script nonce="{{ request.state.csp_nonce }}">
+(()=>{
+  const box=document.getElementById('whoCheck');if(!box)return;
+  const job=box.dataset.job,status=document.getElementById('whoCheckStatus'),fix=document.getElementById('whoCheckFix');
+  const items=[...box.querySelectorAll('.who-check-item')];
+  const show=()=>{
+    const answers=items.map(item=>item.querySelector('[aria-pressed="true"]')).filter(Boolean);
+    const swapped=answers.filter(button=>button.dataset.answer==='B').length;
+    fix.hidden=swapped===0;
+    status.textContent=answers.length===0?'':swapped?`${answers.length} of ${items.length} answered. ${swapped} ${swapped===1?'was':'were'} the other way round: press Fix who is who.`:`${answers.length} of ${items.length} answered, all as WarriorIQ had them.`;
+  };
+  items.forEach(item=>item.querySelectorAll('[data-answer]').forEach(button=>button.addEventListener('click',async()=>{
+    item.querySelectorAll('[data-answer]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));
+    show();
+    try{
+      const response=await fetch(`/api/identity-answers/${job}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({answers:{[item.dataset.frame]:button.dataset.answer}})});
+      if(!response.ok)throw new Error();
+    }catch(error){status.textContent='That answer was not saved. Check the connection and tap it again.'}
+  })));
+  fix.addEventListener('click',async()=>{
+    fix.disabled=true;fix.textContent='Fixing…';
+    try{
+      const response=await fetch(`/api/identity-fix/${job}`,{method:'POST',headers:wiqCsrfHeaders()});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.detail||'');
+      if(data.rerun&&data.progress_url){location.assign(data.progress_url);return}
+      status.textContent=data.message||'Nothing to fix.';
+    }catch(error){status.textContent=error.message||'Could not start the correction. Try again.'}
+    fix.disabled=false;fix.textContent='Fix who is who';
+  });
+  show();
+})();
+</script>
+{% endif %}
 {#- When the fighters could not be followed, the page says so once, at the
     top, in plain words, with the one thing to do about it (2026-10-11: a
     fighter read the old page - the same advice three times, technical words,

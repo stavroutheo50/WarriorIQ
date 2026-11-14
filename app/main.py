@@ -119,6 +119,7 @@ from core.scoring import ruleset_hint, score_explanation
 from core.selection_check import pair_verdict
 from core.quality_guardian import inspect_video_quality
 from core.metric_catalog import BY_KEY as METRIC_CATALOG, EXPERIMENTAL_NOTE, evidence_limitations, readings as metric_readings
+from core.crossings import anchors_from_answers
 from core.chunked_upload import (
     ChunkedUploadError, StoredUpload, append as append_chunk, begin as begin_chunked,
     discard as discard_chunked, extend_lease, finalise as finalise_chunked,
@@ -2841,6 +2842,7 @@ def _analysis_request(job_id: str, job: dict, fighter_a_box: list[float], fighte
         fighter_id=job.get("fighter_id"),
         rotate_clockwise=quarter_turn(job.get("rotate_clockwise")),
         sideways=_job_still_sideways(job),
+        identity_anchors=list(job.get("identity_anchors") or []) or None,
     )
 
 
@@ -5080,7 +5082,7 @@ _WORKER_PROGRESS_FIELDS = {
     "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
     "fighter_b_confidence", "current_round", "quality_mode", "live_event_mode",
     "live_events", "provisional_stats", "latest_observation",
-    "stage_fraction", "tracked_video_seconds", "eta_scope",
+    "stage_fraction", "tracked_video_seconds", "eta_scope", "crossing_questions",
 }
 _WORKER_ARCHIVE_FILES = {"report.json", "tracking.jsonl", "events.json"}
 _WORKER_REPORT_KEYS = {
@@ -5146,6 +5148,8 @@ def _remote_job_payload(job_id: str, job: dict) -> dict:
         "selected_rounds": job.get("selected_rounds"),
         "openai_identity_recovery": bool(job.get("openai_identity_recovery") and job.get("external_ai_opted_in")),
         "external_ai_opted_in": bool(job.get("external_ai_opted_in")),
+        # The person's "tap your fighter" answers (core/crossings.py).
+        "identity_anchors": list(job.get("identity_anchors") or []),
         # The turn the boxes were drawn under, and whether it is still sideways.
         "rotate_clockwise": quarter_turn(job.get("rotate_clockwise")),
         "sideways": _job_still_sideways(job),
@@ -5813,7 +5817,7 @@ def _public_job_status(job_id: str, job: dict) -> dict:
         "processed_video_seconds", "video_duration_seconds", "fighter_a_confidence",
         "fighter_b_confidence", "current_round", "quality_mode", "live_event_mode",
         "live_events", "provisional_stats", "latest_observation", "focus_fighter", "analysis_run_id",
-        "eta_scope",
+        "eta_scope", "crossing_questions", "identity_answers",
     }
     payload = {key: value for key, value in job.items() if key in public_fields}
     if not feature_is_on("key_moments"):
@@ -6510,6 +6514,12 @@ def result_page(request: Request, job_id: str):
         "numbers": numbers,
         "camera_lost": _identity_lost_to_camera(report),
         "identity_failure": _identity_failure(report),
+        # "Tap your fighter" after the crossings the analysis was least sure
+        # about, the answers given so far, and how many earlier answers this
+        # report was built with (core/crossings.py; owner, 2026-11-13).
+        "crossing_questions": _crossing_questions(job_id, job),
+        "identity_answers": dict(job.get("identity_answers") or {}),
+        "identity_anchor_count": len(job.get("identity_anchors") or []),
         # "Why this score" (core.scoring.score_explanation; audit 2026-10-14, #7).
         "score_reasons": score_explanation(report.get("scorecard"), names),
         # "Punches and knees are not counted" on taekwondo, which awards no
@@ -6590,6 +6600,146 @@ def result_page(request: Request, job_id: str):
         "kick_minimum": kick_minimum_check(report) if identity_trusted else None,
     })
     return _result_opened(request, response, job_id)
+
+
+class IdentityAnswersPayload(BaseModel):
+    # ask_frame (as text) -> "A" when the box the analysis called A was the
+    # person's fighter A, "B" when that box was the other fighter.
+    answers: dict[str, str]
+
+
+def _crossing_questions(job_id: str, job: dict | None = None) -> list[dict]:
+    """The "tap your fighter" questions for this fight, in time order.
+
+    The finished report's, the ones the live page is asking while the
+    analysis runs, and any the person already answered - an answer given
+    live stays usable when the final list ranks that crossing differently.
+    """
+    job = job if job is not None else (get_job(job_id) or {})
+    found: list = []
+    if job.get("status") == "complete":
+        try:
+            report = json.loads(_require_completed_artifact(job_id, "report.json").read_text(encoding="utf-8"))
+            found += ((report.get("tracking") or {}).get("crossings") or {}).get("questions") or []
+        except (HTTPException, OSError, ValueError):
+            pass
+    else:
+        found += job.get("crossing_questions") or []
+    found += job.get("asked_questions") or []
+    questions: dict[str, dict] = {}
+    for question in found:
+        if isinstance(question, dict) and question.get("ask_frame") is not None:
+            questions.setdefault(str(question["ask_frame"]), question)
+    return sorted(questions.values(), key=lambda q: float(q.get("ask_seconds") or 0.0))
+
+
+@app.get("/result/{job_id}/crossing/{frame}.jpg", include_in_schema=False)
+def crossing_still(request: Request, job_id: str, frame: int):
+    """The picture a "tap your fighter" question is asked on, with A and B boxed.
+
+    Owner, 2026-11-13: fighters in the same kit were mixed up at crossings.
+    The person who can see says which box is their fighter (core/crossings.py).
+    """
+    job = _authorized_job(request, job_id)
+    if not job:
+        raise HTTPException(404)
+    question = next((q for q in _crossing_questions(job_id, job) if int(q["ask_frame"]) == int(frame)), None)
+    video_path = job.get("video_path")
+    if question is None or not video_path or not Path(video_path).is_file():
+        raise HTTPException(404)
+    image = rotate_frame(read_frame(video_path, int(frame)), job.get("rotate_clockwise"))
+    if image is None:
+        raise HTTPException(404)
+    red_a = (_corner_labels(job).get("A") or "").startswith("Red")
+    colours = {"A": (112, 100, 255) if red_a else (255, 160, 90), "B": (255, 160, 90) if red_a else (112, 100, 255)}
+    thickness = max(2, round(image.shape[0] / 240))
+    scale = max(0.6, image.shape[0] / 420)
+    for name, key in (("A", "a_box"), ("B", "b_box")):
+        x1, y1, x2, y2 = (int(round(v)) for v in question[key])
+        cv2.rectangle(image, (x1, y1), (x2, y2), colours[name], thickness)
+        # A filled tag with the letter, readable on a phone-sized picture.
+        (text_w, text_h), base = cv2.getTextSize(name, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+        tag_y = y1 + text_h + 2 * base + thickness
+        cv2.rectangle(image, (x1, y1), (x1 + text_w + 4 * thickness, tag_y), colours[name], -1)
+        cv2.putText(image, name, (x1 + 2 * thickness, tag_y - base - thickness), cv2.FONT_HERSHEY_SIMPLEX,
+                    scale, (255, 255, 255), thickness)
+    ok, data = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        raise HTTPException(500)
+    response = Response(content=data.tobytes(), media_type="image/jpeg")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+@app.post("/api/identity-answers/{job_id}", dependencies=[Depends(require_csrf)])
+def save_identity_answers(request: Request, job_id: str, payload: IdentityAnswersPayload):
+    """Keep the person's "tap your fighter" answers for this fight."""
+    _enforce_rate_limit(request, "identity-answers", 60, 300)
+    job = _authorized_job(request, job_id)
+    if not job:
+        raise HTTPException(404)
+    questions = {str(q["ask_frame"]): q for q in _crossing_questions(job_id, job)}
+    asked = set(questions)
+    answers = dict(job.get("identity_answers") or {})
+    kept = {str(q["ask_frame"]): q for q in (job.get("asked_questions") or [])}
+    for frame, answer in payload.answers.items():
+        answer = str(answer).upper()
+        if str(frame) in asked and answer in {"A", "B"}:
+            answers[str(frame)] = answer
+            kept[str(frame)] = questions[str(frame)]
+    update_job(job_id, {"identity_answers": answers, "asked_questions": list(kept.values())})
+    swapped = sum(1 for frame, answer in answers.items() if frame in asked and answer == "B")
+    return {"answers": answers, "answered": len([f for f in answers if f in asked]), "asked": len(asked),
+            "swapped": swapped}
+
+
+@app.post("/api/identity-fix/{job_id}", dependencies=[Depends(require_csrf)])
+def fix_identity(request: Request, job_id: str):
+    """Analyse the fight again with the person's answers pinned in.
+
+    Each answer re-locks A and B at that moment (core/crossings.py
+    anchors_from_answers, IdentityManager.apply_person_assignment). Not
+    charged again: it is the same fight, corrected.
+    """
+    _enforce_rate_limit(request, "analysis-restart", 12, 600)
+    job = _authorized_job(request, job_id)
+    if not job:
+        raise HTTPException(404)
+    if job.get("status") in {"queued", "running"}:
+        return _analysis_started_response(request, job_id)
+    if job.get("status") != "complete":
+        raise HTTPException(409, "This fight has no finished report to correct yet.")
+    questions = _crossing_questions(job_id, job)
+    new = anchors_from_answers(questions, dict(job.get("identity_answers") or {}))
+    if not any(anchor["swapped"] for anchor in new):
+        return {"rerun": False, "message": "Every answer agreed with the analysis, so there is nothing to fix."}
+    fighter_a_box, fighter_b_box = job.get("fighter_a_box"), job.get("fighter_b_box")
+    if not isinstance(fighter_a_box, list) or len(fighter_a_box) != 4 or not isinstance(fighter_b_box, list) \
+            or len(fighter_b_box) != 4:
+        raise HTTPException(409, "This fight's fighter selection is not stored, so it cannot be corrected here.")
+    capacity = _require_analysis_capacity()
+    # Earlier answers stay pinned; an answer about the same frame replaces it.
+    kept = [anchor for anchor in (job.get("identity_anchors") or [])
+            if int(anchor.get("frame", -1)) not in {anchor_new["frame"] for anchor_new in new}]
+    anchors = sorted(kept + new, key=lambda anchor: int(anchor["frame"]))
+    update_job(job_id, {"identity_anchors": anchors, "identity_answers": {}, "asked_questions": []})
+    job = get_job(job_id) or job
+    req = _analysis_request(job_id, job, fighter_a_box, fighter_b_box, job.get("focus_fighter") or "A")
+    try:
+        prepare_job_run(job_id, {
+            "message": _deferred_analysis_message() if capacity["deferred"] else "Fixing who is who with your answers",
+        })
+    except AnalysisStateNotPersisted as exc:
+        LOGGER.error("analysis_queue_not_persisted job_id=%s", job_id, exc_info=exc)
+        raise HTTPException(503, "WarriorIQ could not queue the correction. Your answers are kept.") from exc
+    analysis_run_id = str((get_job(job_id) or {}).get("analysis_run_id") or "")
+    if SETTINGS.analysis_worker_mode == "inprocess":
+        executor.submit(_run_job, job_id, req, analysis_run_id)
+    else:
+        _wake_analysis_worker(job_id)
+    record_security_event("identity_fix_requested", account_id=(job.get("account_id") or None),
+                          metadata={"anchors": len(anchors), "swapped": sum(a["swapped"] for a in anchors)})
+    return {"rerun": True, "progress_url": f"/progress/{job_id}"}
 
 
 @app.get("/result/{job_id}/report.json", include_in_schema=False)

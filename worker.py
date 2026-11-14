@@ -116,6 +116,7 @@ def _request_from_job(job_id: str, job: dict) -> AnalysisRequest:
         # orientation record by a local one (app.main._job_still_sideways).
         sideways=bool(job["sideways"] if "sideways" in job else (job.get("orientation") or {}).get(
             "sideways", bool((job.get("orientation") or {}).get("warning")) and not job.get("rotate_clockwise"))),
+        identity_anchors=list(job.get("identity_anchors") or []) or None,
     )
 
 

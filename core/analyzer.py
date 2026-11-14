@@ -26,6 +26,7 @@ from core.frame_feed import FrameFeed
 from core.generalship import judge_fight
 from core.fight_presence import FightPresence
 from core import strike_verifier
+from core.crossings import CrossingWatch
 from core.kit import HandoffKitCheck, kit_similarity, region_colours
 from core.kit_attribution import KitAttribution, box_shorts_dark_share, darker_at_selection_boxes
 from core.slow_watch import SlowRunWatch
@@ -1156,6 +1157,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # own speed (core/progress_eta.py); before this it showed none at all.
     stage_eta = StageEta(info.fps)
 
+    # Crossings, and which to ask the person about (core/crossings.py). Made
+    # here so every progress update can carry the questions so far, which the
+    # live page puts to the person while the analysis runs (owner, 2026-11-13).
+    crossing_watch = CrossingWatch()
+    answered_frames = tuple(int(anchor["frame"]) for anchor in (req.identity_anchors or [])
+                            if anchor.get("frame") is not None)
+
     def progress(
         message: str,
         percent: float,
@@ -1230,6 +1238,8 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             stage_fraction=None if stage_fraction is None else float(max(0.0, min(1.0, stage_fraction))),
             tracked_video_seconds=None if tracked_seconds is None else float(tracked_seconds),
             eta_scope=eta_scope if eta is not None else None,
+            crossing_questions=crossing_watch.questions(
+                answered_frames=answered_frames, near_frames=int(round(1.5 * info.fps))),
         )
         progress_callback(payload.to_dict())
 
@@ -1503,6 +1513,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     # Where each fighter's box was on every analysed frame, for the video
     # check's crops after the frame pass (core/strike_verifier.py).
     box_track: list[tuple[float, list | None, list | None]] = []
+    # The person's answers about crossings (core/crossings.py); the watch
+    # itself is made before the progress helper, which reports its questions.
+    anchor_queue = sorted((dict(anchor) for anchor in (req.identity_anchors or [])
+                           if anchor.get("frame") is not None and anchor.get("a_box") and anchor.get("b_box")),
+                          key=lambda anchor: int(anchor["frame"]))
+    anchors_applied: list[dict] = []
+    anchors_missed: list[dict] = []
     tracking_file = tracking_path.open("w", encoding="utf-8") if SETTINGS.save_tracking_jsonl else None
     # Decoding runs a step ahead on a helper thread; see core/frame_feed.py.
     feed = FrameFeed(
@@ -1667,6 +1684,21 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
                         fighter_a = recovered_a or fighter_a
                         fighter_b = recovered_b or fighter_b
 
+                # The person said who is who here (tap your fighter, after a
+                # crossing): put A and B back on those people, whatever the
+                # tracks say. Applied on the first analysed frame at or after it.
+                while anchor_queue and source_frame >= int(anchor_queue[0]["frame"]):
+                    anchor = anchor_queue.pop(0)
+                    pinned_a, pinned_b = manager.apply_person_assignment(
+                        people, anchor["a_box"], anchor["b_box"], source_frame)
+                    record = {"frame": int(anchor["frame"]), "applied_frame": source_frame,
+                              "swapped": bool(anchor.get("swapped"))}
+                    if pinned_a is not None and pinned_b is not None:
+                        fighter_a, fighter_b = pinned_a, pinned_b
+                        anchors_applied.append(record)
+                    else:
+                        anchors_missed.append(record)
+
             # A fighter picked up again by someone wearing their own kit was
             # not lost: take that hand-off back off the suspicious count.
             for name, box in manager.handoffs_to_check:
@@ -1740,6 +1772,10 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
             step_seconds["pose_measures"] += strikes_started - measures_started
             box_track.append((seconds, None if fighter_a is None else fighter_a.box.tolist(),
                               None if fighter_b is None else fighter_b.box.tolist()))
+            crossing_watch.observe(seconds, source_frame,
+                                   None if fighter_a is None else fighter_a.box.tolist(),
+                                   None if fighter_b is None else fighter_b.box.tolist(),
+                                   manager.a.identity_confidence, manager.b.identity_confidence)
             if active_selected_round:
                 active_analyzed_frames += 1
                 # Measured once the whole fight is classified, so footage that
@@ -2078,6 +2114,14 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
         # (core/report.py identity_ready_by_fighter), so such a report is
         # shown as unverified rather than as the chosen fighter's numbers.
         "identity_seed_confirmed": None if seed_check is None else not seed_check.get("failed"),
+        # Where the two fighters crossed, the few worth asking the person
+        # about, and the answers this run was given (core/crossings.py).
+        "crossings": crossing_watch.summary(answered_frames=answered_frames,
+                                            near_frames=int(round(1.5 * info.fps))),
+        "identity_anchors": {"given": len(req.identity_anchors or []), "applied": anchors_applied,
+                             "missed": anchors_missed + [{"frame": int(a["frame"]), "applied_frame": None,
+                                                          "swapped": bool(a.get("swapped"))}
+                                                         for a in anchor_queue]},
         "requested_fighter_A_box": [float(value) for value in req.fighter_a_box],
         "requested_fighter_B_box": [float(value) for value in req.fighter_b_box],
         "canonical_fighter_A_box": canonical_a_box,

@@ -1388,3 +1388,27 @@ form.is-picking .early-pick { margin-top: 4px; }
    its neighbours are never cut off on a phone. */
 form.is-picking .upload-steps li.is-done { flex: 0 0 auto; gap: 0; padding: 6px; font-size: 0; }
 form.is-picking .upload-steps li.is-done b { font-size: 13px; }
+
+/* Check who is who on the report (owner, 2026-11-13). */
+.who-check { margin: 18px 0; }
+.who-check h2 { margin: 6px 0 8px; }
+.who-check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin: 14px 0 0; padding: 0; list-style: none; }
+.who-check-item { overflow: hidden; border: 1px solid var(--glass-edge, rgba(255, 255, 255, .1)); border-radius: 18px; background: rgba(255, 255, 255, .03); }
+.who-check-item img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: contain; background: #05080d; }
+.who-check-answer { display: grid; gap: 8px; padding: 10px 12px 12px; }
+.who-check-answer .btn[aria-pressed="true"] { border-color: #3ddc97 !important; background: rgba(61, 220, 151, .16); }
+.who-check-status { margin: 12px 0 0; }
+#whoCheckFix { margin-top: 10px; }
+/* Tap your fighter, on the live page (owner, 2026-11-13). */
+.live-who { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 12px; align-items: center; margin: 10px 0 0; padding: 10px; border: 1px solid rgba(90, 169, 255, .45); border-radius: 18px; background: rgba(90, 169, 255, .08); }
+.live-who img { display: block; width: 100%; height: auto; border-radius: 12px; background: #05080d; }
+.live-who-copy { display: grid; gap: 6px; min-width: 0; }
+.live-who-copy small { color: #9aa6b8; font-size: 12px; }
+.live-who-buttons { display: flex; gap: 8px; }
+.live-who-buttons .btn { flex: 1 1 0; padding-block: 8px; }
+@media (max-width: 620px) {
+  .live-who { grid-template-columns: minmax(0, 1fr); }
+}
+@media (min-width: 1000px) {
+  .live-analysis-page .live-video-card > .live-who { grid-column: 1 / -1; }
+}
