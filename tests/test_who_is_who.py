@@ -127,3 +127,62 @@ def test_the_still_is_rate_limited(tmp_path):
     finally:
         web._rate_windows.clear()
         delete_job(job_id)
+
+
+# The live page: the person draws their fighter on a plain picture (owner, 2026-11-15).
+
+def test_the_plain_still_has_no_boxes_drawn_on_it(tmp_path):
+    client, job_id, _ = _fight(tmp_path)
+    web._rate_windows.clear()
+    try:
+        boxed = cv2.imdecode(np.frombuffer(client.get(f"/result/{job_id}/crossing/60.jpg").content, np.uint8), 1)
+        plain = cv2.imdecode(np.frombuffer(client.get(f"/result/{job_id}/crossing/60.jpg?plain=1").content, np.uint8), 1)
+        # The video is one flat grey per frame: only drawn boxes add colour.
+        assert int(plain.std()) <= 2 < int(boxed.std())
+    finally:
+        delete_job(job_id)
+
+
+def test_a_drawn_box_is_kept_and_a_bad_one_is_refused(tmp_path):
+    client, job_id, headers = _fight(tmp_path)
+    web._rate_windows.clear()
+    try:
+        saved = client.post(f"/api/identity-answers/{job_id}", headers=headers,
+                            json={"answers": {"60": [22, 18, 81, 151], "160": [5, 5, 6, 6]}})
+        assert saved.status_code == 200, saved.text
+        assert get_job(job_id)["identity_answers"] == {"60": [22.0, 18.0, 81.0, 151.0]}   # tiny box dropped
+        assert saved.json()["swapped"] == 0                     # it matches the box the analysis called A
+    finally:
+        delete_job(job_id)
+
+
+def test_a_drawn_box_on_the_other_fighter_fixes_who_is_who(tmp_path):
+    client, job_id, headers = _fight(tmp_path)
+    web._rate_windows.clear()
+    try:
+        client.post(f"/api/identity-answers/{job_id}", headers=headers,
+                    json={"answers": {"60": [22, 18, 81, 151]}})
+        agreed = client.post(f"/api/identity-fix/{job_id}", headers=headers)
+        assert agreed.json()["rerun"] is False
+
+        drawn = [198.0, 25.0, 262.0, 148.0]                     # around the person the analysis called B
+        client.post(f"/api/identity-answers/{job_id}", headers=headers, json={"answers": {"160": drawn}})
+        previous_mode = web.SETTINGS.analysis_worker_mode
+        object.__setattr__(web.SETTINGS, "analysis_worker_mode", "inprocess")
+        try:
+            with patch.object(web, "_require_analysis_capacity", return_value={"deferred": False}), \
+                 patch.object(web.executor, "submit", side_effect=lambda fn, *args: None):
+                fixed = client.post(f"/api/identity-fix/{job_id}", headers=headers)
+        finally:
+            object.__setattr__(web.SETTINGS, "analysis_worker_mode", previous_mode)
+        assert fixed.json()["rerun"] is True, fixed.text
+        anchor = next(a for a in get_job(job_id)["identity_anchors"] if a["frame"] == 160)
+        assert anchor["a_box"] == drawn and anchor["b_box"] == QUESTIONS[1]["a_box"] and anchor["swapped"]
+    finally:
+        delete_job(job_id)
+
+
+def test_a_box_drawn_on_neither_fighter_still_counts_as_a_correction():
+    question = QUESTIONS[0]
+    (anchor,) = web._identity_anchors([question], {"60": [120.0, 20.0, 180.0, 150.0]})
+    assert anchor["swapped"] and anchor["a_box"] == [120.0, 20.0, 180.0, 150.0]

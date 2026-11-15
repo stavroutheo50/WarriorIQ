@@ -7,7 +7,7 @@
 {% if reported %}<div class="notice good" role="status">Thank you. The report has been sent to WarriorIQ for review.</div>{% endif %}
 <header class="athlete-head profile-head-band">
   <div class="athlete-id">
-    {% if visible and athlete.photo_path %}<img class="athlete-avatar athlete-photo" src="{{athlete.photo_path}}" width="56" height="56" alt="" decoding="async">
+    {% if visible and athlete.photo_path %}<img class="athlete-avatar athlete-photo" src="{{athlete.photo_path|profile_media}}" width="56" height="56" alt="" decoding="async">
     {% else %}<span class="athlete-avatar" aria-hidden="true">{{athlete.display_name[:1]|upper}}</span>{% endif %}
     <div>
       <div class="eyebrow">{% if public %}Public athlete{% else %}Private athlete{% endif %}</div>

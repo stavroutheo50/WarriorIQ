@@ -27,7 +27,7 @@
   {% for item in items %}
   <li class="card feed-item">
     <div class="feed-who">
-      {% if item.who.photo %}<img class="athlete-avatar athlete-photo" src="{{item.who.photo}}" width="40" height="40" alt="" decoding="async">
+      {% if item.who.photo %}<img class="athlete-avatar athlete-photo" src="{{item.who.photo|profile_media}}" width="40" height="40" alt="" decoding="async">
       {% else %}<span class="athlete-avatar" aria-hidden="true">{{item.who.name[:1]|upper}}</span>{% endif %}
       <span><a class="feed-name" href="/athlete/{{item.who.handle}}">{{item.who.name}}</a>
         <time class="small muted" datetime="{{item.at}}" data-local="date">{{item.at|fight_moment(false)}}</time></span>
