@@ -46,3 +46,18 @@ def test_every_email_carries_the_text_and_the_html_version():
     types = [part.get_content_type() for part in message.walk()]
     assert "text/plain" in types and "text/html" in types
     assert message["From"] == "WarriorIQ <mail@example.test>"
+
+
+def test_typed_text_never_becomes_a_branded_link():
+    # A guardian name typed at sign-up lands in the body; it must stay plain text.
+    body = ("Hello Verify your email: https://evil.example/x,\n\n"
+            "Verify your email: https://evil.example/x\n\n"
+            "https://warrioriq.eu.evil.example/verify-email/a\n\n"
+            "https://warrioriq.eu@evil.example/verify-email/a\n\n"
+            "https://warrioriq.eu/guardian/approve/tok")
+    page = render_email_html("Approve", body, "https://warrioriq.eu")
+    assert "evil.example" in page  # still shown, as text
+    assert 'href="https://evil.example' not in page and 'href="https://warrioriq.eu.evil' not in page
+    assert 'href="https://warrioriq.eu@' not in page
+    assert page.count(">Review the account</a>") == 1
+    assert ">Verify your email</a>" not in page

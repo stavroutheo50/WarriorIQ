@@ -7,8 +7,10 @@ different things:
 
 - the WarriorIQ logo and name in a dark header, the site's blue as the accent;
 - each paragraph of the text as a paragraph;
-- a link on a line of its own as a button, labelled for what it does, with the
-  address underneath for mail apps that block buttons;
+- a link to the site on a line of its own as a button, labelled for what it
+  does, with the address underneath for mail apps that block buttons. Only
+  addresses on the site's own host become links: the text can include names
+  people typed, and those must never turn into a WarriorIQ button;
 - a footer with the site's address.
 
 Table layout and inline styles only: that is what Gmail, Outlook and Apple
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import html
 import re
+from urllib.parse import urlsplit
 
 _URL = re.compile(r"https?://[^\s<>\"']+")
 BLUE = "#2f7cf6"
@@ -42,11 +45,29 @@ def _button_label(url: str) -> str:
     return next((label for marker, label in _BUTTON_LABELS if marker in url), "Open WarriorIQ")
 
 
-def _linkify(text: str) -> str:
-    """Escape a line and turn any address in it into a link."""
+def _is_own_url(url: str, host: str) -> bool:
+    """True only for an address on the site's own host, with no user part.
+
+    The text of an email can carry words people typed (a guardian's name at
+    sign-up, for one), so a link or button is made only for addresses this
+    service writes itself; anything else stays plain, escaped text.
+    """
+    try:
+        parts = urlsplit(url)
+        hostname = parts.hostname
+    except ValueError:
+        return False
+    return (parts.scheme in {"http", "https"} and bool(host) and hostname == host
+            and parts.username is None and parts.password is None)
+
+
+def _linkify(text: str, host: str) -> str:
+    """Escape a line and turn an address on our own site into a link."""
     out, last = [], 0
     for match in _URL.finditer(text):
         url = match.group(0).rstrip(".,;:)")
+        if not _is_own_url(url, host):
+            continue
         out.append(html.escape(text[last:match.start()]))
         out.append(f'<a href="{html.escape(url, quote=True)}" style="color:{BLUE};text-decoration:underline">'
                    f'{html.escape(url)}</a>')
@@ -58,15 +79,16 @@ def _linkify(text: str) -> str:
 _LABELLED_URL = re.compile(r"^(?P<label>[^\n:]{2,60}):\s*(?P<url>https?://[^\s<>\"']+)$")
 
 
-def _block(paragraph: str) -> str:
+def _block(paragraph: str, host: str) -> str:
     paragraph = paragraph.strip()
-    # "See the invitation: https://..." on its own: a button with those words.
+    # "See the invitation: https://..." on its own: a button with those words,
+    # but only for our own address (see _is_own_url).
     labelled = _LABELLED_URL.match(paragraph)
-    if labelled:
+    if labelled and _is_own_url(labelled.group("url"), host):
         return _button(labelled.group("url"), labelled.group("label").strip())
-    if _URL.fullmatch(paragraph):
+    if _URL.fullmatch(paragraph) and _is_own_url(paragraph, host):
         return _button(paragraph, _button_label(paragraph))
-    lines = "<br>".join(_linkify(line) for line in paragraph.splitlines())
+    lines = "<br>".join(_linkify(line, host) for line in paragraph.splitlines())
     return f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:{INK}">{lines}</p>'
 
 
@@ -90,7 +112,8 @@ def render_email_html(subject: str, body: str, base_url: str = "") -> str:
     logo = html.escape(f"{base}/static/warrioriq-logo-96.png", quote=True)
     site = html.escape(base.split("://", 1)[-1])
     paragraphs = [part for part in re.split(r"\n\s*\n", body.strip()) if part.strip()]
-    content = "".join(_block(part) for part in paragraphs)
+    host = (urlsplit(base).hostname or "").lower()
+    content = "".join(_block(part, host) for part in paragraphs)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light"><title>{html.escape(subject)}</title></head>
