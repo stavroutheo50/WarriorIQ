@@ -1945,6 +1945,9 @@ def _run_periodic_maintenance(now: float | None = None) -> None:
             video = Path(fight.get("video_path") or "missing").resolve()
             if video.parent == UPLOADS.resolve():
                 video.unlink(missing_ok=True)
+                # And its browser-playable copy: the fight stays saved, so
+                # the abandoned-file sweep protects that copy for ever.
+                remove_derivative(video)
                 mark_fight_video_deleted(fight["job_id"], int(fight["profile_id"]))
                 record_security_event(
                     "video_retention_deleted", account_id=None, resource_type="fight",
@@ -3879,6 +3882,7 @@ def home(request: Request):
             "profile": profile,
             "version": SETTINGS.version,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
+            "video_retention_days": SETTINGS.saved_video_retention_days,
             **_home_sections(),
         },
     )
@@ -6991,11 +6995,16 @@ def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
     annotation_id = save_annotation(job_id, payload.event_time, report.get("setup", {}).get("ruleset", "K1"), predicted, corrected)
     profile = get_profile(_profile_id(request))
     training_consent = bool(profile and profile.get("allow_model_training"))
+    # Never from footage with anyone under 18, as the upload's own training
+    # box already is (2026-11-15: the homepage promises it). Only a fight
+    # uploaded as "all 18 or over" is exported; an unknown answer is not.
+    job_state = get_job(job_id) or {}
+    adults_only = job_state.get("minor_permission_status") == "no_minors"
     sequence_path = export_sequence(
         job_id, annotation_id, corrected, contact_time,
         tracking_path=report_path.parent / "tracking.jsonl",
-        source_fight_id=(get_job(job_id) or {}).get("source_video_sha256"),
-    ) if training_consent else None
+        source_fight_id=job_state.get("source_video_sha256"),
+    ) if training_consent and adults_only else None
     set_annotation_sequence(annotation_id, sequence_path)
     return {
         "ok": True, "annotation_id": annotation_id,
@@ -8086,6 +8095,7 @@ def delete_original_video(request: Request, job_id: str):
     video = Path(fight.get("video_path") or "missing").resolve()
     if video.parent == UPLOADS.resolve():
         video.unlink(missing_ok=True)
+        remove_derivative(video)
     training_consent.forget(job_id)
     mark_fight_video_deleted(job_id, int(account["profile_id"]))
     record_security_event(

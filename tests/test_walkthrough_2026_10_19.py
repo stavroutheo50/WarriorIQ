@@ -135,7 +135,9 @@ def test_library_cards_and_profile_titles():
 # ------------------------------------------------------------------ 14 15
 def test_the_homepage_is_shorter_and_accuracy_has_its_own_page():
     home = BrowserClient(web.app).get("/").text
-    assert home.count("<section") <= 7
+    # 7 sections (walkthrough 2026-10-19); 9 since the owner's brief of
+    # 2026-11-14 asked for "who it's for" and trust and privacy sections.
+    assert home.count("<section") <= 9
     for gone in ("Your next round starts here.", "Evidence before claims.", 'id="accuracy"'):
         assert gone not in home
     accuracy = BrowserClient(web.app).get("/accuracy")

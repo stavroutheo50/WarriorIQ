@@ -882,6 +882,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         job_id = "privateowner1"
         video_path = webapp.UPLOADS / f"{job_id}.mp4"
         video_path.write_bytes(b"private-video")
+        playable_copy = webapp.UPLOADS / f"{job_id}_web.mp4"
+        playable_copy.write_bytes(b"private-video, browser copy")
         report_dir = webapp.OUTPUTS / job_id
         report_dir.mkdir()
         report_path = report_dir / "report.json"
@@ -907,6 +909,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         deleted = self.client.post(f"/settings/videos/{job_id}/delete", follow_redirects=False)
         self.assertEqual(deleted.status_code, 303)
         self.assertFalse(video_path.exists())
+        self.assertFalse(playable_copy.exists())
         self.assertTrue(report_path.exists())
         saved = database.get_fight(job_id)
         self.assertEqual(saved["video_path"], "")
@@ -1304,6 +1307,24 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         })
         self.assertEqual(opted_in_label.status_code, 200)
         self.assertTrue(opted_in_label.json()["training_consent"])
+        # Opted in, but nothing is known about minors in this fight: no export.
+        self.assertFalse(opted_in_label.json()["sequence_exported"])
+        exported = []
+        fake_export = lambda *args, **kwargs: exported.append(args[0]) or "sequence.npz"
+        for status, expected in (("guardian_authorized", []), ("no_minors", [job_id])):
+            create_job(job_id, {"owner_key": f"account:{account['id']}", "minor_permission_status": status,
+                                "status": "complete"})
+            try:
+                with patch.object(webapp, "export_sequence", side_effect=fake_export), \
+                     patch.object(webapp, "set_annotation_sequence"):
+                    label = self.client.post(f"/api/annotations/{job_id}", json={
+                        "event_time": 8.2, "predicted": {}, "fighter": "A", "technique": "jab",
+                        "target": "head", "outcome": "clean", "manual": True,
+                    })
+            finally:
+                delete_job(job_id)
+            self.assertEqual(label.status_code, 200, label.text)
+            self.assertEqual(exported, expected, status)
         completed = self.client.post(f"/review/{job_id}/complete", data={"complete": "true"}, follow_redirects=False)
         self.assertEqual(completed.status_code, 303)
         self.assertEqual(database.get_fight_review(job_id)["status"], "complete")
