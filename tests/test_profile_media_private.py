@@ -122,3 +122,26 @@ def test_a_new_upload_is_saved_outside_the_public_folder(media):
     assert (media[0] / name).is_file() and not (media[1] / name).exists()
     assert db.get_profile(int(owner["profile_id"]))["photo_path"] == f"/profile-media/{name}"
     assert client.get(f"/profile-media/{name}").status_code == 200
+
+
+def test_the_real_static_folder_never_serves_a_legacy_file_by_any_path():
+    """Written where the old uploads really are, so the mount itself is tested."""
+    from pathlib import Path
+
+    folder = Path(web.ROOT) / "app" / "static" / "profile"
+    existed = folder.exists()
+    folder.mkdir(exist_ok=True)
+    name = f"profile_{uuid.uuid4().int % 10**9}.jpg"
+    (folder / name).write_bytes(JPEG)
+    try:
+        client = _client()
+        for url in (f"/static/profile/{name}", f"/static/%2e%2e/static/profile/{name}",
+                    f"/static/%2E%2E/static/profile/{name}", f"/static/./profile/{name}",
+                    f"/static/profile/./{name}", f"/static/%2e/profile/{name}"):
+            assert client.get(url).status_code == 404, url
+            assert client.head(url).status_code == 404, url
+        assert client.get("/static/glass.css").status_code == 200
+    finally:
+        (folder / name).unlink(missing_ok=True)
+        if not existed:
+            folder.rmdir()

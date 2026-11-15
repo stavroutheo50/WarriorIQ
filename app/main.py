@@ -265,7 +265,14 @@ class _PublicStaticFiles(StaticFiles):
     """The static mount, minus the profile media left in it by older uploads."""
 
     async def get_response(self, path: str, scope):
-        if os.path.normpath(path).replace("\\", "/").lstrip("/").startswith("profile/"):
+        # Decided on the file that would be opened, not on the path text:
+        # "/static/%2e%2e/static/profile/x.jpg" reaches here as
+        # "../static/profile/x.jpg", which does not start with "profile/",
+        # yet resolves back inside the served folder (security review, PR #232).
+        served = os.path.realpath(str(self.directory))
+        private = os.path.join(served, "profile")
+        target = os.path.realpath(os.path.join(served, path))
+        if target == private or target.startswith(private + os.sep):
             raise HTTPException(404)
         return await super().get_response(path, scope)
 
