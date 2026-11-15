@@ -578,6 +578,9 @@ PRIVATE_ROUTE_PREFIXES = (
     "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
     "/auth/", "/guardian",
+    # Pages whose address carries a secret token, and the gym pages
+    # (2026-11-15): a counted path is stored in page_views and shown on /admin.
+    "/gym", "/reset-password/", "/verify-email/",
 )
 # The only pages the Google tag may load on (QA, 2026-10-07: it loaded on every
 # page, private reports included, and its Google Ads destination sent the full
@@ -2303,7 +2306,7 @@ async def viewer_context(request: Request, call_next):
         try:
             # Off the event loop: the batch flush is a database write, and on
             # the event loop it held every other request until it finished.
-            await run_in_threadpool(record_page_view, _counted_path(request.url.path))
+            await run_in_threadpool(record_page_view, _counted_path(_loggable_path(request.url.path)))
         except Exception:  # pragma: no cover - counting must never cost a page
             # A visitor came for the page, not for the statistic. If the write
             # fails the page still has to be served, so this swallows rather

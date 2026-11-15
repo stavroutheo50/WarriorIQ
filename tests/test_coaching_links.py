@@ -164,3 +164,17 @@ def test_a_rejected_form_on_an_invitation_address_stores_no_token():
     stored = [e for e in db.list_security_events(50) if e["event_type"] == "csrf_token_rejected"]
     assert stored and stored[0]["resource_id"] == "/coaching/invite/[token]/answer"
     assert not any("secret-invite-token" in str(e.get("resource_id")) for e in db.list_security_events(200))
+
+
+def test_token_addresses_never_reach_the_traffic_counts():
+    from starlette.requests import Request
+
+    def counted(path):
+        scope = {"type": "http", "method": "GET", "path": path, "headers": [(b"user-agent", b"Mozilla/5.0")],
+                 "query_string": b""}
+        response = web.Response("x", media_type="text/html")
+        return web._is_counted_page_view(Request(scope), response)
+
+    for path in ("/gym/invite/secret-token", "/coaching/invite/secret-token",
+                 "/reset-password/secret-token", "/verify-email/secret-token", "/gym"):
+        assert not counted(path), path
