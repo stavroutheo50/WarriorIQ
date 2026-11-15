@@ -12,6 +12,14 @@ after a change to `requirements-web.txt`, run pip install in that panel. The
 analysis runs on the owner's own GPU PC. Older notes below that say "Render"
 mean "the web host".
 
+## 0. After the November 2026 upgrade (WARRIORIQ_UPGRADE_REPORT.md)
+
+- [ ] **Update the analysis PC:** run `update-worker.bat`, because `core/` changed.
+- [ ] **Try coaching and gyms with more than one athlete:** seats follow the plan, and the free plan has one. In Setup Python App, set `WARRIORIQ_COMPLIMENTARY_PLANS=<your email>:gym` and restart the app.
+- [ ] **Email for invitations:** coaching and gym invitations are emailed only when email works (admin page → Tools → "Send test email to me"). Otherwise the link is shown once to copy and send by hand.
+- [ ] **Lawyer review:** the privacy policy now describes coaching and gyms. Include those lines in the lawyer's review.
+- [ ] **Decide on under-18s:** they cannot accept a coach or join a gym as an athlete. Allowing it needs guardian consent for coaching, which is a product and legal decision.
+
 ## 1. Speed: deploy and measure on the GPU (#1, #23)
 
 - [ ] **Update your GPU worker PC:** run `deploy/update-worker.ps1` (or `update-worker.bat`) on it. It brings the worker to the code on `main` and restarts it. The pose engine for your GPU is built and cached the first time it runs.
