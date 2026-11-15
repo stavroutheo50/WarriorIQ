@@ -1463,3 +1463,14 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 /* The live "draw your fighter" card (owner, 2026-11-15). */
 .live-who-stage { position: relative; max-width: 720px; }
 .live-who-stage canvas { position: absolute; inset: 0; cursor: crosshair; touch-action: none; border-radius: 12px; }
+
+/* Fight Camp: the last 30, 60 and 90 days (owner's brief, 2026-11-14). */
+.period-tabs { display: grid; grid-template-columns: repeat(3, max-content) minmax(0, 1fr); gap: 8px 6px; margin-top: 10px; }
+.period-radio { position: absolute; opacity: 0; pointer-events: none; }
+.period-tabs > label { padding: 8px 16px; border: 1px solid rgba(255, 255, 255, .1); border-radius: 999px; color: #c3cad8; font-size: 14px; font-weight: 700; cursor: pointer; }
+.period-radio:checked + label { border-color: rgba(90, 169, 255, .6); background: rgba(90, 169, 255, .16); color: #fff; }
+.period-radio:focus-visible + label { outline: 2px solid #5aa9ff; outline-offset: 2px; }
+.period-panel { display: none; grid-column: 1 / -1; }
+#period30:checked ~ .period-panel[data-period="30"], #period60:checked ~ .period-panel[data-period="60"], #period90:checked ~ .period-panel[data-period="90"] { display: block; }
+.period-facts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 8px 0 12px; color: #c3cad8; font-size: 14px; }
+.period-facts b { color: #fff; font-size: 18px; }

@@ -161,6 +161,7 @@ from core.retention import (
 )
 from core import training_consent
 from app import admin_overview
+from app.progress_periods import period_summary
 from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
 from core.stat_sheet import build_stat_sheet
@@ -8955,6 +8956,8 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
             "assignments": assignments,
             "camp": camp,
             "standing": camp_standing(points, sessions, today),
+            # The last 30, 60 and 90 days (app/progress_periods.py).
+            "periods": period_summary(progress.get("points") or [], sessions),
             "points_history": points_history(points),
             # The stats-only Fight Camp story card (static/camp_share.js).
             "camp_card": {
