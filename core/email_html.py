@@ -76,6 +76,9 @@ def _linkify(text: str, host: str) -> str:
     return "".join(out)
 
 
+# The only "Label: address" lines WarriorIQ writes itself (coaching and gym
+# invitations). Any other words before an address are not ours to put on a button.
+_OWN_LABELS = frozenset({"See the invitation"})
 _LABELLED_URL = re.compile(r"^(?P<label>[^\n:]{2,60}):\s*(?P<url>https?://[^\s<>\"']+)$")
 
 
@@ -84,7 +87,7 @@ def _block(paragraph: str, host: str) -> str:
     # "See the invitation: https://..." on its own: a button with those words,
     # but only for our own address (see _is_own_url).
     labelled = _LABELLED_URL.match(paragraph)
-    if labelled and _is_own_url(labelled.group("url"), host):
+    if labelled and labelled.group("label").strip() in _OWN_LABELS and _is_own_url(labelled.group("url"), host):
         return _button(labelled.group("url"), labelled.group("label").strip())
     if _URL.fullmatch(paragraph) and _is_own_url(paragraph, host):
         return _button(paragraph, _button_label(paragraph))

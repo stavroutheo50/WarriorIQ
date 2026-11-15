@@ -61,3 +61,9 @@ def test_typed_text_never_becomes_a_branded_link():
     assert 'href="https://warrioriq.eu@' not in page
     assert page.count(">Review the account</a>") == 1
     assert ">Verify your email</a>" not in page
+
+
+def test_only_our_own_words_label_a_button():
+    page = render_email_html("x", "Claim your prize: https://warrioriq.eu/pricing", "https://warrioriq.eu")
+    assert ">Claim your prize</a>" not in page
+    assert 'href="https://warrioriq.eu/pricing"' in page  # still a plain link to our own site
