@@ -88,12 +88,13 @@
 <section class="hx-section" aria-labelledby="trustTitle">
   {#- Trust (owner's brief, 2026-11-14). Each line is something the product
       does now: owner-only fights, the retention setting, opt-in training
-      consent (never for under-18s), export and delete in Settings, 2FA. -#}
+      consent (never for under-18s; a consented video is kept until deleted -
+      core/training_consent.py), export and delete in Settings, 2FA. -#}
   <div class="hx-head hx-reveal"><span class="eyebrow">Your footage</span><h2 id="trustTitle">Stays yours.</h2></div>
   <div class="hx-measures hx-two">
     <article class="hx-measure glass-panel hx-reveal"><h3>Private by default</h3><p>Only you see your fights, unless you choose to share one. Two-step sign-in is available in Settings.</p></article>
-    <article class="hx-measure glass-panel hx-reveal" style="--i:1"><h3>Videos are not kept forever</h3><p>Saved videos are deleted after {{ video_retention_days }} days. Reports stay until you delete them.</p></article>
-    <article class="hx-measure glass-panel hx-reveal"><h3>Not used for training</h3><p>Unless you tick the box when you upload. Never for videos with anyone under 18.</p></article>
+    <article class="hx-measure glass-panel hx-reveal" style="--i:1"><h3>Videos are not kept forever</h3><p>Saved videos are deleted after {{ video_retention_days }} days, unless you let WarriorIQ use one for training. Reports stay until you delete them.</p></article>
+    <article class="hx-measure glass-panel hx-reveal"><h3>Not used for training</h3><p>Unless you tick the box when you upload. That video is then kept privately until you delete it. Never for videos with anyone under 18.</p></article>
     <article class="hx-measure glass-panel hx-reveal" style="--i:1"><h3>Download or delete it all</h3><p>Export your data or delete your account from Settings, any time. <a class="text-link" href="/privacy">Privacy Policy</a></p></article>
   </div>
 </section>

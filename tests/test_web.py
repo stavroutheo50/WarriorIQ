@@ -1208,7 +1208,7 @@ class PublicPageTests(unittest.TestCase):
         # the product does now.
         self.assertIn('id="whoTitle"', page)
         self.assertIn('id="trustTitle"', page)
-        self.assertIn("Saved videos are deleted after 30 days.", page)
+        self.assertIn("Saved videos are deleted after 30 days, unless you let WarriorIQ use one for training.", page)
         self.assertNotIn("WonderIQ", page)
         # "Frame by frame" is industry shorthand a fighter does not read as a
         # promise. The headline says what they get instead.
