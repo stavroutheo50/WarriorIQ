@@ -152,3 +152,15 @@ def test_tokens_in_addresses_are_never_logged(caplog):
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "secret-invite-token" not in logged and "secret-reset-token" not in logged
     assert "/coaching/invite/[token]" in logged
+
+
+def test_a_rejected_form_on_an_invitation_address_stores_no_token():
+    from fastapi.testclient import TestClient
+
+    client = TestClient(web.app)                  # a plain client: it sends no form token
+    web._rate_windows.clear()
+    refused = client.post("/coaching/invite/secret-invite-token-abcdef/answer", data={"answer": "accept"})
+    assert refused.status_code == 403                                  # no CSRF token sent
+    stored = [e for e in db.list_security_events(50) if e["event_type"] == "csrf_token_rejected"]
+    assert stored and stored[0]["resource_id"] == "/coaching/invite/[token]/answer"
+    assert not any("secret-invite-token" in str(e.get("resource_id")) for e in db.list_security_events(200))

@@ -892,7 +892,7 @@ def _trusted_request_host(value: str) -> bool:
 # (resetting a password, approving an account, reading a shared report,
 # accepting a coach's invitation). Never written to the log (2026-11-15).
 _SECRET_PATH = re.compile(
-    r"^(/(?:reset-password|verify-email|guardian/approve|settings/email/confirm|s|coaching/invite|gym/invite)/)[^/]+")
+    r"^(/(?:reset-password|verify-email|guardian/approve|settings/email/confirm|s|f|coaching/invite|gym/invite)/)[^/]+")
 
 
 def _loggable_path(path: str) -> str:
@@ -1155,7 +1155,7 @@ async def require_csrf(request: Request) -> None:
         return
     record_security_event(
         "csrf_token_rejected", severity="warning",
-        resource_type="route", resource_id=request.url.path[:200],
+        resource_type="route", resource_id=_loggable_path(request.url.path)[:200],
     )
     # 403 rather than 400: the request was understood and refused. The wording
     # has to be usable by somebody who simply left a tab open overnight, which
@@ -2221,7 +2221,7 @@ async def viewer_context(request: Request, call_next):
         # under a hostname nobody listed in WARRIORIQ_ALLOWED_HOSTS is a blank
         # 400 with nothing to act on. Logged rather than recorded as a security
         # event, so an unauthenticated request cannot drive a database write.
-        LOGGER.warning("untrusted_request_host host=%r path=%s", rejected_host[:120], request.url.path)
+        LOGGER.warning("untrusted_request_host host=%r path=%s", rejected_host[:120], _loggable_path(request.url.path))
         return JSONResponse({"detail": "Unrecognized website address."}, status_code=400)
     request_started = time.perf_counter()
     request_id = request.headers.get("x-request-id", "").strip()[:64] or uuid.uuid4().hex[:16]
@@ -2257,7 +2257,7 @@ async def viewer_context(request: Request, call_next):
         client = _client_ip(request)
         wait = _take_rate_slot("site", client, SETTINGS.request_rate_limit_per_minute, 60)
         if wait is not None:
-            LOGGER.warning("site_rate_limited path=%s retry_after=%s", request.url.path, wait)
+            LOGGER.warning("site_rate_limited path=%s retry_after=%s", _loggable_path(request.url.path), wait)
             response = _rate_limited_response(request, wait)
             _apply_response_headers(request, response)
             return response
@@ -2308,7 +2308,7 @@ async def viewer_context(request: Request, call_next):
             # A visitor came for the page, not for the statistic. If the write
             # fails the page still has to be served, so this swallows rather
             # than raises, and says so in the log instead.
-            LOGGER.warning("page_view_not_counted path=%s", request.url.path)
+            LOGGER.warning("page_view_not_counted path=%s", _loggable_path(request.url.path))
     _apply_response_headers(request, response)
     if new_guest:
         response.set_cookie(
