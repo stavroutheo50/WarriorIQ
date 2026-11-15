@@ -6995,11 +6995,16 @@ def annotate_event(request: Request, job_id: str, payload: AnnotationPayload):
     annotation_id = save_annotation(job_id, payload.event_time, report.get("setup", {}).get("ruleset", "K1"), predicted, corrected)
     profile = get_profile(_profile_id(request))
     training_consent = bool(profile and profile.get("allow_model_training"))
+    # Never from footage with anyone under 18, as the upload's own training
+    # box already is (2026-11-15: the homepage promises it). Only a fight
+    # uploaded as "all 18 or over" is exported; an unknown answer is not.
+    job_state = get_job(job_id) or {}
+    adults_only = job_state.get("minor_permission_status") == "no_minors"
     sequence_path = export_sequence(
         job_id, annotation_id, corrected, contact_time,
         tracking_path=report_path.parent / "tracking.jsonl",
-        source_fight_id=(get_job(job_id) or {}).get("source_video_sha256"),
-    ) if training_consent else None
+        source_fight_id=job_state.get("source_video_sha256"),
+    ) if training_consent and adults_only else None
     set_annotation_sequence(annotation_id, sequence_path)
     return {
         "ok": True, "annotation_id": annotation_id,
