@@ -13,9 +13,11 @@ from core import db
 from core.auth import hash_password, issue_session
 
 
-def _person(minor: bool = False):
+def _person(minor: bool = False, verified: bool = True):
     email = f"gym-{uuid.uuid4().hex[:10]}@example.test"
     created = db.create_account(email, hash_password("Strong-Local-Password"))
+    if verified:
+        db.mark_email_verified(int(created["id"]))
     if minor:
         db.set_guardian_approval_status(int(created["id"]), "accepted")
     client = BrowserClient(web.app)
@@ -31,11 +33,13 @@ def _post(client, url, data=None):
 
 
 def _invite(owner_client, email, role):
+    # Email "works" (coach invitations need it) but the message is not sent.
     with patch.object(web, "deliver_email", side_effect=web.EmailNotSent("off")), \
+         patch.object(web, "email_settings_problem", return_value=None), \
          patch.object(web, "_request_plan", return_value={"roster_limit": 3}):
         answer = _post(owner_client, "/gym/invite", {"email": email, "role": role})
-    assert answer.status_code == 303 and "invite=" in answer.headers["location"], answer.headers.get("location")
-    return re.search(r"invite=([A-Za-z0-9_-]+)", answer.headers["location"]).group(1)
+    assert answer.status_code == 200 and "location" not in answer.headers, answer.text
+    return re.search(r"/gym/invite/([A-Za-z0-9_-]+)", answer.text).group(1)
 
 
 def _fight(person):
@@ -135,13 +139,25 @@ def test_a_coach_invitation_works_only_for_the_email_it_was_sent_to():
     assert [m["role"] for m in db.memberships_of(int(intended["profile_id"]))] == ["coach"]
 
 
-def test_a_coach_must_have_verified_the_address_when_email_works():
+def test_a_coach_must_have_verified_the_invited_address():
     owner, _, owner_client = _person()
     _post(owner_client, "/gym/create", {"name": "Gym"})
-    coach, coach_email, coach_client = _person()
+    coach, coach_email, coach_client = _person(verified=False)
     token = _invite(owner_client, coach_email, "coach")
-    with patch.object(web, "email_settings_problem", return_value=None), \
-         patch.object(web, "_account", side_effect=lambda request, _real=web._account: {
-             **(_real(request) or {}), "email_verified_at": None} if _real(request) else None):
-        refused = _post(coach_client, f"/gym/invite/{token}/answer", {"answer": "accept"})
-    assert refused.status_code == 403 and db.memberships_of(int(coach["profile_id"])) == []
+    assert _post(coach_client, f"/gym/invite/{token}/answer", {"answer": "accept"}).status_code == 403
+    assert db.memberships_of(int(coach["profile_id"])) == []
+    db.mark_email_verified(int(coach["id"]))
+    assert _post(coach_client, f"/gym/invite/{token}/answer", {"answer": "accept"}).status_code == 303
+
+
+def test_no_coach_invitation_is_made_while_email_is_off():
+    owner, _, owner_client = _person()
+    _post(owner_client, "/gym/create", {"name": "Gym"})
+    with patch.object(web, "email_settings_problem", return_value="no smtp"), \
+         patch.object(web, "_request_plan", return_value={"roster_limit": 3}):
+        refused = _post(owner_client, "/gym/invite", {"email": "coach@example.test", "role": "coach"})
+        athlete = _post(owner_client, "/gym/invite", {"email": "athlete@example.test", "role": "athlete"})
+    assert refused.status_code == 303 and "error=" in refused.headers["location"]
+    assert athlete.status_code == 200                      # athletes share only their own fights
+    org = db.organisation_owned_by(int(owner["profile_id"]))
+    assert [m["role"] for m in db.organisation_members(int(org["id"])) if m["status"] == "pending"] == ["athlete"]

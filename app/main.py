@@ -8937,7 +8937,12 @@ def _coach_seats(request: Request, coach_profile_id: int) -> dict:
 
 
 @app.get("/coaching", response_class=HTMLResponse)
-def coaching_page(request: Request, invite: str = "", notice: str = "", error: str = ""):
+def coaching_page(request: Request, notice: str = "", error: str = ""):
+    return _coaching_response(request, notice=notice, error=error)
+
+
+def _coaching_response(request: Request, *, invite: str = "", notice: str = "", error: str = ""):
+    """The coaching page; `invite` only from the invitation form's own response, never an address."""
     profile_id = _profile_id(request)
     if profile_id is None:
         return RedirectResponse("/login?next=/coaching", status_code=303)
@@ -8997,7 +9002,10 @@ def coaching_invite(request: Request, email: str = Form(...)):
                           metadata={"emailed": sent})
     notice = ("Invitation emailed. You can also send them this link yourself:" if sent
               else "Email is not set up, so send them this link yourself:")
-    return RedirectResponse("/coaching?" + urlencode({"invite": token, "notice": notice}), status_code=303)
+    # The link is shown once, on the page that answers the form. It never
+    # travels in an address: the front-end server's access log keeps the whole
+    # request line, query string included (security review, PR #233).
+    return _coaching_response(request, invite=token, notice=notice)
 
 
 @app.get("/coaching/invite/{token}", response_class=HTMLResponse)
@@ -9129,7 +9137,12 @@ def _gym_seats(request: Request, org_id: int) -> dict:
 
 
 @app.get("/gym", response_class=HTMLResponse)
-def gym_page(request: Request, invite: str = "", notice: str = "", error: str = ""):
+def gym_page(request: Request, notice: str = "", error: str = ""):
+    return _gym_response(request, notice=notice, error=error)
+
+
+def _gym_response(request: Request, *, invite: str = "", notice: str = "", error: str = ""):
+    """The gym page; `invite` only from the invitation form's own response, never an address."""
     profile_id = _profile_id(request)
     if profile_id is None:
         return RedirectResponse("/login?next=/gym", status_code=303)
@@ -9177,6 +9190,12 @@ def gym_invite(request: Request, email: str = Form(...), role: str = Form("athle
     email = email.strip().lower()
     if not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}", email) or email == str(account.get("email") or "").lower():
         return RedirectResponse("/gym?" + urlencode({"error": "Enter the person's email address."}), status_code=303)
+    # A coach place reads other people's reports, so it is safe only when the
+    # invited person can prove the address, which needs email to work.
+    if role == "coach" and email_settings_problem():
+        return RedirectResponse("/gym?" + urlencode(
+            {"error": "Coach invitations need email to be set up, so the coach can verify their address. "
+                      "Invite them as an athlete for now, or set up email first."}), status_code=303)
     if role == "athlete" and not _gym_seats(request, int(owned["id"]))["can_add"]:
         return RedirectResponse("/gym?" + urlencode(
             {"error": "Every athlete seat on your plan is taken. Remove an athlete or an invitation first."}),
@@ -9199,7 +9218,8 @@ def gym_invite(request: Request, email: str = Form(...), role: str = Form("athle
                           resource_id=str(owned["id"]), metadata={"role": role, "emailed": sent})
     notice = ("Invitation emailed. You can also send them this link yourself:" if sent
               else "Email is not set up, so send them this link yourself:")
-    return RedirectResponse("/gym?" + urlencode({"invite": token, "notice": notice}), status_code=303)
+    # Shown on this response, never in an address (see coaching_invite).
+    return _gym_response(request, invite=token, notice=notice)
 
 
 @app.get("/gym/invite/{token}", response_class=HTMLResponse)
@@ -9242,9 +9262,9 @@ def gym_invite_answer(request: Request, token: str, answer: str = Form(...)):
             str(account.get("email") or "").strip().lower() != str(invite.get("invite_email") or "").strip().lower():
         raise HTTPException(403, "This coach invitation was sent to a different email address. "
                                  "Sign in with that account to accept it.")
-    # And that address must be proven theirs when it can be: anyone can sign
-    # up with an address they do not own while verification is optional.
-    if accept and invite["role"] == "coach" and not account.get("email_verified_at") and not email_settings_problem():
+    # And proven theirs: anyone can sign up with an address they do not own
+    # while verification is optional, so matching text is not proof.
+    if accept and invite["role"] == "coach" and not account.get("email_verified_at"):
         raise HTTPException(403, "Verify your email address first (Settings), then accept this coach invitation.")
     if not answer_org_invite(int(invite["id"]), profile_id, accept):
         raise HTTPException(404, GYM_INVITE_GONE)

@@ -37,8 +37,9 @@ def _post(client, url, data=None):
 def _invite(coach_client, email) -> str:
     with patch.object(web, "deliver_email", side_effect=web.EmailNotSent("off")):
         answer = _post(coach_client, "/coaching/invite", {"email": email})
-    assert answer.status_code == 303, answer.text
-    return re.search(r"invite=([A-Za-z0-9_-]+)", answer.headers["location"]).group(1)
+    # The link is on the page that answers the form, never in a redirect address.
+    assert answer.status_code == 200 and "location" not in answer.headers, answer.text
+    return re.search(r"/coaching/invite/([A-Za-z0-9_-]+)", answer.text).group(1)
 
 
 def _fight(athlete, tmp_path_factory=None):
@@ -178,3 +179,11 @@ def test_token_addresses_never_reach_the_traffic_counts():
     for path in ("/gym/invite/secret-token", "/coaching/invite/secret-token",
                  "/reset-password/secret-token", "/verify-email/secret-token", "/gym"):
         assert not counted(path), path
+
+
+def test_the_invitation_link_never_travels_in_an_address():
+    coach, _, coach_client = _person(coach=True)
+    with patch.object(web, "_request_plan", return_value={"roster_limit": 5}):
+        token = _invite(coach_client, f"x{uuid.uuid4().hex[:6]}@example.test")
+    # The page no longer takes a token from the address at all.
+    assert token not in coach_client.get(f"/coaching?invite={token}").text

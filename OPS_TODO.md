@@ -17,6 +17,7 @@ mean "the web host".
 - [ ] **Update the analysis PC:** run `update-worker.bat`, because `core/` changed.
 - [ ] **Try coaching and gyms with more than one athlete:** seats follow the plan, and the free plan has one. In Setup Python App, set `WARRIORIQ_COMPLIMENTARY_PLANS=<your email>:gym` and restart the app.
 - [ ] **Email for invitations:** coaching and gym invitations are emailed only when email works (admin page → Tools → "Send test email to me"). Otherwise the link is shown once to copy and send by hand.
+  - Gym **coach** invitations need email to work, and the coach's address to be verified. A coach can read every athlete's reports in the gym, so a forwarded link must not be enough. With email off, invite people as athletes only.
 - [ ] **Lawyer review:** the privacy policy now describes coaching and gyms. Include those lines in the lawyer's review.
 - [ ] **Decide on under-18s:** they cannot accept a coach or join a gym as an athlete. Allowing it needs guardian consent for coaching, which is a product and legal decision.
 
