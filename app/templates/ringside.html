@@ -35,6 +35,12 @@
       <label><span class="ringside-dot ringside-dot-b"></span>Red corner<input id="nameB" maxlength="24" placeholder="Red" autocomplete="off"></label>
     </div>
     <button class="btn btn-lead ringside-start" type="button" id="scorerStart">Start scoring</button>
+    {#- Past scorecards (owner's brief, 2026-11-14): kept on this phone only. -#}
+    <div class="ringside-history" id="scorerHistory" hidden>
+      <h2 class="ringside-label">Past scorecards on this phone</h2>
+      <ul class="list-clean" id="scorerHistoryList"></ul>
+      <button class="btn secondary" type="button" id="scorerHistoryClear">Remove all</button>
+    </div>
   </div>
 
   <div class="ringside-live" id="scorerLive" hidden>
@@ -60,10 +66,11 @@
     <h2 id="resultHeadline">Final score</h2>
     <div class="ringside-final"><span class="ringside-a" id="resultNameA"></span><strong id="resultScore"></strong><span class="ringside-b" id="resultNameB"></span></div>
     <table class="ringside-table"><thead><tr><th>Round</th><th id="resultColA">Blue</th><th id="resultColB">Red</th></tr></thead><tbody id="resultRounds"></tbody></table>
-    <p class="small muted">Scored from the points you tapped, under these rules. It is an unofficial scorecard, not a judges' decision.</p>
+    <p class="small muted">Scored from the points you tapped, under these rules. It is an unofficial scorecard, not a judges' decision. It is saved on this phone under Past scorecards.</p>
     <div class="ringside-actions">
       <button class="btn btn-lead" type="button" id="scorerShare">Share scorecard</button>
       <a class="btn secondary" id="scorerWhatsApp" href="#" target="_blank" rel="noopener">Send on WhatsApp</a>
+      <button class="btn secondary" type="button" id="scorerCsv">Download CSV</button>
       <button class="btn secondary" type="button" id="scorerBack">Back to scoring</button>
       <button class="btn secondary" type="button" id="scorerNew">New fight</button>
     </div>

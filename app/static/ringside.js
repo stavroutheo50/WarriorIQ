@@ -51,6 +51,7 @@
   });
   $('scorerStart').addEventListener('click', function () {
     state.rounds = [blankRound()]; state.current = 0; state.history = []; state.view = 'live'; lastScore = null;
+    state.fightId = String(Date.now());
     save(); show();
   });
 
@@ -159,7 +160,80 @@
       body.appendChild(tr);
     });
     $('scorerWhatsApp').href = 'https://wa.me/?text=' + encodeURIComponent(shareText());
+    if (state.view === 'result') keepInHistory();
   }
+
+  // ---- past scorecards and export (owner's brief, 2026-11-14) ----------------
+  // Kept in this browser only, like the fight being scored: the scorer needs no
+  // account and sends nothing to WarriorIQ but the taps it scores.
+  var HISTORY_KEY = 'wiq-ringside-history-v1', HISTORY_MAX = 30;
+  function history() { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') || []; } catch (e) { return []; } }
+  function keepHistory(list) { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX))); } catch (e) { /* private mode */ } }
+  function keepInHistory() {
+    if (!lastScore) return;
+    var id = state.fightId || String(Date.now()); state.fightId = id; save();
+    var entry = { id: id, at: new Date().toISOString(), sport: sport().label, rules: rules().label,
+                  names: { A: name('A'), B: name('B') }, totals: lastScore.totals, rounds: lastScore.rounds,
+                  verdict: verdict() };
+    keepHistory([entry].concat(history().filter(function (item) { return item.id !== id; })));
+  }
+  // A cell a spreadsheet will not run: quoted, and never starting with = + - @.
+  function cell(value) {
+    var text = String(value == null ? '' : value);
+    if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+    return '"' + text.replace(/"/g, '""') + '"';
+  }
+  function csv(entry) {
+    var rows = [['WarriorIQ Ringside Scorer', 'Unofficial scorecard, not a judges\' decision'],
+                ['Date', entry.at.slice(0, 10)], ['Sport', entry.sport], ['Rules', entry.rules],
+                ['Result', entry.verdict], [],
+                ['Round', entry.names.A, entry.names.B, entry.names.A + ' points tapped', entry.names.A + ' deductions',
+                 entry.names.B + ' points tapped', entry.names.B + ' deductions']];
+    entry.rounds.forEach(function (row) {
+      rows.push([row.round, row.A, row.B, row.points_A, row.deductions_A || 0, row.points_B, row.deductions_B || 0]);
+    });
+    rows.push(['Total', entry.totals.A, entry.totals.B]);
+    return rows.map(function (row) { return row.map(cell).join(','); }).join('\r\n') + '\r\n';
+  }
+  function download(entry) {
+    var blob = new Blob([csv(entry)], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = ('scorecard-' + entry.names.A + '-vs-' + entry.names.B + '-' + entry.at.slice(0, 10))
+      .replace(/[^A-Za-z0-9-]+/g, '-').slice(0, 80) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
+  function drawHistory() {
+    var list = history(), box = $('scorerHistory'), ul = $('scorerHistoryList');
+    if (!box) return;
+    box.hidden = !list.length; ul.innerHTML = '';
+    list.forEach(function (entry) {
+      var li = document.createElement('li'), text = document.createElement('div');
+      var title = document.createElement('strong'); title.textContent = entry.names.A + ' vs ' + entry.names.B;
+      var meta = document.createElement('small');
+      meta.textContent = entry.at.slice(0, 10) + ' · ' + entry.rules + ' · ' + entry.verdict;
+      text.appendChild(title); text.appendChild(meta);
+      var csvButton = document.createElement('button'); csvButton.type = 'button'; csvButton.className = 'btn secondary';
+      csvButton.textContent = 'CSV'; csvButton.setAttribute('aria-label', 'Download ' + title.textContent + ' as CSV');
+      csvButton.addEventListener('click', function () { download(entry); });
+      var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn secondary';
+      remove.textContent = 'Remove'; remove.setAttribute('aria-label', 'Remove ' + title.textContent);
+      remove.addEventListener('click', function () {
+        keepHistory(history().filter(function (item) { return item.id !== entry.id; })); drawHistory();
+      });
+      li.appendChild(text); li.appendChild(csvButton); li.appendChild(remove); ul.appendChild(li);
+    });
+  }
+  $('scorerCsv').addEventListener('click', function () {
+    if (!lastScore) return;
+    keepInHistory();
+    var entry = history().find(function (item) { return item.id === state.fightId; });
+    if (entry) download(entry);
+  });
+  $('scorerHistoryClear').addEventListener('click', function () {
+    if (window.confirm('Remove every past scorecard from this phone?')) { keepHistory([]); drawHistory(); }
+  });
   function shareText() {
     return name('A') + ' vs ' + name('B') + ' (' + rules().label + '): ' + verdict() +
       '. Scored with WarriorIQ Ringside Scorer: ' + location.origin + '/scorer';
@@ -209,7 +283,7 @@
     $('scorerResult').hidden = state.view !== 'result';
     // While scoring, the board sits at the top of the screen, not under the title.
     $('ringside').classList.toggle('is-scoring', state.view === 'live');
-    if (state.view === 'setup') drawSetup();
+    if (state.view === 'setup') { drawSetup(); drawHistory(); }
     else { drawPads(); drawBoard(); requestScore(); }
   }
   show();

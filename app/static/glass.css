@@ -1484,3 +1484,11 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 .coaching-notes p { margin: 4px 0 0; white-space: pre-wrap; }
 .coaching-invite { max-width: 680px; margin: 24px auto; }
 .coaching-grid { align-items: start; }
+
+/* Ringside Scorer: past scorecards on this phone (owner's brief, 2026-11-14). */
+.ringside-history { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, .08); }
+.ringside-history li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.ringside-history li > div { display: grid; flex: 1 1 auto; min-width: 0; }
+.ringside-history li small { color: #9aa6b8; font-size: 12px; overflow-wrap: anywhere; }
+.ringside-history li .btn { flex: 0 0 auto; padding-inline: 12px; }
+.ringside-history > .btn { margin-top: 10px; }
