@@ -6656,6 +6656,10 @@ def crossing_still(request: Request, job_id: str, frame: int):
     Owner, 2026-11-13: fighters in the same kit were mixed up at crossings.
     The person who can see says which box is their fighter (core/crossings.py).
     """
+    # Each still is a seek, a decode and a JPEG encode. A report shows at most
+    # six (core/crossings.py MAX_QUESTIONS) and the live page one at a time,
+    # so 60 in five minutes leaves room for reloads and stops a loop.
+    _enforce_rate_limit(request, "crossing-still", 60, 300)
     job = _authorized_job(request, job_id)
     if not job:
         raise HTTPException(404)

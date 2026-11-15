@@ -116,3 +116,14 @@ def test_the_live_page_is_sent_the_questions_and_the_answers_so_far():
     status = web._public_job_status("x", job)
     assert status["crossing_questions"] == QUESTIONS[:1] and status["identity_answers"] == {"60": "B"}
     assert "fighter_a_box" not in status
+
+
+def test_the_still_is_rate_limited(tmp_path):
+    client, job_id, _ = _fight(tmp_path)
+    web._rate_windows.clear()
+    try:
+        codes = [client.get(f"/result/{job_id}/crossing/60.jpg").status_code for _ in range(61)]
+        assert codes[:60] == [200] * 60 and codes[60] == 429
+    finally:
+        web._rate_windows.clear()
+        delete_job(job_id)
