@@ -33,6 +33,10 @@ mean "the web host".
   - It copies the database with SQLite's online backup (safe while the site runs), checks the copy's integrity, and keeps the newest 14 copies. It never touches anything else in that folder, and videos are not included.
   - `/home/dchoodxm/warrioriq_backups` sits outside `public_html`, so it is never served on the web.
   - Restore drill: download one copy, open it with any SQLite viewer, and check that the `accounts` and `fights` tables have rows. Write down the date you did it.
+- [ ] **Leftover video copies (one time, after deploying PR #230):** before 2026-11-15, deleting a video left its browser copy (`<job>_web.mp4`) on disk. Clear them with `tools/delete_orphan_web_videos.py`.
+  - Run it the same way as the backup job (a cPanel Cron Job, or Setup Python App's run-script box), with the same `WARRIORIQ_DATA_DIR` the website uses.
+  - First without `--confirm`: it only lists the files and their size. Check the list (every name ends in `_web.mp4`), then run again with `--confirm`. Remove the cron job afterwards if you used one.
+  - Make a database backup first. Each deletion is logged in security_events.
 - [ ] **Optional media CDN (Cloudflare R2 or any pull CDN):**
   - Set `WARRIORIQ_MEDIA_CDN_BASE_URL` and a random `WARRIORIQ_MEDIA_SIGNING_KEY` (keep the key out of the repository).
   - Then check that replay start time drops.
