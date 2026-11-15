@@ -4611,6 +4611,21 @@ def frame_page(request: Request, job_id: str):
     return templates.TemplateResponse(request=request, name="frame.html", context={"request": request, "job_id": job_id, "job": job})
 
 
+def _small_video(job: dict) -> dict | None:
+    """The video's size, when it is below the size the analysis treats as low resolution.
+
+    Owner, 2026-11-14: a 480x220 fight lost a fighter among the people at the
+    ringside and the report came back with who-is-who unverified. Such a video
+    is analysed at a larger inference size already (SETTINGS.low_resolution_edge),
+    but small fighters are still harder to keep apart, and the person may have
+    the original file. Said before analysing, rather than after a failed report.
+    """
+    width, height = int(job.get("video_width") or 0), int(job.get("video_height") or 0)
+    if width <= 0 or height <= 0 or max(width, height) >= SETTINGS.low_resolution_edge:
+        return None
+    return {"width": width, "height": height}
+
+
 @app.get("/select/{job_id}", response_class=HTMLResponse)
 def select_page(request: Request, job_id: str, seconds: float | None = None):
     job = _authorized_job(request, job_id)
@@ -4667,6 +4682,7 @@ def select_page(request: Request, job_id: str, seconds: float | None = None):
                  "can_discard_upload": job.get("status") == "selecting" and not get_fight(job_id),
                  # The same file was analysed before (C6): said before analysing.
                  "duplicate_of": _same_video_elsewhere(request, job_id, job),
+                 "small_video": _small_video(job),
                  "reselecting": bool(get_fight(job_id)) or seconds is not None,
                  "back_url": f"/analyze/{_job_sport(job)}" if _job_sport(job) in SPORTS else "/analyze",
                  "default_corner": job.get("fighter_a_corner") or ""})

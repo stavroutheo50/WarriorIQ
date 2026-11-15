@@ -957,6 +957,34 @@ class BackupRuntimeTests(unittest.TestCase):
             self.assertEqual(len(manifest["sha256"]), 64)
             self.assertFalse(manifest["contains_original_videos"])
 
+    def test_a_missing_database_is_refused_rather_than_backed_up_empty(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            missing = root / "nowhere" / "warrioriq.sqlite3"
+            with patch.object(backup_runtime, "DB_PATH", missing), self.assertRaises(SystemExit):
+                backup_runtime.backup_database(root / "backups")
+            self.assertFalse(missing.exists())
+            self.assertFalse((root / "backups").exists())
+
+    def test_pruning_keeps_the_newest_and_touches_nothing_else(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stamps = ["20261101T020000Z", "20261102T020000Z", "20261103T020000Z"]
+            for stamp in stamps:
+                (root / f"warrioriq-{stamp}.sqlite3").write_bytes(b"x")
+                (root / f"warrioriq-{stamp}.json").write_text("{}", encoding="utf-8")
+            (root / "warrioriq-notes.sqlite3").write_bytes(b"mine")       # not this tool's name
+            (root / "other.txt").write_text("keep", encoding="utf-8")
+
+            self.assertEqual(backup_runtime.prune_backups(root, 0), [])
+            removed = backup_runtime.prune_backups(root, 2)
+
+            self.assertEqual(removed, ["warrioriq-20261101T020000Z.sqlite3", "warrioriq-20261101T020000Z.json"])
+            left = sorted(path.name for path in root.iterdir())
+            self.assertEqual(left, ["other.txt", "warrioriq-20261102T020000Z.json",
+                                    "warrioriq-20261102T020000Z.sqlite3", "warrioriq-20261103T020000Z.json",
+                                    "warrioriq-20261103T020000Z.sqlite3", "warrioriq-notes.sqlite3"])
+
 
 if __name__ == "__main__":
     unittest.main()
