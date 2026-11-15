@@ -559,6 +559,7 @@ PUBLIC_INDEX_ROUTES = (
     "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
     "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
     "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
+    "/muay-thai-fight-analysis", "/mma-fight-analysis",
     "/analyze", "/analyze/kickboxing", "/analyze/boxing", "/analyze/muay_thai",
     "/analyze/taekwondo", "/analyze/mma", "/scorer",
 )
@@ -663,6 +664,43 @@ SEARCH_GUIDES = {
                 "No. A scorecard is withheld when both fighters were not analysed or the evidence gates are not met."
                 if feature_is_on("scoring") else
                 "Not yet. Score estimates are coming once strikes can be counted accurately; reports show measured movement, guard, balance and coaching until then.")},
+        ],
+        "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
+    },
+    # Muay Thai and MMA (owner's brief, 2026-11-14: SEO pages, limited to what
+    # the analysis does). What is not observed comes from core.sport_policy
+    # (sport_unobserved); tests/test_seo_guides.py keeps the two in step.
+    "muay-thai-fight-analysis": {
+        "title": "Muay Thai Fight Analysis from Video | WarriorIQ",
+        "description": "Upload a Muay Thai fight or sparring video. WarriorIQ follows both fighters and measures movement, guard, balance and pressure, round by round, with honest limits on what video can show.",
+        "eyebrow": "Muay Thai fight analysis",
+        "heading": "Review a Muay Thai fight with the evidence in view.",
+        "intro": "WarriorIQ follows both fighters through the whole video and measures how each one moved: ring position, pressure, guard and balance, round by round. It says plainly what it cannot see in Muay Thai yet, instead of filling the gap with guesses.",
+        "sections": [
+            {"title": "What is measured", "body": "Both fighters are tracked from one tap on each at the start. The detailed report goes to the fighter you choose, with the opponent kept as context.", "items": ["Movement and ring-centre position", "Pressure: who walks forward and who gets backed up", "Guard (experimental) and post-action balance", *(["Punches, kicks and knees, as rough estimates"] if feature_is_on("strike_counts") else []), "A four-week training plan from your own numbers"]},
+            {"title": "What it does not see yet", "body": "Elbow strikes, clinch dominance and sweeps are not observed, so professional stadium-style scoring, where the clinch and sweeps carry weight, is not judged. The report says so rather than estimating them."},
+            {"title": "Training, not judging", "body": "Everything is for review and training. WarriorIQ is not an official judge, and any score estimate is a training estimate, never an event result."},
+        ],
+        "faqs": [
+            {"question": "Does it work on sparring and pad rounds?", "answer": "Sparring is analysed like a fight. For pad work or shadowboxing with one person, choose Solo session to get movement, guard and balance for that person only."},
+            {"question": "What footage works best?", "answer": "A stable, wide view with both fighters head to feet. Film from outside the ropes at chest height or higher, and avoid zooming and panning."},
+        ],
+        "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
+    },
+    "mma-fight-analysis": {
+        "title": "MMA Fight Analysis from Video | WarriorIQ",
+        "description": "Upload an MMA fight or sparring video. WarriorIQ follows both fighters and measures stand-up movement, pressure and time on the ground, round by round, with honest limits on what it cannot see yet.",
+        "eyebrow": "MMA fight analysis",
+        "heading": "Review the stand-up and the time on the ground.",
+        "intro": "WarriorIQ follows both fighters through an MMA fight and measures the stand-up: movement, pressure, guard and balance. It also measures how much of each round was spent on the ground. What happens on the ground, takedowns included, is not judged yet, and the report says so.",
+        "sections": [
+            {"title": "What is measured", "body": "Both fighters are tracked from one tap on each at the start; the detailed report goes to the fighter you choose.", "items": ["Stand-up movement, ring position and pressure", "Guard (experimental) and balance", "Time on the ground, round by round", *(["Punches, kicks and knees on the feet, as rough estimates"] if feature_is_on("strike_counts") else []), "A four-week training plan from your own numbers"]},
+            {"title": "What it does not see yet", "body": "Takedowns and takedown defence, who controls the ground, ground-and-pound, submission attempts, elbow strikes and damage are not observed. Those decide many MMA rounds, so a round is never judged on what the video cannot show."},
+            {"title": "Training, not judging", "body": "Everything is for review and training. WarriorIQ is not an official judge, and any score estimate is a training estimate, never an event result."},
+        ],
+        "faqs": [
+            {"question": "Can it tell the fighters apart on the ground?", "answer": "It keeps following both fighters, and when it cannot be sure who is who after they tangle up, it asks you to point them out again rather than guessing."},
+            {"question": "What footage works best?", "answer": "A stable, elevated view of the whole cage or ring with both fighters head to feet. Fence and net mesh in front of the lens make tracking harder."},
         ],
         "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
     },
@@ -10518,6 +10556,8 @@ def ringside_score(request: Request, payload: RingsidePayload):
 
 @app.get("/kickboxing-fight-analysis", response_class=HTMLResponse)
 @app.get("/k1-fight-analysis", response_class=HTMLResponse)
+@app.get("/muay-thai-fight-analysis", response_class=HTMLResponse)
+@app.get("/mma-fight-analysis", response_class=HTMLResponse)
 @app.get("/fight-video-analysis-for-coaches", response_class=HTMLResponse)
 @app.get("/how-to-record-a-fight-for-analysis", response_class=HTMLResponse)
 def search_guide_page(request: Request):
