@@ -1400,7 +1400,7 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 .who-check-status { margin: 12px 0 0; }
 #whoCheckFix { margin-top: 10px; }
 /* Tap your fighter, on the live page (owner, 2026-11-13). */
-.live-who { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 12px; align-items: center; margin: 10px 0 0; padding: 10px; border: 1px solid rgba(90, 169, 255, .45); border-radius: 18px; background: rgba(90, 169, 255, .08); }
+.live-who { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: center; margin: 10px 0 0; padding: 10px; border: 1px solid rgba(90, 169, 255, .45); border-radius: 18px; background: rgba(90, 169, 255, .08); }
 .live-who img { display: block; width: 100%; height: auto; border-radius: 12px; background: #05080d; }
 .live-who-copy { display: grid; gap: 6px; min-width: 0; }
 .live-who-copy small { color: #9aa6b8; font-size: 12px; }
@@ -1459,3 +1459,7 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 }
 .admin-alerts { display: grid; gap: 10px; }
 .admin-alerts .notice { margin: 0; max-width: none; }
+
+/* The live "draw your fighter" card (owner, 2026-11-15). */
+.live-who-stage { position: relative; max-width: 720px; }
+.live-who-stage canvas { position: absolute; inset: 0; cursor: crosshair; touch-action: none; border-radius: 12px; }

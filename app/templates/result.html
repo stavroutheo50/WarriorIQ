@@ -37,12 +37,13 @@
   <p class="muted">{% if identity_anchor_count %}This report already uses {{ identity_anchor_count }} of your answers. {% endif %}These are the moments, just after the two fighters crossed, where WarriorIQ was least sure who was who. Tap the box {{ names.A }} is in. If any are the other way round, WarriorIQ fixes the whole report.</p>
   <ol class="who-check-list">
     {% for q in crossing_questions %}{% set frame = q.ask_frame|string %}{% set given = identity_answers.get(frame) %}
-    <li class="who-check-item" data-frame="{{ frame }}">
+    <li class="who-check-item" data-frame="{{ frame }}"{% if frame in drawn_corrections %} data-drawn="{{ 'correction' if drawn_corrections[frame] else 'agrees' }}"{% endif %}>
       <img src="/result/{{ job_id }}/crossing/{{ frame }}.jpg" alt="The fight at {{ '%d:%02d'|format((q.ask_seconds // 60)|int, (q.ask_seconds % 60)|int) }}, with the two fighters boxed A and B" loading="lazy" width="480" height="270">
       <div class="who-check-answer">
         <span class="small muted">{{ '%d:%02d'|format((q.ask_seconds // 60)|int, (q.ask_seconds % 60)|int) }}</span>
         <button class="btn secondary" type="button" data-answer="A" aria-pressed="{{ 'true' if given == 'A' else 'false' }}">{{ names.A }} is in box A</button>
         <button class="btn secondary" type="button" data-answer="B" aria-pressed="{{ 'true' if given == 'B' else 'false' }}">{{ names.A }} is in box B</button>
+        {% if given and given is not string %}<span class="small muted">You drew {{ names.A }} here on the live page.</span>{% endif %}
       </div>
     </li>
     {% endfor %}
@@ -56,8 +57,10 @@
   const job=box.dataset.job,status=document.getElementById('whoCheckStatus'),fix=document.getElementById('whoCheckFix');
   const items=[...box.querySelectorAll('.who-check-item')];
   const show=()=>{
-    const answers=items.map(item=>item.querySelector('[aria-pressed="true"]')).filter(Boolean);
-    const swapped=answers.filter(button=>button.dataset.answer==='B').length;
+    // An item is answered by a tapped letter, or by a box drawn on the live page.
+    const answers=items.filter(item=>item.querySelector('[aria-pressed="true"]')||item.dataset.drawn);
+    const swapped=answers.filter(item=>{const pressed=item.querySelector('[aria-pressed="true"]');
+      return pressed?pressed.dataset.answer==='B':item.dataset.drawn==='correction'}).length;
     fix.hidden=swapped===0;
     status.textContent=answers.length===0?'':swapped?`${answers.length} of ${items.length} answered. ${swapped} ${swapped===1?'was':'were'} the other way round: press Fix who is who.`:`${answers.length} of ${items.length} answered, all as WarriorIQ had them.`;
   };

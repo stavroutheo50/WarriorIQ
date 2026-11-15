@@ -74,12 +74,16 @@
           was unsure about, the frame just after it with A and B boxed. The
           analysis does not wait; answers are kept and used to fix who is who
           once it finishes (core/crossings.py, /api/identity-answers). -#}
+      {#- Owner, 2026-11-15: the analysis's own A and B boxes were often what
+          was wrong, so the person draws their fighter on a plain picture
+          instead of choosing between them. -#}
+      {% set who_a = (fighter_names|default({}, true)).get('A', 'Fighter A') %}
       {% if not solo %}<div class="live-who" id="liveWho" hidden>
-        <img id="liveWhoImage" alt="The fight just after the two fighters crossed, boxed A and B" width="480" height="270">
+        <div class="live-who-stage" id="liveWhoStage"><img id="liveWhoImage" alt="The fight just after the two fighters crossed" width="480" height="270"><canvas id="liveWhoCanvas" aria-label="Drag a box around {{ who_a }}, head to feet"></canvas></div>
         <div class="live-who-copy">
-          <strong>Which box is {{ (fighter_names|default({}, true)).get('A', 'Fighter A') }}?</strong>
-          <small id="liveWhoNote">They just crossed. The analysis keeps going; your answer fixes who is who at the end.</small>
-          <div class="live-who-buttons"><button class="btn secondary" type="button" data-answer="A">Box A</button><button class="btn secondary" type="button" data-answer="B">Box B</button></div>
+          <strong>Draw a box around {{ who_a }}, head to feet.</strong>
+          <small id="liveWhoNote">They just crossed. The analysis keeps going; your box fixes who is who at the end.</small>
+          <div class="live-who-buttons"><button class="btn" type="button" id="liveWhoSave" disabled>Use this box</button><button class="btn secondary" type="button" id="liveWhoClear" disabled>Draw again</button></div>
         </div>
       </div>{% endif %}
       <p class="playback-ahead" id="playbackAhead" hidden>The video is ahead of the analysis frontier. Playback can continue; new detections will appear only after WarriorIQ reaches this moment.</p>
@@ -231,22 +235,46 @@ function renderFacts(d){
     if(a!==null&&b!==null){const dd=$('factStrikes');dd.replaceChildren();const ea=document.createElement('b'),eb=document.createElement('b');ea.className='fact-a';eb.className='fact-b';ea.textContent=a;eb.textContent=b;dd.append(ea,' – ',eb)}}
   if(d.quality_mode)set('factQuality',words(d.quality_mode));
 }
-let whoFrame=null;
+let whoFrame=null,whoBox=null,whoDrag=null;
+function whoDraw(){
+  const canvas=$('liveWhoCanvas'),img=$('liveWhoImage');if(!canvas||!img)return;
+  const w=img.clientWidth,h=img.clientHeight,ratio=window.devicePixelRatio||1;
+  canvas.width=Math.round(w*ratio);canvas.height=Math.round(h*ratio);canvas.style.width=w+'px';canvas.style.height=h+'px';
+  const g=canvas.getContext('2d');g.setTransform(ratio,0,0,ratio,0,0);g.clearRect(0,0,w,h);
+  const box=whoDrag||whoBox;if(!box)return;
+  const x=Math.min(box[0],box[2]),y=Math.min(box[1],box[3]),bw=Math.abs(box[2]-box[0]),bh=Math.abs(box[3]-box[1]);
+  g.fillStyle='rgba(90,169,255,.18)';g.fillRect(x,y,bw,bh);g.lineWidth=2;g.strokeStyle='#5aa9ff';g.strokeRect(x,y,bw,bh);
+}
+function whoPoint(event){const r=$('liveWhoCanvas').getBoundingClientRect();return[Math.max(0,Math.min(r.width,event.clientX-r.left)),Math.max(0,Math.min(r.height,event.clientY-r.top))]}
+function whoReset(){whoBox=null;whoDrag=null;$('liveWhoSave').disabled=true;$('liveWhoClear').disabled=true;whoDraw()}
 function renderWho(d){
   const card=$('liveWho');if(!card)return;
   const answers=d.identity_answers||{},questions=Array.isArray(d.crossing_questions)?d.crossing_questions:[];
   const open=questions.filter(q=>!(String(q.ask_frame) in answers));
   if(!open.length||d.status==='complete'){card.hidden=true;whoFrame=null;return}
   const q=open[0];
-  if(whoFrame!==String(q.ask_frame)){whoFrame=String(q.ask_frame);$('liveWhoImage').src=`/result/${encodeURIComponent(jobId)}/crossing/${whoFrame}.jpg`}
-  $('liveWhoNote').textContent=`At ${clock(q.ask_seconds)} they crossed${open.length>1?` (${open.length} to check)`:''}. The analysis keeps going; your answer fixes who is who at the end.`;
+  if(whoFrame!==String(q.ask_frame)){whoFrame=String(q.ask_frame);whoReset();$('liveWhoImage').src=`/result/${encodeURIComponent(jobId)}/crossing/${whoFrame}.jpg?plain=1`}
+  $('liveWhoNote').textContent=`At ${clock(q.ask_seconds)} they crossed${open.length>1?` (${open.length} to check)`:''}. The analysis keeps going; your box fixes who is who at the end.`;
   card.hidden=false;
 }
-document.querySelectorAll('#liveWho [data-answer]').forEach(button=>button.addEventListener('click',async()=>{
-  if(!whoFrame)return;const frame=whoFrame;
-  latestData.identity_answers={...(latestData.identity_answers||{}),[frame]:button.dataset.answer};renderWho(latestData);
-  try{await fetch(`/api/identity-answers/${encodeURIComponent(jobId)}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({answers:{[frame]:button.dataset.answer}})})}catch(error){}
-}));
+if($('liveWho')){
+  const canvas=$('liveWhoCanvas');
+  $('liveWhoImage').addEventListener('load',whoDraw);window.addEventListener('resize',whoDraw);
+  canvas.addEventListener('pointerdown',event=>{event.preventDefault();canvas.setPointerCapture(event.pointerId);const p=whoPoint(event);whoDrag=[p[0],p[1],p[0],p[1]];whoDraw()});
+  canvas.addEventListener('pointermove',event=>{if(!whoDrag)return;const p=whoPoint(event);whoDrag[2]=p[0];whoDrag[3]=p[1];whoDraw()});
+  const finish=()=>{if(!whoDrag)return;const b=whoDrag;whoDrag=null;
+    const box=[Math.min(b[0],b[2]),Math.min(b[1],b[3]),Math.max(b[0],b[2]),Math.max(b[1],b[3])];
+    if(box[2]-box[0]<12||box[3]-box[1]<12){whoDraw();return}
+    whoBox=box;$('liveWhoSave').disabled=false;$('liveWhoClear').disabled=false;whoDraw()};
+  canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',finish);
+  $('liveWhoClear').addEventListener('click',whoReset);
+  $('liveWhoSave').addEventListener('click',async()=>{
+    if(!whoFrame||!whoBox)return;const img=$('liveWhoImage'),sx=img.naturalWidth/img.clientWidth,sy=img.naturalHeight/img.clientHeight;
+    const frame=whoFrame,box=whoBox.map((v,i)=>Math.round(v*(i%2?sy:sx)*10)/10);
+    latestData.identity_answers={...(latestData.identity_answers||{}),[frame]:box};whoReset();renderWho(latestData);
+    try{await fetch(`/api/identity-answers/${encodeURIComponent(jobId)}`,{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({answers:{[frame]:box}})})}catch(error){}
+  });
+}
 function render(d){resetForRun(d);latestData=d;renderFacts(d);renderWho(d);const backendPercent=clamp(d.percent,0,100),percent=d.status==='complete'?100:Math.min(99.9,backendPercent),analysisDuration=Number(d.analysis_duration_seconds||d.video_duration_seconds||1),warmupVisible=!['analysis','report','complete'].includes(d.stage)&&!['error','interrupted','complete'].includes(d.status),view=d.stage_view||{step:1,steps:4,label:'Starting the analysis',percent:null,cursor:'Waiting for the first analysed frame'},stagePercent=view.percent===null||view.percent===undefined?null:clamp(view.percent,0,100),stageText=stagePercent===null?'…':`${Math.round(stagePercent)}%`;$('percent').textContent=stageText;$('stageCaption').textContent=`Step ${view.step} of ${view.steps} · ${view.label}`;window.wiqUpdateAnalysisChip?.({job_id:jobId,status:d.status,percent});$('percentInline').textContent=stageText;$('bar').style.width=`${stagePercent??0}%`;progressShell.setAttribute('aria-valuenow',(stagePercent??0).toFixed(1));progressShell.setAttribute('aria-valuetext',`Step ${view.step} of ${view.steps}, ${view.label}${stagePercent===null?'':`, ${Math.round(stagePercent)}%`}`);$('message').textContent=d.worker_refused?d.worker_refused:d.worker_offline?'The analysis computer is not connected right now. Your fight is saved and keeps its place in the queue; it starts as soon as the computer connects.':d.warming_up?'Starting the analysis: the analysis computer is loading its models. Your fight is next.':(d.message||d.status||'Analysis running');sinceStart={seconds:Number.isFinite(Number(d.since_start_seconds))&&d.since_start_seconds!==null?Number(d.since_start_seconds):null,at:Date.now()};renderTiming(d);$('quality').textContent=d.stage==='report'?'Full fight processed · Building report':`Round ${d.current_round??'—'} · ${words(d.quality_mode||'balanced')} quality`;$('videoStage').textContent=words(d.stage||d.status||'Preparing');$('analysisCursor').textContent=view.cursor;$('analysisFrontier').style.width=`${clamp(Number(d.processed_video_seconds||0)/analysisDuration)*100}%`;$('analysisWarmup').hidden=!warmupVisible;$('videoWrap').classList.toggle('is-warming',warmupVisible);if(warmupVisible)$('warmupStep').textContent=d.warming_up?'Warming up the analysis computer':view.label;setStages(d);renderEvents(d);renderStats(d);renderOverlay();refreshStill();startPlaybackWhenAnalysisStarts(d);if(d.status==='complete'){stopped=true;page.classList.add('analysis-complete');$('liveLabel').textContent='Analysis complete';$('completeActions').hidden=false;scheduleReportTransition(finishNavigation(d));}else if(d.status==='error'||d.status==='interrupted'){stopped=true;page.classList.add('analysis-error');$('liveLabel').textContent=d.status==='interrupted'?'Analysis paused safely':'Analysis needs attention';$('errorActions').hidden=false;$('restartAnalysis').hidden=d.status!=='interrupted';}else{$('liveLabel').textContent=d.paused_for_update?'Paused for an update':d.status==='queued'?'Waiting for analysis worker':'Analysis running';}}
 async function poll(){if(stopped)return;try{const response=await fetch(`/api/status/${jobId}`,{cache:'no-store'}),data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not read analysis status');retryDelay=900;render(data);}catch(error){$('liveLabel').textContent='Reconnecting…';$('message').textContent=`Connection lost. WarriorIQ is retrying automatically. ${error.message}`;retryDelay=Math.min(8000,retryDelay*1.6);}if(!stopped)setTimeout(poll,document.hidden?2500:retryDelay);}
 $('restartAnalysis').addEventListener('click',async()=>{const button=$('restartAnalysis');button.disabled=true;button.textContent='Restarting…';try{const response=await fetch(`/api/restart/${jobId}`,{method:'POST',headers:wiqCsrfHeaders()}),data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not restart analysis');stopped=false;$('errorActions').hidden=true;page.classList.remove('analysis-error');retryDelay=300;poll();}catch(error){button.disabled=false;button.textContent='Restart preserved analysis';$('message').textContent=error.message;}});
