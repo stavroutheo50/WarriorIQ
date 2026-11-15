@@ -3879,6 +3879,7 @@ def home(request: Request):
             "profile": profile,
             "version": SETTINGS.version,
             "allowance": analysis_allowance(int(account["id"])) if account else None,
+            "video_retention_days": SETTINGS.saved_video_retention_days,
             **_home_sections(),
         },
     )

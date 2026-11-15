@@ -1412,3 +1412,13 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 @media (min-width: 1000px) {
   .live-analysis-page .live-video-card > .live-who { grid-column: 1 / -1; }
 }
+
+/* Homepage additions (owner's brief, 2026-11-14): the longer headline, and the
+   two-column "who it's for" and "your footage" blocks. */
+.hx-title.hx-title-long { font-size: clamp(44px, 6.6vw, 96px) !important; }
+.hx-measures.hx-two { grid-template-columns: repeat(2, 1fr); }
+.hx-measures.hx-two .hx-measure { min-height: 0; }
+.hx-list { display: grid; gap: 8px; margin: 0; padding-left: 18px; color: #c3cad8; font-size: 15px; }
+@media (max-width: 900px) {
+  .hx-measures.hx-two { grid-template-columns: 1fr; }
+}

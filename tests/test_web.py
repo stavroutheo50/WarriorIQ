@@ -1034,7 +1034,7 @@ class PublicPageTests(unittest.TestCase):
 
         self.assertIn('/assets/base.css', shell)
         self.assertIn("product.css", CSS_BUNDLES["base"])
-        self.assertIn("In numbers.", home)
+        self.assertIn("Improve your game.", home)
         # The report excerpt is gone (owner, 2026-11-09): its strike numbers
         # were a selling point the counts cannot yet support.
         self.assertNotIn('class="home-proof"', home)
@@ -1201,8 +1201,14 @@ class PublicPageTests(unittest.TestCase):
 
     def test_home_copy_uses_the_warrioriq_combat_sports_voice(self):
         page = self.client.get("/").text
-        # The glass homepage headline (owner, 2026-10-28).
-        self.assertIn("Your fight.<br><em>In numbers.</em>", page)
+        # The homepage headline (owner's brief, 2026-11-14; it was "Your
+        # fight. In numbers." from 2026-10-28).
+        self.assertIn("Understand your performance.<br><em>Improve your game.</em>", page)
+        # Who it is for, and what happens to the footage - each line something
+        # the product does now.
+        self.assertIn('id="whoTitle"', page)
+        self.assertIn('id="trustTitle"', page)
+        self.assertIn("Saved videos are deleted after 30 days.", page)
         self.assertNotIn("WonderIQ", page)
         # "Frame by frame" is industry shorthand a fighter does not read as a
         # promise. The headline says what they get instead.
