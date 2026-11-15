@@ -6,6 +6,7 @@
   <div class="eyebrow">Gym invitation</div>
   <h1 id="gymInviteTitle">Join {{ org_name }} as {{ 'a coach' if role == 'coach' else 'an athlete' }}</h1>
   {% if own_invite %}<p class="muted">This is an invitation from your own gym. Send the link to the person you invited.</p>
+  {% elif wrong_account %}<p class="notice">This coach invitation was sent to a different email address. Sign out and sign in with that account to accept it.</p>
   {% elif minor %}<p class="notice">Accounts under 18 cannot join a gym as an athlete yet: that needs a parent or guardian's consent, which WarriorIQ does not collect for gyms.</p>
   {% else %}
   {% if role == 'athlete' %}<p>If you join, the coaches of {{ org_name }} can read your fight reports, without changing them and without the original video, and leave you notes and training objectives.</p>

@@ -120,3 +120,28 @@ def test_deleting_the_owner_removes_the_gym():
     _post(member_client, f"/gym/invite/{token}/answer", {"answer": "accept"})
     db.delete_account(int(owner["id"]))
     assert db.memberships_of(int(member["profile_id"])) == []
+
+
+def test_a_coach_invitation_works_only_for_the_email_it_was_sent_to():
+    owner, _, owner_client = _person()
+    _post(owner_client, "/gym/create", {"name": "Gym"})
+    intended, intended_email, intended_client = _person()
+    stranger, _, stranger_client = _person()
+    token = _invite(owner_client, intended_email, "coach")
+    assert "sent to a different email address" in stranger_client.get(f"/gym/invite/{token}").text
+    assert _post(stranger_client, f"/gym/invite/{token}/answer", {"answer": "accept"}).status_code == 403
+    assert db.memberships_of(int(stranger["profile_id"])) == []
+    assert _post(intended_client, f"/gym/invite/{token}/answer", {"answer": "accept"}).status_code == 303
+    assert [m["role"] for m in db.memberships_of(int(intended["profile_id"]))] == ["coach"]
+
+
+def test_a_coach_must_have_verified_the_address_when_email_works():
+    owner, _, owner_client = _person()
+    _post(owner_client, "/gym/create", {"name": "Gym"})
+    coach, coach_email, coach_client = _person()
+    token = _invite(owner_client, coach_email, "coach")
+    with patch.object(web, "email_settings_problem", return_value=None), \
+         patch.object(web, "_account", side_effect=lambda request, _real=web._account: {
+             **(_real(request) or {}), "email_verified_at": None} if _real(request) else None):
+        refused = _post(coach_client, f"/gym/invite/{token}/answer", {"answer": "accept"})
+    assert refused.status_code == 403 and db.memberships_of(int(coach["profile_id"])) == []

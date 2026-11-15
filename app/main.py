@@ -9207,10 +9207,13 @@ def gym_invite_page(request: Request, token: str):
     profile_id = _profile_id(request)
     if profile_id is None:
         return RedirectResponse(f"/login?next=/gym/invite/{token}", status_code=303)
+    account = _account(request) or {}
     return templates.TemplateResponse(
         request=request, name="gym_invite.html",
         context={"request": request, "token": token, "org_name": invite["org_name"], "role": invite["role"],
                  "own_invite": int(invite["owner_profile_id"]) == profile_id,
+                 "wrong_account": invite["role"] == "coach" and str(account.get("email") or "").strip().lower()
+                 != str(invite.get("invite_email") or "").strip().lower(),
                  "minor": invite["role"] == "athlete" and social.is_minor_account(get_account_by_profile(profile_id))})
 
 
@@ -9229,6 +9232,17 @@ def gym_invite_answer(request: Request, token: str, answer: str = Form(...)):
         raise HTTPException(409, "This is your own gym.")
     if accept and invite["role"] == "athlete" and social.is_minor_account(account):
         raise HTTPException(403, "Under-18 accounts cannot join a gym as an athlete yet.")
+    # A coach's place reads other people's reports, so only the person it was
+    # sent to can take it: a forwarded or leaked link is not enough. (Joining
+    # as an athlete shares only the joiner's own fights.)
+    if accept and invite["role"] == "coach" and \
+            str(account.get("email") or "").strip().lower() != str(invite.get("invite_email") or "").strip().lower():
+        raise HTTPException(403, "This coach invitation was sent to a different email address. "
+                                 "Sign in with that account to accept it.")
+    # And that address must be proven theirs when it can be: anyone can sign
+    # up with an address they do not own while verification is optional.
+    if accept and invite["role"] == "coach" and not account.get("email_verified_at") and not email_settings_problem():
+        raise HTTPException(403, "Verify your email address first (Settings), then accept this coach invitation.")
     if not answer_org_invite(int(invite["id"]), profile_id, accept):
         raise HTTPException(404, GYM_INVITE_GONE)
     record_security_event("gym_invite_accepted" if accept else "gym_invite_declined",
