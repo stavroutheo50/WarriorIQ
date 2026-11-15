@@ -74,6 +74,8 @@ from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
     HandleTaken, accept_follow, count_follows, follow_status,
+    answer_org_invite, create_org_invite, create_organisation, end_org_membership, gym_athletes_for_coach,
+    memberships_of, org_invite_by_token, organisation_members, organisation_owned_by,
     add_coach_note, answer_coach_invite, coach_can_view, coach_invite_by_token, coach_links_for_athlete,
     coach_links_for_coach, create_coach_invite, end_coach_link, list_coach_notes, get_account_by_profile, get_profile_by_handle, search_profiles_by_handle,
     list_follows, remove_follow, request_follow, set_public_profile,
@@ -852,7 +854,7 @@ def _trusted_request_host(value: str) -> bool:
 # (resetting a password, approving an account, reading a shared report,
 # accepting a coach's invitation). Never written to the log (2026-11-15).
 _SECRET_PATH = re.compile(
-    r"^(/(?:reset-password|verify-email|guardian/approve|settings/email/confirm|s|coaching/invite)/)[^/]+")
+    r"^(/(?:reset-password|verify-email|guardian/approve|settings/email/confirm|s|coaching/invite|gym/invite)/)[^/]+")
 
 
 def _loggable_path(path: str) -> str:
@@ -8906,6 +8908,8 @@ def coaching_page(request: Request, invite: str = "", notice: str = "", error: s
                  "my_coaches": coach_links_for_athlete(profile_id),
                  "notes": list_coach_notes(profile_id),
                  "athletes": coach_links_for_coach(profile_id) if is_coach else [],
+                 # Athletes this person can see because they coach in a gym.
+                 "gym_athletes": gym_athletes_for_coach(profile_id),
                  "seats": _coach_seats(request, profile_id) if is_coach else None,
                  # The invitation link, shown once, right after it is made.
                  "invite_url": (f"{_public_base(request).rstrip('/')}/coaching/invite/{invite}"
@@ -9065,6 +9069,146 @@ def coaching_add_objective(request: Request, athlete_profile_id: int, title: str
     add_assignment(athlete_profile_id, title, detail.strip()[:1000], assigned_by_profile_id=coach_id)
     return RedirectResponse(f"/coaching/athletes/{athlete_profile_id}?" + urlencode(
         {"notice": "Objective added. It shows in their Fight Camp missions."}), status_code=303)
+
+
+# ---- Gyms: coaches and athletes under one organisation ---------------------
+#
+# Owner's brief, 2026-11-14. The owner invites coaches and athletes by email;
+# each joins only by accepting while signed in. An athlete who joins lets the
+# gym's coaches read their reports (app.main._linked_athlete via
+# core.db.coach_can_view) until they leave or are removed.
+
+GYM_INVITE_GONE = "This gym invitation has expired, was withdrawn or was already answered. Ask the gym for a new one."
+
+
+def _gym_seats(request: Request, org_id: int) -> dict:
+    """Athletes in the gym, active or invited, against the owner's plan."""
+    athletes = [m for m in organisation_members(org_id) if m["role"] == "athlete"]
+    return roster_capacity(_request_plan(request), len(athletes))
+
+
+@app.get("/gym", response_class=HTMLResponse)
+def gym_page(request: Request, invite: str = "", notice: str = "", error: str = ""):
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/gym", status_code=303)
+    owned = organisation_owned_by(profile_id)
+    return templates.TemplateResponse(
+        request=request, name="gym.html",
+        context={"request": request, "owned": owned,
+                 "members": organisation_members(int(owned["id"])) if owned else [],
+                 "seats": _gym_seats(request, int(owned["id"])) if owned else None,
+                 "memberships": [m for m in memberships_of(profile_id) if m["role"] != "owner"],
+                 "invite_url": (f"{_public_base(request).rstrip('/')}/gym/invite/{invite}"
+                                if invite and re.fullmatch(r"[A-Za-z0-9_-]{20,100}", invite) else None),
+                 "notice": notice[:200], "error": error[:200]})
+
+
+@app.post("/gym/create", dependencies=[Depends(require_csrf)])
+def gym_create(request: Request, name: str = Form(...)):
+    _enforce_rate_limit(request, "gym-create", 5, 3600)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse("/login?next=/gym", status_code=303)
+    if organisation_owned_by(profile_id):
+        return RedirectResponse("/gym", status_code=303)
+    name = name.strip()
+    if not name:
+        return RedirectResponse("/gym?" + urlencode({"error": "Give your gym a name."}), status_code=303)
+    create_organisation(profile_id, name)
+    record_security_event("gym_created", account_id=int(account["id"]), resource_type="organisation")
+    return RedirectResponse("/gym?" + urlencode({"notice": "Gym created. Invite your coaches and athletes."}),
+                            status_code=303)
+
+
+@app.post("/gym/invite", dependencies=[Depends(require_csrf)])
+def gym_invite(request: Request, email: str = Form(...), role: str = Form("athlete")):
+    _enforce_rate_limit(request, "gym-invite", 40, 3600)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse("/login?next=/gym", status_code=303)
+    owned = organisation_owned_by(profile_id)
+    if not owned:
+        raise HTTPException(404)
+    role = role if role in {"coach", "athlete"} else "athlete"
+    email = email.strip().lower()
+    if not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}", email) or email == str(account.get("email") or "").lower():
+        return RedirectResponse("/gym?" + urlencode({"error": "Enter the person's email address."}), status_code=303)
+    if role == "athlete" and not _gym_seats(request, int(owned["id"]))["can_add"]:
+        return RedirectResponse("/gym?" + urlencode(
+            {"error": "Every athlete seat on your plan is taken. Remove an athlete or an invitation first."}),
+            status_code=303)
+    token = session_token()
+    create_org_invite(int(owned["id"]), role, email, token_digest(token))
+    link = f"{_public_base(request).rstrip('/')}/gym/invite/{token}"
+    what = ("If you join as an athlete, the gym's coaches can read your fight reports (not change them). "
+            if role == "athlete" else "As a coach you can read the reports of the gym's athletes. ")
+    sent = True
+    try:
+        deliver_email(email, f"Join {owned['name']} on WarriorIQ",
+                      f"{owned['name']} has invited you to join their gym on WarriorIQ as "
+                      f"{'a coach' if role == 'coach' else 'an athlete'}.\n\n{what}"
+                      f"You can leave at any time from Gym in your account.\n\nSee the invitation: {link}\n\n"
+                      f"It expires in 14 days. If you do not know this gym, ignore this email.")
+    except EmailNotSent:
+        sent = False
+    record_security_event("gym_invite_created", account_id=int(account["id"]), resource_type="organisation",
+                          resource_id=str(owned["id"]), metadata={"role": role, "emailed": sent})
+    notice = ("Invitation emailed. You can also send them this link yourself:" if sent
+              else "Email is not set up, so send them this link yourself:")
+    return RedirectResponse("/gym?" + urlencode({"invite": token, "notice": notice}), status_code=303)
+
+
+@app.get("/gym/invite/{token}", response_class=HTMLResponse)
+def gym_invite_page(request: Request, token: str):
+    invite = org_invite_by_token(token_digest(token))
+    if not invite:
+        raise HTTPException(404, GYM_INVITE_GONE)
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse(f"/login?next=/gym/invite/{token}", status_code=303)
+    return templates.TemplateResponse(
+        request=request, name="gym_invite.html",
+        context={"request": request, "token": token, "org_name": invite["org_name"], "role": invite["role"],
+                 "own_invite": int(invite["owner_profile_id"]) == profile_id,
+                 "minor": invite["role"] == "athlete" and social.is_minor_account(get_account_by_profile(profile_id))})
+
+
+@app.post("/gym/invite/{token}/answer", dependencies=[Depends(require_csrf)])
+def gym_invite_answer(request: Request, token: str, answer: str = Form(...)):
+    _enforce_rate_limit(request, "gym-invite-answer", 20, 3600)
+    invite = org_invite_by_token(token_digest(token))
+    if not invite:
+        raise HTTPException(404, GYM_INVITE_GONE)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse(f"/login?next=/gym/invite/{token}", status_code=303)
+    accept = answer == "accept"
+    if accept and int(invite["owner_profile_id"]) == profile_id:
+        raise HTTPException(409, "This is your own gym.")
+    if accept and invite["role"] == "athlete" and social.is_minor_account(account):
+        raise HTTPException(403, "Under-18 accounts cannot join a gym as an athlete yet.")
+    if not answer_org_invite(int(invite["id"]), profile_id, accept):
+        raise HTTPException(404, GYM_INVITE_GONE)
+    record_security_event("gym_invite_accepted" if accept else "gym_invite_declined",
+                          account_id=int(account["id"]), resource_type="organisation",
+                          resource_id=str(invite["org_id"]), metadata={"role": invite["role"]})
+    notice = f"You joined {invite['org_name']}." if accept else "Invitation declined."
+    return RedirectResponse("/gym?" + urlencode({"notice": notice}), status_code=303)
+
+
+@app.post("/gym/members/{member_id}/end", dependencies=[Depends(require_csrf)])
+def gym_end_membership(request: Request, member_id: int):
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account or not end_org_membership(member_id, profile_id):
+        raise HTTPException(404)
+    record_security_event("gym_membership_ended", account_id=int(account["id"]), resource_type="org_member",
+                          resource_id=str(member_id))
+    return RedirectResponse("/gym?" + urlencode({"notice": "Done."}), status_code=303)
 
 
 @app.get("/coach")
@@ -10722,6 +10866,10 @@ def export_account_data(request: Request, password: str = Form(...),
         "coach_assignments": list_assignments(profile_id),
         # Coaches who can see this account's fights, athletes who let this
         # account see theirs, and coaches' notes on this athlete.
+        "gyms": {
+            "member_of": memberships_of(profile_id),
+            "owned": organisation_owned_by(profile_id),
+        },
         "coaching": {
             "my_coaches": [{k: v for k, v in link.items() if k != "token_hash"}
                            for link in coach_links_for_athlete(profile_id)],

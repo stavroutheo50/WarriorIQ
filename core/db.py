@@ -669,6 +669,37 @@ def _init_db_schema() -> None:
                )"""
         )
         con.execute("CREATE INDEX IF NOT EXISTS idx_coach_notes_athlete ON coach_notes(athlete_profile_id, id)")
+        # Gyms and organisations (owner's brief, 2026-11-14). People join only
+        # by accepting an invitation while signed in; an athlete who joins
+        # lets the gym's coaches read their reports, and can leave at any time.
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS organisations (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name TEXT NOT NULL,
+                   owner_profile_id INTEGER NOT NULL,
+                   created_at TEXT NOT NULL,
+                   FOREIGN KEY(owner_profile_id) REFERENCES profiles(id)
+               )"""
+        )
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS org_members (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   org_id INTEGER NOT NULL,
+                   profile_id INTEGER,
+                   role TEXT NOT NULL,
+                   status TEXT NOT NULL DEFAULT 'pending',
+                   invite_email TEXT NOT NULL DEFAULT '',
+                   token_hash TEXT UNIQUE,
+                   created_at TEXT NOT NULL,
+                   expires_at TEXT,
+                   responded_at TEXT,
+                   ended_at TEXT,
+                   FOREIGN KEY(org_id) REFERENCES organisations(id),
+                   FOREIGN KEY(profile_id) REFERENCES profiles(id)
+               )"""
+        )
+        con.execute("CREATE INDEX IF NOT EXISTS idx_org_members_org ON org_members(org_id, status)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_org_members_profile ON org_members(profile_id, status)")
         # Which coach set a training objective, when a linked coach did. Null
         # for the athlete's own (every existing row).
         assignment_columns = {row[1] for row in con.execute("PRAGMA table_info(coach_assignments)").fetchall()}
@@ -2538,6 +2569,12 @@ def delete_account(account_id: int) -> dict | None:
                     (profile_id, profile_id))
         con.execute("DELETE FROM coach_notes WHERE coach_profile_id=? OR athlete_profile_id=?",
                     (profile_id, profile_id))
+        # A gym this account owns goes with it, members and all; elsewhere it
+        # simply stops being a member.
+        con.execute("DELETE FROM org_members WHERE org_id IN (SELECT id FROM organisations WHERE owner_profile_id=?)",
+                    (profile_id,))
+        con.execute("DELETE FROM organisations WHERE owner_profile_id=?", (profile_id,))
+        con.execute("DELETE FROM org_members WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM legal_acceptances WHERE profile_id=?", (profile_id,))
         con.execute("DELETE FROM analysis_usage WHERE account_id=?", (account_id,))
         con.execute("DELETE FROM upload_leases WHERE account_id=?", (account_id,))
@@ -3068,11 +3105,20 @@ def coach_links_for_athlete(athlete_profile_id: int) -> list[dict]:
 
 
 def coach_can_view(coach_profile_id: int, athlete_profile_id: int) -> bool:
+    """A direct link the athlete accepted, or a gym where they are an athlete and the coach coaches."""
+    if int(coach_profile_id) == int(athlete_profile_id):
+        return False
     init_db()
     with connection() as con:
         row = con.execute(
             "SELECT 1 FROM coach_links WHERE coach_profile_id=? AND athlete_profile_id=? AND status='active'",
             (int(coach_profile_id), int(athlete_profile_id))).fetchone()
+        if row is None:
+            row = con.execute(
+                """SELECT 1 FROM org_members c JOIN org_members a ON a.org_id = c.org_id
+                   WHERE c.profile_id=? AND c.status='active' AND c.role IN ('owner','coach')
+                     AND a.profile_id=? AND a.status='active' AND a.role='athlete'""",
+                (int(coach_profile_id), int(athlete_profile_id))).fetchone()
     return row is not None
 
 
@@ -3097,4 +3143,130 @@ def list_coach_notes(athlete_profile_id: int, coach_profile_id: int | None = Non
         params.append(int(coach_profile_id))
     with connection() as con:
         rows = con.execute(query + " ORDER BY n.id DESC LIMIT 200", tuple(params)).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ---- Gyms and organisations (owner's brief, 2026-11-14) --------------------
+
+ORG_ROLES = ("coach", "athlete")
+
+
+def create_organisation(owner_profile_id: int, name: str) -> dict:
+    """A gym, with its creator as its owner (who also coaches in it)."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        cursor = con.execute("INSERT INTO organisations(name,owner_profile_id,created_at) VALUES(?,?,?)",
+                             (name.strip()[:80], int(owner_profile_id), now))
+        org_id = int(cursor.lastrowid)
+        con.execute("""INSERT INTO org_members(org_id,profile_id,role,status,created_at,responded_at)
+                       VALUES(?,?,'owner','active',?,?)""", (org_id, int(owner_profile_id), now, now))
+        return dict(con.execute("SELECT * FROM organisations WHERE id=?", (org_id,)).fetchone())
+
+
+def organisation_owned_by(profile_id: int) -> dict | None:
+    init_db()
+    with connection() as con:
+        row = con.execute("SELECT * FROM organisations WHERE owner_profile_id=? ORDER BY id LIMIT 1",
+                          (int(profile_id),)).fetchone()
+    return dict(row) if row else None
+
+
+def memberships_of(profile_id: int) -> list[dict]:
+    """The gyms this profile is an active member of, with the gym's name."""
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            """SELECT m.*, o.name AS org_name, o.owner_profile_id FROM org_members m
+               JOIN organisations o ON o.id = m.org_id WHERE m.profile_id=? AND m.status='active' ORDER BY o.name""",
+            (int(profile_id),)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def organisation_members(org_id: int) -> list[dict]:
+    """Active members and unexpired invitations, with names."""
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            """SELECT m.id, m.org_id, m.profile_id, m.role, m.status, m.invite_email, m.created_at,
+                      m.expires_at, m.responded_at, p.display_name AS name, p.handle AS handle
+               FROM org_members m LEFT JOIN profiles p ON p.id = m.profile_id
+               WHERE m.org_id=? AND (m.status='active' OR (m.status='pending' AND m.expires_at>?))
+               ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'coach' THEN 1 ELSE 2 END, m.status, name""",
+            (int(org_id), datetime.now(timezone.utc).isoformat())).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_org_invite(org_id: int, role: str, email: str, token_hash: str) -> dict:
+    if role not in ORG_ROLES:
+        raise ValueError("role")
+    init_db()
+    now = datetime.now(timezone.utc)
+    with connection() as con:
+        cursor = con.execute(
+            """INSERT INTO org_members(org_id,role,status,invite_email,token_hash,created_at,expires_at)
+               VALUES(?,?,'pending',?,?,?,?)""",
+            (int(org_id), role, email.strip().lower()[:254], token_hash, now.isoformat(),
+             (now + timedelta(days=COACH_INVITE_DAYS)).isoformat()))
+        return dict(con.execute("SELECT * FROM org_members WHERE id=?", (cursor.lastrowid,)).fetchone())
+
+
+def org_invite_by_token(token_hash: str) -> dict | None:
+    init_db()
+    with connection() as con:
+        row = con.execute(
+            """SELECT m.*, o.name AS org_name, o.owner_profile_id FROM org_members m
+               JOIN organisations o ON o.id = m.org_id
+               WHERE m.token_hash=? AND m.status='pending' AND m.expires_at>?""",
+            (token_hash, datetime.now(timezone.utc).isoformat())).fetchone()
+    return dict(row) if row else None
+
+
+def answer_org_invite(member_id: int, profile_id: int, accept: bool) -> bool:
+    """The invitee's answer. Someone already active in the gym is not added twice."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        row = con.execute("SELECT * FROM org_members WHERE id=? AND status='pending'", (int(member_id),)).fetchone()
+        if not row:
+            return False
+        if accept and con.execute("SELECT 1 FROM org_members WHERE org_id=? AND profile_id=? AND status='active'",
+                                  (row["org_id"], int(profile_id))).fetchone():
+            con.execute("UPDATE org_members SET status='ended',ended_at=? WHERE id=?", (now, int(member_id)))
+            return True
+        con.execute("UPDATE org_members SET status=?,profile_id=?,responded_at=?,token_hash=NULL WHERE id=?",
+                    ("active" if accept else "declined", int(profile_id), now, int(member_id)))
+    return True
+
+
+def end_org_membership(member_id: int, actor_profile_id: int) -> bool:
+    """The owner removes a member or withdraws an invitation; a member leaves. The owner cannot leave."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        row = con.execute(
+            """SELECT m.*, o.owner_profile_id FROM org_members m JOIN organisations o ON o.id = m.org_id
+               WHERE m.id=? AND m.status IN ('pending','active')""", (int(member_id),)).fetchone()
+        if not row or row["role"] == "owner":
+            return False
+        if int(actor_profile_id) not in {int(row["owner_profile_id"]), int(row["profile_id"] or -1)}:
+            return False
+        con.execute("UPDATE org_members SET status='ended',ended_at=?,token_hash=NULL WHERE id=?",
+                    (now, int(member_id)))
+    return True
+
+
+def gym_athletes_for_coach(coach_profile_id: int) -> list[dict]:
+    """Athletes a coach can see through their gyms, with the gym's name."""
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            """SELECT DISTINCT a.profile_id AS athlete_profile_id, p.display_name AS athlete_name,
+                      p.handle AS athlete_handle, o.name AS org_name
+               FROM org_members c JOIN org_members a ON a.org_id = c.org_id
+               JOIN organisations o ON o.id = c.org_id LEFT JOIN profiles p ON p.id = a.profile_id
+               WHERE c.profile_id=? AND c.status='active' AND c.role IN ('owner','coach')
+                 AND a.status='active' AND a.role='athlete' AND a.profile_id<>?
+               ORDER BY athlete_name""",
+            (int(coach_profile_id), int(coach_profile_id))).fetchall()
     return [dict(row) for row in rows]
