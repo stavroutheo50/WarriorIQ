@@ -2550,7 +2550,9 @@ class TransactionalEmailConfigTests(unittest.TestCase):
         )
         # An address already given is left exactly alone.
         self.assertEqual(_from_header("WarriorIQ <a@b.com>", "x@y.com"), "WarriorIQ <a@b.com>")
-        self.assertEqual(_from_header("", "warrioriqai@gmail.com"), "warrioriqai@gmail.com")
+        # A bare address, or none, still shows the brand name in the inbox.
+        self.assertEqual(_from_header("", "warrioriqai@gmail.com"), "WarriorIQ <warrioriqai@gmail.com>")
+        self.assertEqual(_from_header("hello@warrioriq.eu", "x@y.com"), "WarriorIQ <hello@warrioriq.eu>")
         # Nothing usable at all must not produce a header of pure nonsense.
         self.assertEqual(_from_header("WarriorIQ", ""), "")
 

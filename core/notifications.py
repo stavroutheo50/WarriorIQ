@@ -7,6 +7,7 @@ import ssl
 from email.message import EmailMessage
 
 from core.config import SETTINGS
+from core.email_html import render_email_html
 
 
 LOGGER = logging.getLogger("warrioriq.notifications")
@@ -22,11 +23,15 @@ def _from_header(configured: str, username: str) -> str:
     through untouched, so a correctly configured server behaves exactly as
     before.
     """
-    if "@" in configured:
+    # A bare address shows in the inbox as just the address; the brand name in
+    # front is what makes it read "WarriorIQ" (owner, 2026-11-15).
+    if "<" in configured:
         return configured
+    if "@" in configured:
+        return f"WarriorIQ <{configured.strip()}>"
     if not username:
         return ""
-    return f"{configured} <{username}>" if configured else username
+    return f"{configured or 'WarriorIQ'} <{username}>"
 
 
 class EmailNotSent(Exception):
@@ -82,6 +87,9 @@ def deliver_email(recipient: str, subject: str, body: str) -> None:
     message["To"] = recipient
     message["Subject"] = subject
     message.set_content(body)
+    # The branded HTML version of the same text (core/email_html.py); mail apps
+    # that show only text keep the plain body above.
+    message.add_alternative(render_email_html(subject, body, getattr(SETTINGS, "public_base_url", "")), subtype="html")
     context = ssl.create_default_context()
     try:
         # Port 465 speaks TLS from the first byte; 587 (and 25) start plain and
