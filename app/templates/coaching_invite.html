@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block head %}<meta name="robots" content="noindex">{% endblock %}
+{% block title %}Coaching invitation · WarriorIQ{% endblock %}
+{% block content %}
+<section class="card coaching-invite" aria-labelledby="inviteTitle">
+  <div class="eyebrow">Coaching invitation</div>
+  <h1 id="inviteTitle">{{ coach_name }}{% if coach_handle %} <span class="muted">@{{ coach_handle }}</span>{% endif %} wants to coach you</h1>
+  {% if own_invite %}<p class="muted">This is an invitation you sent. Send the link to the athlete; they accept it from their own account.</p>
+  {% elif minor %}<p class="notice">Accounts under 18 cannot share their fights with a coach yet: that needs a parent or guardian's consent, which WarriorIQ does not collect for coaching. Your coach can still use the free Ringside Scorer with you.</p>
+  {% else %}
+  <p>If you accept, {{ coach_name }} can:</p>
+  <ul>
+    <li>read your fight reports, without changing them and without the original video;</li>
+    <li>leave you notes and add training objectives to your Fight Camp.</li>
+  </ul>
+  <p class="muted">You can stop sharing at any time from Coaching in your account menu. Only accept if you know this person.</p>
+  <form action="/coaching/invite/{{ token }}/answer" method="post" class="row"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <button class="btn" type="submit" name="answer" value="accept">Accept</button>
+    <button class="btn secondary" type="submit" name="answer" value="decline">Decline</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

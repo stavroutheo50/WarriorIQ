@@ -73,7 +73,9 @@ from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
-    HandleTaken, accept_follow, count_follows, follow_status, get_account_by_profile, get_profile_by_handle, search_profiles_by_handle,
+    HandleTaken, accept_follow, count_follows, follow_status,
+    add_coach_note, answer_coach_invite, coach_can_view, coach_invite_by_token, coach_links_for_athlete,
+    coach_links_for_coach, create_coach_invite, end_coach_link, list_coach_notes, get_account_by_profile, get_profile_by_handle, search_profiles_by_handle,
     list_follows, remove_follow, request_follow, set_public_profile,
     add_assignment, analysis_allowance, apply_subscription_change, award_points, link_camp_mission, list_camp_missions,
     list_points, list_training_sessions, record_training_session, redeem_points_for_analysis, apply_checkout_event, consume_email_verification_token,
@@ -844,6 +846,17 @@ def _trusted_request_host(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+# Paths that carry a secret: the token in them is a password for one action
+# (resetting a password, approving an account, reading a shared report,
+# accepting a coach's invitation). Never written to the log (2026-11-15).
+_SECRET_PATH = re.compile(
+    r"^(/(?:reset-password|verify-email|guardian/approve|settings/email/confirm|s|coaching/invite)/)[^/]+")
+
+
+def _loggable_path(path: str) -> str:
+    return _SECRET_PATH.sub(r"\1[token]", path)
 
 
 def _public_base(request: Request) -> str:
@@ -2244,7 +2257,7 @@ async def viewer_context(request: Request, call_next):
     response.headers.setdefault("Server-Timing", f"app;dur={duration_ms:.1f}")
     LOGGER.info(
         "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
-        request_id, request.method, request.url.path, response.status_code, duration_ms,
+        request_id, request.method, _loggable_path(request.url.path), response.status_code, duration_ms,
     )
     if _is_counted_page_view(request, response):
         try:
@@ -8858,6 +8871,202 @@ def compare_page(request: Request, a: str = "", b: str = "", include_failed: str
     )
 
 
+# ---- Coaching: a coach sees an athlete's fights with their consent ----------
+#
+# Owner's brief, 2026-11-14: "Coaches must only access athletes who have
+# explicitly granted them permission." A coach invites an athlete by email; the
+# athlete, signed in to their own account, accepts; from then on the coach can
+# read that athlete's reports (read-only), and add notes and training
+# objectives, until either of them ends it. Under-18 athletes cannot accept
+# yet: that needs a parent or guardian's consent, which this does not collect.
+
+COACH_INVITE_GONE = "This invitation has expired, was withdrawn or was already answered. Ask the coach for a new one."
+
+
+def _is_coach_account(profile: dict | None) -> bool:
+    return str((profile or {}).get("account_type") or "athlete") == "coach"
+
+
+def _coach_seats(request: Request, coach_profile_id: int) -> dict:
+    """Athletes linked or invited, against the plan's roster seats."""
+    used = len(coach_links_for_coach(coach_profile_id))
+    return roster_capacity(_request_plan(request), used)
+
+
+@app.get("/coaching", response_class=HTMLResponse)
+def coaching_page(request: Request, invite: str = "", notice: str = "", error: str = ""):
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/coaching", status_code=303)
+    profile = get_profile(profile_id) or {}
+    is_coach = _is_coach_account(profile)
+    return templates.TemplateResponse(
+        request=request, name="coaching.html",
+        context={"request": request, "is_coach": is_coach,
+                 "my_coaches": coach_links_for_athlete(profile_id),
+                 "notes": list_coach_notes(profile_id),
+                 "athletes": coach_links_for_coach(profile_id) if is_coach else [],
+                 "seats": _coach_seats(request, profile_id) if is_coach else None,
+                 # The invitation link, shown once, right after it is made.
+                 "invite_url": (f"{_public_base(request).rstrip('/')}/coaching/invite/{invite}"
+                                if invite and re.fullmatch(r"[A-Za-z0-9_-]{20,100}", invite) else None),
+                 "notice": notice[:200], "error": error[:200]})
+
+
+@app.post("/coaching/invite", dependencies=[Depends(require_csrf)])
+def coaching_invite(request: Request, email: str = Form(...)):
+    _enforce_rate_limit(request, "coach-invite", 20, 3600)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse("/login?next=/coaching", status_code=303)
+    if not _is_coach_account(get_profile(profile_id)):
+        return RedirectResponse("/coaching?" + urlencode(
+            {"error": "Set your account type to Coach on your athlete profile to invite athletes."}), status_code=303)
+    email = email.strip().lower()
+    if not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}", email):
+        return RedirectResponse("/coaching?" + urlencode({"error": "Enter the athlete's email address."}),
+                                status_code=303)
+    if email == str(account.get("email") or "").lower():
+        return RedirectResponse("/coaching?" + urlencode({"error": "That is your own email address."}),
+                                status_code=303)
+    if not _coach_seats(request, profile_id)["can_add"]:
+        return RedirectResponse("/coaching?" + urlencode(
+            {"error": "Every athlete seat on your plan is taken. End a link or a pending invitation first."}),
+            status_code=303)
+    token = session_token()
+    create_coach_invite(profile_id, email, token_digest(token))
+    coach_name = (get_profile(profile_id) or {}).get("display_name") or "A coach"
+    link = f"{_public_base(request).rstrip('/')}/coaching/invite/{token}"
+    sent = True
+    try:
+        deliver_email(email, f"{coach_name} wants to coach you on WarriorIQ",
+                      f"{coach_name} has invited you to share your WarriorIQ fights with them.\n\n"
+                      f"If you accept, they can read your fight reports (not change them) and leave notes and "
+                      f"training objectives. You can end it at any time from Coaching in your account.\n\n"
+                      f"See the invitation: {link}\n\nIt expires in 14 days. If you do not know this person, "
+                      f"ignore this email.")
+    except EmailNotSent:
+        sent = False
+    record_security_event("coach_invite_created", account_id=int(account["id"]), resource_type="coach_link",
+                          metadata={"emailed": sent})
+    notice = ("Invitation emailed. You can also send them this link yourself:" if sent
+              else "Email is not set up, so send them this link yourself:")
+    return RedirectResponse("/coaching?" + urlencode({"invite": token, "notice": notice}), status_code=303)
+
+
+@app.get("/coaching/invite/{token}", response_class=HTMLResponse)
+def coaching_invite_page(request: Request, token: str):
+    link = coach_invite_by_token(token_digest(token))
+    if not link:
+        raise HTTPException(404, COACH_INVITE_GONE)
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse(f"/login?next=/coaching/invite/{token}", status_code=303)
+    coach = get_profile(int(link["coach_profile_id"])) or {}
+    minor = social.is_minor_account(get_account_by_profile(profile_id))
+    return templates.TemplateResponse(
+        request=request, name="coaching_invite.html",
+        context={"request": request, "token": token, "coach_name": coach.get("display_name") or "A coach",
+                 "coach_handle": coach.get("handle"), "own_invite": int(link["coach_profile_id"]) == profile_id,
+                 "minor": minor})
+
+
+@app.post("/coaching/invite/{token}/answer", dependencies=[Depends(require_csrf)])
+def coaching_invite_answer(request: Request, token: str, answer: str = Form(...)):
+    _enforce_rate_limit(request, "coach-invite-answer", 20, 3600)
+    link = coach_invite_by_token(token_digest(token))
+    if not link:
+        raise HTTPException(404, COACH_INVITE_GONE)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse(f"/login?next=/coaching/invite/{token}", status_code=303)
+    accept = answer == "accept"
+    if accept and social.is_minor_account(account):
+        raise HTTPException(403, "Under-18 accounts cannot share their fights with a coach yet.")
+    if not answer_coach_invite(int(link["id"]), profile_id, accept):
+        raise HTTPException(404, COACH_INVITE_GONE)
+    record_security_event("coach_invite_accepted" if accept else "coach_invite_declined",
+                          account_id=int(account["id"]), resource_type="coach_link", resource_id=str(link["id"]))
+    notice = "Your coach can now see your fights." if accept else "Invitation declined."
+    return RedirectResponse("/coaching?" + urlencode({"notice": notice}), status_code=303)
+
+
+@app.post("/coaching/links/{link_id}/end", dependencies=[Depends(require_csrf)])
+def coaching_end_link(request: Request, link_id: int):
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account or not end_coach_link(link_id, profile_id):
+        raise HTTPException(404)
+    record_security_event("coach_link_ended", account_id=int(account["id"]), resource_type="coach_link",
+                          resource_id=str(link_id))
+    return RedirectResponse("/coaching?" + urlencode({"notice": "Done. That link is ended."}), status_code=303)
+
+
+def _linked_athlete(request: Request, athlete_profile_id: int) -> tuple[int, dict]:
+    """The coach's id and the athlete's profile, or a 404 when they are not linked."""
+    coach_id = _profile_id(request)
+    if coach_id is None or not coach_can_view(coach_id, athlete_profile_id):
+        raise HTTPException(404)
+    return coach_id, get_profile(athlete_profile_id) or {}
+
+
+@app.get("/coaching/athletes/{athlete_profile_id}", response_class=HTMLResponse)
+def coaching_athlete_page(request: Request, athlete_profile_id: int, notice: str = ""):
+    coach_id, athlete = _linked_athlete(request, athlete_profile_id)
+    fights = list_fights(athlete_profile_id)
+    for fight in fights:
+        fight["choice_label"] = fight_choice_label(fight.get("ruleset"), fight.get("created_at"),
+                                                   fight.get("fight_type"), fight.get("fighter_name"))
+        fight["report_failed"] = _report_failed(fight["job_id"])
+    objectives = [item for item in list_assignments(athlete_profile_id)
+                  if item.get("assigned_by_profile_id") == coach_id]
+    return templates.TemplateResponse(
+        request=request, name="coaching_athlete.html",
+        context={"request": request, "athlete": athlete, "athlete_id": athlete_profile_id, "fights": fights,
+                 "notes": list_coach_notes(athlete_profile_id, coach_id), "objectives": objectives,
+                 "notice": notice[:200]})
+
+
+@app.get("/coaching/reports/{job_id}", response_class=HTMLResponse)
+def coaching_report(request: Request, job_id: str):
+    fight = get_fight(job_id)
+    if not fight:
+        raise HTTPException(404)
+    coach_id, athlete = _linked_athlete(request, int(fight["profile_id"]))
+    return _read_only_report(request, job_id, "This report is not available.",
+                             coach_view={"athlete_id": int(fight["profile_id"]),
+                                         "athlete_name": athlete.get("display_name") or "Athlete"})
+
+
+@app.post("/coaching/athletes/{athlete_profile_id}/notes", dependencies=[Depends(require_csrf)])
+def coaching_add_note(request: Request, athlete_profile_id: int, body: str = Form(...), job_id: str = Form("")):
+    _enforce_rate_limit(request, "coach-notes", 60, 3600)
+    coach_id, _ = _linked_athlete(request, athlete_profile_id)
+    text = body.strip()
+    if not text:
+        return RedirectResponse(f"/coaching/athletes/{athlete_profile_id}", status_code=303)
+    fight = get_fight(job_id) if job_id else None
+    if job_id and (not fight or int(fight["profile_id"]) != athlete_profile_id):
+        raise HTTPException(404)
+    add_coach_note(coach_id, athlete_profile_id, text, job_id or None)
+    return RedirectResponse(f"/coaching/athletes/{athlete_profile_id}?" + urlencode({"notice": "Note saved."}),
+                            status_code=303)
+
+
+@app.post("/coaching/athletes/{athlete_profile_id}/objectives", dependencies=[Depends(require_csrf)])
+def coaching_add_objective(request: Request, athlete_profile_id: int, title: str = Form(...), detail: str = Form("")):
+    _enforce_rate_limit(request, "coach-objectives", 60, 3600)
+    coach_id, _ = _linked_athlete(request, athlete_profile_id)
+    title = title.strip()[:120]
+    if not title:
+        return RedirectResponse(f"/coaching/athletes/{athlete_profile_id}", status_code=303)
+    add_assignment(athlete_profile_id, title, detail.strip()[:1000], assigned_by_profile_id=coach_id)
+    return RedirectResponse(f"/coaching/athletes/{athlete_profile_id}?" + urlencode(
+        {"notice": "Objective added. It shows in their Fight Camp missions."}), status_code=303)
+
+
 @app.get("/coach")
 def coach_redirect(request: Request):
     """/coach and /dashboard were one page at two addresses, sold on the home
@@ -10289,7 +10498,13 @@ def shared_report(request: Request, token: str):
     share = get_report_share(token_digest(token))
     if not share:
         raise HTTPException(404, gone)
-    path = _require_completed_artifact(share["job_id"], "report.json")
+    return _read_only_report(request, share["job_id"], gone, expires_at=share["expires_at"])
+
+
+def _read_only_report(request: Request, job_id: str, gone: str, *, expires_at: str | None = None,
+                      coach_view: dict | None = None):
+    """A report as a coach reads it: a share link's page, or a linked coach's."""
+    path = _require_completed_artifact(job_id, "report.json")
     if not path.exists():
         raise HTTPException(404, gone)
     report = json.loads(path.read_text(encoding="utf-8"))
@@ -10299,8 +10514,9 @@ def shared_report(request: Request, token: str):
     _withhold_score_while_counts_are_off(report)
     return templates.TemplateResponse(
         request=request, name="shared.html",
-        context={"request": request, "report": report, "expires_at": share["expires_at"],
-                 "expires_label": _friendly_date(share["expires_at"]),
+        context={"request": request, "report": report, "expires_at": expires_at,
+                 "expires_label": _friendly_date(expires_at) if expires_at else None,
+                 "coach_view": coach_view,
                  # The same verdicts the athlete's page shows, so a coach sees
                  # no number the athlete was told not to trust.
                  "numbers": _numbers_state(report),
@@ -10504,6 +10720,15 @@ def export_account_data(request: Request, password: str = Form(...),
             "pending_requests": list_follows(profile_id, direction="followers", status="pending"),
         },
         "coach_assignments": list_assignments(profile_id),
+        # Coaches who can see this account's fights, athletes who let this
+        # account see theirs, and coaches' notes on this athlete.
+        "coaching": {
+            "my_coaches": [{k: v for k, v in link.items() if k != "token_hash"}
+                           for link in coach_links_for_athlete(profile_id)],
+            "my_athletes": [{k: v for k, v in link.items() if k != "token_hash"}
+                            for link in coach_links_for_coach(profile_id)],
+            "notes_about_me": list_coach_notes(profile_id),
+        },
         # Fight Camp: missions taken, training sessions (the check's findings
         # and a fingerprint - the clips themselves are never kept) and points.
         "fight_camp": {

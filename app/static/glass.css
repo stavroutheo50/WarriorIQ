@@ -1474,3 +1474,13 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 #period30:checked ~ .period-panel[data-period="30"], #period60:checked ~ .period-panel[data-period="60"], #period90:checked ~ .period-panel[data-period="90"] { display: block; }
 .period-facts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 8px 0 12px; color: #c3cad8; font-size: 14px; }
 .period-facts b { color: #fff; font-size: 18px; }
+
+/* Coaching (owner's brief, 2026-11-14). */
+.coaching-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.coaching-list li > div { min-width: 0; overflow-wrap: anywhere; }
+.coaching-invite-form .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.coaching-invite-form input { flex: 1 1 240px; }
+.coaching-link-field { width: 100%; font-size: 14px; }
+.coaching-notes p { margin: 4px 0 0; white-space: pre-wrap; }
+.coaching-invite { max-width: 680px; margin: 24px auto; }
+.coaching-grid { align-items: start; }
