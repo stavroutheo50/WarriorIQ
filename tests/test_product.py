@@ -882,6 +882,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         job_id = "privateowner1"
         video_path = webapp.UPLOADS / f"{job_id}.mp4"
         video_path.write_bytes(b"private-video")
+        playable_copy = webapp.UPLOADS / f"{job_id}_web.mp4"
+        playable_copy.write_bytes(b"private-video, browser copy")
         report_dir = webapp.OUTPUTS / job_id
         report_dir.mkdir()
         report_path = report_dir / "report.json"
@@ -907,6 +909,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         deleted = self.client.post(f"/settings/videos/{job_id}/delete", follow_redirects=False)
         self.assertEqual(deleted.status_code, 303)
         self.assertFalse(video_path.exists())
+        self.assertFalse(playable_copy.exists())
         self.assertTrue(report_path.exists())
         saved = database.get_fight(job_id)
         self.assertEqual(saved["video_path"], "")

@@ -1945,6 +1945,9 @@ def _run_periodic_maintenance(now: float | None = None) -> None:
             video = Path(fight.get("video_path") or "missing").resolve()
             if video.parent == UPLOADS.resolve():
                 video.unlink(missing_ok=True)
+                # And its browser-playable copy: the fight stays saved, so
+                # the abandoned-file sweep protects that copy for ever.
+                remove_derivative(video)
                 mark_fight_video_deleted(fight["job_id"], int(fight["profile_id"]))
                 record_security_event(
                     "video_retention_deleted", account_id=None, resource_type="fight",
@@ -8087,6 +8090,7 @@ def delete_original_video(request: Request, job_id: str):
     video = Path(fight.get("video_path") or "missing").resolve()
     if video.parent == UPLOADS.resolve():
         video.unlink(missing_ok=True)
+        remove_derivative(video)
     training_consent.forget(job_id)
     mark_fight_video_deleted(job_id, int(account["profile_id"]))
     record_security_event(
