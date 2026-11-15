@@ -251,8 +251,38 @@ app.add_middleware(
     same_site="none" if _oauth_cookie_secure else "lax",
     https_only=_oauth_cookie_secure,
 )
-app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
+# Profile photos and videos (2026-11-15). They used to be saved in
+# app/static/profile/ and served by the public static mount at guessable
+# names ("profile_<id>.jpg"), whatever the profile's visibility - a minor's
+# included. New ones are saved here, outside anything served, and every one is
+# served by /profile-media/, which applies the same rules as the athlete page.
+PROFILE_MEDIA = DATA_ROOT / "profile_media"
+LEGACY_PROFILE_MEDIA = ROOT / "app" / "static" / "profile"
+_PROFILE_MEDIA_NAME = re.compile(r"^profile(_video)?_(\d+)\.(jpg|jpeg|png|webp|mp4|mov|m4v|webm)$")
+
+
+class _PublicStaticFiles(StaticFiles):
+    """The static mount, minus the profile media left in it by older uploads."""
+
+    async def get_response(self, path: str, scope):
+        if os.path.normpath(path).replace("\\", "/").lstrip("/").startswith("profile/"):
+            raise HTTPException(404)
+        return await super().get_response(path, scope)
+
+
+app.mount("/static", _PublicStaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "app" / "templates"))
+
+
+def _profile_media_url(value: str | None) -> str | None:
+    """The address a stored profile photo or video is served at.
+
+    Older rows say /static/profile/<name>; their file is still where it was
+    and is now served through /profile-media/<name> like a new one.
+    """
+    if value and value.startswith("/static/profile/"):
+        return "/profile-media/" + value.rsplit("/", 1)[-1]
+    return value
 
 
 def _fight_moment(value: str | None, with_time: bool = True) -> str:
@@ -293,6 +323,7 @@ _RULESET_LABEL_VALUES = frozenset(RULESET_LABELS.values())
 
 
 templates.env.filters["fight_moment"] = _fight_moment
+templates.env.filters["profile_media"] = _profile_media_url
 
 
 def _date_search_terms(value: str | None) -> str:
@@ -8182,7 +8213,7 @@ async def save_profile(
     photo_path = None
     profile_video_path = None
     if photo and photo.filename:
-        folder = ROOT / "app" / "static" / "profile"
+        folder = PROFILE_MEDIA
         folder.mkdir(parents=True, exist_ok=True)
         suffix = Path(photo.filename).suffix.lower()
         if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
@@ -8193,11 +8224,11 @@ async def save_profile(
             file_path.unlink(missing_ok=True)
             return _form_refusal("The profile photo could not be decoded as a safe image.",
                                  "/profile", "/profile")
-        photo_path = f"/static/profile/{file_path.name}"
+        photo_path = f"/profile-media/{file_path.name}"
         if current_profile.get("photo_path") != photo_path:
             _remove_profile_file(current_profile.get("photo_path"))
     if profile_video and profile_video.filename:
-        folder = ROOT / "app" / "static" / "profile"
+        folder = PROFILE_MEDIA
         folder.mkdir(parents=True, exist_ok=True)
         suffix = Path(profile_video.filename).suffix.lower()
         if suffix not in {".mp4", ".mov", ".m4v", ".webm"}:
@@ -8209,7 +8240,7 @@ async def save_profile(
         except Exception:
             file_path.unlink(missing_ok=True)
             raise HTTPException(400, "The profile video could not be decoded as a supported video.")
-        profile_video_path = f"/static/profile/{file_path.name}"
+        profile_video_path = f"/profile-media/{file_path.name}"
         if current_profile.get("video_path") != profile_video_path:
             _remove_profile_file(current_profile.get("video_path"))
     update_profile(
@@ -8565,11 +8596,48 @@ def _remove_fight_files(fight: dict) -> None:
 
 
 def _remove_profile_file(value: str | None) -> None:
-    if not value or not value.startswith("/static/profile/"):
+    """Delete a stored profile photo or video, wherever it was saved."""
+    if not value or not (value.startswith("/static/profile/") or value.startswith("/profile-media/")):
         return
-    path = (ROOT / "app" / value.lstrip("/")).resolve()
-    if path.parent == (ROOT / "app" / "static" / "profile").resolve():
-        path.unlink(missing_ok=True)
+    name = value.rsplit("/", 1)[-1]
+    if not _PROFILE_MEDIA_NAME.match(name):
+        return
+    for folder in (PROFILE_MEDIA, LEGACY_PROFILE_MEDIA):
+        path = (folder / name).resolve()
+        if path.parent == folder.resolve():
+            path.unlink(missing_ok=True)
+
+
+@app.get("/profile-media/{name}", include_in_schema=False)
+def profile_media(request: Request, name: str):
+    """A profile photo or video, for whoever may see that profile.
+
+    The same rule as /athlete/{handle}: the owner always; anyone else only if
+    the profile has a handle, is not a minor's, and is public or followed with
+    an accepted request. Anything else is a 404, as if there were no file.
+    """
+    match = _PROFILE_MEDIA_NAME.match(name)
+    if not match:
+        raise HTTPException(404)
+    profile_id = int(match.group(2))
+    profile = get_profile(profile_id)
+    field = "video_path" if match.group(1) else "photo_path"
+    stored = (profile or {}).get(field) or ""
+    if not profile or stored.rsplit("/", 1)[-1] != name:
+        raise HTTPException(404)
+    viewer = _profile_id(request)
+    if viewer is None or int(viewer) != profile_id:
+        minor = social.is_minor_account(get_account_by_profile(profile_id))
+        follow = follow_status(viewer, profile_id) if viewer is not None else None
+        if not (social.is_discoverable(viewer_profile_id=viewer, profile=profile, minor=minor)
+                and social.can_view(viewer_profile_id=viewer, profile=profile, minor=minor, follow=follow)):
+            raise HTTPException(404)
+    for folder in (PROFILE_MEDIA, LEGACY_PROFILE_MEDIA):
+        path = folder / name
+        if path.is_file():
+            return FileResponse(path, headers={"Cache-Control": "private, no-store",
+                                               "X-Content-Type-Options": "nosniff"})
+    raise HTTPException(404)
 
 
 def _delete_own_fight(request: Request, profile_id: int, job_id: str) -> bool:
