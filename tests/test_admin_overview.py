@@ -12,7 +12,8 @@ import uuid
 
 import app.main as web
 from browser_client import BrowserClient
-from core import admin_overview, db
+from app import admin_overview
+from core import db
 from core.auth import hash_password, issue_session
 from core.config import SETTINGS
 

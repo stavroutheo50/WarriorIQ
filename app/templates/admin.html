@@ -4,7 +4,7 @@
 {#- The admin page (owner, 2026-11-15: "organise it, with the most information
     it can have"). Sections in the order they are checked: is anything wrong,
     is analysis working, who signed up, what was analysed, who visited, safety,
-    tools. Every figure is counted on this request (core/admin_overview.py);
+    tools. Every figure is counted on this request (app/admin_overview.py);
     nothing is estimated. -#}
 {% set o = overview %}
 <header class="archive-hero"><div><div class="eyebrow">Restricted administration</div><h1>WarriorIQ control room.</h1><p>Only explicitly configured administrator emails can enter. Every visit and action is logged.</p><p class="small muted">Website release {{ release }} · analysis mode {{ o.worker_mode }} · payments {{ 'on' if o.payments_enabled else 'off' }}</p></div></header>
