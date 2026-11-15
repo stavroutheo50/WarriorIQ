@@ -301,6 +301,7 @@ def prepare_job_run(job_id: str, patch: dict) -> str:
         "live_events": [],
         "provisional_stats": {},
         "latest_observation": None,
+        "crossing_questions": [],
         "report": None,
         "worker_id": None,
         "worker_started_at_epoch": None,

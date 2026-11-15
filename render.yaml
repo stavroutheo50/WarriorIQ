@@ -1,3 +1,8 @@
+# NOT USED IN PRODUCTION (owner, 2026-11-12). WarriorIQ is hosted on OuiHeberg
+# cPanel (Passenger) and deployed with cPanel Git Version Control (.cpanel.yml);
+# see README.md, "OuiHeberg cPanel with Namecheap DNS". This blueprint is kept,
+# and tested, for anyone hosting WarriorIQ on Render instead.
+#
 # WarriorIQ on Render.
 #
 # This file used to say `plan: free` and install `requirements.txt`, and both

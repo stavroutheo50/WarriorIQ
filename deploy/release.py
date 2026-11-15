@@ -10,10 +10,11 @@ fight. Equal strings mean the worker will be given fights.
     python deploy/release.py                    # print the release, wait for the site to match
     python deploy/release.py --site https://warrioriq.eu --wait 900
 
-Order: the website deploys itself from main on Render (render.yaml autoDeploy).
+Order: deploy the website from main (cPanel Git Version Control: Update from
+Remote, then Deploy HEAD Commit, then restart the app in Setup Python App).
 Update the GPU worker PC to the same main (deploy/update-worker.ps1), then run
 this from that folder: it waits until the site's /health reports the same
-release. An uncommitted change is a different release from what Render builds.
+release. An uncommitted change is a different release from what the site runs.
 """
 
 from __future__ import annotations

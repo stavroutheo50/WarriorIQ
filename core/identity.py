@@ -1311,6 +1311,35 @@ class IdentityManager:
         b = self._commit(self.b, b_candidate, source_frame, confidence, recovered=True)
         return a, b
 
+    def apply_person_assignment(self, people: list[PersonObservation], a_box, b_box,
+                                source_frame: int) -> tuple[PersonObservation | None, PersonObservation | None]:
+        """Put A and B on the people the person said they are.
+
+        The person's own answer to "tap your fighter" after a crossing
+        (core/crossings.py). Unlike apply_ai_assignment there is no
+        plausibility check against the current tracks: the tracks are exactly
+        what may be wrong, and the answer comes from someone who can see. The
+        two detections nearest the given boxes are taken; nothing is changed
+        when either cannot be found or both boxes land on one person.
+        """
+        def nearest(box) -> int | None:
+            best, best_score = None, 0.0
+            for index, person in enumerate(people):
+                overlap = box_iou(box, person.box)
+                score = overlap if overlap > 0 else 0.5 / (1.0 + normalized_distance(box, person.box)) - 0.4
+                if score > best_score:
+                    best, best_score = index, score
+            return best if best_score >= 0.25 else None
+
+        a_index, b_index = nearest(a_box), nearest(b_box)
+        if a_index is None or b_index is None or a_index == b_index:
+            return None, None
+        a = self._commit(self.a, people[a_index], source_frame, 1.0, recovered=True)
+        b = self._commit(self.b, people[b_index], source_frame, 1.0, recovered=True)
+        self.a.identity_confidence = 1.0
+        self.b.identity_confidence = 1.0
+        return a, b
+
     def apply_external_recovery(self, state: FighterState, recovered_box, people: list[PersonObservation], source_frame: int) -> PersonObservation | None:
         if recovered_box is None:
             return None

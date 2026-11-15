@@ -67,6 +67,10 @@ class AnalysisRequest:
     # The video still looks sideways after any turn; guard and balance are
     # then not measurements of an upright body and are withheld.
     sideways: bool = False
+    # The person's answers to "tap your fighter" after crossings
+    # (core/crossings.py anchors_from_answers): at each, A and B are put back
+    # on the people they said. Each is {"frame", "seconds", "a_box", "b_box"}.
+    identity_anchors: list[dict] | None = None
 
 
 @dataclass
@@ -250,6 +254,9 @@ class AnalysisProgress:
     # "stage" when eta_seconds covers only the pass that is running (a later
     # pass has not measured its own speed yet), "job" when it covers the rest.
     eta_scope: str | None = None
+    # "Tap your fighter" questions so far: crossings the analysis was least
+    # sure about (core/crossings.py), asked on the live page as it runs.
+    crossing_questions: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

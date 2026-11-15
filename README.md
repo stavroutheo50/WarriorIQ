@@ -186,6 +186,8 @@ Render's free filesystem is ephemeral. Without a persistent disk, accounts, uplo
 
 After each GitHub update, use cPanel Git Version Control to **Update from Remote** and then **Deploy HEAD Commit**. Restart the Python application, run `/health`, and enable AutoSSL for both `warrioriq.eu` and `www.warrioriq.eu`. The domain must use the DNS nameservers supplied by OuiHeberg before certificates and traffic can reach this application. The public site is not ready while either hostname has a certificate error. Never place GitHub credentials or production secrets in the repository.
 
+Back up the database every day with a cPanel Cron Job that runs `tools/backup_runtime.py <folder outside public_html> --keep 14` inside the app's virtual environment (the exact command is in `OPS_TODO.md`, section 2). It keeps the newest 14 integrity-checked copies and deletes only its own older copies.
+
 This repository also remains compatible with hosts that provide `PORT` or `SERVER_PORT`. `run.py` binds to `0.0.0.0` in those environments, while Passenger uses the separate `passenger_wsgi.py` WSGI adapter.
 
 Shared hosting is suitable for serving and testing the web product, but the complete Torch/Ultralytics/SAM2 fight-analysis workload may exceed its memory, process-time or CPU limits. Confirm those limits with the hosting plan before enabling public uploads. If the analysis worker cannot finish a two-minute video reliably, keep the domain and web layer here and run analysis on a dedicated GPU worker instead of silently reducing analysis quality.

@@ -26,6 +26,13 @@ mean "the web host".
 - [ ] **Hosting limits:** on cPanel, open Resource Usage after some real traffic and look for CPU, memory or entry-process faults (they show up as 503/508, not timeouts). `WEB_CONCURRENCY` does not apply under Passenger.
 - [ ] **ffprobe on the host:** in cPanel's Terminal run `which ffprobe ffmpeg`. Without either, the upload type check can't run and lets the file through.
 - [ ] **Backups:** confirm the cPanel backup (JetBackup or Backup Wizard) covers the data folder with the SQLite database and the reports, then restore one copy somewhere to prove it works.
+- [ ] **Daily database copy (cPanel, Cron Jobs):** add one job, once a day at a quiet hour, with this command.
+  - Take the first part from Setup Python App: the "Enter to the virtual environment" line it shows for the app, without the `cd` at the end.
+  - The command: `source <that activate path> && cd /home/dchoodxm/warrioriq && python tools/backup_runtime.py /home/dchoodxm/warrioriq_backups --keep 14`
+  - A cron job does not get the variables from Setup Python App. If `WARRIORIQ_DATA_DIR` (or `WARRIORIQ_DB_PATH`) is set there, put the same setting before `python`, e.g. `WARRIORIQ_DATA_DIR=<same value> python tools/...`. Without it the tool stops with "No WarriorIQ database at ..." rather than saving an empty copy.
+  - It copies the database with SQLite's online backup (safe while the site runs), checks the copy's integrity, and keeps the newest 14 copies. It never touches anything else in that folder, and videos are not included.
+  - `/home/dchoodxm/warrioriq_backups` sits outside `public_html`, so it is never served on the web.
+  - Restore drill: download one copy, open it with any SQLite viewer, and check that the `accounts` and `fights` tables have rows. Write down the date you did it.
 - [ ] **Optional media CDN (Cloudflare R2 or any pull CDN):**
   - Set `WARRIORIQ_MEDIA_CDN_BASE_URL` and a random `WARRIORIQ_MEDIA_SIGNING_KEY` (keep the key out of the repository).
   - Then check that replay start time drops.
