@@ -1,0 +1,30 @@
+{#- The last 30, 60 and 90 days (owner's brief, 2026-11-14;
+    app/progress_periods.py). The same measured fights as above, narrowed to
+    the period; a change needs two fights with that measure inside it. -#}
+{% if periods %}
+<section class="card camp-periods" aria-labelledby="periodsTitle" data-reveal>
+  <div class="eyebrow">By period</div>
+  <h2 id="periodsTitle">Your last 30, 60 and 90 days</h2>
+  <div class="period-tabs" role="radiogroup" aria-label="Period">
+    {% for period in periods %}<input type="radio" name="campPeriod" id="period{{ period.days }}" class="period-radio"{% if loop.first %} checked{% endif %}><label for="period{{ period.days }}">{{ period.days }} days</label>{% endfor %}
+    {% for period in periods %}
+    <div class="period-panel" data-period="{{ period.days }}">
+      <p class="period-facts"><span><b class="wiq-num">{{ period.fights }}</b> fight{{ '' if period.fights == 1 else 's' }} measured</span><span><b class="wiq-num">{{ period.sessions }}</b> training session{{ '' if period.sessions == 1 else 's' }} counted</span><span><b class="wiq-num">{{ period.active_weeks }}</b> of {{ period.weeks }} weeks trained</span></p>
+      {% if period.cards %}
+      <div class="trend-cards">
+        {% for card in period.cards %}
+        <article class="trend-card" data-direction="{{ card.direction }}">
+          <header><span>{{ card.label }}</span><b class="wiq-num">{{ card.latest }}</b></header>
+          <svg viewBox="0 0 {{ progress.card_width|int }} {{ progress.card_height|int }}" preserveAspectRatio="none" role="img" aria-label="{{ card.label }} across {{ card.fights }} fights in the last {{ period.days }} days: from {{ card.first }} to {{ card.latest }}"><polyline points="{{ card.line }}" pathLength="1"/><circle cx="{{ card.last_x }}" cy="{{ card.last_y }}" r="2.5"/></svg>
+          <footer><i class="trend-change">{{ card.change }}</i><small>{{ card.fights }} fights &middot; from {{ card.first }}</small></footer>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted small">Not enough fights in the last {{ period.days }} days to show a change. It takes two analysed fights with the same measure in the period.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

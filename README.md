@@ -47,6 +47,26 @@ withholds any claim the footage cannot support.
 - No fake/demo statistics. Unsupported/low-evidence values remain unavailable/uncertain.
 - Privacy settings for account export, separate video/analysis/account deletion, consent choices and session revocation.
 - Standard Stripe-ready architecture, disabled by default and requiring a lawful configured account.
+- Who is who after crossings: the live page asks the person to draw their fighter on a plain still after the least certain crossings; "Fix who is who" re-runs the fight with the answers pinned (`core/crossings.py`).
+- Fight Camp progress over the last 30, 60 and 90 days, with training consistency (`app/progress_periods.py`).
+- Coaching by consent (`/coaching`): a coach invites, the athlete accepts, the coach reads reports read-only and adds notes and objectives; either side ends it. Under-18 accounts cannot accept.
+- Gyms (`/gym`): an owner invites coaches and athletes; athletes who join let the gym's coaches read their reports; members leave at any time.
+- Ringside Scorer history and CSV export, kept on the phone.
+- Admin control room (`/admin`): accounts, fights, queue, analysis computer, failures, storage, traffic, safety.
+- Profile photos and videos served only to who may see the profile (`/profile-media/`).
+
+## Configuration added in November 2026
+
+No new environment variable is required. Two existing ones matter for the new features:
+
+- `WARRIORIQ_COMPLIMENTARY_PLANS`: comma-separated `email:plan` grants, e.g. `owner@example.com:gym`. Coach and gym seats follow the account's plan (free has one seat), so grant a plan here to try coaching and gyms with more than one athlete while billing is closed.
+- Email settings (`WARRIORIQ_EMAIL_PROVIDER` and the SMTP values in `.env.example`): coaching and gym invitations are emailed when these work; otherwise the invitation link is shown once to copy and send by hand.
+
+## Testing
+
+- Full suite: `python -m pytest -q -p no:cacheprovider tests` (about 2,550 tests; under three minutes on a laptop).
+- Phone layout: `python tools/audit_mobile_layout.py <site> --email <account> --password <password> [--paths /a,/b]` checks overflow, tap targets under 44px and text under 12px at 390px. Needs the Python `playwright` package; set `CHROMIUM` to a Chromium executable if Playwright has not downloaded its own.
+- Never point either at production user data; use a separate QA account (`tools/seed_qa_account.py`).
 
 
 

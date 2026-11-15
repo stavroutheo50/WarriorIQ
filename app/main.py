@@ -73,7 +73,11 @@ from core.annotations import accuracy_summary, export_sequence
 from core.model_validation import audit_dataset_split
 from core.release_validation import assess_end_to_end_validation, end_to_end_metadata
 from core.db import (
-    HandleTaken, accept_follow, count_follows, follow_status, get_account_by_profile, get_profile_by_handle, search_profiles_by_handle,
+    HandleTaken, accept_follow, count_follows, follow_status,
+    answer_org_invite, create_org_invite, create_organisation, end_org_membership, gym_athletes_for_coach,
+    memberships_of, org_invite_by_token, organisation_members, organisation_owned_by,
+    add_coach_note, answer_coach_invite, coach_can_view, coach_invite_by_token, coach_links_for_athlete,
+    coach_links_for_coach, create_coach_invite, end_coach_link, list_coach_notes, get_account_by_profile, get_profile_by_handle, search_profiles_by_handle,
     list_follows, remove_follow, request_follow, set_public_profile,
     add_assignment, analysis_allowance, apply_subscription_change, award_points, link_camp_mission, list_camp_missions,
     list_points, list_training_sessions, record_training_session, redeem_points_for_analysis, apply_checkout_event, consume_email_verification_token,
@@ -161,6 +165,7 @@ from core.retention import (
 )
 from core import training_consent
 from app import admin_overview
+from app.progress_periods import period_summary
 from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
 from core.stat_sheet import build_stat_sheet
@@ -554,6 +559,7 @@ PUBLIC_INDEX_ROUTES = (
     "/eula", "/dmca", "/accessibility", "/ai-transparency", "/security",
     "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
     "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
+    "/muay-thai-fight-analysis", "/mma-fight-analysis",
     "/analyze", "/analyze/kickboxing", "/analyze/boxing", "/analyze/muay_thai",
     "/analyze/taekwondo", "/analyze/mma", "/scorer",
 )
@@ -572,6 +578,9 @@ PRIVATE_ROUTE_PREFIXES = (
     "/compare", "/coach", "/camp", "/profile", "/validation", "/s/", "/share/", "/shares/",
     "/account/", "/settings/", "/admin", "/checkout/", "/stripe/", "/purchase/",
     "/auth/", "/guardian",
+    # Pages whose address carries a secret token, and the gym pages
+    # (2026-11-15): a counted path is stored in page_views and shown on /admin.
+    "/gym", "/reset-password/", "/verify-email/",
 )
 # The only pages the Google tag may load on (QA, 2026-10-07: it loaded on every
 # page, private reports included, and its Google Ads destination sent the full
@@ -658,6 +667,43 @@ SEARCH_GUIDES = {
                 "No. A scorecard is withheld when both fighters were not analysed or the evidence gates are not met."
                 if feature_is_on("scoring") else
                 "Not yet. Score estimates are coming once strikes can be counted accurately; reports show measured movement, guard, balance and coaching until then.")},
+        ],
+        "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
+    },
+    # Muay Thai and MMA (owner's brief, 2026-11-14: SEO pages, limited to what
+    # the analysis does). What is not observed comes from core.sport_policy
+    # (sport_unobserved); tests/test_seo_guides.py keeps the two in step.
+    "muay-thai-fight-analysis": {
+        "title": "Muay Thai Fight Analysis from Video | WarriorIQ",
+        "description": "Upload a Muay Thai fight or sparring video. WarriorIQ follows both fighters and measures movement, guard, balance and pressure, round by round, with honest limits on what video can show.",
+        "eyebrow": "Muay Thai fight analysis",
+        "heading": "Review a Muay Thai fight with the evidence in view.",
+        "intro": "WarriorIQ follows both fighters through the whole video and measures how each one moved: ring position, pressure, guard and balance, round by round. It says plainly what it cannot see in Muay Thai yet, instead of filling the gap with guesses.",
+        "sections": [
+            {"title": "What is measured", "body": "Both fighters are tracked from one tap on each at the start. The detailed report goes to the fighter you choose, with the opponent kept as context.", "items": ["Movement and ring-centre position", "Pressure: who walks forward and who gets backed up", "Guard (experimental) and post-action balance", *(["Punches, kicks and knees, as rough estimates"] if feature_is_on("strike_counts") else []), "A four-week training plan from your own numbers"]},
+            {"title": "What it does not see yet", "body": "Elbow strikes, clinch dominance and sweeps are not observed, so professional stadium-style scoring, where the clinch and sweeps carry weight, is not judged. The report says so rather than estimating them."},
+            {"title": "Training, not judging", "body": "Everything is for review and training. WarriorIQ is not an official judge, and any score estimate is a training estimate, never an event result."},
+        ],
+        "faqs": [
+            {"question": "Does it work on sparring and pad rounds?", "answer": "Sparring is analysed like a fight. For pad work or shadowboxing with one person, choose Solo session to get movement, guard and balance for that person only."},
+            {"question": "What footage works best?", "answer": "A stable, wide view with both fighters head to feet. Film from outside the ropes at chest height or higher, and avoid zooming and panning."},
+        ],
+        "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
+    },
+    "mma-fight-analysis": {
+        "title": "MMA Fight Analysis from Video | WarriorIQ",
+        "description": "Upload an MMA fight or sparring video. WarriorIQ follows both fighters and measures stand-up movement, pressure and time on the ground, round by round, with honest limits on what it cannot see yet.",
+        "eyebrow": "MMA fight analysis",
+        "heading": "Review the stand-up and the time on the ground.",
+        "intro": "WarriorIQ follows both fighters through an MMA fight and measures the stand-up: movement, pressure, guard and balance. It also measures how much of each round was spent on the ground. What happens on the ground, takedowns included, is not judged yet, and the report says so.",
+        "sections": [
+            {"title": "What is measured", "body": "Both fighters are tracked from one tap on each at the start; the detailed report goes to the fighter you choose.", "items": ["Stand-up movement, ring position and pressure", "Guard (experimental) and balance", "Time on the ground, round by round", *(["Punches, kicks and knees on the feet, as rough estimates"] if feature_is_on("strike_counts") else []), "A four-week training plan from your own numbers"]},
+            {"title": "What it does not see yet", "body": "Takedowns and takedown defence, who controls the ground, ground-and-pound, submission attempts, elbow strikes and damage are not observed. Those decide many MMA rounds, so a round is never judged on what the video cannot show."},
+            {"title": "Training, not judging", "body": "Everything is for review and training. WarriorIQ is not an official judge, and any score estimate is a training estimate, never an event result."},
+        ],
+        "faqs": [
+            {"question": "Can it tell the fighters apart on the ground?", "answer": "It keeps following both fighters, and when it cannot be sure who is who after they tangle up, it asks you to point them out again rather than guessing."},
+            {"question": "What footage works best?", "answer": "A stable, elevated view of the whole cage or ring with both fighters head to feet. Fence and net mesh in front of the lens make tracking harder."},
         ],
         "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
     },
@@ -843,6 +889,17 @@ def _trusted_request_host(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+# Paths that carry a secret: the token in them is a password for one action
+# (resetting a password, approving an account, reading a shared report,
+# accepting a coach's invitation). Never written to the log (2026-11-15).
+_SECRET_PATH = re.compile(
+    r"^(/(?:reset-password|verify-email|guardian/approve|settings/email/confirm|s|f|coaching/invite|gym/invite)/)[^/]+")
+
+
+def _loggable_path(path: str) -> str:
+    return _SECRET_PATH.sub(r"\1[token]", path)
 
 
 def _public_base(request: Request) -> str:
@@ -1101,7 +1158,7 @@ async def require_csrf(request: Request) -> None:
         return
     record_security_event(
         "csrf_token_rejected", severity="warning",
-        resource_type="route", resource_id=request.url.path[:200],
+        resource_type="route", resource_id=_loggable_path(request.url.path)[:200],
     )
     # 403 rather than 400: the request was understood and refused. The wording
     # has to be usable by somebody who simply left a tab open overnight, which
@@ -2167,7 +2224,7 @@ async def viewer_context(request: Request, call_next):
         # under a hostname nobody listed in WARRIORIQ_ALLOWED_HOSTS is a blank
         # 400 with nothing to act on. Logged rather than recorded as a security
         # event, so an unauthenticated request cannot drive a database write.
-        LOGGER.warning("untrusted_request_host host=%r path=%s", rejected_host[:120], request.url.path)
+        LOGGER.warning("untrusted_request_host host=%r path=%s", rejected_host[:120], _loggable_path(request.url.path))
         return JSONResponse({"detail": "Unrecognized website address."}, status_code=400)
     request_started = time.perf_counter()
     request_id = request.headers.get("x-request-id", "").strip()[:64] or uuid.uuid4().hex[:16]
@@ -2203,7 +2260,7 @@ async def viewer_context(request: Request, call_next):
         client = _client_ip(request)
         wait = _take_rate_slot("site", client, SETTINGS.request_rate_limit_per_minute, 60)
         if wait is not None:
-            LOGGER.warning("site_rate_limited path=%s retry_after=%s", request.url.path, wait)
+            LOGGER.warning("site_rate_limited path=%s retry_after=%s", _loggable_path(request.url.path), wait)
             response = _rate_limited_response(request, wait)
             _apply_response_headers(request, response)
             return response
@@ -2243,18 +2300,18 @@ async def viewer_context(request: Request, call_next):
     response.headers.setdefault("Server-Timing", f"app;dur={duration_ms:.1f}")
     LOGGER.info(
         "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
-        request_id, request.method, request.url.path, response.status_code, duration_ms,
+        request_id, request.method, _loggable_path(request.url.path), response.status_code, duration_ms,
     )
     if _is_counted_page_view(request, response):
         try:
             # Off the event loop: the batch flush is a database write, and on
             # the event loop it held every other request until it finished.
-            await run_in_threadpool(record_page_view, _counted_path(request.url.path))
+            await run_in_threadpool(record_page_view, _counted_path(_loggable_path(request.url.path)))
         except Exception:  # pragma: no cover - counting must never cost a page
             # A visitor came for the page, not for the statistic. If the write
             # fails the page still has to be served, so this swallows rather
             # than raises, and says so in the log instead.
-            LOGGER.warning("page_view_not_counted path=%s", request.url.path)
+            LOGGER.warning("page_view_not_counted path=%s", _loggable_path(request.url.path))
     _apply_response_headers(request, response)
     if new_guest:
         response.set_cookie(
@@ -8857,6 +8914,378 @@ def compare_page(request: Request, a: str = "", b: str = "", include_failed: str
     )
 
 
+# ---- Coaching: a coach sees an athlete's fights with their consent ----------
+#
+# Owner's brief, 2026-11-14: "Coaches must only access athletes who have
+# explicitly granted them permission." A coach invites an athlete by email; the
+# athlete, signed in to their own account, accepts; from then on the coach can
+# read that athlete's reports (read-only), and add notes and training
+# objectives, until either of them ends it. Under-18 athletes cannot accept
+# yet: that needs a parent or guardian's consent, which this does not collect.
+
+COACH_INVITE_GONE = "This invitation has expired, was withdrawn or was already answered. Ask the coach for a new one."
+
+
+def _is_coach_account(profile: dict | None) -> bool:
+    return str((profile or {}).get("account_type") or "athlete") == "coach"
+
+
+def _coach_seats(request: Request, coach_profile_id: int) -> dict:
+    """Athletes linked or invited, against the plan's roster seats."""
+    used = len(coach_links_for_coach(coach_profile_id))
+    return roster_capacity(_request_plan(request), used)
+
+
+@app.get("/coaching", response_class=HTMLResponse)
+def coaching_page(request: Request, notice: str = "", error: str = ""):
+    return _coaching_response(request, notice=notice, error=error)
+
+
+def _coaching_response(request: Request, *, invite: str = "", notice: str = "", error: str = ""):
+    """The coaching page; `invite` only from the invitation form's own response, never an address."""
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/coaching", status_code=303)
+    profile = get_profile(profile_id) or {}
+    is_coach = _is_coach_account(profile)
+    return templates.TemplateResponse(
+        request=request, name="coaching.html",
+        context={"request": request, "is_coach": is_coach,
+                 "my_coaches": coach_links_for_athlete(profile_id),
+                 "notes": list_coach_notes(profile_id),
+                 "athletes": coach_links_for_coach(profile_id) if is_coach else [],
+                 # Athletes this person can see because they coach in a gym.
+                 "gym_athletes": gym_athletes_for_coach(profile_id),
+                 "seats": _coach_seats(request, profile_id) if is_coach else None,
+                 # The invitation link, shown once, right after it is made.
+                 "invite_url": (f"{_public_base(request).rstrip('/')}/coaching/invite/{invite}"
+                                if invite and re.fullmatch(r"[A-Za-z0-9_-]{20,100}", invite) else None),
+                 "notice": notice[:200], "error": error[:200]})
+
+
+@app.post("/coaching/invite", dependencies=[Depends(require_csrf)])
+def coaching_invite(request: Request, email: str = Form(...)):
+    _enforce_rate_limit(request, "coach-invite", 20, 3600)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse("/login?next=/coaching", status_code=303)
+    if not _is_coach_account(get_profile(profile_id)):
+        return RedirectResponse("/coaching?" + urlencode(
+            {"error": "Set your account type to Coach on your athlete profile to invite athletes."}), status_code=303)
+    email = email.strip().lower()
+    if not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}", email):
+        return RedirectResponse("/coaching?" + urlencode({"error": "Enter the athlete's email address."}),
+                                status_code=303)
+    if email == str(account.get("email") or "").lower():
+        return RedirectResponse("/coaching?" + urlencode({"error": "That is your own email address."}),
+                                status_code=303)
+    if not _coach_seats(request, profile_id)["can_add"]:
+        return RedirectResponse("/coaching?" + urlencode(
+            {"error": "Every athlete seat on your plan is taken. End a link or a pending invitation first."}),
+            status_code=303)
+    token = session_token()
+    create_coach_invite(profile_id, email, token_digest(token))
+    coach_name = (get_profile(profile_id) or {}).get("display_name") or "A coach"
+    link = f"{_public_base(request).rstrip('/')}/coaching/invite/{token}"
+    sent = True
+    try:
+        deliver_email(email, f"{coach_name} wants to coach you on WarriorIQ",
+                      f"{coach_name} has invited you to share your WarriorIQ fights with them.\n\n"
+                      f"If you accept, they can read your fight reports (not change them) and leave notes and "
+                      f"training objectives. You can end it at any time from Coaching in your account.\n\n"
+                      f"See the invitation: {link}\n\nIt expires in 14 days. If you do not know this person, "
+                      f"ignore this email.")
+    except EmailNotSent:
+        sent = False
+    record_security_event("coach_invite_created", account_id=int(account["id"]), resource_type="coach_link",
+                          metadata={"emailed": sent})
+    notice = ("Invitation emailed. You can also send them this link yourself:" if sent
+              else "Email is not set up, so send them this link yourself:")
+    # The link is shown once, on the page that answers the form. It never
+    # travels in an address: the front-end server's access log keeps the whole
+    # request line, query string included (security review, PR #233).
+    return _coaching_response(request, invite=token, notice=notice)
+
+
+@app.get("/coaching/invite/{token}", response_class=HTMLResponse)
+def coaching_invite_page(request: Request, token: str):
+    link = coach_invite_by_token(token_digest(token))
+    if not link:
+        raise HTTPException(404, COACH_INVITE_GONE)
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse(f"/login?next=/coaching/invite/{token}", status_code=303)
+    coach = get_profile(int(link["coach_profile_id"])) or {}
+    minor = social.is_minor_account(get_account_by_profile(profile_id))
+    return templates.TemplateResponse(
+        request=request, name="coaching_invite.html",
+        context={"request": request, "token": token, "coach_name": coach.get("display_name") or "A coach",
+                 "coach_handle": coach.get("handle"), "own_invite": int(link["coach_profile_id"]) == profile_id,
+                 "minor": minor})
+
+
+@app.post("/coaching/invite/{token}/answer", dependencies=[Depends(require_csrf)])
+def coaching_invite_answer(request: Request, token: str, answer: str = Form(...)):
+    _enforce_rate_limit(request, "coach-invite-answer", 20, 3600)
+    link = coach_invite_by_token(token_digest(token))
+    if not link:
+        raise HTTPException(404, COACH_INVITE_GONE)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse(f"/login?next=/coaching/invite/{token}", status_code=303)
+    accept = answer == "accept"
+    if accept and social.is_minor_account(account):
+        raise HTTPException(403, "Under-18 accounts cannot share their fights with a coach yet.")
+    if not answer_coach_invite(int(link["id"]), profile_id, accept):
+        raise HTTPException(404, COACH_INVITE_GONE)
+    record_security_event("coach_invite_accepted" if accept else "coach_invite_declined",
+                          account_id=int(account["id"]), resource_type="coach_link", resource_id=str(link["id"]))
+    notice = "Your coach can now see your fights." if accept else "Invitation declined."
+    return RedirectResponse("/coaching?" + urlencode({"notice": notice}), status_code=303)
+
+
+@app.post("/coaching/links/{link_id}/end", dependencies=[Depends(require_csrf)])
+def coaching_end_link(request: Request, link_id: int):
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account or not end_coach_link(link_id, profile_id):
+        raise HTTPException(404)
+    record_security_event("coach_link_ended", account_id=int(account["id"]), resource_type="coach_link",
+                          resource_id=str(link_id))
+    return RedirectResponse("/coaching?" + urlencode({"notice": "Done. That link is ended."}), status_code=303)
+
+
+def _linked_athlete(request: Request, athlete_profile_id: int) -> tuple[int, dict]:
+    """The coach's id and the athlete's profile, or a 404 when they are not linked."""
+    coach_id = _profile_id(request)
+    if coach_id is None or not coach_can_view(coach_id, athlete_profile_id):
+        raise HTTPException(404)
+    return coach_id, get_profile(athlete_profile_id) or {}
+
+
+@app.get("/coaching/athletes/{athlete_profile_id}", response_class=HTMLResponse)
+def coaching_athlete_page(request: Request, athlete_profile_id: int, notice: str = ""):
+    coach_id, athlete = _linked_athlete(request, athlete_profile_id)
+    fights = list_fights(athlete_profile_id)
+    for fight in fights:
+        fight["choice_label"] = fight_choice_label(fight.get("ruleset"), fight.get("created_at"),
+                                                   fight.get("fight_type"), fight.get("fighter_name"))
+        fight["report_failed"] = _report_failed(fight["job_id"])
+    objectives = [item for item in list_assignments(athlete_profile_id)
+                  if item.get("assigned_by_profile_id") == coach_id]
+    return templates.TemplateResponse(
+        request=request, name="coaching_athlete.html",
+        context={"request": request, "athlete": athlete, "athlete_id": athlete_profile_id, "fights": fights,
+                 "notes": list_coach_notes(athlete_profile_id, coach_id), "objectives": objectives,
+                 "notice": notice[:200]})
+
+
+@app.get("/coaching/reports/{job_id}", response_class=HTMLResponse)
+def coaching_report(request: Request, job_id: str):
+    fight = get_fight(job_id)
+    if not fight:
+        raise HTTPException(404)
+    coach_id, athlete = _linked_athlete(request, int(fight["profile_id"]))
+    return _read_only_report(request, job_id, "This report is not available.",
+                             coach_view={"athlete_id": int(fight["profile_id"]),
+                                         "athlete_name": athlete.get("display_name") or "Athlete"})
+
+
+@app.post("/coaching/athletes/{athlete_profile_id}/notes", dependencies=[Depends(require_csrf)])
+def coaching_add_note(request: Request, athlete_profile_id: int, body: str = Form(...), job_id: str = Form("")):
+    _enforce_rate_limit(request, "coach-notes", 60, 3600)
+    coach_id, _ = _linked_athlete(request, athlete_profile_id)
+    text = body.strip()
+    if not text:
+        return RedirectResponse(f"/coaching/athletes/{athlete_profile_id}", status_code=303)
+    fight = get_fight(job_id) if job_id else None
+    if job_id and (not fight or int(fight["profile_id"]) != athlete_profile_id):
+        raise HTTPException(404)
+    add_coach_note(coach_id, athlete_profile_id, text, job_id or None)
+    return RedirectResponse(f"/coaching/athletes/{athlete_profile_id}?" + urlencode({"notice": "Note saved."}),
+                            status_code=303)
+
+
+@app.post("/coaching/athletes/{athlete_profile_id}/objectives", dependencies=[Depends(require_csrf)])
+def coaching_add_objective(request: Request, athlete_profile_id: int, title: str = Form(...), detail: str = Form("")):
+    _enforce_rate_limit(request, "coach-objectives", 60, 3600)
+    coach_id, _ = _linked_athlete(request, athlete_profile_id)
+    title = title.strip()[:120]
+    if not title:
+        return RedirectResponse(f"/coaching/athletes/{athlete_profile_id}", status_code=303)
+    add_assignment(athlete_profile_id, title, detail.strip()[:1000], assigned_by_profile_id=coach_id)
+    return RedirectResponse(f"/coaching/athletes/{athlete_profile_id}?" + urlencode(
+        {"notice": "Objective added. It shows in their Fight Camp missions."}), status_code=303)
+
+
+# ---- Gyms: coaches and athletes under one organisation ---------------------
+#
+# Owner's brief, 2026-11-14. The owner invites coaches and athletes by email;
+# each joins only by accepting while signed in. An athlete who joins lets the
+# gym's coaches read their reports (app.main._linked_athlete via
+# core.db.coach_can_view) until they leave or are removed.
+
+GYM_INVITE_GONE = "This gym invitation has expired, was withdrawn or was already answered. Ask the gym for a new one."
+
+
+def _gym_seats(request: Request, org_id: int) -> dict:
+    """Athletes in the gym, active or invited, against the owner's plan."""
+    athletes = [m for m in organisation_members(org_id) if m["role"] == "athlete"]
+    return roster_capacity(_request_plan(request), len(athletes))
+
+
+@app.get("/gym", response_class=HTMLResponse)
+def gym_page(request: Request, notice: str = "", error: str = ""):
+    return _gym_response(request, notice=notice, error=error)
+
+
+def _gym_response(request: Request, *, invite: str = "", notice: str = "", error: str = ""):
+    """The gym page; `invite` only from the invitation form's own response, never an address."""
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse("/login?next=/gym", status_code=303)
+    owned = organisation_owned_by(profile_id)
+    return templates.TemplateResponse(
+        request=request, name="gym.html",
+        context={"request": request, "owned": owned,
+                 "members": organisation_members(int(owned["id"])) if owned else [],
+                 "seats": _gym_seats(request, int(owned["id"])) if owned else None,
+                 "memberships": [m for m in memberships_of(profile_id) if m["role"] != "owner"],
+                 "invite_url": (f"{_public_base(request).rstrip('/')}/gym/invite/{invite}"
+                                if invite and re.fullmatch(r"[A-Za-z0-9_-]{20,100}", invite) else None),
+                 "notice": notice[:200], "error": error[:200]})
+
+
+@app.post("/gym/create", dependencies=[Depends(require_csrf)])
+def gym_create(request: Request, name: str = Form(...)):
+    _enforce_rate_limit(request, "gym-create", 5, 3600)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse("/login?next=/gym", status_code=303)
+    if organisation_owned_by(profile_id):
+        return RedirectResponse("/gym", status_code=303)
+    name = name.strip()
+    if not name:
+        return RedirectResponse("/gym?" + urlencode({"error": "Give your gym a name."}), status_code=303)
+    create_organisation(profile_id, name)
+    record_security_event("gym_created", account_id=int(account["id"]), resource_type="organisation")
+    return RedirectResponse("/gym?" + urlencode({"notice": "Gym created. Invite your coaches and athletes."}),
+                            status_code=303)
+
+
+@app.post("/gym/invite", dependencies=[Depends(require_csrf)])
+def gym_invite(request: Request, email: str = Form(...), role: str = Form("athlete")):
+    _enforce_rate_limit(request, "gym-invite", 40, 3600)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse("/login?next=/gym", status_code=303)
+    owned = organisation_owned_by(profile_id)
+    if not owned:
+        raise HTTPException(404)
+    role = role if role in {"coach", "athlete"} else "athlete"
+    email = email.strip().lower()
+    if not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}", email) or email == str(account.get("email") or "").lower():
+        return RedirectResponse("/gym?" + urlencode({"error": "Enter the person's email address."}), status_code=303)
+    # A coach place reads other people's reports, so it is safe only when the
+    # invited person can prove the address, which needs email to work.
+    if role == "coach" and email_settings_problem():
+        return RedirectResponse("/gym?" + urlencode(
+            {"error": "Coach invitations need email to be set up, so the coach can verify their address. "
+                      "Invite them as an athlete for now, or set up email first."}), status_code=303)
+    if role == "athlete" and not _gym_seats(request, int(owned["id"]))["can_add"]:
+        return RedirectResponse("/gym?" + urlencode(
+            {"error": "Every athlete seat on your plan is taken. Remove an athlete or an invitation first."}),
+            status_code=303)
+    token = session_token()
+    create_org_invite(int(owned["id"]), role, email, token_digest(token))
+    link = f"{_public_base(request).rstrip('/')}/gym/invite/{token}"
+    what = ("If you join as an athlete, the gym's coaches can read your fight reports (not change them). "
+            if role == "athlete" else "As a coach you can read the reports of the gym's athletes. ")
+    sent = True
+    try:
+        deliver_email(email, f"Join {owned['name']} on WarriorIQ",
+                      f"{owned['name']} has invited you to join their gym on WarriorIQ as "
+                      f"{'a coach' if role == 'coach' else 'an athlete'}.\n\n{what}"
+                      f"You can leave at any time from Gym in your account.\n\nSee the invitation: {link}\n\n"
+                      f"It expires in 14 days. If you do not know this gym, ignore this email.")
+    except EmailNotSent:
+        sent = False
+    record_security_event("gym_invite_created", account_id=int(account["id"]), resource_type="organisation",
+                          resource_id=str(owned["id"]), metadata={"role": role, "emailed": sent})
+    notice = ("Invitation emailed. You can also send them this link yourself:" if sent
+              else "Email is not set up, so send them this link yourself:")
+    # Shown on this response, never in an address (see coaching_invite).
+    return _gym_response(request, invite=token, notice=notice)
+
+
+@app.get("/gym/invite/{token}", response_class=HTMLResponse)
+def gym_invite_page(request: Request, token: str):
+    invite = org_invite_by_token(token_digest(token))
+    if not invite:
+        raise HTTPException(404, GYM_INVITE_GONE)
+    profile_id = _profile_id(request)
+    if profile_id is None:
+        return RedirectResponse(f"/login?next=/gym/invite/{token}", status_code=303)
+    account = _account(request) or {}
+    return templates.TemplateResponse(
+        request=request, name="gym_invite.html",
+        context={"request": request, "token": token, "org_name": invite["org_name"], "role": invite["role"],
+                 "own_invite": int(invite["owner_profile_id"]) == profile_id,
+                 "wrong_account": invite["role"] == "coach" and str(account.get("email") or "").strip().lower()
+                 != str(invite.get("invite_email") or "").strip().lower(),
+                 "minor": invite["role"] == "athlete" and social.is_minor_account(get_account_by_profile(profile_id))})
+
+
+@app.post("/gym/invite/{token}/answer", dependencies=[Depends(require_csrf)])
+def gym_invite_answer(request: Request, token: str, answer: str = Form(...)):
+    _enforce_rate_limit(request, "gym-invite-answer", 20, 3600)
+    invite = org_invite_by_token(token_digest(token))
+    if not invite:
+        raise HTTPException(404, GYM_INVITE_GONE)
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account:
+        return RedirectResponse(f"/login?next=/gym/invite/{token}", status_code=303)
+    accept = answer == "accept"
+    if accept and int(invite["owner_profile_id"]) == profile_id:
+        raise HTTPException(409, "This is your own gym.")
+    if accept and invite["role"] == "athlete" and social.is_minor_account(account):
+        raise HTTPException(403, "Under-18 accounts cannot join a gym as an athlete yet.")
+    # A coach's place reads other people's reports, so only the person it was
+    # sent to can take it: a forwarded or leaked link is not enough. (Joining
+    # as an athlete shares only the joiner's own fights.)
+    if accept and invite["role"] == "coach" and \
+            str(account.get("email") or "").strip().lower() != str(invite.get("invite_email") or "").strip().lower():
+        raise HTTPException(403, "This coach invitation was sent to a different email address. "
+                                 "Sign in with that account to accept it.")
+    # And proven theirs: anyone can sign up with an address they do not own
+    # while verification is optional, so matching text is not proof.
+    if accept and invite["role"] == "coach" and not account.get("email_verified_at"):
+        raise HTTPException(403, "Verify your email address first (Settings), then accept this coach invitation.")
+    if not answer_org_invite(int(invite["id"]), profile_id, accept):
+        raise HTTPException(404, GYM_INVITE_GONE)
+    record_security_event("gym_invite_accepted" if accept else "gym_invite_declined",
+                          account_id=int(account["id"]), resource_type="organisation",
+                          resource_id=str(invite["org_id"]), metadata={"role": invite["role"]})
+    notice = f"You joined {invite['org_name']}." if accept else "Invitation declined."
+    return RedirectResponse("/gym?" + urlencode({"notice": notice}), status_code=303)
+
+
+@app.post("/gym/members/{member_id}/end", dependencies=[Depends(require_csrf)])
+def gym_end_membership(request: Request, member_id: int):
+    profile_id = _profile_id(request)
+    account = _account(request)
+    if profile_id is None or not account or not end_org_membership(member_id, profile_id):
+        raise HTTPException(404)
+    record_security_event("gym_membership_ended", account_id=int(account["id"]), resource_type="org_member",
+                          resource_id=str(member_id))
+    return RedirectResponse("/gym?" + urlencode({"notice": "Done."}), status_code=303)
+
+
 @app.get("/coach")
 def coach_redirect(request: Request):
     """/coach and /dashboard were one page at two addresses, sold on the home
@@ -8955,6 +9384,8 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
             "assignments": assignments,
             "camp": camp,
             "standing": camp_standing(points, sessions, today),
+            # The last 30, 60 and 90 days (app/progress_periods.py).
+            "periods": period_summary(progress.get("points") or [], sessions),
             "points_history": points_history(points),
             # The stats-only Fight Camp story card (static/camp_share.js).
             "camp_card": {
@@ -10162,6 +10593,8 @@ def ringside_score(request: Request, payload: RingsidePayload):
 
 @app.get("/kickboxing-fight-analysis", response_class=HTMLResponse)
 @app.get("/k1-fight-analysis", response_class=HTMLResponse)
+@app.get("/muay-thai-fight-analysis", response_class=HTMLResponse)
+@app.get("/mma-fight-analysis", response_class=HTMLResponse)
 @app.get("/fight-video-analysis-for-coaches", response_class=HTMLResponse)
 @app.get("/how-to-record-a-fight-for-analysis", response_class=HTMLResponse)
 def search_guide_page(request: Request):
@@ -10286,7 +10719,13 @@ def shared_report(request: Request, token: str):
     share = get_report_share(token_digest(token))
     if not share:
         raise HTTPException(404, gone)
-    path = _require_completed_artifact(share["job_id"], "report.json")
+    return _read_only_report(request, share["job_id"], gone, expires_at=share["expires_at"])
+
+
+def _read_only_report(request: Request, job_id: str, gone: str, *, expires_at: str | None = None,
+                      coach_view: dict | None = None):
+    """A report as a coach reads it: a share link's page, or a linked coach's."""
+    path = _require_completed_artifact(job_id, "report.json")
     if not path.exists():
         raise HTTPException(404, gone)
     report = json.loads(path.read_text(encoding="utf-8"))
@@ -10296,8 +10735,9 @@ def shared_report(request: Request, token: str):
     _withhold_score_while_counts_are_off(report)
     return templates.TemplateResponse(
         request=request, name="shared.html",
-        context={"request": request, "report": report, "expires_at": share["expires_at"],
-                 "expires_label": _friendly_date(share["expires_at"]),
+        context={"request": request, "report": report, "expires_at": expires_at,
+                 "expires_label": _friendly_date(expires_at) if expires_at else None,
+                 "coach_view": coach_view,
                  # The same verdicts the athlete's page shows, so a coach sees
                  # no number the athlete was told not to trust.
                  "numbers": _numbers_state(report),
@@ -10501,6 +10941,19 @@ def export_account_data(request: Request, password: str = Form(...),
             "pending_requests": list_follows(profile_id, direction="followers", status="pending"),
         },
         "coach_assignments": list_assignments(profile_id),
+        # Coaches who can see this account's fights, athletes who let this
+        # account see theirs, and coaches' notes on this athlete.
+        "gyms": {
+            "member_of": memberships_of(profile_id),
+            "owned": organisation_owned_by(profile_id),
+        },
+        "coaching": {
+            "my_coaches": [{k: v for k, v in link.items() if k != "token_hash"}
+                           for link in coach_links_for_athlete(profile_id)],
+            "my_athletes": [{k: v for k, v in link.items() if k != "token_hash"}
+                            for link in coach_links_for_coach(profile_id)],
+            "notes_about_me": list_coach_notes(profile_id),
+        },
         # Fight Camp: missions taken, training sessions (the check's findings
         # and a fingerprint - the clips themselves are never kept) and points.
         "fight_camp": {

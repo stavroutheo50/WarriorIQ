@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><meta name="robots" content="noindex">{% endblock %}
+{% block title %}{{ athlete.display_name or 'Athlete' }} · Coaching · WarriorIQ{% endblock %}
+{% block content %}
+{%- set name = athlete.display_name or 'Athlete' -%}
+<header class="athlete-head">
+  <div>
+    <div class="eyebrow"><a class="text-link" href="/coaching">Coaching</a></div>
+    <h1>{{ name }}</h1>
+    <p class="muted">{{ name }} shares their fights with you. Reports are read-only; your notes and objectives are visible to them.</p>
+  </div>
+</header>
+{% if notice %}<p class="notice good" role="status">{{ notice }}</p>{% endif %}
+<section class="card" aria-labelledby="fightsTitle">
+  <h2 id="fightsTitle">Fights</h2>
+  <ul class="list-clean coaching-list">
+    {% for fight in fights %}
+    <li><div><strong>{{ fight.choice_label }}</strong>{% if fight.report_failed %} <span class="pill">analysis did not work</span>{% endif %}</div>{% if not fight.report_failed %}<a class="btn secondary" href="/coaching/reports/{{ fight.job_id }}">Open report</a>{% endif %}</li>
+    {% else %}<li class="muted">{{ name }} has no saved fights yet.</li>{% endfor %}
+  </ul>
+</section>
+<div class="grid coaching-grid">
+<section class="card" aria-labelledby="objectivesTitle">
+  <h2 id="objectivesTitle">Training objectives</h2>
+  <form action="/coaching/athletes/{{ athlete_id }}/objectives" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <div class="field"><label for="objectiveTitle">Objective</label><input id="objectiveTitle" name="title" required maxlength="120" placeholder="e.g. Hands back to the chin after every jab"></div>
+    <div class="field"><label for="objectiveDetail">Details (optional)</label><textarea id="objectiveDetail" name="detail" maxlength="1000" rows="3"></textarea></div>
+    <button class="btn" type="submit">Add to their Fight Camp</button>
+  </form>
+  <ul class="list-clean">{% for item in objectives %}<li><strong>{{ item.title }}</strong> <span class="pill">{{ 'done' if item.status == 'complete' else 'open' }}</span>{% if item.detail %}<br><span class="small muted">{{ item.detail }}</span>{% endif %}</li>{% else %}<li class="muted small">No objectives from you yet.</li>{% endfor %}</ul>
+</section>
+<section class="card" aria-labelledby="notesTitle">
+  <h2 id="notesTitle">Notes</h2>
+  <form action="/coaching/athletes/{{ athlete_id }}/notes" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <div class="field"><label for="noteBody">Note to {{ name }}</label><textarea id="noteBody" name="body" required maxlength="2000" rows="3"></textarea></div>
+    <div class="field"><label for="noteFight">About a fight (optional)</label><select id="noteFight" name="job_id"><option value="">No particular fight</option>{% for fight in fights %}<option value="{{ fight.job_id }}">{{ fight.choice_label }}</option>{% endfor %}</select></div>
+    <button class="btn" type="submit">Save note</button>
+  </form>
+  <ul class="list-clean coaching-notes">{% for note in notes %}<li><span class="small muted">{{ note.created_at[:10] }}</span><p>{{ note.body }}</p></li>{% else %}<li class="muted small">No notes yet.</li>{% endfor %}</ul>
+</section>
+</div>
+{% endblock %}

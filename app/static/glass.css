@@ -1208,7 +1208,7 @@ main .card, .auth-card, .empty-workspace, .trust-panel, .analysis-process-card, 
 .password-label-row .text-link { font-size: 13px; }
 .password-box { position: relative; }
 .password-box input { width: 100%; padding-right: 52px; }
-.password-toggle { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 12px; background: transparent; color: #8f9db1; cursor: pointer; transition: color 160ms ease, background-color 160ms ease; }
+.password-toggle { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 12px; background: transparent; color: #8f9db1; cursor: pointer; transition: color 160ms ease, background-color 160ms ease; }
 .password-toggle:hover { color: #e6edf8; background: rgba(255, 255, 255, .06); }
 .password-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .password-toggle .eye-shut { display: none; }
@@ -1463,3 +1463,32 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 /* The live "draw your fighter" card (owner, 2026-11-15). */
 .live-who-stage { position: relative; max-width: 720px; }
 .live-who-stage canvas { position: absolute; inset: 0; cursor: crosshair; touch-action: none; border-radius: 12px; }
+
+/* Fight Camp: the last 30, 60 and 90 days (owner's brief, 2026-11-14). */
+.period-tabs { display: grid; grid-template-columns: repeat(3, max-content) minmax(0, 1fr); gap: 8px 6px; margin-top: 10px; }
+.period-radio { position: absolute; opacity: 0; pointer-events: none; }
+.period-tabs > label { padding: 8px 16px; border: 1px solid rgba(255, 255, 255, .1); border-radius: 999px; color: #c3cad8; font-size: 14px; font-weight: 700; cursor: pointer; }
+.period-radio:checked + label { border-color: rgba(90, 169, 255, .6); background: rgba(90, 169, 255, .16); color: #fff; }
+.period-radio:focus-visible + label { outline: 2px solid #5aa9ff; outline-offset: 2px; }
+.period-panel { display: none; grid-column: 1 / -1; }
+#period30:checked ~ .period-panel[data-period="30"], #period60:checked ~ .period-panel[data-period="60"], #period90:checked ~ .period-panel[data-period="90"] { display: block; }
+.period-facts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 8px 0 12px; color: #c3cad8; font-size: 14px; }
+.period-facts b { color: #fff; font-size: 18px; }
+
+/* Coaching (owner's brief, 2026-11-14). */
+.coaching-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.coaching-list li > div { min-width: 0; overflow-wrap: anywhere; }
+.coaching-invite-form .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.coaching-invite-form input { flex: 1 1 240px; }
+.coaching-link-field { width: 100%; font-size: 14px; }
+.coaching-notes p { margin: 4px 0 0; white-space: pre-wrap; }
+.coaching-invite { max-width: 680px; margin: 24px auto; }
+.coaching-grid { align-items: start; }
+
+/* Ringside Scorer: past scorecards on this phone (owner's brief, 2026-11-14). */
+.ringside-history { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, .08); }
+.ringside-history li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.ringside-history li > div { display: grid; flex: 1 1 auto; min-width: 0; }
+.ringside-history li small { color: #9aa6b8; font-size: 12px; overflow-wrap: anywhere; }
+.ringside-history li .btn { flex: 0 0 auto; padding-inline: 12px; }
+.ringside-history > .btn { margin-top: 10px; }

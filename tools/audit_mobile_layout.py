@@ -25,7 +25,7 @@ AUDIT_JS = r"""(() => {
   const visible = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && !e.closest('[hidden],dialog:not([open]),.sr-only,.visually-hidden'); };
   document.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea,summary').forEach(e => {
     if (!visible(e)) return;
-    if (e.tagName === 'A' && e.closest('p,li:not(.nav li),small,dd,td') && getComputedStyle(e).display === 'inline') return; // inline text links
+    if (e.tagName === 'A' && e.closest('p,li:not(.nav li),small,dd,td,label') && getComputedStyle(e).display === 'inline') return; // inline text links, sentences in labels included
     let r = e.getBoundingClientRect();
     if ((e.type === 'radio' || e.type === 'checkbox') && e.closest('label')) r = e.closest('label').getBoundingClientRect();
     if (e.type === 'file') return;
@@ -69,7 +69,9 @@ def main() -> int:
                 page.goto(args.base + "/login")
                 page.fill("input[name=email]", args.email)
                 page.fill("input[name=password]", args.password)
-                page.click("form[action^='/login'] button[type=submit]")
+                # Enter, not a click: the login form also holds a hidden submit
+                # button (for the password manager), which a click can land on.
+                page.press("input[name=password]", "Enter")
                 page.wait_for_load_state("networkidle")
             for path in paths:
                 page.goto(args.base + path)

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}"><meta name="robots" content="noindex">{% endblock %}
+{% block title %}Coaching · WarriorIQ{% endblock %}
+{% block content %}
+{#- Coaching (owner's brief, 2026-11-14): coaches see an athlete's own fights
+    only after that athlete accepts, and either side can end it. -#}
+<header class="athlete-head">
+  <div>
+    <div class="eyebrow">Coaching</div>
+    <h1>{{ 'Your athletes and coaches' if is_coach else 'Your coaches' }}</h1>
+    <p class="muted">A coach sees an athlete's fight reports only after the athlete accepts their invitation. Reports are read-only, without the original video, and either side can end it at any time.</p>
+  </div>
+</header>
+{% if notice %}<p class="notice good" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="notice bad" role="alert">{{ error }}</p>{% endif %}
+{% if invite_url %}<section class="card coaching-invite-link" aria-label="Invitation link"><p><strong>Invitation link</strong> (shown once): send it to the athlete. It works for 14 days.</p><input class="coaching-link-field" type="text" readonly value="{{ invite_url }}" aria-label="Invitation link"></section>{% endif %}
+
+{% if is_coach %}
+<section class="card" aria-labelledby="athletesTitle">
+  <div class="eyebrow">For coaches</div>
+  <h2 id="athletesTitle">Athletes who share their fights with you</h2>
+  {% if seats %}<p class="small muted">{% if seats.limit is none %}{{ seats.used }} linked or invited.{% else %}{{ seats.used }} of {{ seats.limit }} athlete seat{{ '' if seats.limit == 1 else 's' }} used (linked or invited) on your plan.{% endif %}</p>{% endif %}
+  <form class="coaching-invite-form" action="/coaching/invite" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <label for="inviteEmail" class="small muted">Invite an athlete by email</label>
+    <div class="row"><input id="inviteEmail" name="email" type="email" required maxlength="254" autocomplete="off" placeholder="athlete@example.com"><button class="btn" type="submit"{% if seats and not seats.can_add %} disabled{% endif %}>Send invitation</button></div>
+  </form>
+  <ul class="list-clean coaching-list">
+    {% for link in athletes %}
+    <li>
+      {% if link.status == 'active' %}<div><a class="text-link" href="/coaching/athletes/{{ link.athlete_profile_id }}"><strong>{{ link.athlete_name or 'Athlete' }}</strong></a>{% if link.athlete_handle %} <span class="muted">@{{ link.athlete_handle }}</span>{% endif %}<br><span class="small muted">Linked {{ (link.responded_at or link.created_at)[:10] }}</span></div>
+      {% else %}<div><strong>{{ link.invite_email }}</strong><br><span class="small muted">Invited {{ link.created_at[:10] }} · waiting for them to accept</span></div>{% endif %}
+      <form action="/coaching/links/{{ link.id }}/end" method="post" data-confirm="{{ 'End this link? You will no longer see their fights.' if link.status == 'active' else 'Withdraw this invitation?' }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">{{ 'End link' if link.status == 'active' else 'Withdraw' }}</button></form>
+    </li>
+    {% else %}<li class="muted">No athletes yet. Invite one above.</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% if gym_athletes %}
+<section class="card" aria-labelledby="gymAthletesTitle">
+  <div class="eyebrow">Through your gym</div>
+  <h2 id="gymAthletesTitle">Your gym's athletes</h2>
+  <ul class="list-clean coaching-list">{% for a in gym_athletes %}<li><div><a class="text-link" href="/coaching/athletes/{{ a.athlete_profile_id }}"><strong>{{ a.athlete_name or 'Athlete' }}</strong></a>{% if a.athlete_handle %} <span class="muted">@{{ a.athlete_handle }}</span>{% endif %}<br><span class="small muted">{{ a.org_name }}</span></div></li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% if not is_coach %}
+<p class="small muted">Coaching a team? Set your account type to Coach on your <a class="text-link" href="/profile">athlete profile</a> to invite athletes.</p>
+{% endif %}
+
+<section class="card" aria-labelledby="coachesTitle">
+  <div class="eyebrow">For athletes</div>
+  <h2 id="coachesTitle">Coaches who can see your fights</h2>
+  <ul class="list-clean coaching-list">
+    {% for link in my_coaches %}
+    <li><div><strong>{{ link.coach_name or 'Coach' }}</strong>{% if link.coach_handle %} <span class="muted">@{{ link.coach_handle }}</span>{% endif %}<br><span class="small muted">Since {{ (link.responded_at or link.created_at)[:10] }}</span></div>
+      <form action="/coaching/links/{{ link.id }}/end" method="post" data-confirm="Stop this coach seeing your fights?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Stop sharing</button></form></li>
+    {% else %}<li class="muted">No coach can see your fights. A coach can invite you; you accept from the link they send.</li>{% endfor %}
+  </ul>
+  {% if notes %}<h3>Notes from your coaches</h3>
+  <ul class="list-clean coaching-notes">{% for note in notes %}<li><strong>{{ note.coach_name or 'Coach' }}</strong> <span class="small muted">{{ note.created_at[:10] }}{% if note.job_id %} · <a class="text-link" href="/result/{{ note.job_id }}">about this fight</a>{% endif %}</span><p>{{ note.body }}</p></li>{% endfor %}</ul>{% endif %}
+</section>
+{% endblock %}
