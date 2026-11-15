@@ -1,36 +1,135 @@
 {% extends "base.html" %}
 {% block title %}Administration · WarriorIQ{% endblock %}
 {% block content %}
-<header class="archive-hero"><div><div class="eyebrow">Restricted administration</div><h1>Safety and compliance operations.</h1><p>Only explicitly configured administrator emails can enter. Every visit and action is logged.</p><p class="small muted">Website release {{ release }}</p></div></header>
-{#- Whether two-step secrets are encrypted at rest (core/two_factor.py). A yes or a reason, never the key. -#}
-<section class="card two-factor-storage" aria-labelledby="twoFactorStorageTitle"><div class="eyebrow">Security</div><h2 id="twoFactorStorageTitle">Two-step sign-in storage</h2>
-  {% if two_factor_storage.encrypting %}<p><span class="pill">Encrypted</span> New authenticator secrets are encrypted before they are stored.</p>
-  {% else %}<p class="notice bad"><strong>Not encrypted.</strong> New authenticator secrets would be stored as plain text: {{ two_factor_storage.reason }}. See OPS_TODO.md section 7.</p>{% endif %}
-  <p class="small muted">{{ two_factor_counts.total }} account{{ '' if two_factor_counts.total == 1 else 's' }} {{ 'has' if two_factor_counts.total == 1 else 'have' }} two-step sign-in on: {{ two_factor_counts.encrypted }} stored encrypted, {{ two_factor_counts.plain }} stored as plain text.</p></section>
-{% if worker_version_flag %}<section class="card" role="alert"><p class="notice bad"><strong>Analysis is paused: worker version mismatch.</strong> Worker {{ worker_version_flag.worker_id }} was refused ({{ worker_version_flag.reason|replace('_',' ') }}). Customers see "Analysis is paused for an update". Deploy the worker and the website from the same commit; both must report release {{ release }}.</p></section>{% endif %}
-<section class="card">
-  <form method="get" action="/admin"><div class="field"><label for="adminSearch">Search users by email</label><input id="adminSearch" type="search" name="q" value="{{query}}"></div><button class="btn secondary" type="submit">Search users</button></form>
-  <div class="privacy-fight-list">{% for user in users %}<article><div><strong>{{user.email}}</strong><span>{{user.account_status}} · {{user.plan_override or user.plan}} · joined {{user.created_at[:10]}}</span></div><form action="/admin/accounts/{{user.id}}/status" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="status" value="{% if user.account_status == 'active' %}suspended{% else %}active{% endif %}"><button class="btn {% if user.account_status == 'active' %}danger{% else %}secondary{% endif %}" type="submit">{% if user.account_status == 'active' %}Suspend{% else %}Restore{% endif %}</button></form></article>{% else %}<p class="muted">No matching users.</p>{% endfor %}</div>
+{#- The admin page (owner, 2026-11-15: "organise it, with the most information
+    it can have"). Sections in the order they are checked: is anything wrong,
+    is analysis working, who signed up, what was analysed, who visited, safety,
+    tools. Every figure is counted on this request (core/admin_overview.py);
+    nothing is estimated. -#}
+{% set o = overview %}
+<header class="archive-hero"><div><div class="eyebrow">Restricted administration</div><h1>WarriorIQ control room.</h1><p>Only explicitly configured administrator emails can enter. Every visit and action is logged.</p><p class="small muted">Website release {{ release }} · analysis mode {{ o.worker_mode }} · payments {{ 'on' if o.payments_enabled else 'off' }}</p></div></header>
+
+<nav class="admin-nav" aria-label="Admin sections"><a href="#adminOverview">Overview</a><a href="#adminAnalysis">Analysis</a><a href="#adminPeople">People</a><a href="#adminFights">Fights</a><a href="#adminTraffic">Traffic</a><a href="#adminSafety">Safety</a><a href="#adminTools">Tools</a></nav>
+
+{#- Anything that needs action first, together in one box. -#}
+{% if worker_version_flag or not o.worker.available or email_problem %}<section class="card admin-alerts" role="alert" aria-label="Needs attention"><div class="eyebrow">Needs attention</div>
+  {% if worker_version_flag %}<p class="notice bad"><strong>Analysis is paused: worker version mismatch.</strong> Worker {{ worker_version_flag.worker_id }} was refused ({{ worker_version_flag.reason|replace('_',' ') }}). Customers see "Analysis is paused for an update". Deploy the worker and the website from the same commit; both must report release {{ release }}.</p>{% endif %}
+  {% if not o.worker.available %}<p class="notice bad"><strong>No analysis computer connected.</strong> {{ (o.worker.reason or 'unknown')|replace('_',' ')|capitalize }}{% if o.worker.heartbeat_age_seconds is not none %}; last heard from {{ (o.worker.heartbeat_age_seconds / 60)|round(0)|int }} minutes ago{% endif %}. Fights wait in the queue until it connects.</p>{% endif %}
+  {% if email_problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ email_problem }}. Password resets and verification emails cannot be sent. <a class="text-link" href="#adminTools">Email settings</a></p>{% endif %}
+</section>{% endif %}
+
+<section class="card admin-section" id="adminOverview" aria-labelledby="adminOverviewTitle">
+  <div class="eyebrow">At a glance</div><h2 id="adminOverviewTitle">Overview</h2>
+  <div class="admin-tiles">
+    <div class="admin-tile"><span>Accounts</span><strong>{{ o.accounts.total }}</strong><small>+{{ o.accounts.new_day }} today · +{{ o.accounts.new_week }} this week · +{{ o.accounts.new_month }} in 30 days</small></div>
+    <div class="admin-tile"><span>Fights analysed</span><strong>{{ o.fights.total }}</strong><small>+{{ o.fights.new_day }} today · +{{ o.fights.new_week }} this week · +{{ o.fights.new_month }} in 30 days</small></div>
+    <div class="admin-tile"><span>Analysing now</span><strong>{{ o.worker.running_jobs }}</strong><small>{{ o.worker.queued_jobs }} waiting in the queue</small></div>
+    <div class="admin-tile {{ 'is-good' if o.worker.available else 'is-bad' }}"><span>Analysis computer</span><strong>{{ 'Connected' if o.worker.available else 'Offline' }}</strong><small>{% if o.worker.heartbeat_age_seconds is not none %}Last heartbeat {{ o.worker.heartbeat_age_seconds|round(0)|int }} s ago{% else %}No heartbeat yet{% endif %}</small></div>
+    <div class="admin-tile {{ 'is-bad' if o.failures.total_month else '' }}"><span>Failed analyses</span><strong>{{ o.failures.total_month }}</strong><small>in the last 30 days</small></div>
+    <div class="admin-tile"><span>Page views</span><strong>{{ traffic.total }}</strong><small>in the last 30 days</small></div>
+    <div class="admin-tile"><span>Signed in now</span><strong>{{ o.accounts.signed_in }}</strong><small>accounts with a live session</small></div>
+    <div class="admin-tile"><span>Storage</span><strong>{{ (o.storage.uploads_bytes + o.storage.outputs_bytes + o.storage.database_bytes)|filesizeformat }}</strong><small>{% if o.storage.disk_free_bytes is not none %}{{ o.storage.disk_free_bytes|filesizeformat }} free on the disk{% endif %}</small></div>
+  </div>
 </section>
-<section class="card">
-  <div class="eyebrow">Traffic · counted here, not by Google</div><h2>Last 30 days</h2>
+
+<section class="card admin-section" id="adminAnalysis" aria-labelledby="adminAnalysisTitle">
+  <div class="eyebrow">Analysis</div><h2 id="adminAnalysisTitle">Queue, computer and failures</h2>
+  <div class="admin-columns">
+    <div>
+      <h3>Analysis computer</h3>
+      <dl class="admin-facts">
+        <dt>Status</dt><dd>{{ 'Connected' if o.worker.available else 'Offline' }}{% if o.worker.reason %} ({{ o.worker.reason|replace('_',' ') }}){% endif %}</dd>
+        <dt>Mode</dt><dd>{{ o.worker.mode }}</dd>
+        <dt>Last heartbeat</dt><dd>{% if o.worker.heartbeat_age_seconds is not none %}{{ o.worker.heartbeat_age_seconds|round(0)|int }} seconds ago{% else %}never{% endif %}</dd>
+        <dt>Working on</dt><dd>{{ o.worker.current_job_id or 'nothing' }}</dd>
+        <dt>Release</dt><dd>{{ release }}</dd>
+        {% if o.worker_refusal %}<dt>Refused</dt><dd>{{ o.worker_refusal.worker_id }}: {{ o.worker_refusal.reason|replace('_',' ') }}</dd>{% endif %}
+        {% if o.worker.missing_dependencies %}<dt>Missing</dt><dd>{{ o.worker.missing_dependencies|join(', ') }}</dd>{% endif %}
+      </dl>
+      <h3>Jobs the site holds</h3>
+      <p class="small muted">{% for status, n in o.live.counts.items() %}{{ status }} {{ n }}{% if not loop.last %} · {% endif %}{% else %}None.{% endfor %}</p>
+    </div>
+    <div>
+      <h3>Running and waiting</h3>
+      <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Analysis</th><th>Status</th><th>Account</th><th>Rules</th></tr></thead><tbody>
+        {% for job in o.live.active %}<tr><td><code>{{ job.job_id }}</code></td><td>{{ job.status }}{% if job.stage %} · {{ job.stage }}{% endif %}{% if job.percent is not none %} · {{ job.percent|round(0)|int }}%{% endif %}</td><td>{{ job.email or '—' }}</td><td>{{ job.ruleset }}</td></tr>
+        {% else %}<tr><td colspan="4" class="muted">Nothing running or waiting.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div>
+  </div>
+  <h3>Failures in the last 30 days</h3>
+  {% if o.failures.reasons %}<p class="small">{% for item in o.failures.reasons %}<span class="pill">{{ item.reason|replace('_',' ') }} · {{ item.n }}</span> {% endfor %}</p>{% endif %}
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>When</th><th>Analysis</th><th>Account</th><th>Stage</th><th>Reason</th><th>Tries</th></tr></thead><tbody>
+    {% for item in o.failures.recent %}<tr><td>{{ item.occurred_at[:16]|replace('T',' ') }}</td><td><code>{{ item.job_id }}</code></td><td>{{ item.email or 'guest' }}</td><td>{{ item.stage }}</td><td>{{ item.reason|replace('_',' ') }}{% if item.detail %}<br><span class="small muted">{{ item.detail[:160] }}</span>{% endif %}</td><td>{{ item.attempts }}</td></tr>
+    {% else %}<tr><td colspan="6" class="muted">No failed analyses recorded.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="card admin-section" id="adminPeople" aria-labelledby="adminPeopleTitle">
+  <div class="eyebrow">People</div><h2 id="adminPeopleTitle">Accounts</h2>
+  <div class="admin-tiles admin-tiles-small">
+    <div class="admin-tile"><span>Athletes</span><strong>{{ o.accounts.athletes }}</strong></div>
+    <div class="admin-tile"><span>Coaches</span><strong>{{ o.accounts.coaches }}</strong></div>
+    <div class="admin-tile"><span>Email verified</span><strong>{{ o.accounts.verified }}</strong></div>
+    <div class="admin-tile"><span>Two-step on</span><strong>{{ o.accounts.two_factor }}</strong></div>
+    <div class="admin-tile"><span>Waiting for a guardian</span><strong>{{ o.accounts.guardian_pending }}</strong></div>
+    <div class="admin-tile"><span>Suspended</span><strong>{{ o.accounts.suspended }}</strong></div>
+    <div class="admin-tile"><span>Marketing emails OK</span><strong>{{ o.accounts.marketing }}</strong></div>
+  </div>
+  <p class="small muted">By plan: {% for item in o.accounts.plans %}{{ item.plan }} {{ item.n }}{% if not loop.last %} · {% endif %}{% endfor %}{% if o.fights.plan_interest %} · Asked to be told when paid plans open: {% for item in o.fights.plan_interest %}{{ item.plan_key }} {{ item.n }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</p>
+  <h3>Newest accounts</h3>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Joined</th><th>Email</th><th>Type</th><th>Plan</th><th>Verified</th><th>Fights</th><th>Status</th></tr></thead><tbody>
+    {% for user in o.accounts.recent %}<tr><td>{{ user.created_at[:10] }}</td><td>{{ user.email }}</td><td>{{ user.account_type }}</td><td>{{ user.plan }}</td><td>{{ 'yes' if user.verified else 'no' }}</td><td>{{ user.fights }}</td><td>{{ user.account_status }}</td></tr>
+    {% else %}<tr><td colspan="7" class="muted">No accounts yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <h3>Find an account</h3>
+  <form method="get" action="/admin#adminPeople"><div class="field"><label for="adminSearch">Search users by email</label><input id="adminSearch" type="search" name="q" value="{{query}}"></div><button class="btn secondary" type="submit">Search users</button></form>
+  {% if query %}<div class="privacy-fight-list">{% for user in users %}<article><div><strong>{{user.email}}</strong><span>{{user.account_status}} · {{user.plan_override or user.plan}} · joined {{user.created_at[:10]}}</span></div><form action="/admin/accounts/{{user.id}}/status" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="status" value="{% if user.account_status == 'active' %}suspended{% else %}active{% endif %}"><button class="btn {% if user.account_status == 'active' %}danger{% else %}secondary{% endif %}" type="submit">{% if user.account_status == 'active' %}Suspend{% else %}Restore{% endif %}</button></form></article>{% else %}<p class="muted">No matching users.</p>{% endfor %}</div>{% else %}<p class="small muted">Search to suspend or restore an account.</p>{% endif %}
+</section>
+
+<section class="card admin-section" id="adminFights" aria-labelledby="adminFightsTitle">
+  <div class="eyebrow">Fights</div><h2 id="adminFightsTitle">Saved analyses</h2>
+  <p class="small muted">{{ o.fights.total }} saved by {{ o.fights.profiles }} account{{ '' if o.fights.profiles == 1 else 's' }} · {{ o.fights.videos_held }} still hold their video ({{ o.storage.uploads_bytes|filesizeformat }} of uploads, {{ o.storage.outputs_bytes|filesizeformat }} of reports)</p>
+  <p class="small">{% for item in o.fights.rulesets %}<span class="pill">{{ item.ruleset }} · {{ item.n }}</span> {% endfor %}{% for item in o.fights.types %}<span class="pill">{{ item.fight_type }} · {{ item.n }}</span> {% endfor %}</p>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>When</th><th>Analysis</th><th>Account</th><th>Rules</th><th>Type</th><th>Video</th></tr></thead><tbody>
+    {% for fight in o.fights.recent %}<tr><td>{{ fight.created_at[:16]|replace('T',' ') }}</td><td><code>{{ fight.job_id }}</code></td><td>{{ fight.email or '—' }}</td><td>{{ fight.ruleset }}</td><td>{{ fight.fight_type }}</td><td>{{ 'kept' if fight.video_held else 'deleted' }}</td></tr>
+    {% else %}<tr><td colspan="6" class="muted">No fights analysed yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="card admin-section" id="adminTraffic" aria-labelledby="adminTrafficTitle">
+  <div class="eyebrow">Traffic · counted here, not by Google</div><h2 id="adminTrafficTitle">Last 30 days</h2>
   {#- Google is told nothing until a visitor accepts cookies, and below its
      modelling threshold a denied visitor is absent from the reports rather
      than estimated. These numbers include them. They are page views, not
      people: nothing here identifies anybody, by design. -#}
   <p class="big">{{traffic.total}} page view{{ '' if traffic.total == 1 else 's' }}</p>
-  <div class="privacy-fight-list">{% for page in traffic.pages[:15] %}<article><div><strong>{{page.path}}</strong></div><span>{{page.views}}</span></article>{% else %}<p class="muted">No page views counted yet.</p>{% endfor %}</div>
-  <h3>By day</h3>
-  <ul class="list-clean">{% for day in traffic.days[-14:] %}<li><span class="small muted">{{day.day}}</span> · {{day.views}}</li>{% endfor %}</ul>
+  <div class="admin-columns">
+    <div><h3>Top pages</h3><div class="privacy-fight-list">{% for page in traffic.pages[:15] %}<article><div><strong>{{page.path}}</strong></div><span>{{page.views}}</span></article>{% else %}<p class="muted">No page views counted yet.</p>{% endfor %}</div></div>
+    <div><h3>By day</h3><ul class="list-clean admin-days">{% set top = (traffic.days[-14:]|map(attribute='views')|max) if traffic.days else 0 %}{% for day in traffic.days[-14:] %}<li><span class="small muted">{{day.day}}</span><span class="admin-bar" style="--w:{{ ((day.views / top * 100) if top else 0)|round(1) }}%"></span><span>{{day.views}}</span></li>{% endfor %}</ul></div>
+  </div>
 </section>
-<div class="grid">
-  <section class="card"><div class="eyebrow">Copyright and abuse</div><h2>Reports</h2><ul class="list-clean">{% for report in reports %}<li><strong>{{report.report_type|title}} · #{{report.id}}</strong><br><span class="small muted">{{report.reporter_email}} · {{report.created_at}}</span><p>{{report.details}}</p>{% if report.status == 'open' %}<form action="/admin/reports/{{report.id}}/resolve" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Mark resolved</button></form>{% endif %}</li>{% else %}<li class="muted">No reports.</li>{% endfor %}</ul></section>
-  <section class="card"><div class="eyebrow">Security audit</div><h2>Recent events</h2><ul class="list-clean">{% for event in security_events %}<li><strong>{{event.event_type|replace('_',' ')|title}}</strong><br><span class="small muted">{{event.occurred_at}} · {{event.severity}} · {{event.resource_type or ''}} {{event.resource_id or ''}}</span></li>{% else %}<li class="muted">No events.</li>{% endfor %}</ul></section>
-</div>
-<section class="card"><div class="eyebrow">Email</div><h2>Password resets and account emails</h2>
+
+<section class="card admin-section" id="adminSafety" aria-labelledby="adminSafetyTitle">
+  <div class="eyebrow">Safety</div><h2 id="adminSafetyTitle">Security, reports and audit</h2>
+  {#- Whether two-step secrets are encrypted at rest (core/two_factor.py). A yes or a reason, never the key. -#}
+  <div class="two-factor-storage" aria-labelledby="twoFactorStorageTitle"><h3 id="twoFactorStorageTitle">Two-step sign-in storage</h3>
+    {% if two_factor_storage.encrypting %}<p><span class="pill">Encrypted</span> New authenticator secrets are encrypted before they are stored.</p>
+    {% else %}<p class="notice bad"><strong>Not encrypted.</strong> New authenticator secrets would be stored as plain text: {{ two_factor_storage.reason }}. See OPS_TODO.md section 7.</p>{% endif %}
+    <p class="small muted">{{ two_factor_counts.total }} account{{ '' if two_factor_counts.total == 1 else 's' }} {{ 'has' if two_factor_counts.total == 1 else 'have' }} two-step sign-in on: {{ two_factor_counts.encrypted }} stored encrypted, {{ two_factor_counts.plain }} stored as plain text.</p></div>
+  <div class="admin-columns">
+    <div><h3>Copyright and abuse reports</h3><ul class="list-clean">{% for report in reports %}<li><strong>{{report.report_type|title}} · #{{report.id}}</strong> <span class="pill">{{ report.status }}</span><br><span class="small muted">{{report.reporter_email}} · {{report.created_at}}</span><p>{{report.details}}</p>{% if report.status == 'open' %}<form action="/admin/reports/{{report.id}}/resolve" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Mark resolved</button></form>{% endif %}</li>{% else %}<li class="muted">No reports.</li>{% endfor %}</ul></div>
+    <div><h3>Recent security events</h3><ul class="list-clean admin-events">{% for event in security_events[:60] %}<li><strong>{{event.event_type|replace('_',' ')|capitalize}}</strong>{% if event.severity != 'info' %} <span class="pill">{{ event.severity }}</span>{% endif %}<br><span class="small muted">{{event.occurred_at[:19]|replace('T',' ')}} · {{event.resource_type or ''}} {{event.resource_id or ''}}</span></li>{% else %}<li class="muted">No events.</li>{% endfor %}</ul></div>
+  </div>
+</section>
+
+<section class="card admin-section" id="adminTools" aria-labelledby="adminToolsTitle">
+  <div class="eyebrow">Tools</div><h2 id="adminToolsTitle">Email and content removal</h2>
+  <h3>Password resets and account emails</h3>
   {% if email_problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ email_problem }}. Set it in the website's environment settings, then send a test.</p>{% else %}<p class="muted">Settings are present. Send a test to your own admin address to prove the mail server accepts them.</p>{% endif %}
   {% if email_test %}<p class="notice {{ 'good' if email_test.startswith('Sent') else 'bad' }}" role="status">{{ email_test }}</p>{% endif %}
   <form action="/admin/email/test" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Send test email to me</button></form>
+  <div class="account-danger"><h3>Delete a prohibited saved analysis</h3><p>Use only after matching the exact private analysis ID to a validated complaint. This removes its stored video, report and temporary analysis files and creates an audit event.</p><form action="/admin/videos/delete" method="post" data-confirm="Permanently remove this exact analysis and video?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="field"><label for="adminJobId">Analysis ID</label><input id="adminJobId" name="job_id" required maxlength="120"></div><button class="btn danger" type="submit">Delete prohibited content</button></form></div>
+  <p class="small muted">Storage measured {{ o.storage.measured_at[:19]|replace('T',' ') }} UTC (refreshed every 5 minutes): uploads {{ o.storage.uploads_files }} files, reports {{ o.storage.outputs_files }} files, database {{ o.storage.database_bytes|filesizeformat }}.</p>
 </section>
-<section class="card account-danger"><div class="eyebrow">Content removal</div><h2>Delete a prohibited saved analysis</h2><p>Use only after matching the exact private analysis ID to a validated complaint. This removes its stored video, report and temporary analysis files and creates an audit event.</p><form action="/admin/videos/delete" method="post" data-confirm="Permanently remove this exact analysis and video?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="field"><label for="adminJobId">Analysis ID</label><input id="adminJobId" name="job_id" required maxlength="120"></div><button class="btn danger" type="submit">Delete prohibited content</button></form></section>
 {% endblock %}

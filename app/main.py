@@ -160,6 +160,7 @@ from core.retention import (
     guest_job_valid,
 )
 from core import training_consent
+from core import admin_overview
 from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
 from core.stat_sheet import build_stat_sheet
@@ -9301,6 +9302,19 @@ def admin_page(request: Request, q: str = ""):
             "release": release_version(),
             "two_factor_storage": two_factor.storage_status(),
             "two_factor_counts": two_factor_storage_counts(),
+            # The whole service at a glance (core/admin_overview.py): counts
+            # read from the database and data folders on this request.
+            "overview": {
+                "accounts": admin_overview.accounts(),
+                "fights": admin_overview.fights(),
+                "failures": admin_overview.failures(),
+                "storage": admin_overview.storage(),
+                "live": admin_overview.live_jobs(list_jobs()),
+                "worker": worker_status(),
+                "worker_refusal": recent_worker_refusal(),
+                "payments_enabled": SETTINGS.payments_enabled,
+                "worker_mode": SETTINGS.analysis_worker_mode,
+            },
         },
     )
 
