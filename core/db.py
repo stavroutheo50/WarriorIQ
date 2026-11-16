@@ -1488,6 +1488,9 @@ def update_password_hash(account_id: int, password_hash: str) -> bool:
             # PR #236). Reset waits never sign anyone in, and stay for the
             # browser that asked for the link being used.
             con.execute("DELETE FROM auth_waits WHERE account_id=? AND kind='verify'", (int(account_id),))
+            # Any reset link still out stops working too: a password chosen in
+            # Settings must not be replaceable by an older link.
+            con.execute("DELETE FROM password_reset_tokens WHERE account_id=?", (int(account_id),))
         return cursor.rowcount == 1
 
 

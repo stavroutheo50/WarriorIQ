@@ -196,3 +196,20 @@ def test_a_password_change_ends_a_waiting_sign_up(verification_on):
     assert squatter.get("/auth/wait").json() == {"state": "none"}
     continued = squatter.get("/auth/continue", follow_redirects=False)
     assert web.SESSION_COOKIE not in continued.headers.get("set-cookie", "")
+
+
+def test_a_password_change_in_settings_ends_reset_links_already_sent():
+    # Security review, PR #236: a link sent before the change must not undo it.
+    from core import db
+    from core.auth import hash_password
+    email = f"settings-{uuid.uuid4().hex[:8]}@example.com"
+    _account(email)
+    sent = []
+    with patch.object(web, "deliver_email", lambda to, subject, body: sent.append(body)):
+        web._rate_windows.clear()
+        BrowserClient(web.app).post("/forgot-password", data={"email": email})
+    account = db.get_account_by_email(email)
+    assert db.update_password_hash(int(account["id"]), hash_password("Settings-Chosen-Password-3"))
+    late = BrowserClient(web.app).post(_link(sent[0], "reset-password"), data={"password": "Someone-Elses-Pass-4"},
+                                       follow_redirects=False)
+    assert late.status_code == 410
