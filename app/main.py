@@ -3890,8 +3890,9 @@ def login(
 
 
 @app.get("/verify-email", response_class=HTMLResponse)
-def verify_email_page(request: Request, message: str = ""):
-    return _verify_email_response(request, message=message)
+def verify_email_page(request: Request):
+    # Nothing from the address is shown on this page (security review, PR #236).
+    return _verify_email_response(request)
 
 
 def _verify_email_response(request: Request, message: str = "", error: str = "", status_code: int = 200):
@@ -3937,7 +3938,7 @@ def resend_verification_email(request: Request, email: str = Form(...)):
             "email_verification_resent", account_id=int(account["id"]),
             metadata={"email_delivery": "sent" if delivered else "unavailable"},
         )
-    return verify_email_page(
+    return _verify_email_response(
         request,
         "If an unverified account exists, a fresh verification link has been sent.",
     )
