@@ -3959,8 +3959,10 @@ def forgot_password_page(request: Request, next: str = "/camp", email: str = "")
 def request_password_reset(request: Request, email: str = Form(...), next_path: str = Form("/camp")):
     _enforce_rate_limit(request, "password-reset", 8, 900)
     account = get_account_by_email(email.strip().lower()) if valid_email(email) else None
+    link_hash = None
     if account and account.get("account_status", "active") == "active":
         token = session_token()
+        link_hash = token_digest(token)
         expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
         save_password_reset_token(int(account["id"]), token_digest(token), expires)
         reset_url = f"{_public_base(request)}/reset-password/{token}"
@@ -3988,7 +3990,9 @@ def request_password_reset(request: Request, email: str = Form(...), next_path: 
                  "sender": _sender_address(), "next_path": _safe_next(next_path), "waiting": True,
                  "message": ""},
     )
-    _start_auth_wait(request, response, "reset", int(account["id"]) if account else None, next_path)
+    # Bound to this one link: the wait finishes only when this link is used.
+    _start_auth_wait(request, response, "reset", int(account["id"]) if link_hash else None, next_path,
+                     link_hash=link_hash)
     return response
 
 
@@ -4023,9 +4027,9 @@ def reset_password(request: Request, token: str, password: str = Form(...)):
                      "error": "This link has expired or was already used. Links work once, for 30 minutes. "
                               "Ask for a new one below."})
     record_security_event("password_reset_completed", account_id=account_id)
-    # The browser that asked for the link, on whatever device, moves on to
-    # sign-in where it was heading.
-    finish_auth_waits(account_id, "reset")
+    # The browser that asked for this link, on whatever device, moves on to
+    # sign-in where it was heading; no other browser learns of it.
+    finish_auth_waits(account_id, "reset", link_hash=token_digest(token))
     mine = _waiting_row(request, "reset")
     if mine and mine.get("account_id") == account_id:
         response = _finish_waiting(request, mine)
@@ -4053,9 +4057,10 @@ def reset_password(request: Request, token: str, password: str = Form(...)):
 AUTH_WAIT_COOKIE = "warrioriq_wait"
 
 
-def _start_auth_wait(request: Request, response, kind: str, account_id: int | None, next_path: str) -> None:
+def _start_auth_wait(request: Request, response, kind: str, account_id: int | None, next_path: str,
+                     link_hash: str | None = None) -> None:
     token = session_token()
-    create_auth_wait(kind, token_digest(token), account_id, _safe_next(next_path))
+    create_auth_wait(kind, token_digest(token), account_id, _safe_next(next_path), link_hash=link_hash)
     response.set_cookie(AUTH_WAIT_COOKIE, token, max_age=3600, httponly=True, samesite="lax",
                         secure=_request_is_secure(request))
 

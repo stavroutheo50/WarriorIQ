@@ -710,6 +710,7 @@ def _init_db_schema() -> None:
                    kind TEXT NOT NULL,
                    account_id INTEGER,
                    next_path TEXT NOT NULL DEFAULT '/camp',
+                   link_hash TEXT,
                    created_at TEXT NOT NULL,
                    done_at TEXT,
                    claimed_at TEXT
@@ -1487,7 +1488,10 @@ def update_password_hash(account_id: int, password_hash: str) -> bool:
 def save_password_reset_token(account_id: int, token_hash: str, expires_at: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
-        con.execute("DELETE FROM password_reset_tokens WHERE expires_at<=? OR used_at IS NOT NULL", (now,))
+        # A new link replaces the account's earlier ones, so only the newest
+        # email works, as the page that asked for it says (security review, PR #236).
+        con.execute("DELETE FROM password_reset_tokens WHERE account_id=? OR expires_at<=? OR used_at IS NOT NULL",
+                    (int(account_id), now))
         con.execute(
             "INSERT INTO password_reset_tokens(account_id,token_hash,created_at,expires_at) VALUES(?,?,?,?)",
             (int(account_id), token_hash, now, expires_at),
@@ -1497,7 +1501,8 @@ def save_password_reset_token(account_id: int, token_hash: str, expires_at: str)
 AUTH_WAIT_MINUTES = 60
 
 
-def create_auth_wait(kind: str, wait_hash: str, account_id: int | None, next_path: str) -> None:
+def create_auth_wait(kind: str, wait_hash: str, account_id: int | None, next_path: str,
+                     link_hash: str | None = None) -> None:
     """Remember a browser waiting for `kind` ("verify" or "reset") to be finished elsewhere.
 
     `account_id` may be None (a reset asked for an address with no account), so
@@ -1509,20 +1514,35 @@ def create_auth_wait(kind: str, wait_hash: str, account_id: int | None, next_pat
         con.execute("DELETE FROM auth_waits WHERE created_at<=?",
                     ((now - timedelta(minutes=AUTH_WAIT_MINUTES)).isoformat(),))
         con.execute(
-            "INSERT OR REPLACE INTO auth_waits(wait_hash,kind,account_id,next_path,created_at) VALUES(?,?,?,?,?)",
-            (wait_hash, kind, None if account_id is None else int(account_id), next_path, now.isoformat()),
+            "INSERT OR REPLACE INTO auth_waits(wait_hash,kind,account_id,next_path,link_hash,created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (wait_hash, kind, None if account_id is None else int(account_id), next_path, link_hash,
+             now.isoformat()),
         )
 
 
-def finish_auth_waits(account_id: int, kind: str) -> None:
-    """The email link was used: every browser waiting on it for this account may move on."""
+def finish_auth_waits(account_id: int, kind: str, link_hash: str | None = None) -> None:
+    """An email link was used: the browser waiting on it may move on.
+
+    With `link_hash`, only the browser that asked for that very link: anyone
+    can ask for a reset of any address, and must not learn from their own
+    waiting page that the owner reset it (security review, PR #236). Without
+    it (email verification, waited on only by the browser that created the
+    account), every wait of that kind for the account.
+    """
     init_db()
     now = datetime.now(timezone.utc)
+    recent = (now - timedelta(minutes=AUTH_WAIT_MINUTES)).isoformat()
     with connection() as con:
-        con.execute(
-            "UPDATE auth_waits SET done_at=? WHERE account_id=? AND kind=? AND done_at IS NULL AND created_at>?",
-            (now.isoformat(), int(account_id), kind, (now - timedelta(minutes=AUTH_WAIT_MINUTES)).isoformat()),
-        )
+        if link_hash is not None:
+            con.execute(
+                "UPDATE auth_waits SET done_at=? WHERE account_id=? AND kind=? AND link_hash=? "
+                "AND done_at IS NULL AND created_at>?",
+                (now.isoformat(), int(account_id), kind, link_hash, recent))
+        else:
+            con.execute(
+                "UPDATE auth_waits SET done_at=? WHERE account_id=? AND kind=? AND done_at IS NULL AND created_at>?",
+                (now.isoformat(), int(account_id), kind, recent))
 
 
 def auth_wait(wait_hash: str) -> dict | None:
@@ -1562,6 +1582,9 @@ def consume_password_reset_token(token_hash: str) -> int | None:
         if row is None:
             return None
         con.execute("UPDATE password_reset_tokens SET used_at=? WHERE id=?", (now, int(row["id"])))
+        # And no other link for the account outlives the reset.
+        con.execute("DELETE FROM password_reset_tokens WHERE account_id=? AND id<>?",
+                    (int(row["account_id"]), int(row["id"])))
         return int(row["account_id"])
 
 

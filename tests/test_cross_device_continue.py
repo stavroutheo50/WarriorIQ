@@ -132,3 +132,34 @@ def test_the_duplicate_sign_up_leads_to_sign_in_with_the_address_filled():
     assert 'href="/login?next=/history"' in box and ">Sign in</a>" in box
     login = client.get("/login?next=%2Fhistory").text
     assert f'value="{email}"' in login and 'name="next_path" value="/history"' in login
+
+
+def test_a_new_reset_link_cancels_the_older_one():
+    # Security review, PR #236: the page says to use the newest email.
+    email = f"two-links-{uuid.uuid4().hex[:8]}@example.com"
+    _account(email)
+    sent = []
+    with patch.object(web, "deliver_email", lambda to, subject, body: sent.append(body)):
+        for _ in range(2):
+            web._rate_windows.clear()
+            BrowserClient(web.app).post("/forgot-password", data={"email": email})
+    old, new = _link(sent[0], "reset-password"), _link(sent[1], "reset-password")
+    phone = BrowserClient(web.app)
+    assert phone.post(old, data={"password": "A-Brand-New-Password-7"}, follow_redirects=False).status_code == 410
+    assert phone.post(new, data={"password": "A-Brand-New-Password-7"}, follow_redirects=False).status_code == 200
+
+
+def test_someone_else_asking_for_a_reset_does_not_see_the_owner_finish_theirs():
+    # Security review, PR #236: a wait finishes only for the link it asked for.
+    email = f"watched-{uuid.uuid4().hex[:8]}@example.com"
+    _account(email)
+    stranger, owner = BrowserClient(web.app), BrowserClient(web.app)
+    sent = []
+    with patch.object(web, "deliver_email", lambda to, subject, body: sent.append(body)):
+        web._rate_windows.clear()
+        stranger.post("/forgot-password", data={"email": email})
+        web._rate_windows.clear()
+        owner.post("/forgot-password", data={"email": email})
+    BrowserClient(web.app).post(_link(sent[-1], "reset-password"), data={"password": "A-Brand-New-Password-7"})
+    assert owner.get("/auth/wait").json()["state"] == "done"
+    assert stranger.get("/auth/wait").json() == {"state": "waiting"}
