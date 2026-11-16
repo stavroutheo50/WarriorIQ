@@ -1482,6 +1482,12 @@ def update_password_hash(account_id: int, password_hash: str) -> bool:
         )
         if cursor.rowcount:
             con.execute("DELETE FROM sessions WHERE account_id=?", (int(account_id),))
+            # And any browser still waiting to be signed in by email
+            # verification: whoever signed up first must not get back in once
+            # the address's owner has set a new password (security review,
+            # PR #236). Reset waits never sign anyone in, and stay for the
+            # browser that asked for the link being used.
+            con.execute("DELETE FROM auth_waits WHERE account_id=? AND kind='verify'", (int(account_id),))
         return cursor.rowcount == 1
 
 

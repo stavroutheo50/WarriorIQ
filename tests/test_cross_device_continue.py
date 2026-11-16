@@ -177,3 +177,22 @@ def test_the_reset_page_shows_only_its_own_notices():
     weak = client.post("/reset-password/x", data={"password": "short"}, follow_redirects=False)
     assert weak.headers["location"].endswith("?error=short")
     assert "between 10 and 1,024 characters" in client.get(weak.headers["location"]).text
+
+
+def test_a_password_change_ends_a_waiting_sign_up(verification_on):
+    # Security review, PR #236: someone signs up with another person's address
+    # and leaves the page waiting; the owner resets the password, then confirms
+    # the address. The first browser must not be signed in.
+    squatter = BrowserClient(web.app)
+    email = f"squat-{uuid.uuid4().hex[:8]}@example.com"
+    verify_link = _sign_up(squatter, email)
+    sent = []
+    with patch.object(web, "deliver_email", lambda to, subject, body: sent.append(body)):
+        web._rate_windows.clear()
+        BrowserClient(web.app).post("/forgot-password", data={"email": email})
+    owner = BrowserClient(web.app)
+    owner.post(_link(sent[0], "reset-password"), data={"password": "Owners-Own-Password-9"})
+    owner.get(verify_link)
+    assert squatter.get("/auth/wait").json() == {"state": "none"}
+    continued = squatter.get("/auth/continue", follow_redirects=False)
+    assert web.SESSION_COOKIE not in continued.headers.get("set-cookie", "")
