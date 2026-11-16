@@ -9,7 +9,7 @@
 {% set o = overview %}
 <header class="archive-hero"><div><div class="eyebrow">Restricted administration</div><h1>WarriorIQ control room.</h1><p>Only explicitly configured administrator emails can enter. Every visit and action is logged.</p><p class="small muted">Website release {{ release }} · analysis mode {{ o.worker_mode }} · payments {{ 'on' if o.payments_enabled else 'off' }}</p></div></header>
 
-<nav class="admin-nav" aria-label="Admin sections"><a href="#adminOverview">Overview</a><a href="#adminAnalysis">Analysis</a><a href="#adminPeople">People</a><a href="#adminFights">Fights</a><a href="#adminTraffic">Traffic</a><a href="#adminSafety">Safety</a><a href="#adminTools">Tools</a></nav>
+<nav class="admin-nav" aria-label="Admin sections"><a href="#adminOverview">Overview</a><a href="#adminAnalysis">Analysis</a><a href="#adminPeople">People</a><a href="#adminFights">Fights</a><a href="#adminAccuracy">Accuracy</a><a href="#adminTraffic">Traffic</a><a href="#adminSafety">Safety</a><a href="#adminTools">Tools</a></nav>
 
 {#- Anything that needs action first, together in one box. -#}
 {% if worker_version_flag or not o.worker.available or email_problem or backups.stale or not server_checks.ffprobe %}<section class="card admin-alerts" role="alert" aria-label="Needs attention"><div class="eyebrow">Needs attention</div>
@@ -97,6 +97,29 @@
     {% for fight in o.fights.recent %}<tr><td>{{ fight.created_at[:16]|replace('T',' ') }}</td><td><code>{{ fight.job_id }}</code></td><td>{{ fight.email or '—' }}</td><td>{{ fight.ruleset }}</td><td>{{ fight.fight_type }}</td><td>{{ 'kept' if fight.video_held else 'deleted' }}</td></tr>
     {% else %}<tr><td colspan="6" class="muted">No fights analysed yet.</td></tr>{% endfor %}
   </tbody></table></div>
+</section>
+
+{#- Accuracy from the answers people gave (app/accuracy.py). Counts with the
+    number of answers behind them; a percentage only from 20 answers up. -#}
+{% macro rate(n, total) %}{{ n }} of {{ total }}{% if total >= 20 %} ({{ (100 * n / total)|round(0)|int }}%){% endif %}{% endmacro %}
+<section class="card admin-section" id="adminAccuracy" aria-labelledby="adminAccuracyTitle">
+  <div class="eyebrow">Accuracy · from people's answers, not estimated</div><h2 id="adminAccuracyTitle">How often the analysis was right</h2>
+  {% if accuracy %}{% set a = accuracy %}
+  <p class="muted">Counted from the answers given on reports and the live page. People answer what caught their eye, so these are not a random sample. A percentage appears from 20 answers up. Refreshed every 5 minutes.</p>
+  <h3>Who is who at crossings</h3>
+  {% if a.identity.answers %}<p>The analysis had the fighters the wrong way round at <strong>{{ rate(a.identity.disagreed, a.identity.answers) }}</strong> answered crossings, in {{ a.identity.fights_with_a_swap }} of {{ a.identity.fights }} fights with answers. {{ a.identity.fights_rerun }} fight{{ '' if a.identity.fights_rerun == 1 else 's' }} re-run with "Fix who is who".</p>{% else %}<p class="small muted">No crossing answers yet.</p>{% endif %}
+  <h3>Counted strikes (one-tap checks)</h3>
+  <p class="small muted">These checks are shown to administrators only today, so they are your own answers.</p>
+  <ul class="list-clean small">{% for family, row in a.strikes.items() %}<li><strong>{{ {'punch': 'Punches', 'kick': 'Kicks', 'knee': 'Knees'}[family] }}</strong>: {% if row.answered %}right {{ rate(row.right, row.answered) }}; not a strike {{ row.not_a_strike }}, wrong fighter {{ row.wrong_fighter }}, another type {{ row.other_type }}{% else %}no answers yet{% endif %}</li>{% endfor %}</ul>
+  <h3>Someone went down</h3>
+  {% if a.down.answered %}<p>Of {{ a.down.answered }} moments answered, <strong>{{ rate(a.down.nobody, a.down.answered) }}</strong> were nobody going down (a false alarm); fighter A {{ a.down.A }}, fighter B {{ a.down.B }}.</p>{% else %}<p class="small muted">No answers yet.</p>{% endif %}
+  <h3>Full corrections</h3>
+  {% if a.corrections.total %}<ul class="list-clean small">
+    <li><strong>Technique</strong> right in {{ rate(a.corrections.technique.correct, a.corrections.technique.total) }}</li>
+    <li><strong>Which fighter threw it</strong> right in {{ rate(a.corrections.fighter_identity.correct, a.corrections.fighter_identity.total) }}</li>
+    <li><strong>Target</strong> right in {{ rate(a.corrections.target.correct, a.corrections.target.total) }}</li>
+  </ul><p class="small muted">{{ a.corrections.total }} corrections from every account, measured as on the validation page.</p>{% else %}<p class="small muted">No corrections yet.</p>{% endif %}
+  {% else %}<p class="notice bad">These figures could not be counted just now. The error is in the website log.</p>{% endif %}
 </section>
 
 <section class="card admin-section" id="adminTraffic" aria-labelledby="adminTrafficTitle">

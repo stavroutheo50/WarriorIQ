@@ -166,6 +166,7 @@ from core.retention import (
 from core import training_consent
 from app import admin_overview
 from app import site_backup
+from app import accuracy as accuracy_answers
 from app.progress_periods import period_summary
 from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
@@ -9906,6 +9907,8 @@ def admin_page(request: Request, q: str = ""):
                 "copies": site_backup.backups(),
                 "stale": _backup_is_stale(),
             },
+            # How often the analysis was right, from people's answers (app/accuracy.py).
+            "accuracy": _accuracy_summary(),
             "server_checks": site_backup.server_checks(),
             "leftovers": site_backup.leftover_copies(),
             "tool_result": _ADMIN_TOOL_RESULTS.get(request.query_params.get("tool", ""), ""),
@@ -9924,6 +9927,17 @@ _ADMIN_TOOL_RESULTS = {
     "leftovers_deleted": "The selected leftover copies were deleted.",
     "leftovers_none": "Nothing was deleted: tick the confirmation and at least one copy.",
 }
+
+
+def _accuracy_summary() -> dict | None:
+    def anchors_for(job_id: str, job: dict) -> list[dict]:
+        return _identity_anchors(_crossing_questions(job_id, job), dict(job.get("identity_answers") or {}))
+    try:
+        return accuracy_answers.summary(list_jobs(), anchors_for)
+    except Exception:                                               # noqa: BLE001
+        # A figure that cannot be counted is left out; the admin page still opens.
+        LOGGER.exception("admin_accuracy_failed")
+        return None
 
 
 def _backup_is_stale() -> bool:
