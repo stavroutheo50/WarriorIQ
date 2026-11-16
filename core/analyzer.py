@@ -2382,6 +2382,13 @@ def _analyze(req: AnalysisRequest, progress_callback: ProgressCallback | None = 
     report["went_down"] = down_watch.summary(rounds)
     if ground_watch is not None:
         report["ground_time"] = ground_watch.summary()
+        ground_seconds = (report["ground_time"] or {}).get("ground_seconds_list") or []
+        if ground_seconds:
+            # No "who is who" question while they are on the ground; one after
+            # each spell (core/crossings.py apply_ground).
+            crossing_watch.apply_ground(ground_seconds)
+            report["tracking"]["crossings"] = crossing_watch.summary(
+                answered_frames=answered_frames, near_frames=int(round(1.5 * info.fps)))
     progress(
         "Finalizing coaching priorities", 99.2, time.perf_counter() - wall_start, segment_duration,
         manager, None, quality, stage="report", live_events_snapshot=final_live_events,

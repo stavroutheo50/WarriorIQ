@@ -97,3 +97,64 @@ def test_a_crossing_already_answered_is_not_asked_again():
     frame = watch.crossings[0].ask_frame
     assert watch.questions(min_gap=0.0)
     assert watch.questions(min_gap=0.0, answered_frames=(frame + 5,), near_frames=10) == []
+
+
+def _apart(watch: CrossingWatch, frames: int, start_frame: int = 0):
+    for step in range(frames):
+        frame = start_frame + step
+        watch.observe(frame / FPS, frame, _box(100), _box(600))
+
+
+def test_one_question_after_each_ground_spell_asked_first():
+    # Owner, 2026-11-16: identity was lost most on the ground. The MMA ground
+    # model's seconds say when; the question goes on the first settled frame after.
+    watch = CrossingWatch()
+    _apart(watch, 30 * 25)
+    assert watch.apply_ground([5, 6, 7, 8, 10, 11, 20, 21, 22]) == 2
+    asked = sorted(watch.crossings, key=lambda c: c.ask_seconds)
+    assert [c.reason for c in asked] == ["ground", "ground"]
+    assert 12.4 <= asked[0].ask_seconds < 12.5 and 23.4 <= asked[1].ask_seconds < 23.5
+    assert all(c.lowest_confidence == 0.0 for c in asked)
+    assert [q["reason"] for q in watch.questions(limit=2, min_gap=1.0)] == ["ground", "ground"]
+
+
+def test_no_question_is_asked_inside_a_ground_spell():
+    watch = CrossingWatch()
+    frame = 0
+    for _ in range(6):                                         # a crossing every 2.6 s
+        _walk(watch, [100] * 10 + [300] * 25 + [100] * 30, [600] * 10 + [330] * 25 + [600] * 30,
+              start_frame=frame)
+        frame += 65
+    before = [c.ask_seconds for c in watch.crossings]
+    watch.apply_ground(range(4, 12))
+    after = [c for c in watch.crossings if c.reason == "crossed"]
+    assert len(after) < len(before)
+    assert not any(4 <= c.ask_seconds < 12 for c in after)
+
+
+def test_a_short_spell_or_no_ground_changes_nothing():
+    watch = CrossingWatch()
+    _apart(watch, 25 * 10)
+    assert watch.apply_ground([3, 4]) == 0 and watch.apply_ground([]) == 0
+    assert watch.crossings == []
+
+
+def test_after_the_ground_waits_until_they_are_apart():
+    watch = CrossingWatch()
+    for step in range(25 * 20):
+        seconds = step / FPS
+        b = 330 if seconds < 14 else 600                       # still close until 14 s
+        watch.observe(seconds, step, _box(300 if seconds < 14 else 100), _box(b))
+    watch.apply_ground(range(5, 10))
+    ground = [c for c in watch.crossings if c.reason == "ground"]
+    assert len(ground) == 1 and ground[0].ask_seconds >= 14
+
+
+def test_a_two_second_hole_in_the_ground_seconds_does_not_end_the_spell():
+    # Ma268, 2026-11-16: the model said ground at 155 and 158 s but not 156-157;
+    # ending the spell at 155 asked while they were still down.
+    watch = CrossingWatch()
+    _apart(watch, 25 * 30)
+    watch.apply_ground([5, 6, 7, 8, 11, 12])
+    ground = [c for c in watch.crossings if c.reason == "ground"]
+    assert len(ground) == 1 and ground[0].ask_seconds >= 13.4
