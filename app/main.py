@@ -3953,11 +3953,10 @@ def logout(request: Request):
 
 
 @app.get("/forgot-password", response_class=HTMLResponse)
-def forgot_password_page(request: Request, next: str = "/camp", email: str = ""):
+def forgot_password_page(request: Request, next: str = "/camp"):
     return templates.TemplateResponse(
         request=request, name="password_reset.html",
-        context={"request": request, "token": "", "message": "", "next_path": _safe_next(next),
-                 "email": email.strip()[:254]},
+        context={"request": request, "token": "", "message": "", "next_path": _safe_next(next), "email": ""},
     )
 
 
@@ -3970,7 +3969,11 @@ def request_password_reset(request: Request, email: str = Form(...), next_path: 
         token = session_token()
         link_hash = token_digest(token)
         expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
-        save_password_reset_token(int(account["id"]), token_digest(token), expires)
+        # Replaces only the link this same browser asked for before.
+        earlier = _waiting_row(request, "reset")
+        save_password_reset_token(
+            int(account["id"]), link_hash, expires,
+            supersedes=earlier.get("link_hash") if earlier and earlier.get("account_id") == int(account["id"]) else None)
         reset_url = f"{_public_base(request)}/reset-password/{token}"
         failure = None
         try:

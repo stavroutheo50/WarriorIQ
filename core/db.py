@@ -1494,13 +1494,21 @@ def update_password_hash(account_id: int, password_hash: str) -> bool:
         return cursor.rowcount == 1
 
 
-def save_password_reset_token(account_id: int, token_hash: str, expires_at: str) -> None:
+def save_password_reset_token(account_id: int, token_hash: str, expires_at: str,
+                              supersedes: str | None = None) -> None:
+    """Store a new reset link; `supersedes` is the earlier link the same browser asked for.
+
+    Only that link is replaced, so the newest email a browser asked for is the
+    one that works, while a stranger asking for a reset of this address cannot
+    cancel the link the owner is holding (security review, PR #236). Using any
+    link, or changing the password, ends all of them.
+    """
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
-        # A new link replaces the account's earlier ones, so only the newest
-        # email works, as the page that asked for it says (security review, PR #236).
-        con.execute("DELETE FROM password_reset_tokens WHERE account_id=? OR expires_at<=? OR used_at IS NOT NULL",
-                    (int(account_id), now))
+        con.execute("DELETE FROM password_reset_tokens WHERE expires_at<=? OR used_at IS NOT NULL", (now,))
+        if supersedes:
+            con.execute("DELETE FROM password_reset_tokens WHERE account_id=? AND token_hash=?",
+                        (int(account_id), supersedes))
         con.execute(
             "INSERT INTO password_reset_tokens(account_id,token_hash,created_at,expires_at) VALUES(?,?,?,?)",
             (int(account_id), token_hash, now, expires_at),

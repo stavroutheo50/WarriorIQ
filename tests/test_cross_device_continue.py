@@ -139,10 +139,11 @@ def test_a_new_reset_link_cancels_the_older_one():
     email = f"two-links-{uuid.uuid4().hex[:8]}@example.com"
     _account(email)
     sent = []
+    asker = BrowserClient(web.app)                              # the same browser asks twice
     with patch.object(web, "deliver_email", lambda to, subject, body: sent.append(body)):
         for _ in range(2):
             web._rate_windows.clear()
-            BrowserClient(web.app).post("/forgot-password", data={"email": email})
+            asker.post("/forgot-password", data={"email": email})
     old, new = _link(sent[0], "reset-password"), _link(sent[1], "reset-password")
     phone = BrowserClient(web.app)
     assert phone.post(old, data={"password": "A-Brand-New-Password-7"}, follow_redirects=False).status_code == 410
@@ -213,3 +214,27 @@ def test_a_password_change_in_settings_ends_reset_links_already_sent():
     late = BrowserClient(web.app).post(_link(sent[0], "reset-password"), data={"password": "Someone-Elses-Pass-4"},
                                        follow_redirects=False)
     assert late.status_code == 410
+
+
+def test_a_stranger_asking_for_a_reset_does_not_cancel_the_owners_link():
+    # Security review, PR #236: another browser's request leaves the owner's link working.
+    email = f"keep-link-{uuid.uuid4().hex[:8]}@example.com"
+    _account(email)
+    sent = []
+    with patch.object(web, "deliver_email", lambda to, subject, body: sent.append(body)):
+        web._rate_windows.clear()
+        BrowserClient(web.app).post("/forgot-password", data={"email": email})      # the owner
+        web._rate_windows.clear()
+        BrowserClient(web.app).post("/forgot-password", data={"email": email})      # a stranger
+    owners = BrowserClient(web.app).post(_link(sent[0], "reset-password"),
+                                         data={"password": "Owners-New-Password-5"}, follow_redirects=False)
+    assert owners.status_code == 200
+    # Using one link ends the others.
+    stale = BrowserClient(web.app).post(_link(sent[1], "reset-password"),
+                                        data={"password": "Strangers-Pass-66"}, follow_redirects=False)
+    assert stale.status_code == 410
+
+
+def test_the_forgot_password_page_shows_no_address_from_the_link():
+    page = BrowserClient(web.app).get("/forgot-password?email=Call+555+now").text
+    assert "Call 555 now" not in page
