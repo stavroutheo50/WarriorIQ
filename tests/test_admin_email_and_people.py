@@ -27,7 +27,13 @@ def test_a_from_address_on_another_domain_is_flagged(monkeypatch):
     setup = admin_overview.email_setup()
     assert setup["sender"] == "warrioriqai@gmail.com"
     assert not any("different domain" in w for w in setup["warnings"])
-    assert any("personal gmail.com address" in w for w in setup["warnings"])
+    assert any("personal gmail.com mailbox" in w for w in setup["warnings"])
+    assert setup["own_domain"] is False                 # so the page shows how to reach every inbox
+    monkeypatch.setenv("WARRIORIQ_SMTP_USERNAME", "noreply@warrioriq.eu")
+    monkeypatch.setenv("WARRIORIQ_EMAIL_FROM", "noreply@warrioriq.eu")
+    setup = admin_overview.email_setup()
+    assert setup["own_domain"] is True and setup["warnings"] == []
+    monkeypatch.setenv("WARRIORIQ_SMTP_USERNAME", "warrioriqai@gmail.com")
     monkeypatch.setenv("WARRIORIQ_SMTP_PASSWORD", "app-password-value-123")
     assert "app-password-value-123" not in repr(admin_overview.email_setup())     # never the password
 

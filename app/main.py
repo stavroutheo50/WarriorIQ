@@ -100,6 +100,7 @@ from core.db import (
     set_guardian_approval_status,
     set_account_status, set_annotation_sequence,
     page_view_summary, plan_interest_counts, plans_wanted_by, policies_outdated,
+    clear_expired_plan_overrides, decline_plan_request, grant_plan, pending_plan_requests, set_plan_override,
     record_page_view, record_plan_interest, record_policy_reacceptance,
     set_fight_review_status, toggle_assignment, update_cookie_preferences, set_fight_details, clean_fight_name,
     update_marketing_consent, update_password_hash, update_profile,
@@ -968,6 +969,7 @@ def _request_plan(request: Request) -> dict:
         return plan_for_key("free")
     return plan_for_key(effective_plan_key(
         account.get("plan"), account.get("plan_override"), account.get("email"),
+        account.get("plan_override_until"),
     ))
 
 
@@ -2071,6 +2073,9 @@ def _run_periodic_maintenance(now: float | None = None) -> None:
             record_security_event(
                 "abandoned_processing_files_deleted", resource_type="fight", resource_id=abandoned_job_id,
             )
+        # Plans given from the admin page for a set time: the resolver already
+        # ignores an ended one; this keeps the stored row honest.
+        clear_expired_plan_overrides()
         _last_saved_video_cleanup = now
         # The daily database backup (app/site_backup.py): the host has no
         # shell, so no cron job can run tools/backup_runtime.py.
@@ -8164,7 +8169,8 @@ def settings_page(request: Request, section: str, notice: str = "", error: str =
             # plan_override or plan by hand missed a granted plan, and Billing
             # said "Starter, €0 forever" while /pricing said Gym (QA, 2026-10-11).
             "plan": plan_for_key(effective_plan_key(
-                account.get("plan"), account.get("plan_override"), account.get("email"))),
+                account.get("plan"), account.get("plan_override"), account.get("email"),
+                account.get("plan_override_until"))),
             "pending_email": pending_email_change(int(account["id"])),
             "subscription_actions": list_subscription_actions(int(account["id"])),
             "two_factor": _two_factor_view(account),
@@ -10054,7 +10060,7 @@ def admin_page(request: Request, q: str = ""):
             "reports": list_moderation_reports(), "security_events": list_security_events(),
             "traffic": page_view_summary(30),
             "email_problem": email_settings_problem(),
-            "email_test": request.query_params.get("email_test", "")[:600],
+            "email_tests": _email_tests(),
             # Set while a worker is being refused for running other code.
             "worker_version_flag": worker_alerts.version_mismatch_flag(OUTPUTS),
             "release": release_version(),
@@ -10089,6 +10095,11 @@ def admin_page(request: Request, q: str = ""):
             "people": admin_overview.person(q[:200]) if q.strip() else [],
             "leftovers": site_backup.leftover_copies(),
             "tool_result": _ADMIN_TOOL_RESULTS.get(request.query_params.get("tool", ""), ""),
+            # Plan requests from the pricing page, for a yes with an end date
+            # or a no (owner, 2026-11-16).
+            "plan_requests": pending_plan_requests(),
+            "plan_choices": [(key, plan["label"]) for key, plan in PLANS.items() if key != "free"],
+            "plan_durations": _PLAN_DURATIONS,
         },
     )
 
@@ -10103,6 +10114,10 @@ _ADMIN_TOOL_RESULTS = {
     "backup_no_database": "No database was found where the website expects it, so nothing was backed up.",
     "leftovers_deleted": "The selected leftover copies were deleted.",
     "leftovers_none": "Nothing was deleted: tick the confirmation and at least one copy.",
+    "plan_granted": "Plan given. The person was emailed if email is working; the Email section shows whether it was sent.",
+    "plan_declined": "Request declined. The person's plan was not changed.",
+    "plan_ended": "The plan was taken away. The person is back on the plan they pay for, or Starter.",
+    "plan_invalid": "Nothing changed: choose a plan and how long it lasts.",
 }
 
 
@@ -10157,24 +10172,44 @@ async def admin_delete_leftovers(request: Request):
 
 
 @app.post("/admin/email/test", dependencies=[Depends(require_csrf)])
-def admin_send_test_email(request: Request):
-    """Send a test message to the signed-in admin and show exactly what happened.
+def admin_send_test_email(request: Request, to: str = Form("")):
+    """Send a test message and show exactly what the mail server said.
 
     Password resets, verification and guardian emails all go through the same
     sender, so this is the one place an administrator can see why they fail.
+    It can go to any address, not only the admin's own: mail was reaching
+    Gmail but not iCloud, Yahoo or Outlook (owner, 2026-11-16), and the only
+    way to check one of those is to send to an address there.
+
+    The result is kept as a security event and the page shows it from there,
+    so nothing in the page's address is ever shown back.
     """
     if not _is_admin(request):
         raise HTTPException(404)
+    _enforce_rate_limit(request, "admin-email-test", 20, 3600)
     actor = _account(request)
-    try:
-        deliver_email(actor["email"], "WarriorIQ test email",
-                      "This is a test from the WarriorIQ admin page. Email is working.")
-        outcome = f"Sent to {actor['email']}. If it has not arrived within a few minutes, check the spam folder."
-    except EmailNotSent as reason:
-        outcome = f"Not sent: {reason}"
+    recipient = normalize_email(to) if to.strip() else actor["email"]
+    if not valid_email(recipient):
+        outcome = "Not sent: that is not an email address."
+    else:
+        try:
+            deliver_email(recipient, "WarriorIQ test email",
+                          "This is a test from the WarriorIQ admin page. Email is working.")
+            outcome = (f"Sent to {recipient}. The mail server accepted it. If it has not arrived within a few "
+                       "minutes, look in Junk; if it is not there either, that inbox provider dropped it.")
+        except EmailNotSent as reason:
+            outcome = f"Not sent to {recipient}: {reason}"
     record_security_event("admin_email_test", account_id=int(actor["id"]), resource_type="email",
-                          metadata={"outcome": outcome[:300]})
-    return RedirectResponse("/admin?" + urlencode({"email_test": outcome}), status_code=303)
+                          metadata={"outcome": outcome[:400], "sent": outcome.startswith("Sent")})
+    return RedirectResponse("/admin#adminEmail", status_code=303)
+
+
+def _email_tests(limit: int = 6) -> list[dict]:
+    """The latest test emails and what happened, newest first."""
+    tests = [event for event in list_security_events(300) if event["event_type"] == "admin_email_test"]
+    return [{"at": event["occurred_at"], "outcome": event["metadata"].get("outcome", ""),
+             "sent": bool(event["metadata"].get("sent", str(event["metadata"].get("outcome", "")).startswith("Sent")))}
+            for event in tests[:limit]]
 
 
 @app.post("/admin/accounts/{account_id}/status", dependencies=[Depends(require_csrf)])
@@ -10191,6 +10226,68 @@ def admin_account_status(request: Request, account_id: int, status: str = Form(.
         resource_type="account", resource_id=str(account_id), metadata={"status": status},
     )
     return RedirectResponse("/admin", status_code=303)
+
+
+# How long a plan given from the admin page lasts; "" is no end date.
+_PLAN_DURATIONS = [("7", "1 week"), ("14", "2 weeks"), ("30", "1 month"), ("90", "3 months"),
+                   ("180", "6 months"), ("365", "1 year"), ("", "No end date")]
+
+
+@app.post("/admin/plans/grant", dependencies=[Depends(require_csrf)])
+def admin_grant_plan(request: Request, account_id: int = Form(...), plan_key: str = Form(...),
+                     days: str = Form("30")):
+    """Give a person a plan for a set time, from their request or their support card.
+
+    Billing is not touched: this is the same local entitlement as
+    plan_override, now with an end date, after which the person is back on
+    the plan they pay for (or Starter) without anyone having to remember.
+    """
+    if not _is_admin(request):
+        raise HTTPException(404)
+    if days not in {value for value, _ in _PLAN_DURATIONS} or plan_key not in PLANS or plan_key == "free":
+        return RedirectResponse("/admin?tool=plan_invalid#adminPlans", status_code=303)
+    target = get_account(int(account_id))
+    if not target:
+        raise HTTPException(404)
+    until = grant_plan(int(account_id), plan_key, int(days) if days else None)
+    label = PLANS[plan_key]["label"]
+    ends = f"until {datetime.fromisoformat(until).strftime('%d %B %Y')}" if until else "with no end date"
+    emailed = send_transactional_email(
+        target["email"], f"Your WarriorIQ plan: {label}",
+        f"Your request was approved. Your account now has the {label} plan {ends}.\n\n"
+        "Nothing is charged for it. When it ends, your account goes back to the plan it had before.\n\n"
+        f"Open WarriorIQ: {_public_base(request)}/camp")
+    actor = _account(request)
+    record_security_event(
+        "admin_plan_granted", account_id=int(target["id"]), severity="warning", resource_type="account",
+        resource_id=str(account_id),
+        metadata={"plan": plan_key, "until": until, "by": int(actor["id"]),
+                  "email_delivery": "sent" if emailed else "failed"})
+    return RedirectResponse("/admin?tool=plan_granted#adminPlans", status_code=303)
+
+
+@app.post("/admin/plans/decline", dependencies=[Depends(require_csrf)])
+def admin_decline_plan(request: Request, account_id: int = Form(...), plan_key: str = Form(...)):
+    if not _is_admin(request):
+        raise HTTPException(404)
+    if decline_plan_request(int(account_id), plan_key):
+        record_security_event("admin_plan_request_declined", account_id=int(account_id), resource_type="account",
+                              resource_id=str(account_id),
+                              metadata={"plan": plan_key, "by": int(_account(request)["id"])})
+    return RedirectResponse("/admin?tool=plan_declined#adminPlans", status_code=303)
+
+
+@app.post("/admin/plans/end", dependencies=[Depends(require_csrf)])
+def admin_end_plan(request: Request, account_id: int = Form(...)):
+    """Take away a plan given from the admin page, now."""
+    if not _is_admin(request):
+        raise HTTPException(404)
+    if not set_plan_override(int(account_id), None):
+        raise HTTPException(404)
+    record_security_event("admin_plan_ended", account_id=int(account_id), severity="warning",
+                          resource_type="account", resource_id=str(account_id),
+                          metadata={"by": int(_account(request)["id"])})
+    return RedirectResponse("/admin?tool=plan_ended#adminPlans", status_code=303)
 
 
 @app.post("/admin/reports/{report_id}/resolve", dependencies=[Depends(require_csrf)])
@@ -10931,6 +11028,7 @@ def pricing_page(request: Request):
             # a Starter card badged "Current plan". One resolver, both places.
             "current_plan_key": effective_plan_key(
                 account.get("plan"), account.get("plan_override"), account.get("email"),
+                account.get("plan_override_until"),
             ) if account else None,
             "plans_wanted": plans_wanted_by(int(account["id"])) if account else set(),
         },

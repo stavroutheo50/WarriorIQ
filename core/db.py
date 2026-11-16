@@ -613,10 +613,21 @@ def _init_db_schema() -> None:
             "totp_enabled_at": "TEXT",
             "totp_last_step": "INTEGER",
             "recovery_codes": "TEXT",
+            # When a plan given from the admin page ends (owner, 2026-11-16).
+            # NULL, as on every existing grant, means it has no end date.
+            "plan_override_until": "TEXT",
         }
         for column, definition in account_migrations.items():
             if column not in account_columns:
                 con.execute(f"ALTER TABLE accounts ADD COLUMN {column} {definition}")
+        interest_columns = {row[1] for row in con.execute("PRAGMA table_info(plan_interest)").fetchall()}
+        # What the administrator decided about a plan request: NULL while it
+        # waits, then "granted", "declined" or "closed" (another of the same
+        # person's requests was granted). Asking again reopens it.
+        if "decision" not in interest_columns:
+            con.execute("ALTER TABLE plan_interest ADD COLUMN decision TEXT")
+        if "decided_at" not in interest_columns:
+            con.execute("ALTER TABLE plan_interest ADD COLUMN decided_at TEXT")
         session_columns = {row[1] for row in con.execute("PRAGMA table_info(sessions)").fetchall()}
         if "device_label" not in session_columns:
             # "Chrome on Windows": a coarse label for the signed-in devices
@@ -1714,7 +1725,7 @@ def list_accounts(search: str = "", limit: int = 100) -> list[dict]:
     query = f"%{search.strip().lower()}%"
     with connection() as con:
         rows = con.execute(
-            """SELECT id,email,profile_id,plan,plan_override,account_status,created_at,
+            """SELECT id,email,profile_id,plan,plan_override,plan_override_until,account_status,created_at,
                terms_version,privacy_version,policies_accepted_at,marketing_consent
                FROM accounts WHERE lower(email) LIKE ? ORDER BY id DESC LIMIT ?""",
             (query, max(1, min(int(limit), 250))),
@@ -1722,16 +1733,19 @@ def list_accounts(search: str = "", limit: int = 100) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def set_plan_override(account_id: int, plan: str | None) -> bool:
-    """Set a permanent local entitlement without altering billing state."""
+def set_plan_override(account_id: int, plan: str | None, until: str | None = None) -> bool:
+    """Give a plan without altering billing state; `until` is when it ends (None: no end).
+
+    Clearing the plan clears its end date too.
+    """
     init_db()
     normalized = None if plan is None else str(plan).strip().lower()
     if normalized is not None and normalized not in PLANS:
         raise ValueError(f"Unknown plan override: {plan}")
     with connection() as con:
         cursor = con.execute(
-            "UPDATE accounts SET plan_override=? WHERE id=?",
-            (normalized, int(account_id)),
+            "UPDATE accounts SET plan_override=?, plan_override_until=? WHERE id=?",
+            (normalized, until if normalized is not None else None, int(account_id)),
         )
         return cursor.rowcount == 1
 
@@ -1739,8 +1753,10 @@ def set_plan_override(account_id: int, plan: str | None) -> bool:
 def _effective_plan_key(account) -> str:
     if not account:
         return "free"
-    email = account["email"] if "email" in account.keys() else None
-    return effective_plan_key(account["plan"], account["plan_override"], email)
+    keys = account.keys()
+    email = account["email"] if "email" in keys else None
+    until = account["plan_override_until"] if "plan_override_until" in keys else None
+    return effective_plan_key(account["plan"], account["plan_override"], email, until)
 
 
 def save_session(account_id: int, token_hash: str, expires_at: str, device_label: str = "") -> None:
@@ -1760,7 +1776,7 @@ def account_for_session(token_hash: str) -> dict | None:
     with connection() as con:
         row = con.execute(
             """SELECT accounts.id,accounts.email,accounts.profile_id,accounts.plan,accounts.plan_override,
-               accounts.credits,accounts.created_at,accounts.account_status,accounts.marketing_consent,
+               accounts.plan_override_until,accounts.credits,accounts.created_at,accounts.account_status,accounts.marketing_consent,
                accounts.marketing_consent_at,accounts.cookie_analytics,accounts.cookie_marketing,
                accounts.terms_version,accounts.privacy_version,accounts.policies_accepted_at,
                accounts.stripe_customer_id,accounts.stripe_subscription_id,accounts.subscription_status,
@@ -2325,7 +2341,7 @@ def reserve_analysis(account_id: int, job_id: str, now: datetime | None = None,
         ).fetchone()
         if existing:
             return int(existing["account_id"]) == int(account_id)
-        account = con.execute("SELECT plan,plan_override,email FROM accounts WHERE id=?", (account_id,)).fetchone()
+        account = con.execute("SELECT plan,plan_override,plan_override_until,email FROM accounts WHERE id=?", (account_id,)).fetchone()
         if not account:
             return False
         plan = plan_for_key(_effective_plan_key(account))
@@ -2366,7 +2382,7 @@ def analysis_allowance(account_id: int, now: datetime | None = None) -> dict:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     with connection() as con:
-        account = con.execute("SELECT plan,plan_override,email FROM accounts WHERE id=?", (account_id,)).fetchone()
+        account = con.execute("SELECT plan,plan_override,plan_override_until,email FROM accounts WHERE id=?", (account_id,)).fetchone()
         plan = plan_for_key(_effective_plan_key(account))
         period_key, limit = _usage_period(plan, moment)
         minutes = period_key.startswith("minutes:")
@@ -2856,8 +2872,10 @@ def record_plan_interest(account_id: int, plan_key: str) -> bool:
             (int(account_id), str(plan_key)),
         ).fetchone()
         if existing:
+            # Asking again after a decision reopens the request.
             con.execute(
-                "UPDATE plan_interest SET created_at=? WHERE id=?", (now, int(existing["id"])))
+                "UPDATE plan_interest SET created_at=?, decision=NULL, decided_at=NULL WHERE id=?",
+                (now, int(existing["id"])))
             return False
         con.execute(
             "INSERT INTO plan_interest(account_id,plan_key,created_at) VALUES(?,?,?)",
@@ -2867,13 +2885,84 @@ def record_plan_interest(account_id: int, plan_key: str) -> bool:
 
 
 def plans_wanted_by(account_id: int) -> set[str]:
-    """Which plans this account has already asked about, for the page to mark."""
+    """Which plans this account has asked for and is still waiting on, for the page to mark."""
     init_db()
     with connection() as con:
         rows = con.execute(
-            "SELECT plan_key FROM plan_interest WHERE account_id=?", (int(account_id),)
+            "SELECT plan_key FROM plan_interest WHERE account_id=? AND decision IS NULL", (int(account_id),)
         ).fetchall()
     return {str(row["plan_key"]) for row in rows}
+
+
+def pending_plan_requests(limit: int = 100) -> list[dict]:
+    """Plan requests waiting for the administrator, oldest first (owner, 2026-11-16)."""
+    init_db()
+    with connection() as con:
+        rows = con.execute(
+            """SELECT r.account_id, r.plan_key, r.created_at, a.email, a.plan, a.plan_override,
+                      a.plan_override_until, a.account_status
+               FROM plan_interest r JOIN accounts a ON a.id = r.account_id
+               WHERE r.decision IS NULL ORDER BY r.created_at ASC LIMIT ?""",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["current_plan"] = _effective_plan_key(row)
+        result.append(item)
+    return result
+
+
+def grant_plan(account_id: int, plan_key: str, days: int | None,
+               now: datetime | None = None) -> str | None:
+    """Give an account a plan for `days` days (None: no end date) and close its requests.
+
+    Returns the end time (ISO, UTC) or None for no end date. Billing state is
+    not touched. The request for this plan is marked granted and the person's
+    other waiting requests closed, since they now hold the plan chosen here.
+    """
+    if plan_key not in PLANS or plan_key == "free":
+        raise ValueError(f"Unknown plan: {plan_key}")
+    if days is not None and not 1 <= int(days) <= 3660:
+        raise ValueError("A plan is given for 1 to 3660 days, or with no end date.")
+    init_db()
+    now = now or datetime.now(timezone.utc)
+    until = (now + timedelta(days=int(days))).isoformat() if days is not None else None
+    with connection() as con:
+        changed = con.execute(
+            "UPDATE accounts SET plan_override=?, plan_override_until=? WHERE id=?",
+            (plan_key, until, int(account_id))).rowcount
+        if not changed:
+            raise ValueError("No such account.")
+        con.execute(
+            """UPDATE plan_interest SET decision=CASE WHEN plan_key=? THEN 'granted' ELSE 'closed' END,
+               decided_at=? WHERE account_id=? AND decision IS NULL""",
+            (plan_key, now.isoformat(), int(account_id)))
+    return until
+
+
+def decline_plan_request(account_id: int, plan_key: str) -> bool:
+    """Say no to one waiting plan request. The account's plan is not changed."""
+    init_db()
+    with connection() as con:
+        return con.execute(
+            """UPDATE plan_interest SET decision='declined', decided_at=?
+               WHERE account_id=? AND plan_key=? AND decision IS NULL""",
+            (datetime.now(timezone.utc).isoformat(), int(account_id), str(plan_key))).rowcount == 1
+
+
+def clear_expired_plan_overrides(now: datetime | None = None) -> int:
+    """Remove plans whose end date has passed, so the stored row says what holds.
+
+    effective_plan_key already ignores an ended plan; this only tidies up.
+    """
+    init_db()
+    moment = (now or datetime.now(timezone.utc)).isoformat()
+    with connection() as con:
+        return con.execute(
+            """UPDATE accounts SET plan_override=NULL, plan_override_until=NULL
+               WHERE plan_override_until IS NOT NULL AND plan_override_until<=?""",
+            (moment,)).rowcount
 
 
 def plan_interest_counts() -> dict[str, int]:

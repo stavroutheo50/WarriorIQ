@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Administration · WarriorIQ{% endblock %}
 {% block content %}
+{#- Give a plan for a set time (POST /admin/plans/grant). -#}
+{% macro plan_form(account_id, chosen, id_prefix) %}<form class="admin-plan-form" action="/admin/plans/grant" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="account_id" value="{{ account_id }}">
+  <div class="field"><label for="{{ id_prefix }}Plan">Plan</label><select id="{{ id_prefix }}Plan" name="plan_key">{% for key, label in plan_choices %}<option value="{{ key }}"{% if key == chosen %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="{{ id_prefix }}Days">For how long</label><select id="{{ id_prefix }}Days" name="days">{% for value, label in plan_durations %}<option value="{{ value }}"{% if value == '30' %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+  <button class="btn" type="submit">Give this plan</button></form>{% endmacro %}
+{% macro plan_label(key) %}{% for k, label in plan_choices %}{% if k == key %}{{ label }}{% endif %}{% endfor %}{% if key == 'free' %}Starter{% endif %}{% endmacro %}
 {#- The admin page (owner, 2026-11-15: "organise it, with the most information
     it can have"). Sections in the order they are checked: is anything wrong,
     is analysis working, who signed up, what was analysed, who visited, safety,
@@ -9,16 +15,16 @@
 {% set o = overview %}
 <header class="archive-hero"><div><div class="eyebrow">Restricted administration</div><h1>WarriorIQ control room.</h1><p>Only explicitly configured administrator emails can enter. Every visit and action is logged.</p><p class="small muted">Website release {{ release }} · analysis mode {{ o.worker_mode }} · payments {{ 'on' if o.payments_enabled else 'off' }}</p></div></header>
 
-<nav class="admin-nav" aria-label="Admin sections"><a href="#adminOverview">Overview</a><a href="#adminAnalysis">Analysis</a><a href="#adminPeople">People</a><a href="#adminEmail">Email</a><a href="#adminFights">Fights</a><a href="#adminAccuracy">Accuracy</a><a href="#adminTraffic">Traffic</a><a href="#adminSafety">Safety</a><a href="#adminTools">Tools</a></nav>
+<nav class="admin-nav" aria-label="Admin sections"><a href="#adminOverview">Overview</a><a href="#adminAnalysis">Analysis</a><a href="#adminPeople">People</a><a href="#adminPlans">Plans</a><a href="#adminEmail">Email</a><a href="#adminFights">Fights</a><a href="#adminAccuracy">Accuracy</a><a href="#adminTraffic">Traffic</a><a href="#adminSafety">Safety</a><a href="#adminTools">Tools</a></nav>
 
 {#- Anything that needs action first, together in one box. -#}
-{% if worker_version_flag or not o.worker.available or email_problem or email.setup.warnings or backups.stale or not server_checks.ffprobe %}<section class="card admin-alerts" role="alert" aria-label="Needs attention"><div class="eyebrow">Needs attention</div>
+{% if worker_version_flag or not o.worker.available or email_problem or email.setup.warnings or backups.stale or plan_requests %}<section class="card admin-alerts" role="alert" aria-label="Needs attention"><div class="eyebrow">Needs attention</div>
   {% if worker_version_flag %}<p class="notice bad"><strong>Analysis is paused: worker version mismatch.</strong> Worker {{ worker_version_flag.worker_id }} was refused ({{ worker_version_flag.reason|replace('_',' ') }}). Customers see "Analysis is paused for an update". Deploy the worker and the website from the same commit; both must report release {{ release }}.</p>{% endif %}
   {% if not o.worker.available %}<p class="notice bad"><strong>No analysis computer connected.</strong> {{ (o.worker.reason or 'unknown')|replace('_',' ')|capitalize }}{% if o.worker.heartbeat_age_seconds is not none %}; last heard from {{ (o.worker.heartbeat_age_seconds / 60)|round(0)|int }} minutes ago{% endif %}. Fights wait in the queue until it connects.</p>{% endif %}
   {% if email_problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ email_problem }}. Password resets and verification emails cannot be sent. <a class="text-link" href="#adminTools">Email settings</a></p>{% endif %}
   {% if email.setup.warnings and not email_problem %}<p class="notice bad"><strong>Some inboxes may not get WarriorIQ's emails.</strong> {{ email.setup.warnings[0] }} <a class="text-link" href="#adminEmail">Email</a></p>{% endif %}
+  {% if plan_requests %}<p class="notice"><strong>{{ plan_requests|length }} plan request{{ '' if plan_requests|length == 1 else 's' }} waiting.</strong> <a class="text-link" href="#adminPlans">Plan requests</a></p>{% endif %}
   {% if backups.stale %}<p class="notice bad"><strong>No database backup in the last two days.</strong> {% if backups.copies %}The newest is from {{ backups.copies[0].created_at.strftime('%Y-%m-%d %H:%M') }} UTC.{% else %}None has been made yet.{% endif %} <a class="text-link" href="#adminBackups">Back up now</a></p>{% endif %}
-  {% if not server_checks.ffprobe %}<p class="notice bad"><strong>ffprobe is not installed on the server.</strong> Uploads cannot have their video type checked. <a class="text-link" href="#adminServer">Server checks</a></p>{% endif %}
 </section>{% endif %}
 
 <section class="card admin-section" id="adminOverview" aria-labelledby="adminOverviewTitle">
@@ -95,16 +101,34 @@
       <div><dt>Email confirmed</dt><dd>{% if card.email_verified_at %}yes, {{ card.email_verified_at[:10] }}{% else %}<strong>no</strong>{% endif %}</dd></div>
       <div><dt>Last signed in</dt><dd>{{ card.last_sign_in[:16]|replace('T', ' ') if card.last_sign_in else 'never' }}</dd></div>
       <div><dt>Signed in on</dt><dd>{{ card.signed_in_devices }} device{{ '' if card.signed_in_devices == 1 else 's' }}</dd></div>
-      <div><dt>Plan</dt><dd>{{ card.plan }}</dd></div>
+      <div><dt>Plan</dt><dd>{{ plan_label(card.plan) }}{% if card.given_plan %} (given here, {% if card.given_until %}until {{ card.given_until[:10] }}{% else %}no end date{% endif %}){% endif %}</dd></div>
       <div><dt>Fights saved</dt><dd>{{ card.fights }}</dd></div>
       <div><dt>Two-step sign-in</dt><dd>{{ 'on' if card.two_factor else 'off' }}</dd></div>
       {% if card.guardian_status != 'not_applicable' %}<div><dt>Guardian</dt><dd>{{ card.guardian_status|replace('_', ' ') }}</dd></div>{% endif %}
     </dl>
     <h4>Recent activity</h4>
     <ul class="list-clean small">{% for event in card.events %}<li>{{ event.at[:16]|replace('T', ' ') }} · {{ event.type }}{% if event.email %} · <strong>{{ event.email }}</strong>{% endif %}</li>{% else %}<li class="muted">Nothing recorded.</li>{% endfor %}</ul>
+    <h4>Plan</h4>
+    {{ plan_form(card.id, card.given_plan or 'athlete', 'person' ~ loop.index) }}
+    {% if card.given_plan %}<form action="/admin/plans/end" method="post" data-confirm="End the plan given to {{ card.email }} now?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="account_id" value="{{ card.id }}"><button class="btn secondary" type="submit">End the given plan now</button></form>{% endif %}
     <form action="/admin/accounts/{{card.id}}/status" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="status" value="{% if card.status == 'active' %}suspended{% else %}active{% endif %}"><button class="btn {% if card.status == 'active' %}danger{% else %}secondary{% endif %}" type="submit">{% if card.status == 'active' %}Suspend this account{% else %}Restore this account{% endif %}</button></form>
   </article>{% else %}<p class="muted">No account matches "{{ query }}".</p>{% endfor %}{% endif %}
 </section>
+
+<section class="card admin-section" id="adminPlans" aria-labelledby="adminPlansTitle">
+  <div class="eyebrow">Plans</div><h2 id="adminPlansTitle">Plan requests</h2>
+  <p class="muted">People who pressed "Tell us you want" a plan on the pricing page. Give it to them for a set time, or say no. Nothing is charged: when the time is up they go back to the plan they pay for, or Starter, by themselves. They get an email when you say yes.</p>
+  {% if request.query_params.get('tool', '').startswith('plan_') and tool_result %}<p class="notice {{ 'bad' if request.query_params.get('tool') == 'plan_invalid' else 'good' }}" role="status">{{ tool_result }}</p>{% endif %}
+  {% for item in plan_requests %}<article class="admin-person admin-request">
+    <header><strong>{{ item.email }}</strong><span class="pill">wants {{ plan_label(item.plan_key) }}</span></header>
+    <p class="small muted">Asked {{ item.created_at[:16]|replace('T', ' ') }} UTC · has {{ plan_label(item.current_plan) }} now{% if item.account_status != 'active' %} · account {{ item.account_status }}{% endif %}</p>
+    {{ plan_form(item.account_id, item.plan_key, 'req' ~ loop.index) }}
+    <form action="/admin/plans/decline" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="account_id" value="{{ item.account_id }}"><input type="hidden" name="plan_key" value="{{ item.plan_key }}"><button class="btn secondary" type="submit">Decline</button></form>
+  </article>{% else %}<p class="small muted">No requests waiting.</p>{% endfor %}
+  <p class="small muted">To give a plan to someone who has not asked, or to end one early, look them up in <a class="text-link" href="#adminPeople">Help one person</a>.</p>
+</section>
+
+
 
 <section class="card admin-section" id="adminFights" aria-labelledby="adminFightsTitle">
   <div class="eyebrow">Fights</div><h2 id="adminFightsTitle">Saved analyses</h2>
@@ -128,6 +152,14 @@
   </dl>
   {% if e.problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ e.problem }}.</p>{% endif %}
   {% for warning in e.warnings %}<p class="notice bad">{{ warning }}</p>{% endfor %}
+  {% if not e.own_domain %}<h3>How to reach every inbox</h3>
+  <p class="small">Send from a mailbox on {{ e.domain }}, through {{ e.domain }}'s own mail server. The domain already tells iCloud, Yahoo and Outlook that this server may send for it (SPF and DKIM), so they accept the mail.</p>
+  <ol class="small auth-steps">
+    <li>In cPanel, open <strong>Email Accounts</strong> and create an address such as <strong>noreply@{{ e.domain }}</strong> with a strong password.</li>
+    <li>In cPanel, open <strong>Email Deliverability</strong> and check that {{ e.domain }} shows DKIM and SPF as valid. If it offers to repair one, accept.</li>
+    <li>In <strong>Setup Python App</strong>, set <code>WARRIORIQ_SMTP_HOST</code> to <code>mail.{{ e.domain }}</code>, <code>WARRIORIQ_SMTP_PORT</code> to <code>465</code>, and both <code>WARRIORIQ_SMTP_USERNAME</code> and <code>WARRIORIQ_EMAIL_FROM</code> to the new address. Type the new address's password into <code>WARRIORIQ_SMTP_PASSWORD</code> yourself. Then restart.</li>
+    <li>Send a test below to an iCloud, a Yahoo and an Outlook address.</li>
+  </ol>{% endif %}
   {% if email.log.providers %}<h3>Last 30 days, by inbox provider</h3>
   <ul class="list-clean small">{% for domain, line in email.log.providers.items() %}<li><strong>{{ domain }}</strong>: {{ line.sent }} sent{% if line.not_sent %}, <strong>{{ line.not_sent }} not sent</strong>{% endif %}</li>{% endfor %}</ul>{% endif %}
   <h3>Latest emails</h3>
@@ -135,7 +167,12 @@
     {% for item in email.log.recent %}<tr><td>{{ item.at[:16]|replace('T', ' ') }}</td><td>{{ item.what }}</td><td>{{ item.to }}</td><td>{% if item.sent %}sent{% else %}<strong>not sent</strong>{% if item.reason %}: {{ item.reason }}{% endif %}{% endif %}</td></tr>
     {% else %}<tr><td colspan="4" class="muted">No account emails yet.</td></tr>{% endfor %}
   </tbody></table></div>
-  <p class="small muted">Test it from <a class="text-link" href="#adminTools">Tools</a> with "Send test email to me".</p>
+  <h3 id="adminEmailTest">Send a test email</h3>
+  <p class="small muted">Send one to an iCloud, Yahoo or Outlook/Hotmail address you can open, as well as Gmail. Leave the box empty to send it to yourself.</p>
+  <form action="/admin/email/test" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <div class="field"><label for="adminTestTo">Send to</label><input id="adminTestTo" name="to" type="email" maxlength="320" autocomplete="off" placeholder="name@icloud.com"></div>
+    <button class="btn secondary" type="submit">Send test email</button></form>
+  {% if email_tests %}<ul class="list-clean small">{% for test in email_tests %}<li><span class="pill">{{ 'sent' if test.sent else 'not sent' }}</span> {{ test.at[:16]|replace('T', ' ') }} UTC · {{ test.outcome }}</li>{% endfor %}</ul>{% endif %}
 </section>
 
 {#- Accuracy from the answers people gave (app/accuracy.py). Counts with the
@@ -189,20 +226,21 @@
 
 <section class="card admin-section" id="adminTools" aria-labelledby="adminToolsTitle">
   <div class="eyebrow">Tools</div><h2 id="adminToolsTitle">Email, backups, server and clean-up</h2>
-  {% if tool_result %}<p class="notice {{ 'bad' if 'failed' in tool_result or 'Nothing' in tool_result or 'No database' in tool_result else 'good' }}" role="status">{{ tool_result }}</p>{% endif %}
+  {% if tool_result and not request.query_params.get('tool', '').startswith('plan_') %}<p class="notice {{ 'bad' if 'failed' in tool_result or 'Nothing' in tool_result or 'No database' in tool_result else 'good' }}" role="status">{{ tool_result }}</p>{% endif %}
   <h3>Password resets and account emails</h3>
-  {% if email_problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ email_problem }}. Set it in the website's environment settings, then send a test.</p>{% else %}<p class="muted">Settings are present. Send a test to your own admin address to prove the mail server accepts them.</p>{% endif %}
-  {% if email_test %}<p class="notice {{ 'good' if email_test.startswith('Sent') else 'bad' }}" role="status">{{ email_test }}</p>{% endif %}
-  <form action="/admin/email/test" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Send test email to me</button></form>
+  {% if email_problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ email_problem }}. Set it in the website's environment settings, then send a test.</p>{% else %}<p class="muted">Settings are present.</p>{% endif %}
+  <p class="small"><a class="text-link" href="#adminEmailTest">Send a test email</a> from the Email section, to any address.</p>
   <h3 id="adminBackups">Database backups</h3>
   <p class="muted">{% if backups.enabled %}The website copies its database once a day, checks the copy and keeps the newest {{ backups.keep }}. Videos are not included.{% else %}Daily backups are switched off (WARRIORIQ_AUTO_BACKUP). You can still make one here.{% endif %}</p>
   {% if backups.copies %}<ul class="list-clean small">{% for copy in backups.copies[:5] %}<li><strong>{{ copy.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</strong> · {{ copy.bytes|filesizeformat }} · check: {{ copy.integrity_check or 'not recorded' }}</li>{% endfor %}</ul>{% if backups.copies|length > 5 %}<p class="small muted">{{ backups.copies|length }} copies in all.</p>{% endif %}{% else %}<p class="small muted">No backups yet.</p>{% endif %}
   <form action="/admin/backup" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Back up now</button></form>
   <h3 id="adminServer">Server checks</h3>
+  <p class="small muted">Optional video tools on the website's own server. Analysis runs on the analysis computer, which has its own.</p>
   <ul class="list-clean small">
-    <li><strong>ffprobe</strong> (upload type check): {{ 'installed' if server_checks.ffprobe else 'not found' }}</li>
-    <li><strong>ffmpeg</strong> (browser-playable copies): {{ 'installed' if server_checks.ffmpeg else 'not found' }}</li>
+    <li><strong>ffprobe</strong> (stricter upload type check): {{ 'installed' if server_checks.ffprobe else 'not installed' }}</li>
+    <li><strong>ffmpeg</strong> (faster-starting replays): {{ 'installed' if server_checks.ffmpeg else 'not installed' }}</li>
   </ul>
+  {% if not server_checks.ffprobe and not server_checks.ffmpeg %}<p class="small">This is not an error, and uploads work without them. Every upload is still checked for a real video signature, and must decode with OpenCV. What the website cannot do without them: read a file's streams for an extra "is there really a picture" check, and rewrite iPhone videos whose index sits at the end so the replay starts sooner. Shared hosting without a shell cannot install them.</p>{% endif %}
   <h3>Leftover video copies</h3>
   <p class="muted">Browser-playable copies whose original video was already deleted, left behind before 15 November 2026. No page can play them. Only copies older than a day are listed.</p>
   {% if leftovers %}<form action="/admin/leftovers/delete" method="post" data-confirm="Permanently delete the ticked leftover copies?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">

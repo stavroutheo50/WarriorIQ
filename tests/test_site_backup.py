@@ -180,3 +180,19 @@ def test_a_copy_without_its_checked_manifest_is_not_counted(database):
     folder.mkdir()
     (folder / "warrioriq-20990101T000000Z.sqlite3").write_bytes(b"")
     assert site_backup.latest() is None
+
+
+def test_missing_video_tools_are_explained_not_raised_as_an_alarm(database, monkeypatch):
+    """No shell means no ffprobe; uploads still work, so it is not 'Needs attention' (owner, 2026-11-16)."""
+    monkeypatch.setattr(site_backup, "server_checks", lambda: {"ffprobe": None, "ffmpeg": None})
+    client, email = _admin_client()
+    previous = SETTINGS.admin_emails
+    object.__setattr__(SETTINGS, "admin_emails", (email.lower(),))
+    try:
+        page = client.get("/admin").text
+    finally:
+        object.__setattr__(SETTINGS, "admin_emails", previous)
+    assert "ffprobe is not installed on the server" not in page
+    assert "This is not an error, and uploads work without them." in page
+    alerts = page.split('aria-label="Needs attention"')[1].split("</section>")[0] if 'aria-label="Needs attention"' in page else ""
+    assert "ffprobe" not in alerts

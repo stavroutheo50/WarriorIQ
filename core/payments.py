@@ -338,7 +338,25 @@ def plan_for_key(plan_key: str | None) -> dict:
     return PLANS.get(LEGACY_PLAN_ALIASES.get(key, key), PLANS["free"])
 
 
-def effective_plan_key(plan: str | None, plan_override: str | None, email: str | None = None) -> str:
+def override_in_force(plan_override: str | None, override_until: str | None, now=None) -> bool:
+    """Is a plan the administrator gave still running? No end date means it is."""
+    if not plan_override:
+        return False
+    if not override_until:
+        return True
+    from datetime import datetime, timezone
+
+    try:
+        ends = datetime.fromisoformat(str(override_until))
+    except ValueError:
+        return False                      # an unreadable end date gives nothing away
+    if ends.tzinfo is None:
+        ends = ends.replace(tzinfo=timezone.utc)
+    return (now or datetime.now(timezone.utc)) < ends
+
+
+def effective_plan_key(plan: str | None, plan_override: str | None, email: str | None = None,
+                       override_until: str | None = None) -> str:
     """Resolve the plan an account actually holds.
 
     A complimentary grant is an operator decision recorded in configuration
@@ -349,7 +367,11 @@ def effective_plan_key(plan: str | None, plan_override: str | None, email: str |
     granted = SETTINGS.complimentary_plans.get(str(email or "").strip().lower())
     if granted and granted in PLANS:
         return granted
-    return str(plan_override or plan or "free")
+    # A plan given from the admin page for a set time ends by itself
+    # (owner, 2026-11-16); one with no end date stays until it is taken away.
+    if override_in_force(plan_override, override_until):
+        return str(plan_override)
+    return str(plan or "free")
 
 
 def create_checkout(plan_key: str, success_url: str, cancel_url: str, account_id: int, email: str) -> str:

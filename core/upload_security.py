@@ -162,8 +162,10 @@ def _pending_limit_for(con, account_id: int) -> int | None:
     its third upload with 429 (QA, 2026-10-11). Every other plan keeps the
     configured ceiling.
     """
-    row = con.execute("SELECT plan,plan_override,email FROM accounts WHERE id=?", (account_id,)).fetchone()
-    if row is not None and plan_for_key(effective_plan_key(row["plan"], row["plan_override"], row["email"])).get("unlimited"):
+    row = con.execute("SELECT plan,plan_override,plan_override_until,email FROM accounts WHERE id=?",
+                      (account_id,)).fetchone()
+    if row is not None and plan_for_key(effective_plan_key(
+            row["plan"], row["plan_override"], row["email"], row["plan_override_until"])).get("unlimited"):
         return None
     return SETTINGS.max_pending_uploads
 
