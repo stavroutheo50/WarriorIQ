@@ -10046,6 +10046,10 @@ def admin_page(request: Request, q: str = ""):
             # How often the analysis was right, from people's answers (app/accuracy.py).
             "accuracy": _accuracy_summary(),
             "server_checks": site_backup.server_checks(),
+            # How mail is sent and every account email tried, and one person's
+            # whole picture for a support question (app/admin_overview.py).
+            "email": {"setup": admin_overview.email_setup(), "log": admin_overview.email_log()},
+            "people": admin_overview.person(q[:200]) if q.strip() else [],
             "leftovers": site_backup.leftover_copies(),
             "tool_result": _ADMIN_TOOL_RESULTS.get(request.query_params.get("tool", ""), ""),
         },

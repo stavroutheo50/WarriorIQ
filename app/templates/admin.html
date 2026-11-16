@@ -9,13 +9,14 @@
 {% set o = overview %}
 <header class="archive-hero"><div><div class="eyebrow">Restricted administration</div><h1>WarriorIQ control room.</h1><p>Only explicitly configured administrator emails can enter. Every visit and action is logged.</p><p class="small muted">Website release {{ release }} · analysis mode {{ o.worker_mode }} · payments {{ 'on' if o.payments_enabled else 'off' }}</p></div></header>
 
-<nav class="admin-nav" aria-label="Admin sections"><a href="#adminOverview">Overview</a><a href="#adminAnalysis">Analysis</a><a href="#adminPeople">People</a><a href="#adminFights">Fights</a><a href="#adminAccuracy">Accuracy</a><a href="#adminTraffic">Traffic</a><a href="#adminSafety">Safety</a><a href="#adminTools">Tools</a></nav>
+<nav class="admin-nav" aria-label="Admin sections"><a href="#adminOverview">Overview</a><a href="#adminAnalysis">Analysis</a><a href="#adminPeople">People</a><a href="#adminEmail">Email</a><a href="#adminFights">Fights</a><a href="#adminAccuracy">Accuracy</a><a href="#adminTraffic">Traffic</a><a href="#adminSafety">Safety</a><a href="#adminTools">Tools</a></nav>
 
 {#- Anything that needs action first, together in one box. -#}
-{% if worker_version_flag or not o.worker.available or email_problem or backups.stale or not server_checks.ffprobe %}<section class="card admin-alerts" role="alert" aria-label="Needs attention"><div class="eyebrow">Needs attention</div>
+{% if worker_version_flag or not o.worker.available or email_problem or email.setup.warnings or backups.stale or not server_checks.ffprobe %}<section class="card admin-alerts" role="alert" aria-label="Needs attention"><div class="eyebrow">Needs attention</div>
   {% if worker_version_flag %}<p class="notice bad"><strong>Analysis is paused: worker version mismatch.</strong> Worker {{ worker_version_flag.worker_id }} was refused ({{ worker_version_flag.reason|replace('_',' ') }}). Customers see "Analysis is paused for an update". Deploy the worker and the website from the same commit; both must report release {{ release }}.</p>{% endif %}
   {% if not o.worker.available %}<p class="notice bad"><strong>No analysis computer connected.</strong> {{ (o.worker.reason or 'unknown')|replace('_',' ')|capitalize }}{% if o.worker.heartbeat_age_seconds is not none %}; last heard from {{ (o.worker.heartbeat_age_seconds / 60)|round(0)|int }} minutes ago{% endif %}. Fights wait in the queue until it connects.</p>{% endif %}
   {% if email_problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ email_problem }}. Password resets and verification emails cannot be sent. <a class="text-link" href="#adminTools">Email settings</a></p>{% endif %}
+  {% if email.setup.warnings and not email_problem %}<p class="notice bad"><strong>Some inboxes may not get WarriorIQ's emails.</strong> {{ email.setup.warnings[0] }} <a class="text-link" href="#adminEmail">Email</a></p>{% endif %}
   {% if backups.stale %}<p class="notice bad"><strong>No database backup in the last two days.</strong> {% if backups.copies %}The newest is from {{ backups.copies[0].created_at.strftime('%Y-%m-%d %H:%M') }} UTC.{% else %}None has been made yet.{% endif %} <a class="text-link" href="#adminBackups">Back up now</a></p>{% endif %}
   {% if not server_checks.ffprobe %}<p class="notice bad"><strong>ffprobe is not installed on the server.</strong> Uploads cannot have their video type checked. <a class="text-link" href="#adminServer">Server checks</a></p>{% endif %}
 </section>{% endif %}
@@ -84,9 +85,25 @@
     {% for user in o.accounts.recent %}<tr><td>{{ user.created_at[:10] }}</td><td>{{ user.email }}</td><td>{{ user.account_type }}</td><td>{{ user.plan }}</td><td>{{ 'yes' if user.verified else 'no' }}</td><td>{{ user.fights }}</td><td>{{ user.account_status }}</td></tr>
     {% else %}<tr><td colspan="7" class="muted">No accounts yet.</td></tr>{% endfor %}
   </tbody></table></div>
-  <h3>Find an account</h3>
-  <form method="get" action="/admin#adminPeople"><div class="field"><label for="adminSearch">Search users by email</label><input id="adminSearch" type="search" name="q" value="{{query}}"></div><button class="btn secondary" type="submit">Search users</button></form>
-  {% if query %}<div class="privacy-fight-list">{% for user in users %}<article><div><strong>{{user.email}}</strong><span>{{user.account_status}} · {{user.plan_override or user.plan}} · joined {{user.created_at[:10]}}</span></div><form action="/admin/accounts/{{user.id}}/status" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="status" value="{% if user.account_status == 'active' %}suspended{% else %}active{% endif %}"><button class="btn {% if user.account_status == 'active' %}danger{% else %}secondary{% endif %}" type="submit">{% if user.account_status == 'active' %}Suspend{% else %}Restore{% endif %}</button></form></article>{% else %}<p class="muted">No matching users.</p>{% endfor %}</div>{% else %}<p class="small muted">Search to suspend or restore an account.</p>{% endif %}
+  <h3>Help one person</h3>
+  <p class="small muted">Type their email, or part of it. You see everything needed to answer "I can't get in": whether their email is confirmed, the last time they signed in, and every email WarriorIQ tried to send them.</p>
+  <form method="get" action="/admin#adminPeople"><div class="field"><label for="adminSearch">Email</label><input id="adminSearch" type="search" name="q" value="{{query}}"></div><button class="btn secondary" type="submit">Look up</button></form>
+  {% if query %}{% for card in people %}<article class="admin-person">
+    <header><strong>{{ card.email }}</strong><span class="pill">{{ card.status }}</span></header>
+    <dl class="admin-facts">
+      <div><dt>Joined</dt><dd>{{ card.created_at[:10] }}</dd></div>
+      <div><dt>Email confirmed</dt><dd>{% if card.email_verified_at %}yes, {{ card.email_verified_at[:10] }}{% else %}<strong>no</strong>{% endif %}</dd></div>
+      <div><dt>Last signed in</dt><dd>{{ card.last_sign_in[:16]|replace('T', ' ') if card.last_sign_in else 'never' }}</dd></div>
+      <div><dt>Signed in on</dt><dd>{{ card.signed_in_devices }} device{{ '' if card.signed_in_devices == 1 else 's' }}</dd></div>
+      <div><dt>Plan</dt><dd>{{ card.plan }}</dd></div>
+      <div><dt>Fights saved</dt><dd>{{ card.fights }}</dd></div>
+      <div><dt>Two-step sign-in</dt><dd>{{ 'on' if card.two_factor else 'off' }}</dd></div>
+      {% if card.guardian_status != 'not_applicable' %}<div><dt>Guardian</dt><dd>{{ card.guardian_status|replace('_', ' ') }}</dd></div>{% endif %}
+    </dl>
+    <h4>Recent activity</h4>
+    <ul class="list-clean small">{% for event in card.events %}<li>{{ event.at[:16]|replace('T', ' ') }} · {{ event.type }}{% if event.email %} · <strong>{{ event.email }}</strong>{% endif %}</li>{% else %}<li class="muted">Nothing recorded.</li>{% endfor %}</ul>
+    <form action="/admin/accounts/{{card.id}}/status" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="status" value="{% if card.status == 'active' %}suspended{% else %}active{% endif %}"><button class="btn {% if card.status == 'active' %}danger{% else %}secondary{% endif %}" type="submit">{% if card.status == 'active' %}Suspend this account{% else %}Restore this account{% endif %}</button></form>
+  </article>{% else %}<p class="muted">No account matches "{{ query }}".</p>{% endfor %}{% endif %}
 </section>
 
 <section class="card admin-section" id="adminFights" aria-labelledby="adminFightsTitle">
@@ -97,6 +114,28 @@
     {% for fight in o.fights.recent %}<tr><td>{{ fight.created_at[:16]|replace('T',' ') }}</td><td><code>{{ fight.job_id }}</code></td><td>{{ fight.email or '—' }}</td><td>{{ fight.ruleset }}</td><td>{{ fight.fight_type }}</td><td>{{ 'kept' if fight.video_held else 'deleted' }}</td></tr>
     {% else %}<tr><td colspan="6" class="muted">No fights analysed yet.</td></tr>{% endfor %}
   </tbody></table></div>
+</section>
+
+<section class="card admin-section" id="adminEmail" aria-labelledby="adminEmailTitle">
+  <div class="eyebrow">Email</div><h2 id="adminEmailTitle">Account emails and how they are sent</h2>
+  <p class="muted">Password resets, email confirmations, guardian approvals and invitations. "Sent" means the mail server accepted it; whether the inbox then shows it, or files it as Junk, WarriorIQ cannot see.</p>
+  {% set e = email.setup %}
+  <dl class="admin-facts">
+    <div><dt>Sending</dt><dd>{{ 'on' if not e.problem else 'off' }}</dd></div>
+    <div><dt>From address</dt><dd>{{ e.sender or 'not set' }}</dd></div>
+    <div><dt>Sent through</dt><dd>{{ e.host or 'not set' }}{% if e.host %} (port {{ e.port }}){% endif %}</dd></div>
+    <div><dt>Sending account</dt><dd>{{ e.username or 'none' }}</dd></div>
+  </dl>
+  {% if e.problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ e.problem }}.</p>{% endif %}
+  {% for warning in e.warnings %}<p class="notice bad">{{ warning }}</p>{% endfor %}
+  {% if email.log.providers %}<h3>Last 30 days, by inbox provider</h3>
+  <ul class="list-clean small">{% for domain, line in email.log.providers.items() %}<li><strong>{{ domain }}</strong>: {{ line.sent }} sent{% if line.not_sent %}, <strong>{{ line.not_sent }} not sent</strong>{% endif %}</li>{% endfor %}</ul>{% endif %}
+  <h3>Latest emails</h3>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>When (UTC)</th><th>What</th><th>To</th><th>Result</th></tr></thead><tbody>
+    {% for item in email.log.recent %}<tr><td>{{ item.at[:16]|replace('T', ' ') }}</td><td>{{ item.what }}</td><td>{{ item.to }}</td><td>{% if item.sent %}sent{% else %}<strong>not sent</strong>{% if item.reason %}: {{ item.reason }}{% endif %}{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No account emails yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="small muted">Test it from <a class="text-link" href="#adminTools">Tools</a> with "Send test email to me".</p>
 </section>
 
 {#- Accuracy from the answers people gave (app/accuracy.py). Counts with the

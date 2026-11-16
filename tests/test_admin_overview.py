@@ -86,10 +86,10 @@ def test_the_page_shows_every_section_to_an_admin_only():
         page = client.get("/admin")
         assert page.status_code == 200
         for section in ("adminOverview", "adminAnalysis", "adminPeople", "adminFights", "adminTraffic",
-                        "adminSafety", "adminTools"):
+                        "adminSafety", "adminTools", "adminEmail"):
             assert f'id="{section}"' in page.text and f'href="#{section}"' in page.text
         assert email in page.text                                       # newest accounts
-        assert "Search to suspend or restore an account." in page.text  # no list until searched
+        assert 'class="admin-person"' not in page.text                  # no person shown until looked up
         searched = client.get("/admin", params={"q": email}).text
         assert f"/admin/accounts/{created['id']}/status" in searched
     finally:

@@ -1506,3 +1506,10 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 .auth-steps li + li { margin-top: 8px; }
 .auth-wait { color: #b9c6db; font-size: 14px; }
 .auth-wait:empty { display: none; }
+
+/* Admin: one person's support card, and the email section (owner, 2026-11-16). */
+.admin-facts > div { display: contents; }
+.admin-person { margin: 14px 0; padding: 16px; border: 1px solid rgba(110, 126, 255, .3); border-radius: 16px; background: rgba(13, 23, 41, .55); }
+.admin-person header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; overflow-wrap: anywhere; }
+.admin-person h4 { margin: 14px 0 6px; font-size: 14px; }
+.admin-person form { margin-top: 12px; }

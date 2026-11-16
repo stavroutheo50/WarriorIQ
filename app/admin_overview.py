@@ -201,3 +201,151 @@ def live_jobs(jobs: list[tuple[str, dict]]) -> dict:
         account = owner.split(":", 1)[1] if owner.startswith("account:") else ""
         item["email"] = owners.get(int(account)) if account.isdigit() else ("guest" if owner else "")
     return {"counts": dict(sorted(counts.items())), "active": active}
+
+
+# --- Email (owner, 2026-11-16) -------------------------------------------------
+# A friend's password reset never reached his iCloud inbox. The admin page now
+# shows how mail is sent and every account email the site tried to send, so
+# "was it sent?" has an answer. "Sent" means the mail server accepted it;
+# whether the receiving inbox then delivers it, or files it as junk, the site
+# cannot see.
+
+EMAIL_EVENTS = {
+    "password_reset_requested": "Password reset link",
+    "email_verification_requested": "Email verification",
+    "email_verification_resent": "Email verification (resent)",
+    "guardian_approval_requested": "Guardian approval request",
+    "email_change_requested": "Email change confirmation",
+    "coach_invite_created": "Coaching invitation",
+    "gym_invite_created": "Gym invitation",
+}
+# Sent to someone other than the account the event belongs to.
+_OTHER_RECIPIENT = {"guardian_approval_requested": "the guardian named at sign-up",
+                    "coach_invite_created": "the person invited", "gym_invite_created": "the person invited"}
+
+
+def _was_sent(metadata: dict) -> bool:
+    # Invitations record {"emailed": bool}; the rest {"email_delivery": "sent" | ...}.
+    return metadata.get("email_delivery") == "sent" or metadata.get("emailed") is True
+
+
+def _domain(address: str) -> str:
+    return address.rpartition("@")[2].strip().lower() if "@" in (address or "") else ""
+
+
+def email_setup() -> dict:
+    """How mail is sent, from the website's settings. Never the password."""
+    from email.utils import parseaddr
+
+    from core.config import SETTINGS
+    from core.notifications import _from_header, email_settings_problem
+
+    username = os.getenv("WARRIORIQ_SMTP_USERNAME", "").strip()
+    sender = parseaddr(_from_header(os.getenv("WARRIORIQ_EMAIL_FROM", "").strip(), username))[1]
+    host = os.getenv("WARRIORIQ_SMTP_HOST", "").strip()
+    warnings = []
+    if sender and username and _domain(sender) != _domain(username):
+        warnings.append(
+            f"The From address ({sender}) is on a different domain from the account that sends the mail "
+            f"({username}). iCloud and Outlook often send such mail to Junk or drop it. Use the same "
+            "address for both, or send from your own domain's mail service.")
+    if _domain(sender) in {"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "icloud.com", "yahoo.com"}:
+        warnings.append(
+            f"Mail is sent from a personal {_domain(sender)} address. Some inboxes, iCloud included, are more "
+            "likely to put it in Junk. The reliable fix is sending from a warrioriq.eu address with SPF, DKIM "
+            "and DMARC set up at the domain (with the mailboxes planned for December).")
+    return {"provider": SETTINGS.email_provider, "host": host, "port": os.getenv("WARRIORIQ_SMTP_PORT", "587"),
+            "username": username, "sender": sender, "problem": email_settings_problem(), "warnings": warnings}
+
+
+def email_log(limit: int = 60, now: datetime | None = None) -> dict:
+    """Account emails the site tried to send, newest first, and totals by inbox provider."""
+    import json
+
+    init_db()
+    now = now or datetime.now(timezone.utc)
+    kinds = tuple(EMAIL_EVENTS)
+    marks = ",".join("?" * len(kinds))
+    with connection() as con:
+        rows = con.execute(
+            f"""SELECT e.event_type, e.occurred_at, e.metadata_json, a.email
+                FROM security_events e LEFT JOIN accounts a ON a.id = e.account_id
+                WHERE e.event_type IN ({marks}) ORDER BY e.id DESC LIMIT ?""",
+            (*kinds, max(1, min(int(limit), 300))),
+        ).fetchall()
+        month = con.execute(
+            f"""SELECT e.metadata_json, a.email FROM security_events e LEFT JOIN accounts a ON a.id = e.account_id
+                WHERE e.event_type IN ({marks}) AND e.event_type NOT IN ({",".join("?" * len(_OTHER_RECIPIENT))})
+                AND e.occurred_at >= ?""",
+            (*kinds, *_OTHER_RECIPIENT, _iso(now - timedelta(days=30))),
+        ).fetchall()
+    recent = []
+    for row in rows:
+        metadata = json.loads(row["metadata_json"] or "{}")
+        sent = _was_sent(metadata)
+        recent.append({
+            "what": EMAIL_EVENTS[row["event_type"]], "at": row["occurred_at"],
+            "to": _OTHER_RECIPIENT.get(row["event_type"]) or row["email"] or "deleted account",
+            "sent": sent, "reason": "" if sent else (
+                metadata.get("reason") or "Email is switched off or failed; the website log has the reason."),
+        })
+    providers: dict[str, dict] = {}
+    for row in month:
+        if not row["email"]:
+            continue
+        line = providers.setdefault(_domain(row["email"]), {"sent": 0, "not_sent": 0})
+        line["sent" if _was_sent(json.loads(row["metadata_json"] or "{}")) else "not_sent"] += 1
+    return {"recent": recent, "providers": dict(sorted(providers.items(), key=lambda kv: -sum(kv[1].values())))}
+
+
+# --- One person, for support (owner, 2026-11-16) -------------------------------
+
+def person(query: str, limit: int = 5) -> list[dict]:
+    """Everything the admin needs to help one person, for accounts whose email matches."""
+    import json
+
+    query = (query or "").strip().lower()
+    if not query:
+        return []
+    init_db()
+    now = _iso(datetime.now(timezone.utc))
+    with connection() as con:
+        accounts_found = con.execute(
+            """SELECT * FROM accounts WHERE lower(email) LIKE ? ORDER BY (lower(email)=?) DESC, id DESC LIMIT ?""",
+            (f"%{query}%", query, max(1, min(int(limit), 10))),
+        ).fetchall()
+        cards = []
+        for account in accounts_found:
+            account = dict(account)
+            account_id = int(account["id"])
+            sessions = con.execute("SELECT COUNT(*) FROM sessions WHERE account_id=? AND expires_at>?",
+                                   (account_id, now)).fetchone()[0]
+            fights_saved = con.execute("SELECT COUNT(*) FROM fights WHERE profile_id=?",
+                                       (int(account["profile_id"]),)).fetchone()[0]
+            last_login = con.execute(
+                "SELECT occurred_at FROM security_events WHERE account_id=? AND event_type='login_succeeded' "
+                "ORDER BY id DESC LIMIT 1", (account_id,)).fetchone()
+            events = con.execute(
+                "SELECT event_type, severity, occurred_at, metadata_json FROM security_events WHERE account_id=? "
+                "ORDER BY id DESC LIMIT 15", (account_id,)).fetchall()
+            cards.append({
+                "id": account_id, "email": account["email"], "status": account.get("account_status") or "active",
+                "plan": account.get("plan_override") or account.get("plan") or "free",
+                "created_at": account.get("created_at") or "",
+                "email_verified_at": account.get("email_verified_at"),
+                "guardian_status": account.get("guardian_approval_status") or "not_applicable",
+                "signed_in_devices": int(sessions), "fights": int(fights_saved),
+                "last_sign_in": last_login[0] if last_login else None,
+                "two_factor": bool(account.get("totp_enabled_at")),
+                "events": [{"type": event["event_type"].replace("_", " "), "severity": event["severity"],
+                            "at": event["occurred_at"],
+                            "email": _email_note(event["event_type"], json.loads(event["metadata_json"] or "{}"))}
+                           for event in events],
+            })
+    return cards
+
+
+def _email_note(event_type: str, metadata: dict) -> str:
+    if event_type not in EMAIL_EVENTS:
+        return ""
+    return "email sent" if _was_sent(metadata) else "email NOT sent"
