@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -88,6 +89,10 @@ def backups() -> list[dict]:
             manifest = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             manifest = {}
+        # The manifest is written only after the copy passed its integrity
+        # check, so a file without one is a copy that did not finish.
+        if manifest.get("integrity_check") != "ok":
+            continue
         found.append({"name": path.name, "created_at": created, "bytes": path.stat().st_size,
                       "integrity_check": manifest.get("integrity_check"),
                       "sha256": manifest.get("sha256")})
@@ -146,10 +151,15 @@ def make_backup(*, scheduled: bool, now: datetime | None = None) -> dict:
                 return {"outcome": "not_due"}
             if not scheduled and age < MANUAL_GAP:
                 return {"outcome": "recent"}
+        before = set(folder.glob("warrioriq-*.sqlite3"))
         try:
             result = backup_database(folder)
-        except (SystemExit, RuntimeError, OSError) as error:
-            return {"outcome": "failed", "error": str(error)[:300]}
+        except (SystemExit, RuntimeError, OSError, sqlite3.Error) as error:
+            # A copy that failed part-way must not stay behind looking like one.
+            for partial in set(folder.glob("warrioriq-*.sqlite3")) - before:
+                partial.unlink(missing_ok=True)
+                partial.with_suffix(".json").unlink(missing_ok=True)
+            return {"outcome": "failed", "error": f"{type(error).__name__}: {error}"[:300]}
         removed = prune_backups(folder, keep())
         return {"outcome": "done", "name": Path(result["path"]).name, "bytes": result["bytes"],
                 "removed": removed}

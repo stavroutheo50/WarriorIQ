@@ -162,3 +162,21 @@ def test_the_admin_page_backs_up_and_cleans_up_for_an_admin_only(database, tmp_p
         assert not leftover.exists()
     finally:
         object.__setattr__(SETTINGS, "admin_emails", previous)
+
+
+def test_a_failed_copy_leaves_nothing_that_looks_like_a_backup(database, monkeypatch):
+    def broken(folder):
+        (folder / "warrioriq-20990101T000000Z.sqlite3").write_bytes(b"")
+        raise sqlite3.OperationalError("disk I/O error")
+    monkeypatch.setattr(site_backup, "backup_database", broken)
+    result = site_backup.make_backup(scheduled=False)
+    assert result["outcome"] == "failed" and "OperationalError: disk I/O error" in result["error"]
+    assert list((database.parent / "backups").glob("warrioriq-*.sqlite3")) == []
+    assert site_backup.latest() is None
+
+
+def test_a_copy_without_its_checked_manifest_is_not_counted(database):
+    folder = database.parent / "backups"
+    folder.mkdir()
+    (folder / "warrioriq-20990101T000000Z.sqlite3").write_bytes(b"")
+    assert site_backup.latest() is None
