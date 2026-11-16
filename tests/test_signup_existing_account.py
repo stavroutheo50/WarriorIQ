@@ -26,8 +26,10 @@ def test_an_existing_email_is_sent_to_sign_in_with_the_address_kept():
     again = BrowserClient(web.app).post("/signup", data={"email": email.upper(), **SIGNUP}, follow_redirects=False)
     assert again.status_code == 400
     page = again.text
-    assert "You already have an account with this email." in page
-    assert 'action="/login"' in page and 'action="/signup"' not in page
+    # Owner, 2026-11-16: its own clear box, with the reset link one tap away.
+    assert "You already have a WarriorIQ account with this email." in page
+    assert 'class="account-exists" role="alert"' in page and "Email me a reset link" in page
+    assert 'action="/login"' in page and 'action="/forgot-password"' in page and 'action="/signup"' not in page
     assert f'value="{email.upper()}"' in page
     assert web.SESSION_COOKIE not in again.headers.get("set-cookie", "")
 

@@ -157,7 +157,8 @@ def test_enter_in_the_password_field_signs_in_with_email():
     # Live walkthrough 2026-10-26: Enter presses the form's first submit button,
     # which was Continue with Google, so Enter after a password went to Google.
     page = (TEMPLATES / "auth.html").read_text(encoding="utf-8")
-    form = page[page.index('<form class="auth-form"'):page.index("</form>")]
+    start = page.index('<form class="auth-form"')
+    form = page[start:page.index("</form>", start)]
     first_submit = re.search(r'<button[^>]*type="submit"[^>]*>', form).group(0)
     assert "formaction" not in first_submit
 

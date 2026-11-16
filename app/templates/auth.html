@@ -13,6 +13,16 @@
     <div class="eyebrow">{% if mode == 'signup' %}Create account{% else %}Sign in{% endif %}</div>
     <h2>{% if mode == 'signup' %}Start your athlete profile{% else %}Open your workspace{% endif %}</h2>
     {% if error %}<div class="notice bad-notice" role="alert">{{error}}</div>{% endif %}
+    {% if notice %}<div class="notice good-notice auth-done-notice" role="status"><strong>{{ notice }}</strong></div>{% endif %}
+    {#- Signing up with an address that already has an account (owner,
+        2026-11-16: a friend on an iPhone could not make out the grey line
+        this used to be). Its own box, plain words, and the reset link one tap
+        away; the sign-in form stays below for anyone who remembers. -#}
+    {% if account_exists %}<div class="account-exists" role="alert">
+      <strong>You already have a WarriorIQ account with this email.</strong>
+      <p>Sign in below with your password. Forgotten it? We can email you a link to choose a new one.</p>
+      <form method="post" action="/forgot-password"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="email" value="{{ email }}"><input type="hidden" name="next_path" value="{{ next_path }}"><button class="btn" type="submit">Email me a reset link</button></form>
+    </div>{% endif %}
     <form class="auth-form" method="post" action="/{% if mode == 'signup' %}signup{% else %}login{% endif %}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <input type="hidden" name="mode" value="{{mode}}">
       <input type="hidden" name="next_path" value="{{next_path}}">
@@ -36,7 +46,7 @@
           once it would be accepted. autocomplete=new-password keeps the
           phone's "use a strong password" suggestion. -#}
       <div class="field password-field">
-        <div class="password-label-row"><label for="authPassword">Password</label>{% if mode == 'login' %}<a class="text-link" href="/forgot-password">Forgot password?</a>{% endif %}</div>
+        <div class="password-label-row"><label for="authPassword">Password</label>{% if mode == 'login' %}<a class="text-link" href="/forgot-password?next={{ next_path|urlencode }}">Forgot password?</a>{% endif %}</div>
         <div class="password-box"><input id="authPassword" type="password" name="password" autocomplete="{% if mode == 'signup' %}new-password{% else %}current-password{% endif %}"{% if mode == 'signup' %} minlength="10" aria-describedby="authPasswordNote"{% endif %} required>
           <button class="password-toggle" type="button" aria-controls="authPassword" aria-pressed="false" aria-label="Show password" data-keep-label="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="eye-open" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle class="eye-open" cx="12" cy="12" r="3"/><path class="eye-shut" d="M3 3l18 18M10.6 5.6A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3 3.8M6.6 6.6C3.9 8.3 2.5 12 2.5 12S6 18.5 12 18.5c1.9 0 3.5-.6 4.9-1.5M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></button>
         </div>
