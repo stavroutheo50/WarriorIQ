@@ -3540,10 +3540,15 @@ def signup(
         # (2026-10-28). What that person wants is to sign in, so they are
         # shown the sign-in form with their address already in it.
         if get_account_by_email(normalize_email(email)):
-            # Shown as its own screen, not a grey line above a sign-in form
-            # (owner, 2026-11-16: a friend on an iPhone could not make out
-            # what it said). One tap sends the reset link.
-            return _auth_page(request, "login", "", next_path, email=email, account_exists=True)
+            # Its own screen, not a grey line above a sign-in form (owner,
+            # 2026-11-16: a friend on an iPhone could not make out what it
+            # said). One button, Sign in, to the sign-in page with the address
+            # filled in; Forgot password is there if they need it. The address
+            # rides in a short-lived cookie, never in the web address.
+            response = _auth_page(request, "signup", "", next_path, account_exists=True)
+            response.set_cookie(PREFILL_COOKIE, normalize_email(email)[:254], max_age=600, httponly=True,
+                                samesite="lax", secure=_request_is_secure(request))
+            return response
         return _auth_page(request, "signup", str(exc), next_path, email=email)
     record_account_signup_acceptance(
         int(account["id"]), terms_version=SETTINGS.policy_version,
@@ -3704,12 +3709,20 @@ _LOGIN_NOTICES = {
 }
 
 
+PREFILL_COOKIE = "warrioriq_prefill"
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/camp", verified: str = "", reset: str = ""):
     if _account(request):
         return RedirectResponse(_safe_next(next), status_code=303)
     notice = _LOGIN_NOTICES["verified"] if verified else _LOGIN_NOTICES["reset"] if reset else ""
-    return _auth_page(request, "login", next_path=next, notice=notice)
+    prefill = request.cookies.get(PREFILL_COOKIE, "")
+    response = _auth_page(request, "login", next_path=next, notice=notice,
+                          email=prefill if valid_email(prefill) else "")
+    if prefill:
+        response.delete_cookie(PREFILL_COOKIE)                  # filled in once
+    return response
 
 
 TWO_FACTOR_COOKIE = "warrioriq_2fa"

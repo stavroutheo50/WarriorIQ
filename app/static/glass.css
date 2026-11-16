@@ -1496,9 +1496,7 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 /* Account recovery (owner, 2026-11-16): a duplicate sign-up a friend could not
    read on an iPhone. Plain white words in a clear box, not a grey hint. */
 .account-exists { margin: 0 0 20px; padding: 18px 18px 16px; border-radius: 18px; border: 1px solid rgba(110, 126, 255, .55); border-left: 4px solid #6e7eff; background: rgba(75, 102, 190, .2); color: #f4f7ff; }
-.account-exists strong { display: block; font-size: 18px; line-height: 1.35; color: #ffffff; }
-.account-exists p { margin: 8px 0 14px; font-size: 16px; line-height: 1.5; color: #e2e8f5; }
-.account-exists form { margin: 0; }
+.account-exists strong { display: block; margin-bottom: 16px; font-size: 18px; line-height: 1.35; color: #ffffff; }
 .account-exists .btn { width: 100%; min-height: 48px; }
 .auth-card .notice.good-notice, .notice.good-notice { border-color: rgba(74, 222, 128, .45); border-left-color: #4ade80; background: rgba(74, 222, 128, .1); color: #e9fbe9; }
 .auth-done-notice strong { color: #ffffff; font-size: 16px; line-height: 1.45; }

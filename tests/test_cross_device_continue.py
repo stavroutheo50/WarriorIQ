@@ -121,11 +121,14 @@ def test_a_used_reset_link_explains_itself():
     assert "This link has expired or was already used." in response.text and "Send reset link" in response.text
 
 
-def test_the_duplicate_sign_up_offers_the_reset_link_for_that_address():
+def test_the_duplicate_sign_up_leads_to_sign_in_with_the_address_filled():
     email = f"dupe-{uuid.uuid4().hex[:8]}@example.com"
     _account(email)
     web._rate_windows.clear()
-    page = BrowserClient(web.app).post("/signup", data={"email": email, **SIGNUP}).text
-    form = page[page.index('<div class="account-exists"'):]
-    form = form[:form.index("</form>")]
-    assert 'action="/forgot-password"' in form and f'name="email" value="{email}"' in form
+    client = BrowserClient(web.app)
+    page = client.post("/signup", data={"email": email, "next_path": "/history", **SIGNUP}).text
+    box = page[page.index('<div class="account-exists"'):]
+    box = box[:box.index("</div>")]
+    assert 'href="/login?next=/history"' in box and ">Sign in</a>" in box
+    login = client.get("/login?next=%2Fhistory").text
+    assert f'value="{email}"' in login and 'name="next_path" value="/history"' in login

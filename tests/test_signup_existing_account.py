@@ -23,15 +23,20 @@ def test_an_existing_email_is_sent_to_sign_in_with_the_address_kept():
     email = f"exists-{uuid.uuid4().hex[:8]}@example.com"
     first = BrowserClient(web.app).post("/signup", data={"email": email, **SIGNUP}, follow_redirects=False)
     assert first.status_code == 303
-    again = BrowserClient(web.app).post("/signup", data={"email": email.upper(), **SIGNUP}, follow_redirects=False)
+    again_client = BrowserClient(web.app)
+    again = again_client.post("/signup", data={"email": email.upper(), **SIGNUP}, follow_redirects=False)
     assert again.status_code == 400
     page = again.text
-    # Owner, 2026-11-16: its own clear box, with the reset link one tap away.
+    # Owner, 2026-11-16: one clear box and one button, Sign in, to the
+    # sign-in page with the address filled in. No form under it, no reset button.
     assert "You already have a WarriorIQ account with this email." in page
-    assert 'class="account-exists" role="alert"' in page and "Email me a reset link" in page
-    assert 'action="/login"' in page and 'action="/forgot-password"' in page and 'action="/signup"' not in page
-    assert f'value="{email.upper()}"' in page
+    assert 'class="account-exists" role="alert"' in page and 'href="/login?next=' in page
+    card = page[page.index('auth-card'):page.index('</section>', page.index('auth-card'))]
+    assert "<form" not in card and "reset link" not in page
     assert web.SESSION_COOKIE not in again.headers.get("set-cookie", "")
+    login = again_client.get("/login")
+    assert f'value="{email}"' in login.text and "Forgot password?" in login.text
+    assert again_client.get("/login").text.count(f'value="{email}"') == 0          # filled in once
 
 
 def test_other_refusals_keep_the_address_too():
