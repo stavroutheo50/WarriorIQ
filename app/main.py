@@ -52,7 +52,7 @@ from app.state import (
 )
 from core.auth import (
     authenticate, end_session, hash_password, verify_password, issue_session, normalize_email, register, resolve_session,
-    new_password_problem, session_token, token_digest, valid_email, valid_password,
+    new_password_problem, session_token, token_digest, valid_email, valid_password, COMMON_PASSWORD_MESSAGE,
 )
 from core import common_passwords, two_factor
 from core.db import (
@@ -4001,11 +4001,20 @@ def request_password_reset(request: Request, email: str = Form(...), next_path: 
     return response
 
 
+# What a refused new password may say, by a fixed code in the address: the
+# page never prints text taken from the address (security review, PR #236).
+_RESET_PAGE_NOTICES = {
+    "short": "Password must contain between 10 and 1,024 characters.",
+    "common": COMMON_PASSWORD_MESSAGE,
+}
+
+
 @app.get("/reset-password/{token}", response_class=HTMLResponse)
 def reset_password_page(request: Request, token: str, error: str = ""):
     return templates.TemplateResponse(
         request=request, name="password_reset.html",
-        context={"request": request, "token": token, "message": "", "error": error[:200], "next_path": "/camp"},
+        context={"request": request, "token": token, "message": "", "error": _RESET_PAGE_NOTICES.get(error, ""),
+                 "next_path": "/camp"},
     )
 
 
@@ -4021,8 +4030,9 @@ def reset_password(request: Request, token: str, password: str = Form(...)):
         # Back to the form with the reason, rather than a 400 page over it.
         # The token stays in the path, so the link is still usable - which a
         # 400 page made look untrue at the moment it mattered most.
+        code = "common" if problem == COMMON_PASSWORD_MESSAGE else "short"
         return RedirectResponse(
-            "/reset-password/%s?%s" % (quote(token, safe=""), urlencode({"error": problem})),
+            "/reset-password/%s?%s" % (quote(token, safe=""), urlencode({"error": code})),
             status_code=303)
     account_id = consume_password_reset_token(token_digest(token))
     if account_id is None or not update_password_hash(account_id, hash_password(password)):

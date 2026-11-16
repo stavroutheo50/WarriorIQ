@@ -168,3 +168,12 @@ def test_someone_else_asking_for_a_reset_does_not_see_the_owner_finish_theirs():
 def test_the_verify_page_ignores_an_error_or_status_in_the_address():
     response = BrowserClient(web.app).get("/verify-email?error=Injected+text&status_code=500")
     assert response.status_code == 200 and "Injected text" not in response.text
+
+
+def test_the_reset_page_shows_only_its_own_notices():
+    # Security review, PR #236: no wording taken from the address.
+    client = BrowserClient(web.app)
+    assert "Call 555" not in client.get("/reset-password/x?error=Call+555").text
+    weak = client.post("/reset-password/x", data={"password": "short"}, follow_redirects=False)
+    assert weak.headers["location"].endswith("?error=short")
+    assert "between 10 and 1,024 characters" in client.get(weak.headers["location"]).text
