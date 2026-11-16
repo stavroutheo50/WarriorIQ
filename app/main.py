@@ -3890,7 +3890,12 @@ def login(
 
 
 @app.get("/verify-email", response_class=HTMLResponse)
-def verify_email_page(request: Request, message: str = "", error: str = "", status_code: int = 200):
+def verify_email_page(request: Request, message: str = ""):
+    return _verify_email_response(request, message=message)
+
+
+def _verify_email_response(request: Request, message: str = "", error: str = "", status_code: int = 200):
+    # The error and status are set only by the server, never from the address.
     return templates.TemplateResponse(
         request=request, name="verify_email.html",
         context={"request": request, "message": message, "error": error,
@@ -3905,7 +3910,7 @@ def verify_email_token(request: Request, token: str):
     if account_id is None:
         # A page that says what to do, not a bare error: the usual reason is
         # that a newer link was sent, which replaces this one.
-        return verify_email_page(
+        return _verify_email_response(
             request, error="This link has expired or a newer one was sent. Use the newest WarriorIQ email, "
                            "or send a new link below.", status_code=410)
     record_security_event("email_verified", account_id=account_id)

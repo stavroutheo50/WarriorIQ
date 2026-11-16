@@ -163,3 +163,8 @@ def test_someone_else_asking_for_a_reset_does_not_see_the_owner_finish_theirs():
     BrowserClient(web.app).post(_link(sent[-1], "reset-password"), data={"password": "A-Brand-New-Password-7"})
     assert owner.get("/auth/wait").json()["state"] == "done"
     assert stranger.get("/auth/wait").json() == {"state": "waiting"}
+
+
+def test_the_verify_page_ignores_an_error_or_status_in_the_address():
+    response = BrowserClient(web.app).get("/verify-email?error=Injected+text&status_code=500")
+    assert response.status_code == 200 and "Injected text" not in response.text
