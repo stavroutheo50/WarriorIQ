@@ -87,12 +87,39 @@ def test_admin_test_button_shows_the_result(monkeypatch):
 
             monkeypatch.setattr(main, "deliver_email", fail)
             result = client.post("/admin/email/test")
-            assert "Not sent: the mail server rejected" in result.text
-            monkeypatch.setattr(main, "deliver_email", lambda *args: None)
+            assert f"Not sent to {email}: the mail server rejected" in result.text
+            sent_to = []
+            monkeypatch.setattr(main, "deliver_email", lambda to, *args: sent_to.append(to))
             result = client.post("/admin/email/test")
             assert f"Sent to {email}" in result.text
+            # Any address, so an iCloud, Yahoo or Outlook inbox can be checked.
+            result = client.post("/admin/email/test", data={"to": " Someone@iCloud.com "})
+            assert "Sent to someone@icloud.com" in result.text and sent_to[-1] == "someone@icloud.com"
+            result = client.post("/admin/email/test", data={"to": "not an address"})
+            assert "Not sent: that is not an email address." in result.text and len(sent_to) == 2
+            # The result comes from the stored event, never from the address.
+            assert "Injected words" not in client.get("/admin?email_test=Injected+words").text
             # Not an admin: the button does not exist.
             object.__setattr__(SETTINGS, "admin_emails", ())
             assert client.post("/admin/email/test").status_code == 404
     finally:
         object.__setattr__(SETTINGS, "admin_emails", previous)
+
+
+def test_every_message_carries_a_date_and_a_message_id_on_the_senders_domain():
+    """iCloud, Outlook and Yahoo refuse or junk mail without them (owner, 2026-11-16)."""
+    with _env(WARRIORIQ_EMAIL_FROM="noreply@warrioriq.eu", WARRIORIQ_SMTP_USERNAME="noreply@warrioriq.eu"), \
+            _smtp(), mock.patch.object(notifications.smtplib, "SMTP") as plain:
+        notifications.deliver_email("a@icloud.com", "s", "b")
+    message = plain.return_value.send_message.call_args.args[0]
+    assert message["Date"] and message["Message-ID"].endswith("@warrioriq.eu>")
+    assert message["From"] == "WarriorIQ <noreply@warrioriq.eu>"
+
+
+def test_a_certificate_for_another_name_is_explained():
+    import ssl
+
+    with _env(), _smtp(), mock.patch.object(
+            notifications.smtplib, "SMTP", side_effect=ssl.SSLCertVerificationError("hostname mismatch")):
+        with pytest.raises(notifications.EmailNotSent, match="certificate does not match"):
+            notifications.deliver_email("a@b.com", "s", "b")

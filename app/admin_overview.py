@@ -218,6 +218,7 @@ EMAIL_EVENTS = {
     "email_change_requested": "Email change confirmation",
     "coach_invite_created": "Coaching invitation",
     "gym_invite_created": "Gym invitation",
+    "admin_plan_granted": "Plan approved",
 }
 # Sent to someone other than the account the event belongs to.
 _OTHER_RECIPIENT = {"guardian_approval_requested": "the guardian named at sign-up",
@@ -247,15 +248,24 @@ def email_setup() -> dict:
     if sender and username and _domain(sender) != _domain(username):
         warnings.append(
             f"The From address ({sender}) is on a different domain from the account that sends the mail "
-            f"({username}). iCloud and Outlook often send such mail to Junk or drop it. Use the same "
-            "address for both, or send from your own domain's mail service.")
-    if _domain(sender) in {"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "icloud.com", "yahoo.com"}:
+            f"({username}). iCloud, Yahoo and Outlook often junk or silently drop such mail. Use the same "
+            "address for both.")
+    if _domain(sender) in _PERSONAL_MAIL:
         warnings.append(
-            f"Mail is sent from a personal {_domain(sender)} address. Some inboxes, iCloud included, are more "
-            "likely to put it in Junk. The reliable fix is sending from a warrioriq.eu address with SPF, DKIM "
-            "and DMARC set up at the domain (with the mailboxes planned for December).")
+            f"Mail is sent from a personal {_domain(sender)} mailbox. Gmail inboxes take it, but iCloud, Yahoo "
+            "and Outlook/Hotmail often junk it or drop it without telling anyone.")
     return {"provider": SETTINGS.email_provider, "host": host, "port": os.getenv("WARRIORIQ_SMTP_PORT", "587"),
-            "username": username, "sender": sender, "problem": email_settings_problem(), "warnings": warnings}
+            "username": username, "sender": sender, "problem": email_settings_problem(), "warnings": warnings,
+            # The setup that reaches every inbox: a mailbox on the site's own
+            # domain, sent through the domain's own mail server, which the
+            # domain's SPF and DKIM records vouch for.
+            "own_domain": bool(sender) and _domain(sender) == SETTINGS.public_email_domain
+                          and _domain(username or sender) == SETTINGS.public_email_domain,
+            "domain": SETTINGS.public_email_domain}
+
+
+_PERSONAL_MAIL = {"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "icloud.com",
+                  "me.com", "yahoo.com"}
 
 
 def email_log(limit: int = 60, now: datetime | None = None) -> dict:
@@ -304,6 +314,8 @@ def person(query: str, limit: int = 5) -> list[dict]:
     """Everything the admin needs to help one person, for accounts whose email matches."""
     import json
 
+    from core.payments import effective_plan_key, override_in_force
+
     query = (query or "").strip().lower()
     if not query:
         return []
@@ -330,7 +342,12 @@ def person(query: str, limit: int = 5) -> list[dict]:
                 "ORDER BY id DESC LIMIT 15", (account_id,)).fetchall()
             cards.append({
                 "id": account_id, "email": account["email"], "status": account.get("account_status") or "active",
-                "plan": account.get("plan_override") or account.get("plan") or "free",
+                # The plan the person actually has now, an ended grant ignored.
+                "plan": effective_plan_key(account.get("plan"), account.get("plan_override"), account.get("email"),
+                                           account.get("plan_override_until")),
+                "given_plan": account.get("plan_override") if override_in_force(
+                    account.get("plan_override"), account.get("plan_override_until")) else None,
+                "given_until": account.get("plan_override_until"),
                 "created_at": account.get("created_at") or "",
                 "email_verified_at": account.get("email_verified_at"),
                 "guardian_status": account.get("guardian_approval_status") or "not_applicable",

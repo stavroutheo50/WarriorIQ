@@ -173,8 +173,15 @@ def daily_backup_if_due() -> dict | None:
 
 
 def server_checks() -> dict:
-    """What the host has installed, found the way the upload check finds it."""
-    return {"ffprobe": shutil.which("ffprobe"), "ffmpeg": shutil.which("ffmpeg")}
+    """What the host has installed, found the way the upload code finds it.
+
+    ffmpeg is looked up with core.video._ffmpeg_exe, which also finds the copy
+    bundled with imageio-ffmpeg, so this never says "not installed" for a tool
+    the upload code would in fact use.
+    """
+    from core.video import _ffmpeg_exe
+
+    return {"ffprobe": shutil.which("ffprobe"), "ffmpeg": _ffmpeg_exe()}
 
 
 def leftover_copies() -> list[dict]:

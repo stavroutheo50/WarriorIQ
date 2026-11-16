@@ -152,7 +152,7 @@
           had selected Coach 30 and had not. Registering interest is the only
           thing this card can actually do, so it is the only button on it, and
           it says which plan it is for rather than "this". -#}
-      {% if key in plans_wanted %}<p class="small muted plan-wanted">Noted — you are on the list for {{plan.label}}. We will email you when billing opens.</p>
+      {% if key in plans_wanted %}<p class="small muted plan-wanted">Noted — your request for {{plan.label}} is with us. We will email you when it is approved.</p>
       {% else %}<form method="post" action="/plan-interest/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="/pricing"><button class="btn" type="submit">Tell us you want {{plan.label}}</button></form>{% endif %}
     {% else %}
       {% if payments_enabled %}<a class="btn secondary" href="/signup?next=/camp">Create account first</a>

@@ -5,6 +5,7 @@ import os
 import smtplib
 import ssl
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid, parseaddr
 
 from core.config import SETTINGS
 from core.email_html import render_email_html
@@ -32,6 +33,12 @@ def _from_header(configured: str, username: str) -> str:
     if not username:
         return ""
     return f"{configured or 'WarriorIQ'} <{username}>"
+
+
+def _domain_of(header: str) -> str:
+    """The domain of the address in a From header, for the Message-ID."""
+    address = parseaddr(header)[1]
+    return address.rpartition("@")[2].lower() or "warrioriq.eu"
 
 
 class EmailNotSent(Exception):
@@ -62,6 +69,9 @@ def _explain(exc: Exception, host: str, port: int) -> str:
                 "2-Step Verification -> App passwords), not the normal password; an app password "
                 "stops working when the Google password changes.") if "gmail" in host.lower() else ""
         return f"the mail server rejected the username or password (code {exc.smtp_code}).{hint}"
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        return (f"the mail server's certificate does not match {host}. Use the server name your host gives "
+                "for secure mail (in cPanel: Email Accounts, Connect Devices).")
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
         return "the mail server refused the recipient address"
     if isinstance(exc, smtplib.SMTPSenderRefused):
@@ -86,6 +96,12 @@ def deliver_email(recipient: str, subject: str, body: str) -> None:
     message["From"] = sender
     message["To"] = recipient
     message["Subject"] = subject
+    # iCloud, Outlook and Yahoo drop or junk mail without these, and not every
+    # mail server adds them for a message handed over by a program (Gmail
+    # does, a cPanel server may not). The site's mail was reaching Gmail
+    # only (owner, 2026-11-16); missing headers are one cause it rules out.
+    message["Date"] = formatdate(usegmt=True)
+    message["Message-ID"] = make_msgid(domain=_domain_of(sender))
     message.set_content(body)
     # The branded HTML version of the same text (core/email_html.py); mail apps
     # that show only text keep the plain body above.

@@ -1511,3 +1511,5 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 .admin-person header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; overflow-wrap: anywhere; }
 .admin-person h4 { margin: 14px 0 6px; font-size: 14px; }
 .admin-person form { margin-top: 12px; }
+.admin-plan-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.admin-plan-form .field { margin: 0; min-width: 160px; }
