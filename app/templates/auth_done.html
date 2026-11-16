@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · WarriorIQ{% endblock %}
+{% block content %}
+{#- After an email link is used: what happened, and the choice of carrying on
+    here or on the device it was asked for on (owner, 2026-11-16). -#}
+<section class="auth-layout compact-auth">
+  <div class="auth-copy"><div class="eyebrow">Account</div><h1>{{ title }}.</h1></div>
+  <section class="hero-card auth-card">
+    <div class="notice good-notice auth-done-notice" role="status"><strong>{{ lead }}</strong></div>
+    <p>{{ other_device }}</p>
+    <p><a class="btn" href="{{ here_url }}">{{ here_label }}</a></p>
+  </section>
+</section>
+{% endblock %}

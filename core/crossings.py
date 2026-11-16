@@ -30,6 +30,23 @@ MIN_TOGETHER_SECONDS = 0.25
 # The question is asked on a frame this long after they separate, when both
 # are clear of each other again.
 SETTLE_SECONDS = 0.4
+# Ground spells (owner, 2026-11-16: identity was lost most on the ground,
+# where the pose model cannot pull two tangled bodies apart). Read from the
+# MMA ground-time model (core/ground_time.py), which says second by second
+# whether the fighters are on the ground. Its seconds join into a spell across
+# gaps up to GROUND_GAP_SECONDS. No question is asked inside a spell - nobody
+# can answer "which box is your fighter" about two tangled bodies - and one is
+# asked on the first settled frame after each spell, ahead of the ordinary ones.
+# The "someone is down" moments of core/ground.py were tried first and
+# rejected: they see about half the seconds down, so on a real bout half the
+# questions fell while the fighters were still on the ground.
+# Checked 2026-11-16 on two CC BY pankration bouts (Internet Archive,
+# Subfighter.com Ma604 and Ma268; Ma268 is not among the bouts the ground
+# model was fitted on): with gaps up to 3 s joined, every question placed
+# after a spell showed the fighters up again. Joining only 2 s left one asked
+# while they were still down, in a 2 s hole in the model's ground seconds.
+GROUND_GAP_SECONDS = 3
+MIN_GROUND_SECONDS = 3
 # At most this many questions per fight, at least this far apart.
 MAX_QUESTIONS = 6
 MIN_GAP_SECONDS = 8.0
@@ -55,12 +72,14 @@ class Crossing:
     b_box: list[float] | None = None
     # The lowest identity confidence either fighter had while they were together.
     lowest_confidence: float = 1.0
+    # "crossed": close together, then apart. "ground": after a ground spell.
+    reason: str = "crossed"
 
     def as_dict(self) -> dict:
         return {"entered_seconds": round(self.entered_seconds, 3), "left_seconds": round(self.left_seconds, 3),
                 "ask_seconds": round(self.ask_seconds, 3), "ask_frame": self.ask_frame,
                 "a_box": self.a_box, "b_box": self.b_box,
-                "lowest_confidence": round(self.lowest_confidence, 3)}
+                "lowest_confidence": round(self.lowest_confidence, 3), "reason": self.reason}
 
 
 @dataclass
@@ -71,9 +90,14 @@ class CrossingWatch:
     _together_since: float | None = None
     _lowest: float = 1.0
     _pending: Crossing | None = None
+    # Every frame's boxes, for placing the questions after ground spells once
+    # the ground-time model has read the whole fight.
+    _history: list = field(default_factory=list)
 
     def observe(self, seconds: float, source_frame: int, a_box, b_box,
                 a_confidence: float = 1.0, b_confidence: float = 1.0) -> None:
+        if a_box is not None and b_box is not None:
+            self._history.append((float(seconds), int(source_frame), list(a_box), list(b_box)))
         if self._pending is not None and seconds >= self._pending.left_seconds + SETTLE_SECONDS:
             if a_box is not None and b_box is not None and _centre_gap_in_heights(a_box, b_box) > APART_BODY_HEIGHTS:
                 self._pending.ask_seconds = float(seconds)
@@ -98,6 +122,46 @@ class CrossingWatch:
                 self._pending = Crossing(entered_seconds=self._together_since, left_seconds=float(seconds),
                                          lowest_confidence=self._lowest)
             self._together_since = None
+
+    def apply_ground(self, ground_seconds) -> int:
+        """Use the seconds the fighters were on the ground (core/ground_time.py).
+
+        Crossings asked about inside a spell are dropped; one crossing is added
+        after each spell. Returns how many were added.
+        """
+        ground = sorted({int(second) for second in ground_seconds})
+        if not ground:
+            return 0
+        spells: list[list[int]] = []
+        for second in ground:
+            if spells and second - spells[-1][-1] <= GROUND_GAP_SECONDS:
+                spells[-1].append(second)
+            else:
+                spells.append([second])
+        spells = [spell for spell in spells if spell[-1] - spell[0] + 1 >= MIN_GROUND_SECONDS]
+        if not spells:
+            return 0
+        down = set(ground)
+
+        def inside(value: float) -> bool:
+            return int(value) in down or any(spell[0] <= value < spell[-1] + 1 for spell in spells)
+
+        self.crossings = [c for c in self.crossings if c.ask_frame is None or not inside(c.ask_seconds)]
+        added = 0
+        for spell in spells:
+            end = spell[-1] + 1.0
+            for seconds, frame, a_box, b_box in self._history:
+                if seconds < end + SETTLE_SECONDS or inside(seconds):
+                    continue
+                if _centre_gap_in_heights(a_box, b_box) <= APART_BODY_HEIGHTS:
+                    continue
+                self.crossings.append(Crossing(
+                    entered_seconds=float(spell[0]), left_seconds=end, ask_seconds=seconds, ask_frame=frame,
+                    a_box=[round(float(v), 1) for v in a_box], b_box=[round(float(v), 1) for v in b_box],
+                    lowest_confidence=0.0, reason="ground"))
+                added += 1
+                break
+        return added
 
     def questions(self, limit: int = MAX_QUESTIONS, min_gap: float = MIN_GAP_SECONDS,
                   answered_frames: tuple[int, ...] = (), near_frames: int = 0) -> list[dict]:

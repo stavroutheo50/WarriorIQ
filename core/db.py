@@ -700,6 +700,23 @@ def _init_db_schema() -> None:
         )
         con.execute("CREATE INDEX IF NOT EXISTS idx_org_members_org ON org_members(org_id, status)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_org_members_profile ON org_members(profile_id, status)")
+        # A browser waiting for an email link to be opened on another device
+        # (owner, 2026-11-16: "if I am on my PC and I accept it on my phone, I
+        # want to continue on my PC where I left off"). Only a digest of the
+        # browser's waiting cookie is kept; rows are an hour's worth at most.
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS auth_waits (
+                   wait_hash TEXT PRIMARY KEY,
+                   kind TEXT NOT NULL,
+                   account_id INTEGER,
+                   next_path TEXT NOT NULL DEFAULT '/camp',
+                   link_hash TEXT,
+                   created_at TEXT NOT NULL,
+                   done_at TEXT,
+                   claimed_at TEXT
+               )"""
+        )
+        con.execute("CREATE INDEX IF NOT EXISTS idx_auth_waits_account ON auth_waits(account_id, kind)")
         # Which coach set a training objective, when a linked coach did. Null
         # for the athlete's own (every existing row).
         assignment_columns = {row[1] for row in con.execute("PRAGMA table_info(coach_assignments)").fetchall()}
@@ -1465,17 +1482,109 @@ def update_password_hash(account_id: int, password_hash: str) -> bool:
         )
         if cursor.rowcount:
             con.execute("DELETE FROM sessions WHERE account_id=?", (int(account_id),))
+            # And any browser still waiting to be signed in by email
+            # verification: whoever signed up first must not get back in once
+            # the address's owner has set a new password (security review,
+            # PR #236). Reset waits never sign anyone in, and stay for the
+            # browser that asked for the link being used.
+            con.execute("DELETE FROM auth_waits WHERE account_id=? AND kind='verify'", (int(account_id),))
+            # Any reset link still out stops working too: a password chosen in
+            # Settings must not be replaceable by an older link.
+            con.execute("DELETE FROM password_reset_tokens WHERE account_id=?", (int(account_id),))
         return cursor.rowcount == 1
 
 
-def save_password_reset_token(account_id: int, token_hash: str, expires_at: str) -> None:
+def save_password_reset_token(account_id: int, token_hash: str, expires_at: str,
+                              supersedes: str | None = None) -> None:
+    """Store a new reset link; `supersedes` is the earlier link the same browser asked for.
+
+    Only that link is replaced, so the newest email a browser asked for is the
+    one that works, while a stranger asking for a reset of this address cannot
+    cancel the link the owner is holding (security review, PR #236). Using any
+    link, or changing the password, ends all of them.
+    """
     now = datetime.now(timezone.utc).isoformat()
     with connection() as con:
         con.execute("DELETE FROM password_reset_tokens WHERE expires_at<=? OR used_at IS NOT NULL", (now,))
+        if supersedes:
+            con.execute("DELETE FROM password_reset_tokens WHERE account_id=? AND token_hash=?",
+                        (int(account_id), supersedes))
         con.execute(
             "INSERT INTO password_reset_tokens(account_id,token_hash,created_at,expires_at) VALUES(?,?,?,?)",
             (int(account_id), token_hash, now, expires_at),
         )
+
+
+AUTH_WAIT_MINUTES = 60
+
+
+def create_auth_wait(kind: str, wait_hash: str, account_id: int | None, next_path: str,
+                     link_hash: str | None = None) -> None:
+    """Remember a browser waiting for `kind` ("verify" or "reset") to be finished elsewhere.
+
+    `account_id` may be None (a reset asked for an address with no account), so
+    the waiting page behaves the same whether or not the account exists.
+    """
+    init_db()
+    now = datetime.now(timezone.utc)
+    with connection() as con:
+        con.execute("DELETE FROM auth_waits WHERE created_at<=?",
+                    ((now - timedelta(minutes=AUTH_WAIT_MINUTES)).isoformat(),))
+        con.execute(
+            "INSERT OR REPLACE INTO auth_waits(wait_hash,kind,account_id,next_path,link_hash,created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (wait_hash, kind, None if account_id is None else int(account_id), next_path, link_hash,
+             now.isoformat()),
+        )
+
+
+def finish_auth_waits(account_id: int, kind: str, link_hash: str | None = None) -> None:
+    """An email link was used: the browser waiting on it may move on.
+
+    With `link_hash`, only the browser that asked for that very link: anyone
+    can ask for a reset of any address, and must not learn from their own
+    waiting page that the owner reset it (security review, PR #236). Without
+    it (email verification, waited on only by the browser that created the
+    account), every wait of that kind for the account.
+    """
+    init_db()
+    now = datetime.now(timezone.utc)
+    recent = (now - timedelta(minutes=AUTH_WAIT_MINUTES)).isoformat()
+    with connection() as con:
+        if link_hash is not None:
+            con.execute(
+                "UPDATE auth_waits SET done_at=? WHERE account_id=? AND kind=? AND link_hash=? "
+                "AND done_at IS NULL AND created_at>?",
+                (now.isoformat(), int(account_id), kind, link_hash, recent))
+        else:
+            con.execute(
+                "UPDATE auth_waits SET done_at=? WHERE account_id=? AND kind=? AND done_at IS NULL AND created_at>?",
+                (now.isoformat(), int(account_id), kind, recent))
+
+
+def auth_wait(wait_hash: str) -> dict | None:
+    """The waiting row for this browser, if it is still within the hour."""
+    init_db()
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=AUTH_WAIT_MINUTES)).isoformat()
+    with connection() as con:
+        row = con.execute("SELECT * FROM auth_waits WHERE wait_hash=? AND created_at>?",
+                          (wait_hash, cutoff)).fetchone()
+    return dict(row) if row else None
+
+
+def claim_auth_wait(wait_hash: str) -> dict | None:
+    """Use a finished wait once: the row, or None if it is not finished or already used."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            "SELECT * FROM auth_waits WHERE wait_hash=? AND done_at IS NOT NULL AND claimed_at IS NULL",
+            (wait_hash,)).fetchone()
+        if row is None:
+            return None
+        con.execute("UPDATE auth_waits SET claimed_at=? WHERE wait_hash=?", (now, wait_hash))
+    return dict(row)
 
 
 def consume_password_reset_token(token_hash: str) -> int | None:
@@ -1490,6 +1599,9 @@ def consume_password_reset_token(token_hash: str) -> int | None:
         if row is None:
             return None
         con.execute("UPDATE password_reset_tokens SET used_at=? WHERE id=?", (now, int(row["id"])))
+        # And no other link for the account outlives the reset.
+        con.execute("DELETE FROM password_reset_tokens WHERE account_id=? AND id<>?",
+                    (int(row["account_id"]), int(row["id"])))
         return int(row["account_id"])
 
 
@@ -2565,6 +2677,7 @@ def delete_account(account_id: int) -> dict | None:
         # Objectives this account set for athletes stay theirs, unattributed.
         con.execute("UPDATE coach_assignments SET assigned_by_profile_id=NULL WHERE assigned_by_profile_id=?",
                     (profile_id,))
+        con.execute("DELETE FROM auth_waits WHERE account_id=?", (int(account_id),))
         con.execute("DELETE FROM coach_links WHERE coach_profile_id=? OR athlete_profile_id=?",
                     (profile_id, profile_id))
         con.execute("DELETE FROM coach_notes WHERE coach_profile_id=? OR athlete_profile_id=?",

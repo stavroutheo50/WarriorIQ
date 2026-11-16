@@ -52,7 +52,7 @@ from app.state import (
 )
 from core.auth import (
     authenticate, end_session, hash_password, verify_password, issue_session, normalize_email, register, resolve_session,
-    new_password_problem, session_token, token_digest, valid_email, valid_password,
+    new_password_problem, session_token, token_digest, valid_email, valid_password, COMMON_PASSWORD_MESSAGE,
 )
 from core import common_passwords, two_factor
 from core.db import (
@@ -81,7 +81,7 @@ from core.db import (
     list_follows, remove_follow, request_follow, set_public_profile,
     add_assignment, analysis_allowance, apply_subscription_change, award_points, link_camp_mission, list_camp_missions,
     list_points, list_training_sessions, record_training_session, redeem_points_for_analysis, apply_checkout_event, consume_email_verification_token,
-    consume_password_reset_token,
+    consume_password_reset_token, auth_wait, claim_auth_wait, create_auth_wait, finish_auth_waits,
     assign_fighter_to_fight, create_fighter, set_account_type, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
     get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, is_down_check, is_strike_check, get_fighter, get_profile,
@@ -3156,16 +3156,17 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
     return response
 
 
-def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/camp", email: str = ""):
+def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/camp", email: str = "",
+               notice: str = "", account_exists: bool = False):
     # email refills the form after a refusal, so a typo is fixed, not retyped.
     return templates.TemplateResponse(
         request=request,
         name="auth.html",
         context={"request": request, "mode": mode, "error": error, "next_path": _safe_next(next_path),
-                 "email": email.strip()[:254],
+                 "email": email.strip()[:254], "notice": notice, "account_exists": account_exists,
                  # The same lists the server refuses, for the live hint.
                  "password_rules": common_passwords.page_rules() if mode == "signup" else None},
-        status_code=400 if error else 200,
+        status_code=400 if error or account_exists else 200,
     )
 
 
@@ -3539,12 +3540,15 @@ def signup(
         # (2026-10-28). What that person wants is to sign in, so they are
         # shown the sign-in form with their address already in it.
         if get_account_by_email(normalize_email(email)):
-            return _auth_page(
-                request, "login",
-                "You already have an account with this email. Sign in below, or use Forgot password if you "
-                "don't remember it.",
-                next_path, email=email,
-            )
+            # Its own screen, not a grey line above a sign-in form (owner,
+            # 2026-11-16: a friend on an iPhone could not make out what it
+            # said). One button, Sign in, to the sign-in page with the address
+            # filled in; Forgot password is there if they need it. The address
+            # rides in a short-lived cookie, never in the web address.
+            response = _auth_page(request, "signup", "", next_path, account_exists=True)
+            response.set_cookie(PREFILL_COOKIE, normalize_email(email)[:254], max_age=600, httponly=True,
+                                samesite="lax", secure=_request_is_secure(request))
+            return response
         return _auth_page(request, "signup", str(exc), next_path, email=email)
     record_account_signup_acceptance(
         int(account["id"]), terms_version=SETTINGS.policy_version,
@@ -3582,7 +3586,11 @@ def signup(
             "email_verification_requested", account_id=int(account["id"]),
             metadata={"email_delivery": "sent" if delivered else "unavailable"},
         )
-        return RedirectResponse("/verify-email", status_code=303)
+        # This browser waits for the link, wherever it is opened, then goes on
+        # signed in to where the person was heading (_auth_wait_status).
+        response = RedirectResponse("/verify-email", status_code=303)
+        _start_auth_wait(request, response, "verify", int(account["id"]), next_path)
+        return response
     mark_email_verified(int(account["id"]))
     response = RedirectResponse(_safe_next(next_path), status_code=303)
     response.set_cookie(
@@ -3695,11 +3703,26 @@ def guardian_approve(request: Request, token: str, decision: str = Form(""),
     )
 
 
+_LOGIN_NOTICES = {
+    "verified": "Your email is confirmed. Sign in to continue.",
+    "reset": "Your password has been changed. Sign in with the new one.",
+}
+
+
+PREFILL_COOKIE = "warrioriq_prefill"
+
+
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = "/camp"):
+def login_page(request: Request, next: str = "/camp", verified: str = "", reset: str = ""):
     if _account(request):
         return RedirectResponse(_safe_next(next), status_code=303)
-    return _auth_page(request, "login", next_path=next)
+    notice = _LOGIN_NOTICES["verified"] if verified else _LOGIN_NOTICES["reset"] if reset else ""
+    prefill = request.cookies.get(PREFILL_COOKIE, "")
+    response = _auth_page(request, "login", next_path=next, notice=notice,
+                          email=prefill if valid_email(prefill) else "")
+    if prefill:
+        response.delete_cookie(PREFILL_COOKIE)                  # filled in once
+    return response
 
 
 TWO_FACTOR_COOKIE = "warrioriq_2fa"
@@ -3867,10 +3890,18 @@ def login(
 
 
 @app.get("/verify-email", response_class=HTMLResponse)
-def verify_email_page(request: Request, message: str = ""):
+def verify_email_page(request: Request):
+    # Nothing from the address is shown on this page (security review, PR #236).
+    return _verify_email_response(request)
+
+
+def _verify_email_response(request: Request, message: str = "", error: str = "", status_code: int = 200):
+    # The error and status are set only by the server, never from the address.
     return templates.TemplateResponse(
         request=request, name="verify_email.html",
-        context={"request": request, "message": message},
+        context={"request": request, "message": message, "error": error,
+                 "waiting": bool(_waiting_row(request, "verify"))},
+        status_code=status_code,
     )
 
 
@@ -3878,9 +3909,23 @@ def verify_email_page(request: Request, message: str = ""):
 def verify_email_token(request: Request, token: str):
     account_id = consume_email_verification_token(token_digest(token))
     if account_id is None:
-        raise HTTPException(410, "This email-verification link is invalid or expired.")
+        # A page that says what to do, not a bare error: the usual reason is
+        # that a newer link was sent, which replaces this one.
+        return _verify_email_response(
+            request, error="This link has expired or a newer one was sent. Use the newest WarriorIQ email, "
+                           "or send a new link below.", status_code=410)
     record_security_event("email_verified", account_id=account_id)
-    return RedirectResponse("/login?verified=1", status_code=303)
+    # Any browser that signed up and is waiting (another device, usually)
+    # moves on by itself. This one goes on too if it is that browser.
+    finish_auth_waits(account_id, "verify")
+    mine = _waiting_row(request, "verify")
+    if mine and mine.get("account_id") == account_id:
+        return _finish_waiting(request, mine) or RedirectResponse("/login?verified=1", status_code=303)
+    return templates.TemplateResponse(request=request, name="auth_done.html", context={
+        "request": request, "title": "Email confirmed",
+        "lead": "Your email is confirmed.",
+        "other_device": "If you signed up on another device, it carries on by itself where you left off.",
+        "here_url": "/login?verified=1", "here_label": "Sign in on this device"})
 
 
 @app.post("/verify-email", response_class=HTMLResponse, dependencies=[Depends(require_csrf)])
@@ -3893,7 +3938,7 @@ def resend_verification_email(request: Request, email: str = Form(...)):
             "email_verification_resent", account_id=int(account["id"]),
             metadata={"email_delivery": "sent" if delivered else "unavailable"},
         )
-    return verify_email_page(
+    return _verify_email_response(
         request,
         "If an unverified account exists, a fresh verification link has been sent.",
     )
@@ -3908,21 +3953,27 @@ def logout(request: Request):
 
 
 @app.get("/forgot-password", response_class=HTMLResponse)
-def forgot_password_page(request: Request):
+def forgot_password_page(request: Request, next: str = "/camp"):
     return templates.TemplateResponse(
         request=request, name="password_reset.html",
-        context={"request": request, "token": "", "message": ""},
+        context={"request": request, "token": "", "message": "", "next_path": _safe_next(next), "email": ""},
     )
 
 
 @app.post("/forgot-password", response_class=HTMLResponse, dependencies=[Depends(require_csrf)])
-def request_password_reset(request: Request, email: str = Form(...)):
+def request_password_reset(request: Request, email: str = Form(...), next_path: str = Form("/camp")):
     _enforce_rate_limit(request, "password-reset", 8, 900)
     account = get_account_by_email(email.strip().lower()) if valid_email(email) else None
+    link_hash = None
     if account and account.get("account_status", "active") == "active":
         token = session_token()
+        link_hash = token_digest(token)
         expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
-        save_password_reset_token(int(account["id"]), token_digest(token), expires)
+        # Replaces only the link this same browser asked for before.
+        earlier = _waiting_row(request, "reset")
+        save_password_reset_token(
+            int(account["id"]), link_hash, expires,
+            supersedes=earlier.get("link_hash") if earlier and earlier.get("account_id") == int(account["id"]) else None)
         reset_url = f"{_public_base(request)}/reset-password/{token}"
         failure = None
         try:
@@ -3938,20 +3989,36 @@ def request_password_reset(request: Request, email: str = Form(...)):
             severity="warning" if failure else "info",
             metadata={"email_delivery": "sent" if failure is None else "failed", "reason": failure},
         )
-    return templates.TemplateResponse(
+    # The same page whether or not the address has an account, so it says
+    # nothing about who has one. This browser waits for the link to be used
+    # on any device, then moves on to sign-in (never signed in by itself:
+    # whoever asked for the link is not proof of who chose the password).
+    response = templates.TemplateResponse(
         request=request, name="password_reset.html",
-        context={
-            "request": request, "token": "",
-            "message": "If an eligible account exists, a time-limited reset link has been queued for its email provider.",
-        },
+        context={"request": request, "token": "", "sent_to": email.strip()[:254] if valid_email(email) else "",
+                 "sender": _sender_address(), "next_path": _safe_next(next_path), "waiting": True,
+                 "message": ""},
     )
+    # Bound to this one link: the wait finishes only when this link is used.
+    _start_auth_wait(request, response, "reset", int(account["id"]) if link_hash else None, next_path,
+                     link_hash=link_hash)
+    return response
+
+
+# What a refused new password may say, by a fixed code in the address: the
+# page never prints text taken from the address (security review, PR #236).
+_RESET_PAGE_NOTICES = {
+    "short": "Password must contain between 10 and 1,024 characters.",
+    "common": COMMON_PASSWORD_MESSAGE,
+}
 
 
 @app.get("/reset-password/{token}", response_class=HTMLResponse)
 def reset_password_page(request: Request, token: str, error: str = ""):
     return templates.TemplateResponse(
         request=request, name="password_reset.html",
-        context={"request": request, "token": token, "message": "", "error": error[:200]},
+        context={"request": request, "token": token, "message": "", "error": _RESET_PAGE_NOTICES.get(error, ""),
+                 "next_path": "/camp"},
     )
 
 
@@ -3967,16 +4034,122 @@ def reset_password(request: Request, token: str, password: str = Form(...)):
         # Back to the form with the reason, rather than a 400 page over it.
         # The token stays in the path, so the link is still usable - which a
         # 400 page made look untrue at the moment it mattered most.
+        code = "common" if problem == COMMON_PASSWORD_MESSAGE else "short"
         return RedirectResponse(
-            "/reset-password/%s?%s" % (quote(token, safe=""), urlencode({"error": problem})),
+            "/reset-password/%s?%s" % (quote(token, safe=""), urlencode({"error": code})),
             status_code=303)
     account_id = consume_password_reset_token(token_digest(token))
     if account_id is None or not update_password_hash(account_id, hash_password(password)):
-        raise HTTPException(410, "This password-reset link is invalid or expired.")
+        return templates.TemplateResponse(
+            request=request, name="password_reset.html", status_code=410,
+            context={"request": request, "token": "", "message": "", "next_path": "/camp",
+                     "error": "This link has expired or was already used. Links work once, for 30 minutes. "
+                              "Ask for a new one below."})
     record_security_event("password_reset_completed", account_id=account_id)
-    response = RedirectResponse("/login", status_code=303)
+    # The browser that asked for this link, on whatever device, moves on to
+    # sign-in where it was heading; no other browser learns of it.
+    finish_auth_waits(account_id, "reset", link_hash=token_digest(token))
+    mine = _waiting_row(request, "reset")
+    if mine and mine.get("account_id") == account_id:
+        response = _finish_waiting(request, mine)
+    else:
+        response = templates.TemplateResponse(request=request, name="auth_done.html", context={
+            "request": request, "title": "Password changed",
+            "lead": "Your password has been changed.",
+            "other_device": "If you asked for the link on another device, it has moved on to sign in, "
+                            "where you left off.",
+            "here_url": "/login?reset=1", "here_label": "Sign in on this device"})
     response.delete_cookie(SESSION_COOKIE)
     return response
+
+
+# A browser waiting for an email link to be used on another device (owner,
+# 2026-11-16: "if I accept it on my phone, I want to continue on my PC where I
+# left off"). The browser holds a random value in an HTTP-only cookie; the
+# database keeps only its digest (core/db.py auth_waits). The page polls
+# /auth/wait; once the link is used it moves on:
+#   verify - signed in and sent where it was heading. It is the browser that
+#            just created the account with its password, so this is no more
+#            than signing in, done for it.
+#   reset  - sent to sign-in, never signed in: asking for a reset link proves
+#            nothing about who then chose the new password.
+AUTH_WAIT_COOKIE = "warrioriq_wait"
+
+
+def _start_auth_wait(request: Request, response, kind: str, account_id: int | None, next_path: str,
+                     link_hash: str | None = None) -> None:
+    token = session_token()
+    create_auth_wait(kind, token_digest(token), account_id, _safe_next(next_path), link_hash=link_hash)
+    response.set_cookie(AUTH_WAIT_COOKIE, token, max_age=3600, httponly=True, samesite="lax",
+                        secure=_request_is_secure(request))
+
+
+def _waiting_row(request: Request, kind: str) -> dict | None:
+    token = request.cookies.get(AUTH_WAIT_COOKIE)
+    row = auth_wait(token_digest(token)) if token else None
+    return row if row and row.get("kind") == kind else None
+
+
+def _finish_waiting(request: Request, row: dict):
+    """Where a finished wait goes, as a redirect; None if it cannot be used (already used)."""
+    claimed = claim_auth_wait(row["wait_hash"])
+    if claimed is None:
+        return None
+    destination = _safe_next(claimed.get("next_path") or "/camp")
+    if claimed["kind"] == "reset":
+        response = RedirectResponse(f"/login?reset=1&next={quote(destination, safe='')}", status_code=303)
+    else:
+        account = get_account(int(claimed["account_id"])) if claimed.get("account_id") else None
+        if (not account or account.get("account_status", "active") != "active"
+                or two_factor_row(int(account["id"]))["enabled"]):
+            response = RedirectResponse(f"/login?verified=1&next={quote(destination, safe='')}", status_code=303)
+        else:
+            if policies_outdated(account):
+                destination = f"/policies?next={quote(destination, safe='')}"
+            response = RedirectResponse(destination, status_code=303)
+            record_security_event("login_succeeded", account_id=int(account["id"]),
+                                  metadata={"via": "email_verified"})
+            response.set_cookie(
+                SESSION_COOKIE, issue_session(int(account["id"]), device_label=_device_label(request)),
+                max_age=60 * 60 * 24 * 30, httponly=True, samesite="lax", secure=_request_is_secure(request))
+    response.delete_cookie(AUTH_WAIT_COOKIE)
+    return response
+
+
+@app.get("/auth/wait")
+def auth_wait_status(request: Request):
+    """Polled by the waiting page: has the email link been used yet?"""
+    _enforce_rate_limit(request, "auth-wait", 240, 600)
+    token = request.cookies.get(AUTH_WAIT_COOKIE)
+    row = auth_wait(token_digest(token)) if token else None
+    if row is None:
+        return JSONResponse({"state": "none"}, headers={"Cache-Control": "no-store"})
+    if not row.get("done_at"):
+        return JSONResponse({"state": "waiting"}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"state": "done", "go": "/auth/continue"}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/auth/continue")
+def auth_continue(request: Request):
+    """The waiting page's next step once the link was used: a real navigation, so cookies land."""
+    token = request.cookies.get(AUTH_WAIT_COOKIE)
+    row = auth_wait(token_digest(token)) if token else None
+    if row and row.get("done_at"):
+        response = _finish_waiting(request, row)
+        if response is not None:
+            return response
+    return RedirectResponse("/login", status_code=303)
+
+
+def _sender_address() -> str:
+    """The address WarriorIQ's emails come from, for "look for an email from ..."."""
+    from email.utils import parseaddr
+    try:
+        from core.notifications import _from_header
+        return parseaddr(_from_header(os.getenv("WARRIORIQ_EMAIL_FROM", ""),
+                                      os.getenv("WARRIORIQ_SMTP_USERNAME", "")))[1]
+    except Exception:                                               # noqa: BLE001
+        return ""
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -9910,6 +10083,10 @@ def admin_page(request: Request, q: str = ""):
             # How often the analysis was right, from people's answers (app/accuracy.py).
             "accuracy": _accuracy_summary(),
             "server_checks": site_backup.server_checks(),
+            # How mail is sent and every account email tried, and one person's
+            # whole picture for a support question (app/admin_overview.py).
+            "email": {"setup": admin_overview.email_setup(), "log": admin_overview.email_log()},
+            "people": admin_overview.person(q[:200]) if q.strip() else [],
             "leftovers": site_backup.leftover_copies(),
             "tool_result": _ADMIN_TOOL_RESULTS.get(request.query_params.get("tool", ""), ""),
         },

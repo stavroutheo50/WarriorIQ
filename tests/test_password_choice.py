@@ -97,6 +97,6 @@ def test_login_form_has_no_signup_rules():
     page = BrowserClient(web.app).get("/login").text
     assert "data-rules='" not in page and 'minlength="' not in page
     assert 'class="password-toggle"' in page and 'autocomplete="current-password"' in page
-    assert page.index('id="authPassword"') > page.index('href="/forgot-password"')
+    assert page.index('id="authPassword"') > page.index('href="/forgot-password')
     assert 'data-loading-label="Signing in…"' in page
     assert "auth-required-choices" not in page

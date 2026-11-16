@@ -1492,3 +1492,22 @@ form.is-picking .upload-steps li.is-done b { font-size: 13px; }
 .ringside-history li small { color: #9aa6b8; font-size: 12px; overflow-wrap: anywhere; }
 .ringside-history li .btn { flex: 0 0 auto; padding-inline: 12px; }
 .ringside-history > .btn { margin-top: 10px; }
+
+/* Account recovery (owner, 2026-11-16): a duplicate sign-up a friend could not
+   read on an iPhone. Plain white words in a clear box, not a grey hint. */
+.account-exists { margin: 0 0 20px; padding: 18px 18px 16px; border-radius: 18px; border: 1px solid rgba(110, 126, 255, .55); border-left: 4px solid #6e7eff; background: rgba(75, 102, 190, .2); color: #f4f7ff; }
+.account-exists strong { display: block; margin-bottom: 16px; font-size: 18px; line-height: 1.35; color: #ffffff; }
+.account-exists .btn { width: 100%; min-height: 48px; }
+.auth-card .notice.good-notice, .notice.good-notice { border-color: rgba(74, 222, 128, .45); border-left-color: #4ade80; background: rgba(74, 222, 128, .1); color: #e9fbe9; }
+.auth-done-notice strong { color: #ffffff; font-size: 16px; line-height: 1.45; }
+.auth-steps { margin: 14px 0; padding-left: 20px; color: #d8e0ee; font-size: 15px; line-height: 1.55; }
+.auth-steps li + li { margin-top: 8px; }
+.auth-wait { color: #b9c6db; font-size: 14px; }
+.auth-wait:empty { display: none; }
+
+/* Admin: one person's support card, and the email section (owner, 2026-11-16). */
+.admin-facts > div { display: contents; }
+.admin-person { margin: 14px 0; padding: 16px; border: 1px solid rgba(110, 126, 255, .3); border-radius: 16px; background: rgba(13, 23, 41, .55); }
+.admin-person header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; overflow-wrap: anywhere; }
+.admin-person h4 { margin: 14px 0 6px; font-size: 14px; }
+.admin-person form { margin-top: 12px; }
