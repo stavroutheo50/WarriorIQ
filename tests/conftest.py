@@ -50,6 +50,10 @@ os.environ["WARRIORIQ_UPLOAD_STREAM_PROBE"] = "0"
 # with them on; tests/test_strike_counts_off.py pins the default-off path by
 # switching the flag back off where it is read.
 os.environ["WARRIORIQ_PUBLISH_STRIKE_COUNTS"] = "1"
+# The maintenance sweep makes a daily database backup (app/site_backup.py);
+# tests that call the sweep should not each write one. tests/test_site_backup.py
+# switches it back on.
+os.environ["WARRIORIQ_AUTO_BACKUP"] = "0"
 _RUNTIME = pathlib.Path(tempfile.mkdtemp(prefix="warrioriq-tests-"))
 (_RUNTIME / "uploads").mkdir(parents=True, exist_ok=True)
 (_RUNTIME / "outputs").mkdir(parents=True, exist_ok=True)

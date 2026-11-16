@@ -12,10 +12,12 @@
 <nav class="admin-nav" aria-label="Admin sections"><a href="#adminOverview">Overview</a><a href="#adminAnalysis">Analysis</a><a href="#adminPeople">People</a><a href="#adminFights">Fights</a><a href="#adminTraffic">Traffic</a><a href="#adminSafety">Safety</a><a href="#adminTools">Tools</a></nav>
 
 {#- Anything that needs action first, together in one box. -#}
-{% if worker_version_flag or not o.worker.available or email_problem %}<section class="card admin-alerts" role="alert" aria-label="Needs attention"><div class="eyebrow">Needs attention</div>
+{% if worker_version_flag or not o.worker.available or email_problem or backups.stale or not server_checks.ffprobe %}<section class="card admin-alerts" role="alert" aria-label="Needs attention"><div class="eyebrow">Needs attention</div>
   {% if worker_version_flag %}<p class="notice bad"><strong>Analysis is paused: worker version mismatch.</strong> Worker {{ worker_version_flag.worker_id }} was refused ({{ worker_version_flag.reason|replace('_',' ') }}). Customers see "Analysis is paused for an update". Deploy the worker and the website from the same commit; both must report release {{ release }}.</p>{% endif %}
   {% if not o.worker.available %}<p class="notice bad"><strong>No analysis computer connected.</strong> {{ (o.worker.reason or 'unknown')|replace('_',' ')|capitalize }}{% if o.worker.heartbeat_age_seconds is not none %}; last heard from {{ (o.worker.heartbeat_age_seconds / 60)|round(0)|int }} minutes ago{% endif %}. Fights wait in the queue until it connects.</p>{% endif %}
   {% if email_problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ email_problem }}. Password resets and verification emails cannot be sent. <a class="text-link" href="#adminTools">Email settings</a></p>{% endif %}
+  {% if backups.stale %}<p class="notice bad"><strong>No database backup in the last two days.</strong> {% if backups.copies %}The newest is from {{ backups.copies[0].created_at.strftime('%Y-%m-%d %H:%M') }} UTC.{% else %}None has been made yet.{% endif %} <a class="text-link" href="#adminBackups">Back up now</a></p>{% endif %}
+  {% if not server_checks.ffprobe %}<p class="notice bad"><strong>ffprobe is not installed on the server.</strong> Uploads cannot have their video type checked. <a class="text-link" href="#adminServer">Server checks</a></p>{% endif %}
 </section>{% endif %}
 
 <section class="card admin-section" id="adminOverview" aria-labelledby="adminOverviewTitle">
@@ -124,11 +126,28 @@
 </section>
 
 <section class="card admin-section" id="adminTools" aria-labelledby="adminToolsTitle">
-  <div class="eyebrow">Tools</div><h2 id="adminToolsTitle">Email and content removal</h2>
+  <div class="eyebrow">Tools</div><h2 id="adminToolsTitle">Email, backups, server and clean-up</h2>
+  {% if tool_result %}<p class="notice {{ 'bad' if 'failed' in tool_result or 'Nothing' in tool_result or 'No database' in tool_result else 'good' }}" role="status">{{ tool_result }}</p>{% endif %}
   <h3>Password resets and account emails</h3>
   {% if email_problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ email_problem }}. Set it in the website's environment settings, then send a test.</p>{% else %}<p class="muted">Settings are present. Send a test to your own admin address to prove the mail server accepts them.</p>{% endif %}
   {% if email_test %}<p class="notice {{ 'good' if email_test.startswith('Sent') else 'bad' }}" role="status">{{ email_test }}</p>{% endif %}
   <form action="/admin/email/test" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Send test email to me</button></form>
+  <h3 id="adminBackups">Database backups</h3>
+  <p class="muted">{% if backups.enabled %}The website copies its database once a day, checks the copy and keeps the newest {{ backups.keep }}. Videos are not included.{% else %}Daily backups are switched off (WARRIORIQ_AUTO_BACKUP). You can still make one here.{% endif %}</p>
+  {% if backups.copies %}<ul class="list-clean small">{% for copy in backups.copies[:5] %}<li><strong>{{ copy.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</strong> · {{ copy.bytes|filesizeformat }} · check: {{ copy.integrity_check or 'not recorded' }}</li>{% endfor %}</ul>{% if backups.copies|length > 5 %}<p class="small muted">{{ backups.copies|length }} copies in all.</p>{% endif %}{% else %}<p class="small muted">No backups yet.</p>{% endif %}
+  <form action="/admin/backup" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Back up now</button></form>
+  <h3 id="adminServer">Server checks</h3>
+  <ul class="list-clean small">
+    <li><strong>ffprobe</strong> (upload type check): {{ 'installed' if server_checks.ffprobe else 'not found' }}</li>
+    <li><strong>ffmpeg</strong> (browser-playable copies): {{ 'installed' if server_checks.ffmpeg else 'not found' }}</li>
+  </ul>
+  <h3>Leftover video copies</h3>
+  <p class="muted">Browser-playable copies whose original video was already deleted, left behind before 15 November 2026. No page can play them. Only copies older than a day are listed.</p>
+  {% if leftovers %}<form action="/admin/leftovers/delete" method="post" data-confirm="Permanently delete the ticked leftover copies?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <ul class="list-clean small">{% for copy in leftovers %}<li><label class="check"><input type="checkbox" name="name" value="{{ copy.name }}" checked> <span>{{ copy.name }} · {{ copy.bytes|filesizeformat }}</span></label></li>{% endfor %}</ul>
+    <p class="small muted">{{ leftovers|length }} cop{{ 'y' if leftovers|length == 1 else 'ies' }}, {{ leftovers|sum(attribute='bytes')|filesizeformat }} in all.</p>
+    <label class="check"><input type="checkbox" name="confirm" value="yes" required> <span>I have a recent backup and want these copies deleted</span></label>
+    <button class="btn danger" type="submit">Delete ticked copies</button></form>{% else %}<p class="small muted">None found.</p>{% endif %}
   <div class="account-danger"><h3>Delete a prohibited saved analysis</h3><p>Use only after matching the exact private analysis ID to a validated complaint. This removes its stored video, report and temporary analysis files and creates an audit event.</p><form action="/admin/videos/delete" method="post" data-confirm="Permanently remove this exact analysis and video?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="field"><label for="adminJobId">Analysis ID</label><input id="adminJobId" name="job_id" required maxlength="120"></div><button class="btn danger" type="submit">Delete prohibited content</button></form></div>
   <p class="small muted">Storage measured {{ o.storage.measured_at[:19]|replace('T',' ') }} UTC (refreshed every 5 minutes): uploads {{ o.storage.uploads_files }} files, reports {{ o.storage.outputs_files }} files, database {{ o.storage.database_bytes|filesizeformat }}.</p>
 </section>
