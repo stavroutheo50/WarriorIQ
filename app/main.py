@@ -165,6 +165,8 @@ from core.retention import (
 )
 from core import training_consent
 from app import admin_overview
+from app import site_backup
+from app import accuracy as accuracy_answers
 from app.progress_periods import period_summary
 from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
 from core.orientation import needed_turn, tag_rotation
@@ -2070,6 +2072,20 @@ def _run_periodic_maintenance(now: float | None = None) -> None:
                 "abandoned_processing_files_deleted", resource_type="fight", resource_id=abandoned_job_id,
             )
         _last_saved_video_cleanup = now
+        # The daily database backup (app/site_backup.py): the host has no
+        # shell, so no cron job can run tools/backup_runtime.py.
+        try:
+            backup = site_backup.daily_backup_if_due()
+        except Exception:                                           # noqa: BLE001
+            LOGGER.exception("scheduled_backup_failed")
+            backup = {"outcome": "failed", "error": "unexpected error"}
+        if backup and backup["outcome"] in {"done", "failed"}:
+            record_security_event(
+                "database_backup_created" if backup["outcome"] == "done" else "database_backup_failed",
+                severity="info" if backup["outcome"] == "done" else "warning", resource_type="backup",
+                resource_id=backup.get("name", ""), metadata={"scheduled": True, **{
+                    key: backup[key] for key in ("bytes", "error", "removed") if key in backup}},
+            )
 
 
 def _schedule_maintenance() -> None:
@@ -9884,8 +9900,83 @@ def admin_page(request: Request, q: str = ""):
                 "payments_enabled": SETTINGS.payments_enabled,
                 "worker_mode": SETTINGS.analysis_worker_mode,
             },
+            # Backups and server checks without a shell (app/site_backup.py).
+            "backups": {
+                "enabled": site_backup.enabled(),
+                "keep": site_backup.keep(),
+                "copies": site_backup.backups(),
+                "stale": _backup_is_stale(),
+            },
+            # How often the analysis was right, from people's answers (app/accuracy.py).
+            "accuracy": _accuracy_summary(),
+            "server_checks": site_backup.server_checks(),
+            "leftovers": site_backup.leftover_copies(),
+            "tool_result": _ADMIN_TOOL_RESULTS.get(request.query_params.get("tool", ""), ""),
         },
     )
+
+
+# What the backup and clean-up buttons report, by a fixed code in the address
+# (never free text from the address, which anyone could put in a link).
+_ADMIN_TOOL_RESULTS = {
+    "backup_done": "Backup made and checked.",
+    "backup_recent": "A backup was made less than 5 minutes ago, so no new one was made.",
+    "backup_busy": "A backup is already being made. Reload in a minute.",
+    "backup_failed": "The backup failed. The security log has the reason.",
+    "backup_no_database": "No database was found where the website expects it, so nothing was backed up.",
+    "leftovers_deleted": "The selected leftover copies were deleted.",
+    "leftovers_none": "Nothing was deleted: tick the confirmation and at least one copy.",
+}
+
+
+def _accuracy_summary() -> dict | None:
+    def anchors_for(job_id: str, job: dict) -> list[dict]:
+        return _identity_anchors(_crossing_questions(job_id, job), dict(job.get("identity_answers") or {}))
+    try:
+        return accuracy_answers.summary(list_jobs(), anchors_for)
+    except Exception:                                               # noqa: BLE001
+        # A figure that cannot be counted is left out; the admin page still opens.
+        LOGGER.exception("admin_accuracy_failed")
+        return None
+
+
+def _backup_is_stale() -> bool:
+    """True when daily backups are on but the newest is over two days old, or missing."""
+    if not site_backup.enabled():
+        return False
+    last = site_backup.latest()
+    return last is None or datetime.now(timezone.utc) - last["created_at"] > timedelta(hours=48)
+
+
+@app.post("/admin/backup", dependencies=[Depends(require_csrf)])
+def admin_backup_now(request: Request):
+    if not _is_admin(request):
+        raise HTTPException(404)
+    actor = _account(request)
+    result = site_backup.make_backup(scheduled=False)
+    if result["outcome"] in {"done", "failed"}:
+        record_security_event(
+            "database_backup_created" if result["outcome"] == "done" else "database_backup_failed",
+            account_id=int(actor["id"]), severity="info" if result["outcome"] == "done" else "warning",
+            resource_type="backup", resource_id=result.get("name", ""),
+            metadata={"scheduled": False, **{key: result[key] for key in ("bytes", "error", "removed") if key in result}},
+        )
+    return RedirectResponse(f"/admin?tool=backup_{result['outcome']}#adminTools", status_code=303)
+
+
+@app.post("/admin/leftovers/delete", dependencies=[Depends(require_csrf)])
+async def admin_delete_leftovers(request: Request):
+    if not _is_admin(request):
+        raise HTTPException(404)
+    form = await request.form()
+    names = [str(value) for value in form.getlist("name")][:500]
+    if form.get("confirm") != "yes" or not names:
+        return RedirectResponse("/admin?tool=leftovers_none#adminTools", status_code=303)
+    actor = _account(request)
+    for name in site_backup.delete_leftover_copies(names):
+        record_security_event("orphan_web_video_deleted", account_id=int(actor["id"]), resource_type="fight",
+                              resource_id=name[: -len("_web.mp4")], metadata={"tool": "admin_page"})
+    return RedirectResponse("/admin?tool=leftovers_deleted#adminTools", status_code=303)
 
 
 @app.post("/admin/email/test", dependencies=[Depends(require_csrf)])

@@ -34,6 +34,8 @@ warrioriq.sqlite3
 machine_profile.json
 uploads/
 outputs/
+# Daily database copies made by the website (app/site_backup.py).
+backups/
 dataset/regression/private/
 
 # Local logs and operating-system files

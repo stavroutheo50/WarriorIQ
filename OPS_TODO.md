@@ -33,19 +33,14 @@ mean "the web host".
 ## 2. Hosting (#3, #4, #25)
 
 - [ ] **Hosting limits:** on cPanel, open Resource Usage after some real traffic and look for CPU, memory or entry-process faults (they show up as 503/508, not timeouts). `WEB_CONCURRENCY` does not apply under Passenger.
-- [ ] **ffprobe on the host:** in cPanel's Terminal run `which ffprobe ffmpeg`. Without either, the upload type check can't run and lets the file through.
+- [ ] **ffprobe on the host:** open `/admin` → Tools → Server checks. It says whether ffprobe and ffmpeg are installed, and the "Needs attention" box warns when ffprobe is missing. Without it the upload type check can't run and lets the file through. (The host has no shell, so `which ffprobe` can't be run there.)
 - [ ] **Backups:** confirm the cPanel backup (JetBackup or Backup Wizard) covers the data folder with the SQLite database and the reports, then restore one copy somewhere to prove it works.
-- [ ] **Daily database copy (cPanel, Cron Jobs):** add one job, once a day at a quiet hour, with this command.
-  - Take the first part from Setup Python App: the "Enter to the virtual environment" line it shows for the app, without the `cd` at the end.
-  - The command: `source <that activate path> && cd /home/dchoodxm/warrioriq && python tools/backup_runtime.py /home/dchoodxm/warrioriq_backups --keep 14`
-  - A cron job does not get the variables from Setup Python App. If `WARRIORIQ_DATA_DIR` (or `WARRIORIQ_DB_PATH`) is set there, put the same setting before `python`, e.g. `WARRIORIQ_DATA_DIR=<same value> python tools/...`. Without it the tool stops with "No WarriorIQ database at ..." rather than saving an empty copy.
-  - It copies the database with SQLite's online backup (safe while the site runs), checks the copy's integrity, and keeps the newest 14 copies. It never touches anything else in that folder, and videos are not included.
-  - `/home/dchoodxm/warrioriq_backups` sits outside `public_html`, so it is never served on the web.
-  - Restore drill: download one copy, open it with any SQLite viewer, and check that the `accounts` and `fights` tables have rows. Write down the date you did it.
-- [ ] **Leftover video copies (one time, after deploying PR #230):** before 2026-11-15, deleting a video left its browser copy (`<job>_web.mp4`) on disk. Clear them with `tools/delete_orphan_web_videos.py`.
-  - Run it the same way as the backup job (a cPanel Cron Job, or Setup Python App's run-script box), with the same `WARRIORIQ_DATA_DIR` the website uses.
-  - First without `--confirm`: it only lists the files and their size. Check the list (every name ends in `_web.mp4`), then run again with `--confirm`. Remove the cron job afterwards if you used one.
-  - Make a database backup first. Each deletion is logged in security_events.
+- [x] **Daily database copy:** the website makes it itself (app/site_backup.py, 2026-11-16), because the host has no shell and so no cron job. Nothing to set up.
+  - Once a day the maintenance sweep copies the database with SQLite's online backup, checks the copy's integrity and keeps the newest 14 (`WARRIORIQ_BACKUP_KEEP`). Videos are not included.
+  - The copies go in a `backups` folder beside the database, or `WARRIORIQ_BACKUP_DIR` if set. No route serves that folder. `WARRIORIQ_AUTO_BACKUP=0` switches the daily copy off.
+  - `/admin` → Tools → Database backups lists the copies and has "Back up now". The "Needs attention" box warns when the newest copy is over two days old.
+  - [ ] Restore drill: download one copy with cPanel's File Manager, open it with any SQLite viewer, and check that the `accounts` and `fights` tables have rows. Write down the date you did it.
+- [ ] **Leftover video copies (one time):** before 2026-11-15, deleting a video left its browser copy (`<job>_web.mp4`) on disk. `/admin` → Tools → Leftover video copies lists them (only copies older than a day whose original is gone). Make a backup, tick the confirmation and press "Delete ticked copies". Each deletion is logged in security_events. `tools/delete_orphan_web_videos.py` does the same from a shell, where one exists.
 - [ ] **Optional media CDN (Cloudflare R2 or any pull CDN):**
   - Set `WARRIORIQ_MEDIA_CDN_BASE_URL` and a random `WARRIORIQ_MEDIA_SIGNING_KEY` (keep the key out of the repository).
   - Then check that replay start time drops.
