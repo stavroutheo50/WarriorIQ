@@ -59,7 +59,7 @@ from core.qr import svg as qr_svg
 from core.db import (
     begin_two_factor_setup, count_two_factor_attempt, create_two_factor_challenge, delete_two_factor_challenge,
     disable_two_factor, enable_two_factor, get_two_factor_challenge, list_account_sessions, replace_recovery_codes,
-    revoke_session_by_id, two_factor_row, has_security_event, two_factor_storage_counts, use_recovery_code, use_two_factor_step,
+    revoke_session_by_id, two_factor_row, has_security_event, has_security_event_for, two_factor_storage_counts, use_recovery_code, use_two_factor_step,
 )
 from core.identity import fighter_pair_similarity
 from core.kit import alike_reason as kit_alike_reason, kit_similarity
@@ -2283,7 +2283,9 @@ JOURNEY_ONCE = ("journey_upload_page", "journey_video_uploaded", "journey_fighte
 
 
 def _journey_failed(job: dict | None, reason: str, job_id: str = "") -> None:
-    """An analysis that started and failed, against the account that started it."""
+    """An analysis that started and failed, against the account that started it; and an email to say so."""
+    if job_id:
+        _email_analysis_outcome(job_id, job, ready=False)
     owner = str((job or {}).get("owner_key") or "")
     if not owner.startswith("account:"):
         return
@@ -3180,9 +3182,12 @@ def _wake_expectation() -> str:
 
 
 def _deferred_analysis_message() -> str:
+    # The email is real since 2026-11-22 (_email_analysis_outcome), so the
+    # page can say so: the wait has once run to 46 hours.
     return (
         "The analysis machine is asleep and is being woken now. Your fight is "
-        f"saved and {_wake_expectation()} - you can close this page."
+        f"saved and {_wake_expectation()}. You can close this page: we email you "
+        "when your report is ready."
     )
 
 
@@ -5660,6 +5665,58 @@ def _prepare_worker_archive(archive_path: Path, job_dir: Path, analysis_run_id: 
 
 def _save_remote_fight(job_id: str, job: dict, report: dict) -> None:
     persist_completed_job(job_id, str(job.get("analysis_run_id") or ""))
+    _email_analysis_outcome(job_id, job, ready=True)
+
+
+# Tell the person when their analysis is done (owner, 2026-11-22). The
+# analysis runs on the owner's own computer, so a fight can wait - once for
+# 46 hours - and nobody waits on a page that long. One email per analysis,
+# ready or failed, sent off the request (a slow mail server must not hold up
+# the worker's upload). Tests switch the thread off.
+_EMAIL_IN_BACKGROUND = True
+
+
+def _job_account_id(job: dict | None) -> int | None:
+    owner = str((job or {}).get("owner_key") or "")
+    if owner.startswith("account:") and owner.split(":", 1)[1].isdigit():
+        return int(owner.split(":", 1)[1])
+    account_id = (job or {}).get("account_id")
+    return int(account_id) if str(account_id or "").isdigit() else None
+
+
+def _email_analysis_outcome(job_id: str, job: dict | None, ready: bool) -> None:
+    account_id = _job_account_id(job)
+    if account_id is None:
+        return
+    event = "report_ready_emailed" if ready else "analysis_failed_emailed"
+
+    def send() -> None:
+        try:
+            if has_security_event_for(event, job_id):
+                return
+            account = get_account(account_id) or {}
+            if not account.get("email") or account.get("account_status", "active") != "active":
+                return
+            base = SETTINGS.public_base_url or "https://warrioriq.eu"
+            if ready:
+                subject = "Your WarriorIQ fight report is ready"
+                body = (f"Your fight has been analysed. Open your report:\n\n{base}/result/{job_id}\n\n"
+                        "It is private to your account.")
+            else:
+                subject = "WarriorIQ could not finish analysing your fight"
+                body = ("The analysis of your fight stopped before it finished, and it has not used up any of "
+                        f"your analyses. Open your fight library to see what went wrong and try again:\n\n"
+                        f"{base}/history")
+            delivered = send_transactional_email(account["email"], subject, body)
+            record_security_event(event, account_id=account_id, resource_type="fight", resource_id=job_id,
+                                  metadata={"email_delivery": "sent" if delivered else "unavailable"})
+        except Exception:                                               # noqa: BLE001 - never costs the result
+            LOGGER.exception("analysis_outcome_email_failed job_id=%s", job_id)
+
+    if _EMAIL_IN_BACKGROUND:
+        threading.Thread(target=send, name="warrioriq-outcome-email", daemon=True).start()
+    else:
+        send()
 
 
 @app.post("/api/worker/heartbeat", dependencies=[Depends(_require_remote_worker)])
@@ -9696,8 +9753,9 @@ def coach_redirect(request: Request):
     page as two different things (D3, QA 2026-10-11). /coach now forwards to
     Fight Camp; old links and bookmarks keep working, query string included
     (the browser carries a #squad fragment across the redirect itself)."""
-    query = request.url.query
-    return RedirectResponse("/camp" + (f"?{query}" if query else ""), status_code=308)
+    # full=1: /coach means the roster tools, never the first-report steps.
+    query = "&".join(part for part in (request.url.query, "full=1") if part)
+    return RedirectResponse(f"/camp?{query}", status_code=308)
 
 
 @app.get("/dashboard")
@@ -9709,8 +9767,28 @@ def dashboard_redirect(request: Request):
     return RedirectResponse("/camp" + (f"?{query}" if query else ""), status_code=301)
 
 
+def _first_report_page(request: Request):
+    """Until an account has its first report, Fight Camp is this one job (owner, 2026-11-22).
+
+    New accounts landed on a Fight Camp built for regular users - a "My
+    Athlete" placeholder, 0 fights, Rookie points, Compare and Share - and
+    only 2 of 8 analysed a fight. This shows the four steps to a first report
+    and where this account is in them, from the analyses it has waiting.
+    """
+    pending = _pending_jobs_for_owner(_owner_key(request))
+    waiting = next((item for item in pending if item["status"] in {"queued", "running", "interrupted"}), None)
+    picking = next((item for item in pending if item["status"] == "selecting"), None)
+    failed = next((item for item in pending if item["status"] == "error"), None)
+    step = 3 if waiting else 2 if picking else 1
+    return templates.TemplateResponse(request=request, name="first_report.html", context={
+        "request": request, "step": step, "waiting": waiting, "picking": picking, "failed": failed,
+        "upload_limit_bytes": min(MAX_FIGHT_BYTES, SETTINGS.max_upload_bytes),
+    })
+
+
 @app.get("/camp", response_class=HTMLResponse)
-def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = "", redeem: str = ""):
+def fight_camp_page(request: Request, error: str = "", name: str = "", session: str = "", redeem: str = "",
+                    full: str = ""):
     """Fight Camp: missions from the latest fight, progress, and the squad.
 
     Progress (/dashboard) and the coach portal (/coach) were two pages about
@@ -9728,6 +9806,15 @@ def fight_camp_page(request: Request, error: str = "", name: str = "", session: 
         )
     profile = get_profile(profile_id) or {}
     fights = list_fights(profile_id)
+    # A brand-new account - nothing analysed, no roster, no assignments - gets
+    # the first-report steps; anyone who has started using Fight Camp keeps it.
+    # Coaches (by account type, or arriving at the old /coach address for the
+    # roster tools) always get the full page: their first job is the roster.
+    coach_tools = profile.get("account_type") == "coach"
+    if (not fights and full != "1" and not error and not coach_tools
+            and not list_fighters(profile_id, include_archived=True) and not list_assignments(profile_id)
+            and not list_points(profile_id)):
+        return _first_report_page(request)
     for fight in fights:
         # The saved-evidence list printed the raw ruleset enum beside every
         # entry: "Fight analysis · KICK_LIGHT".

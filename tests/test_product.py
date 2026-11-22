@@ -92,7 +92,8 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertIn(SESSION_COOKIE, self.client.cookies)
         dashboard = self.client.get("/dashboard")
         self.assertEqual(dashboard.status_code, 200)
-        self.assertIn("Your baseline starts with one fight", dashboard.text)
+        # A brand-new account sees the steps to its first report (2026-11-22).
+        self.assertIn("Step 1 of 4", dashboard.text)
         self.assertNotIn("Create your private athlete workspace", dashboard.text)
         account = database.get_account_by_email("athlete@example.com")
         acceptances = database.list_legal_acceptances(profile_id=account["profile_id"])
