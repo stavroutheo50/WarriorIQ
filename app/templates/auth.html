@@ -33,7 +33,7 @@
           social buttons now sit below the form (2026-11-13); this stays so
           the order can change again without bringing that back. -#}
       <button class="visually-hidden" type="submit" tabindex="-1" aria-hidden="true" data-keep-label="true">{% if mode == 'signup' %}Create account{% else %}Sign in{% endif %}</button>
-      <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" name="email" autocomplete="email" value="{{email}}" required{% if field_errors.email %} aria-invalid="true" aria-describedby="authEmailError"{% endif %}><p class="field-error" id="authEmailError" data-error-for="email"{% if not field_errors.email %} hidden{% endif %}>{{ field_errors.email }}</p></div>
+      <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" name="email" autocomplete="email" value="{{email}}" required{% if field_errors.email %} aria-invalid="true" aria-describedby="authEmailError"{% endif %}><p class="field-error" id="authEmailError" data-error-for="email"{% if not field_errors.email %} hidden{% endif %}>{{ field_errors.email }}</p>{% if mode == 'signup' %}<p class="email-typo-hint" id="emailTypoHint" data-typos='{{ email_typos|tojson }}' aria-live="polite" hidden><span></span> <button class="btn secondary tiny" type="button" data-keep-label="true">Use it</button></p>{% endif %}</div>
       {#- minlength is a signup rule. On sign-in it constrains a password that
           already exists, so an account created under an older policy cannot
           submit the form at all and is given no reason why, and the attribute
@@ -208,6 +208,15 @@
       problems[0][0]?.focus({preventScroll:true});summary.scrollIntoView({block:'center'});
     },true);
   }
+  // "Did you mean gmail.com?" as the address is typed: the same list the
+  // server refuses (core/email_typos.py), with one tap to fix it.
+  (()=>{const hint=document.getElementById('emailTypoHint'),box=document.getElementById('authEmail');if(!hint||!box)return;
+    let typos={};try{typos=JSON.parse(hint.dataset.typos||'{}')}catch(error){}
+    const text=hint.querySelector('span'),use=hint.querySelector('button');let fixed='';
+    const check=()=>{const value=box.value.trim(),at=value.lastIndexOf('@'),right=at>0?typos[value.slice(at+1).toLowerCase()]:null;
+      fixed=right?value.slice(0,at+1)+right:'';hint.hidden=!fixed;if(fixed)text.textContent=`Did you mean ${fixed}?`};
+    use.addEventListener('click',()=>{if(!fixed)return;box.value=fixed;hint.hidden=true;box.focus();const error=document.getElementById('authEmailError');if(error){error.hidden=true;box.setAttribute('aria-invalid','false')}});
+    box.addEventListener('blur',check);box.addEventListener('input',()=>{if(!hint.hidden)check()});check()})();
   // The address typed here goes with "Forgot password?", so it is not typed twice.
   const forgot=document.getElementById('forgotLink'),emailBox=document.getElementById('authEmail');
   if(forgot&&emailBox)forgot.addEventListener('click',()=>{const value=emailBox.value.trim();if(value&&emailBox.validity.valid){const url=new URL(forgot.href,location.href);url.searchParams.set('email',value);forgot.href=url.pathname+url.search}});
