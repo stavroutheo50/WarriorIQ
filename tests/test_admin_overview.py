@@ -96,14 +96,13 @@ def test_the_page_shows_every_section_to_an_admin_only():
         object.__setattr__(SETTINGS, "admin_emails", previous)
 
 
-def test_linked_sign_ins_are_counted_per_provider_with_github_always_listed():
-    """The owner reads the GitHub number on /admin to decide whether legacy GitHub sign-in can go (2026-11-22)."""
+def test_linked_sign_ins_are_counted_per_provider():
+    """The host has no shell, so /admin is where the owner sees which sign-ins are in use (2026-11-22)."""
     before = admin_overview.accounts()["sign_in_providers"]
-    assert "github" in before
     created, email = _new_account()
-    db.link_oauth_identity("github", f"gh-{uuid.uuid4().hex[:8]}", int(created["id"]), email)
+    db.link_oauth_identity("google", f"g-{uuid.uuid4().hex[:8]}", int(created["id"]), email)
     after = admin_overview.accounts()["sign_in_providers"]
-    assert after["github"] == before["github"] + 1
+    assert after["google"] == before.get("google", 0) + 1
 
     client = BrowserClient(web.app)
     client.cookies.set(web.SESSION_COOKIE, issue_session(created["id"]))
@@ -113,7 +112,7 @@ def test_linked_sign_ins_are_counted_per_provider_with_github_always_listed():
         page = client.get("/admin").text
     finally:
         object.__setattr__(SETTINGS, "admin_emails", original)
-    assert f"GitHub {after['github']}" in page
+    assert f"Google {after['google']}" in page
 
 
 def test_admin_archives_only_the_exact_qa_fighters_on_their_own_roster():

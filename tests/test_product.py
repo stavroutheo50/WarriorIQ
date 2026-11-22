@@ -2406,73 +2406,40 @@ class SocialSignInCspTests(unittest.TestCase):
         submit handler had already relabelled the button "Working...", so it
         sat there loading for ever - the exact reported symptom.
         """
-        from core.social_auth import AUTHORIZE_ORIGINS, SocialAuthRegistry
+        from core.social_auth import AUTHORIZE_ORIGINS, LEGACY_PROVIDER_LABELS, PROVIDER_LABELS, SocialAuthRegistry
 
         registry = SocialAuthRegistry()
-        registry._enabled = {"google", "github"}
+        registry._enabled = {"google", "microsoft"}
         self.assertEqual(
             set(registry.form_action_origins),
-            {"https://accounts.google.com", "https://github.com"},
+            {"https://accounts.google.com", "https://login.microsoftonline.com"},
         )
 
         # Nothing configured means nothing added: the policy stays at 'self'.
         registry._enabled = set()
         self.assertEqual(registry.form_action_origins, [])
 
-        # Every provider that can be registered needs somewhere to redirect to,
-        # or its button is shown and then blocked by the browser.
-        #
-        # This is a subset rather than an equality now. GitHub keeps its origin
-        # after losing its button, so that an account created through it can
-        # still complete a sign-in - see the next test. The direction that
-        # matters is unchanged: nothing may have a button without an origin.
-        from core.social_auth import PROVIDER_LABELS
+        # Every provider with a button, current or legacy, needs somewhere to
+        # redirect to, and no origin is allowed for a provider nobody can use.
+        self.assertEqual(set(PROVIDER_LABELS) | set(LEGACY_PROVIDER_LABELS), set(AUTHORIZE_ORIGINS))
 
-        self.assertLessEqual(set(PROVIDER_LABELS), set(AUTHORIZE_ORIGINS))
-        self.assertIn("github", set(AUTHORIZE_ORIGINS) - set(PROVIDER_LABELS))
+    def test_github_sign_in_is_gone_everywhere(self):
+        """Removed 2026-11-22, once /admin showed the one linked account was the owner's.
 
-    def test_github_has_no_button_but_an_existing_account_is_not_orphaned(self):
-        """GitHub is off the sign-in page without being deleted.
-
-        This is a product for fighters and coaches, so a developer account is
-        not a credential that audience has and the button goes. Deleting the
-        provider outright is a different matter: an account created through
-        GitHub has an oauth_identities row, and GitHub only publishes a profile
-        email if the account chose to, so some of those accounts have no address
-        to send a password reset to. Removing the registration would lock them
-        out with nothing to fall back on.
-
-        So: no button, but still registered and still startable. Restoring it is
-        one line in PROVIDER_LABELS.
+        Not a button, not a legacy sign-in line, not an allowed form-action
+        origin, not a registered client, and no setting left to configure it.
         """
-        from core.social_auth import PROVIDER_LABELS, SocialAuthRegistry
+        from core.config import SETTINGS
+        from core.social_auth import AUTHORIZE_ORIGINS, LEGACY_PROVIDER_LABELS, PROVIDER_LABELS, SocialAuthRegistry
 
-        self.assertNotIn("github", PROVIDER_LABELS)
-        self.assertIn("google", PROVIDER_LABELS)
-
+        for table in (PROVIDER_LABELS, LEGACY_PROVIDER_LABELS, AUTHORIZE_ORIGINS):
+            self.assertNotIn("github", table)
+        self.assertFalse(hasattr(SETTINGS, "github_client_id"))
         registry = SocialAuthRegistry()
-        registry._enabled = {"google", "github"}
-        self.assertEqual([b["key"] for b in registry.provider_buttons], ["google"])
-        self.assertTrue(registry.is_enabled("github"))
-        self.assertIn("https://github.com", registry.form_action_origins)
-        # Sign-in only, and only while the provider is still configured.
-        self.assertEqual([b["key"] for b in registry.legacy_provider_buttons], ["github"])
-        registry._enabled = {"google"}
+        self.assertIsNone(registry.client("github"))
         self.assertEqual([], registry.legacy_provider_buttons)
 
-    def test_signup_cannot_use_github_but_an_existing_account_can_sign_in(self):
-        """The lockout this would otherwise cause, checked on the real pages.
-
-        GitHub is configured on the live site, so an account may exist that was
-        created through it. Those accounts have no password, and GitHub
-        publishes a profile email only when the account chose to, so some have
-        no address to send a reset to. Removing the button from BOTH pages
-        would take away the only door they have.
-
-        So: /signup offers no GitHub at all - not the button and not the
-        endpoint, because a form action is as good as a button to anyone who
-        reads the markup - and /login keeps a quiet recovery line.
-        """
+    def test_neither_auth_page_offers_github(self):
         import re
         from unittest import mock
 
@@ -2482,7 +2449,7 @@ class SocialSignInCspTests(unittest.TestCase):
         from core.social_auth import SocialAuthRegistry
 
         registry = SocialAuthRegistry()
-        registry._enabled = {"google", "github"}
+        registry._enabled = {"google"}
         with mock.patch.object(webapp, "SOCIAL_AUTH", registry):
             client = TestClient(webapp.app)
             signup = client.get("/signup").text
@@ -2490,15 +2457,10 @@ class SocialSignInCspTests(unittest.TestCase):
 
         starts = lambda page: set(re.findall(r'formaction="/auth/(\w+)/start"', page))
         self.assertEqual({"google"}, starts(signup))
-        self.assertNotIn("GitHub", signup)
-        self.assertNotIn("Signed up with", signup)
-
-        self.assertEqual({"google", "github"}, starts(login))
-        # Audit 2026-10-14 (#50): an inline link beside a full Google button
-        # read as an afterthought; both are now buttons of the same size, with
-        # a line saying GitHub is for accounts created with it.
-        self.assertIn("Continue with GitHub", login)
-        self.assertIn("GitHub sign-in is for accounts created with it.", login)
+        self.assertEqual({"google"}, starts(login))
+        for page in (signup, login):
+            self.assertNotIn("GitHub", page)
+            self.assertNotIn("https://github.com", page)
 
     def test_the_response_header_carries_those_origins(self):
         from fastapi.testclient import TestClient

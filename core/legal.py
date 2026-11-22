@@ -359,7 +359,6 @@ def subprocessor_sections() -> list[tuple[str, str]]:
     sign_in = [name for name, configured in (
         ("Meta/Facebook", SETTINGS.facebook_client_id and SETTINGS.facebook_client_secret),
         ("Microsoft", SETTINGS.microsoft_client_id and SETTINGS.microsoft_client_secret),
-        ("GitHub", SETTINGS.github_client_id and SETTINGS.github_client_secret),
     ) if configured and SETTINGS.oauth_state_secret]
     if sign_in:
         names = sign_in[0] if len(sign_in) == 1 else ", ".join(sign_in[:-1]) + " and " + sign_in[-1]
