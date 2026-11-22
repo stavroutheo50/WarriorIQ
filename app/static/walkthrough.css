@@ -499,3 +499,27 @@ details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg)
 .confirm-email-banner form { margin: 0; }
 .email-typo-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 0; color: #f3c98b; font-size: 14px; }
 .admin-excluded .inline-form { display: inline; margin-left: 8px; }
+
+/* --- Phones: the next action on the first screen (walkthrough, 2026-11-22) ------- */
+@media (max-width: 620px) {
+  /* Upload: the card with "Choose fight video" first, the title and clip after it. */
+  .ux-setup { display: flex; flex-direction: column; gap: 18px; }
+  .ux-setup .setup-card { order: -1; }
+  .ux-setup .setup-head { padding-top: 0; }
+  .analysis-steps .workflow-steps { margin: 10px 0 14px; }
+  /* The confirm-email reminder as one slim line. */
+  .confirm-email-banner { padding: 10px 12px; gap: 8px 10px; margin-top: 10px; font-size: 14px; }
+  .confirm-email-banner .confirm-email-more { display: none; }
+  .confirm-email-banner span { flex: 1 1 auto; }
+  /* Pick the fighters: a smaller heading so the frame is on the first screen. */
+  .fighter-workflow .workflow-heading h1, .selection-workflow .workflow-heading h1 { font-size: 30px; line-height: 1.05; margin: 4px 0 8px; }
+  .fighter-workflow .workflow-heading p, .selection-workflow .workflow-heading p { font-size: 14px; margin: 4px 0; }
+  .selection-workflow { padding-top: 8px; }
+  /* The cookie choice as a compact bar where it does show. */
+  .cookie-notice { padding: 10px 12px; gap: 8px; bottom: 10px; }
+  .cookie-notice p { display: none; }
+  .cookie-notice .btn { padding: 8px 6px; font-size: 12px; min-height: 40px; }
+}
+/* A tick box with a paragraph beside it is a card, not a pill: 999px rounding
+   on a six-line label drew a stretched oval (the optional training consent). */
+.check.upload-training-consent, .check.legal-check { border-radius: 18px; }
