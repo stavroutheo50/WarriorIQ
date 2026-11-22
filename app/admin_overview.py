@@ -409,7 +409,18 @@ def onboarding(jobs: list[tuple[str, dict]], days: int = 14, now: datetime | Non
                       (SELECT COUNT(*) FROM fights f WHERE f.profile_id = a.profile_id) AS fights,
                       (SELECT MAX(created_at) FROM sessions s WHERE s.account_id = a.id) AS last_sign_in
                FROM accounts a WHERE a.created_at >= ? ORDER BY a.created_at DESC""", (since,))]
+        # Accounts the owner marked as their own tests (latest mark wins), and
+        # the administrators themselves: left out of the numbers.
+        marked: dict[int, bool] = {}
+        for row in con.execute(
+                """SELECT resource_id, metadata_json FROM security_events
+                   WHERE event_type='admin_marked_test_account' ORDER BY id"""):
+            try:
+                marked[int(row["resource_id"])] = bool(json.loads(row["metadata_json"] or "{}").get("test"))
+            except (TypeError, ValueError):
+                continue
         events: dict[int, list[dict]] = {}
+        signed_in: dict[int, str] = {}
         if rows:
             marks = ",".join("?" * len(rows))
             for row in con.execute(
@@ -422,14 +433,29 @@ def onboarding(jobs: list[tuple[str, dict]], days: int = 14, now: datetime | Non
                     metadata = {}
                 events.setdefault(int(row["account_id"]), []).append(
                     {"type": row["event_type"], "at": row["occurred_at"], "meta": metadata})
+            # Last seen from sign-ins too: a session row is deleted at sign-out,
+            # so sessions alone showed "never" for people who had signed out.
+            for row in con.execute(
+                    f"""SELECT account_id, MAX(occurred_at) AS at FROM security_events
+                        WHERE account_id IN ({marks})
+                          AND event_type IN ('login_succeeded', 'social_login_succeeded', 'account_created')
+                        GROUP BY account_id""", tuple(r["id"] for r in rows)):
+                signed_in[int(row["account_id"])] = row["at"]
     held: dict[int, list[str]] = {}
     for _, job in jobs:
         owner = str(job.get("owner_key") or "")
         if owner.startswith("account:") and owner.split(":", 1)[1].isdigit():
             held.setdefault(int(owner.split(":", 1)[1]), []).append(str(job.get("status") or ""))
 
-    people, reached_counts = [], {key: 0 for key, _ in JOURNEY_STEPS}
+    from core.config import SETTINGS
+
+    admins = {email.lower() for email in SETTINGS.admin_emails}
+    people, excluded, reached_counts = [], [], {key: 0 for key, _ in JOURNEY_STEPS}
     for row in rows:
+        if marked.get(int(row["id"])) or str(row["email"] or "").lower() in admins:
+            excluded.append({"id": row["id"], "email": row["email"], "created_at": row["created_at"],
+                             "admin": str(row["email"] or "").lower() in admins})
+            continue
         reached = {"signed_up"}
         account_events = events.get(int(row["id"]), [])
         for event in account_events:
@@ -455,7 +481,8 @@ def onboarding(jobs: list[tuple[str, dict]], days: int = 14, now: datetime | Non
             blocked = "waiting for a parent or guardian to approve"
         elif row["account_status"] != "active":
             blocked = f"account {row['account_status']}"
-        seen = [value for value in (row["last_sign_in"], account_events[-1]["at"] if account_events else None) if value]
+        seen = [value for value in (row["last_sign_in"], signed_in.get(int(row["id"])),
+                                    account_events[-1]["at"] if account_events else None) if value]
         people.append({
             "id": row["id"], "email": row["email"], "created_at": row["created_at"],
             "email_confirmed": bool(row["email_verified_at"]),
@@ -470,8 +497,8 @@ def onboarding(jobs: list[tuple[str, dict]], days: int = 14, now: datetime | Non
             "before_tracking": str(row["created_at"] or "") < JOURNEY_TRACKING_SINCE and not account_events,
             "last_seen": max(seen) if seen else None,
         })
-    total = len(rows)
+    total = len(people)
     funnel = [{"key": key, "label": label, "count": reached_counts[key],
                "share": round(reached_counts[key] / total * 100) if total else 0} for key, label in JOURNEY_STEPS]
-    return {"days": days, "total": total, "funnel": funnel, "people": people,
+    return {"days": days, "total": total, "funnel": funnel, "people": people, "excluded": excluded,
             "tracking_since": JOURNEY_TRACKING_SINCE}

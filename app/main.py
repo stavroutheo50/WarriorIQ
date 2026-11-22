@@ -56,6 +56,7 @@ from core.auth import (
 )
 from core import common_passwords, two_factor
 from core.qr import svg as qr_svg
+from core.email_typos import TYPO_DOMAINS, suggestion as email_typo_suggestion
 from core.db import (
     begin_two_factor_setup, count_two_factor_attempt, create_two_factor_challenge, delete_two_factor_challenge,
     disable_two_factor, enable_two_factor, get_two_factor_challenge, list_account_sessions, replace_recovery_codes,
@@ -1968,6 +1969,10 @@ def _load_viewer_state(request: Request) -> None:
     """
     request.state.account = resolve_session(request.cookies.get(SESSION_COOKIE))
     request.state.account_display = account_display(request.state.account)
+    # Signed in, but the email is not confirmed yet: base.html asks for it.
+    request.state.email_unconfirmed = bool(
+        request.state.account and SETTINGS.require_email_verification
+        and not request.state.account.get("email_verified_at"))
     request.state.analysis_navigation = _analysis_navigation_state(
         _owner_key(request),
         request.cookies.get(ACTIVE_ANALYSIS_COOKIE),
@@ -3306,7 +3311,9 @@ def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/
                  "email": email.strip()[:254], "notice": notice, "account_exists": account_exists,
                  "field_errors": field_errors or {},
                  # The same lists the server refuses, for the live hint.
-                 "password_rules": common_passwords.page_rules() if mode == "signup" else None},
+                 "password_rules": common_passwords.page_rules() if mode == "signup" else None,
+                 # The same list the server refuses, for the live "Did you mean" hint.
+                 "email_typos": TYPO_DOMAINS if mode == "signup" else None},
         status_code=400 if error or account_exists else 200,
     )
 
@@ -3534,12 +3541,13 @@ async def social_auth_callback(request: Request, provider: str):
         mark_email_verified(int(account["id"]))
         account = get_account(int(account["id"])) or account
     if SETTINGS.require_email_verification and not account.get("email_verified_at"):
+        # Sent, but no longer a wall (owner, 2026-11-22): the person signs in
+        # and can upload; a banner asks them to confirm (base.html).
         delivered = _send_verification_email(request, account)
         record_security_event(
             "email_verification_requested", account_id=int(account["id"]),
             metadata={"email_delivery": "sent" if delivered else "unavailable", "provider": identity.provider},
         )
-        return RedirectResponse("/verify-email", status_code=303)
     record_security_event(
         "social_login_succeeded",
         account_id=int(account["id"]),
@@ -3660,6 +3668,10 @@ def signup(
     field_errors = {}
     if not valid_email(email):
         field_errors["email"] = "Enter your email address, like name@example.com."
+    elif email_typo_suggestion(email):
+        # A provider misspelling no mail can reach (core/email_typos.py).
+        field_errors["email"] = (f"Did you mean {email_typo_suggestion(email)}? Check the address: your "
+                                 "confirmation link and reports are sent to it.")
     password_problem = new_password_problem(password)
     if password_problem:
         field_errors["password"] = password_problem
@@ -3734,17 +3746,19 @@ def signup(
         )
         next_path = "/guardian"
     if SETTINGS.require_email_verification:
+        # The confirmation link is sent, and the person goes straight on,
+        # signed in, to upload a fight (owner, 2026-11-22). Holding them on a
+        # "check your email" page until they confirmed lost 9 of 32 new
+        # accounts in two weeks, one of them to a mistyped address the link
+        # could never reach. A banner asks them to confirm (base.html), and the
+        # report-ready email waits for a confirmed address.
         delivered = _send_verification_email(request, account)
         record_security_event(
             "email_verification_requested", account_id=int(account["id"]),
             metadata={"email_delivery": "sent" if delivered else "unavailable"},
         )
-        # This browser waits for the link, wherever it is opened, then goes on
-        # signed in to where the person was heading (_auth_wait_status).
-        response = RedirectResponse("/verify-email", status_code=303)
-        _start_auth_wait(request, response, "verify", int(account["id"]), next_path)
-        return response
-    mark_email_verified(int(account["id"]))
+    else:
+        mark_email_verified(int(account["id"]))
     response = RedirectResponse(_safe_next(next_path), status_code=303)
     response.set_cookie(
         SESSION_COOKIE, issue_session(int(account["id"]), device_label=_device_label(request)), max_age=60 * 60 * 24 * 30,
@@ -4024,12 +4038,8 @@ def login(
     if not account:
         record_security_event("login_failed", severity="warning", metadata={"email_hash": token_digest(email.strip().lower())[:16]})
         return _auth_page(request, "login", "The email or password is incorrect.", next_path, email=email)
-    if SETTINGS.require_email_verification and not account.get("email_verified_at"):
-        return _auth_page(
-            request, "login",
-            "Verify your email before signing in. You can request a fresh verification link below.",
-            next_path,
-        )
+    # An unconfirmed email no longer stops sign-in (owner, 2026-11-22); the
+    # banner in base.html asks for it, with a link to send it again.
     second_step = _begin_two_factor(request, account, next_path)
     if second_step is not None:
         return second_step
@@ -5696,6 +5706,10 @@ def _email_analysis_outcome(job_id: str, job: dict | None, ready: bool) -> None:
                 return
             account = get_account(account_id) or {}
             if not account.get("email") or account.get("account_status", "active") != "active":
+                return
+            # Only to an address its owner has confirmed: an unconfirmed one may
+            # be mistyped, or someone else's.
+            if SETTINGS.require_email_verification and not account.get("email_verified_at"):
                 return
             base = SETTINGS.public_base_url or "https://warrioriq.eu"
             if ready:
@@ -10524,6 +10538,23 @@ def admin_account_status(request: Request, account_id: int, status: str = Form(.
         resource_type="account", resource_id=str(account_id), metadata={"status": status},
     )
     return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/accounts/{account_id}/test-account", dependencies=[Depends(require_csrf)])
+def admin_mark_test_account(request: Request, account_id: int, test: str = Form("1")):
+    """Leave an account out of "Where new accounts stop", or count it again (2026-11-22).
+
+    The owner's own trial sign-ups were a sixth of the report. Nothing about
+    the account changes; the latest mark wins (app/admin_overview.py).
+    """
+    if not _is_admin(request):
+        raise HTTPException(404)
+    if get_account(int(account_id)) is None:
+        raise HTTPException(404)
+    actor = _account(request)
+    record_security_event("admin_marked_test_account", account_id=int(actor["id"]), resource_type="account",
+                          resource_id=str(int(account_id)), metadata={"test": test == "1"})
+    return RedirectResponse("/admin#adminOnboarding", status_code=303)
 
 
 # How long a plan given from the admin page lasts; "" is no end date.

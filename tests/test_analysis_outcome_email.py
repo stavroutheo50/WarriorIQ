@@ -125,3 +125,21 @@ def test_the_four_step_bar_marks_the_current_step():
 
 def test_a_queued_fight_says_it_will_be_emailed():
     assert "we email you when your report is ready" in web._deferred_analysis_message()
+
+
+def test_the_ready_email_waits_for_a_confirmed_address():
+    from core.config import SETTINGS
+
+    previous = SETTINGS.require_email_verification
+    object.__setattr__(SETTINGS, "require_email_verification", True)
+    try:
+        created, _ = _account()                                      # never confirmed
+        with mock.patch.object(web, "send_transactional_email", return_value=True) as send:
+            web._email_analysis_outcome(f"u{uuid.uuid4().hex[:8]}", {"owner_key": f"account:{created['id']}"}, ready=True)
+        assert not send.called
+        db.mark_email_verified(int(created["id"]))
+        with mock.patch.object(web, "send_transactional_email", return_value=True) as send:
+            web._email_analysis_outcome(f"v{uuid.uuid4().hex[:8]}", {"owner_key": f"account:{created['id']}"}, ready=True)
+        assert send.called
+    finally:
+        object.__setattr__(SETTINGS, "require_email_verification", previous)

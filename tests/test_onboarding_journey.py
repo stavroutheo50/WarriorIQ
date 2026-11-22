@@ -92,11 +92,13 @@ def test_the_admin_report_shows_each_new_account_and_where_it_stopped():
     assert funnel["signed_up"] >= 3 and funnel["upload_page"] >= 3 and funnel["finished"] >= 1
     assert funnel["signed_up"] >= funnel["upload_page"] >= funnel["finished"]
 
-    # Shown to an administrator on the admin page.
+    # Shown to an administrator on the admin page (a separate account: an
+    # administrator's own account is left out of the report).
+    _, admin_email, admin_client = _account()
     previous = SETTINGS.admin_emails
-    object.__setattr__(SETTINGS, "admin_emails", (stuck_email.lower(),))
+    object.__setattr__(SETTINGS, "admin_emails", (admin_email.lower(),))
     try:
-        page = client.get("/admin").text
+        page = admin_client.get("/admin").text
     finally:
         object.__setattr__(SETTINGS, "admin_emails", previous)
     assert "Where new accounts stop" in page and "That file is too large." in page
@@ -107,3 +109,37 @@ def test_a_failed_analysis_is_put_against_its_account():
     web._journey_failed({"owner_key": f"account:{created['id']}"}, "decode_failed", "jobx")
     web._journey_failed({"owner_key": "guest:abc"}, "decode_failed", "joby")
     assert _events(created["id"]) == [("journey_analysis_failed", {"reason": "decode_failed"})]
+
+
+def test_signing_out_does_not_make_an_account_look_never_seen():
+    created, email, client = _account()
+    db.record_security_event("login_succeeded", account_id=int(created["id"]))
+    client.post("/logout")                                       # deletes the session row
+    person = next(p for p in admin_overview.onboarding([])["people"] if p["email"] == email)
+    assert person["last_seen"] is not None
+
+
+def test_test_accounts_and_admins_are_left_out_and_can_be_counted_again():
+    admin, admin_email, admin_client = _account()
+    tester, tester_email, _ = _account()
+    previous = SETTINGS.admin_emails
+    object.__setattr__(SETTINGS, "admin_emails", (admin_email.lower(),))
+    try:
+        report = admin_overview.onboarding([])
+        assert admin_email not in {p["email"] for p in report["people"]}
+        assert admin_email in {p["email"] for p in report["excluded"]}
+        before = report["total"]
+        marked = admin_client.post(f"/admin/accounts/{tester['id']}/test-account", data={"test": "1"},
+                                   follow_redirects=False)
+        assert marked.status_code == 303
+        report = admin_overview.onboarding([])
+        assert tester_email not in {p["email"] for p in report["people"]} and report["total"] == before - 1
+        page = admin_client.get("/admin").text
+        assert "left out: test accounts and administrators" in page and "Count it again" in page
+        admin_client.post(f"/admin/accounts/{tester['id']}/test-account", data={"test": "0"})
+        assert tester_email in {p["email"] for p in admin_overview.onboarding([])["people"]}
+    finally:
+        object.__setattr__(SETTINGS, "admin_emails", previous)
+    # Not an administrator: the action does not exist.
+    _, _, stranger = _account()
+    assert stranger.post(f"/admin/accounts/{tester['id']}/test-account", data={"test": "1"}).status_code == 404

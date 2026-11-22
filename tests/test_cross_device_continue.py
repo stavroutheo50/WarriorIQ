@@ -36,39 +36,41 @@ def _link(body: str, path: str) -> str:
 
 
 def _sign_up(pc: BrowserClient, email: str, next_path: str = "/history") -> str:
+    """Sign up with confirmation required. Since 2026-11-22 the browser goes
+    straight on, signed in; the confirmation link is still sent."""
     sent = []
     with patch.object(web, "send_transactional_email", lambda to, subject, body: sent.append(body) or True):
         response = pc.post("/signup", data={"email": email, "next_path": next_path, **SIGNUP},
                            follow_redirects=False)
-    assert response.status_code == 303 and response.headers["location"] == "/verify-email"
+    assert response.status_code == 303 and response.headers["location"] == next_path
+    assert web.SESSION_COOKIE in response.headers.get("set-cookie", "")
     return _link(sent[0], "verify-email")
 
 
-def test_verifying_on_the_phone_signs_the_computer_in_where_it_was(verification_on):
+def test_signing_up_goes_straight_on_and_the_link_confirms_later(verification_on):
+    # Owner, 2026-11-22: "let people upload before confirming". The browser is
+    # signed in at once and can open the upload page; a banner asks for the
+    # confirmation, and disappears once the link is opened on any device.
     pc, phone = BrowserClient(web.app), BrowserClient(web.app)
-    link = _sign_up(pc, f"cross-{uuid.uuid4().hex[:8]}@example.com")
-    page = pc.get("/verify-email").text
-    assert "data-auth-wait" in page and "/static/auth-wait.js" in page
-    assert pc.get("/auth/wait").json() == {"state": "waiting"}
-
+    email = f"cross-{uuid.uuid4().hex[:8]}@example.com"
+    link = _sign_up(pc, email)
+    assert pc.get("/analyze", follow_redirects=False).status_code == 200
+    page = pc.get("/history").text
+    assert "confirm-email-banner" in page and email in page and 'action="/verify-email"' in page
     done = phone.get(link)
     assert done.status_code == 200 and "Your email is confirmed." in done.text
     assert web.SESSION_COOKIE not in phone.cookies                 # the phone is not signed in by this
-
-    assert pc.get("/auth/wait").json()["state"] == "done"
-    carry_on = pc.get("/auth/continue", follow_redirects=False)
-    assert carry_on.status_code == 303 and carry_on.headers["location"] == "/history"
-    assert web.SESSION_COOKIE in carry_on.headers.get("set-cookie", "")
-    # Used once.
-    assert pc.get("/auth/continue", follow_redirects=False).headers["location"] == "/login"
+    assert "confirm-email-banner" not in pc.get("/history").text
 
 
-def test_verifying_in_the_same_browser_goes_straight_on(verification_on):
+def test_an_unconfirmed_account_can_sign_in_again(verification_on):
     pc = BrowserClient(web.app)
-    link = _sign_up(pc, f"same-{uuid.uuid4().hex[:8]}@example.com", next_path="/camp")
-    response = pc.get(link, follow_redirects=False)
-    assert response.status_code == 303 and response.headers["location"] == "/camp"
-    assert web.SESSION_COOKIE in response.headers.get("set-cookie", "")
+    email = f"again-{uuid.uuid4().hex[:8]}@example.com"
+    _sign_up(pc, email, next_path="/camp")
+    later = BrowserClient(web.app)
+    web._rate_windows.clear()
+    response = later.post("/login", data={"email": email, "password": SIGNUP["password"]}, follow_redirects=False)
+    assert response.status_code == 303 and web.SESSION_COOKIE in later.cookies
 
 
 def test_an_old_verification_link_explains_itself(verification_on):
@@ -191,23 +193,24 @@ def test_the_reset_page_shows_only_its_own_notices():
     assert "between 10 and 1,024 characters" in client.get(weak.headers["location"]).text
 
 
-def test_a_password_change_ends_a_waiting_sign_up(verification_on):
-    # Security review, PR #236: someone signs up with another person's address
-    # and leaves the page waiting; the owner resets the password, then confirms
-    # the address. The first browser must not be signed in.
+def test_the_real_owner_resetting_the_password_signs_a_squatter_out(verification_on):
+    # Security review, PR #236, kept after 2026-11-22: someone signs up with
+    # another person's address and is now signed in straight away. The owner
+    # takes the account back with a password reset; the squatter's browser
+    # must lose its session.
     squatter = BrowserClient(web.app)
     email = f"squat-{uuid.uuid4().hex[:8]}@example.com"
-    verify_link = _sign_up(squatter, email)
+    _sign_up(squatter, email)
+    assert squatter.get("/settings/privacy", follow_redirects=False).status_code == 200
     sent = []
     with patch.object(web, "deliver_email", lambda to, subject, body: sent.append(body)):
         web._rate_windows.clear()
         BrowserClient(web.app).post("/forgot-password", data={"email": email})
     owner = BrowserClient(web.app)
-    owner.post(_link(sent[0], "reset-password"), data={"password": "Owners-Own-Password-9"})
-    owner.get(verify_link)
-    assert squatter.get("/auth/wait").json() == {"state": "none"}
-    continued = squatter.get("/auth/continue", follow_redirects=False)
-    assert web.SESSION_COOKIE not in continued.headers.get("set-cookie", "")
+    owner.post(_link(sent[0], "reset-password"), data={"password": "Owners-Own-Password-9",
+                                                        "confirm_password": "Owners-Own-Password-9"})
+    signed_out = squatter.get("/settings/privacy", follow_redirects=False)
+    assert signed_out.status_code == 303 and signed_out.headers["location"].startswith("/login")
 
 
 def test_a_password_change_in_settings_ends_reset_links_already_sent():
