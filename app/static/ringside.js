@@ -113,6 +113,9 @@
     $('boardNameA').textContent = name('A'); $('boardNameB').textContent = name('B');
     $('boardRound').textContent = 'Round ' + (state.current + 1);
     $('boardRules').textContent = rules().label;
+    // Say what the big number is: it is the scorecard, not the taps (walkthrough, 2026-11-16).
+    var kind = $('boardKind');
+    if (kind) kind.textContent = lastScore && lastScore.ten_point_must ? 'Total of round scores (10-point must)' : 'Score under these rules';
     ['A', 'B'].forEach(function (side) {
       var n = tapped(side);
       $('boardLanded' + side).textContent = n + (n === 1 ? ' point' : ' points') + ' tapped';
