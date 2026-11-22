@@ -408,7 +408,7 @@
       list ran to over 5,000 px on a phone, which is most of why this page
       was fourteen screens long. -#}
   <div class="table-wrap"><table>
-    <thead><tr><th>Fighter</th><th>Fight</th><th>Seen</th><th>Movement</th><th>Pressure <small class="muted">/100</small></th><th>Centre</th><th>Work on</th><th></th></tr></thead>
+    <thead><tr><th>Fighter</th><th>Fight</th><th>Seen</th><th>Movement</th><th>Pressure <small class="muted">/100</small></th><th>Centre</th><th>Work on</th><th><span class="visually-hidden">Report</span></th></tr></thead>
     <tbody>
     {% for f in squad.fights[:5] %}{{ squad_row(f) }}{% endfor %}
     </tbody>
@@ -416,7 +416,7 @@
   {% if squad.fights|length > 5 %}
   <details class="squad-more"><summary>Show {{ squad.fights|length - 5 }} older fight{{ '' if squad.fights|length == 6 else 's' }}</summary>
   <div class="table-wrap"><table>
-    <thead><tr><th>Fighter</th><th>Fight</th><th>Seen</th><th>Movement</th><th>Pressure <small class="muted">/100</small></th><th>Centre</th><th>Work on</th><th></th></tr></thead>
+    <thead><tr><th>Fighter</th><th>Fight</th><th>Seen</th><th>Movement</th><th>Pressure <small class="muted">/100</small></th><th>Centre</th><th>Work on</th><th><span class="visually-hidden">Report</span></th></tr></thead>
     <tbody>
     {% for f in squad.fights[5:] %}{{ squad_row(f) }}{% endfor %}
     </tbody>

@@ -543,7 +543,7 @@ body {
 .film-shot figcaption strong { display: block; color: #ffffff; font-size: 14px; }
 .film-shot figcaption b { display: grid; place-items: center; flex: 0 0 auto;     }
 .film-shot.is-good figcaption b { background: #3ddc97; color: #06121a; }
-.film-shot.is-bad figcaption b { background: #ff5d6c; color: #ffffff; }
+.film-shot.is-bad figcaption b { background: #ff5d6c; color: #06121a; }
 
 /* Blue corner versus red corner (owner, 2026-11-01: "don't make it blue and
    yellow, make it blue versus red"). Fighter B is red on every page; these

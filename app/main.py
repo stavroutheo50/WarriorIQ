@@ -2287,7 +2287,7 @@ def _apply_response_headers(request: Request, response) -> None:
         # volatile, and re-sending 101 MB on every seek is not privacy.
         response.headers.setdefault("Cache-Control", "no-store")
     elif request.url.path.startswith("/static/"):
-        response.headers.setdefault("Cache-Control", "public, max-age=604800")
+        response.headers.setdefault("Cache-Control", _static_cache_control(request))
     if _request_is_secure(request):
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
@@ -10689,8 +10689,23 @@ def admin_openapi(request: Request):
     return JSONResponse(app.openapi())
 
 
+# A year, for a stylesheet or script whose ?v= is the current ASSET_VERSION
+# (Lighthouse, 2026-11-22). That token is a hash of exactly these files, so a
+# changed file is a new URL and a year-long copy can never be stale. Images and
+# fonts are not in the hash, so they keep the week: a replaced photo would not
+# change its URL.
+_IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
+_WEEK_CACHE = "public, max-age=604800"
+
+
+def _static_cache_control(request: Request) -> str:
+    path = request.url.path
+    hashed = path.count("/") == 2 and path.endswith((".css", ".js"))     # /static/<file>, what the hash reads
+    return _IMMUTABLE_CACHE if hashed and request.query_params.get("v") == ASSET_VERSION else _WEEK_CACHE
+
+
 @app.get("/assets/{bundle}.css", include_in_schema=False)
-def css_bundle(bundle: str):
+def css_bundle(bundle: str, request: Request):
     """Serve one concatenated stylesheet instead of several.
 
     Served from memory rather than written into app/static, because the web
@@ -10704,7 +10719,7 @@ def css_bundle(bundle: str):
     return Response(
         content=text,
         media_type="text/css",
-        headers={"Cache-Control": "public, max-age=604800"},
+        headers={"Cache-Control": _IMMUTABLE_CACHE if request.query_params.get("v") == ASSET_VERSION else _WEEK_CACHE},
     )
 
 
