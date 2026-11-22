@@ -37,7 +37,7 @@ html, body { background: var(--wiq-canvas); }
 
 .brand { font-size: 19px; font-weight: 800; letter-spacing: -.03em; }
 .brand span { color: var(--wiq-text); }          /* the logo carries the colour */
-.brand-mark { display: none; }
+
 
 .navlinks a {
   padding: 8px 11px;
@@ -111,32 +111,18 @@ h1, h2, h3 { letter-spacing: -.03em; }
 /* --- Hero -----------------------------------------------------------------
    Left aligned and set against a rule. Centring made a product page read as a
    landing page for something that does not exist yet. */
-.hero-centered { text-align: left; padding: clamp(64px, 12vh, 132px) 0 clamp(52px, 9vh, 96px); }
-.hero-centered .hero-copy { align-items: flex-start; margin: 0; max-width: 780px; }
-.hero-centered .hero-actions,
-.hero-centered .fight-path,
-.hero-centered .trust-row,
-.hero-centered .sport-rail { justify-content: flex-start; }
-.hero-centered .hero-copy > p { margin-inline: 0; font-size: 17px; color: var(--wiq-text-secondary); }
-.hero-centered .eyebrow::before { display: inline-block; }
+
+
+
+
+
 
 .btn-lead { min-height: 48px; padding-inline: 24px; font-size: 14px; }
 
 /* The sport rail becomes a measured strip against a rule, not a row of words. */
-.sport-rail {
-  gap: 0;
-  margin-top: 34px;
-  padding-top: 18px;
-  border-top: 1px solid var(--wiq-line-soft);
-  width: 100%;
-}
-.sport-rail b {
-  padding-right: 22px;
-  color: var(--wiq-text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-}
-.sport-rail b + b::before { display: none; }
+
+
+
 
 /* --- Sport chooser --------------------------------------------------------
    The five cards are the page. Square, flat, and separated by rules; the sport
@@ -233,12 +219,12 @@ tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 @media (max-width: 620px) {
   .shell { width: calc(100% - 32px); }
   .nav { height: 60px; }
-  .hero-centered { padding: 44px 0 36px; }
+  
   .hero h1 { font-size: 40px; letter-spacing: -.035em; }
-  .hero-centered .hero-copy > p { font-size: 15px; }
+  
   .btn { width: auto; }
-  .sport-rail { display: flex; flex-wrap: wrap; row-gap: 6px; }
-  .sport-rail b { padding-right: 16px; font-size: 12px; }
+  
+  
 }
 
 /* --- Gradient text, removed -----------------------------------------------
@@ -285,7 +271,7 @@ h1 em, h2 em {
 }
 .fight-path i { display: none; }
 
-.status-dot { box-shadow: none; }
+
 
 /* --- Remaining colour leaks ------------------------------------------------
    A blue glow was reapplied to primary buttons by the motion layer, and two
@@ -312,9 +298,9 @@ h1 em, h2 em {
 }
 
 /* The preview mock keeps its two fighter colours - that is data, not chrome. */
-.preview-screen { border-color: var(--wiq-line-soft); box-shadow: none; background: var(--wiq-canvas-raised); }
-.preview-fight-stage { background: #0d0d0f; border-color: var(--wiq-line-soft); }
-.preview-scan { display: none; }
+
+
+
 
 /* --- Upload target --------------------------------------------------------
    The primary action on a sport's page, so it wears that sport rather than a
@@ -477,44 +463,34 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
    of only asserting it, and the two columns give the page a centre of gravity.
    --------------------------------------------------------------------------- */
 @media (min-width: 981px) {
-  .hero-centered { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .92fr); gap: 64px; align-items: center; }
-  .hero-centered .hero-copy { max-width: none; }
+  
+  
   /* The illustration is pulled out of the section below and parked in the
      hero's second column, so no markup has to move. */
-  .product-preview { grid-column: 2; grid-row: 1; padding-top: 0; border-top: 0; }
-  .product-preview .preview-copy { display: none; }
-  .hero-centered + .product-preview { display: none; }
+  
+  
+  
 }
 
 /* The mock itself: a real instrument panel rather than two empty outlines. */
-.preview-screen { padding: 14px; border-radius: 5px; }
-.preview-screen-head { color: var(--wiq-text-tertiary); }
-.preview-screen-head b { color: rgb(var(--wiq-accent)); }
-.preview-fight-stage {
-  background: linear-gradient(180deg, #101014, #0b0b0d);
-  border-color: var(--wiq-line-soft);
-  aspect-ratio: 16 / 9.6;
-}
-.preview-fighter { border-width: 1.5px; border-radius: 3px; }
-.preview-timeline i { background: rgb(var(--wiq-accent)); }
-.preview-timeline span { border-radius: 2px; }
+
+
+
+
+
+
+
 
 /* The illustration has to fill the column it was given, or it reads as a
    thumbnail floating in empty space rather than the hero's second half. */
-.product-preview { display: block; width: 100%; }
-.preview-visual { width: 100%; max-width: none; }
-.preview-screen { width: 100%; }
+
+
+
 
 /* Its header row was sized for a wider band and wrapped into four words. */
-.preview-screen-head {
-  gap: 12px;
-  flex-wrap: nowrap;
-  white-space: nowrap;
-  font-size: var(--wiq-text-micro);
-  letter-spacing: .07em;
-}
 
-.preview-fighter { font-size: clamp(14px, 2.4vw, 26px); }
+
+
 
 /* --- Keyboard review ------------------------------------------------------
    Building a training set means judging a thousand candidates, so the active
@@ -646,27 +622,14 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
    Collapsed, because it needs a key for an outside service and almost no
    fight needs it. Fight format stays open: getting the rounds wrong segments
    the analysis wrongly, so that one is not something to tuck away. */
-.setup-extra {
-  margin: 4px 0 14px;
-  border: 1px solid var(--wiq-line-soft);
-  border-radius: 4px;
-  background: var(--wiq-canvas-raised);
-}
-.setup-extra > summary {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 13px 15px;
-  cursor: pointer;
-  list-style: none;
-}
-.setup-extra > summary::-webkit-details-marker { display: none; }
-.setup-extra > summary::after { content: "+"; margin-left: auto; color: var(--wiq-text-tertiary); }
-.setup-extra[open] > summary::after { content: "\2212"; }
-.setup-extra > summary strong { color: var(--wiq-text); font-size: var(--wiq-text-sm); font-weight: 650; }
-.setup-extra > summary small { color: var(--wiq-text-tertiary); font-size: var(--wiq-text-micro); }
-.setup-extra > .check { display: block; padding: 0 15px 15px; }
+
+
+
+
+
+
+
+
 
 /* The consent notice is required, but on a phone it was covering the upload
    button - the one thing the page exists to offer. Cap it to a slim bar at the
@@ -849,7 +812,7 @@ fieldset.needs-attention {
   .cookie-notice { background: #0c1629 !important; box-shadow: 0 8px 24px #0009 !important; }
   .app-toast { background: #111b30 !important; }
   .camp-sticky { background: #080c16 !important; }
-  .hero-copy:before { filter: none !important; }
+  
 }
 /* The long report sections below the fold are laid out and painted only as
    they come near the screen, instead of all at once on every scroll. */

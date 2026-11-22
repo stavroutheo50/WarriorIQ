@@ -52,20 +52,11 @@
 .add-fighter-row input:focus { border-color: #4a4a52; outline: none; }
 
 /* Athlete and coach ladders are different products, so the page picks one. */
-.audience-switch {
-  display: inline-flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin: 0 0 12px;
-  padding: 4px;
-  border: 1px solid var(--wiq-edge);
-  border-radius: calc(var(--wiq-radius-md) + 4px);
-  background: rgba(255, 255, 255, .022);
-}
-.audience-switch .btn { min-height: 40px; padding: 9px 18px; border-radius: var(--wiq-radius-md); }
-.audience-switch .btn.secondary { border-color: transparent; background: transparent; }
-.audience-switch .btn.secondary:hover { background: rgba(255, 255, 255, .05); }
-.audience-switch .btn.is-current { pointer-events: none; }
+
+
+
+
+
 .audience-note { margin: 0 0 22px; max-width: 58ch; }
 
 /* A plan smaller than the roster it would have to hold. Shown rather than
@@ -522,7 +513,7 @@
 .mission-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
 .mission-card{display:flex;gap:16px;padding:16px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
 .mission-card.done{opacity:.7}
-.mission-number{flex:none;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:rgba(79,215,255,.14);color:#4fd7ff}
+
 .mission-body{min-width:0;flex:1}
 .mission-body h3{margin:4px 0 6px}
 .mission-body p{margin:4px 0}
@@ -535,7 +526,7 @@
 .camp-level-bar i{display:block;height:100%;background:#4fd7ff;border-radius:999px}
 .camp-rules summary{cursor:pointer;font-size:14px;color:#c7cede}
 .camp-rules li{margin:6px 0}
-.assignment-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+
 .session-upload{display:flex;gap:6px;margin:0}
 .session-upload label{cursor:pointer;position:relative}
 .session-upload [hidden]{display:none!important}
@@ -580,7 +571,7 @@
 .camp-finished .mission-list{margin-top:12px}
 .camp-finished .mission-card{opacity:.8}
 .camp-add .assignment-builder{margin-top:12px}
-@media (max-width:760px){.camp-today{grid-template-columns:1fr;padding:16px}.camp-next-actions .btn,.camp-next-actions form,.camp-next-actions label{width:100%;justify-content:center}.assignment-actions{justify-content:flex-start}}
+@media (max-width:760px){.camp-today{grid-template-columns:1fr;padding:16px}.camp-next-actions .btn,.camp-next-actions form,.camp-next-actions label{width:100%;justify-content:center}}
 /* A fight's public link (story.html): the stats-only card as a page. */
 .story-page{max-width:760px;margin:24px auto 48px;display:grid;gap:16px}
 .story-head h1{margin:8px 0 10px;font-size:clamp(34px,6vw,56px);line-height:1.02}
@@ -663,11 +654,11 @@
 .fight-numbers-head [role=columnheader]:nth-child(2){grid-column:2}.fight-numbers-head [role=columnheader]:nth-child(3){grid-column:3}
 @media (max-width:560px){.fight-numbers-group [role=row]{grid-template-columns:1fr 64px 64px}.fight-numbers-group{padding:10px 12px}}
 /* A share button that says why it cannot share (result.html). */
-.share-unavailable{position:relative}
-.share-unavailable summary{list-style:none;cursor:pointer}
-.share-unavailable summary::-webkit-details-marker{display:none}
-.share-unavailable p{position:absolute;z-index:5;right:0;top:calc(100% + 6px);width:min(320px,80vw);margin:0;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:#10192b;box-shadow:0 12px 30px rgba(0,0,0,.4)}
-@media (max-width:560px){.share-unavailable p{position:static;width:auto;margin-top:8px}}
+
+
+
+
+@media (max-width:560px){}
 /* Phones: today's upload always one thumb away (camp.html). */
 .camp-sticky{display:none}
 @media (max-width:760px){

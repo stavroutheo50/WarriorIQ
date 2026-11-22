@@ -300,79 +300,42 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
   font-weight: 600;
 }
 /* Headline top left, the interface preview to its right (owner, 2026-10-28). */
-.home-hero {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-  gap: clamp(32px, 5vw, 72px);
-  align-items: center;
-  padding: clamp(48px, 9vh, 104px) 0 56px;
-}
-.home-hero h1 {
-  margin: 26px 0 0;
-  font-size: clamp(44px, 6vw, 96px);
-  font-weight: 850;
-  line-height: .9;
-  letter-spacing: -.045em;
-  text-transform: uppercase;
-}
-.home-hero h1 em { font-style: normal; color: rgba(255, 255, 255, .5) !important; }
+
+
+
 .home-lead { max-width: 560px; margin: 24px 0 0; color: var(--glass-text-soft); font-size: clamp(17px, 1.5vw, 20px); line-height: 1.5; }
 .home-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
 .home-actions .btn { min-height: 56px; padding-inline: 28px; font-size: 17px; }
-.home-preview { position: relative; padding: 12px; border-radius: 30px; }
+
 /* Glass only looks like glass with something behind it. A soft blue and
    violet light sits behind the preview, the way an iPhone's glass sits on its
    wallpaper; the rest of the page stays plain. */
-.home-preview::before {
-  content: "";
-  position: absolute;
-  inset: -18% -12% -22% -14%;
-  z-index: -1;
-  border-radius: 50%;
-  background:
-    radial-gradient(42% 46% at 30% 38%, rgba(64, 120, 255, .38), transparent 70%),
-    radial-gradient(38% 42% at 72% 66%, rgba(150, 92, 255, .30), transparent 70%),
-    radial-gradient(30% 30% at 60% 22%, rgba(56, 210, 255, .18), transparent 70%);
-  filter: blur(30px);
-  pointer-events: none;
-}
-.home-preview .preview-screen {
-  border: 1px solid rgba(255, 255, 255, .08) !important;
-  border-radius: 20px;
-  background: rgba(6, 9, 15, .62) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
-}
-.home-preview .preview-screen-head b { color: rgba(255, 255, 255, .85); }
+
+
+
 
 /* The hero clip's play button (owner, 2026-11-01), over the clip's corner. */
-.preview-play {
-  position: absolute; right: 12px; bottom: 12px;
-  display: inline-flex; align-items: center; gap: 8px;
-  min-height: 44px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, .22); border-radius: 999px;
-  background: rgba(6, 9, 15, .72); color: #ffffff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
-}
-.preview-play:hover { background: rgba(20, 26, 38, .9); }
-.preview-play[hidden] { display: none; }
-.preview-play-icon { width: 0; height: 0; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; }
-.is-playing .preview-play-icon { width: 10px; height: 12px; border-width: 0 3px; border-color: currentColor; }
 
-.home-proof { padding: 16px 0 72px; }
+
+
+
+
+
+
 .home-proof-title, .home-steps h3 { margin: 0; }
-.home-proof-title { color: var(--glass-text-faint); font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .1em; }
+
 .home-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; margin-top: 22px; }
 .home-card { padding: 26px; border-radius: 28px; }
 .home-card h3 { margin: 0; color: var(--glass-text-faint); font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .08em; }
 .home-card h3 span { margin-left: 6px; color: #7f8aa0; text-transform: none; letter-spacing: 0; }
 .home-card small { display: block; margin-top: 8px; color: #dfe4ee; font-size: 15px; line-height: 1.5; }
-.home-pair { display: flex; gap: 28px; margin-top: 16px; }
-.home-pair strong, .home-score strong { font-size: 60px; font-weight: 850; line-height: 1; font-variant-numeric: tabular-nums; }
-.home-pair small { margin-top: 6px; }
-.home-a { color: #8cc2ff; }
-.home-b { color: #ff6470; }
-.home-score { display: flex; align-items: baseline; gap: 10px; margin: 16px 0 0; color: #8a93a6; font-size: 40px; }
-.home-drill { margin: 16px 0 0; font-size: 26px; font-weight: 750; line-height: 1.15; }
+
+
+
+
+
+
+
 .home-card-featured { box-shadow: var(--glass-shine), 0 0 0 1px rgba(255, 255, 255, .22), var(--glass-shadow) !important; }
 .home-price { margin: 12px 0 0; font-size: 40px; font-weight: 850; line-height: 1.1; }
 .home-price span { display: block; margin-top: 4px; color: var(--glass-text-faint); font-size: 15px; font-weight: 500; }
@@ -391,8 +354,8 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 .home-steps p { margin: 6px 0 0; color: var(--glass-text-faint); }
 
 /* Two value cards under the three columns (owner, 2026-11-01). */
-.home-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 0 0 56px; }
-.home-values h3 { color: #ffffff; font-size: 18px; text-transform: none; letter-spacing: 0; }
+
+
 
 .home-section { padding: 40px 0; }
 .home-section > h2 { margin: 0 0 8px; font-size: clamp(34px, 4.4vw, 52px); font-weight: 850; letter-spacing: -.03em; }
@@ -406,18 +369,18 @@ h1 em { color: rgba(255, 255, 255, .5) !important; }
 /* The glow reached ~45px past the preview's sides, which made phones and
    tablets scroll sideways once the preview met the page edge. */
 @media (max-width: 1100px) {
-  .home-preview::before { inset: -18% 0 -22% 0; }
+  
 }
 @media (max-width: 900px) {
-  .home-hero { grid-template-columns: minmax(0, 1fr); padding-top: 36px; }
+  
 }
 @media (max-width: 720px) {
   .glass-chip { font-size: 12px; padding: 8px 14px; }
   .home-actions { flex-direction: column; }
   .home-actions .btn { width: 100%; }
   .home-steps ol { grid-template-columns: minmax(0, 1fr); gap: 20px; }
-  .home-values { grid-template-columns: minmax(0, 1fr); }
-  .home-pair strong, .home-score strong { font-size: 50px; }
+  
+  
   .nav { top: 8px; margin-top: 8px; height: 58px; padding: 0 6px 0 14px; }
   .nav-backdrop { height: 80px; }
   .cookie-notice { bottom: 10px; padding: 14px; }
@@ -555,29 +518,21 @@ body {
 /* --- Homepage clip (index.html) -------------------------------------------
    The real tracking example in the glass frame where the interface preview
    was. */
-.home-preview { margin: 0; }
-.home-clip { position: relative; overflow: hidden; border-radius: 20px; background: #05070b; aspect-ratio: 16 / 9; }
-.home-clip video { display: block; width: 100%; height: 100%; object-fit: cover; }
-.home-clip-live {
-  position: absolute; top: 12px; right: 12px;
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 12px;
-  border: 1px solid var(--glass-edge-side); border-top-color: var(--glass-edge-top); border-radius: 999px;
-  background: rgba(10, 15, 24, .55);
-  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-  color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-}
-.home-clip-live i { width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; box-shadow: 0 0 10px #3ddc97; }
-.home-preview figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 6px 2px; color: #dfe4ee; font-size: 13px; }
-.home-preview figcaption span { display: inline-flex; align-items: center; gap: 6px; }
-.home-dot { width: 10px; height: 10px; border-radius: 3px; }
-.home-dot-a { background: #8cc2ff; }
-.home-dot-b { background: #ff6470; }
-.home-clip-note { margin-left: auto; color: var(--glass-text-faint); }
+
+
+
+
+
+
+
+
+
+
+
 /* Nothing to tap on the homepage clip: no pause, no controls, no full screen
    (owner, 2026-11-01). */
-.home-clip video { pointer-events: none; user-select: none; -webkit-user-select: none; }
-.home-clip video::-webkit-media-controls, .home-clip video::-webkit-media-controls-start-playback-button { display: none !important; -webkit-appearance: none; }
+
+
 
 /* --- Upload form: one step at a time (analyze.html) ------------------------
    The button styles set display, which beat the hidden attribute: Back and
@@ -623,7 +578,7 @@ body {
 .analysis-markers button.fighter-a { background: #5aa0ff; }
 .live-event-item.fighter-a button { border-left-color: #5aa0ff; }
 .warmup-a { color: #5aa0ff; }
-.preview-b { color: #ffe3e6; }
+
 
 /* Ringside Scorer (owner, 2026-11-02): app/templates/ringside.html. Built for
    a phone held at ringside: big targets, blue corner left, red corner right. */
@@ -666,7 +621,7 @@ body {
 .ringside-pad-b .ringside-tap { border: 1px solid rgba(255, 100, 112, .45); background-color: rgba(255, 100, 112, .14); }
 .ringside-tap small { opacity: .75; font-weight: 800; }
 .ringside-tap:active, .ringside-tap.is-hit { transform: scale(.96); }
-.ringside-knockdown { min-height: 48px; font-size: 14px; opacity: .85; }
+
 .ringside-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 .ringside-actions .btn { flex: 1 1 140px; justify-content: center; }
 .ringside-live[hidden], .ringside-setup[hidden], .ringside-result[hidden] { display: none !important; }
@@ -823,8 +778,8 @@ textarea { border-radius: 18px !important; }
    Motion lives in static/home.js; nothing is hidden until it runs. */
 body:has(.hx-hero) { overflow-x: clip; }
 .hx-hero { position: relative; width: 100vw; margin-left: calc(50% - 50vw); min-height: min(820px, 92svh); display: grid; align-items: end; overflow: hidden; }
-.hx-hero .hx-hero-clip { position: absolute; inset: 0; margin: 0; border: 0 !important; border-radius: 0 !important; background: #050810; }
-.hx-hero .hx-hero-clip video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.06); animation: hx-settle 2.4s cubic-bezier(.16, 1, .3, 1) forwards; }
+
+
 .hx-hero::after { content: ""; position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(180deg, rgba(10, 15, 24, .55) 0%, rgba(10, 15, 24, .12) 35%, rgba(10, 15, 24, .75) 72%, var(--glass-canvas) 100%),
               linear-gradient(90deg, rgba(10, 15, 24, .85) 0%, rgba(10, 15, 24, 0) 62%); }
@@ -834,7 +789,7 @@ body:has(.hx-hero) { overflow-x: clip; }
   -webkit-background-clip: text; background-clip: text; color: transparent; animation: hx-shimmer 9s linear 1.2s infinite; }
 .hx-lead { max-width: 58ch; margin: 0; color: #c3cad8; font-size: 19px; line-height: 1.55; animation: hx-fade 1s cubic-bezier(.16, 1, .3, 1) .3s both; }
 .hx-actions { margin: 0; animation: hx-fade 1s cubic-bezier(.16, 1, .3, 1) .45s both; }
-.hx-corners { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; animation: hx-fade 1s ease .05s both; }
+
 .hx-corner { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; color: #c3cad8; background: rgba(10, 15, 24, .55); border: 1px solid rgba(255, 255, 255, .12); }
 .hx-corner i { width: 9px; height: 9px; border-radius: 50%; animation: hx-pulse 2.4s ease-in-out infinite; }
 .hx-blue i { background: #5aa9ff; --hx-glow: #5aa9ff; } .hx-red i { background: #ff5d68; --hx-glow: #ff5d68; animation-delay: 1.2s; }
@@ -863,10 +818,10 @@ body:has(.hx-hero) { overflow-x: clip; }
 .hx-measure h3 { margin: 0; font-size: 22px; font-weight: 800; }
 .hx-measure p { margin: 0; color: #c3cad8; font-size: 15px; }
 .hx-split { display: block; width: 72px; height: 4px; border-radius: 4px; background: linear-gradient(90deg, #5aa9ff 0 50%, #ff5d68 50% 100%); }
-.hx-measure.hx-wide { grid-column: span 3; grid-template-columns: 1fr 1fr; gap: 28px; align-items: center; padding: 14px 14px 14px 30px !important; }
-.hx-measure.hx-wide > div { display: grid; gap: 12px; }
-.hx-measure.hx-wide video { width: 100%; height: 260px; object-fit: cover; border-radius: 20px; }
-.hx-tag { justify-self: start; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #cfe2ff; background: rgba(61, 127, 240, .18); border: 1px solid rgba(90, 169, 255, .35); }
+
+
+
+
 
 .hx-steps { display: grid; grid-template-columns: 1fr 1.1fr; gap: 28px; align-items: center; }
 .hx-steps ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
@@ -914,14 +869,14 @@ body:has(.hx-hero) { overflow-x: clip; }
   .hx-sport.hx-half h3 { font-size: 22px; }
   .hx-sport.hx-half p { display: none; }
   .hx-measures, .hx-steps, .hx-plans { grid-template-columns: 1fr; }
-  .hx-measure.hx-wide { grid-column: auto; grid-template-columns: 1fr; padding: 14px !important; }
-  .hx-measure.hx-wide > div { padding: 12px 10px 4px; }
+  
+  
   .hx-steps figure video { min-height: 280px; }
   .hx-band > div { padding: 30px 24px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hx-hero video, .hx-title, .hx-title em, .hx-lead, .hx-actions, .hx-corners, .hx-corner i { animation: none !important; }
-  .hx-hero .hx-hero-clip video { transform: none; }
+  
 }
 /* The older step-strip and headline rules still match these elements. */
 .home-steps .hx-steps ol { display: grid !important; grid-template-columns: 1fr !important; gap: 14px !important; counter-reset: none; }

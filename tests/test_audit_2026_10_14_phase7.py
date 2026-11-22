@@ -100,7 +100,8 @@ def test_the_switcher_marks_the_current_sport():
 def test_the_header_collapses_below_1024px():
     fixes = (STATIC / "fixes.css").read_text(encoding="utf-8")
     product = (STATIC / "product.css").read_text(encoding="utf-8")
-    assert ("@media(max-width:1023px){.navlinks{display:none}.nav-more{display:none}.account-nav{display:none}"
+    # The old .nav-more menu no longer exists; its hide rule was removed with the other unused CSS (2026-11-22).
+    assert ("@media(max-width:1023px){.navlinks{display:none}.account-nav{display:none}"
             ".mobile-menu-button{display:block}}") in fixes
     assert "@media(max-width:1023px){.nav{display:flex}}" in product
 
