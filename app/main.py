@@ -2253,9 +2253,7 @@ def _apply_response_headers(request: Request, response) -> None:
     # Sign-in forms redirect to the provider, and form-action is enforced across
     # that redirect: with 'self' alone every social button is blocked by the
     # browser before it leaves the page. Only the pages carrying those forms
-    # need the provider origins, and only /login carries the legacy GitHub
-    # recovery line - so github.com is no longer allowed on every page of a
-    # site that offers no GitHub sign-up.
+    # need the provider origins, so they are added on those pages only.
     form_action = " ".join(["'self'", *SOCIAL_AUTH.form_action_origins_for(request.url.path)])
     # The replay CDN, only when one is configured (SETTINGS.media_cdn_base_url).
     media_src = "'self' blob:"

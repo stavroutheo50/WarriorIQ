@@ -2630,8 +2630,9 @@ class SocialAuthResilienceTests(unittest.TestCase):
 
         source = (Path(__file__).resolve().parents[1] / "core" / "social_auth.py").read_text(encoding="utf-8")
         self.assertGreater(OUTBOUND_TIMEOUT_SECONDS, 0)
-        # Every registered client, OIDC or not, has to carry the ceiling.
-        self.assertEqual(source.count('"timeout": OUTBOUND_TIMEOUT_SECONDS'), 3)
+        # Every registered client, OIDC or not, has to carry the ceiling: one per
+        # register() call (two: the OIDC helper and Facebook, since GitHub went on 2026-11-22).
+        self.assertEqual(source.count('"timeout": OUTBOUND_TIMEOUT_SECONDS'), source.count("oauth.register("))
 
 
 class UndecodableUploadTests(unittest.TestCase):

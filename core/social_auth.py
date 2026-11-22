@@ -25,21 +25,10 @@ class SocialIdentity:
 # silently twice a year unless minted on every request. Re-adding it means
 # restoring this label, the registration block, and the icon in auth.html.
 #
-# GitHub is absent for a different reason: this is a product for fighters and
-# coaches, and a developer account is not a credential that audience has. It is
-# missing from HERE only - the registration below, the callback and the identity
-# branch are all still live, on purpose. Anyone who already signed up through
-# GitHub has an oauth_identities row and, because GitHub publishes a profile
-# email only if the account chose to, possibly no address to send a password
-# reset to. Deleting the provider outright would lock those people out with no
-# way back. Keeping it registered means putting the button back is one line
-# here, not a rebuild.
-#
-# To finish the removal, confirm nobody is relying on it first:
-#     SELECT COUNT(*) FROM oauth_identities WHERE provider='github';
-# If that is 0, delete the registration block, the AUTHORIZE_ORIGINS entry, the
-# identity_from_token branch, the two config settings and the icon in auth.html,
-# and unset WARRIORIQ_GITHUB_CLIENT_ID/SECRET on the host.
+# GitHub sign-in was removed on 2026-11-22. It had been sign-in only since
+# October (fighters and coaches do not have developer accounts), and the
+# owner confirmed on /admin that the one account linked to it was their own.
+# Its oauth_identities row is left as it was: it is inert without a provider.
 PROVIDER_LABELS = {
     "google": "Google",
     "facebook": "Facebook",
@@ -47,24 +36,10 @@ PROVIDER_LABELS = {
 }
 
 # Providers nobody may sign UP with any more, but that existing accounts still
-# need to sign IN with.
-#
-# Taking GitHub out of PROVIDER_LABELS removes the button from both pages, and
-# that is one step too far on a live site where GitHub was configured and could
-# have been used: those accounts have no password, and GitHub publishes a
-# profile email only when the account chose to, so some of them have no address
-# to send a password reset to either. Removing the only door they have is not
-# a tidy-up, it is a lockout.
-#
-# So the button is gone from /signup, where it was the wrong offer, and /login
-# keeps a quiet recovery line for people who already used it. New accounts
-# cannot be created this way; old ones are not stranded.
-#
-# This can be emptied once the owner confirms nothing depends on it:
-#     SELECT COUNT(*) FROM oauth_identities WHERE provider='github';
-LEGACY_PROVIDER_LABELS = {
-    "github": "GitHub",
-}
+# need to sign IN with: shown on /login only, with a line saying who they are
+# for. Empty since GitHub was removed (2026-11-22); a provider being retired
+# goes here first, so the accounts created with it are not locked out.
+LEGACY_PROVIDER_LABELS: dict[str, str] = {}
 
 # Where each provider's consent page lives.
 #
@@ -78,7 +53,6 @@ AUTHORIZE_ORIGINS = {
     "google": "https://accounts.google.com",
     "facebook": "https://www.facebook.com",
     "microsoft": "https://login.microsoftonline.com",
-    "github": "https://github.com",
 }
 
 # Every outbound call to a provider is made while somebody waits on a button.
@@ -114,26 +88,6 @@ class SocialAuthRegistry:
                 client_kwargs={"scope": "email", "timeout": OUTBOUND_TIMEOUT_SECONDS},
             )
             self._enabled.add("facebook")
-        # GitHub is not an OpenID Connect provider: there is no id_token and no
-        # discovery document, so the identity is read from its own user API.
-        # Its endpoints are fixed, which means pressing this button needs no
-        # network call before the redirect at all.
-        #
-        # This registration is deliberately kept although GitHub no longer has a
-        # button - see the note on PROVIDER_LABELS. It exists so an account
-        # created through GitHub is not orphaned, and so restoring the button is
-        # one line. Do not delete it without checking oauth_identities first.
-        if SETTINGS.github_client_id and SETTINGS.github_client_secret:
-            self.oauth.register(
-                name="github",
-                client_id=SETTINGS.github_client_id,
-                client_secret=SETTINGS.github_client_secret,
-                access_token_url="https://github.com/login/oauth/access_token",
-                authorize_url="https://github.com/login/oauth/authorize",
-                api_base_url="https://api.github.com/",
-                client_kwargs={"scope": "read:user user:email", "timeout": OUTBOUND_TIMEOUT_SECONDS},
-            )
-            self._enabled.add("github")
 
     def _register_oidc(self, name: str, client_id: str, client_secret: str, metadata_url: str) -> None:
         if not client_id or not client_secret:
@@ -214,29 +168,6 @@ class SocialAuthRegistry:
             email = payload.get("email")
             name = payload.get("name")
             email_verified = False
-        elif provider == "github":
-            response = await client.get("user", token=token)
-            response.raise_for_status()
-            payload = response.json()
-            subject = str(payload.get("id") or "")
-            name = payload.get("name") or payload.get("login")
-            email = payload.get("email")
-            email_verified = False
-            if not email:
-                # A GitHub profile email is public only if the account chose to
-                # publish it, so the primary address usually has to be asked
-                # for separately. Failing that, the account is still usable -
-                # it just has no address attached.
-                try:
-                    listing = await client.get("user/emails", token=token)
-                    listing.raise_for_status()
-                    for entry in listing.json():
-                        if entry.get("primary"):
-                            email = entry.get("email")
-                            email_verified = bool(entry.get("verified"))
-                            break
-                except Exception:                       # noqa: BLE001
-                    email = None
         else:
             payload = dict(token.get("userinfo") or {})
             if not payload:
