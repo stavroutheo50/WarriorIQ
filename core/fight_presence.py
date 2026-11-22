@@ -427,6 +427,62 @@ class FightPresence:
 # Verdicts for saved reports, by tracking file and modification time.
 _TRACKING_CACHE: dict[str, tuple[int, dict | None]] = {}
 
+# The verdict is also kept on disk beside the tracking file (2026-11-22).
+# The memory cache above empties every time the host restarts the app - after
+# a deploy, and whenever it has been idle - and the next Fight Camp then
+# re-read every fight's whole frame-by-frame tracking.jsonl, often many MB
+# each: the owner measured 13 seconds. The saved verdict is reused only while
+# the tracking file is unchanged (size and modification time) and this
+# module's code is unchanged (a hash of its source), so a fix to the check
+# recomputes it rather than serving an old answer.
+def _code_version() -> str:
+    import hashlib
+
+    try:
+        return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
+    except OSError:
+        return "unknown"
+
+
+_CODE_VERSION = _code_version()
+
+
+def _verdict_path(path: Path) -> Path:
+    return path.with_name(path.name + ".plausibility.json")
+
+
+def _saved_verdict(path: Path, modified: int, size: int):
+    """(True, verdict) when a still-valid saved verdict exists, else (False, None)."""
+    try:
+        saved = json.loads(_verdict_path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False, None
+    if (isinstance(saved, dict) and saved.get("code") == _CODE_VERSION
+            and saved.get("tracking_mtime_ns") == modified and saved.get("tracking_size") == size):
+        return True, saved.get("verdict")
+    return False, None
+
+
+def _save_verdict(path: Path, modified: int, size: int, verdict) -> None:
+    """Best effort: a folder that cannot be written to only means the next start recomputes."""
+    import os
+    import tempfile
+
+    target = _verdict_path(path)
+    temporary = None
+    try:
+        handle, temporary = tempfile.mkstemp(dir=str(target.parent), prefix=".plausibility-", suffix=".tmp")
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
+            json.dump({"code": _CODE_VERSION, "tracking_mtime_ns": modified, "tracking_size": size,
+                       "verdict": verdict}, out)
+        os.replace(temporary, target)
+    except (OSError, TypeError, ValueError):
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
 
 def plausibility_from_tracking(path: Path) -> dict | None:
     """The plausibility verdict for a saved analysis, from its tracking.jsonl.
@@ -439,12 +495,17 @@ def plausibility_from_tracking(path: Path) -> dict | None:
 
     path = Path(path)
     try:
-        modified = path.stat().st_mtime_ns
+        stat = path.stat()
     except OSError:
         return None
+    modified, size = stat.st_mtime_ns, stat.st_size
     cached = _TRACKING_CACHE.get(str(path))
     if cached and cached[0] == modified:
         return cached[1]
+    found, saved = _saved_verdict(path, modified, size)
+    if found:
+        _TRACKING_CACHE[str(path)] = (modified, saved)
+        return saved
 
     def observation(entry):
         observed = (entry or {}).get("observation")
@@ -474,6 +535,7 @@ def plausibility_from_tracking(path: Path) -> dict | None:
     except (OSError, ValueError, KeyError, TypeError):
         verdict = None
     _TRACKING_CACHE[str(path)] = (modified, verdict)
+    _save_verdict(path, modified, size, verdict)
     return verdict
 
 

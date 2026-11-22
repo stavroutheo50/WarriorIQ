@@ -137,3 +137,6 @@ dataset/public/
 # public repository).
 dataset/stock_strikes/*/track.jsonl.gz
 dataset/stock_strikes/*/features_check.npz
+
+# Saved fight-plausibility verdicts beside tracking files (core/fight_presence.py).
+*.plausibility.json

@@ -59,7 +59,7 @@ from core.qr import svg as qr_svg
 from core.db import (
     begin_two_factor_setup, count_two_factor_attempt, create_two_factor_challenge, delete_two_factor_challenge,
     disable_two_factor, enable_two_factor, get_two_factor_challenge, list_account_sessions, replace_recovery_codes,
-    revoke_session_by_id, two_factor_row, two_factor_storage_counts, use_recovery_code, use_two_factor_step,
+    revoke_session_by_id, two_factor_row, has_security_event, two_factor_storage_counts, use_recovery_code, use_two_factor_step,
 )
 from core.identity import fighter_pair_similarity
 from core.kit import alike_reason as kit_alike_reason, kit_similarity
@@ -2021,6 +2021,30 @@ def _load_viewer_state(request: Request) -> None:
 _maintenance_lock = threading.Lock()
 
 
+_plausibility_warmed = False
+
+
+def _warm_plausibility_verdicts() -> int:
+    """Once per process: save the fight-plausibility verdict beside every fight that lacks one.
+
+    Fight Camp and the library check each fight against its frame-by-frame
+    tracking.jsonl. The verdict is kept on disk once worked out
+    (core/fight_presence.py), so doing it here, in the background sweep that
+    runs after a restart, means no visitor waits for it (owner, 2026-11-22:
+    Fight Camp took 13 seconds). Returns how many fights were checked.
+    """
+    from core.db import list_fight_report_paths
+    from core.fight_presence import plausibility_from_tracking
+
+    checked = 0
+    for report_path in list_fight_report_paths():
+        tracking = Path(report_path).parent / "tracking.jsonl"
+        if tracking.exists() and not tracking.with_name(tracking.name + ".plausibility.json").exists():
+            plausibility_from_tracking(tracking)
+            checked += 1
+    return checked
+
+
 def _run_periodic_maintenance(now: float | None = None) -> None:
     """Expire guest jobs, retained videos and abandoned processing files.
 
@@ -2030,8 +2054,17 @@ def _run_periodic_maintenance(now: float | None = None) -> None:
     It now runs on a background thread (see _schedule_maintenance); calling it
     directly is still the way to run it synchronously, as the tests do.
     """
-    global _last_guest_cleanup, _last_saved_video_cleanup
+    global _last_guest_cleanup, _last_saved_video_cleanup, _plausibility_warmed
     now = time.monotonic() if now is None else now
+    if not _plausibility_warmed:
+        _plausibility_warmed = True
+        try:
+            started = time.monotonic()
+            warmed = _warm_plausibility_verdicts()
+            if warmed:
+                LOGGER.info("plausibility_verdicts_saved fights=%s seconds=%.1f", warmed, time.monotonic() - started)
+        except Exception:                                               # noqa: BLE001
+            LOGGER.exception("plausibility_warm_failed")
     if now - _last_guest_cleanup > 600:
         jobs_before_cleanup = dict(list_jobs())
         cutoff = time.time() - SETTINGS.failed_upload_retention_hours * 3600
@@ -2239,6 +2272,55 @@ def _apply_response_headers(request: Request, response) -> None:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 
+# Where new accounts stop (owner, 2026-11-22: of 8 accounts made in a week,
+# 2 analysed a fight, and nothing said where the other 6 stopped). Each step
+# is recorded once per account in security_events - no new table - and every
+# refusal on the way is recorded each time, with the reason the person was
+# shown. The admin page reads them back (app/admin_overview.py onboarding).
+# Nothing is stored but the step, a status code and that server-written reason.
+JOURNEY_ONCE = ("journey_upload_page", "journey_video_uploaded", "journey_fighter_picker",
+                "journey_fighters_picked")
+
+
+def _journey_failed(job: dict | None, reason: str, job_id: str = "") -> None:
+    """An analysis that started and failed, against the account that started it."""
+    owner = str((job or {}).get("owner_key") or "")
+    if not owner.startswith("account:"):
+        return
+    try:
+        record_security_event("journey_analysis_failed", account_id=int(owner.split(":", 1)[1]),
+                              severity="warning", resource_type="fight", resource_id=job_id or None,
+                              metadata={"reason": reason[:120]})
+    except Exception:                                                   # noqa: BLE001
+        LOGGER.exception("journey_record_failed")
+
+
+def _journey_event(method: str, path: str, status: int) -> str | None:
+    refused = status >= 400
+    if method == "GET" and status == 200 and (path == "/analyze" or path.startswith("/analyze/")):
+        return "journey_upload_page"
+    if method == "GET" and status == 200 and path.startswith("/select/"):
+        return "journey_fighter_picker"
+    if method == "POST" and (path == "/upload" or path == "/api/upload/begin"
+                             or (path.startswith("/api/upload/") and path.endswith("/finish"))):
+        if refused:
+            return "journey_upload_refused"
+        return "journey_video_uploaded" if path != "/api/upload/begin" else None
+    if method == "POST" and path.startswith("/api/start/"):
+        return "journey_start_refused" if refused else "journey_fighters_picked"
+    return None
+
+
+def _record_journey(account_id: int, event: str, status: int, reason: str) -> None:
+    if event in JOURNEY_ONCE and has_security_event(account_id, event):
+        return
+    metadata = {"status": int(status)}
+    if reason:
+        metadata["reason"] = reason[:200]
+    record_security_event(event, account_id=account_id,
+                          severity="warning" if event.endswith("_refused") else "info", metadata=metadata)
+
+
 @app.middleware("http")
 async def viewer_context(request: Request, call_next):
     rejected_host = next(
@@ -2328,6 +2410,14 @@ async def viewer_context(request: Request, call_next):
     else:
         response = await call_next(request)
     duration_ms = (time.perf_counter() - request_started) * 1000.0
+    journey_account = getattr(request.state, "account", None)
+    journey = _journey_event(request.method, request.url.path, response.status_code) if journey_account else None
+    if journey:
+        try:
+            await run_in_threadpool(_record_journey, int(journey_account["id"]), journey, response.status_code,
+                                    str(getattr(request.state, "journey_reason", "") or ""))
+        except Exception:                                               # noqa: BLE001 - never costs the page
+            LOGGER.exception("journey_record_failed")
     response.headers.setdefault("X-Request-ID", request_id)
     response.headers.setdefault("Server-Timing", f"app;dur={duration_ms:.1f}")
     LOGGER.info(
@@ -2364,6 +2454,7 @@ async def viewer_context(request: Request, call_next):
 
 @app.exception_handler(StarletteHTTPException)
 async def http_error_page(request: Request, exc: StarletteHTTPException):
+    request.state.journey_reason = str(exc.detail or "")
     if _wants_json(request):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
     if exc.status_code == 405 and request.method in {"GET", "HEAD"}:
@@ -2427,6 +2518,7 @@ async def invalid_request(request: Request, exc: RequestValidationError):
 
 @app.exception_handler(Exception)
 async def unexpected_error_page(request: Request, exc: Exception):
+    request.state.journey_reason = "unexpected server error"
     LOGGER.exception("Unhandled request failure", exc_info=exc)
     detail = "WarriorIQ could not complete this request. Please try again."
     if _wants_json(request):
@@ -3058,6 +3150,7 @@ def _run_job(job_id: str, req: AnalysisRequest, analysis_run_id: str):
             update_job(job_id, {"usage_reserved": False})
         LOGGER.exception("Analysis job %s failed", job_id, exc_info=exc)
         if still_owns_run:
+            _journey_failed(job, type(exc).__name__, job_id)
             update_job(job_id, {
                 "status": "error", "message": _public_analysis_error(exc),
                 "worker_lease_expires_epoch": None,
@@ -5872,6 +5965,7 @@ def remote_worker_failed(request: Request, job_id: str, payload: WorkerFailurePa
     }, renew_lease=False):
         raise HTTPException(409, "This worker no longer owns the analysis generation.")
     record_worker_heartbeat(worker_id)
+    _journey_failed(job, str(payload.error_code or "analysis_failed")[:80], job_id)
     return {"ok": True}
 
 
@@ -10189,6 +10283,8 @@ def admin_page(request: Request, q: str = ""):
                 "failures": admin_overview.failures(),
                 "storage": admin_overview.storage(),
                 "live": admin_overview.live_jobs(list_jobs()),
+                # Where new accounts stop between sign-up and a report (2026-11-22).
+                "onboarding": admin_overview.onboarding(list_jobs()),
                 "worker": worker_status(),
                 "worker_refusal": recent_worker_refusal(),
                 "payments_enabled": SETTINGS.payments_enabled,

@@ -74,6 +74,25 @@
   </tbody></table></div>
 </section>
 
+{% set ob = o.onboarding %}
+<section class="card admin-section" id="adminOnboarding" aria-labelledby="adminOnboardingTitle">
+  <div class="eyebrow">New accounts · last {{ ob.days }} days</div><h2 id="adminOnboardingTitle">Where new accounts stop</h2>
+  <p class="small muted">Each new account's furthest step on the way to a first report. Steps between sign-up and a saved fight are recorded from {{ ob.tracking_since }}; an older account shows only what its saved fights and waiting analyses prove.</p>
+  {% if ob.total %}
+  <ol class="admin-funnel">{% for step in ob.funnel %}<li><span>{{ step.label }}</span><b class="wiq-num">{{ step.count }}</b><i class="admin-funnel-bar" style="--share: {{ step.share }}%"></i><small>{{ step.share }}%</small></li>{% endfor %}</ol>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Joined</th><th>Email</th><th>Got as far as</th><th>Stopped before</th><th>Now</th><th>Last problem shown to them</th><th>Last seen</th></tr></thead><tbody>
+    {% for person in ob.people %}<tr>
+      <td>{{ person.created_at[:10] }}</td>
+      <td>{{ person.email }}{% if not person.email_confirmed %} <span class="small muted">(email not confirmed)</span>{% endif %}</td>
+      <td>{{ person.furthest }}{% if person.before_tracking and person.furthest_key != 'finished' %} <span class="small muted">(joined before tracking: later steps unknown)</span>{% endif %}</td>
+      <td>{{ person.next_step or '—' }}</td>
+      <td>{{ person.blocked or person.now or '—' }}</td>
+      <td>{% if person.problem %}<span class="small">{{ person.problem.type }}: {{ person.problem.reason }}</span>{% if person.refusals > 1 %} <span class="small muted">({{ person.refusals }} times)</span>{% endif %}{% else %}—{% endif %}</td>
+      <td>{{ person.last_seen[:16]|replace('T', ' ') if person.last_seen else 'never' }}</td>
+    </tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="muted">No accounts made in the last {{ ob.days }} days.</p>{% endif %}
+</section>
 <section class="card admin-section" id="adminPeople" aria-labelledby="adminPeopleTitle">
   <div class="eyebrow">People</div><h2 id="adminPeopleTitle">Accounts</h2>
   <div class="admin-tiles admin-tiles-small">

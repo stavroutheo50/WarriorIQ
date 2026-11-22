@@ -11,6 +11,7 @@ Kept apart from app/main.py so the page template stays presentation only.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import threading
@@ -366,3 +367,109 @@ def _email_note(event_type: str, metadata: dict) -> str:
     if event_type not in EMAIL_EVENTS:
         return ""
     return "email sent" if _was_sent(metadata) else "email NOT sent"
+
+
+# --- Where new accounts stop (owner, 2026-11-22) -------------------------------
+# Eight accounts in a week and two analysed a fight; nothing said where the
+# other six stopped. Each step below is read from what the site already keeps
+# (the account row, saved fights, the analyses it is holding) and from the
+# journey_* events app.main records from 2026-11-22 on. For an account older
+# than that, the steps between sign-up and a saved fight show as unknown
+# unless one of the other sources proves them.
+
+JOURNEY_STEPS = (
+    ("signed_up", "Signed up"),
+    ("upload_page", "Opened the upload page"),
+    ("video_uploaded", "Uploaded a video"),
+    ("fighter_picker", "Saw the pick-the-fighters frame"),
+    ("fighters_picked", "Picked the fighters and started"),
+    ("finished", "Got a finished report"),
+)
+_STEP_INDEX = {key: index for index, (key, _) in enumerate(JOURNEY_STEPS)}
+JOURNEY_TRACKING_SINCE = "2026-11-22"
+_JOB_STEP = {"selecting": "video_uploaded", "uploading": "upload_page", "queued": "fighters_picked",
+             "running": "fighters_picked", "interrupted": "fighters_picked", "error": "fighters_picked",
+             "complete": "finished"}
+_JOB_NOW = {"uploading": "upload still in progress", "selecting": "uploaded, has not picked the fighters",
+            "queued": "waiting for the analysis computer", "running": "being analysed now",
+            "interrupted": "analysis paused (computer stopped mid-way)", "error": "analysis failed"}
+
+
+def onboarding(jobs: list[tuple[str, dict]], days: int = 14, now: datetime | None = None) -> dict:
+    """Each account made in the last `days`: the furthest step reached and where it stands now."""
+    now = now or datetime.now(timezone.utc)
+    since = _iso(now - timedelta(days=days))
+    init_db()
+    with connection() as con:
+        rows = [dict(row) for row in con.execute(
+            """SELECT a.id, a.email, a.created_at, a.email_verified_at, a.guardian_approval_status,
+                      a.account_status,
+                      (SELECT COUNT(*) FROM fights f WHERE f.profile_id = a.profile_id) AS fights,
+                      (SELECT MAX(created_at) FROM sessions s WHERE s.account_id = a.id) AS last_sign_in
+               FROM accounts a WHERE a.created_at >= ? ORDER BY a.created_at DESC""", (since,))]
+        events: dict[int, list[dict]] = {}
+        if rows:
+            marks = ",".join("?" * len(rows))
+            for row in con.execute(
+                    f"""SELECT account_id, event_type, occurred_at, metadata_json FROM security_events
+                        WHERE account_id IN ({marks}) AND event_type LIKE 'journey_%' ORDER BY occurred_at""",
+                    tuple(r["id"] for r in rows)):
+                try:
+                    metadata = json.loads(row["metadata_json"] or "{}")
+                except ValueError:
+                    metadata = {}
+                events.setdefault(int(row["account_id"]), []).append(
+                    {"type": row["event_type"], "at": row["occurred_at"], "meta": metadata})
+    held: dict[int, list[str]] = {}
+    for _, job in jobs:
+        owner = str(job.get("owner_key") or "")
+        if owner.startswith("account:") and owner.split(":", 1)[1].isdigit():
+            held.setdefault(int(owner.split(":", 1)[1]), []).append(str(job.get("status") or ""))
+
+    people, reached_counts = [], {key: 0 for key, _ in JOURNEY_STEPS}
+    for row in rows:
+        reached = {"signed_up"}
+        account_events = events.get(int(row["id"]), [])
+        for event in account_events:
+            step = event["type"].removeprefix("journey_")
+            if step in _STEP_INDEX:
+                reached.add(step)
+        statuses = held.get(int(row["id"]), [])
+        for status in statuses:
+            if status in _JOB_STEP:
+                reached.add(_JOB_STEP[status])
+        if row["fights"]:
+            reached.add("finished")
+        furthest = max(reached, key=lambda key: _STEP_INDEX[key])
+        # Reaching a step means every step before it was passed too.
+        for key, _ in JOURNEY_STEPS[:_STEP_INDEX[furthest] + 1]:
+            reached_counts[key] += 1
+        refusals = [e for e in account_events if e["type"].endswith("_refused") or e["type"] == "journey_analysis_failed"]
+        last_problem = refusals[-1] if refusals else None
+        current = next((_JOB_NOW[s] for s in ("running", "queued", "interrupted", "selecting", "uploading", "error")
+                        if s in statuses), "")
+        blocked = ""
+        if row["guardian_approval_status"] == "pending_guardian":
+            blocked = "waiting for a parent or guardian to approve"
+        elif row["account_status"] != "active":
+            blocked = f"account {row['account_status']}"
+        seen = [value for value in (row["last_sign_in"], account_events[-1]["at"] if account_events else None) if value]
+        people.append({
+            "id": row["id"], "email": row["email"], "created_at": row["created_at"],
+            "email_confirmed": bool(row["email_verified_at"]),
+            "furthest": dict(JOURNEY_STEPS)[furthest], "furthest_key": furthest,
+            "next_step": (dict(JOURNEY_STEPS)[JOURNEY_STEPS[_STEP_INDEX[furthest] + 1][0]]
+                          if _STEP_INDEX[furthest] + 1 < len(JOURNEY_STEPS) else ""),
+            "now": current, "blocked": blocked, "fights": row["fights"],
+            "problem": ({"type": last_problem["type"].removeprefix("journey_").replace("_", " "),
+                         "reason": str(last_problem["meta"].get("reason") or f"HTTP {last_problem['meta'].get('status')}"),
+                         "at": last_problem["at"]} if last_problem else None),
+            "refusals": len(refusals),
+            "before_tracking": str(row["created_at"] or "") < JOURNEY_TRACKING_SINCE and not account_events,
+            "last_seen": max(seen) if seen else None,
+        })
+    total = len(rows)
+    funnel = [{"key": key, "label": label, "count": reached_counts[key],
+               "share": round(reached_counts[key] / total * 100) if total else 0} for key, label in JOURNEY_STEPS]
+    return {"days": days, "total": total, "funnel": funnel, "people": people,
+            "tracking_since": JOURNEY_TRACKING_SINCE}
