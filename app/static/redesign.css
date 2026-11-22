@@ -65,9 +65,9 @@
   border: 1px solid var(--wiq-line) !important;
   color: var(--wiq-text) !important;
 }
-.btn.secondary:hover {  border-color: #3a3a40 !important; }
+.btn.secondary:hover {  border-color: var(--wiq-panel) !important; }
 
-.nav-signup { background: var(--wiq-text); color: #0a0a0b; }
+.nav-signup { background: var(--wiq-text); color: var(--wiq-canvas); }
 
 /* --- Surfaces -------------------------------------------------------------
    Cards stop being the default container. Where one is still a card it is a
@@ -636,7 +636,7 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
   font-weight: 650;
 }
 .social-auth-button:hover:not(:disabled) {
-  border-color: #4a4a52;
+  border-color: var(--wiq-line-soft);
   background: var(--wiq-canvas-raised);
   transform: none;                 /* the lift fought the square field styling */
 }
@@ -657,7 +657,7 @@ fieldset.needs-attention {
    browser's grey groove frame on three sides. One divider line is enough. */
 .upload-consent .minor-permission {
   border: 0;
-  border-top: 1px solid #263750;
+  border-top: 1px solid var(--wiq-line);
   margin: 0;
   padding: 11px 0 0;
 }

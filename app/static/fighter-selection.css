@@ -9,7 +9,7 @@
   padding: 12px 14px;
   border: 1px solid #70404b;
   border-radius: 10px;
-  background: #24131a;
+  background: var(--wiq-canvas);
   color: #ffc3ca;
   font-size: 12px;
   line-height: 1.5;
@@ -28,9 +28,9 @@
 
 .selection-edit-button {
   padding: 8px 11px;
-  border: 1px solid #30435f;
-  background: #0d192a;
-  color: #9cadc2;
+  border: 1px solid var(--wiq-line);
+  background: var(--wiq-field-bg);
+  color: var(--glass-text-faint);
   font: inherit;
   font-size: 12px;
   font-weight: 800;
@@ -39,7 +39,7 @@
 
 .selection-edit-button:hover:not(:disabled) {
   border-color: #5978be;
-  color: #e1e9f4;
+  color: var(--wiq-text);
 }
 
 .selection-edit-button:disabled {
@@ -68,35 +68,35 @@
 .pick-fighter{border:1px solid rgba(255,255,255,.10);border-radius:9px;
   padding:9px 12px 11px;margin:0 0 10px;min-width:0}
 .pick-fighter legend{padding:0 6px;font-size:12px;letter-spacing:1.3px;
-  text-transform:uppercase;font-weight:800;color:#98a2b3}
+  text-transform:uppercase;font-weight:800;color:var(--glass-text-faint)}
 .pick-fighter label{display:flex;align-items:center;gap:9px;padding:5px 2px;
   font-size:13.5px;cursor:pointer;line-height:1.4}
-.pick-fighter input{flex:none;width:16px;height:16px;accent-color:#8794ff}
+.pick-fighter input{flex:none;width:16px;height:16px;accent-color:var(--wiq-blue)}
 /* A visible focus ring, because this control exists for people navigating by
    keyboard and the default ring is invisible against the dark panel. */
-.pick-fighter input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}
+.pick-fighter input:focus-visible{outline:2px solid var(--wiq-blue);outline-offset:3px}
 
 /* Fighter A's corner. A is whoever was boxed first, so the colour is asked
    rather than assumed. */
 .corner-pick{border:1px solid rgba(255,255,255,.10);border-radius:9px;padding:9px 12px 11px;margin:14px 0 0;min-width:0}
-.corner-pick legend{padding:0 6px;font-size:12px;letter-spacing:1.3px;text-transform:uppercase;font-weight:800;color:#98a2b3}
+.corner-pick legend{padding:0 6px;font-size:12px;letter-spacing:1.3px;text-transform:uppercase;font-weight:800;color:var(--glass-text-faint)}
 .corner-pick label{display:flex;align-items:center;gap:9px;padding:4px 2px;font-size:13.5px;cursor:pointer;line-height:1.4}
 .corner-pick label span{display:inline-flex;align-items:center;gap:7px}
-.corner-pick input{flex:none;width:16px;height:16px;accent-color:#8794ff}
-.corner-pick input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}
+.corner-pick input{flex:none;width:16px;height:16px;accent-color:var(--wiq-blue)}
+.corner-pick input:focus-visible{outline:2px solid var(--wiq-blue);outline-offset:3px}
 .corner-pick small{display:block;margin-top:6px;font-size:12px;line-height:1.45}
 .solo-toggle{display:flex;align-items:flex-start;gap:10px;margin:14px 0 0;padding:10px 12px;min-height:44px;border:1px solid rgba(255,255,255,.10);font-size:13.5px;line-height:1.45;cursor:pointer}
-.solo-toggle input{flex:none;width:18px;height:18px;margin-top:2px;accent-color:#8794ff}
-.solo-toggle input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}
+.solo-toggle input{flex:none;width:18px;height:18px;margin-top:2px;accent-color:var(--wiq-blue)}
+.solo-toggle input:focus-visible{outline:2px solid var(--wiq-blue);outline-offset:3px}
 .corner-dot{display:inline-block;width:11px;height:11px;border-radius:50%}
-.corner-dot.red{background:#d9545e}
-.corner-dot.blue{background:#5b8ff0}
+.corner-dot.red{background:var(--wiq-b)}
+.corner-dot.blue{background:var(--wiq-a)}
 
 /* Raised as soon as both boxes are drawn, before the analysis starts. */
-.pair-warning{margin:14px 0 0;padding:11px 13px;border:1px solid #7a5a2a;border-radius:10px;background:#261d0f;color:#ffd99a;font-size:13px;line-height:1.5}
+.pair-warning{margin:14px 0 0;padding:11px 13px;border:1px solid #7a5a2a;border-radius:10px;background:var(--wiq-canvas);color:#ffd99a;font-size:13px;line-height:1.5}
 .pair-warning[hidden],.selection-edit-button[hidden]{display:none}
-.frame-source-note{margin:10px 0 0;font-size:14px;line-height:1.5;color:#c9d4e5}
-.frame-source-note[data-found="none"]{padding:10px 12px;border:1px solid #7a5a2a;border-radius:10px;background:#261d0f;color:#ffd99a}
+.frame-source-note{margin:10px 0 0;font-size:14px;line-height:1.5;color:var(--glass-text-soft)}
+.frame-source-note[data-found="none"]{padding:10px 12px;border:1px solid #7a5a2a;border-radius:10px;background:var(--wiq-canvas);color:#ffd99a}
 .frame-source-note[hidden]{display:none}
 
 /* While WarriorIQ looks for the clearest moment, a light sweeps the frame so
@@ -131,7 +131,7 @@
 .select-instruction{margin:0 0 12px;padding:14px 16px;border-radius:14px;font-size:clamp(18px,2.4vw,22px);font-weight:800;line-height:1.3;color:var(--wiq-field-text)}
 .select-instruction[data-state=ready]{color:#b7f5cf}
 .select-more{margin-top:14px;border:1px solid var(--line,#2d4268);border-radius:12px;padding:0 14px}
-.select-more>summary{cursor:pointer;padding:12px 0;font-size:13px;font-weight:750;color:#c9d6ea}
+.select-more>summary{cursor:pointer;padding:12px 0;font-size:13px;font-weight:750;color:var(--glass-text-soft)}
 .select-more[open]>summary{border-bottom:1px solid var(--line,#2d4268);margin-bottom:12px}
 .select-more>*+*{margin-top:12px}
 .select-more .focus-pick legend{font-weight:800}
@@ -169,7 +169,7 @@
   .fighter-lock-guide .analysis-choice-actions{flex-direction:column;align-items:stretch}
 }
 /* No people found on the frame: turning it is offered up front (C4). */
-.rotate-prominent{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0 0;padding:12px 14px;border:1px solid #62502d;border-radius:10px;background:#1d1708}
+.rotate-prominent{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0 0;padding:12px 14px;border:1px solid #62502d;border-radius:10px;background:var(--wiq-canvas)}
 .rotate-prominent[hidden]{display:none}
 /* Trim before analysis (audit 2026-10-14, #20). */
 .trim-pick{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:8px}

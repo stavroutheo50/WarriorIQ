@@ -36,7 +36,8 @@ def test_every_squad_table_column_has_a_header():
 
 def test_the_avoid_badge_text_is_dark_on_the_red():
     glass = (ROOT / "app" / "static" / "glass.css").read_text(encoding="utf-8")
-    assert ".film-shot.is-bad figcaption b { background: #ff5d6c; color: #06121a; }" in glass
+    # Tokens since the palette clean-up: --wiq-b is #ff6470, --wiq-ink-on-bright #06121a (about 6.5:1).
+    assert ".film-shot.is-bad figcaption b { background: var(--wiq-b); color: var(--wiq-ink-on-bright); }" in glass
 
 
 def test_hashed_css_and_js_are_cached_for_a_year_and_everything_else_for_a_week():
