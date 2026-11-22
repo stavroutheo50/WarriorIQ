@@ -3629,7 +3629,7 @@ class ReflowTests(unittest.TestCase):
     def test_the_hero_buttons_can_shrink(self):
         """`1fr` is `minmax(auto,1fr)`, and `auto` will not go below min-width.
 
-        fixes.css sets `min-width:145px` on these buttons in the same
+        fixes.css used to set `min-width:145px` on these buttons in the same
         breakpoint, left from when this was a flex row that wrapped. Two of
         them plus the gap demanded 302px inside a 288px column, so the home
         page scrolled. Both halves have to stay fixed: a shrinkable track, and
@@ -3639,9 +3639,14 @@ class ReflowTests(unittest.TestCase):
         self.assertIn("grid-template-columns:minmax(0,1fr) minmax(0,1fr)", css)
         self.assertIn(".hero-actions .btn{width:100%;min-width:0}", css)
 
-    def test_the_stale_minimum_is_still_the_reason(self):
-        """If fixes.css ever drops it, the comment above stops making sense."""
-        self.assertIn("min-width:145px", self._css("fixes.css"))
+    def test_the_stale_minimum_is_gone(self):
+        """The overridden min-width:145px was removed from fixes.css (2026-11-22).
+
+        product.css still clears the minimum, so the buttons stay shrinkable even
+        if a later stylesheet reintroduces one.
+        """
+        self.assertNotIn("min-width:145px", self._css("fixes.css"))
+        self.assertIn(".hero-actions .btn{width:100%;min-width:0}", self._css("product.css"))
 
 
 class WorkerAuthOrderingTests(unittest.TestCase):

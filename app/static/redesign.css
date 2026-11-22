@@ -20,7 +20,6 @@
    =========================================================================== */
 
 /* --- Canvas --------------------------------------------------------------- */
-html, body { background: var(--wiq-canvas); }
 
 /* --- Structure ------------------------------------------------------------
    A single measure for the whole product, and generous air around it. The old
@@ -31,7 +30,6 @@ html, body { background: var(--wiq-canvas); }
    A rule under the bar instead of a floating translucent panel, so the header
    reads as part of the page rather than hovering over it. */
 .nav {
-  height: 68px;
   border-bottom: 1px solid var(--wiq-line-soft);
 }
 
@@ -48,45 +46,32 @@ html, body { background: var(--wiq-canvas); }
   letter-spacing: .002em;
 }
 .navlinks a:hover { background: transparent; color: var(--wiq-text); }
-.navlinks a[aria-current="page"] { color: var(--wiq-text); }
 
 /* --- Buttons --------------------------------------------------------------
    One loud button per screen. Solid white on graphite is the highest contrast
    available and needs no glow to be found; everything else is a hairline ghost. */
 .btn {
-  border-radius: 3px;
   padding: 11px 18px;
-  background: #f5f5f6;
-  color: #0a0a0b;
   font-size: 13.5px;
   font-weight: 700;
   letter-spacing: .004em;
-  box-shadow: none;
   transition: background-color 140ms var(--wiq-motion-ease, ease),
               border-color 140ms var(--wiq-motion-ease, ease);
 }
-.btn:hover { background: #ffffff; transform: none; filter: none; }
+.btn:hover {  transform: none; filter: none; }
 
 .btn.secondary, .nav-cta {
   background: transparent;
   border: 1px solid var(--wiq-line) !important;
   color: var(--wiq-text) !important;
 }
-.btn.secondary:hover { background: rgba(255, 255, 255, .04); border-color: #3a3a40 !important; }
+.btn.secondary:hover {  border-color: #3a3a40 !important; }
 
-.btn.danger { background: transparent; border: 1px solid #5b2b33; color: #ff9aa8; }
 .nav-signup { background: #f5f5f6; color: #0a0a0b; }
 
 /* --- Surfaces -------------------------------------------------------------
    Cards stop being the default container. Where one is still a card it is a
    flat panel with a hairline, not a lifted, glowing, rounded box. */
-.card, .hero-card, .setup-card, .stat-band, .sport-card, .empty-workspace {
-  border-radius: 4px;
-  background: var(--wiq-canvas-raised);
-  border: 1px solid var(--wiq-line-soft);
-  box-shadow: none;
-}
-.card:hover { border-color: var(--wiq-line-soft); }
 
 /* --- Type -----------------------------------------------------------------
    Tighter, heavier, and never in a gradient. The headline is the loudest thing
@@ -100,13 +85,10 @@ h1, h2, h3 { letter-spacing: -.03em; }
 }
 .hero h1 em {
   font-style: normal;
-  color: var(--wiq-text-tertiary);
   -webkit-text-stroke: 0;
 }
 .hero h1 span { color: var(--wiq-text); }
 
-.eyebrow { color: var(--wiq-text-tertiary); }
-.eyebrow::before { background: var(--wiq-text-tertiary); }
 
 /* --- Hero -----------------------------------------------------------------
    Left aligned and set against a rule. Centring made a product page read as a
@@ -130,25 +112,19 @@ h1, h2, h3 { letter-spacing: -.03em; }
 .sport-card {
   gap: 8px;
   padding: 26px 24px 24px;
-  border-radius: 4px;
-  background: var(--wiq-canvas-raised);
   transition: background-color 140ms ease, border-color 140ms ease;
 }
-.sport-card:hover { transform: none; background: #141416; border-color: var(--wiq-line); }
+.sport-card:hover { transform: none;   }
 .sport-card-mark { display: none; }             /* the radial wash goes */
-.sport-crest { border-radius: 3px; }
 .sport-card h2 { font-size: 22px; font-weight: 750; }
 
 /* --- Statistics -----------------------------------------------------------
    Numbers are the product. They get size, tabular figures and a rule above,
    and they are not put inside boxes. */
-.stat-band { border-radius: 4px; }
-.stat-support { border-radius: 3px; gap: 1px; background: var(--wiq-line-soft); border-color: var(--wiq-line-soft); }
-.stat { background: var(--wiq-canvas-raised); }
+.stat-support {  gap: 1px;  border-color: var(--wiq-line-soft); }
 .stat-lead strong { letter-spacing: -.05em; font-weight: 800; }
 
 .metric {
-  border-radius: 3px;
   border-color: var(--wiq-line-soft);
   background: var(--wiq-canvas-raised);
 }
@@ -170,9 +146,7 @@ tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 /* --- Inputs ---------------------------------------------------------------
    Square fields on the panel colour, with the focus ring doing the work. */
 .field input, .field select, .field textarea {
-  border-radius: 3px;
   border-color: var(--wiq-line);
-  background-color: #0d0d0f;
   padding: 11px 12px;
 }
 
@@ -185,24 +159,17 @@ tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   padding-right: 40px;
 }
 .field input:focus, .field select:focus, .field textarea:focus {
-  border-color: #4a4a52;
   box-shadow: none;
 }
 
 .pill {
-  border-radius: 3px;
-  border-color: var(--wiq-line);
-  background: transparent;
   color: var(--wiq-text-secondary);
 }
 
 /* --- Notices --------------------------------------------------------------
    A left rule and flat ground rather than a tinted rounded box. */
 .notice {
-  border-radius: 0 3px 3px 0;
-  border: 1px solid var(--wiq-line-soft);
   border-left: 2px solid var(--wiq-line);
-  background: var(--wiq-canvas-raised);
   color: var(--wiq-text-secondary);
 }
 
@@ -218,7 +185,6 @@ tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 
 @media (max-width: 620px) {
   .shell { width: calc(100% - 32px); }
-  .nav { height: 60px; }
   
   .hero h1 { font-size: 40px; letter-spacing: -.035em; }
   
@@ -248,10 +214,6 @@ h1 em, h2 em {
 .hero-card::before,
 .pricing-hero::before { display: none !important; }
 
-.hero-card, .card, .pricing-card {
-  background: var(--wiq-canvas-raised) !important;
-  box-shadow: none !important;
-}
 
 /* --- The three-step path --------------------------------------------------
    Numbered chips in brand blue were the only colour left in the chrome. They
@@ -317,7 +279,6 @@ h1 em, h2 em {
 }
 .file-button:hover {
   transform: none;
-  border-color: rgb(var(--sport-accent) / .55);
   background: rgb(var(--sport-accent) / .05);
 }
 .file-button span {
@@ -327,10 +288,9 @@ h1 em, h2 em {
 }
 .file-button b { font-size: 14px; font-weight: 700; }
 .file-button small { color: var(--wiq-text-tertiary); }
-.file-button.uploaded { border-style: solid; border-color: rgb(var(--sport-accent) / .5); }
+.file-button.uploaded { border-style: solid;  }
 
 .console-badge {
-  border-radius: 3px;
   border: 1px solid var(--wiq-line);
   background: transparent;
   color: var(--wiq-text-secondary);
@@ -372,7 +332,6 @@ h1 em, h2 em {
 .app-toast, .cookie-notice {
   border-radius: 4px;
   border-color: var(--wiq-line);
-  background: var(--wiq-canvas-raised);
   backdrop-filter: none;
   box-shadow: none;
 }
@@ -427,7 +386,7 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
    The eyebrow above a section title and the active nav item. That is the whole
    budget; anything more and it stops meaning "look here". */
 .eyebrow { color: rgb(var(--wiq-accent)); }
-.eyebrow::before { background: rgb(var(--wiq-accent)); width: 22px; height: 2px; }
+.eyebrow::before {  width: 22px; height: 2px; }
 
 .navlinks a[aria-current="page"] {
   color: var(--wiq-text);
@@ -544,9 +503,6 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1px;
   margin: clamp(20px, 3vh, 32px) 0 0;
-  border: 1px solid var(--wiq-line-soft);
-  border-radius: 4px;
-  background: var(--wiq-line-soft);
   overflow: hidden;
 }
 
@@ -603,10 +559,7 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
   margin: 14px 0 0;
   padding: 12px 14px;
   max-width: 70ch;
-  border: 1px solid var(--wiq-line-soft);
   border-left: 2px solid var(--wiq-warning);
-  border-radius: 0 3px 3px 0;
-  background: var(--wiq-canvas-raised);
   color: var(--wiq-text-secondary);
   font-size: var(--wiq-text-sm);
   line-height: 1.6;
@@ -638,7 +591,6 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
    All". Nothing is removed; it simply stops being a half-screen wall. */
 @media (max-width: 560px) {
   .cookie-notice {
-    bottom: 8px;
     padding: 10px 12px;
     gap: 8px;
     max-height: 42vh;
@@ -808,9 +760,6 @@ fieldset.needs-attention {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }
-  .nav { background: #080d17 !important; }
-  .cookie-notice { background: #0c1629 !important; box-shadow: 0 8px 24px #0009 !important; }
-  .app-toast { background: #111b30 !important; }
   .camp-sticky { background: #080c16 !important; }
   
 }

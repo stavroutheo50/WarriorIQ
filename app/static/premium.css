@@ -26,10 +26,8 @@
    layers below; hoisting it one level up lets them sit between the canvas and
    the content instead of behind everything. */
 html {
-  background: var(--wiq-canvas);
   min-height: 100%;
 }
-body { background: transparent; }
 
 /* Content sits above the decoration without either needing a negative index,
    which is what put these layers behind the canvas in the first place. Only the
@@ -66,7 +64,6 @@ body { background: transparent; }
 .trust-panel {
   position: relative;
   border-color: var(--wiq-edge);
-  box-shadow: 0 1px 0 rgba(255,255,255,.05) inset, 0 24px 60px -28px rgba(0,0,0,.85);
   background-image: linear-gradient(180deg, rgba(255,255,255,.028), transparent 42%);
 }
 
@@ -138,7 +135,6 @@ body { background: transparent; }
 
 /* A forced-colours user has asked the OS to drop decoration entirely. */
 @media (forced-colors: active) {
-  html::before, html::after { display: none; }
 }
 
 /* ===========================================================================
@@ -212,11 +208,9 @@ section + section, .pricing-grid, .grid3 { margin-top: clamp(28px, 5vw, 72px); }
   font-size: 12px;
   letter-spacing: .16em;
   font-weight: 650;
-  color: var(--wiq-text-tertiary);
 }
 
-h2 { letter-spacing: -.032em; text-wrap: balance; }
-h3 { letter-spacing: -.018em; }
+h2 {  text-wrap: balance; }
 
 .muted, .small { color: var(--wiq-text-secondary); }
 p { max-width: 68ch; }
@@ -231,14 +225,8 @@ p { max-width: 68ch; }
    Larger targets and a softer radius. The 8px radius on 44px controls read as
    utilitarian; matching the curve to the control height is what makes a form
    feel considered. */
-.btn {
-  border-radius: 11px;
-  padding-inline: 20px;
-  letter-spacing: .004em;
-}
 
 .field input, .field select, .field textarea {
-  border-radius: 11px;
   min-height: 46px;
 }
 
@@ -252,29 +240,15 @@ p { max-width: 68ch; }
    for the primary action, and letting secondary surfaces sit quieter, is what
    makes the one thing you want clicked actually stand out. */
 .btn.secondary {
-  background: rgba(255,255,255,.035);
   border-color: var(--wiq-edge-strong);
-  box-shadow: none;
-}
-.btn.secondary:hover {
-  background: rgba(255,255,255,.06);
-  border-color: rgb(var(--wiq-aurora-a) / .34);
 }
 
-.pill, .check, .trust-checks span {
-  border-radius: 999px;
-  border-color: var(--wiq-edge);
-  background: rgba(255,255,255,.026);
-}
 
 /* --- Navigation -----------------------------------------------------------
    A quiet bar that separates by tone rather than a hard rule. */
 .nav {
-  border-bottom: 1px solid var(--wiq-edge);
   backdrop-filter: saturate(140%) blur(10px);
 }
-.navlinks a { letter-spacing: .002em; }
-.navlinks a[aria-current="page"] { color: var(--wiq-text); }
 
 /* --- Upload feedback ------------------------------------------------------
    The size line changes tone with the file, because a 700 MB phone video and a
@@ -385,11 +359,6 @@ p { max-width: 68ch; }
 
 
 /* The single way in earns more weight than a row of equal buttons. */
-.btn-lead {
-  min-height: 54px;
-  padding-inline: 30px;
-  font-size: 15px;
-}
 
 /* --- The five sports ------------------------------------------------------ */
 .chooser { padding: clamp(40px, 8vh, 88px) 0 clamp(48px, 9vh, 96px); }
@@ -413,14 +382,7 @@ p { max-width: 68ch; }
   flex-direction: column;
   gap: 7px;
   min-height: 186px;
-  padding: 24px 24px 22px;
-  border: 1px solid var(--wiq-edge);
-  border-radius: 16px;
-  background: linear-gradient(160deg, rgba(255,255,255,.045), rgba(255,255,255,.014));
-  box-shadow: var(--wiq-lift);
   overflow: hidden;
-  transition: border-color var(--wiq-fast) var(--wiq-ease),
-              transform var(--wiq-fast) var(--wiq-ease);
 }
 
 /* A wash that only resolves on the hovered card, so the grid reads as one
@@ -431,22 +393,17 @@ p { max-width: 68ch; }
   width: 260px;
   height: 260px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgb(var(--wiq-aurora-a) / .30), transparent 66%);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--wiq-slow, 280ms) var(--wiq-ease);
 }
 
-.sport-card:hover { border-color: var(--wiq-edge-strong); transform: translateY(-3px); }
 .sport-card:hover .sport-card-mark { opacity: 1; }
-.sport-card:focus-visible { outline: 2px solid #82a5ff; outline-offset: 3px; }
+.sport-card:focus-visible { outline: 2px solid #82a5ff;  }
 
-.sport-card h2 { margin: 0; font-size: 25px; letter-spacing: -.02em; }
+.sport-card h2 { margin: 0;  letter-spacing: -.02em; }
 
 .sport-card-rules {
-  margin: 0;
-  color: var(--wiq-text-tertiary);
-  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -487,10 +444,7 @@ p { max-width: 68ch; }
 .setup-coverage {
   margin: 0;
   padding: 13px 15px;
-  border: 1px solid var(--wiq-edge);
   border-left: 2px solid var(--wiq-success);
-  border-radius: 0 11px 11px 0;
-  background: rgba(255, 255, 255, .022);
   color: var(--wiq-text-secondary);
   font-size: 12.5px;
   line-height: 1.62;
@@ -501,10 +455,6 @@ p { max-width: 68ch; }
 
 .setup-card {
   padding: clamp(22px, 3vw, 30px);
-  border: 1px solid var(--wiq-edge);
-  border-radius: 18px;
-  background: linear-gradient(160deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
-  box-shadow: var(--wiq-lift);
 }
 
 @media (max-width: 980px) {
@@ -514,8 +464,7 @@ p { max-width: 68ch; }
 
 @media (max-width: 620px) {
   .sport-grid { grid-template-columns: 1fr; gap: 11px; }
-  .sport-card { min-height: 0; padding: 19px; }
-  .sport-card h2 { font-size: 21px; }
+  .sport-card { min-height: 0;  }
   .btn-lead { width: 100%; }
 }
 
@@ -546,13 +495,10 @@ p { max-width: 68ch; }
 
 /* --- Crest ---------------------------------------------------------------- */
 .sport-crest {
-  display: grid;
-  place-items: center;
   flex: none;
   width: 44px;
   height: 44px;
   border: 1px solid rgb(var(--sport-accent) / .42);
-  border-radius: 13px;
   background: linear-gradient(150deg, rgb(var(--sport-accent) / .24), rgb(var(--sport-accent) / .07));
   color: rgb(var(--sport-accent-soft));
   font-size: 13px;
@@ -569,7 +515,6 @@ p { max-width: 68ch; }
 
 .sport-card { gap: 9px; }
 .sport-card .sport-crest { width: 38px; height: 38px; border-radius: 11px; font-size: 12px; }
-.sport-card:hover { border-color: rgb(var(--sport-accent) / .5); }
 .sport-card:hover h2 { color: rgb(var(--sport-accent-soft)); }
 .sport-card h2 { transition: color var(--wiq-fast) var(--wiq-ease); }
 
@@ -594,8 +539,6 @@ p { max-width: 68ch; }
 /* --- Setup page ----------------------------------------------------------- */
 .setup-title { display: flex; align-items: center; gap: 14px; }
 .setup-title h1 { margin: 0; }
-.setup-head .eyebrow { color: rgb(var(--sport-accent-soft)); }
-.setup-head .eyebrow::before { background: rgb(var(--sport-accent)); }
 
 .setup-decided {
   margin: 14px 0 18px;
@@ -724,7 +667,7 @@ p { max-width: 68ch; }
 
 @media (max-width: 620px) {
   .setup-title { gap: 11px; }
-  .sport-crest { width: 36px; height: 36px; border-radius: 10px; font-size: 12px; }
+  .sport-crest { width: 36px; height: 36px;  font-size: 12px; }
   .weapon-row { grid-template-columns: minmax(0, 1fr); gap: 9px; }
   .weapon-row > b { font-size: 12.5px; }
   .weapon-bar {
@@ -753,7 +696,6 @@ p { max-width: 68ch; }
    stops entirely when the reader has asked for that. */
 @media (prefers-reduced-motion: reduce) {
   .sport-card, .sport-card-mark, .sport-card-go, .sport-option span { transition: none; }
-  .sport-card:hover { transform: none; }
 }
 
 /* Phones: sport cards show the sport and what its report counts; the rules
