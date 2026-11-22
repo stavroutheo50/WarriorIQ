@@ -94,3 +94,23 @@ def test_the_page_shows_every_section_to_an_admin_only():
         assert f"/admin/accounts/{created['id']}/status" in searched
     finally:
         object.__setattr__(SETTINGS, "admin_emails", previous)
+
+
+def test_linked_sign_ins_are_counted_per_provider_with_github_always_listed():
+    """The owner reads the GitHub number on /admin to decide whether legacy GitHub sign-in can go (2026-11-22)."""
+    before = admin_overview.accounts()["sign_in_providers"]
+    assert "github" in before
+    created, email = _new_account()
+    db.link_oauth_identity("github", f"gh-{uuid.uuid4().hex[:8]}", int(created["id"]), email)
+    after = admin_overview.accounts()["sign_in_providers"]
+    assert after["github"] == before["github"] + 1
+
+    client = BrowserClient(web.app)
+    client.cookies.set(web.SESSION_COOKIE, issue_session(created["id"]))
+    original = SETTINGS.admin_emails
+    object.__setattr__(SETTINGS, "admin_emails", (email.lower(),))
+    try:
+        page = client.get("/admin").text
+    finally:
+        object.__setattr__(SETTINGS, "admin_emails", original)
+    assert f"GitHub {after['github']}" in page

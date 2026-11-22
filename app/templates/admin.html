@@ -109,6 +109,7 @@
     <div class="admin-tile"><span>Marketing emails OK</span><strong>{{ o.accounts.marketing }}</strong></div>
   </div>
   <p class="small muted">By plan: {% for item in o.accounts.plans %}{{ item.plan }} {{ item.n }}{% if not loop.last %} · {% endif %}{% endfor %}{% if o.fights.plan_interest %} · Asked to be told when paid plans open: {% for item in o.fights.plan_interest %}{{ item.plan_key }} {{ item.n }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</p>
+  <p class="small muted" id="adminSignInProviders">Accounts with a linked sign-in: {% for name, n in o.accounts.sign_in_providers|dictsort %}{{ name|capitalize if name != 'github' else 'GitHub' }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
   <h3>Newest accounts</h3>
   <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Joined</th><th>Email</th><th>Type</th><th>Plan</th><th>Verified</th><th>Fights</th><th>Status</th></tr></thead><tbody>
     {% for user in o.accounts.recent %}<tr><td>{{ user.created_at[:10] }}</td><td>{{ user.email }}</td><td>{{ user.account_type }}</td><td>{{ user.plan }}</td><td>{{ 'yes' if user.verified else 'no' }}</td><td>{{ user.fights }}</td><td>{{ user.account_status }}</td></tr>
