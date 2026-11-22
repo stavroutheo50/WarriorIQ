@@ -2131,8 +2131,10 @@ class PublicPageTests(unittest.TestCase):
         template = (Path(__file__).resolve().parents[1] / "app" / "templates" / "camp.html").read_text(encoding="utf-8")
         # Guard carries the Experimental badge (audit 2026-10-14, #5).
         self.assertIn('<span class="label">Guard {{ experimental_badge }}</span>', template)
-        for label in ("Balance", "Ring centre", "How clearly we saw you"):
+        for label in ("Balance", "Ring centre"):
             self.assertIn(f'<span class="label">{label}</span>', template)
+        # Shortened so the tiles line up (2026-11-16); the full phrase is the tooltip.
+        self.assertIn('title="How clearly we saw you: the share of the fight you were tracked">Visibility</span>', template)
         self.assertIn("Movement progress is ready", template)
         self.assertNotIn("conversion: Not validated", template)
 

@@ -21,7 +21,9 @@ def change_words(shown, unit: str) -> str:
         return f"{int(shown):+d} percentage point{'' if abs(int(shown)) == 1 else 's'}"
     if unit == "pressure":
         return f"{int(shown):+d} on the 0-100 scale"
-    return f"{float(shown):+.1f} body lengths a second" if unit == "rate" else f"{float(shown):+.1f}"
+    # Footwork's cards use "speed" (the _card_value unit); it printed a bare
+    # "-0.3" because only "rate" was recognised (walkthrough, 2026-11-16).
+    return f"{float(shown):+.1f} body lengths a second" if unit in ("rate", "speed") else f"{float(shown):+.1f}"
 
 
 def identity_failed(record: dict, fighter: str) -> bool:
