@@ -2388,10 +2388,20 @@ async def http_error_page(request: Request, exc: StarletteHTTPException):
         503: "This feature is not launch-ready",
         507: "Storage is temporarily full",
     }.get(exc.status_code, "WarriorIQ could not complete that request")
+    detail = str(exc.detail or "")
+    try:
+        from http import HTTPStatus
+
+        # "Not Found" under the headline is the raw status phrase, not a
+        # sentence (walkthrough, 2026-11-16): the page's own wording is used.
+        if detail == HTTPStatus(exc.status_code).phrase:
+            detail = ""
+    except ValueError:
+        pass
     return templates.TemplateResponse(
         request=request,
         name="error.html",
-        context={"request": request, "status_code": exc.status_code, "error_title": title, "error_detail": str(exc.detail or "")},
+        context={"request": request, "status_code": exc.status_code, "error_title": title, "error_detail": detail},
         status_code=exc.status_code,
         headers=exc.headers,
     )
@@ -8957,6 +8967,16 @@ def history_page(request: Request, cancelled: str = "", deleted: str = ""):
         fight["title"] = fight_title(fight)
         fight["names"] = _library_names(fight)
         fight["sport"] = _ruleset_sport(fight.get("ruleset"))
+        fight["sport_mark"] = sport_identity(fight["sport"]).mark if fight["sport"] in SPORT_IDENTITIES else ""
+    # Two fights from the same file, ruleset and minute are almost always one
+    # upload sent twice (walkthrough, 2026-11-16: 74 fights, many alike). Each
+    # job is saved once (fights.job_id is unique), so nothing is merged or
+    # deleted here: the later copies are labelled so they can be told apart.
+    seen_uploads: dict[tuple, int] = {}
+    for fight in sorted(fights, key=lambda f: str(f.get("created_at") or "")):
+        key = (fight.get("original_name"), fight.get("ruleset"), str(fight.get("created_at") or "")[:16])
+        fight["duplicate_number"] = seen_uploads.get(key, 0) + 1
+        seen_uploads[key] = fight["duplicate_number"]
     pending = _pending_jobs_for_owner(_owner_key(request)) if profile_id is not None else []
     return templates.TemplateResponse(
         request=request, name="history.html",
