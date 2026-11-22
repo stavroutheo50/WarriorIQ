@@ -3,31 +3,44 @@
 {% block content %}
 <header class="archive-hero"><div><div class="eyebrow">Account settings</div><h1>Your account. Your control.</h1><p>Manage privacy, videos, consent, security and billing without contacting support.</p></div></header>
 <nav class="settings-tabs" aria-label="Settings sections"><a href="/settings/privacy" {% if section == 'privacy' %}aria-current="page"{% endif %}>Privacy</a><a href="/settings/billing" {% if section == 'billing' %}aria-current="page"{% endif %}>Billing</a></nav>
-{% if notice %}<div class="notice" role="status">{{notice}}</div>{% endif %}{% if error %}<div class="notice bad-notice" role="alert">{{error}}</div>{% endif %}
+{#- A message about one card is shown inside that card (area); only the rest
+    use the banner here, so nothing jumps or opens elsewhere (2026-11-16). -#}
+{% if not area %}{% if notice %}<div class="notice" role="status">{{notice}}</div>{% endif %}{% if error %}<div class="notice bad-notice" role="alert">{{error}}</div>{% endif %}{% endif %}
+{% macro card_message(name) -%}
+{% if area == name %}{% if notice %}<p class="notice good-notice form-message" role="status">{{ notice }}</p>{% endif %}{% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}{% endif %}
+{%- endmacro %}
 {% if section == 'privacy' %}
-<div class="grid">
-  <section class="card"><div class="eyebrow">Personal data</div><h2>Account overview</h2><dl class="settings-data"><div><dt>Email</dt><dd>{{account.email}}</dd></div><div><dt>Profile</dt><dd>{{display_name or profile.display_name}}</dd></div><div><dt>Joined</dt><dd><time datetime="{{account.created_at}}" data-local="date">{{account.created_at|fight_moment(false)}}</time></dd></div>{#- The acceptance date and the policy versions, each labelled: "Terms
+<div class="grid settings-grid">
+  <section class="card" id="account-overview"><div class="eyebrow">Personal data</div><h2>Account overview</h2><dl class="settings-data"><div><dt>Email</dt><dd>{{account.email}}</dd></div><div><dt>Profile</dt><dd>{{display_name or profile.display_name}}</dd></div><div><dt>Joined</dt><dd><time datetime="{{account.created_at}}" data-local="date">{{account.created_at|fight_moment(false)}}</time></dd></div>{#- The acceptance date and the policy versions, each labelled: "Terms
     accepted 2026-08-24" printed the terms VERSION, earlier than the join date
-    (D9, QA 2026-10-11). -#}<div><dt>Terms accepted on</dt><dd>{% if account.policies_accepted_at %}<time datetime="{{account.policies_accepted_at}}" data-local="date">{{account.policies_accepted_at|fight_moment(false)}}</time>{% else %}Not recorded{% endif %}</dd></div><div><dt>Terms version</dt><dd>{{account.terms_version or 'Not recorded'}}</dd></div><div><dt>Privacy policy version</dt><dd>{{account.privacy_version or 'Not recorded'}}</dd></div></dl>{% if not account.password_login_enabled|default(1) %}<div class="notice"><strong>Social sign-in account.</strong> <a class="text-link" href="/forgot-password">Set a WarriorIQ password</a> before a protected data export or account deletion.</div>{% endif %}<div class="selection-tools"><a class="btn secondary" href="/profile">Edit personal information</a>{% if account.password_login_enabled|default(1) %}<form action="/account/export" method="post"><input type="hidden" name="next_path" value="/settings/privacy"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="sr-only" for="settingsExportPassword">Password for data download</label><input id="settingsExportPassword" type="password" name="password" placeholder="Current password" autocomplete="current-password" required><button class="btn secondary" type="submit" data-keep-label="true">Download account data</button></form>{% endif %}</div></section>
+    (D9, QA 2026-10-11). -#}<div><dt>Terms accepted on</dt><dd>{% if account.policies_accepted_at %}<time datetime="{{account.policies_accepted_at}}" data-local="date">{{account.policies_accepted_at|fight_moment(false)}}</time>{% else %}Not recorded{% endif %}</dd></div><div><dt>Terms version</dt><dd>{{account.terms_version or 'Not recorded'}}</dd></div><div><dt>Privacy policy version</dt><dd>{{account.privacy_version or 'Not recorded'}}</dd></div></dl>{% if not account.password_login_enabled|default(1) %}<div class="notice"><strong>Social sign-in account.</strong> <a class="text-link" href="/forgot-password">Set a WarriorIQ password</a> before a protected data export or account deletion.</div>{% endif %}<p><a class="btn secondary" href="/profile">Edit personal information</a></p>{% if account.password_login_enabled|default(1) %}
+    {#- Not a sign-in form: a distinct name, autocomplete off and read-only until
+        focused (base.html, data-reauth), so Chrome does not fill the saved
+        password in (walkthrough, 2026-11-16). -#}
+    <form action="/account/export" method="post" class="settings-form reauth-form" autocomplete="off"><input type="hidden" name="next_path" value="/settings/privacy"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>Download account data</h3>
+      <div class="field"><label for="exportReauthPassword">Your current password</label><input id="exportReauthPassword" type="password" name="export_password" autocomplete="off" readonly data-reauth required></div>
+      {{ card_message('export') }}
+      <button class="btn secondary" type="submit" data-keep-label="true">Download account data</button></form>{% endif %}</section>
   <section class="card"><div class="eyebrow">Preferences</div><h2>Consent controls</h2><form action="/settings/marketing" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="check legal-check"><input type="checkbox" name="enabled" value="true" {% if account.marketing_consent %}checked{% endif %}><span><strong>WarriorIQ product updates and offers</strong><br><span class="small muted">Optional. Clearing this box unsubscribes this account from future marketing.</span></span></label><button class="btn secondary" type="submit">Save marketing choice</button></form><p><a class="text-link" href="/cookies#preferences">Change cookie preferences</a> · <a class="text-link" href="/privacy">View privacy information</a></p></section>
 </div>
 <section class="card"><div class="eyebrow">Private fight data</div><h2>Videos and analyses</h2><p class="muted">Original uploaded videos are automatically removed after {{video_retention_days}} days. Reports stay private until you delete them. Deleting a video keeps its report; deleting an analysis removes both.</p>{#- Each row names whose fight it is and when, so the right one is deleted
     (D9), and the list is paged (D12): 47 rows made this page 12,000 px tall
-    on a phone. -#}<div class="privacy-fight-list" id="privacyFightList" data-page-size="10">{% for fight in fights %}<article data-fight-row><div><strong>{% if fight.fighter_name %}{{fight.fighter_name}} vs opponent{% else %}Fighter A vs Fighter B{% endif %}</strong><span>{{fight.ruleset|ruleset_label}} · <time datetime="{{fight.created_at}}" data-local>{{fight.created_at|fight_moment}}</time></span></div><div class="selection-tools">{% if fight.video_path and not fight.video_deleted_at %}<form action="/settings/videos/{{fight.job_id}}/delete" method="post" data-confirm="Delete the original video of {{ fight.fighter_name or 'Fighter A vs Fighter B' }} from {{ fight.created_at|fight_moment }}? The report will remain."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Delete Video</button></form>{% else %}<span class="pill">Video deleted</span>{% endif %}<form action="/delete/{{fight.job_id}}" method="post" data-confirm="Delete the analysis of {{ fight.fighter_name or 'Fighter A vs Fighter B' }} from {{ fight.created_at|fight_moment }}: its report, video and temporary files?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn danger" type="submit">Delete Analysis</button></form></div></article>{% else %}<p class="muted">No saved analyses.</p>{% endfor %}</div></section>
+    on a phone. -#}<div class="privacy-fight-list" id="privacyFightList" data-page-size="10">{% for fight in fights %}<article data-fight-row><div><strong>{% if fight.fighter_name %}{{fight.fighter_name}} vs Opponent{% else %}Fighter A vs Fighter B{% endif %}</strong><span>{{fight.ruleset|ruleset_label}} · <time datetime="{{fight.created_at}}" data-local>{{fight.created_at|fight_moment}}</time></span></div><div class="selection-tools">{% if fight.video_path and not fight.video_deleted_at %}<form action="/settings/videos/{{fight.job_id}}/delete" method="post" data-confirm="Delete the original video of {{ fight.fighter_name or 'Fighter A vs Fighter B' }} from {{ fight.created_at|fight_moment }}? The report will remain."><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Delete Video</button></form>{% else %}<span class="pill">Video deleted</span>{% endif %}<form action="/delete/{{fight.job_id}}" method="post" data-confirm="Delete the analysis of {{ fight.fighter_name or 'Fighter A vs Fighter B' }} from {{ fight.created_at|fight_moment }}: its report, video and temporary files?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn danger" type="submit">Delete Analysis</button></form></div></article>{% else %}<p class="muted">No saved analyses.</p>{% endfor %}</div></section>
 <section class="card" id="security"><div class="eyebrow">Security</div><h2>Sign-in details</h2>
   {#- Folded until needed (D12): the page is long on a phone. Open when a
       change was just made or refused, so the message sits beside its form. -#}
-  <details class="settings-fold"{% if error or notice %} open{% endif %}><summary>Change password or email</summary>
+  <details class="settings-fold"{% if area == 'sign-in' and (error or notice) %} open{% endif %}><summary>Change password or email</summary>
+  {{ card_message('sign-in') }}
   <div class="grid">
     <form action="/settings/password" method="post" class="settings-form" autocomplete="on"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>Change password</h3><input type="email" name="username" value="{{account.email}}" autocomplete="username" hidden>
       <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
       <label>New password <small class="muted">(at least 10 characters)</small><input type="password" name="new_password" minlength="10" maxlength="1024" autocomplete="new-password" required></label>
       <label>New password again<input type="password" name="confirm_password" minlength="10" maxlength="1024" autocomplete="new-password" required></label>
       <button class="btn secondary" type="submit">Change password</button><p class="small muted">Every other device you are signed in on is signed out.</p></form>
-    <form action="/settings/email" method="post" class="settings-form"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>Change email</h3>
+    <form action="/settings/email" method="post" class="settings-form reauth-form" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>Change email</h3>
       <p class="small muted">Now: {{account.email}}{% if pending_email %}. Waiting for you to open the link sent to {{pending_email}}.{% endif %}</p>
-      <label>New email<input type="email" name="new_email" maxlength="320" autocomplete="email" required></label>
-      <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+      <label for="changeEmailNew">New email<input id="changeEmailNew" type="email" name="new_email" value="" maxlength="320" autocomplete="off" spellcheck="false" autocapitalize="off" readonly data-reauth required></label>
+      <label for="changeEmailPassword">Your current password<input id="changeEmailPassword" type="password" name="reauth_password" autocomplete="off" readonly data-reauth required></label>
       <button class="btn secondary" type="submit">Send confirmation link</button><p class="small muted">Your email changes only when you open the link we send to the new address.</p></form>
   </div>
   </details>
@@ -35,39 +48,65 @@
 <section class="card" id="two-step"><div class="eyebrow">Security</div><h2>Two-step sign-in</h2>
   {#- Optional (core/two_factor.py). With it on, a password alone does not sign anyone in: a code from an authenticator app is needed too. -#}
   {% if two_factor.enabled %}
-  <p><span class="pill">On</span> A code from your authenticator app is needed every time you sign in.</p>
+  <p class="two-factor-status"><span class="pill status-pill good-pill">On</span> Two-step sign-in is on{% if two_factor.enabled_at %} since <time datetime="{{ two_factor.enabled_at }}" data-local="date">{{ two_factor.enabled_at|fight_moment(false) }}</time>{% endif %}. A code from your authenticator app is needed every time you sign in.</p>
   <p class="small {% if two_factor.recovery_left <= 3 %}bad{% else %}muted{% endif %}">{{ two_factor.recovery_left }} recovery code{{ '' if two_factor.recovery_left == 1 else 's' }} left{% if two_factor.recovery_left <= 3 %}. Make new ones before you run out.{% endif %}</p>
-  <div class="grid">
-    <form action="/settings/2fa/recovery-codes" method="post" class="settings-form"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>New recovery codes</h3>
+  {{ card_message('two-step') }}
+  <div class="grid settings-grid">
+    <form action="/settings/2fa/recovery-codes" method="post" class="settings-form reauth-form" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>Regenerate recovery codes</h3>
       <p class="small muted">Replaces the old ones. Needs your password and a current code.</p>
-      <label>Password<input type="password" name="current_password" autocomplete="current-password" required></label>
-      <label>Code from your app<input type="text" name="code" autocomplete="one-time-code" inputmode="text" autocapitalize="none" maxlength="24" required></label>
-      <button class="btn secondary" type="submit">Make new codes</button></form>
-    <form action="/settings/2fa/disable" method="post" class="settings-form"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>Turn off</h3>
+      <label for="recoveryReauthPassword">Your password<input id="recoveryReauthPassword" type="password" name="reauth_password" autocomplete="off" readonly data-reauth required></label>
+      <label for="recoveryCode">Code from your app<input id="recoveryCode" type="text" name="code" autocomplete="one-time-code" inputmode="text" autocapitalize="off" spellcheck="false" maxlength="24" data-code-input required></label>
+      <button class="btn secondary" type="submit">Regenerate recovery codes</button></form>
+    <form action="/settings/2fa/disable" method="post" class="settings-form reauth-form" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>Turn off</h3>
       <p class="small muted">Needs your password and a current code. Every other device is signed out.</p>
-      <label>Password<input type="password" name="current_password" autocomplete="current-password" required></label>
-      <label>Code from your app<input type="text" name="code" autocomplete="one-time-code" inputmode="text" autocapitalize="none" maxlength="24" required></label>
+      <label for="disableReauthPassword">Your password<input id="disableReauthPassword" type="password" name="reauth_password" autocomplete="off" readonly data-reauth required></label>
+      <label for="disableCode">Code from your app, or a recovery code<input id="disableCode" type="text" name="code" autocomplete="one-time-code" inputmode="text" autocapitalize="off" spellcheck="false" maxlength="24" data-code-input required></label>
       <button class="btn secondary" type="submit">Turn off two-step sign-in</button></form>
   </div>
   {% elif two_factor.setup %}
   <p>Add WarriorIQ to your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy), then enter the code it shows.</p>
-  <ol class="small muted"><li>In the app, choose <b>Add account</b> and then <b>Enter a setup key</b>.</li><li>Type in this key: <code class="two-factor-key">{{ two_factor.setup.secret }}</code></li><li>Choose <b>time-based</b>, then enter the 6-digit code below.</li></ol>
-  <form action="/settings/2fa/confirm" method="post" class="settings-form"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-    <label>6-digit code<input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required></label>
-    <button class="btn" type="submit">Turn on</button></form>
-  <form action="/settings/2fa/cancel" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Cancel</button></form>
+  <div class="two-factor-setup">
+    {#- Drawn on the server (core/qr.py): the secret is never sent to a QR service. -#}
+    <figure class="two-factor-qr">{{ two_factor.setup.qr_svg }}<figcaption class="small muted">Scan with your authenticator app</figcaption></figure>
+    <div class="two-factor-manual">
+      <p class="small muted">Can't scan it? In the app choose <b>Add account</b>, then <b>Enter a setup key</b>, choose <b>time-based</b>, and type this key:</p>
+      <p class="two-factor-key-row"><code class="two-factor-key" id="twoFactorKey">{{ two_factor.setup.secret }}</code> <button class="btn secondary tiny" type="button" data-copy-target="twoFactorKey" data-copy-value="{{ two_factor.setup.plain }}" data-keep-label="true">Copy key</button></p>
+      <form action="/settings/2fa/confirm" method="post" class="settings-form" autocomplete="off" id="twoFactorConfirm"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <label for="twoFactorSetupCode">6-digit code from the app<input id="twoFactorSetupCode" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="\d{6}" maxlength="6" spellcheck="false" autocapitalize="off" data-code-input required{% if area == 'two-step' and error %} aria-invalid="true" aria-describedby="twoFactorError" autofocus{% endif %}></label>
+        {% if area == 'two-step' and error %}<p class="field-error" id="twoFactorError" role="alert">{{ error }}</p>{% endif %}
+        <div class="form-actions"><button class="btn" type="submit">Turn on</button><button class="btn secondary" type="submit" formaction="/settings/2fa/cancel" formnovalidate data-keep-label="true">Cancel</button></div>
+      </form>
+    </div>
+  </div>
   {% else %}
   <p class="muted">Add a second lock. With this on, your password alone cannot sign anyone in: a code from an authenticator app on your phone is needed too. You get recovery codes in case you lose the phone.</p>
-  <form action="/settings/2fa/start" method="post" class="settings-form"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-    <label>Your password<input type="password" name="current_password" autocomplete="current-password" required></label>
+  {{ card_message('two-step') }}
+  <form action="/settings/2fa/start" method="post" class="settings-form reauth-form" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <label for="twoFactorStartPassword">Your password<input id="twoFactorStartPassword" type="password" name="reauth_password" autocomplete="off" readonly data-reauth required></label>
     <button class="btn secondary" type="submit">Set up two-step sign-in</button></form>
   {% endif %}
 </section>
-<section class="card" id="devices"><div class="eyebrow">Security</div><h2>Where you are signed in</h2><p class="muted">If you see a device you do not recognise, sign it out and change your password.</p>
-  <ul class="device-list">{% for item in device_sessions %}<li><div><strong>{{ item.device }}</strong>{% if item.current %} <span class="pill">This browser</span>{% endif %}<span class="small muted">Signed in <time datetime="{{ item.created_at }}" data-local>{{ item.created_at|fight_moment }}</time></span></div>
+<section class="card" id="devices"><div class="eyebrow">Security</div><h2>Where you are signed in</h2><p class="muted">If you see a device you do not recognise, sign it out and change your password.</p>{{ card_message('devices') }}
+  <ul class="device-list">{% for item in device_sessions %}<li><div><strong>{{ item.device }}</strong>{% if item.current %} <span class="pill this-browser">This browser</span>{% endif %}<span class="small muted">Signed in <time datetime="{{ item.created_at }}" data-local>{{ item.created_at|fight_moment }}</time></span></div>
     {% if not item.current %}<form action="/settings/sessions/{{ item.id }}/revoke" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary tiny" type="submit">Sign out</button></form>{% endif %}</li>{% endfor %}</ul>
   <form action="/settings/sessions/revoke" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Sign out every other device</button></form></section>
-<section class="card account-danger"><div class="eyebrow">Delete account &amp; data</div><h2>Permanent deletion</h2><p>This deletes the account, authentication sessions, connected sign-in identities, profile, uploaded videos, reports, analyses, assignments, marketing preferences and stored consent records. Narrow payment or security records are kept only where WarriorIQ has a documented legal duty to keep them; everything else is removed or de-identified.</p>{% if account.password_login_enabled|default(1) %}<form action="/account/delete" method="post" data-confirm="Permanently delete this WarriorIQ account and its data?"><input type="hidden" name="next_path" value="/settings/privacy"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="row"><div class="field"><label for="deleteConfirmation">Type DELETE</label><input id="deleteConfirmation" name="confirmation" autocomplete="off" required></div><div class="field"><label for="deletePassword">Current password</label><input id="deletePassword" type="password" name="password" autocomplete="current-password" required></div></div><button class="btn danger" type="submit">Delete Account &amp; Data</button></form>{% else %}<a class="btn secondary" href="/forgot-password">Set a password to manage deletion</a>{% endif %}</section>
+<section class="card account-danger" id="delete-account"><div class="eyebrow">Delete account &amp; data</div><h2>Permanent deletion</h2><p>This deletes the account, authentication sessions, connected sign-in identities, profile, uploaded videos, reports, analyses, assignments, marketing preferences and stored consent records. Narrow payment or security records are kept only where WarriorIQ has a documented legal duty to keep them; everything else is removed or de-identified.</p>
+  {#- Every check is repeated on the server (app.main.delete_account_route). The
+      fields are not a sign-in form, so Chrome cannot fill them in: the phrase
+      has a name nothing autofills, and the password is read-only until focused
+      (walkthrough, 2026-11-16: Chrome filled the email into "Type DELETE" and
+      the saved password below it). -#}
+  {% set has_password = account.password_login_enabled|default(1) %}
+  <form action="/account/delete" method="post" class="reauth-form delete-account-form" autocomplete="off" data-delete-form data-confirm="Permanently delete this WarriorIQ account and its data?"><input type="hidden" name="next_path" value="/settings/privacy"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <div class="row">
+      <div class="field"><label for="deleteConfirmPhrase">Type {{ delete_phrase }} to confirm</label><input id="deleteConfirmPhrase" type="text" name="confirm_phrase" value="" placeholder="{{ delete_phrase }}" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" data-lpignore="true" data-1p-ignore data-delete-phrase="{{ delete_phrase }}" required></div>
+      {% if has_password %}<div class="field"><label for="deleteReauthPassword">Your current password</label><input id="deleteReauthPassword" type="password" name="delete_password" value="" autocomplete="off" readonly data-reauth data-delete-required required></div>{% endif %}
+      {% if two_factor.enabled %}<div class="field"><label for="deleteCode">Code from your app, or a recovery code</label><input id="deleteCode" type="text" name="code" value="" autocomplete="one-time-code" inputmode="text" spellcheck="false" autocapitalize="off" maxlength="24" data-code-input data-delete-required required></div>{% endif %}
+    </div>
+    {% if not has_password %}<p class="small muted">You sign in with Google, so there is no password to check. We email a confirmation link to {{ account.email }}; the account is deleted only once you open it.</p>{% endif %}
+    {{ card_message('delete') }}
+    <button class="btn danger" type="submit" data-delete-submit>{% if has_password %}Delete account and data{% else %}Email me a confirmation link{% endif %}</button>
+  </form></section>
 {% else %}
 <section class="card"><div class="eyebrow">Current subscription</div><h2>{{plan.label}}</h2><dl class="settings-data"><div><dt>Price</dt><dd>{% if plan.price != '€0' and not account.stripe_subscription_id %}No charge &mdash; given to this account while paid plans are not open ({{plan.price}} {{plan.period}} once billing opens){% else %}{{plan.price}} {{plan.period}}{% endif %}</dd></div><div><dt>Renewal</dt><dd>{% if account.stripe_subscription_id %}Automatic until cancelled{% else %}No connected paid renewal{% endif %}</dd></div><div><dt>Status</dt><dd>{{account.subscription_status or 'No paid subscription'}}</dd></div><div><dt>Access through</dt><dd>{{account.subscription_period_end or 'Not applicable'}}</dd></div></dl></section>
 <div class="grid">
@@ -78,13 +117,20 @@
   <section class="card"><div class="eyebrow">Cancel subscription</div><h2>Stop the next renewal</h2><p>Cancellation is scheduled directly with the connected payment provider. Access continues through the paid period shown above, and no additional renewal charge should occur after confirmed cancellation.</p><form action="/settings/billing/cancel" method="post" data-confirm="Cancel this subscription at the end of the current billing period?"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn danger" type="submit" {% if not account.stripe_subscription_id %}disabled{% endif %}>Cancel Subscription</button></form></section>
   <section class="card"><div class="eyebrow">EU consumer option</div><h2>Withdraw from Contract</h2><p>This is separate from cancellation. WarriorIQ records the request and reviews it. Whether you can withdraw depends on where you live, when you bought, and whether you asked for the service to start straight away.</p><form action="/settings/billing/withdraw" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="check legal-check"><input type="checkbox" name="confirm" value="true" required><span>I want to submit a withdrawal request for review.</span></label><button class="btn secondary" type="submit" {% if not account.stripe_subscription_id %}disabled{% endif %}>Withdraw from Contract</button></form></section>
   {% else %}
-  <section class="card"><div class="eyebrow">Subscription</div><h2>Nothing to cancel</h2><p>You are on a free plan, so there is no renewal to stop and nothing to withdraw from. These options appear here once you have a paid plan.</p></section>
+  <section class="card billing-wide"><div class="eyebrow">Subscription</div><h2>Nothing to cancel</h2><p>{% if plan.price != '€0' %}Your {{ plan.label }} access is free during early access, so there is no renewal to stop and nothing to withdraw from.{% else %}You are on the free plan, so there is no renewal to stop and nothing to withdraw from.{% endif %} These options appear here once you have a paid subscription.</p></section>
   {% endif %}
 </div>
 <section class="card"><div class="eyebrow">Request history</div><h2>Billing actions</h2><ul class="list-clean">{% for action in subscription_actions %}<li><strong>{{action.action_type|replace('_',' ')|title}}</strong> · {{action.status}}<br><span class="small muted">Requested <time datetime="{{action.requested_at}}" data-local>{{action.requested_at|fight_moment}}</time></span></li>{% else %}<li class="muted">No cancellation or withdrawal requests.</li>{% endfor %}</ul><p><a class="text-link" href="/refunds">Refund and withdrawal information</a> · <a class="text-link" href="/terms">Terms</a></p></section>
 {% endif %}
 {% endblock %}
 {% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
+// The delete button stays off until the phrase is exactly DELETE and every
+// other field has something in it. The server checks the same and more.
+(()=>{const form=document.querySelector('[data-delete-form]');if(!form)return;const phrase=form.querySelector('[data-delete-phrase]'),others=[...form.querySelectorAll('[data-delete-required]')],button=form.querySelector('[data-delete-submit]');
+  const sync=()=>{button.disabled=!(phrase.value.trim()===phrase.dataset.deletePhrase&&others.every(field=>field.value.trim()))};
+  form.addEventListener('input',sync);window.addEventListener('pageshow',()=>{phrase.value='';sync()});sync()})();
+// A refusal shown inside a card: bring that card into view without jumping past it.
+(()=>{const message=document.querySelector('.card .field-error[role="alert"], .card .form-message');if(message)message.scrollIntoView({block:'center'})})();
 // Ten saved fights at a time (D12, QA 2026-10-11). Every row stays in the
 // page, so a search or a screen reader still finds them; only the view pages.
 (()=>{const list=document.getElementById('privacyFightList');if(!list)return;const rows=[...list.querySelectorAll('[data-fight-row]')],size=Number(list.dataset.pageSize)||10;if(rows.length<=size)return;let page=0;const pages=Math.ceil(rows.length/size);

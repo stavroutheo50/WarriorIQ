@@ -1370,12 +1370,13 @@ def two_factor_row(account_id: int) -> dict:
             (int(account_id),),
         ).fetchone()
     if not row:
-        return {"secret": None, "enabled": False, "last_step": None, "recovery": []}
+        return {"secret": None, "enabled": False, "enabled_at": None, "last_step": None, "recovery": []}
     try:
         recovery = json.loads(row["recovery_codes"]) if row["recovery_codes"] else []
     except (TypeError, ValueError):
         recovery = []
     return {"secret": row["totp_secret"], "enabled": bool(row["totp_enabled_at"]),
+            "enabled_at": row["totp_enabled_at"],
             "last_step": row["totp_last_step"], "recovery": recovery if isinstance(recovery, list) else []}
 
 
@@ -1596,6 +1597,18 @@ def claim_auth_wait(wait_hash: str) -> dict | None:
             return None
         con.execute("UPDATE auth_waits SET claimed_at=? WHERE wait_hash=?", (now, wait_hash))
     return dict(row)
+
+
+def password_reset_token_usable(token_hash: str) -> bool:
+    """Whether a reset link would still work, without using it up (the page shows the form or says why not)."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as con:
+        row = con.execute(
+            "SELECT 1 FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>?",
+            (token_hash, now),
+        ).fetchone()
+    return row is not None
 
 
 def consume_password_reset_token(token_hash: str) -> int | None:
