@@ -85,7 +85,7 @@ details[open]>*:not(summary){animation:wiq-details-in var(--wiq-motion-base) var
 .analysis-scoreboard{display:flex;gap:20px}
 .analysis-scoreboard .big-progress{margin:0;font-variant-numeric:tabular-nums}
 .analysis-scoreboard span{color:#8494ad;font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase}
-.analysis-visual{position:relative;height:210px;margin:24px 0;overflow:hidden;border:1px solid #263c61;border-radius:18px;background:#07101f}
+.analysis-visual{position:relative;height:210px;margin:24px 0;overflow:hidden;border:1px solid #263c61;border-radius:18px;background:var(--wiq-field-bg)}
 .analysis-visual:before{content:"";position:absolute;inset:50% 7% auto;height:1px;background:#304567}
 .analysis-visual:after{content:"";position:absolute;top:-30%;bottom:-30%;width:32%;background:linear-gradient(90deg,transparent,rgba(103,132,255,.12),transparent);animation:wiq-analysis-scan 2.4s linear infinite}
 .fighter-signal{position:absolute;top:32px;bottom:32px;width:32%;border:1px solid #314a78;border-radius:48% 48% 16px 16px;background:linear-gradient(180deg,rgba(86,126,214,.15),rgba(16,31,58,.2))}
@@ -94,7 +94,7 @@ details[open]>*:not(summary){animation:wiq-details-in var(--wiq-motion-base) var
 .fighter-signal.a{left:11%;color:#62aaff}
 .fighter-signal.b{right:11%;color:#e2b85f}
 .fighter-signal span{position:absolute;inset:auto 0 9px;text-align:center;color:currentColor;font-size:12px;font-weight:900;letter-spacing:1px}
-.analysis-progress{height:12px;border:1px solid #294266;border-radius:99px;background:#07101f}
+.analysis-progress{height:12px;border:1px solid #294266;border-radius:99px;background:var(--wiq-field-bg)}
 .analysis-progress .progress-bar{position:relative;overflow:hidden;transition:width 650ms var(--wiq-ease-out)}
 .analysis-progress .progress-bar:after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent,rgba(255,255,255,.4),transparent);animation:wiq-progress-sheen 1.8s linear infinite}
 .analysis-message{min-height:48px;margin:17px 0 5px;color:#dce5f4;font-size:15px;font-weight:750}

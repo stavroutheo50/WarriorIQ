@@ -576,7 +576,7 @@
 .story-head h1{margin:8px 0 10px;font-size:clamp(34px,6vw,56px);line-height:1.02}
 .story-corner{display:inline-block;padding:5px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2);font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#c7cede}
 .story-corner.corner-red{border-color:#ff718f;color:#ff718f}
-.story-corner.corner-blue{border-color:#5aa0ff;color:#7fb1ff}
+.story-corner.corner-blue{border-color:var(--wiq-a);color:#7fb1ff}
 .story-hero{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:18px;background:radial-gradient(420px 220px at 0 0,rgba(79,215,255,.16),transparent),rgba(255,255,255,.03)}
 .story-total{display:flex;flex-direction:column}
 .story-total strong{font-size:clamp(72px,16vw,128px);line-height:.9}
@@ -670,7 +670,7 @@
 
 /* Disabled-but-explained controls (result page sharing). */
 .btn[aria-disabled="true"]{filter:saturate(.4)}
-.share-unavailable-reason{margin:10px 0 0;padding:10px 12px;border:1px solid var(--wiq-line,#2b416b);border-radius:10px;background:#0c1421;color:#dbe6f7;max-width:640px}
+.share-unavailable-reason{margin:10px 0 0;padding:10px 12px;border:1px solid var(--wiq-line,#2b416b);border-radius:10px;background:var(--wiq-field-bg);color:#dbe6f7;max-width:640px}
 /* Numbers that could not be confirmed as this fighter's own. */
 .fight-vitals[data-unverified="true"]{opacity:.6;filter:grayscale(.8)}
 .vitals-unverified-label{display:inline-block;margin:0 0 8px;padding:4px 10px;border:1px dashed #7a6a3a;border-radius:999px;color:#f1e3bd;font-size:12px;font-weight:700;letter-spacing:.02em}
@@ -908,7 +908,7 @@
 /* The sentence that says what each graph shows, with its numbers. */
 .graph-read{margin:2px 0 6px;font-size:16px;line-height:1.45;color:#eef3ff}
 .stack-part{position:relative;overflow:hidden}
-.stack-part span{position:absolute;inset:0;display:flex;font-style:normal;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#0b0f17}
+.stack-part span{position:absolute;inset:0;display:flex;font-style:normal;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:var(--wiq-canvas)}
 /* Sections folded on phones (D12). On a wide screen the summary row is hidden
    and the section reads as before. */
 .phone-fold>summary{cursor:pointer;margin:6px 0 10px;color:#9fd8ff;font-weight:750;font-size:14px}
@@ -994,7 +994,7 @@ body.replay-theatre-open{overflow:hidden}
 .mark-tap span{font-weight:700;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mark-tap b{font-size:34px;line-height:1.1;font-variant-numeric:tabular-nums}
 .mark-tap small{opacity:.7}
-.mark-a{border-color:#55a7ff}.mark-b{border-color:#ff6470}
+.mark-a{border-color:#55a7ff}.mark-b{border-color:var(--wiq-b)}
 .mark-tap.flash{animation:mark-flash .25s ease-out}
 @keyframes mark-flash{from{background:rgba(255,255,255,.28)}to{background:rgba(255,255,255,.04)}}
 .mark-tools{display:flex;align-items:center;gap:12px;margin-bottom:16px}
@@ -1002,7 +1002,7 @@ body.replay-theatre-open{overflow:hidden}
 .mark-result-grid div{display:flex;flex-direction:column}.mark-result-grid b{font-size:28px;font-variant-numeric:tabular-nums}.mark-result-grid span{font-size:13px;opacity:.8}
 .mark-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
 .mark-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 10px;border-radius:12px;border-left:4px solid;background:rgba(255,255,255,.04)}
-.mark-row-a{border-left-color:#55a7ff}.mark-row-b{border-left-color:#ff6470}
+.mark-row-a{border-left-color:#55a7ff}.mark-row-b{border-left-color:var(--wiq-b)}
 .mark-time{border:0;background:none;color:inherit;text-decoration:underline;cursor:pointer;padding:4px 0}
 .mark-who{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:9em}
 .mark-chips{display:flex;gap:4px}

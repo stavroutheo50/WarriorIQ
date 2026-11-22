@@ -67,7 +67,7 @@
 }
 .btn.secondary:hover {  border-color: #3a3a40 !important; }
 
-.nav-signup { background: #f5f5f6; color: #0a0a0b; }
+.nav-signup { background: var(--wiq-text); color: #0a0a0b; }
 
 /* --- Surfaces -------------------------------------------------------------
    Cards stop being the default container. Where one is still a card it is a
@@ -760,7 +760,7 @@ fieldset.needs-attention {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }
-  .camp-sticky { background: #080c16 !important; }
+  .camp-sticky { background: var(--wiq-canvas) !important; }
   
 }
 /* The long report sections below the fold are laid out and painted only as
