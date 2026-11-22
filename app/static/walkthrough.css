@@ -1,0 +1,163 @@
+/* Site walkthrough fixes (2026-11-16).
+
+   Loaded after glass.css and before a11y.css (CSS_BUNDLES in app/main.py), so
+   it only adjusts what the glass look already draws: spacing, alignment,
+   wrapping, and the few new pieces this pass added (inline field errors, the
+   two-step QR code). No new framework, colours from the existing palette. */
+
+:root {
+  /* One container, one horizontal padding, one section gap (P3). */
+  --wiq-container: 1280px;
+  --wiq-gutter: clamp(16px, 3vw, 32px);
+  --wiq-section-gap: clamp(48px, 7vw, 88px);
+  --wiq-field-bg: #0b1322;
+  --wiq-field-text: #eef3fc;
+}
+
+/* --- Forms ------------------------------------------------------------------ */
+.field-error {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #743544;
+  border-left: 3px solid var(--red, #fb7185);
+  border-radius: 12px;
+  background: #3a162055;
+  color: #ffc9d0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.form-message { margin: 6px 0 12px; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
+.form-actions form { margin: 0; }
+.settings-form .form-actions .btn { justify-self: auto; }
+[aria-invalid="true"] { border-color: #c2475c !important; }
+.btn.is-disabled, .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+
+/* Radios and checkboxes in the theme, with a visible focus ring (P1 #7): the
+   browser's own were bright white squares on the dark cards. Size comes from
+   a11y.css (22px), loaded after this. */
+input[type="checkbox"], input[type="radio"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-content: center;
+  margin: 0;
+  border: 2px solid #6b7fa6;
+  border-radius: 6px;
+  background: var(--wiq-field-bg) center / 70% no-repeat;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s;
+}
+input[type="radio"] { border-radius: 50%; }
+input[type="checkbox"]:hover, input[type="radio"]:hover { border-color: #9fb4dc; }
+input[type="checkbox"]:checked {
+  border-color: #4f86ff;
+  background-color: #4f86ff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3.2L13 4.8' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+input[type="radio"]:checked { border-color: #4f86ff; background: #4f86ff; box-shadow: inset 0 0 0 4px var(--wiq-field-bg); }
+input[type="checkbox"]:disabled, input[type="radio"]:disabled { opacity: .45; cursor: not-allowed; }
+[aria-invalid="true"] input[type="radio"], input[type="checkbox"][aria-invalid="true"] { border-color: #e0627a; }
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
+  outline: 3px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* Chrome's autofill paints dark inputs bright white; keep the field's own
+   colours (P1 #7). The inset shadow is the only way to override it. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--wiq-field-text);
+  caret-color: var(--wiq-field-text);
+  -webkit-box-shadow: 0 0 0 1000px var(--wiq-field-bg) inset;
+  box-shadow: 0 0 0 1000px var(--wiq-field-bg) inset;
+  transition: background-color 9999s ease-out 0s;
+}
+
+/* Visible focus on every interactive element (P3). */
+a:focus-visible, button:focus-visible, summary:focus-visible, select:focus-visible,
+input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid #60a5fa;
+  outline-offset: 3px;
+}
+
+/* --- Cards side by side align their tops (P3) ------------------------------ */
+/* premium.css spaces stacked sections with "section + section"; inside a
+   side-by-side grid that pushed the second card ~70px below the first
+   (Settings: Account overview vs Consent controls; Profile's two columns). */
+.grid > section + section,
+.grid > .card + .card { margin-top: 0; }
+.grid { align-items: start; }
+.grid > .billing-wide { grid-column: 1 / -1; }
+
+/* --- Settings ---------------------------------------------------------------- */
+#account-overview .settings-form { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--glass-edge, #243653); }
+#account-overview .settings-form .field { margin-bottom: 4px; }
+.pill.this-browser { width: auto; align-self: start; padding: 3px 9px; font-size: 12px; }
+.device-list li > div { justify-items: start; }
+.two-factor-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.good-pill { border-color: #256d4d; color: #8ff0bf; }
+.two-factor-setup {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  margin-top: 12px;
+}
+.two-factor-qr { margin: 0; display: grid; justify-items: center; gap: 8px; }
+.two-factor-qr svg {
+  display: block;
+  width: 196px;
+  height: 196px;
+  padding: 0;
+  border-radius: 14px;
+  background: #fff;
+}
+.two-factor-key-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+@media (max-width: 620px) {
+  .two-factor-setup { grid-template-columns: 1fr; }
+  .two-factor-qr { justify-items: start; }
+}
+.delete-account-form .row { align-items: start; }
+
+/* --- Recovery codes page ------------------------------------------------------ */
+.two-factor-codes .form-actions { margin-bottom: 18px; }
+
+/* --- Sign in / sign up / reset (P1 #7, P2 layout) --------------------------- */
+/* "Sign in" and "Create account" are marked when you are on them. */
+.account-nav > a[aria-current="page"]:not(.btn) {
+  background: var(--glass-tint-hover, rgba(255, 255, 255, .12));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2);
+  border-radius: 999px;
+  color: #fff;
+}
+.account-nav > a.btn[aria-current="page"] { box-shadow: 0 0 0 2px rgba(255, 255, 255, .55); }
+.account-nav > a:not(.btn) { padding: 9px 14px; }
+/* Copy and card start at the top, as on Sign in: the tall sign-up card
+   centred the headline ~430px down the page. */
+.auth-layout { align-items: start; min-height: 0; }
+.auth-copy { padding-top: 12px; }
+/* Three points in one column with one separator style, not 2+1 in a grid. */
+.auth-copy .trust-checks { grid-template-columns: 1fr; }
+/* Helper text under the social buttons reads as a sentence, not an eyebrow. */
+.social-auth > p.social-auth-gate {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--glass-text-faint, #a9b2c3);
+}
+.notice.error-summary {
+  border: 1px solid #743544 !important;
+  border-left: 3px solid var(--red, #fb7185) !important;
+  background: #3a162055 !important;
+  color: #ffc9d0;
+}
+.error-summary ul { margin: 8px 0 0; padding-left: 20px; }
+.error-summary li { margin: 3px 0; }
+.age-group[aria-invalid="true"] { border-color: #c2475c; }
+.flash-notice { margin: 18px 0 0; }
