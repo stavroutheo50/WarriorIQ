@@ -8,8 +8,8 @@ exactly what it would delete, and touches nothing else.
     python tools/delete_qa_test_data.py --email owner@example.com --archive --confirm
 
 --archive (2026-11-16) is the reversible choice: the fighters leave the roster
-("On the roster" in Fight Camp) and keep their fights, and can be restored
-from the archived list. Without it the fighters and their fights are deleted.
+("On the roster" in Fight Camp) and keep their fights, and one comes back
+by adding a fighter with the same name again. Without it the fighters and their fights are deleted.
 
 What it matches, and nothing more:
 
@@ -37,14 +37,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# The names the QA pass created (audit 2026-10-14, #32), exactly as entered.
-QA_FIGHTER_NAMES = (
-    "QA Test Boxer",
-    "QA Test MMA",
-    "QA Test MT",
-    "QA Test TKD",
-    "QA <img src=x onerror=alert(1)> \"O'Neil\" & Ωmega",
-)
+# One list for this tool and the admin page's archive button (app/qa_fighters.py).
+from app.qa_fighters import QA_FIGHTER_NAMES  # noqa: E402
 
 
 def _key(name: str) -> str:

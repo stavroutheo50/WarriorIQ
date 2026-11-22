@@ -114,3 +114,39 @@ def test_linked_sign_ins_are_counted_per_provider_with_github_always_listed():
     finally:
         object.__setattr__(SETTINGS, "admin_emails", original)
     assert f"GitHub {after['github']}" in page
+
+
+def test_admin_archives_only_the_exact_qa_fighters_on_their_own_roster():
+    """No shell on the host, so the QA clean-up is a confirmed button on /admin (2026-11-22). Reversible."""
+    from app import qa_fighters
+
+    admin, email = _new_account()
+    other, _ = _new_account()
+    profile, other_profile = int(admin["profile_id"]), int(other["profile_id"])
+    qa = db.create_fighter(profile, "qa test   boxer")                 # same name, other case and spacing
+    real = db.create_fighter(profile, "QA Test Boxer 2")                # not exact: never caught
+    elsewhere = db.create_fighter(other_profile, "QA Test Boxer")       # another account's roster
+    assert [f["id"] for f in qa_fighters.on_roster(profile)] == [qa["id"]]
+
+    client = BrowserClient(web.app)
+    client.cookies.set(web.SESSION_COOKIE, issue_session(admin["id"]))
+    original = SETTINGS.admin_emails
+    object.__setattr__(SETTINGS, "admin_emails", (email.lower(),))
+    try:
+        assert "qa test boxer" in client.get("/admin").text
+        unconfirmed = client.post("/admin/qa-fighters/archive", data={}, follow_redirects=False)
+        assert "tool=qa_none" in unconfirmed.headers["location"]
+        assert qa_fighters.on_roster(profile)
+        done = client.post("/admin/qa-fighters/archive", data={"confirm": "yes"}, follow_redirects=False)
+        assert "tool=qa_archived" in done.headers["location"]
+    finally:
+        object.__setattr__(SETTINGS, "admin_emails", original)
+    roster = {f["id"]: f for f in db.list_fighters(profile, include_archived=True)}
+    assert roster[qa["id"]]["archived"] and not roster[real["id"]]["archived"]
+    assert not db.list_fighters(other_profile, include_archived=True)[0]["archived"]
+    assert elsewhere["id"] != qa["id"]
+
+    stranger = BrowserClient(web.app)
+    stranger.cookies.set(web.SESSION_COOKIE, issue_session(other["id"]))
+    assert stranger.post("/admin/qa-fighters/archive", data={"confirm": "yes"}).status_code == 404
+    assert not db.list_fighters(other_profile, include_archived=True)[0]["archived"]
