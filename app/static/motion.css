@@ -43,17 +43,17 @@ body.motion-enabled .wiq-reveal.is-visible{opacity:1;transform:none}
 details>summary{transition:color var(--wiq-motion-fast) ease,background-color var(--wiq-motion-base) ease}
 details[open]>summary{color:#fff}
 details[open]>*:not(summary){animation:wiq-details-in var(--wiq-motion-base) var(--wiq-ease-out) both}
-.correction-dialog[open]{animation:wiq-modal-in var(--wiq-motion-base) var(--wiq-ease-out) both}
-.correction-dialog[open]::backdrop{animation:wiq-backdrop-in var(--wiq-motion-base) ease both}
+
+
 
 /* Home and upload: keep the restored layout, add intentional interaction. */
-body[data-page=home] .hero-copy>*{animation:wiq-copy-in var(--wiq-motion-slow) var(--wiq-ease-out) both;animation-delay:calc(var(--hero-order,0)*45ms)}
-body[data-page=home] .hero-copy>.eyebrow{--hero-order:0}
-body[data-page=home] .hero-copy>h1{--hero-order:1}
-body[data-page=home] .hero-copy>p{--hero-order:2}
-body[data-page=home] .hero-copy>.hero-actions{--hero-order:3}
-body[data-page=home] .hero-copy>.fight-path{--hero-order:4}
-body[data-page=home] .hero-copy>.trust-row{--hero-order:5}
+
+
+
+
+
+
+
 .hero-card[data-upload-state=ready]{border-color:#4b83d4;box-shadow:0 24px 70px rgba(53,82,170,.24)}
 .file-button.uploaded{animation:wiq-upload-ready var(--wiq-motion-base) var(--wiq-ease-impact)}
 .file-button.uploaded>span{animation:wiq-upload-icon var(--wiq-motion-slow) var(--wiq-ease-impact)}

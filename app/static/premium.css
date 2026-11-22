@@ -295,60 +295,23 @@ p { max-width: 68ch; }
    the upload column, and free wrapping leaves a single orphan on the second
    row that reads as a mistake; auto-fit spreads them evenly instead (3 + 2 in
    the card, one line where there is room for it). */
-.sport-picker {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px;
-}
 
-.sport-option { position: relative; cursor: pointer; }
+
+
 
 /* The input stays focusable and reachable; only its default box is hidden. */
-.sport-option input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  margin: 0;
-  cursor: pointer;
-}
 
-.sport-option span {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--wiq-edge);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .026);
-  color: var(--wiq-text-secondary);
-  font-size: 13px;
-  font-weight: 620;
-  /* .field label uppercases its contents, which is right for the field's own
-     caption and wrong for these: the sport names are choices, not labels, and
-     tracked-out capitals widen the row enough to push MMA onto a second line. */
-  text-transform: none;
-  letter-spacing: .004em;
-  transition: border-color var(--wiq-fast) var(--wiq-ease),
-              background-color var(--wiq-fast) var(--wiq-ease),
-              color var(--wiq-fast) var(--wiq-ease);
-}
 
-.sport-option:hover span { border-color: var(--wiq-edge-strong); color: var(--wiq-text); }
 
-.sport-option input:checked + span {
-  border-color: rgb(var(--wiq-aurora-a) / .55);
-  background: rgb(var(--wiq-aurora-a) / .16);
-  color: var(--wiq-text);
-}
+
+
+
+
 
 /* The focus ring has to follow the visible chip, not the hidden input. */
-.sport-option input:focus-visible + span {
-  outline: 2px solid #82a5ff;
-  outline-offset: 3px;
-}
 
-.sport-field { margin-bottom: 4px; }
+
+
 
 /* --- Coverage disclosure --------------------------------------------------
    The picker offers five sports; the detector reads punches, kicks and knees.
@@ -357,67 +320,32 @@ p { max-width: 68ch; }
    read rather than skimmed past: it sits inside the field, tied to the sport
    above it, and changes tone when coverage is partial.
    --------------------------------------------------------------------------- */
-.sport-coverage {
-  margin: 10px 0 0;
-  padding: 11px 13px;
-  border: 1px solid var(--wiq-edge);
-  border-left: 2px solid var(--wiq-success);
-  border-radius: 0 10px 10px 0;
-  background: rgba(255, 255, 255, .022);
-  color: var(--wiq-text-secondary);
-  font-size: 12px;
-  line-height: 1.6;
-  /* The picker sets a max-width for prose elsewhere; this must fill its field. */
-  max-width: none;
-}
 
-.sport-coverage b { color: var(--wiq-text); font-weight: 700; }
+
+
 
 /* Partial coverage is not an error, so it is amber rather than red: the
    analysis is still correct about what it saw. */
-.sport-coverage[data-covered="no"] {
-  border-left-color: var(--wiq-warning);
-}
 
-.sport-coverage[hidden] { display: none; }
+
+
 
 /* --- Hero sport rail ------------------------------------------------------
    A pill reading "5 sports" asks the visitor to take the claim on trust and
    tells a boxer nothing. Naming them is the whole message of this release, so
    the hero states them outright.
    --------------------------------------------------------------------------- */
-.sport-rail {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 7px 10px;
-  margin-top: 16px;
-  color: var(--wiq-text-tertiary);
-  font-size: 12px;
-}
 
-.sport-rail b {
-  color: var(--wiq-text-secondary);
-  font-weight: 620;
-  letter-spacing: .003em;
-  white-space: nowrap;
-}
+
+
 
 /* Hairline separators drawn between names only, so the list reads as one line
    of type rather than a row of buttons competing with the hero call to action. */
-.sport-rail b + b::before {
-  content: "";
-  display: inline-block;
-  width: 1px;
-  height: 10px;
-  margin-right: 10px;
-  vertical-align: -1px;
-  background: var(--wiq-edge-strong);
-}
+
 
 @media (max-width: 620px) {
-  .sport-rail { font-size: 12px; gap: 6px 8px; }
-  .sport-rail b + b::before { margin-right: 8px; }
+  
+  
 }
 
 /* --- Coverage limit on the report ----------------------------------------
@@ -446,35 +374,15 @@ p { max-width: 68ch; }
    =========================================================================== */
 
 /* --- Centered hero -------------------------------------------------------- */
-.hero-centered {
-  display: block;
-  min-height: 0;
-  padding: clamp(56px, 11vh, 116px) 0 clamp(44px, 8vh, 84px);
-  text-align: center;
-}
 
-.hero-centered .hero-copy {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  /* Measure, not the full 1280px shell: a centered line longer than this stops
-     being readable as a paragraph and starts being a banner. */
-  max-width: 860px;
-  margin: 0 auto;
-}
 
-.hero-centered .hero-copy > p {
-  max-width: 62ch;
-  margin-inline: auto;
-  text-wrap: pretty;
-}
 
-.hero-centered .hero-actions,
-.hero-centered .fight-path,
-.hero-centered .trust-row,
-.hero-centered .sport-rail { justify-content: center; }
 
-.hero-centered .eyebrow::before { display: none; }
+
+
+
+
+
 
 /* The single way in earns more weight than a row of equal buttons. */
 .btn-lead {
@@ -553,16 +461,9 @@ p { max-width: 68ch; }
 
 .sport-card-coverage[data-covered="no"] { color: var(--wiq-warning); }
 
-.sport-card-go {
-  position: absolute;
-  right: 22px;
-  bottom: 20px;
-  color: var(--wiq-text-tertiary);
-  font-size: 17px;
-  transition: transform var(--wiq-fast) var(--wiq-ease), color var(--wiq-fast) var(--wiq-ease);
-}
 
-.sport-card:hover .sport-card-go { transform: translateX(4px); color: var(--wiq-text); }
+
+
 
 .chooser-note { max-width: 68ch; margin-top: 26px; }
 
@@ -687,8 +588,8 @@ p { max-width: 68ch; }
   letter-spacing: .012em;
 }
 
-.sport-card-go { color: rgb(var(--sport-accent-soft)); opacity: .55; }
-.sport-card:hover .sport-card-go { opacity: 1; }
+
+
 
 /* --- Setup page ----------------------------------------------------------- */
 .setup-title { display: flex; align-items: center; gap: 14px; }
@@ -841,7 +742,7 @@ p { max-width: 68ch; }
    nothing interactive should be reachable only by hover. These are the few
    places in the new flow that were under the line.
    --------------------------------------------------------------------------- */
-.sport-option span { min-height: 44px; }
+
 .sport-option, .sport-card, .file-button { cursor: pointer; }
 
 /* The crest is decorative; the whole card is the target, so the card carries

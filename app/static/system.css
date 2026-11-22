@@ -320,7 +320,7 @@ summary:focus-visible,
               color var(--wiq-motion-quick) var(--wiq-motion-ease);
 }
 
-.full-history { margin-top: 20px; }
+
 
 @media (max-width: 860px) {
   .stat-band { grid-template-columns: 1fr; }
@@ -335,9 +335,9 @@ summary:focus-visible,
 
 /* The shared disclosure styles its summary's <span> as one small grey run, so
    a title and a subtitle inside it collide. This one stacks them. */
-.full-history summary span { display: grid; gap: 2px; }
-.full-history summary strong { color: var(--wiq-text); font-size: var(--wiq-text-sm); font-weight: 700; }
-.full-history summary small { color: var(--wiq-text-tertiary); font-size: var(--wiq-text-micro); font-weight: 500; }
+
+
+
 
 @media (max-width: 780px) {
   .fight-list a {

@@ -4039,7 +4039,8 @@ class NavigationReachabilityTests(unittest.TestCase):
     Sign out were all unreachable for 280px of viewport width.
     """
 
-    SELECTORS = (".navlinks", ".nav-more", ".account-nav", ".mobile-menu-button")
+    # .nav-more left the markup; its rule went with the unused-CSS clean-up (2026-11-22).
+    SELECTORS = (".navlinks", ".account-nav", ".mobile-menu-button")
 
     def _enclosing_breakpoint(self, css: str, index: int) -> str:
         """The @media condition the rule at `index` sits inside.
