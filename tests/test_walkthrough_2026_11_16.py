@@ -517,3 +517,55 @@ def test_the_social_helper_line_is_a_sentence_not_an_eyebrow():
     rule = css[css.index(".social-auth > p.social-auth-gate"):]
     assert "text-transform: none" in rule[:200]
     assert "input:-webkit-autofill" in css and "-webkit-box-shadow: 0 0 0 1000px var(--wiq-field-bg) inset" in css
+
+
+# --- P2: page fixes that carry logic -------------------------------------------
+
+def test_a_footwork_change_carries_its_unit():
+    from core.progress_insights import change_words
+
+    assert change_words(-0.3, "speed") == "-0.3 body lengths a second"
+    assert change_words(0.3, "rate") == "+0.3 body lengths a second"
+
+
+def test_the_pace_graph_marks_an_opening_that_is_not_in_the_report():
+    from core.stat_sheet import _pace
+
+    def side(start):
+        return {"numbers": {"series": {"points": [{"t": start + i, "speed": 0.5 + i / 100} for i in range(60)]}}}
+
+    shaded = _pace({"A": side(27.0), "B": side(27.0)})
+    assert shaded["start_x"] > 0 and shaded["start_label"] == "0:27" and shaded["half_speed"] > 0
+    whole = _pace({"A": side(0.0), "B": side(0.0)})
+    assert whole["start_x"] == 0.0
+
+
+def test_the_library_labels_an_upload_saved_twice_and_shows_the_date_once():
+    created, _ = _account()
+    pid = int(created["profile_id"])
+    for suffix in ("a", "b"):
+        db.save_fight(f"twice{uuid.uuid4().hex[:6]}{suffix}", pid, "same.mp4", "", "", "sparring", "K1", "A", {})
+    page = _client(created).get("/history").text
+    assert page.count("Uploaded again · copy 2") == 1
+    record = page[page.index('class="fight-record"'):]
+    record = record[:record.index("</article>")]
+    assert 'data-local="date"' not in record           # the title already carries the date
+    assert 'id="historySearch"' in page and "Search your fights" in page
+
+
+def test_a_plan_too_small_for_the_roster_is_never_offered_starter_included():
+    created, _ = _account()
+    pid = int(created["profile_id"])
+    db.set_plan_override(int(created["id"]), "gym")
+    for n in range(3):
+        db.create_fighter(pid, f"Athlete {n}")
+    page = _client(created).get("/pricing").text
+    starter = page[page.index('id="plan-free"'):]
+    starter = starter[:starter.index("</section>")]
+    assert "Use Starter" not in starter and "this plan holds 1" in starter and "disabled" in starter
+
+
+def test_a_missing_page_says_so_in_a_sentence():
+    page = BrowserClient(web.app).get("/no-such-page-here")
+    assert page.status_code == 404
+    assert ">Not Found<" not in page.text and "find that page" in page.text

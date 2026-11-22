@@ -161,3 +161,261 @@ input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
 .error-summary li { margin: 3px 0; }
 .age-group[aria-invalid="true"] { border-color: #c2475c; }
 .flash-notice { margin: 18px 0 0; }
+
+/* --- Fight library (/history) ------------------------------------------------ */
+/* The bar wraps instead of pushing the Ruleset select past the edge. */
+.archive-tools { flex-wrap: wrap; align-items: end; row-gap: 12px; max-width: 100%; }
+.archive-tools > * { min-width: 0; }
+.archive-tools select { max-width: 100%; }
+/* A real search box, not a 44px circle: its own row-sized space and an icon. */
+.archive-search {
+  position: relative;
+  flex: 1 1 320px;
+  min-width: min(100%, 260px);
+  max-width: none;
+}
+.archive-search input { width: 100%; padding-left: 44px !important; }
+.archive-search-icon {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: #9fb0cb;
+  stroke-width: 2;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+@media (max-width: 720px) { .archive-search { flex-basis: 100%; } }
+/* The tick-box sits in the card's own corner, clear of the thumbnail. */
+.fight-record > .fight-select {
+  top: 14px !important;
+  left: 14px !important;
+  width: 32px;
+  height: 32px;
+  background: rgba(10, 15, 24, .92);
+  border: 1px solid var(--glass-edge, #2c4368);
+}
+.fight-record .fight-thumb { margin-top: 18px; }
+/* No frame: the sport's mark, not a black box. */
+.fight-thumb.thumb-unavailable { background: linear-gradient(145deg, #16233b, #0d1628); }
+.fight-thumb.thumb-unavailable::before {
+  content: attr(data-mark);
+  font-size: 28px;
+  letter-spacing: .06em;
+  color: #8ea3c6;
+}
+.fight-thumb.thumb-unavailable:not([data-mark])::before,
+.fight-thumb.thumb-unavailable[data-mark=""]::before { content: "No preview"; font-size: 12px; }
+.fight-result strong { white-space: nowrap; }
+.fight-result .score-withheld { font-size: 24px; }
+.fight-duplicate {
+  display: inline-flex;
+  padding: 2px 8px;
+  border: 1px solid #805d22;
+  border-radius: 999px;
+  color: #f3c98b;
+  font-size: 12px;
+  font-weight: 700;
+}
+.archive-pager { margin-top: 18px; }
+
+/* --- Fight Camp (/camp) ------------------------------------------------------ */
+/* Today: content from the top, not centred in an empty band. */
+[data-page="camp"] .camp-today { align-items: start; }
+[data-page="camp"] .camp-today > * { align-self: start; }
+/* Header facts as a stat row. */
+.camp-meta { display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 14px 0 0; }
+.camp-meta > div { display: grid; gap: 2px; }
+.camp-meta dt { order: 2; color: var(--glass-text-faint, #a9b2c3); font-size: 12px; font-weight: 600; }
+.camp-meta dd { order: 1; margin: 0; font-size: 22px; font-weight: 800; line-height: 1.1; }
+/* Tiles: separated, not touching with doubled borders; values on one baseline. */
+[data-page="camp"] .stat-support { gap: 10px; background: none; border: 0; overflow: visible; }
+[data-page="camp"] .stat-support .stat {
+  border: 1px solid var(--glass-edge, #2c4368);
+  border-radius: 18px;
+  grid-template-rows: 2.6em auto auto;
+  align-content: start;
+}
+[data-page="camp"] .stat-support .stat .label { align-self: end; }
+/* The sparkline reaches its end dot: no dash animation on these. */
+.trend-cards-card polyline, .camp-periods polyline, [data-page="camp"] .trend-card polyline {
+  stroke-dasharray: none !important;
+  stroke-dashoffset: 0 !important;
+}
+/* Recent analyses: fixed columns, a dash where a value is missing, no rule above the first row. */
+.recent-fights .fight-list a { grid-template-columns: 96px minmax(0, 1fr) repeat(3, 72px); }
+.recent-fights .fight-list li:first-child a { border-top: 0; }
+.recent-fights .fight-figure { display: grid; justify-items: end; gap: 1px; }
+.recent-fights .fight-figure small { color: var(--glass-text-faint, #a9b2c3); font-size: 12px; }
+@media (max-width: 620px) {
+  .recent-fights .fight-list a { grid-template-columns: minmax(0, 1fr) repeat(3, 56px); }
+  .recent-fights .fight-list .fight-ruleset { display: none; }
+}
+.retag-first { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+/* Squad table: one text size, sensible columns. */
+#squad table { table-layout: auto; font-size: 14px; }
+#squad table td, #squad table th, #squad table td * { font-size: 14px; }
+#squad table th { font-size: 12px; }
+#squad table td[data-label="Movement"], #squad table td[data-label="Work on"] { min-width: 160px; max-width: 260px; }
+
+/* --- Ringside Scorer --------------------------------------------------------- */
+/* The board no longer sticks over the +1/+2 pads as the page scrolls. */
+.ringside-board { position: relative !important; top: auto !important; }
+.ringside-kind { font-size: 12px; color: var(--glass-text-faint, #a9b2c3); }
+.ringside-explain { margin: 10px 4px 0; }
+.ringside { padding-bottom: 16px; }
+.ringside-more { margin-top: 20px; }
+
+/* --- Plans (/pricing) -------------------------------------------------------- */
+/* Three separate tiles: the 1px-gap "shared border" showed as small triangles
+   where each rounded tile met the coloured gap. */
+.allowance-strip { gap: 12px; overflow: visible; border: 0; background: none; }
+.allowance-strip > div { border: 1px solid var(--glass-edge, #344b79); }
+/* Ribbons sit flush with the card's top edge and corners. */
+.pricing-grid .pricing-card { padding: 24px; overflow: hidden; }
+.pricing-grid .plan-banner {
+  margin: -24px -24px 20px !important;
+  border-radius: 0 !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  border-top: 0 !important;
+}
+/* "Billing not open yet" is information, not success. */
+.plan-early { border-color: #805d22; background: #3a2a1255; color: #f3c98b; }
+/* One grid at tablet width: Gym takes one column like the others. */
+@media (max-width: 1100px) {
+  .pricing-grid .pricing-card.gym-featured { grid-column: span 6; }
+}
+@media (max-width: 700px) {
+  .pricing-grid .pricing-card.gym-featured { grid-column: 1 / -1; }
+}
+/* The trust points are facts, not buttons. */
+.pricing-trust .trust-checks span { cursor: default; box-shadow: none; background: none; border-style: dashed; }
+
+/* --- Home (/) ---------------------------------------------------------------- */
+/* The hero uses the same side padding as every other section; at ~1000px it
+   was 16px from the edge. */
+.hx-hero-inner { width: min(var(--wiq-container), calc(100% - 2 * var(--wiq-gutter))); }
+.hx-title { overflow-wrap: anywhere; padding-right: var(--wiq-gutter); }
+/* One section gap. */
+.hx-section { margin-top: var(--wiq-section-gap); }
+.home-steps, .product-section.faq { margin-top: var(--wiq-section-gap); padding-top: 0; }
+/* Text over a sport clip stays readable over captions burned into the stock
+   footage (the MMA clip carries "ALVERTIS SHEARS", "OKINAWA"). */
+.hx-sport::after { background: linear-gradient(180deg, rgba(10, 15, 24, .05) 10%, rgba(10, 15, 24, .78) 55%, rgba(10, 15, 24, .97) 100%); }
+.hx-sport > div { text-shadow: 0 1px 12px rgba(0, 0, 0, .85); }
+.hx-sport[href="/analyze/mma"] video { object-position: center 30%; }
+.hx-plan-actions { margin-top: 18px; }
+/* Questions: the same width as the other sections, one list with dividers
+   instead of a rounded box per item stacking into doubled arcs. */
+.faq { max-width: none; }
+.faq details {
+  border: 0 !important;
+  border-bottom: 1px solid var(--glass-edge, #273653) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  margin: 0;
+  padding: 18px 4px;
+}
+.faq details:first-of-type { border-top: 1px solid var(--glass-edge, #273653) !important; }
+/* Lists joined by a dot drawn between items, never after the last one. */
+.faq-guides { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; margin-top: 22px; }
+.dot-list { display: flex; flex-wrap: wrap; gap: 4px 0; margin: 0; padding: 0; list-style: none; }
+.dot-list li + li::before { content: "·"; margin: 0 8px; color: var(--glass-text-faint, #a9b2c3); }
+
+/* --- Global container and footer (P3) ---------------------------------------- */
+.shell { width: min(var(--wiq-container), calc(100% - 2 * var(--wiq-gutter))); }
+/* Footer links wrap left-aligned with even gaps, not centred onto a second line. */
+.legal-footer nav { justify-content: flex-start; max-width: 620px; gap: 8px 18px; }
+
+/* --- Feed, Coaching, Gym: the page title is the largest heading -------------- */
+[data-page="feed"] .athlete-head h1,
+[data-page="coaching"] .athlete-head h1,
+[data-page="gym"] .athlete-head h1 {
+  font-size: clamp(42px, 6vw, 72px);
+  line-height: 1;
+  letter-spacing: -.04em;
+  margin: 10px 0 14px;
+}
+[data-page="feed"] main .card h2,
+[data-page="coaching"] main .card h2,
+[data-page="gym"] main .card h2 { font-size: clamp(22px, 2.6vw, 30px); }
+/* Search: a normal button beside the box, not half the row. */
+.feed-search .row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.feed-search .row .btn { padding-inline: 22px; }
+/* Empty states end with their message, no rule under it. */
+main .card > p:last-child, main .card > .muted:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+
+/* --- Error pages --------------------------------------------------------------- */
+.error-page .hero-actions { align-items: center; }
+.error-page .hero-actions .text-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; }
+
+/* --- Legal centre: no empty tile when fewer operator details are set ------- */
+.legal-identity { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+/* --- Fight report (/result) ---------------------------------------------------- */
+/* The breadcrumb clears the floating bar. */
+[data-page="result"] main { padding-top: 12px; }
+[data-page="result"] .result-hero { scroll-margin-top: 110px; padding-top: 8px; }
+/* Header actions wrap cleanly; one primary. */
+.result-hero .selection-tools { flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.result-hero .selection-tools form { margin: 0; }
+/* "The first 0:27 is not in this report" spans the content, not half of it. */
+.analysed-span-note { display: block; width: 100%; max-width: none; box-sizing: border-box; }
+/* Small print in one footer. */
+.report-meta {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--glass-edge, #273653);
+}
+.report-meta .analysis-build { margin: 0; }
+.report-meta .recording-notes { margin: 0; }
+[data-page="result"] .quiet-back { display: inline-flex; margin-top: 14px; }
+/* Stat sheet graphs: a value axis, gridlines, a shaded excluded opening. */
+.stat-graph-body { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; align-items: stretch; }
+.stat-yaxis { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding: 0 0 18px; color: var(--glass-text-faint, #a9b2c3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.stat-graph-plot { position: relative; }
+.stat-pace .stat-grid { stroke: rgba(255, 255, 255, .1); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.stat-pace .stat-excluded { fill: rgba(255, 255, 255, .05); }
+.stat-excluded-label { position: absolute; left: 0; top: 4px; padding: 0 6px; color: var(--glass-text-faint, #a9b2c3); font-size: 12px; line-height: 1.3; }
+.stat-graph-body .stat-yaxis { padding-bottom: 0; }
+.stat-axis-indent { margin-left: 42px; }
+
+/* --- Account menu and sport switcher ------------------------------------------- */
+.profile-menu-panel, .sport-menu-panel {
+  max-height: calc(100vh - 110px);
+  max-height: calc(100dvh - 110px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.profile-menu-panel .menu-group {
+  margin: 8px 10px 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--glass-edge, #273653);
+  color: var(--glass-text-faint, #a9b2c3);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.profile-menu-panel .menu-group:first-child { margin-top: 2px; padding-top: 0; border-top: 0; }
+.profile-menu-panel .menu-signout { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--glass-edge, #273653); }
+/* Wide enough that a sport's one-line description fits in one or two lines. */
+.sport-menu-panel { width: min(340px, calc(100vw - 32px)) !important; }
+.sport-menu-panel button { padding: 11px 14px; }
+/* The current sport: a tinted row and the dot, not a curved inset edge clipping the text. */
+.sport-menu-panel button[aria-current="true"] { box-shadow: none !important; background: rgb(var(--sport-accent, 92 130 239) / .16); }
+/* The caret is drawn and turns over when open; it read as a broken "⌐". */
+.menu-caret { transition: transform .15s ease; transform-origin: 50% 50%; }
+details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg); }
+.sport-menu[open] > summary .sport-switch-caret.menu-caret { transform: translateY(3px) rotate(-135deg); }
+/* The recording notes read as part of the report, full width, not a loose line. */
+.recording-notes { display: block; width: 100%; margin: 14px 0; }
