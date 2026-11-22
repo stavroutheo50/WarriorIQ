@@ -22,7 +22,7 @@
       <dd class="stat-a wiq-num">{% if row.count %}<span data-count-up>{{ row.a_text }}</span>{% else %}{{ row.a_text }}{% endif %}</dd>
       <dt>{{ row.label }}{% if row.unit %} <small>{{ row.unit }}</small>{% endif %}{% if row.note %} <small class="stat-note">{{ row.note }}</small>{% endif %}</dt>
       <dd class="stat-b wiq-num">{% if row.count %}<span data-count-up>{{ row.b_text }}</span>{% else %}{{ row.b_text }}{% endif %}</dd>
-      <div class="stat-bar" role="img" aria-label="{{ names.A }} {{ row.a_text }}, {{ names.B }} {{ row.b_text }}"><i class="stat-bar-a" style="--share: {{ row.share_a }}%"></i><i class="stat-bar-b" style="--share: {{ 100 - row.share_a }}%"></i></div>
+      {#- A dd, not a div: a <dl> group may only hold dt and dd. Hidden from screen readers because the two values are read from the dd cells beside it. -#}<dd class="stat-bar" aria-hidden="true"><i class="stat-bar-a" style="--share: {{ row.share_a }}%"></i><i class="stat-bar-b" style="--share: {{ 100 - row.share_a }}%"></i></dd>
     </div>
     {% endfor %}
   </dl>
