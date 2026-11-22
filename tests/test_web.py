@@ -1052,7 +1052,7 @@ class PublicPageTests(unittest.TestCase):
         frame = (root / "app" / "templates" / "frame.html").read_text(encoding="utf-8")
         selection = (root / "app" / "templates" / "select.html").read_text(encoding="utf-8")
 
-        self.assertIn('class="workflow-steps"', frame)
+        self.assertIn('{% include "_workflow_steps.html" %}', frame)   # the shared four-step bar
         self.assertIn('class="frame-workbench"', frame)
         self.assertIn('id="sourceVideo"', frame)
         self.assertIn('id="useFrame"', frame)

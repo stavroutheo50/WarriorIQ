@@ -370,16 +370,21 @@ class StepCountTests(unittest.TestCase):
         from pathlib import Path
 
         templates = Path("app/templates")
-        for name in ("sports.html", "analyze.html"):
+        text = (templates / "sports.html").read_text(encoding="utf-8")
+        self.assertIn("of 4", text)
+        self.assertNotIn("of 3", text)
+        # Since 2026-11-22 one shared four-step bar runs from upload to report.
+        from jinja2 import Environment, FileSystemLoader
+
+        rendered = Environment(loader=FileSystemLoader(str(templates))).get_template(
+            "_workflow_steps.html").render(step=1)
+        self.assertEqual(rendered.count("<li"), 4)
+        self.assertIn("of 4", rendered)
+        for name in ("analyze.html", "frame.html", "select.html", "progress.html"):
             with self.subTest(template=name):
                 text = (templates / name).read_text(encoding="utf-8")
-                self.assertIn("of 4", text)
+                self.assertIn('{% include "_workflow_steps.html" %}', text)
                 self.assertNotIn("of 3", text)
-        for name in ("frame.html", "select.html"):
-            with self.subTest(template=name):
-                tracker = (templates / name).read_text(encoding="utf-8").split(
-                    '<ol class="workflow-steps"', 1)[1].split("</ol>", 1)[0]
-                self.assertEqual(tracker.count("<li"), 4)
 
 
 if __name__ == "__main__":

@@ -742,7 +742,8 @@ def test_d2_one_display_name_everywhere():
 def test_d3_coach_forwards_to_fight_camp_and_the_home_page_sells_one_page():
     client = BrowserClient(web.app)
     response = client.get("/coach?x=1", follow_redirects=False)
-    assert response.status_code == 308 and response.headers["location"] == "/camp?x=1"
+    # full=1 (2026-11-22): /coach means the roster tools, never the first-report steps.
+    assert response.status_code == 308 and response.headers["location"] == "/camp?x=1&full=1"
     home = (TEMPLATES / "index.html").read_text(encoding="utf-8")
     # The outcomes section with the Fight Camp card left the homepage on
     # 2026-10-19 (owner: shorter homepage); it must still never link /coach.

@@ -3,6 +3,8 @@
 {% block title %}{{sport_label}} fight analysis · WarriorIQ{% endblock %}
 {% block description %}Upload {{sport_article|default("a")}} {{sport_label}} bout to WarriorIQ for evidence-linked analysis scored under {{sport_label}} rules, with coaching priorities and a fighter-specific training plan.{% endblock %}
 {% block content %}
+{#- The same four steps as the pages that follow (2026-11-22). -#}
+<div class="analysis-steps">{% with step=1, step_note="Choose your video" %}{% include "_workflow_steps.html" %}{% endwith %}</div>
 <section class="setup ux-setup">
   {#- The sticky heading lives in its own grid cell, stretched to the height of
       the upload card beside it, so it can never slide down over the notes in
@@ -10,7 +12,7 @@
   <div class="setup-aside">
   <header class="setup-head" data-reveal>
     <a class="quiet-back" href="/analyze">All sports</a>
-    <div class="eyebrow">Step 1 of 4 · Upload · {{sport_label}}</div>
+    <div class="eyebrow">Upload · {{sport_label}}</div>
     <div class="setup-title"><span class="sport-crest" aria-hidden="true">{{identity.mark}}</span>
       <h1>Set up your {{sport_label}} fight.</h1></div>
     <p class="setup-decided">{{identity.decided_by}}</p>

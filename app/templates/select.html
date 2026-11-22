@@ -3,12 +3,7 @@
 {% block title %}Select Fighters · WarriorIQ{% endblock %}
 {% block content %}
 <section class="selection-workflow fighter-workflow">
-  <ol class="workflow-steps" aria-label="Fight setup progress">
-    <li class="complete"><span>1</span><div><strong>Upload fight</strong><small>Video ready</small></div></li>
-    <li class="active" aria-current="step"><span>2</span><div><strong>Select fighters</strong><small>Tap who is who</small></div></li>
-    <li><span>3</span><div><strong>Analyse</strong><small>Follow it live</small></div></li>
-    <li><span>4</span><div><strong>Report</strong><small>Take it into training</small></div></li>
-  </ol>
+  {% with step=2, step_note="Tap who is who" %}{% include "_workflow_steps.html" %}{% endwith %}
   <header class="workflow-heading">
     <div><div class="eyebrow">Fighter selection</div><h1>Tell WarriorIQ who is who.</h1>{#- Says "tap" only once boxes are actually drawn (loadDetectionCandidates).
     It promised boxes on every page, and on the live host none ever came. -#}<p id="selectIntro">Point out each fighter in the picture below.</p>{% set orientation = job.orientation|default({}, true) %}{% if orientation.warning %}<p class="pair-warning" role="alert" id="orientationWarning">{{ orientation.warning }}</p>{% elif orientation.turned_by_person %}<p class="frame-source-note" role="note">Turned {{ orientation.turned_by_person }}° by you. The whole video is analysed this way up.</p>{% elif orientation.turned_clockwise %}<p class="frame-source-note" role="note">This video was filmed sideways, so WarriorIQ turned it upright before analysing it.</p>{% endif %}{#- A frame nobody chose is said to be one, so choosing a moment is never

@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% block head %}<link rel="stylesheet" href="/static/frame-picker.css?v={{asset_version}}">{% endblock %}
 {% block title %}Live analysis · WarriorIQ{% endblock %}
 {% block content %}
 <section class="analysis-page live-analysis-page{% if a_red_corner %} a-red-corner{% endif %}" id="analysisPage" aria-labelledby="analysisTitle">
+  <div class="analysis-steps">{% with step=3, step_note="Follow it live" %}{% include "_workflow_steps.html" %}{% endwith %}</div>
   <div class="live-analysis-toolbar">
     <a class="analysis-exit quiet-back" href="/camp">Leave analysis running</a>
     <div class="analysis-live"><i aria-hidden="true"></i><span id="liveLabel">Connecting to analysis…</span></div>
