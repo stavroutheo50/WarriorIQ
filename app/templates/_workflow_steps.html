@@ -1,0 +1,15 @@
+{#- The four steps from a video to a report, on every page of the way
+    (upload, pick the fighters, live analysis), so a first-time user always
+    sees how far they are (walkthrough, 2026-11-22). Set `step` (1-4) and,
+    optionally, `step_note` for the current step's small line. -#}
+{% set step_items = [
+  ('Upload fight', 'Video ready', 'Choose your video'),
+  ('Select fighters', 'Fighters picked', 'Tap who is who'),
+  ('Analyse', 'Analysed', 'Follow it live'),
+  ('Report', 'Ready', 'Take it into training'),
+] %}
+<ol class="workflow-steps" aria-label="Fight setup progress, step {{ step }} of 4">
+  {% for title, done_note, todo_note in step_items %}{% set n = loop.index %}
+  <li{% if n < step %} class="complete"{% elif n == step %} class="active" aria-current="step"{% endif %}><span>{{ n }}</span><div><strong>{{ title }}</strong><small>{% if n < step %}{{ done_note }}{% elif n == step and step_note %}{{ step_note }}{% else %}{{ todo_note }}{% endif %}</small></div></li>
+  {% endfor %}
+</ol>

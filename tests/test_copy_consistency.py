@@ -35,7 +35,8 @@ def test_a_claimed_job_is_not_still_staged_as_queued(tmp_path):
 def test_the_frame_picker_uses_the_four_step_bar_only():
     page = _page("frame.html")
     assert "of 03" not in page
-    assert page.count('class="workflow-steps"') == 1
+    # One step bar, from the shared include (2026-11-22).
+    assert page.count('{% include "_workflow_steps.html" %}') == 1 and 'class="workflow-steps"' not in page
 
 
 def test_the_progress_percent_says_what_it_measures():
