@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}WarriorIQ · AI Fight Analysis for Combat Sports{% endblock %}
-{% block scripts %}<script nonce="{{ request.state.csp_nonce }}" src="/static/hero-clip.js?v={{asset_version}}" defer></script><script nonce="{{ request.state.csp_nonce }}" src="/static/home.js?v={{asset_version}}" defer></script>{% endblock %}
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}" src="/static/home.js?v={{asset_version}}" defer></script>{% endblock %}
 {% block description %}Upload a kickboxing, boxing, Muay Thai, taekwondo or MMA fight. WarriorIQ measures how both fighters moved{% if features.scoring.on %}, estimates the round-by-round score under your sport's rules,{% endif %} and builds a four-week training plan from your own numbers.{% endblock %}
 {% block content %}
 {#- The home page (owner, 2026-11-09, from the approved mock-up): the fight
@@ -22,26 +22,33 @@
                   2026-11-10: men, replacing a women's bout)
     The hero is tools/make_hero_clip.py: Mixkit 40951, two men sparring (owner, 2026-11-10; it was two women, Mixkit 40979). The CC BY
     sources are credited at the foot of this page. -#}
-<section class="hx-hero">
-  <div class="home-clip hx-hero-clip">
-    <video id="heroClip" data-tracking-clip src="/static/hero-fight.mp4?v={{asset_version}}" poster="/static/hero-fight.jpg?v={{asset_version}}" muted loop playsinline autoplay preload="auto" disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback" tabindex="-1" aria-label="Two boxers sparring, with WarriorIQ tracking both: a box and a skeleton on each"></video>
-  </div>
-  <div class="hx-hero-inner">
-    <div class="hx-corners"><span class="hx-corner hx-blue"><i></i>Blue corner</span><span class="hx-corner hx-red"><i></i>Red corner</span><span class="hx-clip-note">Real WarriorIQ tracking on a stock clip</span></div>
-    <h1 class="hx-title hx-title-long">Understand your performance.<br><em>Improve your game.</em></h1>
-    <p class="home-lead hx-lead">Film it on your phone. Get both fighters' movement, guard and balance{% if features.strike_counts.on %}, strike volume{% endif %}{% if features.scoring.on %}, a round-by-round score estimate{% endif %}{% if features.scoring.on %} and a four-week plan.{% else %} and a four-week plan. Score estimates are coming.{% endif %}</p>
-    <div class="home-actions hx-actions">{% if request.state.account %}<a class="btn btn-lead" data-motion-primary href="/analyze">Analyse my video</a>{% else %}<a class="btn btn-lead" data-motion-primary href="/signup?next=/analyze">Create a free account and analyse a fight</a>{% endif %}<a class="btn secondary btn-lead" href="/scorer">Try the free Ringside Scorer</a></div>
+{#- A still hero (owner, 2026-11-22: the moving video behind the headline
+    read as confusing and unprofessional). Copy on the left, one clear button;
+    on the right the same real tracking example as a still picture. -#}
+<section class="hx-hero hx-hero-still">
+  <div class="hx-hero-inner hx-hero-split">
+    <div class="hx-hero-copy">
+      <span class="eyebrow">Fight video analysis · boxing, kickboxing, Muay Thai, taekwondo, MMA</span>
+      <h1 class="hx-title hx-title-long">Understand your performance.<br><em>Improve your game.</em></h1>
+      <p class="home-lead hx-lead">Film it on your phone. Get both fighters' movement, guard and balance{% if features.strike_counts.on %}, strike volume{% endif %}{% if features.scoring.on %}, a round-by-round score estimate{% endif %}{% if features.scoring.on %} and a four-week plan.{% else %} and a four-week plan. Score estimates are coming.{% endif %}</p>
+      <div class="home-actions hx-actions">{% if request.state.account %}<a class="btn btn-lead" data-motion-primary href="/analyze">Analyse my video</a>{% else %}<a class="btn btn-lead" data-motion-primary href="/signup?next=/analyze">Analyse a fight free</a>{% endif %}<a class="text-link hx-secondary" href="/scorer">or score a fight live with the Ringside Scorer</a></div>
+      <ul class="hx-trust">{% if not request.state.account %}<li>Free account</li>{% endif %}<li>Your footage stays private</li><li>Delete it any time</li></ul>
+    </div>
+    <figure class="hx-hero-shot">
+      <img src="/static/hero-fight.jpg?v={{asset_version}}" width="1280" height="720" alt="Two boxers sparring, each with WarriorIQ's tracking box and skeleton drawn on: blue corner A, red corner B" fetchpriority="high" decoding="async">
+      <figcaption><span class="hx-corner hx-blue"><i></i>Blue corner</span><span class="hx-corner hx-red"><i></i>Red corner</span><span class="hx-clip-note">Real WarriorIQ tracking on a stock clip</span></figcaption>
+    </figure>
   </div>
 </section>
 
 <section class="hx-section" aria-labelledby="sportsTitle">
   <div class="hx-head hx-reveal"><span class="eyebrow">Built for five sports</span><h2 id="sportsTitle">Your rules. Your sport.</h2></div>
   <div class="hx-sports">
-    <a class="hx-sport hx-big hx-reveal" href="/analyze/boxing"><video data-home-clip src="/static/home/boxing.mp4?v={{asset_version}}" poster="/static/home/boxing.jpg?v={{asset_version}}" muted loop playsinline preload="metadata" aria-hidden="true"></video><div><h3>Boxing</h3><p>Punches only, scored ten-point must.</p></div></a>
-    <a class="hx-sport hx-big hx-reveal" style="--i:1" href="/analyze/kickboxing"><video data-home-clip src="/static/home/kickboxing.mp4?v={{asset_version}}" poster="/static/home/kickboxing.jpg?v={{asset_version}}" muted loop playsinline preload="metadata" aria-hidden="true"></video><div><h3>Kickboxing</h3><p>K-1, Low Kick, Kick Light and Point Fighting rules.</p></div></a>
-    <a class="hx-sport hx-reveal" href="/analyze/mma"><video data-home-clip src="/static/home/mma.mp4?v={{asset_version}}" poster="/static/home/mma.jpg?v={{asset_version}}" muted loop playsinline preload="metadata" aria-hidden="true"></video><div><h3>MMA</h3><p>Including time on the ground, round by round.</p></div></a>
-    <a class="hx-sport hx-half hx-reveal" style="--i:1" href="/analyze/muay_thai"><video data-home-clip src="/static/home/muaythai.mp4?v={{asset_version}}" poster="/static/home/muaythai.jpg?v={{asset_version}}" muted loop playsinline preload="metadata" aria-hidden="true"></video><div><h3>Muay Thai</h3><p>Punches, kicks, knees and elbows.</p></div></a>
-    <a class="hx-sport hx-half hx-reveal" style="--i:2" href="/analyze/taekwondo"><video data-home-clip src="/static/home/taekwondo.mp4?v={{asset_version}}" poster="/static/home/taekwondo.jpg?v={{asset_version}}" muted loop playsinline preload="metadata" aria-hidden="true"></video><div><h3>Taekwondo</h3><p>World Taekwondo and ITF scoring.</p></div></a>
+    <a class="hx-sport hx-big hx-reveal" href="/analyze/boxing"><img src="/static/home/boxing.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><div><h3>Boxing</h3><p>Punches only, scored ten-point must.</p></div></a>
+    <a class="hx-sport hx-big hx-reveal" style="--i:1" href="/analyze/kickboxing"><img src="/static/home/kickboxing.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><div><h3>Kickboxing</h3><p>K-1, Low Kick, Kick Light and Point Fighting rules.</p></div></a>
+    <a class="hx-sport hx-reveal" href="/analyze/mma"><img src="/static/home/mma-still.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><div><h3>MMA</h3><p>Including time on the ground, round by round.</p></div></a>
+    <a class="hx-sport hx-half hx-reveal" style="--i:1" href="/analyze/muay_thai"><img src="/static/home/muaythai.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><div><h3>Muay Thai</h3><p>Punches, kicks, knees and elbows.</p></div></a>
+    <a class="hx-sport hx-half hx-reveal" style="--i:2" href="/analyze/taekwondo"><img src="/static/home/taekwondo.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><div><h3>Taekwondo</h3><p>World Taekwondo and ITF scoring.</p></div></a>
   </div>
 </section>
 
@@ -80,7 +87,7 @@
 
 <section class="hx-section" aria-labelledby="scorerTitle">
   <div class="hx-band hx-reveal">
-    <video data-home-clip src="/static/home/ringside.mp4?v={{asset_version}}" poster="/static/home/ringside.jpg?v={{asset_version}}" muted loop playsinline preload="metadata" aria-hidden="true"></video>
+    <img src="/static/home/ringside.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async">
     <div><span class="eyebrow">Free, no account</span><h2 id="scorerTitle">Ringside Scorer</h2><p class="hx-lead">Tap +1 or +2 for the blue or red corner, take a point off when the referee does. WarriorIQ keeps the score round by round, on your phone.</p><p><a class="btn" href="/scorer">Start scoring</a></p></div>
   </div>
 </section>

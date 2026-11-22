@@ -84,23 +84,20 @@ def test_pricing_copy_follows_the_period():
 def test_the_hero_shows_a_real_tracking_example():
     # The empty interface preview became a real example (owner, 2026-10-28):
     # a stock clip with WarriorIQ's own tracking drawn on it, never a placeholder.
+    # Since 2026-11-22 it is a still picture, not a video: the owner found the
+    # moving clip behind the headline confusing. Still no sample report.
     page = BrowserClient(web.app).get("/").text
-    assert 'id="heroClip" data-tracking-clip src="/static/hero-fight.mp4' in page
+    assert 'src="/static/hero-fight.jpg' in page
     assert "Real WarriorIQ tracking on a stock clip" in page
-    # It plays by itself and cannot be paused or controlled (owner,
-    # 2026-11-01, replacing click to play): no controls, no play button.
-    clip = page[page.index('id="heroClip"'):page.index("></video>")]
-    assert "autoplay" in clip and "muted" in clip and "controls " not in clip and "controls>" not in clip
-    assert "heroClipPlay" not in page
-    css = (web.ROOT / "app" / "static" / "glass.css").read_text(encoding="utf-8")
-    assert ".home-clip video { pointer-events: none;" in css
+    hero = page[page.index('class="hx-hero hx-hero-still"'):page.index("</section>", page.index('class="hx-hero hx-hero-still"'))]
+    assert "<video" not in hero and "autoplay" not in hero
+    assert "<video" not in page                        # no looping video anywhere on the home page
     # The clip shows tracking only (owner, 2026-11-01): its strike names were
-    # wrong too often, so neither the clip nor its description may claim them.
-    assert "strike named" not in page and "each strike" not in clip
+    # wrong too often, so neither the picture nor its description may claim them.
+    assert "strike named" not in page and "each strike" not in hero
     # Removed entirely, not replaced (owner, 2026-11-09).
     assert "From a real WarriorIQ report" not in page and "home-proof" not in page
     assert "Demo clip coming soon" not in page and "goes here" not in page
-    assert (web.ROOT / "app" / "static" / "hero-fight.mp4").stat().st_size < 4_000_000
 
 
 # --------------------------------------------------------------------- #54

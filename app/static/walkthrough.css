@@ -426,3 +426,69 @@ details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg)
 .admin-funnel-bar { display: block; height: 10px; border-radius: 999px; background: linear-gradient(90deg, #4f86ff var(--share), rgba(255, 255, 255, .08) var(--share)); }
 .admin-funnel small { color: var(--glass-text-faint, #a9b2c3); text-align: right; }
 @media (max-width: 620px) { .admin-funnel li { grid-template-columns: minmax(0, 1fr) 32px 44px; } .admin-funnel-bar { display: none; } }
+
+/* --- First report (shown at /camp until the first saved fight) ----------------- */
+.first-report { display: grid; gap: 28px; padding: 32px 0 64px; }
+.first-report-head h1 { margin: 12px 0; font-size: clamp(38px, 5vw, 56px); line-height: 1.04; letter-spacing: -.04em; }
+.first-report-head p { margin: 0; max-width: 640px; color: var(--glass-text-soft, #c3cad8); font-size: 18px; line-height: 1.6; }
+.first-report-body { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.first-report-steps { flex: 999 1 560px; min-width: 0; margin: 0; }
+.first-report-tips { flex: 1 1 300px; min-width: 0; margin: 0; }
+.first-report-count { margin: 0 0 16px; font-size: 14px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--glass-text-faint, #a9b2c3); }
+.first-report-steps ol { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.first-step { display: flex; gap: 16px; align-items: flex-start; padding: 16px 18px; border: 1px solid var(--glass-edge, rgba(255,255,255,.12)); border-radius: 18px; }
+.first-step.is-current { border-color: rgba(79, 134, 255, .55); background: rgba(79, 134, 255, .1); }
+.first-step.is-done { opacity: .8; }
+.first-step-mark { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; box-sizing: border-box; border: 2px solid #4a5874; border-radius: 50%; color: var(--glass-text-faint, #a9b2c3); font-weight: 900; }
+.first-step.is-current .first-step-mark { border-color: #4f86ff; background: #4f86ff; color: #fff; }
+.first-step.is-done .first-step-mark { border-color: #2f9e6b; background: #16342a; }
+.first-step-mark svg { width: 16px; height: 16px; fill: none; stroke: #8ff0bf; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.first-step-text { display: grid; gap: 4px; min-width: 0; }
+.first-step-text strong { font-size: 17px; }
+.first-step-text > span { color: var(--glass-text-soft, #c3cad8); line-height: 1.5; }
+.first-step-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 10px; }
+.first-report-tips h2 { margin: 0 0 10px; font-size: 20px; }
+.first-report-tips ul { margin: 0 0 12px; padding-left: 18px; color: var(--glass-text-soft, #c3cad8); line-height: 1.8; }
+.first-report-full { margin: 16px 0 0; }
+.first-report .card h2.first-report-count { font-size: 14px; line-height: 1.3; letter-spacing: .1em; margin: 0 0 16px; }
+.first-report .card.first-report-tips h2 { font-size: 22px; line-height: 1.2; letter-spacing: -.01em; margin: 0 0 10px; }
+.analysis-steps .workflow-steps { margin: 18px 0 26px; }
+/* The form's own Video/Rules/Fighter/Confirm pills sit inside step 1 of the
+   journey bar above; numbered too, they read as a second 1-4. Labels only. */
+.upload-steps li > b { display: none; }
+
+/* --- Home hero, still (2026-11-22) ------------------------------------------------ */
+/* Copy left, the tracking example as a still right; nothing moves behind text. */
+.hx-hero.hx-hero-still { width: auto; margin-left: 0; min-height: 0; display: block; overflow: visible; }
+.hx-hero.hx-hero-still::after { display: none; }
+.hx-hero-still .hx-hero-split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: clamp(28px, 4vw, 56px);
+  padding: clamp(36px, 6vw, 72px) 0 clamp(24px, 4vw, 48px);
+}
+.hx-hero-copy { flex: 1 1 440px; min-width: 0; display: grid; gap: 20px; }
+.hx-hero-still .hx-title { font-size: clamp(40px, 5.4vw, 72px) !important; line-height: 1.02; letter-spacing: -.045em; }
+.hx-hero-still .hx-lead { max-width: 560px; }
+.hx-hero-still .hx-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
+.hx-secondary { font-size: 15px; font-weight: 600; }
+.hx-trust { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; padding: 0; list-style: none; color: var(--glass-text-faint, #a9b2c3); font-size: 14px; }
+.hx-hero-shot { flex: 1 1 480px; min-width: 0; margin: 0; display: grid; gap: 12px; }
+.hx-hero-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .8);
+}
+.hx-hero-shot figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.hx-hero-shot .hx-corner i { animation: none; }
+/* Sport cards and the Ringside band show still photos where the videos were. */
+.hx-sport > img, .hx-band > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.hx-sport > img { object-position: center 40%; transition: transform .9s cubic-bezier(.16, 1, .3, 1); }
+.hx-sport:hover > img { transform: scale(1.04); }
+@media (prefers-reduced-motion: reduce) { .hx-sport > img { transition: none; } .hx-sport:hover > img { transform: none; } }
