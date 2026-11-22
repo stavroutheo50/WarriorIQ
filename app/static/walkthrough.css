@@ -419,3 +419,10 @@ details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg)
 .sport-menu[open] > summary .sport-switch-caret.menu-caret { transform: translateY(3px) rotate(-135deg); }
 /* The recording notes read as part of the report, full width, not a loose line. */
 .recording-notes { display: block; width: 100%; margin: 14px 0; }
+
+/* --- Admin: where new accounts stop --------------------------------------------- */
+.admin-funnel { display: grid; gap: 8px; margin: 14px 0 18px; padding: 0; list-style: none; }
+.admin-funnel li { display: grid; grid-template-columns: minmax(180px, 260px) 40px minmax(0, 1fr) 44px; gap: 12px; align-items: center; }
+.admin-funnel-bar { display: block; height: 10px; border-radius: 999px; background: linear-gradient(90deg, #4f86ff var(--share), rgba(255, 255, 255, .08) var(--share)); }
+.admin-funnel small { color: var(--glass-text-faint, #a9b2c3); text-align: right; }
+@media (max-width: 620px) { .admin-funnel li { grid-template-columns: minmax(0, 1fr) 32px 44px; } .admin-funnel-bar { display: none; } }

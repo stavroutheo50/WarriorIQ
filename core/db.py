@@ -2106,6 +2106,13 @@ def mark_analysis_failure_reviewed(failure_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+def has_security_event(account_id: int, event_type: str) -> bool:
+    """Whether this account already has an event of this type (indexed on account_id)."""
+    with connection() as con:
+        return con.execute("SELECT 1 FROM security_events WHERE account_id=? AND event_type=? LIMIT 1",
+                           (int(account_id), event_type)).fetchone() is not None
+
+
 def record_security_event(
     event_type: str,
     *,
