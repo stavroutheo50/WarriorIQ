@@ -399,7 +399,7 @@ p { max-width: 68ch; }
 }
 
 .sport-card:hover .sport-card-mark { opacity: 1; }
-.sport-card:focus-visible { outline: 2px solid #82a5ff;  }
+.sport-card:focus-visible { outline: 2px solid var(--wiq-a);  }
 
 .sport-card h2 { margin: 0;  letter-spacing: -.02em; }
 

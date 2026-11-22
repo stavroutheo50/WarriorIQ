@@ -448,9 +448,9 @@ summary:focus-visible,
   background: var(--wiq-line);
 }
 /* A measurement not yet checked against labelled clips (audit 2026-10-14, #5). */
-.badge-experimental{display:inline-block;margin-left:6px;padding:1px 7px;border:1px solid rgba(241,184,75,.55);background:rgba(241,184,75,.12);color:#f1c46b;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:none;vertical-align:middle;white-space:nowrap}
+.badge-experimental{display:inline-block;margin-left:6px;padding:1px 7px;border:1px solid rgba(241,184,75,.55);background:rgba(241,184,75,.12);color:var(--wiq-warning);font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:none;vertical-align:middle;white-space:nowrap}
 /* Library card naming (audit 2026-10-14, #30). */
-.fight-title{margin:2px 0 0;color:#c9d6ea;font-size:13px}
+.fight-title{margin:2px 0 0;color:var(--glass-text-soft);font-size:13px}
 .fight-details-edit{font-size:13px}.fight-details-edit summary{cursor:pointer;color:#9fb4d6}
 .fight-details-edit form{display:grid;gap:8px;margin-top:8px}.fight-details-edit label{display:grid;gap:4px}
 .upload-names{margin:0 0 14px}.upload-names summary{cursor:pointer;font-weight:700}
@@ -463,10 +463,10 @@ summary:focus-visible,
 /* Sport switcher items are buttons now (a POST, audit 2026-10-14, #43);
    they look like the links they replace. The current sport is ticked (#46). */
 .sport-menu-panel form{margin:0}
-.sport-menu-panel button{display:flex;flex-direction:column;align-items:flex-start;width:100%;border:0;border-radius:10px;background:none;color:#eef3ff;font:inherit;font-size:13px;font-weight:700;text-align:left;cursor:pointer}
-.sport-menu-panel button:hover,.sport-menu-panel button:focus-visible{background:#16213c}
-.sport-menu-panel button span{font-weight:500;color:#9fb0cc;font-size:12px}
-.sport-menu-panel button .sport-menu-label{color:#eef3ff;font-size:13px;font-weight:700}
+.sport-menu-panel button{display:flex;flex-direction:column;align-items:flex-start;width:100%;border:0;border-radius:10px;background:none;color:var(--wiq-text);font:inherit;font-size:13px;font-weight:700;text-align:left;cursor:pointer}
+.sport-menu-panel button:hover,.sport-menu-panel button:focus-visible{background:var(--wiq-panel-strong)}
+.sport-menu-panel button span{font-weight:500;color:var(--glass-text-faint);font-size:12px}
+.sport-menu-panel button .sport-menu-label{color:var(--wiq-text);font-size:13px;font-weight:700}
 .sport-menu-tick{color:rgb(var(--sport-accent))}
 
 /* The copyright line broke over two or three lines between 768px and 1440px
