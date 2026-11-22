@@ -173,9 +173,20 @@ def test_the_verify_page_ignores_an_error_or_status_in_the_address():
 
 def test_the_reset_page_shows_only_its_own_notices():
     # Security review, PR #236: no wording taken from the address.
+    from datetime import datetime, timedelta, timezone
+
+    from core import db
+    from core.auth import hash_password, session_token, token_digest
+
     client = BrowserClient(web.app)
     assert "Call 555" not in client.get("/reset-password/x?error=Call+555").text
-    weak = client.post("/reset-password/x", data={"password": "short"}, follow_redirects=False)
+    # A live link (since 2026-11-16 a dead one says so before the form shows).
+    account = db.create_account(f"notice-{session_token()[:8]}@example.test", hash_password("Strong-Local-Password"))
+    token = session_token()
+    db.save_password_reset_token(int(account["id"]), token_digest(token),
+                                 (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat())
+    assert "Call 555" not in client.get(f"/reset-password/{token}?error=Call+555").text
+    weak = client.post(f"/reset-password/{token}", data={"password": "short"}, follow_redirects=False)
     assert weak.headers["location"].endswith("?error=short")
     assert "between 10 and 1,024 characters" in client.get(weak.headers["location"]).text
 

@@ -154,8 +154,16 @@ def _pace(metrics: dict) -> dict | None:
         return " ".join(f"{t / t_max * width:.1f},{height - v / v_max * (height - 2):.1f}" for t, v in points)
 
     minutes, seconds = divmod(int(t_max), 60)
+    # Where the measured speed starts. A recording whose opening is not in
+    # the report (an intro, a camera finding its place) left that stretch
+    # blank; the page shades it and says so (walkthrough, 2026-11-16).
+    t_start = min(t for side in SIDES for t, _ in series[side])
+    start_x = round(t_start / t_max * width, 1) if t_start > 0 else 0.0
+    start_min, start_sec = divmod(int(t_start), 60)
     return {"a": polyline(series["A"]), "b": polyline(series["B"]), "max_speed": round(v_max, 1),
-            "end_label": f"{minutes}:{seconds:02d}"}
+            "half_speed": round(v_max / 2, 1),
+            "end_label": f"{minutes}:{seconds:02d}",
+            "start_x": start_x if start_x >= 2.0 else 0.0, "start_label": f"{start_min}:{start_sec:02d}"}
 
 
 def build_stat_sheet(report: dict, families: list[str] | None, strike_counts_published: bool) -> dict:

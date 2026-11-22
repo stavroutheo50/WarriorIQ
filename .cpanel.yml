@@ -11,7 +11,16 @@ deployment:
     - /bin/cp -R core $DEPLOYPATH/core.new
     - /bin/rm -rf $DEPLOYPATH/core
     - /bin/mv $DEPLOYPATH/core.new $DEPLOYPATH/core
-    - /bin/cp -R app dataset tests tools $DEPLOYPATH
+    # app/ is swapped in whole too (2026-11-16): copied over in place, a
+    # process Passenger started mid-copy imported half-new code and templates
+    # and failed to start (app/startup_guard.py now also retries such a
+    # start). The previous copy is kept as app.old until the next deploy.
+    - /bin/rm -rf $DEPLOYPATH/app.new
+    - /bin/cp -R app $DEPLOYPATH/app.new
+    - /bin/rm -rf $DEPLOYPATH/app.old
+    - if [ -d $DEPLOYPATH/app ]; then /bin/mv $DEPLOYPATH/app $DEPLOYPATH/app.old; fi
+    - /bin/mv $DEPLOYPATH/app.new $DEPLOYPATH/app
+    - /bin/cp -R dataset tests tools $DEPLOYPATH
     - /bin/cp .env.example .gitignore .wakatime-project COMPLIANCE_OPERATIONS.md PRODUCTION_LAUNCH_CHECKLIST.md README.md install_web_dependencies.py passenger_wsgi.py warrioriq_wsgi.py render.yaml requirements.txt requirements-web.txt run.py run_cli.py worker.py $DEPLOYPATH
     # Stamp the deployed commit so /health can prove which code is live. Code
     # and environment variables deploy separately, so a restart can pick up new

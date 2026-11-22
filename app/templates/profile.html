@@ -15,7 +15,6 @@
       <h1>{{display_name or profile.display_name}}</h1>
       {% if profile.display_name == 'My Athlete' and display_name and display_name != 'My Athlete' %}<p class="small muted">The name your fights are filed under. Save it below to keep it as your profile name.</p>{% elif profile.display_name == 'My Athlete' %}<p class="small muted">That is the name WarriorIQ starts everyone with. Change it below and it is used on your progress and coaching pages.</p>{% endif %}
       <p class="athlete-facts">
-        <span>Fighter {{profile.default_fighter|default('A', true)}} corner</span>
         {% if request.state.active_sport %}<span>{{request.state.active_sport.label}}</span>{% endif %}
         <span>{{fights|length}} saved fight{{'' if fights|length == 1 else 's'}}</span>
       </p>
@@ -26,16 +25,17 @@
     <a class="btn" href="/camp">View performance</a>
   </div>
 </header>
-<div class="grid">
+<div class="grid profile-grid">
 <section class="card">
   <div class="profile-head">
-    {% if profile.photo_path %}<img class="avatar" src="{{profile.photo_path|profile_media}}" alt="{{display_name or profile.display_name}} profile photo">{% else %}<div class="avatar empty-avatar" aria-label="No profile photo">IQ</div>{% endif %}
+    {#- The same initial as the header above, not a second "IQ" placeholder (walkthrough, 2026-11-16). -#}
+    {% if profile.photo_path %}<img class="avatar" src="{{profile.photo_path|profile_media}}" alt="{{display_name or profile.display_name}} profile photo">{% else %}<div class="avatar empty-avatar athlete-avatar-large" role="img" aria-label="No profile photo">{{(display_name or profile.display_name)[:1]|upper}}</div>{% endif %}
     <div><h3 style="margin:0">{{display_name or profile.display_name}}</h3><div class="muted">Saved WarriorIQ athlete profile</div></div>
   </div>
   {% if profile.video_path %}<video controls src="{{profile.video_path|profile_media}}" style="width:100%;margin-top:18px;border-radius:14px"></video>{% endif %}
   <form action="/profile" method="post" enctype="multipart/form-data" style="margin-top:20px"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
     <div class="field"><label>Display name</label><input name="display_name" value="{{display_name or profile.display_name}}" required></div>
-    <div class="field"><label>My identity in reports</label><select name="default_fighter"><option value="A" {% if profile.default_fighter == 'A' %}selected{% endif %}>Fighter A</option><option value="B" {% if profile.default_fighter == 'B' %}selected{% endif %}>Fighter B</option></select><div class="small muted">The progress dashboard follows this fighter across saved reports, and it is the starting choice when you pick who to analyse. You can change it on any individual fight — which corner you are in is not the same every time.</div></div>
+    <div class="field"><label for="defaultFighter">Which fighter is you, by default</label><select id="defaultFighter" name="default_fighter"><option value="A" {% if profile.default_fighter == 'A' %}selected{% endif %}>Fighter A</option><option value="B" {% if profile.default_fighter == 'B' %}selected{% endif %}>Fighter B</option></select><div class="small muted">The progress dashboard follows this fighter across saved reports, and it is the starting choice when you pick who to analyse. You can change it on any individual fight — which corner you are in is not the same every time.</div></div>
     <div class="field"><label>Profile photo</label><input class="file-native" id="profilePhoto" type="file" name="photo" accept="image/*"><label class="file-button" id="photoButton" for="profilePhoto"><span>＋</span><b id="photoText">Choose profile photo</b></label></div>
     <div class="field"><label>Profile / highlight video</label><input class="file-native" id="profileVideo" type="file" name="profile_video" accept="video/*"><label class="file-button" id="profileVideoButton" for="profileVideo"><span>＋</span><b id="profileVideoText">Choose profile video</b></label></div>
     {# Athlete or coach decides two things: how many fighters the roster may
@@ -43,12 +43,14 @@
        roster - a coach dropping to an athlete account keeps their fighters,
        they simply cannot add more than the plan allows. #}
     <div class="field">
-      <label for="accountType">What is this workspace for?</label>
-      <select id="accountType" name="account_type">
-        <option value="athlete" {% if (profile.account_type or 'athlete') == 'athlete' %}selected{% endif %}>Just me — I analyse my own fights</option>
-        <option value="coach" {% if profile.account_type == 'coach' %}selected{% endif %}>A squad — I coach several fighters</option>
+      {#- One name for this setting everywhere: Account type (the Coaching page
+          says "set your account type to Coach"). -#}
+      <label for="accountType">Account type</label>
+      <select id="accountType" name="account_type" aria-describedby="accountTypeHint">
+        <option value="athlete" {% if (profile.account_type or 'athlete') == 'athlete' %}selected{% endif %}>Athlete — I analyse my own fights</option>
+        <option value="coach" {% if profile.account_type == 'coach' %}selected{% endif %}>Coach — I coach a squad of fighters</option>
       </select>
-      <p class="small muted">
+      <p class="small muted" id="accountTypeHint">
         {% if profile.account_type == 'coach' %}Coach plans are priced by how many fighters your roster holds.
         {% else %}Athlete plans cover one fighter.{% endif %}
         <a class="text-link" href="/pricing?audience={{profile.account_type or 'athlete'}}">See the plans</a>.
@@ -76,8 +78,8 @@
     <div class="field"><label for="profileGym">Gym or team</label><input id="profileGym" name="gym" value="{{profile.gym or ''}}" maxlength="80"></div>
     <div class="field"><label for="profileBio">Bio</label><textarea id="profileBio" name="bio" rows="2" maxlength="280">{{profile.bio or ''}}</textarea></div>
     {% if not minor %}<label class="check"><input type="checkbox" id="profileShowEmail" name="show_email" value="true"{% if profile.show_email %} checked{% endif %}><span>Show my email on my page. <span class="muted">Off: your email stays private and only your username is shown.</span></span></label>{% endif %}
-    <button class="btn" type="submit">Save public profile</button>
-    {% if profile.handle %}<a class="btn secondary" href="/athlete/{{profile.handle}}">View my page</a>{% endif %}
+    <div class="form-actions"><button class="btn" type="submit">Save public profile</button>
+    {% if profile.handle %}<a class="btn secondary" href="/athlete/{{profile.handle}}">View my page</a>{% endif %}</div>
   </form>
 </section>
 {% if not minor %}
@@ -89,8 +91,10 @@
     <span class="person-actions"><form action="/profile/followers/{{person.id}}/remove" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Remove</button></form></span></li>{% else %}<li class="muted">No followers yet.</li>{% endfor %}</ul>
 </section>
 {% endif %}
-<section class="card"><div class="eyebrow">Your data</div><h3>Download an account copy</h3><p class="muted">Export your profile, fight metadata, corrections, assignments and legal acceptance history. The download does not include password secrets or the video files themselves.</p><form action="/account/export" method="post"><input type="hidden" name="next_path" value="/profile"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="field"><label for="exportPassword">Current password</label><input id="exportPassword" type="password" name="password" autocomplete="current-password" required></div><button class="btn secondary" type="submit" data-keep-label="true">Download my data</button></form></section>
-<section class="card account-danger"><div class="eyebrow">Account and data</div><h3>Delete account</h3><p class="muted">This permanently removes the account, profile, saved fight videos, reports, corrections, assignments, acceptance records, share links, and your followers and the athletes you follow.</p><form action="/account/delete" method="post" data-confirm="Permanently delete this WarriorIQ account and every saved fight?"><input type="hidden" name="next_path" value="/profile"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><div class="row"><div class="field"><label>Type DELETE</label><input name="confirmation" autocomplete="off" required></div><div class="field"><label>Current password</label><input type="password" name="password" autocomplete="current-password" required></div></div><button class="btn danger" type="submit">Delete account and saved data</button></form></section>
+{#- Downloading the data and deleting the account live in one place,
+    Settings; a second copy here meant two forms for Chrome to fill a saved
+    password into (walkthrough, 2026-11-16). -#}
+<section class="card" id="account-data"><div class="eyebrow">Account and data</div><h3>Download or delete your data</h3><p class="muted">Download a copy of your account, or permanently delete the account and every saved fight, from Settings.</p><p><a class="btn secondary" href="/settings/privacy#account-overview">Download my data</a> <a class="btn secondary" href="/settings/privacy#delete-account">Delete account</a></p></section>
 {% endif %}
 {% endblock %}
 {% block scripts %}{% if profile %}<script nonce="{{ request.state.csp_nonce }}">function themedUpload(inputId,buttonId,textId,done){const input=document.getElementById(inputId),button=document.getElementById(buttonId),text=document.getElementById(textId);input.addEventListener('change',()=>{if(input.files[0]){text.textContent=done;button.classList.add('uploaded')}else{button.classList.remove('uploaded')}})}themedUpload('profilePhoto','photoButton','photoText','Profile photo uploaded');themedUpload('profileVideo','profileVideoButton','profileVideoText','Profile video uploaded');(()=>{const handle=document.getElementById('profileHandle');if(!handle)return;/* The box holds the 30 characters a username may have; a pasted or typed @ is not part of it. */handle.addEventListener('paste',event=>{const text=(event.clipboardData||window.clipboardData).getData('text');if(!/^\s*@/.test(text))return;event.preventDefault();handle.setRangeText(text.trim().replace(/^@+/,'').slice(0,30-handle.value.length+(handle.selectionEnd-handle.selectionStart)),handle.selectionStart,handle.selectionEnd,'end')});handle.addEventListener('input',()=>{if(handle.value.startsWith('@'))handle.value=handle.value.replace(/^@+/,'')})})();</script>{% endif %}{% endblock %}

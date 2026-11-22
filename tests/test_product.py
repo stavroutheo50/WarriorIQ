@@ -146,7 +146,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(account["marketing_consent_at"])
         privacy_page = self.client.get("/settings/privacy")
         self.assertEqual(privacy_page.status_code, 200)
-        self.assertIn("Delete Account &amp; Data", privacy_page.text)
+        self.assertIn("Delete account and data", privacy_page.text)
         self.assertIn("Change cookie preferences", privacy_page.text)
         withdrawn = self.client.post("/settings/marketing", data={}, follow_redirects=False)
         self.assertEqual(withdrawn.status_code, 303)
@@ -495,12 +495,11 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
         denied = self.client.post(
             "/account/export", data={"password": "wrong-password", "next_path": "/profile"},
             follow_redirects=False)
-        self.assertEqual(denied.status_code, 303)
-        self.assertIn("error=", denied.headers["location"])
+        # Refused on the spot, beside the field: a 403 with the Settings page.
+        self.assertEqual(denied.status_code, 403)
         self.assertNotIn("password_hash", denied.text)
-        landed = self.client.get(denied.headers["location"])
-        self.assertEqual(landed.status_code, 200)
-        self.assertIn("Enter the current account password", landed.text)
+        self.assertIn("That password is not right", denied.text)
+        self.assertNotIn("attachment", denied.headers.get("content-disposition", ""))
         exported = self.client.post("/account/export", data={"password": "Strong-Local-Password"})
         self.assertEqual(exported.status_code, 200)
         self.assertIn("attachment", exported.headers["content-disposition"])
@@ -1239,11 +1238,9 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
                       "next_path": "/profile"},
                 follow_redirects=False,
             )
-            self.assertEqual(response.status_code, 303)
-            self.assertIn("error=", response.headers["location"])
+            self.assertEqual(response.status_code, 409)
             self.assertIsNotNone(database.get_account(account["id"]))
-            landed = self.client.get(response.headers["location"])
-            self.assertIn("Wait for the running analysis", landed.text)
+            self.assertIn("Wait for the running analysis", response.text)
         finally:
             delete_job("running123")
 
@@ -2217,7 +2214,10 @@ class AccountTypeChoiceTests(unittest.TestCase):
     def test_a_workspace_starts_as_an_athlete(self):
         """Never grant roster room nobody asked for."""
         self.assertEqual(database.get_profile(self.profile)["account_type"], "athlete")
-        self.assertIn("Just me", self.client.get("/profile").text)
+        # Named "Account type" since 2026-11-16, the name the Coaching page uses.
+        page = self.client.get("/profile").text
+        self.assertIn("Account type", page)
+        self.assertRegex(page, r'<option value="athlete" selected>Athlete')
 
     def test_choosing_coach_sets_the_workspace_kind(self):
         """The kind decides seats, not which plans are visible.

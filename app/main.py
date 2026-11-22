@@ -55,6 +55,7 @@ from core.auth import (
     new_password_problem, session_token, token_digest, valid_email, valid_password, COMMON_PASSWORD_MESSAGE,
 )
 from core import common_passwords, two_factor
+from core.qr import svg as qr_svg
 from core.db import (
     begin_two_factor_setup, count_two_factor_attempt, create_two_factor_challenge, delete_two_factor_challenge,
     disable_two_factor, enable_two_factor, get_two_factor_challenge, list_account_sessions, replace_recovery_codes,
@@ -81,7 +82,7 @@ from core.db import (
     list_follows, remove_follow, request_follow, set_public_profile,
     add_assignment, analysis_allowance, apply_subscription_change, award_points, link_camp_mission, list_camp_missions,
     list_points, list_training_sessions, record_training_session, redeem_points_for_analysis, apply_checkout_event, consume_email_verification_token,
-    consume_password_reset_token, auth_wait, claim_auth_wait, create_auth_wait, finish_auth_waits,
+    consume_password_reset_token, password_reset_token_usable, auth_wait, claim_auth_wait, create_auth_wait, finish_auth_waits,
     assign_fighter_to_fight, create_fighter, set_account_type, create_moderation_report, create_oauth_account, delete_account, delete_fight,
     delete_legal_acceptances_for_resource, get_account, get_account_by_email,
     get_account_for_oauth_identity, get_annotations, get_fight, get_fight_review, is_down_check, is_strike_check, get_fighter, get_profile,
@@ -456,7 +457,8 @@ CSS_BUNDLES: dict[str, tuple[str, ...]] = {
     # targets and control font size that must win over whatever a component
     # asked for, and load order is how they do that without !important.
     # glass.css is the 2026-10-28 look: it restyles what comes before it.
-    "shell": ("premium.css", "motion.css", "redesign.css", "glass.css", "a11y.css"),
+    # walkthrough.css (2026-11-16) adjusts spacing and alignment on top of glass.
+    "shell": ("premium.css", "motion.css", "redesign.css", "glass.css", "walkthrough.css", "a11y.css"),
 }
 
 
@@ -479,7 +481,14 @@ def _build_css_bundle(names: tuple[str, ...]) -> str:
 
 CSS_BUNDLE_TEXT = {key: _build_css_bundle(names) for key, names in CSS_BUNDLES.items()}
 executor = ThreadPoolExecutor(max_workers=1)
-init_db()
+try:
+    init_db()
+except Exception:                                                       # noqa: BLE001
+    # A locked or briefly unreachable database must not stop the process from
+    # starting: every query calls init_db() again, so the first request after
+    # the lock clears migrates as usual. Failing here took every page down,
+    # static ones included (walkthrough, 2026-11-16; app/startup_guard.py).
+    logging.getLogger("warrioriq").exception("startup_db_init_failed: will retry on first query")
 
 SESSION_COOKIE = "warrioriq_session"
 GUEST_COOKIE = "warrioriq_guest"
@@ -2217,7 +2226,9 @@ def _apply_response_headers(request: Request, response) -> None:
         # Signing in changes the cookie, and with it which copy may be used.
         response.headers["Vary"] = ", ".join(
             filter(None, [response.headers.get("Vary"), "Cookie"]))
-    elif request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/", "/f/")):
+    elif request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/", "/f/",
+                                         # The two-step secret and QR code, and the deletion link (2026-11-16).
+                                         "/settings", "/account/")):
         # setdefault, so a route that has already chosen keeps its value.
         # /media/ does exactly that: a fight video is private but not
         # volatile, and re-sending 101 MB on every seek is not privacy.
@@ -2377,10 +2388,20 @@ async def http_error_page(request: Request, exc: StarletteHTTPException):
         503: "This feature is not launch-ready",
         507: "Storage is temporarily full",
     }.get(exc.status_code, "WarriorIQ could not complete that request")
+    detail = str(exc.detail or "")
+    try:
+        from http import HTTPStatus
+
+        # "Not Found" under the headline is the raw status phrase, not a
+        # sentence (walkthrough, 2026-11-16): the page's own wording is used.
+        if detail == HTTPStatus(exc.status_code).phrase:
+            detail = ""
+    except ValueError:
+        pass
     return templates.TemplateResponse(
         request=request,
         name="error.html",
-        context={"request": request, "status_code": exc.status_code, "error_title": title, "error_detail": str(exc.detail or "")},
+        context={"request": request, "status_code": exc.status_code, "error_title": title, "error_detail": detail},
         status_code=exc.status_code,
         headers=exc.headers,
     )
@@ -2411,18 +2432,33 @@ async def unexpected_error_page(request: Request, exc: Exception):
     if _wants_json(request):
         return JSONResponse({"detail": detail}, status_code=500)
     if not hasattr(request.state, "account"):
-        return PlainTextResponse(detail, status_code=500)
-    return templates.TemplateResponse(
-        request=request,
-        name="error.html",
-        context={
-            "request": request,
-            "status_code": 500,
-            "error_title": "WarriorIQ hit a technical problem",
-            "error_detail": detail,
-        },
-        status_code=500,
-    )
+        # No page context to render error.html with: the standalone branded
+        # page instead of bare text.
+        from app.startup_guard import branded_page
+
+        return HTMLResponse(branded_page(
+            "Something went wrong.",
+            'WarriorIQ could not complete this request. Please try again, or <a href="/">go to the homepage</a>.'),
+            status_code=500, headers={"Cache-Control": "no-store"})
+    try:
+        return templates.TemplateResponse(
+            request=request,
+            name="error.html",
+            context={
+                "request": request,
+                "status_code": 500,
+                "error_title": "WarriorIQ hit a technical problem",
+                "error_detail": detail,
+            },
+            status_code=500,
+        )
+    except Exception:                                                   # noqa: BLE001
+        # The layout itself failed (it reads the same state that just broke).
+        LOGGER.exception("error_page_render_failed")
+        from app.startup_guard import branded_page
+
+        return HTMLResponse(branded_page("Something went wrong.", html.escape(detail)), status_code=500,
+                            headers={"Cache-Control": "no-store"})
 
 
 ANNOTATION_TECHNIQUES = (
@@ -3162,13 +3198,15 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
 
 
 def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/camp", email: str = "",
-               notice: str = "", account_exists: bool = False):
+               notice: str = "", account_exists: bool = False, field_errors: dict | None = None):
     # email refills the form after a refusal, so a typo is fixed, not retyped.
+    # field_errors puts each reason under its own field (walkthrough, 2026-11-16).
     return templates.TemplateResponse(
         request=request,
         name="auth.html",
         context={"request": request, "mode": mode, "error": error, "next_path": _safe_next(next_path),
                  "email": email.strip()[:254], "notice": notice, "account_exists": account_exists,
+                 "field_errors": field_errors or {},
                  # The same lists the server refuses, for the live hint.
                  "password_rules": common_passwords.page_rules() if mode == "signup" else None},
         status_code=400 if error or account_exists else 200,
@@ -3506,8 +3544,8 @@ def signup_page(request: Request, next: str = "/camp"):
 @app.post("/signup", dependencies=[Depends(require_csrf)])
 def signup(
     request: Request,
-    email: str = Form(...),
-    password: str = Form(...),
+    email: str = Form(""),
+    password: str = Form(""),
     next_path: str = Form("/camp"),
     accept_terms: bool = Form(False),
     age_confirmed: bool = Form(False),
@@ -3519,12 +3557,24 @@ def signup(
 ):
     _enforce_rate_limit(request, "signup", 20, 300)
     group = age_group.strip().lower() or ("adult" if age_confirmed else "")
-    if not accept_terms or group not in {"adult", "minor"}:
+    # Every missing answer at once, each beside its field: an empty form used
+    # to jump to the top with nothing said (walkthrough, 2026-11-16).
+    field_errors = {}
+    if not valid_email(email):
+        field_errors["email"] = "Enter your email address, like name@example.com."
+    password_problem = new_password_problem(password)
+    if password_problem:
+        field_errors["password"] = password_problem
+    if group not in {"adult", "minor"}:
+        field_errors["age_group"] = f"Say whether you are {SETTINGS.minimum_account_age} or older."
+    if not accept_terms:
+        field_errors["accept_terms"] = "Accept the Terms of Service and Privacy Policy to create an account."
+    if field_errors:
         return _auth_page(
             request, "signup",
-            f"Say whether you are {SETTINGS.minimum_account_age} or older, and accept the Terms of Service and "
-            "Privacy Policy.",
-            next_path,
+            "Fix the highlighted fields to create your account." if len(field_errors) > 1 else
+            next(iter(field_errors.values())),
+            next_path, email=email, field_errors=field_errors,
         )
     minor = group == "minor"
     guardian_name = " ".join(guardian_name.split())[:80]
@@ -3829,6 +3879,9 @@ def two_factor_login(request: Request, code: str = Form("")):
             response = _auth_page(request, "login", "Too many wrong codes. Enter your email and password to start again.")
             response.delete_cookie(TWO_FACTOR_COOKIE)
             return response
+        if two_factor.looks_like_recovery(code):
+            return _two_factor_page(request, "That recovery code is not right, or has already been used. "
+                                             "Check it, or use the code from your app.", 400)
         return _two_factor_page(request, "That code is not right, or has already been used. Wait for the next one and try again.", 400)
     delete_two_factor_challenge(digest)
     destination = _safe_next(str(challenge["next_path"]))
@@ -3952,16 +4005,21 @@ def resend_verification_email(request: Request, email: str = Form(...)):
 @app.post("/logout", dependencies=[Depends(require_csrf)])
 def logout(request: Request):
     end_session(request.cookies.get(SESSION_COOKIE))
-    response = RedirectResponse("/", status_code=303)
+    # The homepage says so (base.html, a fixed message chosen by this code).
+    response = RedirectResponse("/?signed_out=1", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
 
 
 @app.get("/forgot-password", response_class=HTMLResponse)
-def forgot_password_page(request: Request, next: str = "/camp"):
+def forgot_password_page(request: Request, next: str = "/camp", email: str = ""):
+    # The address typed on Sign in comes along (walkthrough, 2026-11-16); only
+    # a well-formed address is put back in the box.
+    email = email.strip()[:254]
     return templates.TemplateResponse(
         request=request, name="password_reset.html",
-        context={"request": request, "token": "", "message": "", "next_path": _safe_next(next), "email": ""},
+        context={"request": request, "token": "", "message": "", "next_path": _safe_next(next),
+                 "email": email if valid_email(email) else ""},
     )
 
 
@@ -4015,11 +4073,19 @@ def request_password_reset(request: Request, email: str = Form(...), next_path: 
 _RESET_PAGE_NOTICES = {
     "short": "Password must contain between 10 and 1,024 characters.",
     "common": COMMON_PASSWORD_MESSAGE,
+    "mismatch": "The two passwords do not match.",
 }
 
 
 @app.get("/reset-password/{token}", response_class=HTMLResponse)
 def reset_password_page(request: Request, token: str, error: str = ""):
+    if not password_reset_token_usable(token_digest(token)):
+        # Said before a new password is typed, not after (walkthrough, 2026-11-16).
+        return templates.TemplateResponse(
+            request=request, name="password_reset.html", status_code=410,
+            context={"request": request, "token": "", "message": "", "next_path": "/camp", "email": "",
+                     "error": "This link has expired or was already used. Links work once, for 30 minutes. "
+                              "Ask for a new one below."})
     return templates.TemplateResponse(
         request=request, name="password_reset.html",
         context={"request": request, "token": token, "message": "", "error": _RESET_PAGE_NOTICES.get(error, ""),
@@ -4028,18 +4094,22 @@ def reset_password_page(request: Request, token: str, error: str = ""):
 
 
 @app.post("/reset-password/{token}", dependencies=[Depends(require_csrf)])
-def reset_password(request: Request, token: str, password: str = Form(...)):
+def reset_password(request: Request, token: str, password: str = Form(...), confirm_password: str | None = Form(None)):
     # /forgot-password is limited, but consuming the token was not - so the
     # token itself could be guessed at without limit. It is 32 random bytes
     # and not realistically guessable, which is a reason to keep the limit
     # loose rather than a reason to have none.
     _enforce_rate_limit(request, "password-reset-complete", 15, 900)
     problem = new_password_problem(password)
+    # confirm_password since 2026-11-16; a page opened before it has no
+    # second box, and is not refused for that.
+    if not problem and confirm_password is not None and confirm_password != password:
+        problem = "mismatch"
     if problem:
         # Back to the form with the reason, rather than a 400 page over it.
         # The token stays in the path, so the link is still usable - which a
         # 400 page made look untrue at the moment it mattered most.
-        code = "common" if problem == COMMON_PASSWORD_MESSAGE else "short"
+        code = {"mismatch": "mismatch", COMMON_PASSWORD_MESSAGE: "common"}.get(problem, "short")
         return RedirectResponse(
             "/reset-password/%s?%s" % (quote(token, safe=""), urlencode({"error": code})),
             status_code=303)
@@ -8143,22 +8213,38 @@ def settings_root(request: Request):
     return RedirectResponse("/settings/privacy", status_code=303)
 
 
+# Which card a refusal belongs beside. A message for one of these is shown in
+# that card, under its fields, rather than in a banner at the top of the page
+# (walkthrough, 2026-11-16: a wrong 2FA code reloaded the page, jumped it, and
+# opened "Change password or email" as a side effect).
+SETTINGS_AREAS = frozenset({"sign-in", "two-step", "export", "delete", "devices"})
+
+
 @app.get("/settings/{section}", response_class=HTMLResponse)
-def settings_page(request: Request, section: str, notice: str = "", error: str = ""):
+def settings_page(request: Request, section: str, notice: str = "", error: str = "", area: str = ""):
     account = _account(request)
     if not account:
         return RedirectResponse(f"/login?next=/settings/{section}", status_code=303)
     if section not in {"privacy", "billing"}:
         raise HTTPException(404)
+    return _settings_response(request, account, section, notice=notice, error=error, area=area)
+
+
+def _settings_response(request: Request, account: dict, section: str = "privacy", *, notice: str = "",
+                       error: str = "", area: str = "", status_code: int = 200):
+    """The Settings page, optionally with a message beside the card it is about."""
     account = get_account(int(account["id"])) or account
     return templates.TemplateResponse(
         request=request,
         name="settings.html",
+        status_code=status_code,
         context={
             "request": request,
             "section": section,
-            "notice": notice,
+            "notice": notice[:200],
             "error": error[:200],
+            "area": area if area in SETTINGS_AREAS else "",
+            "delete_phrase": ACCOUNT_DELETE_PHRASE,
             "account": account,
             "profile": get_profile(int(account["profile_id"])) or {},
             "fights": list_fights(int(account["profile_id"])),
@@ -8183,12 +8269,15 @@ def settings_page(request: Request, section: str, notice: str = "", error: str =
 def _two_factor_view(account: dict) -> dict:
     """What the Security card shows: off, half set up (a secret to type in), or on."""
     state = two_factor_row(int(account["id"]))
-    view = {"enabled": state["enabled"], "setup": None, "recovery_left": len(state["recovery"])}
+    view = {"enabled": state["enabled"], "enabled_at": state.get("enabled_at"), "setup": None,
+            "recovery_left": len(state["recovery"])}
     if state["secret"] and not state["enabled"]:
         secret = two_factor.unseal(state["secret"])
         if secret:
-            view["setup"] = {"secret": two_factor.grouped(secret),
-                             "uri": two_factor.provisioning_uri(secret, str(account.get("email") or "account"))}
+            uri = two_factor.provisioning_uri(secret, str(account.get("email") or "account"))
+            # Drawn here, never by an outside service: the image carries the secret.
+            view["setup"] = {"secret": two_factor.grouped(secret), "plain": secret, "uri": uri,
+                             "qr_svg": Markup(qr_svg(uri, module_px=4, label="QR code for your authenticator app"))}
     return view
 
 
@@ -8226,11 +8315,11 @@ def revoke_one_session(request: Request, session_id: int):
     current = request.cookies.get(SESSION_COOKIE)
     mine = {row["id"]: row for row in list_account_sessions(int(account["id"]), token_digest(current) if current else None)}
     if session_id in mine and mine[session_id]["current"]:
-        return _settings_redirect(error="That is this browser. Use Sign out in the menu.")
+        return _settings_redirect(area="devices", error="That is this browser. Use Sign out in the menu.")
     if not revoke_session_by_id(int(account["id"]), session_id):
-        return _settings_redirect(error="That device was already signed out.")
+        return _settings_redirect(area="devices", error="That device was already signed out.")
     record_security_event("session_revoked", account_id=int(account["id"]))
-    return _settings_redirect(notice="That device was signed out.")
+    return _settings_redirect(area="devices", notice="That device was signed out.")
 
 
 def _recovery_codes_page(request: Request, codes: list[str]):
@@ -8250,18 +8339,19 @@ def _fresh_recovery_codes(account_id: int) -> list[str]:
 
 
 @app.post("/settings/2fa/start", dependencies=[Depends(require_csrf)])
-def two_factor_start(request: Request, current_password: str = Form("")):
+def two_factor_start(request: Request, current_password: str = Form(""), reauth_password: str = Form("")):
     """Step 1: a new secret, kept but not yet on. Needs the password."""
+    current_password = reauth_password or current_password
     account = _account(request)
     if not account:
         raise HTTPException(403)
     _enforce_rate_limit(request, "settings-2fa", 20, 900)
     if two_factor_row(int(account["id"]))["enabled"]:
-        return _settings_redirect(error="Two-step sign-in is already on.")
+        return _settings_redirect(area="two-step", error="Two-step sign-in is already on.")
     if not _current_password_ok(int(account["id"]), current_password):
-        return _settings_redirect(error="That password is not right. Nothing was changed.")
+        return _settings_redirect(area="two-step", error="That password is not right. Nothing was changed.")
     begin_two_factor_setup(int(account["id"]), two_factor.seal(two_factor.new_secret()))
-    return _settings_redirect()
+    return _settings_redirect(area="two-step")
 
 
 @app.post("/settings/2fa/cancel", dependencies=[Depends(require_csrf)])
@@ -8271,7 +8361,7 @@ def two_factor_cancel(request: Request):
         raise HTTPException(403)
     if not two_factor_row(int(account["id"]))["enabled"]:
         disable_two_factor(int(account["id"]))
-    return _settings_redirect()
+    return _settings_redirect(area="two-step")
 
 
 @app.post("/settings/2fa/confirm", dependencies=[Depends(require_csrf)])
@@ -8285,13 +8375,13 @@ def two_factor_confirm(request: Request, code: str = Form("")):
     state = two_factor_row(account_id)
     secret = two_factor.unseal(state["secret"])
     if state["enabled"] or not secret:
-        return _settings_redirect(error="Start again: there is no two-step setup waiting for a code.")
+        return _settings_redirect(area="two-step", error="Start again: there is no two-step setup waiting for a code.")
     step = two_factor.verify(secret, code)
     if step is None:
-        return _settings_redirect(error="That code is not right. Check the time on your phone and try the next code.")
+        return _settings_redirect(area="two-step", error="That code is not right. Check the time on your phone and try the next code.")
     codes = two_factor.new_recovery_codes()
     if not enable_two_factor(account_id, step, [two_factor.recovery_hash(c) for c in codes]):
-        return _settings_redirect(error="Two-step sign-in could not be switched on. Start again.")
+        return _settings_redirect(area="two-step", error="Two-step sign-in could not be switched on. Start again.")
     current = request.cookies.get(SESSION_COOKIE)
     revoke_account_sessions(account_id, token_digest(current) if current else None)
     record_security_event("two_factor_enabled", account_id=account_id)
@@ -8306,15 +8396,18 @@ def _second_factor_gate(request: Request, account: dict, current_password: str, 
     if wait is not None:
         raise HTTPException(429, _rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))})
     if not _current_password_ok(account_id, current_password):
-        return _settings_redirect(error="That password is not right. Nothing was changed.")
+        record_security_event("two_factor_change_refused", account_id=account_id)
+        return _settings_redirect(area="two-step", error="That password is not right. Nothing was changed.")
     if _check_second_factor(account_id, code) is None:
         record_security_event("two_factor_failed", severity="warning", account_id=account_id)
-        return _settings_redirect(error="That code is not right, or has already been used. Nothing was changed.")
+        return _settings_redirect(area="two-step", error="That code is not right, or has already been used. Nothing was changed.")
     return None
 
 
 @app.post("/settings/2fa/disable", dependencies=[Depends(require_csrf)])
-def two_factor_disable(request: Request, current_password: str = Form(""), code: str = Form("")):
+def two_factor_disable(request: Request, current_password: str = Form(""), code: str = Form(""),
+                       reauth_password: str = Form("")):
+    current_password = reauth_password or current_password
     account = _account(request)
     if not account:
         raise HTTPException(403)
@@ -8326,11 +8419,13 @@ def two_factor_disable(request: Request, current_password: str = Form(""), code:
     current = request.cookies.get(SESSION_COOKIE)
     revoke_account_sessions(account_id, token_digest(current) if current else None)
     record_security_event("two_factor_disabled", account_id=account_id)
-    return _settings_redirect(notice="Two-step sign-in is off. Every other device was signed out.")
+    return _settings_redirect(area="two-step", notice="Two-step sign-in is off. Every other device was signed out.")
 
 
 @app.post("/settings/2fa/recovery-codes", dependencies=[Depends(require_csrf)])
-def two_factor_new_recovery_codes(request: Request, current_password: str = Form(""), code: str = Form("")):
+def two_factor_new_recovery_codes(request: Request, current_password: str = Form(""), code: str = Form(""),
+                                  reauth_password: str = Form("")):
+    current_password = reauth_password or current_password
     account = _account(request)
     if not account:
         raise HTTPException(403)
@@ -8341,9 +8436,14 @@ def two_factor_new_recovery_codes(request: Request, current_password: str = Form
     return _recovery_codes_page(request, _fresh_recovery_codes(int(account["id"])))
 
 
-def _settings_redirect(notice: str = "", error: str = "") -> RedirectResponse:
-    query = urlencode({key: value for key, value in (("notice", notice), ("error", error)) if value})
-    return RedirectResponse(f"/settings/privacy{'?' + query if query else ''}#security", status_code=303)
+def _settings_redirect(notice: str = "", error: str = "", area: str = "sign-in") -> RedirectResponse:
+    """Back to Settings, at the card the message is about, with the message beside it."""
+    area = area if area in SETTINGS_AREAS else "sign-in"
+    query = urlencode({key: value for key, value in (("notice", notice), ("error", error),
+                                                       ("area", area if notice or error else "")) if value})
+    anchor = {"sign-in": "security", "two-step": "two-step", "devices": "devices",
+              "export": "account-overview", "delete": "delete-account"}[area]
+    return RedirectResponse(f"/settings/privacy{'?' + query if query else ''}#{anchor}", status_code=303)
 
 
 def _current_password_ok(account_id: int, password: str) -> bool:
@@ -8379,9 +8479,14 @@ def change_password(request: Request, current_password: str = Form(""), new_pass
 
 
 @app.post("/settings/email", dependencies=[Depends(require_csrf)])
-def request_email_change(request: Request, current_password: str = Form(""), new_email: str = Form("")):
+def request_email_change(request: Request, current_password: str = Form(""), new_email: str = Form(""),
+                         reauth_password: str = Form("")):
     """Start an email change: nothing changes until the link sent to the new
-    address is opened. The current address is told a change was asked for."""
+    address is opened. The current address is told a change was asked for.
+
+    reauth_password since 2026-11-16 (a name Chrome does not autofill);
+    current_password is the earlier name."""
+    current_password = reauth_password or current_password
     account = _account(request)
     if not account:
         raise HTTPException(403)
@@ -8862,6 +8967,16 @@ def history_page(request: Request, cancelled: str = "", deleted: str = ""):
         fight["title"] = fight_title(fight)
         fight["names"] = _library_names(fight)
         fight["sport"] = _ruleset_sport(fight.get("ruleset"))
+        fight["sport_mark"] = sport_identity(fight["sport"]).mark if fight["sport"] in SPORT_IDENTITIES else ""
+    # Two fights from the same file, ruleset and minute are almost always one
+    # upload sent twice (walkthrough, 2026-11-16: 74 fights, many alike). Each
+    # job is saved once (fights.job_id is unique), so nothing is merged or
+    # deleted here: the later copies are labelled so they can be told apart.
+    seen_uploads: dict[tuple, int] = {}
+    for fight in sorted(fights, key=lambda f: str(f.get("created_at") or "")):
+        key = (fight.get("original_name"), fight.get("ruleset"), str(fight.get("created_at") or "")[:16])
+        fight["duplicate_number"] = seen_uploads.get(key, 0) + 1
+        seen_uploads[key] = fight["duplicate_number"]
     pending = _pending_jobs_for_owner(_owner_key(request)) if profile_id is not None else []
     return templates.TemplateResponse(
         request=request, name="history.html",
@@ -11253,15 +11368,19 @@ def story_preview(token: str):
 
 
 @app.post("/account/export", dependencies=[Depends(require_csrf)])
-def export_account_data(request: Request, password: str = Form(...),
-                        next_path: str = Form("/profile")):
+def export_account_data(request: Request, export_password: str = Form(""), password: str = Form(""),
+                        next_path: str = Form("/settings/privacy")):
+    # export_password since 2026-11-16 (a name Chrome does not take for the
+    # sign-in form and autofill); password is the earlier name.
     _enforce_rate_limit(request, "account-export", 5, 3600)
     account = _account(request)
-    if not account or not authenticate(account["email"], password):
+    if not account:
+        raise HTTPException(403)
+    if not authenticate(account["email"], export_password or password):
         # The password is not carried back, for the obvious reason.
-        return _form_refusal(
-            "Enter the current account password to export your data.",
-            next_path, "/profile")
+        record_security_event("account_export_refused", account_id=int(account["id"]))
+        return _settings_response(request, account, "privacy", area="export", status_code=403,
+                                  error="That password is not right. Nothing was downloaded.")
     profile_id = int(account["profile_id"])
     profile = dict(get_profile(profile_id) or {})
     profile["has_photo"] = bool(profile.pop("photo_path", None))
@@ -11337,26 +11456,155 @@ def export_account_data(request: Request, password: str = Form(...),
     )
 
 
+ACCOUNT_DELETE_PHRASE = "DELETE"
+ACCOUNT_DELETE_LINK_MINUTES = 30
+
+
+def _account_delete_signer():
+    from itsdangerous import URLSafeTimedSerializer
+
+    return URLSafeTimedSerializer(_session_secret(), salt="warrioriq-account-delete")
+
+
+def _account_delete_fingerprint(account: dict) -> str:
+    """Ties an emailed deletion link to this account as it is now.
+
+    A link for an account that was since deleted and recreated with the same
+    address, or whose email changed, stops working. The link is spent by being
+    used: the account it names no longer exists afterwards.
+    """
+    return token_digest(f"{account.get('id')}|{account.get('email')}|{account.get('created_at')}")[:32]
+
+
+def _delete_refusal(request: Request, account: dict, message: str, status_code: int):
+    """The Settings page again, the reason under the deletion fields, nothing deleted."""
+    return _settings_response(request, account, "privacy", error=message, area="delete", status_code=status_code)
+
+
 @app.post("/account/delete", dependencies=[Depends(require_csrf)])
-def delete_account_route(request: Request, password: str = Form(...), confirmation: str = Form(...),
-                         next_path: str = Form("/profile")):
+def delete_account_route(request: Request, confirm_phrase: str = Form(""), delete_password: str = Form(""),
+                         code: str = Form(""), next_path: str = Form("/settings/privacy"),
+                         # The field names before 2026-11-16, still accepted
+                         # so a page open across the deploy keeps working.
+                         confirmation: str = Form(""), password: str = Form("")):
+    """Permanently delete the signed-in account.
+
+    Every check is here, on the server, before any deletion work starts: the
+    phrase DELETE exactly (capitals, surrounding spaces ignored), the current
+    password, and a code from the authenticator app when two-step sign-in is
+    on. An account with no password (signed up with Google) gets an emailed
+    confirmation link instead; it is never deleted without one of the two.
+    """
     # Takes a password, so it is a place to guess one. Nobody deletes their
-    # account five times an hour.
+    # account five times an hour - per address, and per account.
     _enforce_rate_limit(request, "account-delete", 5, 3600)
     account = _account(request)
     if not account:
         raise HTTPException(403)
-    if confirmation.strip().upper() != "DELETE" or not authenticate(account["email"], password):
-        return _form_refusal(
-            "Enter DELETE and your current password to remove the account.",
-            next_path, "/profile")
+    account = get_account(int(account["id"])) or account
+    account_id = int(account["id"])
+    wait = _take_rate_slot("account-delete-account", str(account_id), 5, 3600)
+    if wait is not None:
+        raise HTTPException(429, _rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))})
+    phrase = (confirm_phrase or confirmation).strip()
+    if phrase != ACCOUNT_DELETE_PHRASE:
+        return _delete_refusal(request, account, "Type DELETE in capital letters to confirm. Nothing was deleted.", 400)
+    if not bool(account.get("password_login_enabled", 1)):
+        return _send_account_delete_link(request, account)
+    secret = delete_password or password
+    if not secret:
+        return _delete_refusal(request, account, "Enter your current password. Nothing was deleted.", 400)
+    if not _current_password_ok(account_id, secret):
+        record_security_event("account_deletion_refused", account_id=account_id, severity="warning",
+                              metadata={"reason": "password"})
+        return _delete_refusal(request, account, "That password is not right. Nothing was deleted.", 403)
+    if two_factor_row(account_id)["enabled"] and _check_second_factor(account_id, code) is None:
+        record_security_event("two_factor_failed", severity="warning", account_id=account_id)
+        return _delete_refusal(
+            request, account,
+            "That code is not right, or has already been used. Nothing was deleted.", 403)
+    return _delete_account_now(request, account)
+
+
+def _send_account_delete_link(request: Request, account: dict):
+    """No password to check: confirm by a one-time link sent to the account's own email."""
+    token = _account_delete_signer().dumps({"a": int(account["id"]), "f": _account_delete_fingerprint(account)})
+    url = f"{_public_base(request)}/account/delete/confirm/{token}"
+    delivered = False
+    try:
+        delivered = send_transactional_email(
+            account["email"], "Confirm deleting your WarriorIQ account",
+            f"Someone signed in to your WarriorIQ account asked to delete it. To delete the account and every "
+            f"saved fight for good, open this link within {ACCOUNT_DELETE_LINK_MINUTES} minutes, in the browser "
+            f"you are signed in with:\n\n{url}\n\nIf this was not you, ignore this message: nothing is deleted.")
+    except Exception:                                                    # noqa: BLE001
+        LOGGER.warning("account_delete_link_not_sent account=%s", account["id"])
+    record_security_event("account_deletion_link_requested", account_id=int(account["id"]),
+                          metadata={"email_delivery": "sent" if delivered else "unavailable"})
+    if not delivered:
+        return _delete_refusal(request, account,
+                               "The confirmation email could not be sent right now. Nothing was deleted.", 503)
+    return _settings_response(
+        request, account, "privacy", area="delete",
+        notice=f"Check {account['email']}: open the link in it within {ACCOUNT_DELETE_LINK_MINUTES} minutes "
+               "to finish deleting the account. Nothing is deleted until you do.")
+
+
+def _account_from_delete_link(request: Request, token: str) -> dict | None:
+    from itsdangerous import BadSignature
+
+    account = _account(request)
+    if not account:
+        return None
+    try:
+        payload = _account_delete_signer().loads(token, max_age=ACCOUNT_DELETE_LINK_MINUTES * 60)
+    except (BadSignature, TypeError, ValueError):
+        return None
+    account = get_account(int(account["id"])) or account
+    # The link only works signed in as the account it was sent to.
+    if not isinstance(payload, dict) or payload.get("a") != int(account["id"]) \
+            or payload.get("f") != _account_delete_fingerprint(account):
+        return None
+    return account
+
+
+@app.get("/account/delete/confirm/{token}", response_class=HTMLResponse)
+def account_delete_link_page(request: Request, token: str):
+    """Opening the link shows a button; it never deletes by itself (mail scanners open links)."""
+    if not _account(request):
+        return RedirectResponse(f"/login?next={quote('/account/delete/confirm/' + token, safe='')}", status_code=303)
+    account = _account_from_delete_link(request, token)
+    if account is None:
+        raise HTTPException(410, "This deletion link has expired, was already used, or belongs to another "
+                                 "account. Nothing was deleted. Ask for a new one in Settings.")
+    response = templates.TemplateResponse(request=request, name="account_delete_confirm.html", context={
+        "request": request, "token": token, "email": account["email"],
+        "needs_code": two_factor_row(int(account["id"]))["enabled"]})
+    # no-store comes from the middleware's /account/ prefix.
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@app.post("/account/delete/confirm/{token}", dependencies=[Depends(require_csrf)])
+def account_delete_link_confirm(request: Request, token: str, code: str = Form("")):
+    _enforce_rate_limit(request, "account-delete", 5, 3600)
+    account = _account_from_delete_link(request, token)
+    if account is None:
+        raise HTTPException(410, "This deletion link has expired, was already used, or belongs to another "
+                                 "account. Nothing was deleted.")
+    if two_factor_row(int(account["id"]))["enabled"] and _check_second_factor(int(account["id"]), code) is None:
+        raise HTTPException(403, "That code is not right, or has already been used. Nothing was deleted.")
+    return _delete_account_now(request, account)
+
+
+def _delete_account_now(request: Request, account: dict):
+    """Deletion itself, only ever reached after the checks above."""
     if any(
         job.get("owner_key") == f"account:{account['id']}" and job.get("status") in {"queued", "running"}
         for _, job in list_jobs()
     ):
-        return _form_refusal(
-            "Wait for the running analysis to finish before deleting the account.",
-            next_path, "/profile")
+        return _delete_refusal(request, account,
+                               "Wait for the running analysis to finish before deleting the account.", 409)
     if account.get("stripe_subscription_id"):
         try:
             cancellation = cancel_subscription_at_period_end(str(account["stripe_subscription_id"]))
@@ -11375,7 +11623,7 @@ def delete_account_route(request: Request, password: str = Form(...), confirmati
         profile = removed.get("profile") or {}
         for field in ("photo_path", "video_path"):
             _remove_profile_file(profile.get(field))
-    response = RedirectResponse("/", status_code=303)
+    response = RedirectResponse("/?deleted=1", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
 

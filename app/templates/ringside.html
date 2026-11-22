@@ -46,9 +46,10 @@
   <div class="ringside-live" id="scorerLive" hidden>
     <div class="ringside-board glass-panel" aria-live="polite">
       <div class="ringside-side ringside-a"><span id="boardNameA">Blue</span><strong id="boardScoreA">0</strong><small id="boardLandedA">0 points tapped</small></div>
-      <div class="ringside-mid"><b id="boardRound">Round 1</b><small id="boardRules"></small></div>
+      <div class="ringside-mid"><b id="boardRound">Round 1</b><small id="boardRules"></small><small class="ringside-kind" id="boardKind">Score under these rules</small></div>
       <div class="ringside-side ringside-b"><span id="boardNameB">Red</span><strong id="boardScoreB">0</strong><small id="boardLandedB">0 points tapped</small></div>
     </div>
+    <p class="ringside-explain small muted">The big numbers are the scorecard under the rules above. "Points tapped" counts every +1 and +2 you pressed; under 10-point must, each round goes 10-9 to whoever tapped more, so the two can differ.</p>
     <p class="ringside-offline" id="scorerOffline" hidden>No connection: your taps are kept and the score updates when you are back online.</p>
     <div class="ringside-pads">
       <div class="ringside-pad ringside-pad-a" id="padA" aria-label="Blue corner points"></div>

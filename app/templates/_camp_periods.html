@@ -15,7 +15,7 @@
         {% for card in period.cards %}
         <article class="trend-card" data-direction="{{ card.direction }}">
           <header><span>{{ card.label }}</span><b class="wiq-num">{{ card.latest }}</b></header>
-          <svg viewBox="0 0 {{ progress.card_width|int }} {{ progress.card_height|int }}" preserveAspectRatio="none" role="img" aria-label="{{ card.label }} across {{ card.fights }} fights in the last {{ period.days }} days: from {{ card.first }} to {{ card.latest }}"><polyline points="{{ card.line }}" pathLength="1"/><circle cx="{{ card.last_x }}" cy="{{ card.last_y }}" r="2.5"/></svg>
+          <svg viewBox="0 0 {{ progress.card_width|int }} {{ progress.card_height|int }}" preserveAspectRatio="none" role="img" aria-label="{{ card.label }} across {{ card.fights }} fights in the last {{ period.days }} days: from {{ card.first }} to {{ card.latest }}"><polyline points="{{ card.line }}"/><circle cx="{{ card.last_x }}" cy="{{ card.last_y }}" r="2.5"/></svg>
           <footer><i class="trend-change">{{ card.change }}</i><small>{{ card.fights }} fights &middot; from {{ card.first }}</small></footer>
         </article>
         {% endfor %}

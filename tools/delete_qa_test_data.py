@@ -5,6 +5,11 @@ exactly what it would delete, and touches nothing else.
 
     python tools/delete_qa_test_data.py --email owner@example.com
     python tools/delete_qa_test_data.py --email owner@example.com --confirm
+    python tools/delete_qa_test_data.py --email owner@example.com --archive --confirm
+
+--archive (2026-11-16) is the reversible choice: the fighters leave the roster
+("On the roster" in Fight Camp) and keep their fights, and can be restored
+from the archived list. Without it the fighters and their fights are deleted.
 
 What it matches, and nothing more:
 
@@ -100,12 +105,25 @@ def execute(found: dict) -> None:
                                  resource_type="fighter", resource_id=str(fighter["id"]))
 
 
+def archive(found: dict) -> None:
+    """Take the fighters off the roster; their fights and files stay."""
+    from core import db
+
+    account_id = int(found["account"]["id"])
+    for fighter in found["fighters"]:
+        if not fighter.get("archived") and db.archive_fighter(found["profile_id"], int(fighter["id"])):
+            db.record_security_event("qa_test_data_archived", account_id=account_id,
+                                     resource_type="fighter", resource_id=str(fighter["id"]))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--email", required=True, help="the one account to clean")
     parser.add_argument("--name", action="append", default=[],
                         help="an exact fighter name to delete instead of the built-in QA list (repeatable)")
-    parser.add_argument("--confirm", action="store_true", help="actually delete; without it nothing changes")
+    parser.add_argument("--archive", action="store_true",
+                        help="archive the fighters instead of deleting them and their fights (reversible)")
+    parser.add_argument("--confirm", action="store_true", help="actually change; without it nothing changes")
     args = parser.parse_args(argv)
 
     found = plan(args.email, tuple(args.name) or QA_FIGHTER_NAMES)
@@ -120,6 +138,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"      {path}")
     if not (found["fighters"] or found["fights"]):
         print("Nothing matches. Nothing was changed.")
+        return 0
+    if args.archive:
+        if not args.confirm:
+            print("\nDry run: nothing was changed. Run again with --archive --confirm to archive the fighters "
+                  "above (their fights are kept).")
+            return 0
+        archive(found)
+        print(f"\nArchived {len(found['fighters'])} fighter(s); no fight was deleted.")
         return 0
     if not args.confirm:
         print("\nDry run: nothing was changed. Run again with --confirm to delete exactly the rows above.")

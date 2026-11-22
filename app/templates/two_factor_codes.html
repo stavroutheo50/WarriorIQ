@@ -8,8 +8,23 @@
   <div class="eyebrow">Two-step sign-in is on</div>
   <h1 id="codesTitle">Save your recovery codes.</h1>
   <p class="muted">If you lose your phone, one of these signs you in. <strong>You will not see them again.</strong> Each works once. Keep them somewhere safe and separate from your password: a password manager, or paper.</p>
-  <ol class="recovery-codes">{% for code in codes %}<li>{{ code }}</li>{% endfor %}</ol>
+  <ol class="recovery-codes" id="recoveryCodes">{% for code in codes %}<li>{{ code }}</li>{% endfor %}</ol>
+  {#- Copy and Download work in the browser from the codes already on screen:
+      nothing is fetched again, because nothing readable is kept. -#}
+  <div class="form-actions"><button class="btn secondary" type="button" data-copy-target="recoveryCodes" data-keep-label="true">Copy codes</button><button class="btn secondary" type="button" id="downloadCodes" data-keep-label="true">Download as a text file</button></div>
   <p class="small muted">Every other device was signed out when two-step sign-in was turned on.</p>
-  <div class="hero-actions"><a class="btn" href="/settings/privacy#security">I have saved them</a></div>
+  <label class="check legal-check"><input type="checkbox" id="codesSaved"><span>I saved these recovery codes somewhere safe.</span></label>
+  <div class="hero-actions"><a class="btn" id="codesDone" href="/settings/privacy#two-step">Done</a></div>
 </section>
 {% endblock %}
+{% block scripts %}<script nonce="{{ request.state.csp_nonce }}">
+(()=>{const list=document.getElementById('recoveryCodes'),saved=document.getElementById('codesSaved'),done=document.getElementById('codesDone'),download=document.getElementById('downloadCodes');
+  const codes=()=>[...list.querySelectorAll('li')].map(li=>li.textContent.trim());
+  download.addEventListener('click',()=>{const text='WarriorIQ recovery codes\nEach code works once.\n\n'+codes().join('\n')+'\n';const url=URL.createObjectURL(new Blob([text],{type:'text/plain'}));const a=document.createElement('a');a.href=url;a.download='warrioriq-recovery-codes.txt';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)});
+  // Done stays off until the box is ticked; without JavaScript it simply works.
+  const sync=()=>{done.setAttribute('aria-disabled',String(!saved.checked));done.classList.toggle('is-disabled',!saved.checked)};
+  done.addEventListener('click',event=>{if(!saved.checked){event.preventDefault();saved.focus();window.wiqToast('Tick the box once you have saved the codes')}});
+  saved.addEventListener('change',sync);sync();
+  window.addEventListener('beforeunload',event=>{if(!saved.checked){event.preventDefault();event.returnValue=''}});
+})();
+</script>{% endblock %}
