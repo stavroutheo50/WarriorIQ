@@ -48,3 +48,28 @@ def test_the_owner_hears_when_it_is_back_and_only_after_an_alert(tmp_path):
         assert worker_alerts.note_worker_connected(outputs=tmp_path, recipients=("o@e.com",), send=None) is True
         assert worker_alerts.note_worker_connected(outputs=tmp_path, recipients=("o@e.com",), send=None) is False
     assert sent == ["WarriorIQ: the analysis PC is back"]
+
+
+def test_the_background_sweep_alerts_even_when_nobody_keeps_the_page_open(tmp_path, monkeypatch):
+    """2026-11-22: the page now says it can be closed, so the alert cannot rely on it."""
+    import time as _time
+    from unittest import mock
+
+    import app.main as web
+    from core.config import SETTINGS
+
+    waiting = {"status": "queued", "wake_requested_at_epoch": _time.time() - 3600}
+    previous = SETTINGS.admin_emails
+    object.__setattr__(SETTINGS, "admin_emails", ("owner@example.test",))
+    sent = []
+    try:
+        monkeypatch.setattr(web, "OUTPUTS", tmp_path)
+        monkeypatch.setattr(web, "list_jobs", lambda: [("waiting1", waiting), ("waiting2", dict(waiting))])
+        monkeypatch.setattr(web, "_worker_connected", lambda: False)
+        monkeypatch.setattr(web.worker_alerts, "_send_in_background",
+                            lambda send, recipients, subject, body: sent.append(subject))
+        with mock.patch.object(web, "_warm_plausibility_verdicts", return_value=0):
+            web._run_periodic_maintenance(now=0.0)
+        assert len(sent) == 1 and "analysis PC is not connected" in sent[0]
+    finally:
+        object.__setattr__(SETTINGS, "admin_emails", previous)

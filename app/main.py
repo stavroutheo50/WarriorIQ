@@ -2070,6 +2070,20 @@ def _run_periodic_maintenance(now: float | None = None) -> None:
                 LOGGER.info("plausibility_verdicts_saved fights=%s seconds=%.1f", warmed, time.monotonic() - started)
         except Exception:                                               # noqa: BLE001
             LOGGER.exception("plausibility_warm_failed")
+    # Fights waiting with no analysis PC connected: the owner is emailed
+    # (core/worker_alerts.py). This was checked only while a customer's
+    # progress page was open, and the page now tells people they can close it
+    # (2026-11-22), so the sweep that runs on any visit checks too.
+    if SETTINGS.worker_alert_seconds and SETTINGS.admin_emails:
+        try:
+            online = _worker_connected() and not recent_worker_refusal()
+            for _, waiting in list_jobs():
+                if waiting.get("status") == "queued" and worker_alerts.check_waiting_fight(
+                        waiting, worker_online=online, outputs=OUTPUTS, recipients=SETTINGS.admin_emails,
+                        threshold_seconds=SETTINGS.worker_alert_seconds, send=send_transactional_email):
+                    break                                                # one email covers every waiting fight
+        except Exception:                                               # noqa: BLE001
+            LOGGER.exception("worker_alert_sweep_failed")
     if now - _last_guest_cleanup > 600:
         jobs_before_cleanup = dict(list_jobs())
         cutoff = time.time() - SETTINGS.failed_upload_retention_hours * 3600
