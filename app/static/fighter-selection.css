@@ -29,7 +29,6 @@
 .selection-edit-button {
   padding: 8px 11px;
   border: 1px solid #30435f;
-  border-radius: 8px;
   background: #0d192a;
   color: #9cadc2;
   font: inherit;
@@ -86,7 +85,7 @@
 .corner-pick input{flex:none;width:16px;height:16px;accent-color:#8794ff}
 .corner-pick input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}
 .corner-pick small{display:block;margin-top:6px;font-size:12px;line-height:1.45}
-.solo-toggle{display:flex;align-items:flex-start;gap:10px;margin:14px 0 0;padding:10px 12px;min-height:44px;border:1px solid rgba(255,255,255,.10);border-radius:9px;font-size:13.5px;line-height:1.45;cursor:pointer}
+.solo-toggle{display:flex;align-items:flex-start;gap:10px;margin:14px 0 0;padding:10px 12px;min-height:44px;border:1px solid rgba(255,255,255,.10);font-size:13.5px;line-height:1.45;cursor:pointer}
 .solo-toggle input{flex:none;width:18px;height:18px;margin-top:2px;accent-color:#8794ff}
 .solo-toggle input:focus-visible{outline:2px solid #8794ff;outline-offset:3px}
 .corner-dot{display:inline-block;width:11px;height:11px;border-radius:50%}
@@ -129,7 +128,7 @@
 .stage-extras .select-more{grid-column:1/-1}
 
 /* One instruction above the picture (select.html, 2026-10-09). */
-.select-instruction{margin:0 0 12px;padding:14px 16px;border-radius:14px;font-size:clamp(18px,2.4vw,22px);font-weight:800;line-height:1.3;color:#f2f7ff}
+.select-instruction{margin:0 0 12px;padding:14px 16px;border-radius:14px;font-size:clamp(18px,2.4vw,22px);font-weight:800;line-height:1.3;color:var(--wiq-field-text)}
 .select-instruction[data-state=ready]{color:#b7f5cf}
 .select-more{margin-top:14px;border:1px solid var(--line,#2d4268);border-radius:12px;padding:0 14px}
 .select-more>summary{cursor:pointer;padding:12px 0;font-size:13px;font-weight:750;color:#c9d6ea}

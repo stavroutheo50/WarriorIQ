@@ -39,10 +39,8 @@
 input[type="checkbox"], input[type="radio"] {
   -webkit-appearance: none;
   appearance: none;
-  flex: 0 0 auto;
   display: inline-grid;
   place-content: center;
-  margin: 0;
   border: 2px solid #6b7fa6;
   border-radius: 6px;
   background: var(--wiq-field-bg) center / 70% no-repeat;

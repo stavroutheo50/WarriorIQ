@@ -169,6 +169,7 @@ from core.retention import (
 from core import training_consent
 from app import admin_overview
 from app import site_backup
+from app import qa_fighters
 from app import accuracy as accuracy_answers
 from app.progress_periods import period_summary
 from core.build_info import ANALYSIS_VERSION, analysis_fingerprint, code_differences, engine_name, release_version, result_check
@@ -10420,6 +10421,8 @@ def admin_page(request: Request, q: str = ""):
             "email": {"setup": admin_overview.email_setup(), "log": admin_overview.email_log()},
             "people": admin_overview.person(q[:200]) if q.strip() else [],
             "leftovers": site_backup.leftover_copies(),
+            # The QA pass's test fighters still on the admin's own roster (app/qa_fighters.py).
+            "qa_fighters": qa_fighters.on_roster(int(_account(request)["profile_id"])),
             "tool_result": _ADMIN_TOOL_RESULTS.get(request.query_params.get("tool", ""), ""),
             # Plan requests from the pricing page, for a yes with an end date
             # or a no (owner, 2026-11-16).
@@ -10440,6 +10443,8 @@ _ADMIN_TOOL_RESULTS = {
     "backup_no_database": "No database was found where the website expects it, so nothing was backed up.",
     "leftovers_deleted": "The selected leftover copies were deleted.",
     "leftovers_none": "Nothing was deleted: tick the confirmation and at least one copy.",
+    "qa_archived": "The QA test fighters were archived. Their fights were kept; adding a fighter with the same name brings one back.",
+    "qa_none": "Nothing was archived: tick the confirmation first.",
     "plan_granted": "Plan given. The person was emailed if email is working; the Email section shows whether it was sent.",
     "plan_declined": "Request declined. The person's plan was not changed.",
     "plan_ended": "The plan was taken away. The person is back on the plan they pay for, or Starter.",
@@ -10495,6 +10500,19 @@ async def admin_delete_leftovers(request: Request):
         record_security_event("orphan_web_video_deleted", account_id=int(actor["id"]), resource_type="fight",
                               resource_id=name[: -len("_web.mp4")], metadata={"tool": "admin_page"})
     return RedirectResponse("/admin?tool=leftovers_deleted#adminTools", status_code=303)
+
+
+@app.post("/admin/qa-fighters/archive", dependencies=[Depends(require_csrf)])
+async def admin_archive_qa_fighters(request: Request):
+    """Archive the QA pass's test fighters on the admin's own roster. Reversible; no fight is deleted."""
+    if not _is_admin(request):
+        raise HTTPException(404)
+    form = await request.form()
+    if form.get("confirm") != "yes":
+        return RedirectResponse("/admin?tool=qa_none#adminTools", status_code=303)
+    actor = _account(request)
+    qa_fighters.archive_all(int(actor["profile_id"]), int(actor["id"]))
+    return RedirectResponse("/admin?tool=qa_archived#adminTools", status_code=303)
 
 
 @app.post("/admin/email/test", dependencies=[Depends(require_csrf)])

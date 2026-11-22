@@ -106,6 +106,11 @@ def accounts(now: datetime | None = None) -> dict:
         plans = con.execute(
             """SELECT COALESCE(NULLIF(plan_override,''), plan) AS plan, COUNT(*) AS n
                FROM accounts GROUP BY 1 ORDER BY n DESC""").fetchall()
+        # Accounts per linked sign-in provider. GitHub is listed even at 0: the
+        # owner decides whether its legacy sign-in can go from this number
+        # (2026-11-22), and the host has no shell to count it any other way.
+        providers = con.execute(
+            "SELECT provider, COUNT(DISTINCT account_id) AS n FROM oauth_identities GROUP BY provider").fetchall()
         signed_in = con.execute(
             "SELECT COUNT(DISTINCT account_id) FROM sessions WHERE expires_at > ?", (_iso(now),)).fetchone()[0]
         recent = con.execute(
@@ -119,6 +124,7 @@ def accounts(now: datetime | None = None) -> dict:
     result = dict(row)
     result["athletes"] = result["total"] - result["coaches"]
     result["plans"] = [dict(item) for item in plans]
+    result["sign_in_providers"] = {"github": 0, **{str(item["provider"]): int(item["n"]) for item in providers}}
     result["signed_in"] = int(signed_in)
     result["recent"] = [dict(item) for item in recent]
     return result
