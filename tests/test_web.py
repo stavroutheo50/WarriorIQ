@@ -708,7 +708,10 @@ class PublicPageTests(unittest.TestCase):
         deployment = (Path(__file__).resolve().parents[1] / ".cpanel.yml").read_text(encoding="utf-8")
 
         self.assertIn("DEPLOYPATH=/home/dchoodxm/warrioriq", deployment)
-        self.assertIn("/bin/cp -R app dataset tests tools $DEPLOYPATH", deployment)
+        # app/ and core/ are built beside the live copy and swapped in whole.
+        self.assertIn("/bin/cp -R app $DEPLOYPATH/app.new", deployment)
+        self.assertIn("/bin/mv $DEPLOYPATH/app.new $DEPLOYPATH/app", deployment)
+        self.assertIn("/bin/cp -R dataset tests tools $DEPLOYPATH", deployment)
         self.assertIn("/bin/cp -R core $DEPLOYPATH/core.new", deployment)
         self.assertIn("passenger_wsgi.py", deployment)
         self.assertIn("warrioriq_wsgi.py", deployment)
