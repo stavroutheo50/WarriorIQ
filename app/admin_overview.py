@@ -220,6 +220,8 @@ EMAIL_EVENTS = {
     "coach_invite_created": "Coaching invitation",
     "gym_invite_created": "Gym invitation",
     "admin_plan_granted": "Plan approved",
+    "report_ready_emailed": "Fight report ready",
+    "analysis_failed_emailed": "Analysis could not finish",
 }
 # Sent to someone other than the account the event belongs to.
 _OTHER_RECIPIENT = {"guardian_approval_requested": "the guardian named at sign-up",

@@ -2113,6 +2113,13 @@ def has_security_event(account_id: int, event_type: str) -> bool:
                            (int(account_id), event_type)).fetchone() is not None
 
 
+def has_security_event_for(event_type: str, resource_id: str) -> bool:
+    """Whether an event of this type was recorded for this resource (an analysis, say)."""
+    with connection() as con:
+        return con.execute("SELECT 1 FROM security_events WHERE event_type=? AND resource_id=? LIMIT 1",
+                           (event_type, str(resource_id))).fetchone() is not None
+
+
 def record_security_event(
     event_type: str,
     *,
