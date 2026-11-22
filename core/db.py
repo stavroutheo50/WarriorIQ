@@ -806,6 +806,13 @@ def update_profile(
     return get_profile(profile_id) or {}
 
 
+def list_fight_report_paths() -> list[str]:
+    """Every saved fight's report path, for maintenance that works per fight folder."""
+    init_db()
+    with connection() as con:
+        return [row[0] for row in con.execute("SELECT report_path FROM fights WHERE report_path<>''").fetchall()]
+
+
 def save_fight(
     job_id: str,
     profile_id: int,
