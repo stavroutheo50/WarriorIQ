@@ -569,3 +569,8 @@ def test_a_missing_page_says_so_in_a_sentence():
     page = BrowserClient(web.app).get("/no-such-page-here")
     assert page.status_code == 404
     assert ">Not Found<" not in page.text and "find that page" in page.text
+
+
+def test_the_plans_banner_keeps_the_space_between_its_sentences():
+    page = BrowserClient(web.app).get("/pricing").text
+    assert "opens.To" not in page and "opens. To" in page
