@@ -58,8 +58,10 @@ def dense_fights() -> list[Path]:
     # dataset/stock_strikes/ holds free-licence stock clips labelled strike by
     # strike; their labels are committed, their pose tracks are rebuilt with
     # tools/make_stock_strikes.py and stay out of Git like the others.
+    # dataset/public/own_fights/ holds the owner's own bouts, labelled by a
+    # person on the labelling page's own-video mode (tools/build_own_fight_keys.py).
     roots = [PROJECT_ROOT / "dataset" / "regression", PROJECT_ROOT / "dataset" / "public" / "phone_strikes",
-             PROJECT_ROOT / "dataset" / "stock_strikes"]
+             PROJECT_ROOT / "dataset" / "stock_strikes", PROJECT_ROOT / "dataset" / "public" / "own_fights"]
     return sorted(p for root in roots if root.is_dir() for p in root.iterdir()
                   if p.is_dir() and (p / "track.jsonl.gz").exists() and (p / "strikes.json").exists())
 
