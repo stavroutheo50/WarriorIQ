@@ -1,6 +1,7 @@
 """One table for how accurate the analysis is, against what people marked (2026-11-23).
 
     python tools/scoreboard.py                 # score what is on this machine
+    python tools/scoreboard.py --fetch         # first get what is missing (see fetch() below)
     python tools/scoreboard.py --run-identity  # first re-analyse the identity clips with the current code
     python tools/scoreboard.py --save          # also keep this result and show the change since the last one
     python tools/scoreboard.py --json
@@ -181,6 +182,59 @@ def strike_summary(rows: dict, person: set[str]) -> dict:
     return out
 
 
+# --- getting what is missing ------------------------------------------------------
+
+HUMAN_STRIKE_LABELS = PROJECT_ROOT / "dataset" / "regression" / "human_strikes" / "2026-11-10.labels.json"
+
+
+def fetch() -> None:
+    """Everything the ground and strike rows need that can be made on this machine.
+
+    1. The five labelled pankration bouts, from archive.org (CC BY 2.0), into
+       dataset/public/grappling_clips/<bout>.mp4 - the item's own MP4, as the
+       labels' README says.
+    2. The pose tracks of the stock clips in dataset/stock_strikes/
+       (tools/make_stock_strikes.py: downloads each clip and runs the real
+       analysis, so it uses the GPU).
+    3. The owner's labeller's marks on those clips as answer keys
+       (tools/import_human_strikes.py), so they count as person-labelled.
+    Each step skips what is already there.
+    """
+    import subprocess
+    import urllib.request
+
+    from tools import fit_ground_time
+
+    fit_ground_time.CLIPS.mkdir(parents=True, exist_ok=True)
+    for labels in sorted(fit_ground_time.LABELS.glob("*.json")):
+        target = fit_ground_time.CLIPS / f"{labels.stem}.mp4"
+        if target.exists():
+            continue
+        item = json.loads(labels.read_text(encoding="utf-8"))["archive_item"]
+        with urllib.request.urlopen(f"https://archive.org/metadata/{item}", timeout=60) as response:
+            files = [f for f in json.load(response).get("files", []) if str(f.get("name", "")).lower().endswith(".mp4")]
+        own = [f for f in files if f["name"] == f"{item}.mp4"]
+        pick = own[0] if own else max(files, key=lambda f: int(f.get("size") or 0))
+        print(f"  downloading {labels.stem} ({int(pick.get('size') or 0) // 1_000_000} MB)", flush=True)
+        partial = target.with_suffix(".part")
+        url = f"https://archive.org/download/{item}/{urllib.request.quote(pick['name'])}"
+        with urllib.request.urlopen(url, timeout=600) as response, partial.open("wb") as out:
+            while chunk := response.read(1 << 20):
+                out.write(chunk)
+        partial.replace(target)
+
+    stock = PROJECT_ROOT / "dataset" / "stock_strikes"
+    missing = sorted(p.name for p in stock.iterdir()
+                     if p.is_dir() and (p / "source.json").exists() and not (p / "track.jsonl.gz").exists())
+    if missing:
+        print(f"  rebuilding pose tracks for {len(missing)} stock clip(s); this runs the analysis", flush=True)
+        subprocess.run([sys.executable, str(PROJECT_ROOT / "tools" / "make_stock_strikes.py"), *missing],
+                       cwd=PROJECT_ROOT, check=True)
+    if HUMAN_STRIKE_LABELS.exists():
+        subprocess.run([sys.executable, str(PROJECT_ROOT / "tools" / "import_human_strikes.py"),
+                        str(HUMAN_STRIKE_LABELS)], cwd=PROJECT_ROOT, check=True)
+
+
 # --- the table --------------------------------------------------------------------
 
 def build(run_identity: bool = False) -> dict:
@@ -231,12 +285,16 @@ def _last_saved() -> dict | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser.add_argument("--fetch", action="store_true",
+                        help="first download the ground-time bouts and rebuild the labelled strike clips' tracks")
     parser.add_argument("--run-identity", action="store_true",
                         help="re-analyse the identity clips with the current code first (slow; uses the GPU)")
     parser.add_argument("--save", action="store_true", help="keep this result in " + str(HISTORY.relative_to(PROJECT_ROOT)))
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     previous = _last_saved()
+    if args.fetch:
+        fetch()
     board = build(args.run_identity)
     print(json.dumps(board, indent=2) if args.json else render(board, previous))
     if args.save:
