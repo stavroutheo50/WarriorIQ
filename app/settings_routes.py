@@ -80,126 +80,12 @@ def revoke_one_session(request: Request, session_id: int):
     return _settings_redirect(area="devices", notice="That device was signed out.")
 
 
-def _recovery_codes_page(request: Request, codes: list[str]):
-    """Shown once, never stored in the clear, and never cached."""
-    response = m.templates.TemplateResponse(
-        request=request, name="two_factor_codes.html",
-        context={"request": request, "codes": [m.two_factor.display_code(code) for code in codes]},
-    )
-    response.headers.setdefault("Cache-Control", "no-store")
-    return response
-
-
-def _fresh_recovery_codes(account_id: int) -> list[str]:
-    codes = m.two_factor.new_recovery_codes()
-    m.replace_recovery_codes(account_id, [m.two_factor.recovery_hash(code) for code in codes])
-    return codes
-
-
-@app.post("/settings/2fa/start", dependencies=[Depends(m.require_csrf)])
-def two_factor_start(request: Request, current_password: str = Form(""), reauth_password: str = Form("")):
-    """Step 1: a new secret, kept but not yet on. Needs the password."""
-    current_password = reauth_password or current_password
-    account = m._account(request)
-    if not account:
-        raise HTTPException(403)
-    m._enforce_rate_limit(request, "settings-2fa", 20, 900)
-    if m.two_factor_row(int(account["id"]))["enabled"]:
-        return _settings_redirect(area="two-step", error="Two-step sign-in is already on.")
-    if not m._current_password_ok(int(account["id"]), current_password):
-        return _settings_redirect(area="two-step", error="That password is not right. Nothing was changed.")
-    m.begin_two_factor_setup(int(account["id"]), m.two_factor.seal(m.two_factor.new_secret()))
-    return _settings_redirect(area="two-step")
-
-
-@app.post("/settings/2fa/cancel", dependencies=[Depends(m.require_csrf)])
-def two_factor_cancel(request: Request):
-    account = m._account(request)
-    if not account:
-        raise HTTPException(403)
-    if not m.two_factor_row(int(account["id"]))["enabled"]:
-        m.disable_two_factor(int(account["id"]))
-    return _settings_redirect(area="two-step")
-
-
-@app.post("/settings/2fa/confirm", dependencies=[Depends(m.require_csrf)])
-def two_factor_confirm(request: Request, code: str = Form("")):
-    """Step 2: a code from the app proves it holds the secret. Only then is it on."""
-    account = m._account(request)
-    if not account:
-        raise HTTPException(403)
-    m._enforce_rate_limit(request, "settings-2fa", 20, 900)
-    account_id = int(account["id"])
-    state = m.two_factor_row(account_id)
-    secret = m.two_factor.unseal(state["secret"])
-    if state["enabled"] or not secret:
-        return _settings_redirect(area="two-step", error="Start again: there is no two-step setup waiting for a code.")
-    step = m.two_factor.verify(secret, code)
-    if step is None:
-        return _settings_redirect(area="two-step", error="That code is not right. Check the time on your phone and try the next code.")
-    codes = m.two_factor.new_recovery_codes()
-    if not m.enable_two_factor(account_id, step, [m.two_factor.recovery_hash(c) for c in codes]):
-        return _settings_redirect(area="two-step", error="Two-step sign-in could not be switched on. Start again.")
-    current = request.cookies.get(m.SESSION_COOKIE)
-    m.revoke_account_sessions(account_id, m.token_digest(current) if current else None)
-    m.record_security_event("two_factor_enabled", account_id=account_id)
-    return _recovery_codes_page(request, codes)
-
-
-def _second_factor_gate(request: Request, account: dict, current_password: str, code: str, scope: str):
-    """The password and a live code, for the changes that would weaken the account. None when both are good."""
-    m._enforce_rate_limit(request, scope, 20, 900)
-    account_id = int(account["id"])
-    wait = m._take_rate_slot("settings-2fa-account", str(account_id), 12, 900)
-    if wait is not None:
-        raise HTTPException(429, m._rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))})
-    if not m._current_password_ok(account_id, current_password):
-        m.record_security_event("two_factor_change_refused", account_id=account_id)
-        return _settings_redirect(area="two-step", error="That password is not right. Nothing was changed.")
-    if m._check_second_factor(account_id, code) is None:
-        m.record_security_event("two_factor_failed", severity="warning", account_id=account_id)
-        return _settings_redirect(area="two-step", error="That code is not right, or has already been used. Nothing was changed.")
-    return None
-
-
-@app.post("/settings/2fa/disable", dependencies=[Depends(m.require_csrf)])
-def two_factor_disable(request: Request, current_password: str = Form(""), code: str = Form(""),
-                       reauth_password: str = Form("")):
-    current_password = reauth_password or current_password
-    account = m._account(request)
-    if not account:
-        raise HTTPException(403)
-    refused = _second_factor_gate(request, account, current_password, code, "settings-2fa")
-    if refused is not None:
-        return refused
-    account_id = int(account["id"])
-    m.disable_two_factor(account_id)
-    current = request.cookies.get(m.SESSION_COOKIE)
-    m.revoke_account_sessions(account_id, m.token_digest(current) if current else None)
-    m.record_security_event("two_factor_disabled", account_id=account_id)
-    return _settings_redirect(area="two-step", notice="Two-step sign-in is off. Every other device was signed out.")
-
-
-@app.post("/settings/2fa/recovery-codes", dependencies=[Depends(m.require_csrf)])
-def two_factor_new_recovery_codes(request: Request, current_password: str = Form(""), code: str = Form(""),
-                                  reauth_password: str = Form("")):
-    current_password = reauth_password or current_password
-    account = m._account(request)
-    if not account:
-        raise HTTPException(403)
-    refused = _second_factor_gate(request, account, current_password, code, "settings-2fa")
-    if refused is not None:
-        return refused
-    m.record_security_event("recovery_codes_regenerated", account_id=int(account["id"]))
-    return _recovery_codes_page(request, _fresh_recovery_codes(int(account["id"])))
-
-
 def _settings_redirect(notice: str = "", error: str = "", area: str = "sign-in") -> RedirectResponse:
     """Back to Settings, at the card the message is about, with the message beside it."""
     area = area if area in m.SETTINGS_AREAS else "sign-in"
     query = urlencode({key: value for key, value in (("notice", notice), ("error", error),
                                                        ("area", area if notice or error else "")) if value})
-    anchor = {"sign-in": "security", "two-step": "two-step", "devices": "devices",
+    anchor = {"sign-in": "security", "devices": "devices",
               "export": "account-overview", "delete": "delete-account"}[area]
     return RedirectResponse(f"/settings/privacy{'?' + query if query else ''}#{anchor}", status_code=303)
 

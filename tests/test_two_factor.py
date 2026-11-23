@@ -1,19 +1,17 @@
-"""Optional two-step sign-in, recovery codes and the signed-in devices list (2026-11-12).
+"""The authenticator-code module and the signed-in devices list (2026-11-12).
 
-The things that must hold: a password alone cannot sign in an account that has
-the second step on (by either sign-in route); a code works once; wrong codes
-lock the attempt; recovery codes work once; turning it off needs the password
-and a live code; one person can never sign out another's device.
+Two-step sign-in itself was removed from the site on 2026-11-23 (owner: "we're
+not a banking app"); tests/test_simple_sign_in.py covers that. What stays here:
+core/two_factor.py still computes codes correctly (nothing on the site calls it
+now), and one person can never sign out another's device.
 """
 
 from __future__ import annotations
 
 import base64
 import re
-import time
 import uuid
 
-import pytest
 
 import app.main as web
 from browser_client import BrowserClient
@@ -106,111 +104,6 @@ def _next_code(secret, last=0):
     return two_factor.code_at(secret, state["step"]), state["step"]
 
 
-def test_a_password_alone_does_not_sign_in_once_the_second_step_is_on():
-    created, email = _account()
-    secret, codes = _turn_on(created, _signed_in_client(created))
-    client, response = _login(email)
-    assert response.status_code == 303 and response.headers["location"] == "/login/2fa"
-    assert web.SESSION_COOKIE not in client.cookies                                # no session yet
-    # ...and none of the account is reachable: settings sends a stranger to sign in.
-    assert client.get("/settings/privacy", follow_redirects=False).headers["location"].startswith("/login")
-    # A code from the app finishes it, once.
-    step = db.two_factor_row(created["id"])["last_step"]
-    code, used = _next_code(secret, step)
-    done = client.post("/login/2fa", data={"code": code}, follow_redirects=False)
-    assert done.status_code == 303 and web.SESSION_COOKIE in client.cookies
-    # The same code on a second sign-in is refused: a replay.
-    other, redirected = _login(email)
-    assert redirected.headers["location"] == "/login/2fa"
-    replay = other.post("/login/2fa", data={"code": code}, follow_redirects=False)
-    assert replay.status_code == 400 and web.SESSION_COOKIE not in other.cookies
-
-
-def test_a_recovery_code_signs_in_once_and_only_once():
-    created, email = _account()
-    _, codes = _turn_on(created, _signed_in_client(created))
-    client, _ = _login(email)
-    assert client.post("/login/2fa", data={"code": codes[0]}, follow_redirects=False).status_code == 303
-    again, _ = _login(email)
-    spent = again.post("/login/2fa", data={"code": codes[0]}, follow_redirects=False)
-    assert spent.status_code == 400 and web.SESSION_COOKIE not in again.cookies
-    assert len(db.two_factor_row(created["id"])["recovery"]) == two_factor.RECOVERY_CODE_COUNT - 1
-
-
-def test_wrong_codes_end_the_attempt_after_five():
-    created, email = _account()
-    _turn_on(created, _signed_in_client(created))
-    client, _ = _login(email)
-    for _ in range(web.TWO_FACTOR_MAX_WRONG_CODES - 1):
-        assert client.post("/login/2fa", data={"code": "000000"}, follow_redirects=False).status_code == 400
-    last = client.post("/login/2fa", data={"code": "000000"}, follow_redirects=False)
-    assert "Too many wrong codes" in last.text
-    assert client.get("/login/2fa", follow_redirects=False).headers["location"] == "/login"     # challenge gone
-    assert web.SESSION_COOKIE not in client.cookies
-
-
-def test_the_second_step_page_needs_a_started_sign_in():
-    client = BrowserClient(web.app)
-    assert client.get("/login/2fa", follow_redirects=False).headers["location"] == "/login"
-    refused = client.post("/login/2fa", data={"code": "123456"})
-    assert refused.status_code == 400 and "timed out" in refused.text
-
-
-def test_turning_it_on_needs_the_password_and_a_real_code_and_leaves_login_alone_until_then():
-    created, email = _account()
-    client = _signed_in_client(created)
-    assert "error=" in client.post("/settings/2fa/start", data={"current_password": "wrong"}, follow_redirects=False).headers["location"]
-    assert db.two_factor_row(created["id"])["secret"] is None
-    client.post("/settings/2fa/start", data={"current_password": PASSWORD})
-    bad = client.post("/settings/2fa/confirm", data={"code": "000000"}, follow_redirects=False)
-    assert "error=" in bad.headers["location"] and not db.two_factor_row(created["id"])["enabled"]
-    _, response = _login(email)                         # half set up: sign-in is unchanged
-    assert response.headers["location"] != "/login/2fa"
-    client.post("/settings/2fa/cancel")
-    assert db.two_factor_row(created["id"])["secret"] is None
-
-
-def test_turning_it_off_needs_the_password_and_a_live_code():
-    created, email = _account()
-    client = _signed_in_client(created)
-    secret, codes = _turn_on(created, client)
-    other = issue_session(created["id"])
-    nope = client.post("/settings/2fa/disable", data={"current_password": PASSWORD, "code": "000000"}, follow_redirects=False)
-    assert "error=" in nope.headers["location"] and db.two_factor_row(created["id"])["enabled"]
-    nopw = client.post("/settings/2fa/disable", data={"current_password": "wrong", "code": codes[1]}, follow_redirects=False)
-    assert "error=" in nopw.headers["location"] and db.two_factor_row(created["id"])["enabled"]
-    ok = client.post("/settings/2fa/disable", data={"current_password": PASSWORD, "code": codes[1]}, follow_redirects=False)
-    assert "notice=" in ok.headers["location"]
-    row = db.two_factor_row(created["id"])
-    assert not row["enabled"] and row["secret"] is None and row["recovery"] == []
-    assert db.account_for_session(token_digest(other)) is None                      # other devices signed out
-    _, response = _login(email)
-    assert response.headers["location"] != "/login/2fa"
-
-
-def test_new_recovery_codes_replace_the_old_ones():
-    created, _ = _account()
-    client = _signed_in_client(created)
-    _, codes = _turn_on(created, client)
-    fresh = client.post("/settings/2fa/recovery-codes", data={"current_password": PASSWORD, "code": codes[0]})
-    new = [c.replace("-", "") for c in re.findall(r"<li>([a-z0-9]{5}-[a-z0-9]{5})</li>", fresh.text)]
-    assert len(new) == two_factor.RECOVERY_CODE_COUNT and not set(new) & set(codes)
-    assert not db.use_recovery_code(created["id"], two_factor.recovery_hash(codes[2]))      # an old one is dead
-    assert db.use_recovery_code(created["id"], two_factor.recovery_hash(new[0]))
-
-
-def test_social_sign_in_cannot_skip_the_second_step():
-    created, _ = _account()
-    _turn_on(created, _signed_in_client(created))
-    request = type("R", (), {"headers": {"user-agent": "x"}, "cookies": {}, "url": type("U", (), {"scheme": "http"})(),
-                             "client": type("C", (), {"host": "127.0.0.1"})()})()
-    response = web._begin_two_factor(request, {"id": created["id"]}, "/camp")
-    assert response is not None and response.headers["location"] == "/login/2fa"
-    assert web.TWO_FACTOR_COOKIE in response.headers.get("set-cookie", "")
-    plain, _ = _account()
-    assert web._begin_two_factor(request, {"id": plain["id"]}, "/camp") is None
-
-
 # --- the signed-in devices list ---------------------------------------------
 
 def test_the_device_list_names_devices_and_signs_out_only_your_own():
@@ -249,18 +142,6 @@ def test_no_raw_user_agent_or_address_is_stored_with_a_session():
     assert labels == ["Chrome on Windows"]
 
 
-def test_deleting_an_account_removes_its_second_step_and_pending_sign_ins():
-    created, email = _account()
-    _turn_on(created, _signed_in_client(created))
-    _login(email)                                       # leaves a half-finished sign-in behind
-    with db.connection() as con:
-        assert con.execute("SELECT COUNT(*) FROM two_factor_challenges WHERE account_id=?", (created["id"],)).fetchone()[0] == 1
-    db.delete_account(int(created["id"]))
-    with db.connection() as con:
-        assert con.execute("SELECT COUNT(*) FROM two_factor_challenges WHERE account_id=?", (created["id"],)).fetchone()[0] == 0
-        assert con.execute("SELECT COUNT(*) FROM accounts WHERE id=?", (created["id"],)).fetchone()[0] == 0
-
-
 # --- the admin page says whether secrets are encrypted ------------------------
 
 def _admin_client(monkeypatch):
@@ -270,36 +151,3 @@ def _admin_client(monkeypatch):
     object.__setattr__(SETTINGS, "admin_emails", (email.lower(),))     # SETTINGS is frozen, so as the other tests do
     return created, _signed_in_client(created)
 
-
-def test_the_admin_page_says_whether_two_step_secrets_are_encrypted(monkeypatch):
-    from core.config import SETTINGS
-
-    previous = SETTINGS.admin_emails
-    try:
-        created, client = _admin_client(monkeypatch)
-        monkeypatch.delenv("WARRIORIQ_TWO_FACTOR_KEY", raising=False)
-        page = client.get("/admin").text
-        assert "Two-step sign-in storage" in page and "Not encrypted" in page and "WARRIORIQ_TWO_FACTOR_KEY is not set" in page
-        monkeypatch.setenv("WARRIORIQ_TWO_FACTOR_KEY", "a long private passphrase")
-        page = client.get("/admin").text
-        assert "Encrypted" in page and "Not encrypted" not in page
-        assert "a long private passphrase" not in page                      # the key is never shown
-        # A key without the package is said out loud, not silently treated as fine.
-        monkeypatch.setattr("importlib.util.find_spec", lambda name, *a, **k: None if name == "cryptography" else object())
-        page = client.get("/admin").text
-        assert "Not encrypted" in page and "cryptography package is not installed" in page
-    finally:
-        object.__setattr__(SETTINGS, "admin_emails", previous)
-
-
-def test_the_counts_split_encrypted_from_plain_and_ignore_half_finished_setups(monkeypatch):
-    created, client = _account()[0], None
-    monkeypatch.setenv("WARRIORIQ_TWO_FACTOR_KEY", "a long private passphrase")
-    before = db.two_factor_storage_counts()
-    enc_client = _signed_in_client(created)
-    _turn_on(created, enc_client)
-    after = db.two_factor_storage_counts()
-    assert after["total"] == before["total"] + 1 and after["encrypted"] == before["encrypted"] + 1
-    half, _ = _account()
-    db.begin_two_factor_setup(half["id"], two_factor.seal("ABCDEFGH"))          # not switched on
-    assert db.two_factor_storage_counts() == after

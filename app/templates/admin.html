@@ -103,7 +103,6 @@
     <div class="admin-tile"><span>Athletes</span><strong>{{ o.accounts.athletes }}</strong></div>
     <div class="admin-tile"><span>Coaches</span><strong>{{ o.accounts.coaches }}</strong></div>
     <div class="admin-tile"><span>Email verified</span><strong>{{ o.accounts.verified }}</strong></div>
-    <div class="admin-tile"><span>Two-step on</span><strong>{{ o.accounts.two_factor }}</strong></div>
     <div class="admin-tile"><span>Waiting for a guardian</span><strong>{{ o.accounts.guardian_pending }}</strong></div>
     <div class="admin-tile"><span>Suspended</span><strong>{{ o.accounts.suspended }}</strong></div>
     <div class="admin-tile"><span>Marketing emails OK</span><strong>{{ o.accounts.marketing }}</strong></div>
@@ -127,7 +126,6 @@
       <div><dt>Signed in on</dt><dd>{{ card.signed_in_devices }} device{{ '' if card.signed_in_devices == 1 else 's' }}</dd></div>
       <div><dt>Plan</dt><dd>{{ plan_label(card.plan) }}{% if card.given_plan %} (given here, {% if card.given_until %}until {{ card.given_until[:10] }}{% else %}no end date{% endif %}){% endif %}</dd></div>
       <div><dt>Fights saved</dt><dd>{{ card.fights }}</dd></div>
-      <div><dt>Two-step sign-in</dt><dd>{{ 'on' if card.two_factor else 'off' }}</dd></div>
       {% if card.guardian_status != 'not_applicable' %}<div><dt>Guardian</dt><dd>{{ card.guardian_status|replace('_', ' ') }}</dd></div>{% endif %}
     </dl>
     <h4>Recent activity</h4>
@@ -237,11 +235,6 @@
 
 <section class="card admin-section" id="adminSafety" aria-labelledby="adminSafetyTitle">
   <div class="eyebrow">Safety</div><h2 id="adminSafetyTitle">Security, reports and audit</h2>
-  {#- Whether two-step secrets are encrypted at rest (core/two_factor.py). A yes or a reason, never the key. -#}
-  <div class="two-factor-storage" aria-labelledby="twoFactorStorageTitle"><h3 id="twoFactorStorageTitle">Two-step sign-in storage</h3>
-    {% if two_factor_storage.encrypting %}<p><span class="pill">Encrypted</span> New authenticator secrets are encrypted before they are stored.</p>
-    {% else %}<p class="notice bad"><strong>Not encrypted.</strong> New authenticator secrets would be stored as plain text: {{ two_factor_storage.reason }}. See OPS_TODO.md section 7.</p>{% endif %}
-    <p class="small muted">{{ two_factor_counts.total }} account{{ '' if two_factor_counts.total == 1 else 's' }} {{ 'has' if two_factor_counts.total == 1 else 'have' }} two-step sign-in on: {{ two_factor_counts.encrypted }} stored encrypted, {{ two_factor_counts.plain }} stored as plain text.</p></div>
   <div class="admin-columns">
     <div><h3>Copyright and abuse reports</h3><ul class="list-clean">{% for report in reports %}<li><strong>{{report.report_type|title}} · #{{report.id}}</strong> <span class="pill">{{ report.status }}</span><br><span class="small muted">{{report.reporter_email}} · {{report.created_at}}</span><p>{{report.details}}</p>{% if report.status == 'open' %}<form action="/admin/reports/{{report.id}}/resolve" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Mark resolved</button></form>{% endif %}</li>{% else %}<li class="muted">No reports.</li>{% endfor %}</ul></div>
     <div><h3>Recent security events</h3><ul class="list-clean admin-events">{% for event in security_events[:60] %}<li><strong>{{event.event_type|replace('_',' ')|capitalize}}</strong>{% if event.severity != 'info' %} <span class="pill">{{ event.severity }}</span>{% endif %}<br><span class="small muted">{{event.occurred_at[:19]|replace('T',' ')}} · {{event.resource_type or ''}} {{event.resource_id or ''}}</span></li>{% else %}<li class="muted">No events.</li>{% endfor %}</ul></div>

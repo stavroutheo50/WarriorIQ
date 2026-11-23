@@ -41,8 +41,6 @@ def admin_page(request: Request, q: str = ""):
             # Set while a worker is being refused for running other code.
             "worker_version_flag": m.worker_alerts.version_mismatch_flag(m.OUTPUTS),
             "release": m.release_version(),
-            "two_factor_storage": m.two_factor.storage_status(),
-            "two_factor_counts": m.two_factor_storage_counts(),
             # The whole service at a glance (app/admin_overview.py): counts
             # read from the database and data folders on this request.
             "overview": {

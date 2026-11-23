@@ -95,7 +95,6 @@ def accounts(now: datetime | None = None) -> dict:
                       COALESCE(SUM(a.created_at >= ?),0) AS new_week,
                       COALESCE(SUM(a.created_at >= ?),0) AS new_month,
                       COALESCE(SUM(a.email_verified_at IS NOT NULL AND a.email_verified_at <> ''),0) AS verified,
-                      COALESCE(SUM(a.totp_enabled_at IS NOT NULL AND a.totp_enabled_at <> ''),0) AS two_factor,
                       COALESCE(SUM(a.account_status <> 'active'),0) AS suspended,
                       COALESCE(SUM(a.guardian_approval_status = 'pending_guardian'),0) AS guardian_pending,
                       COALESCE(SUM(a.marketing_consent = 1),0) AS marketing,
@@ -361,7 +360,6 @@ def person(query: str, limit: int = 5) -> list[dict]:
                 "guardian_status": account.get("guardian_approval_status") or "not_applicable",
                 "signed_in_devices": int(sessions), "fights": int(fights_saved),
                 "last_sign_in": last_login[0] if last_login else None,
-                "two_factor": bool(account.get("totp_enabled_at")),
                 "events": [{"type": event["event_type"].replace("_", " "), "severity": event["severity"],
                             "at": event["occurred_at"],
                             "email": _email_note(event["event_type"], json.loads(event["metadata_json"] or "{}"))}
