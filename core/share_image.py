@@ -110,9 +110,12 @@ def preview_png(card: dict, side: str, corner: str | None) -> bytes:
         _text(canvas, "Estimated score", left, 505, 0.8, MUTED, 2)
         _text(canvas, score, bar_right, 510, 1.6, INK, 3, right=True)
 
-    _text(canvas, "warrioriq.eu", x, 580, 1.1, INK, 2)
+    # The address, and a reason to tap it (2026-11-23): the people who see a
+    # shared fight are the ones who could analyse their own.
+    width = _text(canvas, "warrioriq.eu", x, 572, 1.1, INK, 2)
+    _text(canvas, "  -  analyse your own fight free", x + width, 572, 0.8, CYAN, 2)
     _text(canvas, "Automatic estimate, not checked by a person" if me.get("strikes") is not None
-          else "Measured automatically from movement", W - 64, 578, 0.6, MUTED, 1, right=True)
+          else "Measured automatically from movement", x, 606, 0.6, MUTED, 1)
     ok, encoded = cv2.imencode(".png", canvas)
     if not ok:
         raise RuntimeError("could not encode the preview image")
