@@ -54,13 +54,10 @@ from core.auth import (
     authenticate, end_session, hash_password, verify_password, issue_session, normalize_email, register, resolve_session,
     new_password_problem, session_token, token_digest, valid_email, valid_password, COMMON_PASSWORD_MESSAGE,
 )
-from core import common_passwords, two_factor
-from core.qr import svg as qr_svg
+from core import common_passwords
 from core.email_typos import TYPO_DOMAINS, suggestion as email_typo_suggestion
 from core.db import (
-    begin_two_factor_setup, count_two_factor_attempt, create_two_factor_challenge, delete_two_factor_challenge,
-    disable_two_factor, enable_two_factor, get_two_factor_challenge, list_account_sessions, replace_recovery_codes,
-    revoke_session_by_id, two_factor_row, has_security_event, has_security_event_for, two_factor_storage_counts, use_recovery_code, use_two_factor_step,
+    list_account_sessions, revoke_session_by_id, has_security_event, has_security_event_for,
 )
 from core.identity import fighter_pair_similarity
 from core.kit import alike_reason as kit_alike_reason, kit_similarity
@@ -2294,7 +2291,7 @@ def _apply_response_headers(request: Request, response) -> None:
         response.headers["Vary"] = ", ".join(
             filter(None, [response.headers.get("Vary"), "Cookie"]))
     elif request.url.path.startswith(("/result/", "/replay/", "/media/", "/api/", "/profile", "/history", "/dashboard", "/coach", "/camp", "/s/", "/f/",
-                                         # The two-step secret and QR code, and the deletion link (2026-11-16).
+                                         # The deletion link (2026-11-16).
                                          "/settings", "/account/")):
         # setdefault, so a route that has already chosen keeps its value.
         # /media/ does exactly that: a fight video is private but not
@@ -3330,7 +3327,8 @@ def _analysis_started_response(request: Request, job_id: str, deferred: bool = F
 
 
 def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/camp", email: str = "",
-               notice: str = "", account_exists: bool = False, field_errors: dict | None = None):
+               notice: str = "", account_exists: bool = False, field_errors: dict | None = None,
+               under_age_open: bool = False):
     # email refills the form after a refusal, so a typo is fixed, not retyped.
     # field_errors puts each reason under its own field (walkthrough, 2026-11-16).
     return templates.TemplateResponse(
@@ -3339,6 +3337,8 @@ def _auth_page(request: Request, mode: str, error: str = "", next_path: str = "/
         context={"request": request, "mode": mode, "error": error, "next_path": _safe_next(next_path),
                  "email": email.strip()[:254], "notice": notice, "account_exists": account_exists,
                  "field_errors": field_errors or {},
+                 # Reopens "Under 18?" when the guardian route needs fixing.
+                 "under_age_open": under_age_open,
                  # The same lists the server refuses, for the live hint.
                  "password_rules": common_passwords.page_rules() if mode == "signup" else None,
                  # The same list the server refuses, for the live "Did you mean" hint.
@@ -3400,13 +3400,9 @@ async def social_auth_start(
     client = SOCIAL_AUTH.client(provider)
     if not client:
         raise HTTPException(404, "This sign-in provider is not configured.")
-    if mode == "signup" and (not accept_terms or not age_confirmed):
-        return _auth_page(
-            request,
-            "signup",
-            f"Confirm that you are at least {SETTINGS.minimum_account_age} and accept the Terms of Service and Privacy Policy.",
-            next_path,
-        )
+    # No checkbox gate before the provider (owner, 2026-11-23): the notice under
+    # the button says continuing confirms the age and accepts the Terms, and an
+    # account created this way records that acceptance (social_auth_callback).
     # Signing in is not the moment to collect consent: see login(). An account
     # whose accepted version is behind is asked once, after it is known.
     authorize_options = {"response_mode": "form_post"} if provider == "apple" else {}
@@ -3510,11 +3506,10 @@ async def social_auth_callback(request: Request, provider: str):
     if not account:
         account = _link_verified_identity(identity)
     if not account:
-        if intent["mode"] != "signup":
-            return _social_auth_error(
-                request, intent,
-                f"No WarriorIQ account is connected to this {provider.title()} identity yet. Choose Create account first.",
-            )
+        # Someone new is signed up, from either page (owner, 2026-11-23: "Choose
+        # Create account first" was one more wall). Both pages say under the
+        # button that continuing confirms the minimum age and accepts the Terms
+        # and Privacy Policy, and that is recorded below like a sign-up form.
         if not identity.email or not valid_email(identity.email):
             return _social_auth_error(
                 request, intent,
@@ -3549,6 +3544,7 @@ async def social_auth_callback(request: Request, provider: str):
                 profile_id=int(account["profile_id"]),
                 metadata={
                     "source": "social_signup",
+                    "consent": "continue_button_notice",
                     "provider": identity.provider,
                     "enabled": bool(intent.get("marketing_consent")) if kind == "marketing_consent" else True,
                 },
@@ -3582,9 +3578,6 @@ async def social_auth_callback(request: Request, provider: str):
         account_id=int(account["id"]),
         metadata={"provider": identity.provider, "created": created},
     )
-    second_step = _begin_two_factor(request, account, str(intent.get("next_path") or "/camp"))
-    if second_step is not None:
-        return second_step
     response = RedirectResponse(_safe_next(str(intent.get("next_path"))), status_code=303)
     response.set_cookie(
         SESSION_COOKIE,
@@ -3691,7 +3684,14 @@ def signup(
     guardian_email: str = Form(""),
 ):
     _enforce_rate_limit(request, "signup", 20, 300)
-    group = age_group.strip().lower() or ("adult" if age_confirmed else "")
+    # One box confirms the minimum age and the policies (owner, 2026-11-23). The
+    # guardian route is "Under 18?" on the form; filled-in guardian details mean
+    # it too, so it works without JavaScript.
+    group = age_group.strip().lower()
+    if group not in {"adult", "minor"}:
+        group = "adult" if (age_confirmed or accept_terms) else ""
+    if guardian_name.strip() or guardian_email.strip():
+        group = "minor"
     # Every missing answer at once, each beside its field: an empty form used
     # to jump to the top with nothing said (walkthrough, 2026-11-16).
     field_errors = {}
@@ -3704,8 +3704,6 @@ def signup(
     password_problem = new_password_problem(password)
     if password_problem:
         field_errors["password"] = password_problem
-    if group not in {"adult", "minor"}:
-        field_errors["age_group"] = f"Say whether you are {SETTINGS.minimum_account_age} or older."
     if not accept_terms:
         field_errors["accept_terms"] = "Accept the Terms of Service and Privacy Policy to create an account."
     if field_errors:
@@ -3713,7 +3711,7 @@ def signup(
             request, "signup",
             "Fix the highlighted fields to create your account." if len(field_errors) > 1 else
             next(iter(field_errors.values())),
-            next_path, email=email, field_errors=field_errors,
+            next_path, email=email, field_errors=field_errors, under_age_open=group == "minor",
         )
     minor = group == "minor"
     guardian_name = " ".join(guardian_name.split())[:80]
@@ -3724,7 +3722,7 @@ def signup(
             request, "signup",
             f"Under {SETTINGS.minimum_account_age}, a parent or guardian has to approve your account. Enter their "
             "name and their own email address - not yours.",
-            next_path,
+            next_path, email=email, under_age_open=True,
         )
     try:
         account = register(email, password)
@@ -3921,10 +3919,6 @@ def login_page(request: Request, next: str = "/camp", verified: str = "", reset:
     return response
 
 
-TWO_FACTOR_COOKIE = "warrioriq_2fa"
-TWO_FACTOR_MAX_WRONG_CODES = 5
-
-
 def _device_label(request: Request) -> str:
     """"Chrome on Windows": a coarse label for the signed-in devices list.
 
@@ -3942,99 +3936,14 @@ def _device_label(request: Request) -> str:
     return f"{browser} on {system}" if system else browser
 
 
-def _begin_two_factor(request: Request, account: dict, next_path: str):
-    """The second step of signing in, or None when the account has none.
-
-    The one place both sign-in routes (password and social) call before they
-    issue a session, so neither can skip it. The password (or the provider)
-    has already been checked; this holds the half-finished sign-in in a
-    five-minute challenge the browser carries in an HTTP-only cookie, and
-    sends the person to enter a code. No session exists until they do.
-    """
-    state = two_factor_row(int(account["id"]))
-    if not state["enabled"]:
-        return None
-    token = session_token()
-    create_two_factor_challenge(int(account["id"]), _safe_next(next_path), token_digest(token))
-    record_security_event("two_factor_required", account_id=int(account["id"]))
-    response = RedirectResponse("/login/2fa", status_code=303)
-    response.set_cookie(TWO_FACTOR_COOKIE, token, max_age=300, httponly=True, samesite="lax",
-                        secure=_request_is_secure(request))
-    return response
-
-
-def _check_second_factor(account_id: int, code: str) -> str | None:
-    """"app" or "recovery" when the code is good (and is now spent), else None."""
-    state = two_factor_row(int(account_id))
-    if not state["enabled"]:
-        return None
-    if two_factor.looks_like_recovery(code):
-        return "recovery" if use_recovery_code(int(account_id), two_factor.recovery_hash(code)) else None
-    secret = two_factor.unseal(state["secret"])
-    if not secret:
-        return None
-    step = two_factor.verify(secret, code, state["last_step"])
-    return "app" if step is not None and use_two_factor_step(int(account_id), step) else None
-
-
-def _two_factor_page(request: Request, error: str = "", status_code: int = 200):
-    return templates.TemplateResponse(
-        request=request, name="two_factor_login.html",
-        context={"request": request, "error": error}, status_code=status_code,
-    )
-
-
-@app.get("/login/2fa", response_class=HTMLResponse)
-def two_factor_login_page(request: Request):
-    token = request.cookies.get(TWO_FACTOR_COOKIE)
-    if not token or not get_two_factor_challenge(token_digest(token)):
-        return RedirectResponse("/login", status_code=303)
-    return _two_factor_page(request)
-
-
-@app.post("/login/2fa", dependencies=[Depends(require_csrf)])
-def two_factor_login(request: Request, code: str = Form("")):
-    token = request.cookies.get(TWO_FACTOR_COOKIE)
-    digest = token_digest(token) if token else ""
-    challenge = get_two_factor_challenge(digest) if token else None
-    if not challenge:
-        response = _auth_page(request, "login", "That sign-in timed out. Enter your email and password again.")
-        response.delete_cookie(TWO_FACTOR_COOKIE)
-        return response
-    _enforce_rate_limit(request, "login-2fa", 30, 300)
-    account_id = int(challenge["account_id"])
-    wait = _take_rate_slot("login-2fa-account", str(account_id), 12, 900)
-    if wait is not None:
-        raise HTTPException(429, _rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))})
-    account = get_account(account_id) or {}
-    if account.get("account_status") != "active":
-        delete_two_factor_challenge(digest)
-        response = _auth_page(request, "login", "That account cannot sign in.")
-        response.delete_cookie(TWO_FACTOR_COOKIE)
-        return response
-    method = _check_second_factor(account_id, code)
-    if method is None:
-        record_security_event("two_factor_failed", severity="warning", account_id=account_id)
-        if count_two_factor_attempt(digest) >= TWO_FACTOR_MAX_WRONG_CODES:
-            delete_two_factor_challenge(digest)
-            response = _auth_page(request, "login", "Too many wrong codes. Enter your email and password to start again.")
-            response.delete_cookie(TWO_FACTOR_COOKIE)
-            return response
-        if two_factor.looks_like_recovery(code):
-            return _two_factor_page(request, "That recovery code is not right, or has already been used. "
-                                             "Check it, or use the code from your app.", 400)
-        return _two_factor_page(request, "That code is not right, or has already been used. Wait for the next one and try again.", 400)
-    delete_two_factor_challenge(digest)
-    destination = _safe_next(str(challenge["next_path"]))
-    if policies_outdated(account):
-        destination = f"/policies?next={quote(destination, safe='')}"
-    record_security_event("login_succeeded", account_id=account_id, metadata={"second_step": method})
-    response = RedirectResponse(destination, status_code=303)
-    response.delete_cookie(TWO_FACTOR_COOKIE)
-    response.set_cookie(
-        SESSION_COOKIE, issue_session(account_id, device_label=_device_label(request)), max_age=60 * 60 * 24 * 30,
-        httponly=True, samesite="lax", secure=_request_is_secure(request),
-    )
+# Two-step sign-in with an authenticator app was removed (owner, 2026-11-23):
+# "we're not a banking app". Signing in is email and password, or Google. The
+# stored authenticator rows are left alone and nothing reads them. An old
+# /login/2fa link or bookmark goes back to sign-in.
+@app.get("/login/2fa", include_in_schema=False)
+def two_factor_login_retired():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie("warrioriq_2fa")
     return response
 
 
@@ -4069,9 +3978,6 @@ def login(
         return _auth_page(request, "login", "The email or password is incorrect.", next_path, email=email)
     # An unconfirmed email no longer stops sign-in (owner, 2026-11-22); the
     # banner in base.html asks for it, with a link to send it again.
-    second_step = _begin_two_factor(request, account, next_path)
-    if second_step is not None:
-        return second_step
     destination = _safe_next(next_path)
     if policies_outdated(account):
         destination = f"/policies?next={quote(destination, safe='')}"
@@ -4312,8 +4218,7 @@ def _finish_waiting(request: Request, row: dict):
         response = RedirectResponse(f"/login?reset=1&next={quote(destination, safe='')}", status_code=303)
     else:
         account = get_account(int(claimed["account_id"])) if claimed.get("account_id") else None
-        if (not account or account.get("account_status", "active") != "active"
-                or two_factor_row(int(account["id"]))["enabled"]):
+        if not account or account.get("account_status", "active") != "active":
             response = RedirectResponse(f"/login?verified=1&next={quote(destination, safe='')}", status_code=303)
         else:
             if policies_outdated(account):
@@ -8402,15 +8307,15 @@ def report_athlete(request: Request, handle: str, reason: str = Form("")):
     return RedirectResponse(f"/athlete/{quote(profile['handle'])}?reported=1", status_code=303)
 
 
-# Settings helpers also used outside the settings routes (sign-in, account
-# deletion), so they stay here; the routes live in app/settings_routes.py.
+# Settings helpers also used outside the settings routes (account deletion),
+# so they stay here; the routes live in app/settings_routes.py.
 
 
 # Which card a refusal belongs beside. A message for one of these is shown in
 # that card, under its fields, rather than in a banner at the top of the page
 # (walkthrough, 2026-11-16: a wrong 2FA code reloaded the page, jumped it, and
 # opened "Change password or email" as a side effect).
-SETTINGS_AREAS = frozenset({"sign-in", "two-step", "export", "delete", "devices"})
+SETTINGS_AREAS = frozenset({"sign-in", "export", "delete", "devices"})
 
 
 def _settings_response(request: Request, account: dict, section: str = "privacy", *, notice: str = "",
@@ -8442,26 +8347,10 @@ def _settings_response(request: Request, account: dict, section: str = "privacy"
                 account.get("plan_override_until"))),
             "pending_email": pending_email_change(int(account["id"])),
             "subscription_actions": list_subscription_actions(int(account["id"])),
-            "two_factor": _two_factor_view(account),
             "device_sessions": list_account_sessions(
                 int(account["id"]), token_digest(request.cookies.get(SESSION_COOKIE) or "") if request.cookies.get(SESSION_COOKIE) else None),
         },
     )
-
-
-def _two_factor_view(account: dict) -> dict:
-    """What the Security card shows: off, half set up (a secret to type in), or on."""
-    state = two_factor_row(int(account["id"]))
-    view = {"enabled": state["enabled"], "enabled_at": state.get("enabled_at"), "setup": None,
-            "recovery_left": len(state["recovery"])}
-    if state["secret"] and not state["enabled"]:
-        secret = two_factor.unseal(state["secret"])
-        if secret:
-            uri = two_factor.provisioning_uri(secret, str(account.get("email") or "account"))
-            # Drawn here, never by an outside service: the image carries the secret.
-            view["setup"] = {"secret": two_factor.grouped(secret), "plain": secret, "uri": uri,
-                             "qr_svg": Markup(qr_svg(uri, module_px=4, label="QR code for your authenticator app"))}
-    return view
 
 
 def _current_password_ok(account_id: int, password: str) -> bool:
@@ -11111,16 +11000,15 @@ def _delete_refusal(request: Request, account: dict, message: str, status_code: 
 
 @app.post("/account/delete", dependencies=[Depends(require_csrf)])
 def delete_account_route(request: Request, confirm_phrase: str = Form(""), delete_password: str = Form(""),
-                         code: str = Form(""), next_path: str = Form("/settings/privacy"),
+                         next_path: str = Form("/settings/privacy"),
                          # The field names before 2026-11-16, still accepted
                          # so a page open across the deploy keeps working.
                          confirmation: str = Form(""), password: str = Form("")):
     """Permanently delete the signed-in account.
 
     Every check is here, on the server, before any deletion work starts: the
-    phrase DELETE exactly (capitals, surrounding spaces ignored), the current
-    password, and a code from the authenticator app when two-step sign-in is
-    on. An account with no password (signed up with Google) gets an emailed
+    phrase DELETE exactly (capitals, surrounding spaces ignored) and the current
+    password. An account with no password (signed up with Google) gets an emailed
     confirmation link instead; it is never deleted without one of the two.
     """
     # Takes a password, so it is a place to guess one. Nobody deletes their
@@ -11146,11 +11034,6 @@ def delete_account_route(request: Request, confirm_phrase: str = Form(""), delet
         record_security_event("account_deletion_refused", account_id=account_id, severity="warning",
                               metadata={"reason": "password"})
         return _delete_refusal(request, account, "That password is not right. Nothing was deleted.", 403)
-    if two_factor_row(account_id)["enabled"] and _check_second_factor(account_id, code) is None:
-        record_security_event("two_factor_failed", severity="warning", account_id=account_id)
-        return _delete_refusal(
-            request, account,
-            "That code is not right, or has already been used. Nothing was deleted.", 403)
     return _delete_account_now(request, account)
 
 
@@ -11206,22 +11089,19 @@ def account_delete_link_page(request: Request, token: str):
         raise HTTPException(410, "This deletion link has expired, was already used, or belongs to another "
                                  "account. Nothing was deleted. Ask for a new one in Settings.")
     response = templates.TemplateResponse(request=request, name="account_delete_confirm.html", context={
-        "request": request, "token": token, "email": account["email"],
-        "needs_code": two_factor_row(int(account["id"]))["enabled"]})
+        "request": request, "token": token, "email": account["email"]})
     # no-store comes from the middleware's /account/ prefix.
     response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
 
 @app.post("/account/delete/confirm/{token}", dependencies=[Depends(require_csrf)])
-def account_delete_link_confirm(request: Request, token: str, code: str = Form("")):
+def account_delete_link_confirm(request: Request, token: str):
     _enforce_rate_limit(request, "account-delete", 5, 3600)
     account = _account_from_delete_link(request, token)
     if account is None:
         raise HTTPException(410, "This deletion link has expired, was already used, or belongs to another "
                                  "account. Nothing was deleted.")
-    if two_factor_row(int(account["id"]))["enabled"] and _check_second_factor(int(account["id"]), code) is None:
-        raise HTTPException(403, "That code is not right, or has already been used. Nothing was deleted.")
     return _delete_account_now(request, account)
 
 

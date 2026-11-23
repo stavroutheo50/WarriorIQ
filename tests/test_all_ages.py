@@ -126,4 +126,5 @@ def test_the_terms_and_privacy_policy_say_every_age(client):
     assert "only for people aged 18 or older" not in terms
     assert "Accounts are open to every age" in client.get("/privacy").text
     signup = client.get("/signup").text
-    assert 'name="age_group" value="minor"' in signup and 'id="guardianEmail"' in signup
+    # The guardian route is "Under 18?" on the form since 2026-11-23, not an age question.
+    assert 'id="underAge"' in signup and 'id="guardianEmail"' in signup

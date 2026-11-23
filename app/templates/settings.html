@@ -45,47 +45,6 @@
   </div>
   </details>
 </section>
-<section class="card" id="two-step"><div class="eyebrow">Security</div><h2>Two-step sign-in</h2>
-  {#- Optional (core/two_factor.py). With it on, a password alone does not sign anyone in: a code from an authenticator app is needed too. -#}
-  {% if two_factor.enabled %}
-  <p class="two-factor-status"><span class="pill status-pill good-pill">On</span> Two-step sign-in is on{% if two_factor.enabled_at %} since <time datetime="{{ two_factor.enabled_at }}" data-local="date">{{ two_factor.enabled_at|fight_moment(false) }}</time>{% endif %}. A code from your authenticator app is needed every time you sign in.</p>
-  <p class="small {% if two_factor.recovery_left <= 3 %}bad{% else %}muted{% endif %}">{{ two_factor.recovery_left }} recovery code{{ '' if two_factor.recovery_left == 1 else 's' }} left{% if two_factor.recovery_left <= 3 %}. Make new ones before you run out.{% endif %}</p>
-  {{ card_message('two-step') }}
-  <div class="grid settings-grid">
-    <form action="/settings/2fa/recovery-codes" method="post" class="settings-form reauth-form" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>Regenerate recovery codes</h3>
-      <p class="small muted">Replaces the old ones. Needs your password and a current code.</p>
-      <label for="recoveryReauthPassword">Your password<input id="recoveryReauthPassword" type="password" name="reauth_password" autocomplete="off" readonly data-reauth required></label>
-      <label for="recoveryCode">Code from your app<input id="recoveryCode" type="text" name="code" autocomplete="one-time-code" inputmode="text" autocapitalize="off" spellcheck="false" maxlength="24" data-code-input required></label>
-      <button class="btn secondary" type="submit">Regenerate recovery codes</button></form>
-    <form action="/settings/2fa/disable" method="post" class="settings-form reauth-form" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><h3>Turn off</h3>
-      <p class="small muted">Needs your password and a current code. Every other device is signed out.</p>
-      <label for="disableReauthPassword">Your password<input id="disableReauthPassword" type="password" name="reauth_password" autocomplete="off" readonly data-reauth required></label>
-      <label for="disableCode">Code from your app, or a recovery code<input id="disableCode" type="text" name="code" autocomplete="one-time-code" inputmode="text" autocapitalize="off" spellcheck="false" maxlength="24" data-code-input required></label>
-      <button class="btn secondary" type="submit">Turn off two-step sign-in</button></form>
-  </div>
-  {% elif two_factor.setup %}
-  <p>Add WarriorIQ to your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy), then enter the code it shows.</p>
-  <div class="two-factor-setup">
-    {#- Drawn on the server (core/qr.py): the secret is never sent to a QR service. -#}
-    <figure class="two-factor-qr">{{ two_factor.setup.qr_svg }}<figcaption class="small muted">Scan with your authenticator app</figcaption></figure>
-    <div class="two-factor-manual">
-      <p class="small muted">Can't scan it? In the app choose <b>Add account</b>, then <b>Enter a setup key</b>, choose <b>time-based</b>, and type this key:</p>
-      <p class="two-factor-key-row"><code class="two-factor-key" id="twoFactorKey">{{ two_factor.setup.secret }}</code> <button class="btn secondary tiny" type="button" data-copy-target="twoFactorKey" data-copy-value="{{ two_factor.setup.plain }}" data-keep-label="true">Copy key</button></p>
-      <form action="/settings/2fa/confirm" method="post" class="settings-form" autocomplete="off" id="twoFactorConfirm"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <label for="twoFactorSetupCode">6-digit code from the app<input id="twoFactorSetupCode" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="\d{6}" maxlength="6" spellcheck="false" autocapitalize="off" data-code-input required{% if area == 'two-step' and error %} aria-invalid="true" aria-describedby="twoFactorError" autofocus{% endif %}></label>
-        {% if area == 'two-step' and error %}<p class="field-error" id="twoFactorError" role="alert">{{ error }}</p>{% endif %}
-        <div class="form-actions"><button class="btn" type="submit">Turn on</button><button class="btn secondary" type="submit" formaction="/settings/2fa/cancel" formnovalidate data-keep-label="true">Cancel</button></div>
-      </form>
-    </div>
-  </div>
-  {% else %}
-  <p class="muted">Add a second lock. With this on, your password alone cannot sign anyone in: a code from an authenticator app on your phone is needed too. You get recovery codes in case you lose the phone.</p>
-  {{ card_message('two-step') }}
-  <form action="/settings/2fa/start" method="post" class="settings-form reauth-form" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-    <label for="twoFactorStartPassword">Your password<input id="twoFactorStartPassword" type="password" name="reauth_password" autocomplete="off" readonly data-reauth required></label>
-    <button class="btn secondary" type="submit">Set up two-step sign-in</button></form>
-  {% endif %}
-</section>
 <section class="card" id="devices"><div class="eyebrow">Security</div><h2>Where you are signed in</h2><p class="muted">If you see a device you do not recognise, sign it out and change your password.</p>{{ card_message('devices') }}
   <ul class="device-list">{% for item in device_sessions %}<li><div><strong>{{ item.device }}</strong>{% if item.current %} <span class="pill this-browser">This browser</span>{% endif %}<span class="small muted">Signed in <time datetime="{{ item.created_at }}" data-local>{{ item.created_at|fight_moment }}</time></span></div>
     {% if not item.current %}<form action="/settings/sessions/{{ item.id }}/revoke" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary tiny" type="submit">Sign out</button></form>{% endif %}</li>{% endfor %}</ul>
@@ -101,7 +60,6 @@
     <div class="row">
       <div class="field"><label for="deleteConfirmPhrase">Type {{ delete_phrase }} to confirm</label><input id="deleteConfirmPhrase" type="text" name="confirm_phrase" value="" placeholder="{{ delete_phrase }}" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" data-lpignore="true" data-1p-ignore data-delete-phrase="{{ delete_phrase }}" required></div>
       {% if has_password %}<div class="field"><label for="deleteReauthPassword">Your current password</label><input id="deleteReauthPassword" type="password" name="delete_password" value="" autocomplete="off" readonly data-reauth data-delete-required required></div>{% endif %}
-      {% if two_factor.enabled %}<div class="field"><label for="deleteCode">Code from your app, or a recovery code</label><input id="deleteCode" type="text" name="code" value="" autocomplete="one-time-code" inputmode="text" spellcheck="false" autocapitalize="off" maxlength="24" data-code-input data-delete-required required></div>{% endif %}
     </div>
     {% if not has_password %}<p class="small muted">You sign in with Google, so there is no password to check. We email a confirmation link to {{ account.email }}; the account is deleted only once you open it.</p>{% endif %}
     {{ card_message('delete') }}

@@ -26,7 +26,7 @@ import pytest
 
 import app.main as web
 from browser_client import BrowserClient
-from core import db, two_factor
+from core import db
 from core.auth import authenticate, hash_password, issue_session
 
 PASSWORD = "Correct-Horse-Battery-9"
@@ -50,19 +50,6 @@ def _client(created) -> BrowserClient:
 
 def _exists(created) -> bool:
     return db.get_account(int(created["id"])) is not None
-
-
-def _turn_on_two_step(created, client) -> str:
-    client.post("/settings/2fa/start", data={"reauth_password": PASSWORD})
-    secret = two_factor.unseal(db.two_factor_row(created["id"])["secret"])
-    done = client.post("/settings/2fa/confirm", data={"code": two_factor.code_at(secret, two_factor.current_step())})
-    assert done.status_code == 200 and db.two_factor_row(created["id"])["enabled"]
-    return secret
-
-
-def _fresh_code(created, secret) -> str:
-    last = db.two_factor_row(created["id"])["last_step"] or 0
-    return two_factor.code_at(secret, max(two_factor.current_step(), int(last) + 1))
 
 
 # --- P0 #1: deleting an account --------------------------------------------
@@ -107,20 +94,6 @@ def test_the_right_password_and_phrase_delete_the_account():
                            follow_redirects=False)
     assert response.status_code == 303 and not _exists(created)
     assert db.get_account_by_email(email) is None
-
-
-def test_with_two_step_on_a_live_code_is_needed_too():
-    created, _ = _account()
-    client = _client(created)
-    secret = _turn_on_two_step(created, client)
-    for code in ("", "000000", "not-a-code"):
-        response = client.post("/account/delete",
-                               data={"confirm_phrase": "DELETE", "delete_password": PASSWORD, "code": code},
-                               follow_redirects=False)
-        assert response.status_code == 403 and _exists(created)
-    response = client.post("/account/delete", data={"confirm_phrase": "DELETE", "delete_password": PASSWORD,
-                                                    "code": _fresh_code(created, secret)}, follow_redirects=False)
-    assert response.status_code == 303 and not _exists(created)
 
 
 def test_deleting_needs_a_csrf_token_and_a_session():
@@ -190,23 +163,6 @@ def test_wrong_passwords_change_nothing_anywhere_else():
     exported = client.post("/account/export", data={"export_password": "wrong-password-1"})
     assert exported.status_code == 403 and "attachment" not in exported.headers.get("content-disposition", "")
     assert email not in exported.text.split("Email</dt>")[0]          # no data payload, just the page
-    started = client.post("/settings/2fa/start", data={"reauth_password": "wrong-password-1"}, follow_redirects=False)
-    assert "error=" in started.headers["location"] and db.two_factor_row(created["id"])["secret"] is None
-
-
-def test_turning_two_step_off_needs_the_password_and_a_code():
-    created, _ = _account()
-    client = _client(created)
-    secret = _turn_on_two_step(created, client)
-    for data in ({"reauth_password": "wrong-password-1", "code": _fresh_code(created, secret)},
-                 {"reauth_password": PASSWORD, "code": "000000"}):
-        refused = client.post("/settings/2fa/disable", data=data, follow_redirects=False)
-        assert "error=" in refused.headers["location"] and "area=two-step" in refused.headers["location"]
-        assert refused.headers["location"].endswith("#two-step")
-        assert db.two_factor_row(created["id"])["enabled"]
-    ok = client.post("/settings/2fa/disable", data={"reauth_password": PASSWORD, "code": _fresh_code(created, secret)},
-                     follow_redirects=False)
-    assert "notice=" in ok.headers["location"] and not db.two_factor_row(created["id"])["enabled"]
 
 
 # --- P0 #2: the browser cannot fill these forms in ---------------------------
@@ -232,7 +188,7 @@ def test_destructive_forms_are_not_sign_in_forms():
     new_email = re.search(r'<input id="changeEmailNew"[^>]*>', email_form).group(0)
     assert 'autocomplete="off"' in new_email and 'value=""' in new_email and "readonly" in new_email
     assert 'name="reauth_password"' in email_form and "current-password" not in email_form
-    for action in ("/account/export", "/settings/2fa/start"):
+    for action in ("/account/export",):
         assert "current-password" not in _form(page, action) and "data-reauth" in _form(page, action)
     # The real sign-in form keeps current-password: it is the one place it belongs.
     assert 'autocomplete="current-password"' in BrowserClient(web.app).get("/login").text
@@ -248,86 +204,6 @@ def test_there_is_one_delete_section_and_it_is_in_settings():
 
 
 # --- P1 #5: two-step setup ---------------------------------------------------
-
-def test_the_setup_qr_code_is_drawn_here_and_carries_the_secret_being_verified():
-    import cv2
-    import numpy as np
-
-    from core import qr
-
-    created, email = _account()
-    client = _client(created)
-    client.post("/settings/2fa/start", data={"reauth_password": PASSWORD})
-    secret = two_factor.unseal(db.two_factor_row(created["id"])["secret"])
-    page = client.get("/settings/privacy").text
-    assert "<svg" in page and 'aria-label="QR code for your authenticator app"' in page
-    figure = page[page.index('class="two-factor-qr"'):page.index("</figure>")]
-    assert "<img" not in figure and "src=" not in figure and "href" not in figure      # no outside image
-    # The code input: numeric, one-time-code, six digits.
-    code = re.search(r'<input id="twoFactorSetupCode"[^>]*>', page).group(0)
-    for attribute in ('inputmode="numeric"', 'autocomplete="one-time-code"', 'maxlength="6"', r'pattern="\d{6}"'):
-        assert attribute in code
-    # Turn on and Cancel sit in one row, in one form.
-    assert 'formaction="/settings/2fa/cancel"' in _form(page, "/settings/2fa/confirm")
-    # The QR decodes to the provisioning address of the very secret the server checks.
-    uri = two_factor.provisioning_uri(secret, email)
-    assert uri.startswith("otpauth://totp/WarriorIQ%3A") and "issuer=WarriorIQ" in uri
-    assert "digits=6" in uri and "period=30" in uri and f"secret={secret}" in uri
-    modules = qr.matrix(uri)
-    scale, quiet = 8, 4
-    size = (len(modules) + 2 * quiet) * scale
-    image = np.full((size, size), 255, np.uint8)
-    for y, row in enumerate(modules):
-        for x, dark in enumerate(row):
-            if dark:
-                top, left = (y + quiet) * scale, (x + quiet) * scale
-                image[top:top + scale, left:left + scale] = 0
-    edge = quiet * scale
-    corners = np.array([[[edge, edge], [size - edge, edge], [size - edge, size - edge], [edge, size - edge]]],
-                       np.float32)
-    decoded, _ = cv2.QRCodeDetector().decode(image, corners)
-    assert decoded == uri
-
-
-def test_a_wrong_setup_code_is_shown_in_the_two_step_card_only():
-    created, _ = _account()
-    client = _client(created)
-    client.post("/settings/2fa/start", data={"reauth_password": PASSWORD})
-    refused = client.post("/settings/2fa/confirm", data={"code": "000000"}, follow_redirects=False)
-    assert refused.headers["location"].endswith("#two-step")
-    page = client.get(refused.headers["location"]).text
-    assert 'id="twoFactorError" role="alert"' in page
-    # The password/email fold stays shut: the message is not about it.
-    assert '<details class="settings-fold" open' not in page
-    assert not db.two_factor_row(created["id"])["enabled"]
-
-
-def test_two_step_status_says_since_when_and_codes_page_offers_copy_and_download():
-    created, _ = _account()
-    client = _client(created)
-    client.post("/settings/2fa/start", data={"reauth_password": PASSWORD})
-    secret = two_factor.unseal(db.two_factor_row(created["id"])["secret"])
-    codes = client.post("/settings/2fa/confirm", data={"code": two_factor.code_at(secret, two_factor.current_step())})
-    assert "Copy codes" in codes.text and "Download as a text file" in codes.text and 'id="codesSaved"' in codes.text
-    page = client.get("/settings/privacy").text
-    assert "Two-step sign-in is on since" in page and "Regenerate recovery codes" in page
-
-
-def test_sign_in_code_step_has_the_code_attributes_and_a_recovery_option():
-    created, email = _account()
-    _turn_on_two_step(created, _client(created))
-    client = BrowserClient(web.app)
-    web._rate_windows.clear()
-    assert client.post("/login", data={"email": email, "password": PASSWORD},
-                       follow_redirects=False).headers["location"] == "/login/2fa"
-    page = client.get("/login/2fa").text
-    code = re.search(r'<input id="twoFactorCode"[^>]*>', page).group(0)
-    for attribute in ('inputmode="numeric"', 'autocomplete="one-time-code"', 'maxlength="6"'):
-        assert attribute in code
-    assert "Use a recovery code" in page and 'id="twoFactorRecovery"' in page
-    wrong = client.post("/login/2fa", data={"code": "abcde-fghij"})
-    assert wrong.status_code == 400 and "recovery code is not right" in wrong.text and 'role="alert"' in wrong.text
-
 
 # --- P0 #4: names are escaped wherever they are shown -----------------------
 
@@ -483,8 +359,8 @@ def test_an_empty_sign_up_says_what_is_missing_beside_each_field():
     page = client.post("/signup", data={})
     assert page.status_code == 400
     assert 'id="authErrorSummary"' in page.text and "Fix the highlighted fields" in page.text
-    for message in ("Enter your email address", "Password must contain", "Say whether you are",
-                    "Accept the Terms of Service"):
+    # No separate age question since 2026-11-23: the terms box confirms the age.
+    for message in ("Enter your email address", "Password must contain", "Accept the Terms of Service"):
         assert message in page.text
     assert page.text.count('aria-invalid="true"') >= 3
 

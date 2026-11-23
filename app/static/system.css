@@ -476,6 +476,12 @@ summary:focus-visible,
 /* GitHub's mark is drawn near-black, which vanished on the dark button. */
 
 .social-auth>p.social-auth-legacy{text-transform:none;letter-spacing:0;font-weight:500}
+/* Under the Google button: what continuing means, in plain sentence case (2026-11-23). */
+.social-auth>p.social-auth-notice{margin:12px 0 0;text-transform:none;letter-spacing:0;font-weight:500;line-height:1.5}
+/* "Under 18?": a quiet link that opens the parent-approval fields, not a question for everybody. */
+.under-age>summary{cursor:pointer;width:max-content;color:var(--wiq-a);font-size:14px;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.under-age[open]>summary{margin-bottom:10px}
+.under-age .guardian-fields{display:grid;gap:4px}
 /* The roster notice now sits once above the plan cards (audit 2026-10-14 #52). */
 .plan-blocked-summary{margin:0 0 18px;font-size:var(--wiq-text-sm,14px)}
 /* Homepage sections (audit 2026-10-14 #55). */

@@ -10,7 +10,6 @@
   <h1 id="deleteConfirmTitle">Delete {{ email }} for good?</h1>
   <p class="muted">This permanently removes the account, its profile, saved fight videos, reports and everything listed in Settings. It cannot be undone.</p>
   <form action="/account/delete/confirm/{{ token }}" method="post" class="settings-form" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-    {% if needs_code %}<label for="deleteLinkCode">Code from your app, or a recovery code<input id="deleteLinkCode" type="text" name="code" autocomplete="one-time-code" inputmode="text" autocapitalize="off" spellcheck="false" maxlength="24" data-code-input required></label>{% endif %}
     <div class="form-actions"><button class="btn danger" type="submit">Delete my account and data</button><a class="btn secondary" href="/settings/privacy">Keep my account</a></div>
   </form>
 </section>
