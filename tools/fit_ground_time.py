@@ -115,24 +115,47 @@ def bout_rows(bout: str):
     return np.array(X), np.array(y)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--write", action="store_true")
-    args = parser.parse_args()
-    bouts = sorted(p.stem for p in LABELS.glob("*.json") if (CLIPS / f"{p.stem}.mp4").exists())
-    data = {bout: bout_rows(bout) for bout in bouts}
-    total = {"labelled": 0, "measured": 0, "right": 0, "seconds": 0}
+def available_bouts() -> list[str]:
+    """The labelled bouts whose video is on this machine."""
+    return sorted(p.stem for p in LABELS.glob("*.json") if (CLIPS / f"{p.stem}.mp4").exists())
+
+
+def leave_one_out(bouts: list[str], data: dict | None = None) -> dict:
+    """Each bout judged by a head fitted on the others: per-bout rows and a TOTAL.
+
+    Used here and by tools/scoreboard.py, so both report the same number.
+    """
+    data = data if data is not None else {bout: bout_rows(bout) for bout in bouts}
+    rows = {}
+    total = {"labelled": 0, "measured": 0, "right": 0, "seconds": 0, "false_ground": 0, "missed_ground": 0}
     for bout in bouts:
         X, y = data[bout]
         rest_X = np.concatenate([data[o][0] for o in bouts if o != bout])
         rest_y = np.concatenate([data[o][1] for o in bouts if o != bout])
         said = ground_time.predict(ground_time.fit(rest_X, rest_y, l2=L2), X) >= .5
         truth = y == 1
-        print(f"{bout:8} {len(y):4} seconds | ground labelled {int(truth.sum()):4}s, measured {int(said.sum()):4}s | "
-              f"seconds right {int((said == truth).sum())}/{len(y)} | false ground {int((said & ~truth).sum())}, "
-              f"missed ground {int((~said & truth).sum())}")
-        total["labelled"] += int(truth.sum()); total["measured"] += int(said.sum())
-        total["right"] += int((said == truth).sum()); total["seconds"] += len(y)
+        row = {"labelled": int(truth.sum()), "measured": int(said.sum()), "right": int((said == truth).sum()),
+               "seconds": len(y), "false_ground": int((said & ~truth).sum()), "missed_ground": int((~said & truth).sum())}
+        rows[bout] = row
+        for key in total:
+            total[key] += row[key]
+    rows["TOTAL"] = total
+    return rows
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--write", action="store_true")
+    args = parser.parse_args()
+    bouts = available_bouts()
+    data = {bout: bout_rows(bout) for bout in bouts}
+    rows = leave_one_out(bouts, data)
+    for bout in bouts:
+        row = rows[bout]
+        print(f"{bout:8} {row['seconds']:4} seconds | ground labelled {row['labelled']:4}s, measured {row['measured']:4}s | "
+              f"seconds right {row['right']}/{row['seconds']} | false ground {row['false_ground']}, "
+              f"missed ground {row['missed_ground']}")
+    total = rows["TOTAL"]
     print(f"TOTAL    ground labelled {total['labelled']}s, measured {total['measured']}s, "
           f"seconds right {total['right']}/{total['seconds']}")
     if args.write:
