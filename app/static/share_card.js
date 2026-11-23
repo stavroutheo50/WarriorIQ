@@ -140,6 +140,9 @@
     wrap(ctx, card.note, x, H - 200, w, 40, 2);
     if (LOGO.complete && LOGO.naturalWidth) ctx.drawImage(LOGO, x, H - 138, 56, 56);
     ctx.font = font(700, 40); ctx.fillStyle = INK; ctx.fillText("warrioriq.eu", x + 72, H - 96);
+    // A reason to look it up (2026-11-23): whoever sees the story could analyse their own.
+    var domainWidth = ctx.measureText("warrioriq.eu").width;
+    ctx.font = font(600, 30); ctx.fillStyle = BLUE; ctx.fillText("  ·  analyse your own fight free", x + 72 + domainWidth, H - 98);
   }
 
   function toast(message, kind) { if (window.wiqToast) window.wiqToast(message, kind); }
@@ -191,8 +194,17 @@
         links[side] = { side: side, url: made.url, name: showName.checked ? name.value : null,
                         on_profile: !!(links[side] && links[side].on_profile) };
         show();
-        toast(await copy(made.url) ? "Link copied. Paste it into your story's Link sticker, or send it."
-                                    : "Your link is ready: copy it from the box.", "success");
+        var copied = await copy(made.url);
+        // Straight to the phone's share sheet (WhatsApp, Instagram, Messages)
+        // where the browser allows it this long after the tap (2026-11-23): one
+        // tap from "Create link" to posting. Where it does not, the link is
+        // already copied and the message says so.
+        if (navigator.share) {
+          try { await navigator.share({ title: "My fight on WarriorIQ", url: made.url }); return; }
+          catch (err) { if (err && err.name === "AbortError") return; }
+        }
+        toast(copied ? "Link copied. Paste it into your story's Link sticker, or send it."
+                     : "Your link is ready: copy it from the box.", "success");
       } catch (err) {
         toast("Could not make the link. Try again.", "error");
       } finally {

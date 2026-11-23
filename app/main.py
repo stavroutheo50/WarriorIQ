@@ -1970,7 +1970,8 @@ def account_display(account: dict | None) -> dict:
     handle = str(account.get("handle") or "")
     label = f"@{handle}" if handle else name
     initial = next((ch for ch in (handle or name or str(account.get("email") or "")) if ch.isalnum()), "?").upper()
-    return {"label": label, "initial": initial, "email": str(account.get("email") or ""), "has_username": bool(handle)}
+    # No email in here (2026-11-23): nothing shows it, and a page printed this dict by accident.
+    return {"label": label, "initial": initial, "has_username": bool(handle)}
 
 
 def _load_viewer_state(request: Request) -> None:

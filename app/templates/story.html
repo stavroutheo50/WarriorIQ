@@ -9,18 +9,23 @@
     (core.report.STRIKE_COUNTS_PUBLISHED): the card is then movement only. -#}
 {% set counted = me.strikes is not none %}
 {% set headline %}{% if counted %}{{ me.total|count_of('strike') }} thrown{% if card.score %} · estimated score {{ card.score[side] }}–{{ card.score[other] }}{% endif %}{% else %}{% for row in me.movement|default([]) %}{{ row.label }} {{ row.value }}{{ row.unit }}{% if not loop.last %} · {% endif %}{% else %}Fight analysis{% endfor %}{% endif %}{% endset %}
-{% block title %}{{ who }} · {{ card.sport }} fight analysis · WarriorIQ{% endblock %}
-{% block description %}{{ headline }}. Automatic fight analysis by WarriorIQ.{% endblock %}
+{#- What a chat shows above the picture (2026-11-23). "Fighter A · Kickboxing
+    fight analysis" said nothing; without a name the numbers lead instead, and
+    the description ends with what a viewer can do about it. -#}
+{% set share_title %}{% if name %}{{ name }} · {{ card.sport }} fight analysis{% else %}{{ card.sport }} fight: {{ headline }}{% endif %}{% endset %}
+{% set share_description %}{{ headline }}. {{ card.note }} Analyse your own fight free on WarriorIQ.{% endset %}
+{% block title %}{{ share_title }} · WarriorIQ{% endblock %}
+{% block description %}{{ share_description }}{% endblock %}
 {% block social %}
   <meta property="og:type" content="website"><meta property="og:site_name" content="WarriorIQ">
-  <meta property="og:title" content="{{ who }} · {{ card.sport }} fight analysis">
-  <meta property="og:description" content="{{ headline }}. {{ card.note }}">
+  <meta property="og:title" content="{{ share_title }}">
+  <meta property="og:description" content="{{ share_description }}">
   <meta property="og:url" content="{{ page_url }}">
   <meta property="og:image" content="{{ image_url }}"><meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="{{ headline }}">
-  <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{{ who }} · {{ card.sport }} fight analysis">
-  <meta name="twitter:description" content="{{ headline }}. {{ card.note }}"><meta name="twitter:image" content="{{ image_url }}">
+  <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{{ share_title }}">
+  <meta name="twitter:description" content="{{ share_description }}"><meta name="twitter:image" content="{{ image_url }}">
 {% endblock %}
 {% block head %}<link rel="stylesheet" href="/static/components.css?v={{asset_version}}">{% endblock %}
 {% block content %}
