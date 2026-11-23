@@ -262,6 +262,22 @@ app.add_middleware(
     same_site="none" if _oauth_cookie_secure else "lax",
     https_only=_oauth_cookie_secure,
 )
+
+
+def _register_routes_from(module_name: str):
+    """Run a route module so it registers its routes on `app` here, in their old order.
+
+    Re-run, not just imported, when it already was: reloading app.main (tests do)
+    builds a new `app`, and a module Python has already imported would not run
+    again to register on it.
+    """
+    import importlib
+    import sys
+
+    module = sys.modules.get(module_name)
+    return importlib.reload(module) if module is not None else importlib.import_module(module_name)
+
+
 # Profile photos and videos (2026-11-15). They used to be saved in
 # app/static/profile/ and served by the public static mount at guessable
 # names ("profile_<id>.jpg"), whatever the profile's visibility - a minor's
@@ -8386,9 +8402,8 @@ def report_athlete(request: Request, handle: str, reason: str = Form("")):
     return RedirectResponse(f"/athlete/{quote(profile['handle'])}?reported=1", status_code=303)
 
 
-@app.get("/settings")
-def settings_root(request: Request):
-    return RedirectResponse("/settings/privacy", status_code=303)
+# Settings helpers also used outside the settings routes (sign-in, account
+# deletion), so they stay here; the routes live in app/settings_routes.py.
 
 
 # Which card a refusal belongs beside. A message for one of these is shown in
@@ -8396,16 +8411,6 @@ def settings_root(request: Request):
 # (walkthrough, 2026-11-16: a wrong 2FA code reloaded the page, jumped it, and
 # opened "Change password or email" as a side effect).
 SETTINGS_AREAS = frozenset({"sign-in", "two-step", "export", "delete", "devices"})
-
-
-@app.get("/settings/{section}", response_class=HTMLResponse)
-def settings_page(request: Request, section: str, notice: str = "", error: str = "", area: str = ""):
-    account = _account(request)
-    if not account:
-        return RedirectResponse(f"/login?next=/settings/{section}", status_code=303)
-    if section not in {"privacy", "billing"}:
-        raise HTTPException(404)
-    return _settings_response(request, account, section, notice=notice, error=error, area=area)
 
 
 def _settings_response(request: Request, account: dict, section: str = "privacy", *, notice: str = "",
@@ -8459,339 +8464,15 @@ def _two_factor_view(account: dict) -> dict:
     return view
 
 
-@app.post("/settings/marketing", dependencies=[Depends(require_csrf)])
-def save_marketing_preference(request: Request, enabled: bool = Form(False)):
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    update_marketing_consent(int(account["id"]), bool(enabled))
-    record_legal_acceptance(
-        "marketing_consent", SETTINGS.policy_version, profile_id=int(account["profile_id"]),
-        metadata={"enabled": bool(enabled), "source": "privacy_settings"},
-        current_status="accepted" if enabled else "withdrawn",
-    )
-    return RedirectResponse("/settings/privacy?notice=Marketing+preference+saved", status_code=303)
-
-
-@app.post("/settings/sessions/revoke", dependencies=[Depends(require_csrf)])
-def revoke_other_sessions(request: Request):
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    current = request.cookies.get(SESSION_COOKIE)
-    revoke_account_sessions(int(account["id"]), token_digest(current) if current else None)
-    record_security_event("other_sessions_revoked", account_id=int(account["id"]))
-    return RedirectResponse("/settings/privacy?notice=Other+sessions+signed+out", status_code=303)
-
-
-@app.post("/settings/sessions/{session_id}/revoke", dependencies=[Depends(require_csrf)])
-def revoke_one_session(request: Request, session_id: int):
-    """Sign one other device out. Scoped to this account in the query itself."""
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    current = request.cookies.get(SESSION_COOKIE)
-    mine = {row["id"]: row for row in list_account_sessions(int(account["id"]), token_digest(current) if current else None)}
-    if session_id in mine and mine[session_id]["current"]:
-        return _settings_redirect(area="devices", error="That is this browser. Use Sign out in the menu.")
-    if not revoke_session_by_id(int(account["id"]), session_id):
-        return _settings_redirect(area="devices", error="That device was already signed out.")
-    record_security_event("session_revoked", account_id=int(account["id"]))
-    return _settings_redirect(area="devices", notice="That device was signed out.")
-
-
-def _recovery_codes_page(request: Request, codes: list[str]):
-    """Shown once, never stored in the clear, and never cached."""
-    response = templates.TemplateResponse(
-        request=request, name="two_factor_codes.html",
-        context={"request": request, "codes": [two_factor.display_code(code) for code in codes]},
-    )
-    response.headers.setdefault("Cache-Control", "no-store")
-    return response
-
-
-def _fresh_recovery_codes(account_id: int) -> list[str]:
-    codes = two_factor.new_recovery_codes()
-    replace_recovery_codes(account_id, [two_factor.recovery_hash(code) for code in codes])
-    return codes
-
-
-@app.post("/settings/2fa/start", dependencies=[Depends(require_csrf)])
-def two_factor_start(request: Request, current_password: str = Form(""), reauth_password: str = Form("")):
-    """Step 1: a new secret, kept but not yet on. Needs the password."""
-    current_password = reauth_password or current_password
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    _enforce_rate_limit(request, "settings-2fa", 20, 900)
-    if two_factor_row(int(account["id"]))["enabled"]:
-        return _settings_redirect(area="two-step", error="Two-step sign-in is already on.")
-    if not _current_password_ok(int(account["id"]), current_password):
-        return _settings_redirect(area="two-step", error="That password is not right. Nothing was changed.")
-    begin_two_factor_setup(int(account["id"]), two_factor.seal(two_factor.new_secret()))
-    return _settings_redirect(area="two-step")
-
-
-@app.post("/settings/2fa/cancel", dependencies=[Depends(require_csrf)])
-def two_factor_cancel(request: Request):
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    if not two_factor_row(int(account["id"]))["enabled"]:
-        disable_two_factor(int(account["id"]))
-    return _settings_redirect(area="two-step")
-
-
-@app.post("/settings/2fa/confirm", dependencies=[Depends(require_csrf)])
-def two_factor_confirm(request: Request, code: str = Form("")):
-    """Step 2: a code from the app proves it holds the secret. Only then is it on."""
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    _enforce_rate_limit(request, "settings-2fa", 20, 900)
-    account_id = int(account["id"])
-    state = two_factor_row(account_id)
-    secret = two_factor.unseal(state["secret"])
-    if state["enabled"] or not secret:
-        return _settings_redirect(area="two-step", error="Start again: there is no two-step setup waiting for a code.")
-    step = two_factor.verify(secret, code)
-    if step is None:
-        return _settings_redirect(area="two-step", error="That code is not right. Check the time on your phone and try the next code.")
-    codes = two_factor.new_recovery_codes()
-    if not enable_two_factor(account_id, step, [two_factor.recovery_hash(c) for c in codes]):
-        return _settings_redirect(area="two-step", error="Two-step sign-in could not be switched on. Start again.")
-    current = request.cookies.get(SESSION_COOKIE)
-    revoke_account_sessions(account_id, token_digest(current) if current else None)
-    record_security_event("two_factor_enabled", account_id=account_id)
-    return _recovery_codes_page(request, codes)
-
-
-def _second_factor_gate(request: Request, account: dict, current_password: str, code: str, scope: str):
-    """The password and a live code, for the changes that would weaken the account. None when both are good."""
-    _enforce_rate_limit(request, scope, 20, 900)
-    account_id = int(account["id"])
-    wait = _take_rate_slot("settings-2fa-account", str(account_id), 12, 900)
-    if wait is not None:
-        raise HTTPException(429, _rate_limit_detail(wait), headers={"Retry-After": str(max(1, wait))})
-    if not _current_password_ok(account_id, current_password):
-        record_security_event("two_factor_change_refused", account_id=account_id)
-        return _settings_redirect(area="two-step", error="That password is not right. Nothing was changed.")
-    if _check_second_factor(account_id, code) is None:
-        record_security_event("two_factor_failed", severity="warning", account_id=account_id)
-        return _settings_redirect(area="two-step", error="That code is not right, or has already been used. Nothing was changed.")
-    return None
-
-
-@app.post("/settings/2fa/disable", dependencies=[Depends(require_csrf)])
-def two_factor_disable(request: Request, current_password: str = Form(""), code: str = Form(""),
-                       reauth_password: str = Form("")):
-    current_password = reauth_password or current_password
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    refused = _second_factor_gate(request, account, current_password, code, "settings-2fa")
-    if refused is not None:
-        return refused
-    account_id = int(account["id"])
-    disable_two_factor(account_id)
-    current = request.cookies.get(SESSION_COOKIE)
-    revoke_account_sessions(account_id, token_digest(current) if current else None)
-    record_security_event("two_factor_disabled", account_id=account_id)
-    return _settings_redirect(area="two-step", notice="Two-step sign-in is off. Every other device was signed out.")
-
-
-@app.post("/settings/2fa/recovery-codes", dependencies=[Depends(require_csrf)])
-def two_factor_new_recovery_codes(request: Request, current_password: str = Form(""), code: str = Form(""),
-                                  reauth_password: str = Form("")):
-    current_password = reauth_password or current_password
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    refused = _second_factor_gate(request, account, current_password, code, "settings-2fa")
-    if refused is not None:
-        return refused
-    record_security_event("recovery_codes_regenerated", account_id=int(account["id"]))
-    return _recovery_codes_page(request, _fresh_recovery_codes(int(account["id"])))
-
-
-def _settings_redirect(notice: str = "", error: str = "", area: str = "sign-in") -> RedirectResponse:
-    """Back to Settings, at the card the message is about, with the message beside it."""
-    area = area if area in SETTINGS_AREAS else "sign-in"
-    query = urlencode({key: value for key, value in (("notice", notice), ("error", error),
-                                                       ("area", area if notice or error else "")) if value})
-    anchor = {"sign-in": "security", "two-step": "two-step", "devices": "devices",
-              "export": "account-overview", "delete": "delete-account"}[area]
-    return RedirectResponse(f"/settings/privacy{'?' + query if query else ''}#{anchor}", status_code=303)
-
-
 def _current_password_ok(account_id: int, password: str) -> bool:
     full = get_account(int(account_id)) or {}
     return bool(full.get("password_login_enabled", 1)) and verify_password(password or "", full.get("password_hash") or "")
 
 
-@app.post("/settings/password", dependencies=[Depends(require_csrf)])
-def change_password(request: Request, current_password: str = Form(""), new_password: str = Form(""),
-                    confirm_password: str = Form("")):
-    """Change the password while signed in (QA, 2026-10-11: only
-    /forgot-password existed). Needs the current password; every other session
-    is signed out and this browser gets a fresh one."""
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    _enforce_rate_limit(request, "password-change", 10, 3600)
-    if not _current_password_ok(int(account["id"]), current_password):
-        record_security_event("password_change_refused", account_id=int(account["id"]))
-        return _settings_redirect(error="Your current password was not right. Nothing was changed.")
-    if not valid_password(new_password):
-        return _settings_redirect(error="The new password needs between 10 and 1,024 characters.")
-    if new_password_problem(new_password):
-        return _settings_redirect(error=new_password_problem(new_password) + " Nothing was changed.")
-    if new_password != confirm_password:
-        return _settings_redirect(error="The two new passwords do not match. Nothing was changed.")
-    update_password_hash(int(account["id"]), hash_password(new_password))   # ends every session
-    record_security_event("password_changed", account_id=int(account["id"]))
-    response = _settings_redirect(notice="Password changed. Every other device has been signed out.")
-    response.set_cookie(SESSION_COOKIE, issue_session(int(account["id"]), device_label=_device_label(request)),
-                        max_age=60 * 60 * 24 * 30, httponly=True, samesite="lax", secure=_request_is_secure(request))
-    return response
+# Settings routes live in app/settings_routes.py (2026-11-23).
+settings_routes = _register_routes_from("app.settings_routes")
 
 
-@app.post("/settings/email", dependencies=[Depends(require_csrf)])
-def request_email_change(request: Request, current_password: str = Form(""), new_email: str = Form(""),
-                         reauth_password: str = Form("")):
-    """Start an email change: nothing changes until the link sent to the new
-    address is opened. The current address is told a change was asked for.
-
-    reauth_password since 2026-11-16 (a name Chrome does not autofill);
-    current_password is the earlier name."""
-    current_password = reauth_password or current_password
-    account = _account(request)
-    if not account:
-        raise HTTPException(403)
-    _enforce_rate_limit(request, "email-change", 5, 3600)
-    if not _current_password_ok(int(account["id"]), current_password):
-        record_security_event("email_change_refused", account_id=int(account["id"]))
-        return _settings_redirect(error="Your current password was not right. Nothing was changed.")
-    email = normalize_email(new_email)
-    if not valid_email(email):
-        return _settings_redirect(error="Enter a valid new email address.")
-    if email == normalize_email(account.get("email") or ""):
-        return _settings_redirect(error="That is already your email address.")
-    if get_account_by_email(email):
-        return _settings_redirect(error="That email address cannot be used. Choose another one.")
-    token = session_token()
-    expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
-    save_email_change_token(int(account["id"]), email, token_digest(token), expires)
-    confirm_url = f"{_public_base(request)}/settings/email/confirm/{token}"
-    delivered = False
-    try:
-        delivered = send_transactional_email(
-            email, "Confirm your new WarriorIQ email",
-            f"Open this link within 24 hours to make this your WarriorIQ sign-in email:\n\n{confirm_url}\n\n"
-            "If you did not ask for this, ignore this message and nothing changes.")
-        send_transactional_email(
-            account["email"], "Your WarriorIQ email change",
-            "Someone signed in to your WarriorIQ account asked to change its email address. It changes only "
-            "when the link sent to the new address is opened. If this was not you, change your password in "
-            "Settings now.")
-    except Exception:                                                # noqa: BLE001
-        LOGGER.warning("email_change_delivery_failed account=%s", account["id"])
-    record_security_event("email_change_requested", account_id=int(account["id"]),
-                          metadata={"email_delivery": "sent" if delivered else "unavailable"})
-    if not delivered:
-        return _settings_redirect(error="The confirmation email could not be sent right now. Try again later.")
-    return _settings_redirect(notice=f"Check {email}: open the link in it to finish the change.")
-
-
-@app.get("/settings/email/confirm/{token}")
-def confirm_email_change(request: Request, token: str):
-    changed = consume_email_change_token(token_digest(token))
-    if changed is None:
-        raise HTTPException(410, "This email-change link is invalid, used or expired.")
-    account_id, old_email, new_email = changed
-    record_security_event("email_changed", account_id=account_id)
-    try:
-        send_transactional_email(
-            old_email, "Your WarriorIQ email was changed",
-            "The sign-in email for your WarriorIQ account was changed. If this was not you, reset your "
-            "password from the sign-in page and contact support.")
-    except Exception:                                                # noqa: BLE001
-        LOGGER.warning("email_change_notice_failed account=%s", account_id)
-    current = _account(request)
-    if current and int(current["id"]) == account_id:
-        return _settings_redirect(notice=f"Your email is now {new_email}.")
-    return RedirectResponse("/login?verified=1", status_code=303)
-
-
-@app.post("/settings/videos/{job_id}/delete", dependencies=[Depends(require_csrf)])
-def delete_original_video(request: Request, job_id: str):
-    account = _account(request)
-    fight = get_fight(job_id)
-    if not account or not fight or int(fight["profile_id"]) != int(account["profile_id"]):
-        raise HTTPException(404)
-    video = Path(fight.get("video_path") or "missing").resolve()
-    if video.parent == UPLOADS.resolve():
-        video.unlink(missing_ok=True)
-        remove_derivative(video)
-    training_consent.forget(job_id)
-    mark_fight_video_deleted(job_id, int(account["profile_id"]))
-    record_security_event(
-        "fight_video_deleted", account_id=int(account["id"]), resource_type="fight", resource_id=job_id,
-    )
-    return RedirectResponse("/settings/privacy?notice=Original+video+deleted", status_code=303)
-
-
-@app.post("/settings/billing/cancel", dependencies=[Depends(require_csrf)])
-def cancel_subscription(request: Request):
-    session_account = _account(request)
-    if not session_account:
-        raise HTTPException(403)
-    account = get_account(int(session_account["id"])) or session_account
-    subscription_id = account.get("stripe_subscription_id")
-    if not subscription_id:
-        raise HTTPException(400, "No connected paid subscription can be cancelled.")
-    try:
-        provider = cancel_subscription_at_period_end(str(subscription_id))
-    except Exception as exc:
-        raise HTTPException(503, f"Cancellation was not confirmed by the payment provider: {exc}")
-    if not provider.get("cancel_at_period_end"):
-        raise HTTPException(503, "The payment provider did not confirm cancellation.")
-    action = record_subscription_action(
-        int(account["id"]), "cancel", "scheduled",
-        effective_at=account.get("subscription_period_end"), provider_reference=str(subscription_id),
-        metadata={"provider_status": provider.get("status")},
-    )
-    _queue_transactional_notice(
-        int(account["id"]), "subscription_cancellation_confirmation", account["email"],
-        "Your WarriorIQ subscription cancellation",
-        f"Cancellation was scheduled on {action['requested_at']}. Access ends at {account.get('subscription_period_end') or 'the confirmed billing-period end'}. No further renewal should be charged after that date.",
-        {"requested_at": action["requested_at"], "access_ends": account.get("subscription_period_end")},
-    )
-    return RedirectResponse("/settings/billing?notice=Cancellation+scheduled", status_code=303)
-
-
-@app.post("/settings/billing/withdraw", dependencies=[Depends(require_csrf)])
-def request_contract_withdrawal(request: Request, confirm: bool = Form(False)):
-    account = _account(request)
-    if not account or not confirm:
-        return _form_refusal("Confirm the withdrawal request.",
-                             "/settings/billing", "/settings/billing")
-    full_account = get_account(int(account["id"])) or account
-    if not full_account.get("stripe_subscription_id"):
-        return _form_refusal("No connected purchase is available for withdrawal review.",
-                             "/settings/billing", "/settings/billing")
-    action = record_subscription_action(
-        int(account["id"]), "eu_withdrawal", "pending_review",
-        provider_reference=full_account.get("stripe_subscription_id"),
-        metadata={"eligibility_not_determined": True, "policy_version": SETTINGS.policy_version},
-    )
-    _queue_transactional_notice(
-        int(account["id"]), "withdrawal_request_confirmation", account["email"],
-        "WarriorIQ withdrawal request received",
-        f"Your withdrawal request was received on {action['requested_at']} and is pending eligibility and payment review. This is separate from normal subscription cancellation.",
-        {"requested_at": action["requested_at"], "status": "pending_review"},
-    )
-    return RedirectResponse("/settings/billing?notice=Withdrawal+request+recorded+for+review", status_code=303)
 
 
 @app.post("/profile", dependencies=[Depends(require_csrf)])
@@ -10368,20 +10049,6 @@ def submit_copyright_report(
         request=request, name="copyright_report.html",
         context={"request": request, "submitted": True, "reference": report_id},
     )
-
-
-def _register_routes_from(module_name: str):
-    """Run a route module so it registers its routes on `app` here, in their old order.
-
-    Re-run, not just imported, when it already was: reloading app.main (tests do)
-    builds a new `app`, and a module Python has already imported would not run
-    again to register on it.
-    """
-    import importlib
-    import sys
-
-    module = sys.modules.get(module_name)
-    return importlib.reload(module) if module is not None else importlib.import_module(module_name)
 
 
 # The admin control room's routes live in app/admin_routes.py (2026-11-23).
