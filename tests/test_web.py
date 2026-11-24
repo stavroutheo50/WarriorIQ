@@ -4258,8 +4258,10 @@ class PlanBadgeTests(unittest.TestCase):
                 continue
             self.assertEqual(PLANS[key]["price"], headline, key)
             # "Free in early access" read as "this paid plan is free now",
-            # beside a banner saying everyone is on Starter.
-            self.assertIn("Billing not open yet", card, key)
+            # beside a banner saying everyone is on Starter. The notice at the
+            # top says billing is not open; a badge on every card repeated it
+            # six times (visual audit, 2026-11-24).
+            self.assertNotIn("Billing not open yet", card, key)
             self.assertNotIn("Free in early access", card, key)
             self.assertIn("when billing opens", card, key)
             self.assertNotIn("Not open yet", card, key)

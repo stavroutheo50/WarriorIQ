@@ -58,10 +58,11 @@
 <header class="athlete-head">
   <div class="athlete-id">
     {% set athlete = athlete_name|default(profile.display_name, true) %}
-    <span class="athlete-avatar" aria-hidden="true">{{athlete[:1]|upper}}</span>
     <div>
       <div class="eyebrow">Fight Camp</div>
-      <h1>{{athlete}}</h1>
+      {#- Avatar and name on one line (visual audit, 2026-11-24): beside the whole
+          block it sat level with the middle of the text, not with the name. -#}
+      <div class="athlete-name-row"><span class="athlete-avatar" aria-hidden="true">{{athlete[:1]|upper}}</span><h1>{{athlete}}</h1></div>
       <p class="small muted">Each fight follows the fighter you picked for its detailed report.</p>
       {#- One stat row instead of two cramped sentences (walkthrough, 2026-11-16). -#}
       <dl class="camp-meta">
@@ -119,13 +120,19 @@
       </ul>
     </details>
   </div>
-  <div class="camp-standing" aria-label="Your Fight Camp points">
-    <div class="camp-level"><span class="camp-rank">{{ standing.rank }}</span><span class="eyebrow">Level {{ standing.level }} · {{ standing.points }} points</span>
+  {#- Before the first point, one line and one goal (visual audit, 2026-11-24):
+      "0 points", "0/3", "0 to spend" and a disabled 200-point button all at
+      once said nothing to somebody who has not started. The full panel comes
+      with the first point, session or extra analysis. -#}
+  {% set fresh = not standing.points and not standing.balance and not standing.week_sessions and not points_history and not extra_analyses %}
+  <div class="camp-standing{% if fresh %} is-fresh{% endif %}" aria-label="Your Fight Camp points">
+    <div class="camp-level"><span class="camp-rank">{{ standing.rank }}</span>{% if fresh %}<span class="eyebrow">Earn your first points</span>{% else %}<span class="eyebrow">Level {{ standing.level }} · {{ standing.points }} points</span>
       <span class="camp-level-bar" role="progressbar" aria-valuemin="0" aria-valuemax="{{ standing.level_size }}" aria-valuenow="{{ standing.into_level }}" aria-label="Points towards level {{ standing.level + 1 }}"><i style="width:{{ (standing.into_level * 100 // standing.level_size) }}%"></i></span>
-      <small class="muted">{{ standing.level_size - standing.into_level }} to level {{ standing.level + 1 }}{% if standing.next_rank %} · {{ standing.next_rank }} at level {{ standing.next_rank_level }}{% endif %}</small>
+      <small class="muted">{{ standing.level_size - standing.into_level }} to level {{ standing.level + 1 }}{% if standing.next_rank %} · {{ standing.next_rank }} at level {{ standing.next_rank_level }}{% endif %}</small>{% endif %}
       {#- 47 analyses and "0 points" with nothing to say why (QA, 2026-10-11).
           Points come from missions, not from analysing fights. -#}
       {% if not standing.points %}<p class="small muted camp-no-points" id="noPointsYet">No points yet: analysing a fight does not earn points on its own. Take a mission below and upload a training session for it (+{{ points_rules.session }}), finish the mission (+{{ points_rules.done }}), and your next fight showing its number improved earns +{{ points_rules.improved }}.</p>{% endif %}</div>
+    {% if not fresh %}
     {% set week_left = standing.week_target - standing.week_sessions %}
     <div class="camp-week">
       <span class="camp-week-ring" style="--done:{{ ([standing.week_sessions, standing.week_target]|min) * 100 // standing.week_target }}" role="img" aria-label="{{ standing.week_sessions }} of {{ standing.week_target }} training sessions this week"><b class="wiq-num">{{ standing.week_sessions }}/{{ standing.week_target }}</b></span>
@@ -143,6 +150,7 @@
     <details class="camp-history"><summary>Recent points</summary>
       <ul class="list-clean">{% for item in points_history %}<li><b class="wiq-num {{ 'up' if item.points > 0 else 'down' }}">{{ '%+d'|format(item.points) }}</b> {{ item.label }} <time class="muted" datetime="{{ item.created_at }}" data-local="date">{{ item.created_at|fight_moment(false) }}</time></li>{% endfor %}</ul>
     </details>
+    {% endif %}
     {% endif %}
   </div>
   {% if redeem_message %}<p class="notice camp-note" role="status">{{ redeem_message }}</p>{% endif %}
@@ -165,7 +173,7 @@
   {% elif camp.reason == 'identity' %}
   <p class="muted">WarriorIQ could not tell the two fighters apart in your recent fights, so it cannot say whose weak spots it saw. Open the fight and show it who is who, or analyse a video where both fighters stay in view.</p>
   {% elif camp.reason == 'no_drill' %}
-  <p class="muted">Your latest fight did not show any measured number far enough behind to build a drill around, so there is no mission from it. Nothing is made up to fill this space: add your own below, or analyse your next fight.</p>
+  <p class="muted">Your last fight didn't show a number far enough behind to build a drill around. Add your own mission below, or analyse your next fight.</p>
   {% elif not finished_cards %}
   <p class="muted">Analyse a fight and your first missions appear here.</p>
   {% else %}

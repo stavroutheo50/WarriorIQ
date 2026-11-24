@@ -49,50 +49,20 @@
   everything else is the same on every one.
 </p>
 
-{#- Seven plans stacked as cards is about 7,500px on a phone, and comparing
-    two of them means scrolling past the other five and remembering. The
-    choosing happens here, in four numbers visible at once; the cards below
-    stay for the detail somebody wants after they have chosen.
-
-    A real <table>, because it is one: a screen reader announces the column
-    when it reads the cell, which a grid of divs cannot do. See
-    core/payments.comparison_rows. -#}
-<div class="plan-compare-wrap">
-  <table class="plan-compare">
-    <caption class="small muted">Every plan at a glance. Tap a row for the full details.</caption>
-    <thead>
-      <tr>
-        <th scope="col">Plan</th>
-        <th scope="col">Price</th>
-        <th scope="col">Fighters</th>
-        {% set allowance_title, allowance_label = allowance_column() %}<th scope="col"><abbr title="{{ allowance_title }}">{{ allowance_label }}</abbr></th>
-        <th scope="col" class="compare-report">Report</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in plan_comparison %}
-      <tr{% if row.key == current_plan_key %} class="is-current"{% endif %}>
-        <th scope="row"><a href="#plan-{{row.key}}">{{row.label}}</a>{% if row.key == current_plan_key %}
-          <span class="compare-current">Current</span>{% endif %}</th>
-        <td>{{row.price}}</td>
-        <td>{{row.fighters}}</td>
-        <td>{{row.daily}}</td>
-        <td class="compare-report">{{row.report}}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
 
 {#- Plans smaller than the roster are refused rather than sold and reconciled
     afterwards: making the numbers fit would mean archiving somebody's fighters
     for them. Said once here, not on every card (audit 2026-10-14 #52). -#}
 {% set small_plans = [] %}{% for key,plan in plans.items() %}{% if plan.roster_limit and roster_held and roster_held > plan.roster_limit %}{% set _ = small_plans.append(plan.label) %}{% endif %}{% endfor %}
 {% if small_plans %}<div class="plan-blocked plan-blocked-summary" id="rosterTooBig" role="note">You have {{ roster_held|count_of('fighter') }}, more than {{ small_plans|join(', ') }} can hold. Archive fighters on the Fight Camp roster first to choose {{ 'that plan' if small_plans|length == 1 else 'one of those plans' }}.</div>{% endif %}
-<div class="pricing-grid">
-{% for key,plan in plans.items() %}
+{#- Two rows (visual audit, 2026-11-24): one grid of seven cards gave a row
+    of three wide cards over four narrow ones, which read as uneven. Each row
+    now has a heading, and its cards are all the same width. -#}
+{% macro plan_card(key, plan) %}
   <section class="card pricing-card {% if key == 'athlete_pro' %}featured{% elif key == 'gym' %}gym-featured{% endif %}" id="plan-{{key}}" data-plan="{{key}}">
-    {% if plan.highlight %}<div class="plan-banner">{{plan.highlight}}</div>{% endif %}
+    {#- A blank banner on cards without a highlight keeps every price in a row
+        at the same height (visual audit, 2026-11-24). -#}
+    {% if plan.highlight %}<div class="plan-banner">{{plan.highlight}}</div>{% else %}<div class="plan-banner is-blank" aria-hidden="true"></div>{% endif %}
     {% set too_small = plan.roster_limit and roster_held and roster_held > plan.roster_limit %}
     <div class="plan-card-head">
       <div class="eyebrow">{{plan.label}}</div>
@@ -106,20 +76,18 @@
        dead product next to Starter's confident €0.
 
        The price is the permanent fact and the closure is a state that ends, so
-       the price is the headline and the state is a badge. Three things still
-       say it and none of them is buried: the notice at the top of the page,
-       the badge on every paid card, and "when billing opens" directly under
-       the number.
+       the price is the headline. Two things still say it and neither is
+       buried: the notice at the top of the page, and "when billing opens"
+       directly under every paid price. A "Billing not open yet" badge on each
+       card repeated the notice six times and was removed (visual audit,
+       2026-11-24).
 
        Starter is genuinely €0 forever, so none of this applies to it. #}
-    {#- The badge sits with the price rather than in the banner at the top of
-        the card. Two reasons. It qualifies the number, so it belongs next to
-        the number. And the banner slot is the plan's own highlight - putting
-        this there gave all six paid cards an identical badge and deleted the
+    {#- The banner slot stays the plan's own highlight: putting the billing
+        state there gave all six paid cards an identical badge and deleted the
         one line on each that helps somebody choose between them. -#}
     <div class="plan-price-row">
       <div class="plan-price">{{plan.price}}</div>
-      {% if not payments_enabled and key != 'free' %}<span class="plan-early">Billing not open yet</span>{% endif %}
     </div>
     {% if not payments_enabled and key != 'free' %}
       <div class="small muted">{{plan.period}}, when billing opens</div>
@@ -128,7 +96,7 @@
     {% endif %}
     <div class="plan-entitlement"><strong>{{plan.limit_label}}</strong><span>{{plan.report_label}}</span></div>
     {#- Folded (walkthrough, 2026-11-09): seven open cards made the page about
-        8,500px on a phone. The table above does the choosing; price,
+        8,500px on a phone. Price,
         allowance, report and the action stay visible on every card. -#}
     <details class="plan-more">
       <summary><span>What&rsquo;s included<small>Features, billing terms, tax and cancellation</small></span><b aria-hidden="true">+</b></summary>
@@ -161,11 +129,53 @@
       {% else %}<form method="post" action="/plan-interest/{{key}}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="next_path" value="/pricing"><button class="btn" type="submit">Tell us you want {{plan.label}}</button></form>{% endif %}
     {% else %}
       {% if payments_enabled %}<a class="btn secondary" href="/signup?next=/camp">Create account first</a>
-      {% else %}<a class="btn secondary" href="/signup?next=/pricing">Sign up free to request {{plan.label}}</a>{% endif %}
+      {#- Short enough for one line on a narrow card; the free sign-up comes
+          first, and the notice at the top says so. -#}
+      {% else %}<a class="btn secondary" href="/signup?next=/pricing">Request {{plan.label}}</a>{% endif %}
     {% endif %}
   </section>
-{% endfor %}
+{% endmacro %}
+<h2 class="pricing-group">For one fighter</h2>
+<div class="pricing-grid pricing-grid-athletes">
+{% for key,plan in plans.items() if plan.roster_limit == 1 %}{{ plan_card(key, plan) }}{% endfor %}
 </div>
+<h2 class="pricing-group">For coaches and gyms</h2>
+<div class="pricing-grid pricing-grid-teams">
+{% for key,plan in plans.items() if plan.roster_limit != 1 %}{{ plan_card(key, plan) }}{% endfor %}
+</div>
+{#- The comparison table used to sit above the cards, so every plan was
+    shown twice and the page was twice as long (visual audit, 2026-11-24).
+    The cards do the choosing now; the table stays one tap away, still a
+    real <table> for screen readers. See core/payments.comparison_rows. -#}
+<details class="plan-compare-more">
+  <summary class="btn secondary">Compare all plans</summary>
+<div class="plan-compare-wrap">
+  <table class="plan-compare">
+    <caption class="small muted">Every plan at a glance. Tap a plan for its card.</caption>
+    <thead>
+      <tr>
+        <th scope="col">Plan</th>
+        <th scope="col">Price</th>
+        <th scope="col">Fighters</th>
+        {% set allowance_title, allowance_label = allowance_column() %}<th scope="col"><abbr title="{{ allowance_title }}">{{ allowance_label }}</abbr></th>
+        <th scope="col" class="compare-report">Report</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in plan_comparison %}
+      <tr{% if row.key == current_plan_key %} class="is-current"{% endif %}>
+        <th scope="row"><a href="#plan-{{row.key}}">{{row.label}}</a>{% if row.key == current_plan_key %}
+          <span class="compare-current">Current</span>{% endif %}</th>
+        <td>{{row.price}}</td>
+        <td>{{row.fighters}}</td>
+        <td>{{row.daily}}</td>
+        <td class="compare-report">{{row.report}}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+</details>
 
 <section class="report-levels">
   <div class="section-intro"><div class="eyebrow">What changes between reports?</div><h2>More detail when the work gets serious.</h2><p>The tracking and analysis pipeline stays evidence-first on every plan. The report depth changes.</p></div>

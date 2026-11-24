@@ -62,10 +62,23 @@ class ComparisonPageTests(unittest.TestCase):
     def tearDown(self):
         self.client.close()
 
-    def test_the_table_is_on_the_page_above_the_cards(self):
+    def test_the_table_is_folded_under_the_cards(self):
+        """Above the cards it showed every plan twice (visual audit,
+        2026-11-24): the cards do the choosing, the table is one tap away."""
         self.assertIn('class="plan-compare"', self.page)
-        self.assertLess(self.page.index('class="plan-compare"'),
-                        self.page.index('class="pricing-grid"'))
+        self.assertGreater(self.page.index('class="plan-compare"'),
+                           self.page.index('class="pricing-grid'))
+        folded = self.page.split('<details class="plan-compare-more">')[1].split("</details>")[0]
+        self.assertIn("Compare all plans", folded)
+        self.assertIn('class="plan-compare"', folded)
+
+    def test_plans_come_in_two_rows_one_fighter_then_teams(self):
+        athletes = self.page.split("pricing-grid-athletes")[1].split("pricing-grid-teams")[0]
+        teams = self.page.split("pricing-grid-teams")[1].split("plan-compare-more")[0]
+        for key, plan in PLANS.items():
+            with self.subTest(plan=key):
+                row = athletes if plan.get("roster_limit") == 1 else teams
+                self.assertIn(f'data-plan="{key}"', row)
 
     def test_it_is_a_real_table_with_real_headers(self):
         """A screen reader announces the column with the cell, which is what
