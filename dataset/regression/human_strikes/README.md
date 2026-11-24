@@ -34,3 +34,27 @@ Per strike against per fighter (2026-11-10, same 9 clips, 0.5 s window):
 - No single measured feature separates real from false counts well (best:
   contact distance, AUC 0.64). More rule tuning will not fix this; a learned
   model needs far more labelled footage than 9 clips.
+
+## 2026-11-24: six stock clips, a person's labels (tools/strike_errors.py)
+
+54 sure strikes on dataset/stock_strikes/mixkit_* (strikes.human.json).
+
+- Analysis PC tracks: 63 counted, 27 right (precision 43%, recall 50%).
+  Misses: 7 proposed for the other fighter, 7 off in time, 6 combos counted
+  once, 5 dropped by the attempt gate, 1 pair rule, 1 never proposed. False:
+  15 nothing marked (10 on mixkit_40968: 11 counted, 2 marked), 11 off in
+  time, 8 the other fighter's strike, 2 double counts.
+- Rebuilt here on CPU (yolo26m-pose), 12 fps: 48 counted, 21 right. At the
+  clips' full 24 fps: 68 counted, 30 right - recall 39% -> 56%, precision
+  unchanged at 44%, and false "other fighter" counts 12 -> 16. Not adopted:
+  twice the pose work for more counts that are still wrong half the time.
+- Telling a real punch from the defender's flinch, over 12 skeleton measures
+  (torso, head and wrist travel toward or away from the opponent, elbow
+  angle, closing distance, speed, contact distance): best AUC 0.64 at 12 fps,
+  0.62 at 24 fps; the direction measures 0.47-0.57. No rule was built on them.
+- "Who threw more" from the counts (a clear gap of 3 and 25%): right on 0 of
+  2 clips where it would claim one; any difference at all: 2 of 5. Not shown.
+
+The skeleton rules are at their limit for strikes. The next step is a learned
+model on many labelled real strikes: the owners' quick-check answers
+(app/accuracy.py), once there are a few hundred.

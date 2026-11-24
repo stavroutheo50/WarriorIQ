@@ -11,9 +11,12 @@
   </header>
 
   {#- Measured movement first, the estimated strike totals after it (owner,
-      2026-11-11): a person's count of nine clips matched each fighter's total
-      closely, so totals are shown, as estimates (dataset/regression/human_strikes). -#}
-  {% for group, title, lede in [(sheet.movement, 'Movement and position', 'Measured from where each fighter stood and moved, frame by frame.'), (sheet.strikes, 'Strikes', 'Estimated totals, counted automatically. On our test clips each total was typically within a few of a hand count.')] %}{% if group %}
+      2026-11-11). The strike line used to say each total was "typically within
+      a few of a hand count". Measured again on 2026-11-24 against six clips a
+      person labelled (tools/strike_errors.py), fewer than half of the counted
+      strikes matched one the person marked, and one clip counted 11 where the
+      person marked 2, so it now says what was measured. -#}
+  {% for group, title, lede in [(sheet.movement, 'Movement and position', 'Measured from where each fighter stood and moved, frame by frame.'), (sheet.strikes, 'Strikes', 'Rough estimates, counted automatically. On our hand-checked test clips fewer than half of the counted strikes were real ones, so a total can be well off.')] %}{% if group %}
   <h3 class="stat-group">{{ title }}</h3>
   <p class="stat-group-lede">{{ lede }}</p>
   <dl class="stat-rows">

@@ -92,3 +92,14 @@ def test_the_timeline_counts_the_same_strikes_as_the_totals():
     report = _report(event_feed=feed)
     timeline = build_stat_sheet(report, ["punch", "kick"], True)["timeline"]
     assert sum(b["A"] for b in timeline["buckets"]) == 1 and sum(b["B"] for b in timeline["buckets"]) == 1
+
+
+def test_the_strike_lede_says_what_was_measured():
+    """2026-11-24: fewer than half of counted strikes matched a person's labels
+    on six clips (tools/strike_errors.py), so the sheet no longer claims totals
+    are within a few of a hand count."""
+    from pathlib import Path
+
+    sheet = (Path(__file__).resolve().parents[1] / "app" / "templates" / "_stat_sheet.html").read_text(encoding="utf-8")
+    assert "within a few of a hand count" not in sheet.split("-#}")[-1]
+    assert "fewer than half of the counted strikes were real ones" in sheet
