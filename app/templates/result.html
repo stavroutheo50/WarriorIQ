@@ -413,6 +413,75 @@
 {{ fix_html }}
 {% if not identity_failed and numbers.state != 'movement_only' %}{{ keep_fix(vitals_primary) }}{% endif %}
 {% endif %}
+{#- Quick check (owner, 2026-11-24): instead of anyone labelling fights by
+    hand, the person whose fight it is answers a few counted strikes, one tap
+    each. Optional, three at a time, and it never changes this report: the
+    answers measure how accurate WarriorIQ is (app/accuracy.py). -#}
+{% if quick_check %}
+<section class="card quick-check" id="quickCheck" aria-labelledby="quickCheckTitle" data-reveal>
+  <div class="eyebrow">Quick check &middot; optional</div>
+  <h2 id="quickCheckTitle">Did WarriorIQ get these right?</h2>
+  <p class="muted qc-lede">A few strikes from this fight, one tap each. Your answers show us how accurate WarriorIQ is so we can improve it. They don't change this report.</p>
+  <div class="qc-stage" id="qcStage">
+    <p class="qc-step small muted" id="qcStep" aria-live="polite"></p>
+    <video class="qc-video" id="qcVideo" muted playsinline preload="metadata" aria-label="The moment being asked about, slowed down and repeating"></video>
+    <p class="qc-question" id="qcQuestion"></p>
+    <div class="qc-answers" role="group" aria-labelledby="qcQuestion">
+      <button class="btn" type="button" data-verdict="right">Yes, right</button>
+      <button class="btn secondary" type="button" data-verdict="not_a_strike">No strike there</button>
+      <button class="btn secondary" type="button" data-verdict="wrong_fighter">The other fighter threw it</button>
+      <button class="btn secondary" type="button" data-verdict="skip">Not sure</button>
+    </div>
+  </div>
+  <div class="qc-done" id="qcDone" hidden>
+    <p><strong>Thank you.</strong> <span id="qcDoneText"></span></p>
+    <button class="btn secondary" type="button" id="qcMore" hidden>Check 3 more</button>
+  </div>
+  <script type="application/json" id="qcData">{{ quick_check|tojson }}</script>
+</section>
+<script nonce="{{ request.state.csp_nonce }}">
+(()=>{const box=document.getElementById('quickCheck');if(!box)return;
+  let data;try{data=JSON.parse(document.getElementById('qcData').textContent)}catch(e){return}
+  const video=document.getElementById('qcVideo'),step=document.getElementById('qcStep'),question=document.getElementById('qcQuestion');
+  const stage=document.getElementById('qcStage'),done=document.getElementById('qcDone'),more=document.getElementById('qcMore');
+  const items=data.items.slice(),round=3;let shown=0,inRound=0,answered=0,current=null,from=0,to=0;
+  const src={{ ('/media/' ~ job_id)|tojson }};
+  // The strike's second, from a second before to just after, at half speed, repeating.
+  video.addEventListener('timeupdate',()=>{if(current&&video.currentTime>to){video.currentTime=from;}});
+  const show=()=>{
+    if(inRound>=round||shown>=items.length){finish();return}
+    current=items[shown];shown++;inRound++;
+    from=Math.max(0,current.seconds-1.0);to=current.seconds+0.6;
+    step.textContent=`${inRound} of ${Math.min(round,items.length-(shown-inRound))}`;
+    const who=data.names[current.fighter]||('Fighter '+current.fighter);
+    question.textContent=`Did ${who} throw a ${current.family} here (${current.clock})?`;
+    if(!video.src)video.src=src;
+    const go=()=>{video.currentTime=from;video.playbackRate=0.5;video.play().catch(()=>{})};
+    if(video.readyState>=1)go();else video.addEventListener('loadedmetadata',go,{once:true});
+  };
+  const finish=()=>{
+    video.pause();stage.hidden=true;done.hidden=false;
+    document.getElementById('qcDoneText').textContent=answered?`${answered} answer${answered===1?'':'s'} saved.`:'';
+    more.hidden=shown>=items.length;
+  };
+  more.addEventListener('click',()=>{inRound=0;done.hidden=true;stage.hidden=false;show()});
+  box.querySelectorAll('.qc-answers button').forEach(b=>b.addEventListener('click',async()=>{
+    if(!current)return;const verdict=b.dataset.verdict,item=current;
+    if(verdict!=='skip'){
+      box.querySelectorAll('.qc-answers button').forEach(x=>x.disabled=true);
+      try{const r=await fetch({{ ('/api/strike-check/' ~ job_id)|tojson }},{method:'POST',headers:wiqCsrfHeaders({'Content-Type':'application/json'}),
+          body:JSON.stringify({seconds:item.seconds,fighter:item.fighter,family:item.family,verdict})});
+        if(!r.ok)throw new Error(String(r.status));answered++;
+      }catch(err){if(window.wiqToast)window.wiqToast('Could not save that answer. Try again.','error');
+        box.querySelectorAll('.qc-answers button').forEach(x=>x.disabled=false);return}
+      box.querySelectorAll('.qc-answers button').forEach(x=>x.disabled=false);
+    }
+    show();
+  }));
+  show();
+})();
+</script>
+{% endif %}
 {#- Everything else folds under one row on a normal report (2026-10-20: "I
     don't want to scroll so much"): the fight summary, the graphs, every
     number and the coaching plan. Nothing is removed. A report led by "Rough

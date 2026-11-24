@@ -2740,6 +2740,57 @@ def _with_checks(job_id: str, rows: list[dict]) -> list[dict]:
     return rows
 
 
+QUICK_CHECK_POOL = 12      # moments sent to the page; it asks three at a time
+
+
+def _owns_fight(request: Request, job_id: str) -> bool:
+    """The signed-in person's own fight: not a coach's or a gym's view of someone else's."""
+    fight = get_fight(job_id)
+    profile_id = _profile_id(request)
+    return bool(fight and profile_id is not None and int(fight["profile_id"]) == profile_id)
+
+
+def _may_check_strikes(request: Request, job_id: str) -> bool:
+    """Who may give one-tap answers on a fight's counted strikes.
+
+    Administrators, as before, and since 2026-11-24 the fight's own owner
+    (owner: no more hand labelling, so the answers come from the people whose
+    fights they are, one tap at a time). Never an under-18 account, as with
+    the training opt-in.
+    """
+    if not _account(request) or not _authorized_job(request, job_id):
+        return False
+    if _is_admin(request):
+        return True
+    return _owns_fight(request, job_id) and not social.is_minor_account(_account(request))
+
+
+def _quick_check(request: Request, job_id: str, report: dict, families: tuple[str, ...],
+                 identity_trusted: bool, names: dict) -> dict | None:
+    """"Did WarriorIQ get these right?": a few counted strikes for the owner to answer.
+
+    Only where an answer means something: the person may answer, who is who
+    held (a strike credited to the wrong person is not a question about the
+    strike), the video is still here to watch, and something was counted.
+    The moments are spread across the fight, the unanswered ones only.
+    """
+    if not identity_trusted or report.get("video_removed") or not families:
+        return None
+    if not _may_check_strikes(request, job_id):
+        return None
+    rows = _with_checks(job_id, _counted_strikes(report, families))
+    open_rows = [row for row in rows if not row.get("check")]
+    if not open_rows:
+        return None
+    if len(open_rows) > QUICK_CHECK_POOL:
+        step = len(open_rows) / QUICK_CHECK_POOL
+        open_rows = [open_rows[int(i * step)] for i in range(QUICK_CHECK_POOL)]
+    return {"items": [{"seconds": round(row["seconds"], 3), "fighter": row["fighter"], "family": row["family"],
+                       "clock": row["clock"]} for row in open_rows],
+            "answered": len(rows) - len([row for row in rows if not row.get("check")]),
+            "names": {"A": names.get("A", "Fighter A"), "B": names.get("B", "Fighter B")}}
+
+
 def _wrong_sport(report: dict, job: dict) -> dict | None:
     """An MMA video analysed as a striking sport, told plainly (core.ground.looks_like_grappling).
 
@@ -7044,9 +7095,12 @@ def result_page(request: Request, job_id: str):
         "counted_strikes": (_with_checks(job_id, _counted_strikes(report, strike_numbers_shown(
             report, (report.get("scorecard") or {}).get("sport") or _job_sport(job))))
             if feature_is_on("key_moments") else []),
-        # "Was this right?" and "Who went down?" are manual work: internal,
-        # admins only. A customer is never asked (owner, 2026-10-20).
+        # The full "Was this right?" list and "Who went down?" stay internal
+        # (owner, 2026-10-20). Customers get the short quick check below
+        # instead (owner, 2026-11-24: no more hand labelling).
         "can_check_strikes": _is_admin(request),
+        "quick_check": _quick_check(request, job_id, report, strike_numbers_shown(
+            report, (report.get("scorecard") or {}).get("sport") or _job_sport(job)), identity_trusted, names),
         "went_down": _went_down(job_id, report),
         "ground_time": _ground_time_view(report),
         "wrong_sport": _wrong_sport(report, job),
@@ -7379,14 +7433,13 @@ def check_counted_strike(request: Request, job_id: str, payload: StrikeCheckPayl
 
     Stored in the annotations table beside full corrections - one row per
     fight and moment, no new schema - marked source "strike_check" so it can
-    be told apart. Open to any signed-in owner of the fight rather than only
-    correcting plans: these answers are what grows the labelled benchmark
-    (tools/export_strike_checks.py), and a free user's answer is as true as
-    a paying one's. Nothing is exported for training here; that still needs
-    the full correction and the owner's training consent.
+    be told apart. Administrators, and since 2026-11-24 the fight's owner
+    through the report's quick check (_may_check_strikes): these answers are
+    how accuracy is measured without anyone labelling by hand. They never
+    change the report and are never training labels.
     """
     _enforce_rate_limit(request, "strike_checks", 300, 300)
-    if not _account(request) or not _authorized_job(request, job_id) or not _is_admin(request):
+    if not _may_check_strikes(request, job_id):
         raise HTTPException(403, "Not available.")
     fighter = payload.fighter.upper()
     family = payload.family.lower()
