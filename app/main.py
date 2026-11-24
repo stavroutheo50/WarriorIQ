@@ -2313,8 +2313,8 @@ def _apply_response_headers(request: Request, response) -> None:
 # refusal on the way is recorded each time, with the reason the person was
 # shown. The admin page reads them back (app/admin_overview.py onboarding).
 # Nothing is stored but the step, a status code and that server-written reason.
-JOURNEY_ONCE = ("journey_upload_page", "journey_video_uploaded", "journey_fighter_picker",
-                "journey_fighters_picked")
+JOURNEY_ONCE = ("journey_upload_page", "journey_video_chosen", "journey_upload_started",
+                "journey_video_uploaded", "journey_fighter_picker", "journey_fighters_picked")
 
 
 def _journey_failed(job: dict | None, reason: str, job_id: str = "") -> None:
@@ -2342,10 +2342,27 @@ def _journey_event(method: str, path: str, status: int) -> str | None:
                              or (path.startswith("/api/upload/") and path.endswith("/finish"))):
         if refused:
             return "journey_upload_refused"
-        return "journey_video_uploaded" if path != "/api/upload/begin" else None
+        # Begun is its own step (2026-11-24): of the people who open the upload
+        # page and never upload, it says whether they pressed Upload at all.
+        return "journey_video_uploaded" if path != "/api/upload/begin" else "journey_upload_started"
+    if method == "POST" and path == "/api/journey/video-chosen" and not refused:
+        return "journey_video_chosen"
     if method == "POST" and path.startswith("/api/start/"):
         return "journey_start_refused" if refused else "journey_fighters_picked"
     return None
+
+
+@app.post("/api/journey/video-chosen", status_code=204, include_in_schema=False,
+          dependencies=[Depends(require_csrf)])
+def journey_video_chosen(request: Request) -> Response:
+    """The upload page says a video was picked on this device (2026-11-24).
+
+    Nothing about the video is sent: the step is the whole record, written by
+    the journey middleware like every other step, once per account. It splits
+    "opened the upload page" from "chose a video", which the server cannot see
+    because a file stays on the phone until Upload is pressed.
+    """
+    return Response(status_code=204)
 
 
 def _record_journey(account_id: int, event: str, status: int, reason: str) -> None:

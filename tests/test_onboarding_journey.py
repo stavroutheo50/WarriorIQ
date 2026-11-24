@@ -64,7 +64,9 @@ def test_the_journey_steps_are_classified_by_route_and_outcome():
     assert step("GET", "/select/abc", 200) == "journey_fighter_picker"
     assert step("POST", "/upload", 303) == "journey_video_uploaded"
     assert step("POST", "/api/upload/abc/finish", 200) == "journey_video_uploaded"
-    assert step("POST", "/api/upload/begin", 200) is None
+    assert step("POST", "/api/upload/begin", 200) == "journey_upload_started"
+    assert step("POST", "/api/journey/video-chosen", 204) == "journey_video_chosen"
+    assert step("POST", "/api/journey/video-chosen", 403) is None
     assert step("POST", "/api/upload/begin", 413) == "journey_upload_refused"
     assert step("POST", "/api/start/abc", 202) == "journey_fighters_picked"
     assert step("POST", "/api/start/abc", 400) == "journey_start_refused"
@@ -83,7 +85,7 @@ def test_the_admin_report_shows_each_new_account_and_where_it_stopped():
     report = admin_overview.onboarding(jobs)
     people = {p["email"]: p for p in report["people"]}
     assert people[stuck_email]["furthest_key"] == "upload_page"
-    assert people[stuck_email]["next_step"] == "Uploaded a video"
+    assert people[stuck_email]["next_step"] == "Chose a video"
     assert people[stuck_email]["problem"]["reason"] == "That file is too large."
     assert people[done_email]["furthest_key"] == "finished"
     assert people[waiting_email]["furthest_key"] == "fighters_picked"
@@ -143,3 +145,19 @@ def test_test_accounts_and_admins_are_left_out_and_can_be_counted_again():
     # Not an administrator: the action does not exist.
     _, _, stranger = _account()
     assert stranger.post(f"/admin/accounts/{tester['id']}/test-account", data={"test": "1"}).status_code == 404
+
+
+def test_choosing_a_video_is_recorded_once_and_carries_nothing_about_it():
+    """2026-11-24: of the people who open the upload page and leave, did they pick a file?"""
+    created, _, client = _account()
+    client.get("/analyze")
+    for _ in range(2):
+        assert client.post("/api/journey/video-chosen").status_code == 204
+    events = _events(created["id"])
+    assert [e[0] for e in events] == ["journey_upload_page", "journey_video_chosen"]
+    assert set(events[-1][1]) == {"status"}
+
+
+def test_the_admin_funnel_has_the_two_upload_steps_in_order():
+    keys = [key for key, _ in admin_overview.JOURNEY_STEPS]
+    assert keys.index("upload_page") < keys.index("video_chosen") < keys.index("upload_started") < keys.index("video_uploaded")

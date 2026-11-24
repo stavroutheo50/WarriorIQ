@@ -77,7 +77,7 @@
 {% set ob = o.onboarding %}
 <section class="card admin-section" id="adminOnboarding" aria-labelledby="adminOnboardingTitle">
   <div class="eyebrow">New accounts · last {{ ob.days }} days</div><h2 id="adminOnboardingTitle">Where new accounts stop</h2>
-  <p class="small muted">Each new account's furthest step on the way to a first report. Steps between sign-up and a saved fight are recorded from {{ ob.tracking_since }}; an older account shows only what its saved fights and waiting analyses prove.</p>
+  <p class="small muted">Each new account's furthest step on the way to a first report. Steps between sign-up and a saved fight are recorded from {{ ob.tracking_since }}; an older account shows only what its saved fights and waiting analyses prove. "Chose a video" and "Started the upload" are recorded from {{ ob.upload_steps_since }}, so someone who stopped on the upload page before then may have got further than it shows.</p>
   {% if ob.total %}
   <ol class="admin-funnel">{% for step in ob.funnel %}<li><span>{{ step.label }}</span><b class="wiq-num">{{ step.count }}</b><i class="admin-funnel-bar" style="--share: {{ step.share }}%"></i><small>{{ step.share }}%</small></li>{% endfor %}</ol>
   <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Joined</th><th>Email</th><th>Got as far as</th><th>Stopped before</th><th>Now</th><th>Last problem shown to them</th><th>Last seen</th><th><span class="visually-hidden">Test account</span></th></tr></thead><tbody>
