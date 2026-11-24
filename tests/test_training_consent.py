@@ -139,3 +139,12 @@ def test_the_kept_fights_need_the_worker_token():
     response = BrowserClient(web.app).get("/api/worker/consented")
     assert response.status_code in {401, 503}
     assert "fights" not in response.text
+
+
+def test_the_box_switches_off_for_footage_with_a_minor():
+    """The server ignores it for footage with anyone under 18; the page says so
+    rather than taking a tick it will not honour (2026-11-24)."""
+    page = (ROOT / "app" / "templates" / "analyze.html").read_text(encoding="utf-8")
+    assert 'id="trainingMinorNote" hidden' in page
+    script = page.split("const syncTraining=")[1].split("};")[0]
+    assert "guardian_authorized" in script and "trainingBox.checked=false" in script and "trainingBox.disabled=minor" in script

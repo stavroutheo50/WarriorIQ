@@ -622,3 +622,9 @@ details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg)
 .device-signout-all { margin: 0 0 12px; }
 .device-more { margin-top: 10px; }
 .device-more > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--wiq-a); font-weight: 700; }
+
+/* --- "Help WarriorIQ get better" at upload (2026-11-24) ------------------------- */
+.upload-training-consent .upload-training-small, .upload-training-consent .upload-training-minor { display: block; margin-top: 6px; color: var(--glass-text-faint); font-size: 13px; line-height: 1.45; }
+.upload-training-consent .upload-training-minor { color: var(--wiq-text); }
+.upload-training-consent .upload-training-minor[hidden] { display: none; }
+.upload-training-consent:has(input:disabled) { opacity: .7; }
