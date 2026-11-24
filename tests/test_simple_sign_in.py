@@ -148,3 +148,35 @@ def test_both_pages_say_what_continuing_with_google_means():
             assert 'formaction="/auth/google/start"' in page
             assert "Continuing creates your account" in page
             assert 'id="socialGate"' not in page and "disabled" not in page.split('formaction="/auth/google/start"')[1][:200]
+
+
+def test_google_sign_in_behind_on_its_policies_is_asked_once_like_email():
+    email = f"google-old-{uuid.uuid4().hex[:8]}@example.test"
+    subject = f"g-{uuid.uuid4().hex[:10]}"
+    identity = SocialIdentity(provider="google", subject=subject, email=email,
+                              display_name="Old Fighter", email_verified=True)
+
+    def sign_in():
+        client = BrowserClient(web.app, base_url="https://warrioriq.eu")
+        web._rate_windows.clear()
+        with patch.object(web.SOCIAL_AUTH, "client", return_value=_FakeGoogle()), \
+                patch.object(web.SOCIAL_AUTH, "identity_from_token", new=AsyncMock(return_value=identity)):
+            client.post("/auth/google/start", data={"mode": "login", "next_path": "/camp"}, follow_redirects=False)
+            return client, client.get("/auth/google/callback?state=simple-state", follow_redirects=False)
+
+    sign_in()                                                       # creates the account, current policies
+    account = db.get_account_by_email(email)
+    with db.connection() as con:                                    # a policy change since then
+        con.execute("UPDATE accounts SET terms_version='2000-01-01', privacy_version='2000-01-01' WHERE id=?",
+                    (int(account["id"]),))
+    before = len(db.list_legal_acceptances(profile_id=account["profile_id"]))
+    client, done = sign_in()
+    assert done.headers["location"] == "/policies?next=%2Fcamp"
+    # Nothing is recorded as accepted that was not shown.
+    assert len(db.list_legal_acceptances(profile_id=account["profile_id"])) == before
+    page = client.get("/policies?next=/camp")
+    assert page.status_code == 200 and "I accept the updated" in page.text
+    client.post("/policies", data={"next_path": "/camp", "accept_policies": "true",
+                                   "csrf_token": client.cookies.get("warrioriq_csrf", "")}, follow_redirects=False)
+    _, done = sign_in()
+    assert done.headers["location"] == "/camp"

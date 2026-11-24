@@ -3610,7 +3610,11 @@ async def social_auth_callback(request: Request, provider: str):
             account_id=int(account["id"]),
             metadata={"policy_version": SETTINGS.policy_version, "provider": identity.provider},
         )
-    else:
+    elif not policies_outdated(account):
+        # Recorded only when this account has accepted the current version.
+        # It used to be written on every social sign-in, so an account behind
+        # on its policies carried a record of accepting a version it was never
+        # shown - and was never sent to /policies, as an email sign-in is.
         record_legal_acceptance(
             "account_signin_policies",
             SETTINGS.policy_version,
@@ -3633,7 +3637,12 @@ async def social_auth_callback(request: Request, provider: str):
         account_id=int(account["id"]),
         metadata={"provider": identity.provider, "created": created},
     )
-    response = RedirectResponse(_safe_next(str(intent.get("next_path"))), status_code=303)
+    destination = _safe_next(str(intent.get("next_path")))
+    # As after an email sign-in: an account behind on its policies is asked
+    # once, on /policies, before it carries on (2026-11-24).
+    if not created and policies_outdated(account):
+        destination = f"/policies?next={quote(destination, safe='')}"
+    response = RedirectResponse(destination, status_code=303)
     response.set_cookie(
         SESSION_COOKIE,
         issue_session(int(account["id"]), device_label=_device_label(request)),
