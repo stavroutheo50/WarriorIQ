@@ -58,7 +58,7 @@
   transition: background-color 140ms var(--wiq-motion-ease, ease),
               border-color 140ms var(--wiq-motion-ease, ease);
 }
-.btn:hover {  transform: none; filter: none; }
+/* .btn hover lift and glow: app/static/interaction.css (2026-11-24). */
 
 .btn.secondary, .nav-cta {
   background: transparent;
@@ -239,7 +239,7 @@ h1 em, h2 em {
    A blue glow was reapplied to primary buttons by the motion layer, and two
    decorative washes survived on section backgrounds. The chrome carries no hue,
    so they go; the button is already the highest-contrast element on the page. */
-.btn, .btn:hover, .nav-signup, .wiq-primary-motion { box-shadow: none !important; }
+.nav-signup, .wiq-primary-motion { box-shadow: none !important; }
 
 .coach-callout, .final-cta, .trust-panel, .product-preview {
   background-image: none !important;
@@ -396,7 +396,7 @@ body:has(.cookie-notice:not([hidden])) { padding-bottom: 180px; }
 
 /* The primary button keeps white for contrast, but gains a warm edge so it
    belongs to the palette instead of floating on top of it. */
-.btn { box-shadow: inset 0 -1px 0 rgba(0, 0, 0, .25) !important; }
+/* .btn shadows: app/static/interaction.css (2026-11-24). */
 
 /* --- Rhythm ---------------------------------------------------------------
    Section spacing was uniform, so every band had the same weight. The hero
