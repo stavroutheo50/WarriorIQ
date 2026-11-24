@@ -281,14 +281,35 @@ input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   border-right: 0 !important;
   border-top: 0 !important;
 }
-/* "Billing not open yet" is information, not success. */
-.plan-early { border-color: #805d22; background: #3a2a1255; color: #f3c98b; }
 /* One grid at tablet width: Gym takes one column like the others. */
 @media (max-width: 1100px) {
   .pricing-grid .pricing-card.gym-featured { grid-column: span 6; }
 }
 @media (max-width: 700px) {
   .pricing-grid .pricing-card.gym-featured { grid-column: 1 / -1; }
+}
+/* Two rows of equal cards (visual audit, 2026-11-24): the three plans for one
+   fighter, then the four for coaches and gyms, each under its own heading.
+   !important answers the older 12-column span rules for single cards. */
+.pricing-group { margin: 36px 0 14px; font-size: clamp(22px, 2.4vw, 28px); line-height: 1.15; letter-spacing: -.02em; }
+.pricing-grid.pricing-grid-athletes, .pricing-grid.pricing-grid-teams { grid-template-columns: repeat(var(--plan-cols), minmax(0, 1fr)); gap: 18px; }
+.pricing-grid-athletes { --plan-cols: 3; }
+.pricing-grid-teams { --plan-cols: 4; }
+.pricing-grid-athletes > .pricing-card, .pricing-grid-teams > .pricing-card { grid-column: auto !important; }
+.pricing-grid.pricing-grid-athletes, .pricing-grid.pricing-grid-teams { margin-top: 0; }
+/* The blank banner holds a space so it is exactly as tall as a real one. */
+.pricing-grid .plan-banner.is-blank { visibility: hidden; }
+.pricing-grid .plan-banner.is-blank::before { content: "\00a0"; }
+.plan-compare-more { margin: 28px 0 0; }
+.plan-compare-more > summary { list-style: none; }
+.plan-compare-more > summary::-webkit-details-marker { display: none; }
+.plan-compare-more[open] > summary { margin-bottom: 14px; }
+@media (max-width: 1100px) {
+  .pricing-grid-teams { --plan-cols: 2; }
+}
+@media (max-width: 700px) {
+  .pricing-grid-athletes, .pricing-grid-teams { --plan-cols: 1; }
+  .pricing-grid .plan-banner.is-blank { display: none; }
 }
 /* The trust points are facts, not buttons. */
 .pricing-trust .trust-checks span { cursor: default; box-shadow: none; background: none; border-style: dashed; }
@@ -467,11 +488,21 @@ details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg)
   padding: clamp(36px, 6vw, 72px) 0 clamp(24px, 4vw, 48px);
 }
 .hx-hero-copy { flex: 1 1 440px; min-width: 0; display: grid; gap: 20px; }
-.hx-hero-still .hx-title { font-size: clamp(40px, 5.4vw, 72px) !important; line-height: 1.02; letter-spacing: -.045em; }
+/* Three lines (visual audit, 2026-11-24): at 72px in a half-width column the
+   headline broke into five. Plain wrapping, not balance: balance split
+   "Improve your game." in two even where it fits on one line, so that line
+   is kept whole and sized to fit its column, down to a 320px phone. */
+.hx-hero-still .hx-title { font-size: clamp(34px, 4.2vw, 58px) !important; line-height: 1.04; letter-spacing: -.04em; text-wrap: wrap; }
+.hx-hero-still .hx-title em { white-space: nowrap; }
+@media (max-width: 700px) { .hx-hero-still .hx-title { font-size: clamp(26px, 8.2vw, 34px) !important; } }
 .hx-hero-still .hx-lead { max-width: 560px; }
 .hx-hero-still .hx-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
 .hx-secondary { font-size: 15px; font-weight: 600; }
 .hx-trust { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; padding: 0; list-style: none; color: var(--glass-text-faint, #a9b2c3); font-size: 14px; }
+/* Each promise gets a check mark, so the row reads as a list, not loose words. */
+.hx-trust li { display: inline-flex; align-items: center; gap: 7px; }
+.hx-trust li::before { content: "\2713"; color: var(--wiq-a); font-weight: 800; }
+
 .hx-hero-shot { flex: 1 1 480px; min-width: 0; margin: 0; display: grid; gap: 12px; }
 .hx-hero-shot img {
   display: block;
@@ -533,3 +564,61 @@ details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg)
 .qc-step{margin:0}
 .qc-answers{display:flex;flex-wrap:wrap;gap:8px}
 .qc-done p{margin:0 0 10px}
+
+/* --- Fight library (visual audit, 2026-11-24) ---------------------------------- */
+/* One main button; Replay, Compare, Rename and Delete in a "More" menu. */
+.fight-record-actions { gap: 10px; }
+.fight-more { position: relative; border-radius: 0 !important; }
+/* The card with an open menu sits above the cards after it. */
+.fight-record:has(.fight-more[open]) { z-index: 40; }
+.fight-more > summary { list-style: none; cursor: pointer; }
+.fight-more > summary::-webkit-details-marker { display: none; }
+.fight-more > summary::after { content: ""; width: 7px; height: 7px; margin: -3px 0 0 8px; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform .2s ease; }
+.fight-more[open] > summary::after { margin-top: 3px; transform: rotate(-135deg); }
+.fight-more-menu { position: absolute; z-index: 30; top: calc(100% + 8px); right: 0; display: grid; gap: 2px; width: max-content; min-width: 220px; max-width: min(320px, 86vw);
+  padding: 8px; border: 1px solid var(--wiq-line); border-radius: 18px; background: var(--wiq-panel-strong); box-shadow: 0 24px 48px -16px rgba(0, 0, 0, .85); }
+.fight-more-menu > a.text-link, .fight-more-menu .fight-details-edit > summary, .fight-more-menu .record-delete {
+  display: flex; align-items: center; width: 100%; min-height: 44px; padding: 0 12px; border-radius: 12px; color: var(--wiq-text); font-size: 15px; text-decoration: none; }
+.fight-more-menu > a.text-link:hover, .fight-more-menu .fight-details-edit > summary:hover { background: rgba(255, 255, 255, .06); }
+.fight-more-menu .fight-details-edit { font-size: 15px; }
+.fight-more-menu .fight-details-edit form { padding: 0 12px 10px; }
+.fight-more-menu form[data-confirm-delete] { margin: 4px 0 0 !important; padding: 6px 0 0 !important; border-left: 0 !important; border-top: 1px solid var(--wiq-line); }
+.fight-more-menu .record-delete { justify-content: flex-start; color: var(--wiq-danger); }
+.fight-more-menu .record-delete:hover { background: rgba(255, 100, 112, .1); }
+/* Phones: the filters fold behind one button (the script sets .is-folded). */
+.archive-filter-set { display: contents; }
+.archive-filter-toggle[hidden] { display: none; }
+@media (max-width: 620px) {
+  .archive-search { flex: 1 1 0 !important; width: auto !important; min-width: 0 !important; }
+  .archive-filter-toggle { flex: 0 0 auto; min-height: 46px; }
+  .archive-filter-set { display: grid; gap: 10px; flex-basis: 100%; }
+  .archive-tools.is-folded .archive-filter-set { display: none; }
+  .archive-tools.is-folded + .archive-bulk:not(:has(#bulkDelete:enabled)) { display: none; }
+  /* A compact card: the thumbnail beside the names, result and actions below. */
+  .fight-records .fight-record { grid-template-columns: 96px minmax(0, 1fr); gap: 10px 14px; padding: 14px !important; align-items: start; border-radius: 24px; }
+  .fight-record .fight-thumb { grid-column: 1; margin-top: 0; aspect-ratio: 1; border-radius: 16px; }
+  .fight-record .fight-thumb, .fight-record .fight-thumb img { border-radius: 16px; }
+  .fight-record .fight-thumb span { display: none; }
+  .fight-record .fight-thumb.thumb-unavailable::before { font-size: 20px; }
+  .fight-record-main { grid-column: 2; }
+  .fight-record-main h2 { font-size: 19px; margin: 2px 0; }
+  .fight-record .fight-result, .fight-record .fight-record-actions { grid-column: 1 / -1; }
+  .fight-record .fight-result { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+  .fight-record .fight-result .score-withheld, .fight-record .fight-result strong { font-size: 18px; margin: 0; }
+  .fight-record > .fight-select { top: 8px !important; left: 8px !important; width: 28px; height: 28px; }
+  .fight-record-actions .btn { min-height: 44px; }
+}
+
+/* --- Fight Camp (visual audit, 2026-11-24) -------------------------------------- */
+.athlete-name-row { display: flex; align-items: center; gap: 16px; min-width: 0; margin: 6px 0 4px; }
+.athlete-name-row h1 { margin: 0 !important; min-width: 0; overflow-wrap: anywhere; }
+.athlete-name-row .athlete-avatar { flex: 0 0 auto; }
+/* Before the first point the panel is one line and one goal. */
+.camp-standing.is-fresh { align-content: start; }
+.camp-standing.is-fresh .camp-no-points { margin: 6px 0 0; font-size: 14px; }
+
+/* --- Settings (visual audit, 2026-11-24) ---------------------------------------- */
+.settings-versions { margin: 10px 0 0; }
+.device-signout-all { margin: 0 0 12px; }
+.device-more { margin-top: 10px; }
+.device-more > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--wiq-a); font-weight: 700; }

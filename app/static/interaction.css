@@ -143,6 +143,12 @@
 }
 .on-media .btn.secondary:hover{background:rgba(255,255,255,.17);border-color:rgba(255,255,255,.5) !important}
 
+/* --- Headings: a clear order (visual audit, 2026-11-24) -------------------
+   A heading inside a card fell back to the site-wide h2 (up to 43px), as big
+   as the page's own title. :where() keeps this at the weight of a bare h2, so
+   any card that sizes its own heading still wins. */
+:where(main .card) h2{font-size:clamp(22px,2.2vw,28px);line-height:1.15;letter-spacing:-.02em}
+
 /* --- Menu: the highlight slides (motion.js places .nav-pill) ------------- */
 
 .navlinks{position:relative}
