@@ -5705,6 +5705,14 @@ def _email_analysis_outcome(job_id: str, job: dict | None, ready: bool) -> None:
                 subject = "Your WarriorIQ fight report is ready"
                 body = (f"Your fight has been analysed. Open your report:\n\n{base}/result/{job_id}\n\n"
                         "It is private to your account.")
+                # The quick check is how accuracy is measured now (owner, 2026-11-24:
+                # no hand labelling), so the email says it is there. Never to an
+                # under-18 account, who is not asked (_may_check_strikes).
+                if not social.is_minor_account(account):
+                    # Worded as the privacy policy has it: answers measure accuracy;
+                    # they are not training data.
+                    body += ("\n\nYour report may ask about a few strikes it counted, one tap each. "
+                             "Your answers show how accurate WarriorIQ's strike counts are.")
             else:
                 subject = "WarriorIQ could not finish analysing your fight"
                 body = ("The analysis of your fight stopped before it finished, and it has not used up any of "

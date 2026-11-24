@@ -19,6 +19,9 @@
   {% for group, title, lede in [(sheet.movement, 'Movement and position', 'Measured from where each fighter stood and moved, frame by frame.'), (sheet.strikes, 'Strikes', 'Rough estimates, counted automatically. On our hand-checked test clips fewer than half of the counted strikes were real ones, so a total can be well off.')] %}{% if group %}
   <h3 class="stat-group">{{ title }}</h3>
   <p class="stat-group-lede">{{ lede }}</p>
+  {#- Straight to the quick check, where the reader can say whether these
+      counts were right (owner, 2026-11-24). Only where it is offered. -#}
+  {% if title == 'Strikes' and quick_check %}<p class="stat-group-lede"><a class="text-link" href="#quickCheck">Are these right? Answer a quick check, one tap each</a></p>{% endif %}
   <dl class="stat-rows">
     {% for row in group %}
     <div class="stat-row">

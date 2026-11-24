@@ -56,5 +56,7 @@ Per strike against per fighter (2026-11-10, same 9 clips, 0.5 s window):
   2 clips where it would claim one; any difference at all: 2 of 5. Not shown.
 
 The skeleton rules are at their limit for strikes. The next step is a learned
-model on many labelled real strikes: the owners' quick-check answers
-(app/accuracy.py), once there are a few hundred.
+model on many labelled real strikes. The owners' quick-check answers
+(app/accuracy.py) measure accuracy only: the privacy policy says they are not
+training data. Training can use only fights whose uploader ticked "Help
+WarriorIQ get better", or a policy change made first.
