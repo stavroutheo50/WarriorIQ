@@ -646,6 +646,11 @@
     fighterPick.addEventListener('change',syncFighter);syncFighter();
   }
   videoInput.addEventListener('change',()=>{hideUploadError();setReady()});
+  // Tell the server a video was picked, once (where new accounts stop, 2026-11-24).
+  // Only the step: the file stays on this device until Upload is pressed.
+  let chosenSent=false;
+  videoInput.addEventListener('change',()=>{if(chosenSent||!videoInput.files[0]||typeof wiqCsrfHeaders!=='function')return;chosenSent=true;
+    fetch('/api/journey/video-chosen',{method:'POST',headers:wiqCsrfHeaders({}),keepalive:true}).catch(()=>{})});
   // The fighters' frame is found on the server (core/person_detect.py), so
   // the upload only has to finish: WarriorIQ moves on by itself.
   let ready=null,advancing=false;

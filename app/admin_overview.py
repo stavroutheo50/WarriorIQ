@@ -385,6 +385,9 @@ def _email_note(event_type: str, metadata: dict) -> str:
 JOURNEY_STEPS = (
     ("signed_up", "Signed up"),
     ("upload_page", "Opened the upload page"),
+    # From 2026-11-24: picked a file, then pressed Upload.
+    ("video_chosen", "Chose a video"),
+    ("upload_started", "Started the upload"),
     ("video_uploaded", "Uploaded a video"),
     ("fighter_picker", "Saw the pick-the-fighters frame"),
     ("fighters_picked", "Picked the fighters and started"),
@@ -392,7 +395,8 @@ JOURNEY_STEPS = (
 )
 _STEP_INDEX = {key: index for index, (key, _) in enumerate(JOURNEY_STEPS)}
 JOURNEY_TRACKING_SINCE = "2026-11-22"
-_JOB_STEP = {"selecting": "video_uploaded", "uploading": "upload_page", "queued": "fighters_picked",
+UPLOAD_STEPS_SINCE = "2026-11-24"      # "Chose a video" and "Started the upload"
+_JOB_STEP = {"selecting": "video_uploaded", "uploading": "upload_started", "queued": "fighters_picked",
              "running": "fighters_picked", "interrupted": "fighters_picked", "error": "fighters_picked",
              "complete": "finished"}
 _JOB_NOW = {"uploading": "upload still in progress", "selecting": "uploaded, has not picked the fighters",
@@ -504,4 +508,4 @@ def onboarding(jobs: list[tuple[str, dict]], days: int = 14, now: datetime | Non
     funnel = [{"key": key, "label": label, "count": reached_counts[key],
                "share": round(reached_counts[key] / total * 100) if total else 0} for key, label in JOURNEY_STEPS]
     return {"days": days, "total": total, "funnel": funnel, "people": people, "excluded": excluded,
-            "tracking_since": JOURNEY_TRACKING_SINCE}
+            "tracking_since": JOURNEY_TRACKING_SINCE, "upload_steps_since": UPLOAD_STEPS_SINCE}
