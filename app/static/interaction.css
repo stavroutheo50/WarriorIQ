@@ -1,0 +1,200 @@
+/* ============================================================================
+   WarriorIQ interaction layer (owner, 2026-11-24)
+   ----------------------------------------------------------------------------
+   The owner chose from a live mockup: style B ("solid premium") for buttons,
+   style A ("real glass") only for buttons over a photo or video, and all four
+   motions: a sliding menu highlight, cards that lift, pages that fade into
+   each other, and numbers that arrive.
+
+   One place for how buttons look and move. Before this, .btn was styled in
+   twelve files, and redesign.css cancelled every hover lift and glow with
+   `transform: none` and `box-shadow: none !important`, so the transitions
+   that were declared never showed. Those rules are gone; this file is loaded
+   last in the shell bundle, before a11y.css (whose tap-target floors must
+   still win). The few !important here only answer older !important rules.
+
+   Everything that moves animates transform, opacity, box-shadow, filter or a
+   colour: cheap for a phone to draw. prefers-reduced-motion turns it all off.
+   ========================================================================= */
+
+:root{
+  --wiq-press:cubic-bezier(.2,.8,.2,1);
+  --wiq-btn-radius:14px;
+}
+
+/* --- Buttons: B, solid premium ------------------------------------------ */
+
+.btn, a.btn, button.btn{
+  position:relative;
+  isolation:isolate;
+  border-radius:var(--wiq-btn-radius) !important;
+  -webkit-tap-highlight-color:transparent;
+  transition:transform .22s var(--wiq-press), box-shadow .22s var(--wiq-press), filter .22s ease,
+             background-color .22s ease, border-color .22s ease, color .22s ease, opacity .22s ease;
+}
+.btn:focus-visible{outline:3px solid var(--wiq-a);outline-offset:3px}
+
+/* Main action: a crisp blue fill, lit from the top, with a soft glow. */
+.btn:not(.secondary):not(.danger){
+  border:1px solid transparent;
+  background-color:#2f6fed;
+  background-image:linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0));
+  color:var(--wiq-text);
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.35), 0 1px 2px rgba(0,0,0,.4), 0 10px 30px -12px rgba(47,111,237,.95);
+}
+.btn:not(.secondary):not(.danger):hover{
+  /* Colour stated again: glass.css's hover uses the background shorthand,
+     which would otherwise leave it transparent. */
+  background-color:#2f6fed;
+  background-image:linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0));
+  filter:brightness(1.08);
+  transform:translateY(-2px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4), 0 2px 4px rgba(0,0,0,.4), 0 18px 40px -12px rgba(47,111,237,1);
+}
+/* A light sweeps across the main button on hover. The highlight slides inside
+   the button's own box (background-position), so nothing needs clipping: an
+   overflow:hidden button inside a flex row may shrink below its label, which
+   squashed "View analysis" into a circle on phones (2026-11-24). */
+.btn:not(.secondary):not(.danger)::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  border-radius:inherit;
+  pointer-events:none;
+  background:linear-gradient(110deg, transparent 40%, rgba(255,255,255,.32) 50%, transparent 60%) no-repeat;
+  background-size:250% 100%;
+  background-position:130% 0;
+  transition:background-position .7s var(--wiq-press);
+}
+.btn:not(.secondary):not(.danger):hover::after{background-position:-30% 0}
+
+/* Second choice: a dark panel whose edge lights blue. */
+.btn.secondary{
+  border:1px solid var(--wiq-line) !important;
+  background:var(--wiq-panel);
+  color:var(--wiq-text) !important;
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+  box-shadow:0 1px 2px rgba(0,0,0,.4) !important;
+}
+.btn.secondary:hover{
+  border-color:var(--wiq-a) !important;
+  background:var(--wiq-panel-strong);
+  transform:translateY(-2px);
+  box-shadow:0 10px 26px -14px rgba(90,160,255,.8) !important;
+}
+
+.btn.danger{
+  border:1px solid rgba(255,100,112,.45) !important;
+  background:rgba(255,100,112,.1);
+  color:#ff9aa8 !important;
+  box-shadow:none !important;
+}
+.btn.danger:hover{background:rgba(255,100,112,.18);transform:translateY(-2px)}
+
+/* Every button squeezes in a little when pressed, so a tap feels physical. */
+.btn:active{transform:translateY(0) scale(.96);transition-duration:.08s}
+
+.btn:disabled, .btn[aria-disabled="true"]{opacity:.5;cursor:not-allowed;transform:none;filter:none}
+.btn:disabled::after, .btn[aria-disabled="true"]::after{display:none}
+
+/* Busy (base.html sets aria-busy while a form sends): a spinner beside the label. */
+.btn[aria-busy="true"]{cursor:progress}
+.btn[aria-busy="true"]::before{
+  content:"";
+  width:14px;
+  height:14px;
+  margin-right:8px;
+  flex:0 0 auto;
+  border:2px solid currentColor;
+  border-right-color:transparent;
+  border-radius:50%;
+  animation:wiq-btn-spin .7s linear infinite;
+}
+@keyframes wiq-btn-spin{to{transform:rotate(360deg)}}
+
+/* --- Buttons: A, real glass, only over a photo or video ------------------
+   A container that sits on imagery carries .on-media; or one button can take
+   .btn-glass. See-through and blurred, so the picture shows through. */
+.on-media .btn:not(.secondary):not(.danger), .btn.btn-glass{
+  border:1px solid rgba(255,255,255,.34) !important;
+  background-color:rgba(90,160,255,.3);
+  background-image:none;
+  color:var(--wiq-text) !important;
+  text-shadow:0 1px 2px rgba(0,0,0,.35);
+  -webkit-backdrop-filter:blur(16px) saturate(1.7);
+  backdrop-filter:blur(16px) saturate(1.7);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.5), inset 0 -1px 0 rgba(0,0,0,.15), 0 10px 28px -12px rgba(0,0,0,.7) !important;
+}
+.on-media .btn:not(.secondary):not(.danger):hover, .btn.btn-glass:hover{
+  background-color:rgba(90,160,255,.46);
+  filter:none;
+  transform:translateY(-2px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.6), 0 0 0 1px rgba(140,194,255,.35), 0 14px 34px -10px rgba(90,160,255,.75) !important;
+}
+.on-media .btn.secondary{
+  border:1px solid rgba(255,255,255,.3) !important;
+  background:rgba(255,255,255,.09);
+  -webkit-backdrop-filter:blur(16px) saturate(1.7);
+  backdrop-filter:blur(16px) saturate(1.7);
+}
+.on-media .btn.secondary:hover{background:rgba(255,255,255,.17);border-color:rgba(255,255,255,.5) !important}
+
+/* --- Menu: the highlight slides (motion.js places .nav-pill) ------------- */
+
+.navlinks{position:relative}
+.navlinks > a, .navlinks > .sport-menu > summary{position:relative;z-index:1;border-radius:999px}
+.navlinks > a[aria-current="page"]{background:transparent;box-shadow:none}
+.navlinks.has-pill > a:hover{background:transparent}
+.nav-pill{
+  position:absolute;
+  top:0;
+  left:0;
+  z-index:0;
+  height:var(--pill-h, 36px);
+  width:var(--pill-w, 0px);
+  border-radius:999px;
+  background:rgba(255,255,255,.1);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18);
+  transform:translate(var(--pill-x, 0px), var(--pill-y, 0px));
+  opacity:var(--pill-o, 0);
+  pointer-events:none;
+  transition:transform .42s cubic-bezier(.2,.9,.25,1.15), width .42s cubic-bezier(.2,.9,.25,1.15), opacity .2s ease;
+  view-transition-name:wiq-nav-pill;
+}
+
+/* --- Cards lift ----------------------------------------------------------- */
+
+.fight-record, .pricing-card{
+  transition:transform .3s var(--wiq-press), box-shadow .3s ease, border-color .3s ease;
+}
+@media (hover:hover){
+  .fight-record:hover, .pricing-card:hover{
+    transform:translateY(-6px);
+    border-color:var(--wiq-a);
+    box-shadow:0 24px 48px -24px rgba(0,0,0,.9), 0 0 0 1px rgba(90,160,255,.25);
+  }
+  .fight-record .fight-thumb img{transition:transform .6s var(--wiq-press)}
+  .fight-record:hover .fight-thumb img{transform:scale(1.05)}
+}
+
+/* --- Pages fade into each other -------------------------------------------
+   Same-site page changes cross-fade with a short slide (the View Transitions
+   API). Browsers without it load the page as before. */
+@media (prefers-reduced-motion: no-preference){
+  @view-transition{navigation:auto}
+  ::view-transition-old(root){animation:wiq-page-out .22s ease both}
+  ::view-transition-new(root){animation:wiq-page-in .34s var(--wiq-press) both}
+}
+@keyframes wiq-page-out{to{opacity:0;transform:translateY(-6px)}}
+@keyframes wiq-page-in{from{opacity:0;transform:translateY(10px)}}
+
+/* --- Reduced motion: none of it -------------------------------------------- */
+@media (prefers-reduced-motion: reduce){
+  .btn, .btn::after, .nav-pill, .fight-record, .pricing-card, .fight-record .fight-thumb img{transition:none !important}
+  .btn:hover, .btn:active, .fight-record:hover, .pricing-card:hover{transform:none !important}
+  .btn[aria-busy="true"]::before{animation-duration:2s}
+}

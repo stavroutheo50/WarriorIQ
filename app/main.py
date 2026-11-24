@@ -473,7 +473,10 @@ CSS_BUNDLES: dict[str, tuple[str, ...]] = {
     # asked for, and load order is how they do that without !important.
     # glass.css is the 2026-10-28 look: it restyles what comes before it.
     # walkthrough.css (2026-11-16) adjusts spacing and alignment on top of glass.
-    "shell": ("premium.css", "motion.css", "redesign.css", "glass.css", "walkthrough.css", "a11y.css"),
+    # interaction.css (2026-11-24): the one button and motion layer, after
+    # everything it replaces.
+    "shell": ("premium.css", "motion.css", "redesign.css", "glass.css", "walkthrough.css", "interaction.css",
+              "a11y.css"),
 }
 
 

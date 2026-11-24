@@ -82,7 +82,7 @@
     const stat=parseStat(element);
     if(!stat||element.dataset.wiqCounted)return;
     element.dataset.wiqCounted='true';
-    countTo(element,stat.value,{from:0,suffix:stat.suffix,decimals:stat.decimals,duration:520,impact:true});
+    countTo(element,stat.value,{from:0,suffix:stat.suffix,decimals:stat.decimals,duration:900,impact:true});
   };
   const statTargets=[...document.querySelectorAll('body[data-page=result] [data-count-up],body[data-page=result] .analysis-quality-grid strong,body[data-page=result] .performance-stat>strong,body[data-page=result] .metric .value,body[data-page=result] .score,body[data-page=result] #report-scorecard tbody td:nth-child(2),body[data-page=result] #report-scorecard tbody td:nth-child(3),body[data-page=dashboard] .metric .value')];
   if('IntersectionObserver'in window&&!reduced){
@@ -130,5 +130,32 @@
     element.classList.remove('selection-impact');
     requestAnimationFrame(()=>element.classList.add('selection-impact'));
   };
+  // The menu highlight slides (interaction.css .nav-pill, 2026-11-24): it sits
+  // on the current page's link, follows the pointer or keyboard across the
+  // menu, and returns. Between pages the browser carries it over (its
+  // view-transition-name), so it glides to the new page's link.
+  const navlinks=document.querySelector('.navlinks');
+  if(navlinks){
+    const links=[...navlinks.querySelectorAll(':scope > a')];
+    const pill=document.createElement('span');
+    pill.className='nav-pill';pill.setAttribute('aria-hidden','true');
+    navlinks.prepend(pill);navlinks.classList.add('has-pill');
+    const current=()=>links.find(link=>link.getAttribute('aria-current')==='page');
+    const moveTo=link=>{
+      if(!link||!link.offsetWidth){pill.style.setProperty('--pill-o','0');return}
+      pill.style.setProperty('--pill-x',`${link.offsetLeft}px`);pill.style.setProperty('--pill-y',`${link.offsetTop}px`);
+      pill.style.setProperty('--pill-w',`${link.offsetWidth}px`);pill.style.setProperty('--pill-h',`${link.offsetHeight}px`);
+      pill.style.setProperty('--pill-o','1');
+    };
+    const settle=()=>moveTo(current());
+    // Placed without sliding in from the left on the first frame.
+    pill.style.transition='none';settle();requestAnimationFrame(()=>requestAnimationFrame(()=>{pill.style.transition=''}));
+    links.forEach(link=>{link.addEventListener('pointerenter',()=>moveTo(link));link.addEventListener('focus',()=>moveTo(link))});
+    navlinks.addEventListener('pointerleave',settle);
+    navlinks.addEventListener('focusout',event=>{if(!navlinks.contains(event.relatedTarget))settle()});
+    window.addEventListener('resize',settle);window.addEventListener('load',settle);
+    if(document.fonts&&document.fonts.ready)document.fonts.ready.then(settle);
+  }
+
   window.WarriorIQMotion={impact,reduced,countTo};
 })();
