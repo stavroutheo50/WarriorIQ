@@ -123,3 +123,9 @@ def test_the_card_renders_with_its_answers_and_says_it_is_optional():
 def test_the_privacy_policy_says_what_the_answers_are_for():
     page = BrowserClient(main.app).get("/privacy").text
     assert "Optional quick checks" in page and "not used as training data" in page
+
+
+def test_the_stat_sheet_points_to_the_quick_check_only_when_it_is_offered():
+    sheet = (Path(main.__file__).resolve().parent / "templates" / "_stat_sheet.html").read_text(encoding="utf-8")
+    link = sheet.split('href="#quickCheck"')[0].rsplit("{%", 1)[-1]
+    assert "quick_check" in link

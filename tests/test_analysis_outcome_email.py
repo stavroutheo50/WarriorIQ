@@ -143,3 +143,15 @@ def test_the_ready_email_waits_for_a_confirmed_address():
         assert send.called
     finally:
         object.__setattr__(SETTINGS, "require_email_verification", previous)
+
+
+def test_the_ready_email_mentions_the_quick_check_but_not_to_a_minor():
+    created, _ = _account()
+    job = {"owner_key": f"account:{created['id']}"}
+    with mock.patch.object(web, "send_transactional_email", return_value=True) as send:
+        web._email_analysis_outcome(f"qc{uuid.uuid4().hex[:8]}", job, ready=True)
+    assert "one tap each" in send.call_args.args[2]
+    with mock.patch.object(web.social, "is_minor_account", return_value=True), \
+            mock.patch.object(web, "send_transactional_email", return_value=True) as send:
+        web._email_analysis_outcome(f"qc{uuid.uuid4().hex[:8]}", job, ready=True)
+    assert "one tap each" not in send.call_args.args[2]
