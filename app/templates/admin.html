@@ -207,7 +207,7 @@
   <h3>Who is who at crossings</h3>
   {% if a.identity.answers %}<p>The analysis had the fighters the wrong way round at <strong>{{ rate(a.identity.disagreed, a.identity.answers) }}</strong> answered crossings, in {{ a.identity.fights_with_a_swap }} of {{ a.identity.fights }} fights with answers. {{ a.identity.fights_rerun }} fight{{ '' if a.identity.fights_rerun == 1 else 's' }} re-run with "Fix who is who".</p>{% else %}<p class="small muted">No crossing answers yet.</p>{% endif %}
   <h3>Counted strikes (one-tap checks)</h3>
-  <p class="small muted">These checks are shown to administrators only today, so they are your own answers.</p>
+  <p class="small muted">Answered by administrators and, since 24 Nov 2026, by fight owners in the report's quick check. They measure accuracy; the privacy policy says they are not training data.</p>
   <ul class="list-clean small">{% for family, row in a.strikes.items() %}<li><strong>{{ {'punch': 'Punches', 'kick': 'Kicks', 'knee': 'Knees'}[family] }}</strong>: {% if row.answered %}right {{ rate(row.right, row.answered) }}; not a strike {{ row.not_a_strike }}, wrong fighter {{ row.wrong_fighter }}, another type {{ row.other_type }}{% else %}no answers yet{% endif %}</li>{% endfor %}</ul>
   <h3>Someone went down</h3>
   {% if a.down.answered %}<p>Of {{ a.down.answered }} moments answered, <strong>{{ rate(a.down.nobody, a.down.answered) }}</strong> were nobody going down (a false alarm); fighter A {{ a.down.A }}, fighter B {{ a.down.B }}.</p>{% else %}<p class="small muted">No answers yet.</p>{% endif %}
@@ -217,6 +217,10 @@
     <li><strong>Which fighter threw it</strong> right in {{ rate(a.corrections.fighter_identity.correct, a.corrections.fighter_identity.total) }}</li>
     <li><strong>Target</strong> right in {{ rate(a.corrections.target.correct, a.corrections.target.total) }}</li>
   </ul><p class="small muted">{{ a.corrections.total }} corrections from every account, measured as on the validation page.</p>{% else %}<p class="small muted">No corrections yet.</p>{% endif %}
+  <h3>Fights shared to improve WarriorIQ</h3>
+  {#- The only fights the strike detector may be trained on: their uploader
+      ticked "Help WarriorIQ get better" (core/training_consent.py). -#}
+  <p><strong>{{ a.shared.kept }}</strong> fight{{ '' if a.shared.kept == 1 else 's' }} held for training now. {{ rate(a.shared.ticked, a.shared.uploads) }} uploads ticked "Help WarriorIQ get better"; a fight stops counting when it, its video or its account is deleted.</p>
   {% else %}<p class="notice bad">These figures could not be counted just now. The error is in the website log.</p>{% endif %}
 </section>
 

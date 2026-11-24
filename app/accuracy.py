@@ -107,6 +107,20 @@ def identity_answers(jobs: list[tuple[str, dict]],
     return counts
 
 
+def shared_fights(jobs: list[tuple[str, dict]]) -> dict:
+    """Fights uploaded with "Help WarriorIQ get better" ticked (core/training_consent.py).
+
+    The only fights the privacy policy lets the strike detector be trained on.
+    `ticked` counts uploads that asked for it (finished or not); `kept` counts
+    the fights actually held for training now: finished, and not deleted since.
+    Quick-check answers are not training data and are not counted here.
+    """
+    from core import training_consent
+
+    return {"uploads": len(jobs), "ticked": sum(1 for _, job in jobs if job.get("training_consent")),
+            "kept": len(training_consent.kept())}
+
+
 def summary(jobs: list[tuple[str, dict]], anchors_for: Callable[[str, dict], list[dict]],
             now: float | None = None) -> dict:
     """Everything above, counted at most once every CACHE_SECONDS."""
@@ -115,6 +129,7 @@ def summary(jobs: list[tuple[str, dict]], anchors_for: Callable[[str, dict], lis
         return _cache["value"]
     annotations = list_annotations()
     value = {"strikes": strike_answers(annotations), "down": down_answers(annotations),
-             "corrections": corrections(annotations), "identity": identity_answers(jobs, anchors_for)}
+             "corrections": corrections(annotations), "identity": identity_answers(jobs, anchors_for),
+             "shared": shared_fights(jobs)}
     _cache.update(at=now, value=value)
     return value

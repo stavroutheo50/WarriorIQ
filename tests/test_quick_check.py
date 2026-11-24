@@ -129,3 +129,12 @@ def test_the_stat_sheet_points_to_the_quick_check_only_when_it_is_offered():
     sheet = (Path(main.__file__).resolve().parent / "templates" / "_stat_sheet.html").read_text(encoding="utf-8")
     link = sheet.split('href="#quickCheck"')[0].rsplit("{%", 1)[-1]
     assert "quick_check" in link
+
+
+def test_the_admin_counts_fights_shared_for_training(monkeypatch):
+    from app import accuracy
+    from core import training_consent
+
+    monkeypatch.setattr(training_consent, "kept", lambda: [{"job_id": "a"}, {"job_id": "b"}])
+    jobs = [("1", {"training_consent": True}), ("2", {}), ("3", {"training_consent": True})]
+    assert accuracy.shared_fights(jobs) == {"uploads": 3, "ticked": 2, "kept": 2}
