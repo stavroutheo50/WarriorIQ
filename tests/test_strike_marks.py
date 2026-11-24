@@ -165,10 +165,13 @@ def test_a_bad_mark_is_refused_and_nothing_is_written(admin_email):
     assert not (web.OUTPUTS / job_id / web.STRIKE_MARKS_FILE).exists()
 
 
-def test_a_customer_is_not_asked_whether_a_strike_was_right_or_who_went_down():
+def test_a_customer_answers_strikes_through_the_quick_check_only():
+    """Reversed by the owner on 2026-11-24 ("no more hand labelling"): the fight's
+    owner may answer counted strikes (the report's quick check, tests/test_quick_check.py).
+    "Who went down?" and the full list of every counted strike stay internal."""
     client, job_id = _owner_with_fight()
     assert client.post(f"/api/strike-check/{job_id}", json={
-        "seconds": 3.0, "fighter": "A", "family": "punch", "verdict": "right"}).status_code == 403
+        "seconds": 3.0, "fighter": "A", "family": "punch", "verdict": "right"}).status_code == 200
     assert client.post(f"/api/down-check/{job_id}", json={"seconds": 3.0, "verdict": "A"}).status_code == 403
     source = (Path(web.__file__)).read_text(encoding="utf-8")
     assert '"can_check_strikes": _is_admin(request),' in source

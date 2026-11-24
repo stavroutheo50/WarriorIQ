@@ -14,7 +14,9 @@ real use is the answers already given on reports and on the live page:
 Nothing here is estimated. Every figure is a count of answers, shown with how
 many answers it comes from, because a handful of answers is not a rate. The
 people who answer are not a random sample either: they answer what caught
-their eye, and today strike and down answers come from administrators only.
+their eye. Strike answers come from administrators and, since 2026-11-24,
+from fight owners through the report's quick check (a few moments spread
+across their own fight); down answers still from administrators only.
 
 In app/ rather than core/: presentation for the admin page, and every core/*.py
 is part of the analysis-code fingerprint the worker must match.

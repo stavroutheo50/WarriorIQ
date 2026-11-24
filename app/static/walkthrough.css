@@ -521,3 +521,15 @@ details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg)
 /* A tick box with a paragraph beside it is a card, not a pill: 999px rounding
    on a six-line label drew a stretched oval (the optional training consent). */
 .check.upload-training-consent, .check.legal-check { border-radius: 18px; }
+
+/* Quick check on the report (2026-11-24): one moment at a time, one tap. */
+.quick-check{display:grid;gap:12px}
+.quick-check h2{margin:4px 0 0}
+.quick-check .qc-lede{margin:0;max-width:62ch}
+.qc-stage{display:grid;gap:10px}
+.qc-stage[hidden]{display:none}
+.qc-video{width:100%;max-height:48vh;border-radius:14px;background:var(--wiq-canvas);border:1px solid var(--wiq-line)}
+.qc-question{margin:0;font-weight:700;font-size:17px}
+.qc-step{margin:0}
+.qc-answers{display:flex;flex-wrap:wrap;gap:8px}
+.qc-done p{margin:0 0 10px}
