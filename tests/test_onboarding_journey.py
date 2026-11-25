@@ -169,3 +169,18 @@ def test_the_upload_page_leaves_out_an_empty_waiting_line():
     _, _, client = _account()
     page = client.get("/analyze/kickboxing").text
     assert 'id="pendingUploads"' not in page
+
+
+def test_the_upload_page_offers_to_film_a_clip_on_a_phone():
+    """No fight video on the phone: the camera opens for a short solo clip
+    (walkthrough, 2026-11-25). The capture field has no name, so it is never
+    sent itself; the clip is handed to the video field."""
+    _, _, client = _account()
+    page = client.get("/analyze/kickboxing").text
+    from core.upload_security import FIGHT_VIDEO_ACCEPT
+
+    # The server's own list, as the picker uses: video/* would offer formats it refuses.
+    assert f'id="fightVideoCapture" type="file" accept="{FIGHT_VIDEO_ACCEPT}" capture="environment"' in page
+    capture = page.split('id="fightVideoCapture"')[0].rsplit("<input", 1)[1]
+    assert "name=" not in capture
+    assert "videoInput.files=moved.files" in page and "(pointer: coarse)" in page

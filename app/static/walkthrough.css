@@ -643,3 +643,9 @@ details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg)
     white-space: nowrap; text-overflow: ellipsis; text-transform: none; letter-spacing: 0; }
   .workflow-steps li.active div small { display: none; }
 }
+
+/* --- "Film one now" on the upload page (walkthrough, 2026-11-25) ----------------- */
+.film-now { display: grid; gap: 6px; margin: 12px 0 0; }
+.film-now[hidden] { display: none; }
+.film-now .film-now-button { justify-self: start; min-height: 44px; text-transform: none !important; letter-spacing: 0 !important; font-size: 15px !important; }
+.film-now p { margin: 0; }

@@ -113,7 +113,7 @@ def shared_fights(jobs: list[tuple[str, dict]]) -> dict:
     The only fights the privacy policy lets the strike detector be trained on.
     `ticked` counts uploads that asked for it (finished or not); `kept` counts
     the fights actually held for training now: finished, and not deleted since.
-    Quick-check answers are not training data and are not counted here.
+    Quick-check answers are counted separately (app/quick_check_training.py).
     """
     from core import training_consent
 

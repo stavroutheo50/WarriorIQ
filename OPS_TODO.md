@@ -68,7 +68,7 @@ mean "the web host".
 - [ ] **Lawyer review** of every legal document.
   - Only after the whole set is reviewed, set `WARRIORIQ_LEGAL_DRAFT=0` to remove the "Draft — not yet reviewed by a lawyer" banner.
   - Don't clear it after a partial review (see the note in `core/config.py`).
-- [ ] **Policy version:** if `WARRIORIQ_POLICY_VERSION` is set in cPanel's Setup Python App, update it to `2026-10-19` or remove it so the new default applies. The cookie banner asks visitors again after a policy change; that is intended.
+- [ ] **Policy version:** if `WARRIORIQ_POLICY_VERSION` is set in cPanel's Setup Python App, update it to `2026-11-25` or remove it so the new default applies (2026-11-25: quick-check answers may train strike counting; until the version is 2026-11-25 no answer is used). The cookie banner asks visitors again after a policy change; that is intended.
 - [ ] **Analysis computer location:** fights are analysed on your own GPU PC, so /subprocessors lists it as WarriorIQ's own "Analysis computer", not a third party. Set `WARRIORIQ_ANALYSIS_PROVIDER_LOCATION` (e.g. the country it is in) so the page states where it is.
 - [ ] **Old environment value:** if `WARRIORIQ_ANALYSIS_PROVIDER_NAME` is set in cPanel's Setup Python App (an earlier `render.yaml` set it), delete it, or /subprocessors will keep naming a third-party analysis provider.
 - [ ] **Data processing agreement** with OuiHeberg now (and Namecheap if it handles any personal data). With Stripe before billing opens, when Stripe appears on /subprocessors automatically.
