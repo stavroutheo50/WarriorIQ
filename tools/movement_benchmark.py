@@ -9,9 +9,11 @@ every few seconds of each clip. The movement numbers on a report - pressure,
 time in the centre, how far and fast each fighter moved - are all built from
 where each fighter stood, so this scores that, two ways:
 
-  right place      on each marked standing frame, the fighter's tracked floor
-                   point (the bottom middle of their box, where they stand) is
-                   within PLACE_TOLERANCE of their height from the marked one.
+  right place      on each marked standing frame that was analysed, the middle
+                   of the fighter's tracked box - the point core/metrics.py
+                   builds every movement number from - is within
+                   PLACE_TOLERANCE of their height from the middle of the
+                   marked one.
                    No box, or a box on someone else, is a wrong place.
   right direction  between two marked frames up to MAX_GAP_SECONDS apart, a
                    fighter who clearly moved (at least MOVE_THRESHOLD of their
@@ -40,7 +42,8 @@ MAX_GAP_SECONDS = 6.0
 
 
 def _floor(box) -> tuple[float, float]:
-    return ((box[0] + box[2]) / 2.0, float(box[3]))
+    """The point the report's movement numbers use: the middle of the box (core/metrics.py _center)."""
+    return ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
 
 
 def _height(box) -> float:
@@ -63,12 +66,18 @@ def score(records: list[dict], truth: dict) -> dict:
     for frame in marked:
         record = _nearest(records, int(frame["source_frame"]))
         tracked.append((frame, record))
+        # A marked frame outside the analysed span is not scored, as in
+        # tools/identity_benchmark.py: the phone clips are analysed for their
+        # first 55 seconds and marked for two minutes. Counting those frames as
+        # misses read 63% on 2026-11-25 where 92% of analysed frames were right.
+        if record is None:
+            continue
         for fighter in ("A", "B"):
             own = frame.get(fighter)
             if own is None:
                 continue
             place["frames"] += 1
-            box = _box(record, fighter) if record is not None else None
+            box = _box(record, fighter)
             if box is None:
                 continue
             (tx, ty), (mx, my) = _floor(box), _floor(own)
@@ -77,6 +86,8 @@ def score(records: list[dict], truth: dict) -> dict:
     for (first, rec0), (later, rec1) in zip(tracked, tracked[1:]):
         if float(later["time_seconds"]) - float(first["time_seconds"]) > MAX_GAP_SECONDS:
             continue
+        if rec0 is None or rec1 is None:            # not analysed there
+            continue
         for fighter, other in (("A", "B"), ("B", "A")):
             if any(f.get(k) is None for f in (first, later) for k in (fighter, other)):
                 continue
@@ -84,7 +95,7 @@ def score(records: list[dict], truth: dict) -> dict:
             if abs(moved) < MOVE_THRESHOLD * _height(first[fighter]):
                 continue
             direction["moves"] += 1
-            boxes = [_box(r, k) if r is not None else None for r, k in ((rec0, fighter), (rec0, other), (rec1, fighter))]
+            boxes = [_box(r, k) for r, k in ((rec0, fighter), (rec0, other), (rec1, fighter))]
             if any(b is None for b in boxes):
                 continue
             if _toward(*boxes) * moved > 0:

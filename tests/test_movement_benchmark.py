@@ -41,3 +41,12 @@ def test_the_scoreboard_row_takes_the_weaker_of_the_two():
     row = movement_verdict({"right": 96, "frames": 100}, {"right": 9, "moves": 10})
     assert row["score"] == 0.9 and row["passes"] is False
     assert movement_verdict({"right": 0, "frames": 0}, {"right": 0, "moves": 0})["score"] is None
+
+
+def test_frames_outside_the_analysed_span_are_not_scored():
+    """The phone clips are analysed for 55 s and marked for 2 minutes: counting
+    the rest as misses read 63% where 92% of analysed frames were right."""
+    records = [_record(0, [100, 100, 200, 400], [500, 100, 600, 400])]        # nothing near frame 100
+    result = mb.score(records, TRUTH)
+    assert result["place"] == {"right": 2, "frames": 2}
+    assert result["direction"] == {"right": 0, "moves": 0}
