@@ -628,3 +628,18 @@ details[open] > summary .menu-caret { transform: translateY(3px) rotate(-135deg)
 .upload-training-consent .upload-training-minor { color: var(--wiq-text); }
 .upload-training-consent .upload-training-minor[hidden] { display: none; }
 .upload-training-consent:has(input:disabled) { opacity: .7; }
+
+/* --- The four journey steps on a phone (walkthrough, 2026-11-25) ---------------- */
+/* frame-picker.css hid every label below 650px, leaving four unlabelled number
+   boxes that read as empty buttons. The step you are on takes the width and
+   shows its name on one line; the others keep just their number. */
+@media (max-width: 650px) {
+  .workflow-steps { display: flex !important; }
+  .workflow-steps li { flex: 0 0 44px; min-width: 0; justify-content: center; }
+  .workflow-steps li:not(.active) { padding-inline: 0 !important; }
+  .workflow-steps li.active { flex: 1 1 auto; justify-content: flex-start; }
+  .workflow-steps li.active div { display: block; min-width: 0; }
+  .workflow-steps li.active div strong { display: block; overflow: hidden; font-size: 12px; line-height: 1.2;
+    white-space: nowrap; text-overflow: ellipsis; text-transform: none; letter-spacing: 0; }
+  .workflow-steps li.active div small { display: none; }
+}
