@@ -161,3 +161,11 @@ def test_choosing_a_video_is_recorded_once_and_carries_nothing_about_it():
 def test_the_admin_funnel_has_the_two_upload_steps_in_order():
     keys = [key for key, _ in admin_overview.JOURNEY_STEPS]
     assert keys.index("upload_page") < keys.index("video_chosen") < keys.index("upload_started") < keys.index("video_uploaded")
+
+
+def test_the_upload_page_leaves_out_an_empty_waiting_line():
+    """ "Fights waiting: 0 of 2" was a third line of plan details above the
+    video box for every new account (walkthrough, 2026-11-25)."""
+    _, _, client = _account()
+    page = client.get("/analyze/kickboxing").text
+    assert 'id="pendingUploads"' not in page

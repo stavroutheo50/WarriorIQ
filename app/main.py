@@ -4421,7 +4421,20 @@ def _sport_coverage_badge(sport: str) -> dict:
     # takedowns, control or submissions is read yet.
     covered = "no" if (reported["no_strike_counts"] or reported["withheld_families"]
                        or sport == "mma") else "yes"
-    return {"covered": covered, "label": policy["badge"]}
+    label = policy["badge"]
+    # "Strikes only, no grappling yet" (core/sport_policy.py) was written before
+    # MMA reports showed time on the ground (core/ground_time.py, shown where its
+    # fitted head is installed). Said here rather than in core/ so the wording
+    # does not change the analysis-code fingerprint (2026-11-25).
+    if sport == "mma" and not reported["no_strike_counts"] and _ground_time_head_installed():
+        label = "Strikes and time on the ground"
+    return {"covered": covered, "label": label}
+
+
+def _ground_time_head_installed() -> bool:
+    from core import ground_time
+
+    return ground_time.HEAD_PATH.exists()
 
 
 def _prose_list(items) -> str:

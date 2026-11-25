@@ -4180,7 +4180,13 @@ class PublishedStrikeCountsCoreTests(unittest.TestCase):
         self.assertEqual(_sport_coverage_badge("muay_thai")["label"], "Counts punches, kicks and knees")
         self.assertEqual(_sport_coverage_badge("boxing")["label"], "Counts punches")
         self.assertEqual(_sport_coverage_badge("taekwondo")["label"], "Counts punches and kicks")
-        self.assertEqual(_sport_coverage_badge("mma")["label"], "Strikes only, no grappling yet")
+        # MMA reports show time on the ground where its fitted head is installed
+        # (core/ground_time.py), so the card says so (2026-11-25).
+        from core import ground_time
+        expected = ("Strikes and time on the ground" if ground_time.HEAD_PATH.exists()
+                    else "Strikes only, no grappling yet")
+        self.assertEqual(_sport_coverage_badge("mma")["label"], expected)
+        self.assertEqual(_sport_coverage_badge("mma")["covered"], "no")      # takedowns etc. still not read
 
     def test_the_downloaded_report_counts_every_family_and_says_it_is_an_estimate(self):
         import shutil
