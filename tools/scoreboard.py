@@ -22,7 +22,11 @@ how anything is scored:
                (or 2 strikes) - on fights a PERSON labelled. Fights with only
                machine labels are shown, but never count toward the target:
                Claude's own strike labels found 41 of a person's 111 strikes.
-  Movement     not measured yet: nothing marked to compare it with.
+  Movement     tools/movement_benchmark.py on the same tracks and answer keys
+               as "Who is who": each fighter's floor point within a quarter
+               of their height of the marked one, and the direction of each
+               clear move toward or away from the opponent. Target: 95% of
+               both. Time in the centre is not measured (no ring is marked).
 
 What it needs is not in Git (videos, pose tracks of identifiable people): a
 part with nothing on this machine says so instead of showing a number. Run it
@@ -235,6 +239,47 @@ def fetch() -> None:
                         str(HUMAN_STRIKE_LABELS)], cwd=PROJECT_ROOT, check=True)
 
 
+# --- movement --------------------------------------------------------------------
+
+def movement_section() -> dict:
+    """Where each fighter stood and which way they moved (tools/movement_benchmark.py).
+
+    Read from the same tracks and answer keys as "Who is who": each fighter's
+    box is marked there by a person every few seconds (2026-11-25).
+    """
+    from tools import run_identity_benchmark as runner
+    from tools.movement_benchmark import score
+
+    place, direction, clips = {"right": 0, "frames": 0}, {"right": 0, "moves": 0}, {}
+    for path in runner.TRUTH:
+        tracking = RUNS / path.stem / "tracking.jsonl"
+        if not tracking.exists():
+            continue
+        records = [json.loads(line) for line in tracking.read_text(encoding="utf-8").splitlines() if line.strip()]
+        result = score(records, json.loads(path.read_text(encoding="utf-8")))
+        clips[path.stem] = result
+        for key in place:
+            place[key] += result["place"][key]
+        for key in direction:
+            direction[key] += result["direction"][key]
+    return movement_verdict(place, direction, clips)
+
+
+def movement_verdict(place: dict, direction: dict, clips: dict | None = None) -> dict:
+    if not place["frames"]:
+        return {"score": None, "passes": None, "clips": clips or {},
+                "note": "no clip analysed here yet (use --run-identity)"}
+    place_share = place["right"] / place["frames"]
+    direction_share = direction["right"] / direction["moves"] if direction["moves"] else None
+    shares = [share for share in (place_share, direction_share) if share is not None]
+    score = round(min(shares), 4)
+    return {"score": score, "passes": all(share >= TARGET for share in shares), "clips": clips or {},
+            "place": place, "direction": direction,
+            "note": (f"right place {place['right']}/{place['frames']} ({place_share:.0%}), right direction "
+                     + (f"{direction['right']}/{direction['moves']} ({direction_share:.0%})" if direction_share is not None
+                        else "no clear moves") + f" - {len(clips or {})} clips; time in the centre not measured")}
+
+
 # --- the table --------------------------------------------------------------------
 
 def build(run_identity: bool = False) -> dict:
@@ -245,8 +290,10 @@ def build(run_identity: bool = False) -> dict:
             board[name] = make()
         except Exception as exc:                  # noqa: BLE001 - one broken part must not hide the others
             board[name] = {"score": None, "passes": None, "note": f"could not score: {type(exc).__name__}: {exc}"}
-    board["movement"] = {"score": None, "passes": None,
-                         "note": "not measured yet: needs marked positions to compare with"}
+    try:
+        board["movement"] = movement_section()
+    except Exception as exc:                      # noqa: BLE001
+        board["movement"] = {"score": None, "passes": None, "note": f"could not score: {type(exc).__name__}: {exc}"}
     try:
         from core.build_info import analysis_fingerprint
         board["analysis_fingerprint"] = analysis_fingerprint()
