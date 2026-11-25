@@ -23,8 +23,8 @@ how anything is scored:
                machine labels are shown, but never count toward the target:
                Claude's own strike labels found 41 of a person's 111 strikes.
   Movement     tools/movement_benchmark.py on the same tracks and answer keys
-               as "Who is who": each fighter's floor point within a quarter
-               of their height of the marked one, and the direction of each
+               as "Who is who": the middle of each fighter's box within a
+               quarter of their height of the marked one, and the direction of each
                clear move toward or away from the opponent. Target: 95% of
                both. Time in the centre is not measured (no ring is marked).
 
