@@ -1923,7 +1923,7 @@ def _resident_megabytes() -> float | None:
 # chip, and paying for both on every asset multiplied the cost of a page view
 # by the number of files on it.
 _HEALTH_PATHS = frozenset({"/health", "/healthz"})
-_LIGHTWEIGHT_PATHS = _HEALTH_PATHS | {"/favicon.ico", "/robots.txt", "/sitemap.xml"}
+_LIGHTWEIGHT_PATHS = _HEALTH_PATHS | {"/favicon.ico", "/robots.txt", "/sitemap.xml", "/llms.txt", "/indexnow-key.txt"}
 _LIGHTWEIGHT_PREFIXES = ("/static/", "/assets/")
 
 
@@ -2020,6 +2020,7 @@ def _load_viewer_state(request: Request) -> None:
     request.state.cookie_preferences = _cookie_preferences(request)
     request.state.analytics_measurement_id = SETTINGS.analytics_measurement_id
     request.state.site_verification_token = SETTINGS.site_verification_token
+    request.state.bing_verification_token = os.getenv("WARRIORIQ_BING_VERIFICATION", "").strip()
     request.state.gtm_container_id = SETTINGS.gtm_container_id
     request.state.google_tag_allowed = google_tag_allowed(request.url.path, request.state.cookie_preferences)
     request.state.external_ai_available = bool(os.getenv("OPENAI_API_KEY", "").strip())
@@ -9802,6 +9803,26 @@ def robots_txt():
     return PlainTextResponse(
         f"User-agent: *\nAllow: /\n{disallowed}\nSitemap: {SETTINGS.public_base_url}/sitemap.xml\n"
     )
+
+
+@app.get("/llms.txt", response_class=PlainTextResponse, include_in_schema=False)
+def llms_txt():
+    """A plain description of WarriorIQ for AI tools (app/discovery.py, 2026-11-25)."""
+    from app import discovery
+
+    return PlainTextResponse(discovery.llms_txt(SETTINGS.public_base_url or ""),
+                             media_type="text/plain; charset=utf-8")
+
+
+@app.get("/indexnow-key.txt", response_class=PlainTextResponse, include_in_schema=False)
+def indexnow_key_file():
+    """The IndexNow key, where the protocol looks for it (app/discovery.py)."""
+    from app import discovery
+
+    key = discovery.indexnow_key(DATA_ROOT)
+    if not key:
+        raise HTTPException(404)
+    return PlainTextResponse(key)
 
 
 def _deployed_commit() -> str:

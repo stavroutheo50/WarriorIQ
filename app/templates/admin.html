@@ -253,6 +253,11 @@
   <h3>Password resets and account emails</h3>
   {% if email_problem %}<p class="notice bad"><strong>Email is switched off or incomplete:</strong> {{ email_problem }}. Set it in the website's environment settings, then send a test.</p>{% else %}<p class="muted">Settings are present.</p>{% endif %}
   <p class="small"><a class="text-link" href="#adminEmailTest">Send a test email</a> from the Email section, to any address.</p>
+  <h3 id="adminSearch">Search engines</h3>
+  {#- IndexNow (app/discovery.py): tells Bing, Yandex, Seznam and Naver which
+      public pages exist. Use after a deploy that adds or changes them. -#}
+  <p class="small muted">Tells Bing (which also feeds ChatGPT search, Copilot and DuckDuckGo) and other IndexNow search engines about every public page, so they crawl them now. Google is told through Search Console instead.</p>
+  <form action="/admin/indexnow" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button class="btn secondary" type="submit">Tell search engines about the public pages</button></form>
   <h3 id="adminBackups">Database backups</h3>
   <p class="muted">{% if backups.enabled %}The website copies its database once a day, checks the copy and keeps the newest {{ backups.keep }}. Videos are not included.{% else %}Daily backups are switched off (WARRIORIQ_AUTO_BACKUP). You can still make one here.{% endif %}</p>
   {% if backups.copies %}<ul class="list-clean small">{% for copy in backups.copies[:5] %}<li><strong>{{ copy.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</strong> · {{ copy.bytes|filesizeformat }} · check: {{ copy.integrity_check or 'not recorded' }}</li>{% endfor %}</ul>{% if backups.copies|length > 5 %}<p class="small muted">{{ backups.copies|length }} copies in all.</p>{% endif %}{% else %}<p class="small muted">No backups yet.</p>{% endif %}

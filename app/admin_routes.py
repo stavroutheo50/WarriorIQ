@@ -95,6 +95,8 @@ _ADMIN_TOOL_RESULTS = {
     "leftovers_none": "Nothing was deleted: tick the confirmation and at least one copy.",
     "qa_archived": "The QA test fighters were archived. Their fights were kept; adding a fighter with the same name brings one back.",
     "qa_none": "Nothing was archived: tick the confirmation first.",
+    "indexnow_done": "Search engines were told about every public page. Bing usually crawls them within a few days.",
+    "indexnow_failed": "The search engines could not be reached, or the site address is not https. The security log has the reason.",
     "training_minors_removed": "Fights from under-18 accounts were taken out of training. The fights and reports themselves were kept.",
     "training_minors_none": "Nothing was removed: tick the confirmation first.",
     "plan_granted": "Plan given. The person was emailed if email is working; the Email section shows whether it was sent.",
@@ -176,6 +178,21 @@ async def admin_remove_minor_training_copies(request: Request):
                                 resource_id=job_id, metadata={"reason": "under_18_account"})
     accuracy._cache.clear()
     return RedirectResponse("/admin?tool=training_minors_removed#adminTools", status_code=303)
+
+
+@app.post("/admin/indexnow", dependencies=[Depends(m.require_csrf)])
+def admin_submit_indexnow(request: Request):
+    """Tell IndexNow's search engines about every public page (app/discovery.py, 2026-11-25)."""
+    if not m._is_admin(request):
+        raise HTTPException(404)
+    from app import discovery
+
+    result = discovery.submit_to_indexnow(m.SETTINGS.public_base_url or "", m.PUBLIC_INDEX_ROUTES,
+                                          discovery.indexnow_key(m.DATA_ROOT))
+    m.record_security_event("indexnow_submitted", account_id=int(m._account(request)["id"]),
+                            severity="info" if result["ok"] else "warning",
+                            metadata={"status": result["status"], "count": result["count"]})
+    return RedirectResponse(f"/admin?tool=indexnow_{'done' if result['ok'] else 'failed'}#adminTools", status_code=303)
 
 
 @app.post("/admin/qa-fighters/archive", dependencies=[Depends(m.require_csrf)])

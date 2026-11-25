@@ -48,6 +48,11 @@
      after verification un-verifies the property. -#}
   <meta name="google-site-verification" content="{{ request.state.site_verification_token }}">
 {% endif %}
+{% if request.state.bing_verification_token %}
+  {#- Bing Webmaster Tools ownership (2026-11-25). Bing's index also feeds
+     ChatGPT search, Copilot and DuckDuckGo. -#}
+  <meta name="msvalidate.01" content="{{ request.state.bing_verification_token }}">
+{% endif %}
   <meta name="csrf-token" content="{{ request.state.csrf_token }}">
   {#- Scripts read the token from here rather than from the cookie, which
      stays httponly. wiqCsrfHeaders() exists so a future fetch cannot
