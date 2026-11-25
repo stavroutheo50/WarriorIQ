@@ -122,7 +122,8 @@ def test_the_card_renders_with_its_answers_and_says_it_is_optional():
 
 def test_the_privacy_policy_says_what_the_answers_are_for():
     page = BrowserClient(main.app).get("/privacy").text
-    assert "Optional quick checks" in page and "not used as training data" in page
+    assert "Optional quick checks" in page and "answers given before then never are" in page
+    assert "never the video" in page and "Turn it off at any time in Settings" in page
 
 
 def test_the_stat_sheet_points_to_the_quick_check_only_when_it_is_offered():

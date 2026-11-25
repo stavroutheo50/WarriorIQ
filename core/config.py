@@ -1377,7 +1377,7 @@ class Settings:
     # blocked until the real operator has supplied every launch-critical item.
     # 2026-10-19: /subprocessors now names Render, Google and Stripe
     # with purpose, location and data (audit 2026-10-14 #10).
-    policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-10-19")
+    policy_version: str = os.getenv("WARRIORIQ_POLICY_VERSION", "2026-11-25")      # quick-check answers may train (app/quick_check_training.py)
     public_base_url: str = os.getenv("WARRIORIQ_PUBLIC_BASE_URL", "").rstrip("/")
     # Serve replay video through a CDN (Cloudflare in front of this site, or
     # any pull CDN). Off unless both are set. /media then redirects to

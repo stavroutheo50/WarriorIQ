@@ -5785,10 +5785,9 @@ def _email_analysis_outcome(job_id: str, job: dict | None, ready: bool) -> None:
                 # no hand labelling), so the email says it is there. Never to an
                 # under-18 account, who is not asked (_may_check_strikes).
                 if not social.is_minor_account(account):
-                    # Worded as the privacy policy has it: answers measure accuracy;
-                    # they are not training data.
+                    # Worded as the privacy policy has it (version 2026-11-25).
                     body += ("\n\nYour report may ask about a few strikes it counted, one tap each. "
-                             "Your answers show how accurate WarriorIQ's strike counts are.")
+                             "Your answers show how accurate WarriorIQ's strike counts are, and help it count better.")
             else:
                 subject = "WarriorIQ could not finish analysing your fight"
                 body = ("The analysis of your fight stopped before it finished, and it has not used up any of "
@@ -5990,6 +5989,21 @@ def remote_worker_dataset(request: Request):
             "X-WarriorIQ-Sequence-Count": str(len(files)),
         },
     )
+
+
+@app.get("/api/worker/quick-check-training", dependencies=[Depends(_require_remote_worker)])
+def remote_worker_quick_check_training(request: Request):
+    """Quick-check answers that may train strike counting, for the training machine (2026-11-25).
+
+    Worker token only. Each answer comes with both fighters' boxes and
+    keypoints within a second of the moment, never the video, and only where
+    app/quick_check_training.py allows it: given under policy version
+    2026-11-25 or later, not an under-18 account, not turned off in Settings.
+    """
+    _require_remote_worker(request)
+    from app import quick_check_training
+
+    return {"since": quick_check_training.TRAINING_SINCE, "answers": quick_check_training.training_rows(OUTPUTS)}
 
 
 @app.get("/api/worker/consented", dependencies=[Depends(_require_remote_worker)])
@@ -7523,7 +7537,8 @@ def check_counted_strike(request: Request, job_id: str, payload: StrikeCheckPayl
     be told apart. Administrators, and since 2026-11-24 the fight's owner
     through the report's quick check (_may_check_strikes): these answers are
     how accuracy is measured without anyone labelling by hand. They never
-    change the report and are never training labels.
+    change the report. From policy version 2026-11-25 they may also train
+    strike counting, within app/quick_check_training.py's rules.
     """
     _enforce_rate_limit(request, "strike_checks", 300, 300)
     if not _may_check_strikes(request, job_id):
@@ -8488,10 +8503,19 @@ def _settings_response(request: Request, account: dict, section: str = "privacy"
                 account.get("plan_override_until"))),
             "pending_email": pending_email_change(int(account["id"])),
             "subscription_actions": list_subscription_actions(int(account["id"])),
+            # Settings > Consent controls (app/quick_check_training.py).
+            "quick_check_training_on": not _quick_check_objected(account),
+            "minor_account": social.is_minor_account(account),
             "device_sessions": list_account_sessions(
                 int(account["id"]), token_digest(request.cookies.get(SESSION_COOKIE) or "") if request.cookies.get(SESSION_COOKIE) else None),
         },
     )
+
+
+def _quick_check_objected(account: dict) -> bool:
+    from app import quick_check_training
+
+    return quick_check_training.objected(int(account["profile_id"]))
 
 
 def _current_password_ok(account_id: int, password: str) -> bool:

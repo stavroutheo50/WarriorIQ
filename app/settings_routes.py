@@ -53,6 +53,21 @@ def save_marketing_preference(request: Request, enabled: bool = Form(False)):
     return RedirectResponse("/settings/privacy?notice=Marketing+preference+saved", status_code=303)
 
 
+@app.post("/settings/quick-check-training", dependencies=[Depends(m.require_csrf)])
+def save_quick_check_training(request: Request, enabled: bool = Form(False)):
+    """Whether this account's quick-check answers may train strike counting (2026-11-25).
+
+    Off also takes out answers already given (app/quick_check_training.py).
+    """
+    account = m._account(request)
+    if not account:
+        raise HTTPException(403)
+    from app import quick_check_training
+
+    quick_check_training.set_choice(int(account["profile_id"]), bool(enabled), m.SETTINGS.policy_version)
+    return RedirectResponse("/settings/privacy?notice=Quick-check+choice+saved", status_code=303)
+
+
 @app.post("/settings/sessions/revoke", dependencies=[Depends(m.require_csrf)])
 def revoke_other_sessions(request: Request):
     account = m._account(request)

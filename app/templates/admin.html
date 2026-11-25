@@ -207,7 +207,7 @@
   <h3>Who is who at crossings</h3>
   {% if a.identity.answers %}<p>The analysis had the fighters the wrong way round at <strong>{{ rate(a.identity.disagreed, a.identity.answers) }}</strong> answered crossings, in {{ a.identity.fights_with_a_swap }} of {{ a.identity.fights }} fights with answers. {{ a.identity.fights_rerun }} fight{{ '' if a.identity.fights_rerun == 1 else 's' }} re-run with "Fix who is who".</p>{% else %}<p class="small muted">No crossing answers yet.</p>{% endif %}
   <h3>Counted strikes (one-tap checks)</h3>
-  <p class="small muted">Answered by administrators and, since 24 Nov 2026, by fight owners in the report's quick check. They measure accuracy; the privacy policy says they are not training data.</p>
+  <p class="small muted">Answered by administrators and, since 24 Nov 2026, by fight owners in the report's quick check. They measure accuracy, and from policy version 2026-11-25 may train strike counting (app/quick_check_training.py): the training machine collects them from /api/worker/quick-check-training.</p>
   <ul class="list-clean small">{% for family, row in a.strikes.items() %}<li><strong>{{ {'punch': 'Punches', 'kick': 'Kicks', 'knee': 'Knees'}[family] }}</strong>: {% if row.answered %}right {{ rate(row.right, row.answered) }}; not a strike {{ row.not_a_strike }}, wrong fighter {{ row.wrong_fighter }}, another type {{ row.other_type }}{% else %}no answers yet{% endif %}</li>{% endfor %}</ul>
   <h3>Someone went down</h3>
   {% if a.down.answered %}<p>Of {{ a.down.answered }} moments answered, <strong>{{ rate(a.down.nobody, a.down.answered) }}</strong> were nobody going down (a false alarm); fighter A {{ a.down.A }}, fighter B {{ a.down.B }}.</p>{% else %}<p class="small muted">No answers yet.</p>{% endif %}
