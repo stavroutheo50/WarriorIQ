@@ -1,0 +1,187 @@
+/* ============================================================================
+   The home page, "Corner Light" (owner, 2026-11-25: G from the design canvas,
+   "remove the gradient on the back, show both fighters clearly with the
+   skeletons, I trust you with the animations and the glass").
+   ----------------------------------------------------------------------------
+   Loaded on the home page only (index.html {% block head %}). WarriorIQ's own
+   colours: navy ground, the blue for every action, blue and red only for the
+   two corners. No background glow. Glass only where something sits over the
+   photo. Headlines in Archivo (wide, heavy), self-hosted like Inter: a font
+   request to Google would send every visitor's address there first.
+   Motion: the hero's lines rise in on load, sections reveal as they scroll in
+   (home.js, .hx-reveal), the tags on the photo settle in. prefers-reduced-motion
+   turns all of it off.
+   ========================================================================= */
+
+@font-face {
+  font-family: "Archivo";
+  src: url("/static/fonts/archivo-latin.woff2") format("woff2");
+  font-weight: 700 900;
+  font-stretch: 100% 125%;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+                 U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+.cg {
+  --cg-ink: var(--wiq-text, #f5f5f6);
+  --cg-soft: #c3cad8;
+  --cg-faint: #a9b2c3;
+  --cg-line: var(--wiq-line-soft);
+  --cg-panel: var(--wiq-field-bg);
+  --cg-ground: #0a0f18;
+  --cg-deep: #070b12;
+  --cg-blue: #2f6fed;
+  --cg-blue-light: #5aa0ff;
+  --cg-red: #ff5d68;
+  --cg-display: "Archivo", "Arial Black", "Helvetica Neue", Arial, sans-serif;
+  color: var(--cg-ink);
+}
+.cg h1, .cg h2, .cg h3 { font-family: var(--cg-display); font-stretch: 112%; text-transform: uppercase; }
+
+/* The page runs edge to edge; each band keeps its content to one width. */
+.cg-band { width: 100vw; margin-left: calc(50% - 50vw); border-top: 1px solid var(--cg-line); }
+.cg-band.cg-deep { background: var(--cg-deep); }
+.cg-band.cg-ground { background: var(--cg-ground); }
+.cg-wrap { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: clamp(72px, 9vw, 112px) 0; box-sizing: border-box; }
+
+.cg-h2 { margin: 0; font-weight: 900; font-size: clamp(34px, 4.4vw, 60px); line-height: .95; letter-spacing: -.03em; text-wrap: balance; }
+.cg-lead { margin: 0; font-size: 18px; line-height: 1.6; color: var(--cg-soft); max-width: 460px; text-wrap: pretty; }
+
+/* --- Hero ------------------------------------------------------------------ */
+.cg-hero { width: 100vw; margin-left: calc(50% - 50vw); background: var(--cg-deep); position: relative; overflow: hidden; }
+/* Ring ropes: four thin lines across the top, behind the words. */
+.cg-hero::before { content: ""; position: absolute; left: 0; right: 0; top: 34px; height: 127px; pointer-events: none;
+  background: repeating-linear-gradient(180deg, rgba(245, 245, 246, .07) 0 1px, transparent 1px 42px); }
+.cg-hero-copy { position: relative; width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: clamp(40px, 6vw, 72px) 0 0;
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 24px; }
+.cg-corners { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 0; font-size: 13px; font-weight: 600;
+  letter-spacing: .14em; text-transform: uppercase; }
+.cg-corners span { display: inline-flex; align-items: center; gap: 8px; }
+.cg-corners i { width: 10px; height: 10px; border-radius: 50%; }
+.cg-corners .cg-is-blue { color: #8cc2ff; } .cg-corners .cg-is-blue i { background: var(--cg-blue); }
+.cg-corners .cg-is-red { color: var(--wiq-b); } .cg-corners .cg-is-red i { background: var(--cg-red); }
+.cg-corners .cg-vs { color: var(--glass-text-faint); }
+.cg-title { margin: 0; font-weight: 900; font-size: clamp(44px, 7.6vw, 116px); line-height: .92; letter-spacing: -.035em; max-width: 1100px; text-wrap: balance; }
+.cg-title span { display: block; }
+.cg-title .cg-title-blue { color: var(--cg-blue-light); }
+.cg-hero-lead { margin: 0; font-size: clamp(17px, 1.6vw, 20px); line-height: 1.55; color: var(--cg-soft); max-width: 620px; text-wrap: pretty; }
+.cg-cta { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.cg .btn.cg-btn { min-height: 58px; padding: 0 34px; font-size: 18px; border-radius: 999px !important; }
+.cg-trust { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 20px; margin: 0; padding: 0; list-style: none; font-size: 14px; color: var(--cg-faint); }
+.cg-trust li { display: inline-flex; align-items: center; gap: 7px; }
+.cg-trust li::before { content: "\2713"; color: var(--cg-blue-light); font-weight: 800; }
+
+/* The fight, both corners marked, with WarriorIQ's real skeletons. */
+.cg-shot { position: relative; width: min(1240px, calc(100% - 40px)); margin: clamp(40px, 6vw, 64px) auto 0; }
+.cg-shot-frame { position: relative; margin: 0; overflow: hidden; border: 1px solid var(--cg-line); border-bottom: 0; border-radius: 28px 28px 0 0; background: var(--cg-deep); }
+.cg-shot-frame img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.cg-shot-frame::after { content: ""; position: absolute; inset: auto 0 0 0; height: 34%; pointer-events: none;
+  background: linear-gradient(180deg, rgba(7, 11, 18, 0), rgba(7, 11, 18, .88)); }
+/* Glass: only here, over the photo, so the fight shows through. */
+.cg-glass { background: rgba(10, 15, 24, .55); border: 1px solid rgba(255, 255, 255, .16); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 18px 40px -20px rgba(0, 0, 0, .8); }
+.cg-tag { position: absolute; z-index: 1; translate: -50% 0; display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 999px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.cg-tag i { width: 9px; height: 9px; border-radius: 50%; }
+/* Centred over each fighter's head (the pose model's boxes on this frame). */
+.cg-tag-blue { left: 42%; top: 26%; color: var(--wiq-field-text); border-color: rgba(90, 160, 255, .55); }
+.cg-tag-blue i { background: var(--cg-blue-light); }
+.cg-tag-red { left: 69%; top: 15%; color: var(--wiq-field-text); border-color: rgba(255, 93, 104, .55); }
+.cg-tag-red i { background: var(--cg-red); }
+.cg-note { position: absolute; z-index: 1; left: 24px; bottom: 24px; max-width: 320px; padding: 16px 18px; border-radius: 18px; text-align: left; }
+.cg-note b { display: block; margin-bottom: 4px; font-size: 13px; color: #8cc2ff; }
+.cg-note span { font-size: 16px; line-height: 1.45; }
+.cg-credit { position: absolute; z-index: 1; right: 24px; bottom: 26px; margin: 0; font-size: 12px; color: var(--cg-soft); }
+
+/* --- What a coach sees -------------------------------------------------------- */
+.cg-reads { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: clamp(32px, 6vw, 64px); align-items: start; }
+.cg-reads-head { display: flex; flex-direction: column; gap: 20px; }
+@media (min-width: 900px) { .cg-reads-head { position: sticky; top: 110px; } }
+.cg-list { margin: 0; padding: 0; list-style: none; }
+.cg-list li { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 20px; padding: 28px 0; border-top: 1px solid var(--cg-line); }
+.cg-icon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--cg-panel); border: 1px solid var(--cg-line); }
+.cg-icon svg { width: 26px; height: 26px; stroke: var(--cg-blue-light); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.cg-list h3 { margin: 0 0 6px; font-weight: 800; font-size: 24px; letter-spacing: -.01em; }
+.cg-list p { margin: 0; font-size: 17px; line-height: 1.6; color: var(--cg-soft); }
+
+/* --- Three steps -------------------------------------------------------------- */
+.cg-center { text-align: center; }
+.cg-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 40px; margin: 56px 0 0; padding: 0; list-style: none; }
+.cg-steps li { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; }
+.cg-step-n { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--cg-blue);
+  background: rgba(47, 111, 237, .14); font-family: var(--cg-display); font-stretch: 112%; font-weight: 900; font-size: 22px; color: var(--wiq-a); }
+.cg-steps h3 { margin: 0; font-weight: 800; font-size: 24px; }
+.cg-steps p { margin: 0; font-size: 17px; line-height: 1.6; color: var(--cg-soft); max-width: 320px; }
+
+/* --- Sports ------------------------------------------------------------------- */
+.cg-row-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 40px; }
+.cg-sports { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 14px; }
+.cg-sport { position: relative; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; min-height: 340px; padding: 22px;
+  overflow: hidden; border-radius: 22px; border: 1px solid var(--cg-line); color: var(--cg-ink); text-decoration: none; isolation: isolate; }
+.cg-sport img { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; }
+.cg-sport::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(7, 11, 18, 0) 35%, rgba(7, 11, 18, .92)); }
+.cg-sport h3 { margin: 0; line-height: 1.1; color: inherit; font-family: var(--cg-display); font-stretch: 112%; font-weight: 900; font-size: 24px; text-transform: uppercase; }
+.cg-sport span { font-size: 14px; color: var(--glass-text-soft); }
+.cg-sport:hover { color: var(--cg-ink); }
+
+/* --- Fighters and coaches ----------------------------------------------------- */
+.cg-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); gap: 20px; }
+.cg-card { display: flex; flex-direction: column; gap: 16px; padding: clamp(28px, 4vw, 40px); border-radius: 28px; border: 1px solid var(--cg-line); background: var(--cg-panel); }
+.cg-kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+.cg-kicker i { width: 9px; height: 9px; border-radius: 50%; }
+.cg-card.cg-is-blue .cg-kicker { color: #8cc2ff; } .cg-card.cg-is-blue .cg-kicker i { background: var(--cg-blue); }
+.cg-card.cg-is-red .cg-kicker { color: var(--wiq-b); } .cg-card.cg-is-red .cg-kicker i { background: var(--cg-red); }
+.cg-card h3 { margin: 0; font-weight: 900; font-size: clamp(26px, 2.6vw, 34px); line-height: 1; }
+.cg-card ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 17px; color: var(--cg-soft); }
+.cg-card li { display: flex; gap: 10px; } .cg-card li::before { content: "\2713"; color: var(--cg-blue-light); font-weight: 800; }
+.cg-card a { font-weight: 600; }
+
+/* --- Privacy ------------------------------------------------------------------ */
+.cg-privacy { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 36px; }
+.cg-privacy h2 { font-size: clamp(30px, 3.4vw, 44px); }
+.cg-privacy h3 { margin: 0 0 8px; font-family: inherit; font-stretch: normal; text-transform: none; font-weight: 600; font-size: 17px; }
+.cg-privacy p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--cg-faint); }
+
+/* --- Questions (the existing FAQ, in this page's type) ------------------------ */
+.cg .faq.cg-faq { max-width: none; margin: 0; padding: 0; background: none; border: 0; box-shadow: none; }
+.cg .cg-faq > h2 { margin-bottom: 24px; }
+
+/* --- Last word ---------------------------------------------------------------- */
+.cg-end .cg-wrap { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px; padding-block: clamp(96px, 11vw, 140px); }
+.cg-end h2 { font-weight: 900; font-size: clamp(40px, 6.4vw, 96px); line-height: .92; letter-spacing: -.035em; max-width: 1000px; }
+.cg-credits { margin: 0; padding: 20px 0 0; font-size: 12px; color: var(--cg-faint); }
+
+/* --- Phones ------------------------------------------------------------------- */
+@media (max-width: 700px) {
+  .cg-shot { width: 100%; }
+  .cg-shot-frame { border-radius: 0; border-left: 0; border-right: 0; }
+  .cg-tag { gap: 6px; padding: 4px 9px; font-size: 12px; }
+  .cg-tag i { width: 7px; height: 7px; }
+  .cg-tag-blue { left: 25%; top: 14%; }
+  .cg-tag-red { left: 76%; top: 12%; }
+  .cg-note { position: static; max-width: none; margin: 12px 20px 0; }
+  .cg-credit { position: static; margin: 10px 20px 0; text-align: right; }
+  .cg-shot-frame::after { display: none; }
+  .cg-sport { min-height: 240px; }
+}
+
+/* --- Motion ------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  .cg-hero-copy > * { animation: cg-rise .9s cubic-bezier(.16, 1, .3, 1) both; }
+  .cg-hero-copy > :nth-child(2) { animation-delay: .08s; }
+  .cg-hero-copy > :nth-child(3) { animation-delay: .16s; }
+  .cg-hero-copy > :nth-child(4) { animation-delay: .24s; }
+  .cg-shot-frame img { animation: cg-settle 1.6s cubic-bezier(.16, 1, .3, 1) both; }
+  .cg-tag, .cg-note { animation: cg-pop .7s cubic-bezier(.2, .9, .25, 1.1) both; }
+  .cg-tag-blue { animation-delay: .55s; } .cg-tag-red { animation-delay: .7s; } .cg-note { animation-delay: .85s; }
+  .cg-sport img { transition: transform .8s cubic-bezier(.16, 1, .3, 1); }
+  .cg-sport { transition: transform .35s cubic-bezier(.2, .8, .2, 1), border-color .35s ease; }
+  .cg-sport:hover { transform: translateY(-4px); border-color: rgba(90, 160, 255, .5); }
+  .cg-sport:hover img { transform: scale(1.05); }
+  .cg-icon { transition: border-color .3s ease, transform .3s ease; }
+  .cg-list li:hover .cg-icon { border-color: rgba(90, 160, 255, .55); transform: translateY(-2px); }
+}
+@keyframes cg-rise { from { opacity: 0; transform: translateY(18px); } }
+@keyframes cg-settle { from { opacity: 0; transform: scale(1.04); } }
+@keyframes cg-pop { from { opacity: 0; transform: translateY(8px) scale(.96); } }
