@@ -180,3 +180,35 @@ def test_google_sign_in_behind_on_its_policies_is_asked_once_like_email():
                                    "csrf_token": client.cookies.get("warrioriq_csrf", "")}, follow_redirects=False)
     _, done = sign_in()
     assert done.headers["location"] == "/camp"
+
+
+def test_an_account_behind_on_its_policies_cannot_skip_the_page():
+    """Owner, 2026-11-25: after sign-in it went to /policies once, but any other
+    page still opened. Page views now go there until it accepts; its own data,
+    the policies themselves and sign-out stay open."""
+    created, _ = _account()
+    with db.connection() as con:
+        con.execute("UPDATE accounts SET terms_version='2000-01-01', privacy_version='2000-01-01' WHERE id=?",
+                    (int(created["id"]),))
+    client = BrowserClient(web.app)
+    client.cookies.set(web.SESSION_COOKIE, issue_session(created["id"]))
+    html = {"accept": "text/html,application/xhtml+xml"}
+    blocked = client.get("/camp?tab=1", headers=html, follow_redirects=False)
+    assert blocked.status_code == 303 and blocked.headers["location"] == "/policies?next=%2Fcamp%3Ftab%3D1"
+    for open_path in ("/policies?next=/camp", "/terms", "/privacy", "/settings/privacy"):
+        assert client.get(open_path, headers=html, follow_redirects=False).status_code in {200, 303}, open_path
+        assert "/policies?next" not in client.get(open_path, headers=html, follow_redirects=False).headers.get("location", ""), open_path
+    # Not a page view: never redirected.
+    assert client.get("/camp", headers={"accept": "application/json"}, follow_redirects=False).headers.get(
+        "location", "") != "/policies?next=%2Fcamp"
+    client.post("/policies", data={"next_path": "/camp", "accept_policies": "true"}, follow_redirects=False)
+    assert client.get("/camp", headers=html, follow_redirects=False).status_code == 200
+
+
+def test_an_account_with_no_recorded_version_is_not_stopped():
+    created, _ = _account()
+    with db.connection() as con:
+        con.execute("UPDATE accounts SET terms_version=NULL WHERE id=?", (int(created["id"]),))
+    client = BrowserClient(web.app)
+    client.cookies.set(web.SESSION_COOKIE, issue_session(created["id"]))
+    assert client.get("/camp", headers={"accept": "text/html"}, follow_redirects=False).status_code == 200

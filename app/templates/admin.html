@@ -221,6 +221,8 @@
   {#- The only fights the strike detector may be trained on: their uploader
       ticked "Help WarriorIQ get better" (core/training_consent.py). -#}
   <p><strong>{{ a.shared.kept }}</strong> fight{{ '' if a.shared.kept == 1 else 's' }} held for training now. {{ rate(a.shared.ticked, a.shared.uploads) }} uploads ticked "Help WarriorIQ get better"; a fight stops counting when it, its video or its account is deleted.</p>
+  {% if a.shared.from_minors %}<div class="notice bad"><p><strong>{{ a.shared.from_minors }} of these came from under-18 accounts.</strong> Before 25 Nov 2026 the upload accepted the box from them; the privacy policy says it is never used for footage with anyone under 18. Taking them out deletes only the training copy: the fights and reports stay with their owners.</p>
+    <form action="/admin/training/remove-minors" method="post"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><label class="check"><input type="checkbox" name="confirm" value="yes" required> <span>Take these fights out of training</span></label><button class="btn danger" type="submit">Remove from training</button></form></div>{% endif %}
   {% else %}<p class="notice bad">These figures could not be counted just now. The error is in the website log.</p>{% endif %}
 </section>
 

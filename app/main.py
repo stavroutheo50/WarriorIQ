@@ -2375,6 +2375,33 @@ def _record_journey(account_id: int, event: str, status: int, reason: str) -> No
                           severity="warning" if event.endswith("_refused") else "info", metadata=metadata)
 
 
+# Pages an account behind on its policies can still open (2026-11-25): the
+# policies themselves and the legal documents, everything about its own data
+# (download or delete it without accepting anything new), and signing out.
+_POLICY_GATE_OPEN = ("/policies", "/logout", "/legal", "/privacy", "/settings", "/account", "/auth/",
+                     "/forgot-password", "/password-reset", "/verify", "/static/", "/api/", "/healthz")
+
+
+def _policy_gate(request: Request) -> str | None:
+    """Where to send a signed-in account whose accepted policy version is behind.
+
+    After sign-in it was sent to /policies once, but any other page still
+    opened, so the "I accept" could simply be skipped (owner, 2026-11-25:
+    "fix them"). Only page views are sent there - a GET asking for HTML - so
+    images, data requests and the analysis worker are never redirected.
+    """
+    if request.method not in {"GET", "HEAD"} or "text/html" not in request.headers.get("accept", ""):
+        return None
+    account = getattr(request.state, "account", None)
+    if not account or not policies_outdated(account):
+        return None
+    path = request.url.path
+    if path.startswith(_POLICY_GATE_OPEN) or path.strip("/") in LEGAL_DOCUMENTS:
+        return None
+    target = path + (f"?{request.url.query}" if request.url.query else "")
+    return f"/policies?next={quote(_safe_next(target), safe='')}"
+
+
 @app.middleware("http")
 async def viewer_context(request: Request, call_next):
     rejected_host = next(
@@ -2459,7 +2486,10 @@ async def viewer_context(request: Request, call_next):
         if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
             return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
     _schedule_maintenance()
-    if is_fight_upload(request.scope):
+    policy_page = _policy_gate(request)
+    if policy_page is not None:
+        response = RedirectResponse(policy_page, status_code=303)
+    elif is_fight_upload(request.scope):
         response = await _admit_fight_upload(request, call_next)
     else:
         response = await call_next(request)
