@@ -90,7 +90,7 @@ def test_the_hero_shows_a_real_tracking_example():
     # fighters in full view and the pose model's skeleton drawn on each.
     page = BrowserClient(web.app).get("/").text
     assert 'src="/static/home/hero-corners.jpg' in page
-    assert "Real WarriorIQ tracking" in page
+    assert "real warrioriq tracking" in page.lower()
     hero = page[page.index('class="cg-hero"'):page.index("</section>", page.index('class="cg-hero"'))]
     assert "<video" not in hero and "autoplay" not in hero
     assert "<video" not in page                        # no looping video anywhere on the home page

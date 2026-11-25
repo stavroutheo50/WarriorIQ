@@ -1037,7 +1037,7 @@ class PublicPageTests(unittest.TestCase):
 
         self.assertIn('/assets/base.css', shell)
         self.assertIn("product.css", CSS_BUNDLES["base"])
-        self.assertIn("Train what it shows.", home)
+        self.assertIn("Analysed.", home)
         # The report excerpt is gone (owner, 2026-11-09): its strike numbers
         # were a selling point the counts cannot yet support.
         self.assertNotIn('class="home-proof"', home)
@@ -1204,9 +1204,10 @@ class PublicPageTests(unittest.TestCase):
 
     def test_home_copy_uses_the_warrioriq_combat_sports_voice(self):
         page = self.client.get("/").text
-        # The homepage headline (design G, approved by the owner 2026-11-25;
-        # "Understand your performance. Improve your game." from 2026-11-14).
-        self.assertIn('<span>Read the fight.</span><span class="cg-title-blue">Train what it shows.</span>', page)
+        # The homepage headline (owner, 2026-11-25: short and plain; it was
+        # "Read the fight. Train what it shows." for a day, and "Understand
+        # your performance. Improve your game." from 2026-11-14).
+        self.assertIn('<span>Your fight.</span><span class="cg-title-blue">Analysed.</span>', page)
         # Who it is for, and what happens to the footage - each line something
         # the product does now.
         self.assertIn('id="whoTitle"', page)
@@ -3161,11 +3162,15 @@ class HomepagePromiseTests(unittest.TestCase):
             self.assertNotIn(claim, hero, f"the hero cannot promise {claim!r} while strike counting is off")
 
     def test_the_hero_says_what_is_actually_delivered(self):
-        """"Straight to the point" means naming the real deliverables."""
+        """"Straight to the point" means naming the real deliverables.
+
+        Since 2026-11-25 the hero is the headline, the button and the example
+        fight only (owner: "remove the paragraph"); the deliverables are named
+        in the first section under it."""
         from pathlib import Path
 
         home = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
-        hero = home.split("</section>")[0].lower()
+        hero = "</section>".join(home.split("</section>")[:2]).lower()
         self.assertIn("score estimate", hero, "the scorecard is the headline deliverable")
         self.assertIn("four-week plan", hero, "so is the training plan")
         self.assertIn("guard", hero, "and the measurements that are actually real")

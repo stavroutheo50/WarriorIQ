@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}WarriorIQ · AI Fight Analysis for Combat Sports{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/home-corner.css?v={{asset_version}}"><link rel="preload" href="/static/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/home-corner.css?v={{asset_version}}">{% endblock %}
 {% block scripts %}<script nonce="{{ request.state.csp_nonce }}" src="/static/home.js?v={{asset_version}}" defer></script>{% endblock %}
 {% block description %}Upload a kickboxing, boxing, Muay Thai, taekwondo or MMA fight. WarriorIQ measures how both fighters moved{% if features.scoring.on %}, estimates the round-by-round score under your sport's rules,{% endif %} and builds a four-week training plan from your own numbers.{% endblock %}
 {% block content %}
@@ -11,7 +11,7 @@
     static/home-corner.css; sections reveal on scroll (static/home.js).
     Removed from the old page on the owner's word: the Ringside Scorer link
     beside the main button (it stays in the menu), the eyebrow labels, the
-    glass cards. No fight statistics anywhere on the page (owner).
+    glass where it helps. No fight statistics anywhere on the page (owner).
 
     Pictures, all licensed for this use:
       hero-corners  Pexels 4761806 "Two men sparring in kick boxing" (Pexels License), the frame
@@ -27,9 +27,7 @@
 
 <section class="cg-hero" aria-labelledby="heroTitle">
   <div class="cg-hero-copy">
-    <p class="cg-corners" aria-hidden="true"><span class="cg-is-blue"><i></i>Blue corner</span><span class="cg-vs">vs</span><span class="cg-is-red"><i></i>Red corner</span></p>
-    <h1 id="heroTitle" class="cg-title"><span>Read the fight.</span><span class="cg-title-blue">Train what it shows.</span></h1>
-    <p class="cg-hero-lead">Film your sparring on a phone. WarriorIQ follows both fighters through every round and shows how you moved, where you pressed and when your guard dropped{% if features.scoring.on %}, with a round-by-round score estimate{% endif %}. Then it builds a four-week plan from your own rounds.{% if not features.scoring.on %} Score estimates are coming.{% endif %}</p>
+    <h1 id="heroTitle" class="cg-title"><span>Your fight.</span><span class="cg-title-blue">Analysed.</span></h1>
     <div class="cg-cta">
       {% if request.state.account %}<a class="btn cg-btn" data-motion-primary href="/analyze">Analyse my video</a>{% else %}<a class="btn cg-btn" data-motion-primary href="/signup?next=/analyze">Analyse a fight free</a>{% endif %}
       <ul class="cg-trust hx-trust">{% if not request.state.account %}<li>Free account</li>{% endif %}<li>Your footage stays private</li><li>Delete it any time</li></ul>
@@ -37,12 +35,9 @@
   </div>
   <div class="cg-shot">
     <figure class="cg-shot-frame">
-      <img src="/static/home/hero-corners.jpg?v={{asset_version}}" width="1280" height="720" alt="Two kickboxers sparring in a ring, both in full view, each with the skeleton WarriorIQ tracks drawn on: the fighter on the left in blue, the one on the right in red" fetchpriority="high" decoding="async">
+      <img src="/static/home/hero-corners.jpg?v={{asset_version}}" width="1280" height="720" alt="An example fight: two kickboxers sparring in a ring, each with the skeleton WarriorIQ tracks drawn on, the fighter on the left in blue and the one on the right in red" fetchpriority="high" decoding="async">
     </figure>
-    <span class="cg-tag cg-tag-blue cg-glass"><i></i>Blue corner · You</span>
-    <span class="cg-tag cg-tag-red cg-glass"><i></i>Red corner · Opponent</span>
-    <p class="cg-note cg-glass"><b>Work on next</b><span>Your balance drops right after you throw. Reset your feet before the next shot.</span></p>
-    <p class="cg-credit">Real WarriorIQ tracking · example tip</p>
+    <p class="cg-credit">Example fight · real WarriorIQ tracking</p>
   </div>
 </section>
 
@@ -50,7 +45,7 @@
   <div class="cg-wrap cg-reads">
     <div class="cg-reads-head hx-reveal">
       <h2 id="getTitle" class="cg-h2">What a coach sees from the corner.</h2>
-      <p class="cg-lead">Four things decide most rounds before anyone counts a punch. WarriorIQ watches all four, for both fighters, the whole way through.</p>
+      <p class="cg-lead">Four things decide most rounds before anyone counts a punch. WarriorIQ watches all four for both fighters, then builds a four-week plan from your own rounds{% if features.scoring.on %}, with a round-by-round score estimate{% endif %}.{% if not features.scoring.on %} Score estimates are coming.{% endif %}</p>
     </div>
     <ul class="cg-list">
       <li class="hx-reveal"><span class="cg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6M5 6v12"/></svg></span><div><h3>Movement</h3><p>How much ground each fighter covers, and who owns the centre of the ring.</p></div></li>
@@ -133,7 +128,7 @@
 
 <section class="cg-band cg-ground cg-end" aria-labelledby="endTitle">
   <div class="cg-wrap">
-    <h2 id="endTitle" class="hx-reveal">Your next round starts with the last one.</h2>
+    <h2 id="endTitle" class="cg-h2 hx-reveal">Your next round starts with the last one.</h2>
     {% if request.state.account %}<a class="btn cg-btn" href="/analyze">Analyse my video</a>{% else %}<a class="btn cg-btn" href="/signup?next=/analyze">Analyse a fight free</a>{% endif %}
     <p class="cg-credits hx-credits">Footage: Mixkit (Mixkit Free License); MCCS Okinawa MMA Fight Night, US Marine Corps (public domain); kickboxing and Muay Thai sparring, Pexels (Pexels License).</p>
   </div>
