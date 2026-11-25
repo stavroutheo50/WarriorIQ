@@ -4468,6 +4468,8 @@ def _sport_context(request: Request, sport: str) -> dict:
     default_rounds, default_seconds = SPORT_ROUND_DEFAULTS.get(sport, (3, 180))
     return {
         "request": request,
+        # Under-18 accounts are not offered "Help WarriorIQ get better".
+        "minor_account": social.is_minor_account(account),
         "sport": sport,
         "sport_label": RULESET_SPORTS[sport],
         # "a MMA bout" read wrong: the article follows the sound, and MMA
@@ -4716,6 +4718,11 @@ async def upload(
     minor_permission_status: str = Form(""),
 ):
     minor_permission_status = minor_permission_status.strip().lower()
+    # "Help WarriorIQ get better": never for footage with anyone under 18, and
+    # never from an under-18 account, whose own fight shows them (security
+    # review, 2026-11-25; quick checks and coaching already leave them out).
+    may_train = bool(training_consent and minor_permission_status == "no_minors"
+                     and not social.is_minor_account(_account(request)))
     if (
         not rights_confirmed
         or not people_permissions_confirmed
@@ -5035,7 +5042,7 @@ async def upload(
             "openai_identity_recovery": bool(openai_identity_recovery),
             "external_ai_opted_in": bool(openai_identity_recovery),
             # Never for footage with minors in it, whatever was ticked.
-            "training_consent": bool(training_consent and minor_permission_status == "no_minors"),
+            "training_consent": may_train,
             "fighter_id": chosen_fighter["id"] if chosen_fighter else None,
             "event_name": clean_fight_name(event_name),
             "opponent_name": clean_fight_name(opponent_name),
@@ -5063,7 +5070,7 @@ async def upload(
         resource_type="fight", resource_id=job_id,
         metadata={"guest": not bool(account), "minor_permission_status": minor_permission_status},
     )
-    if training_consent and minor_permission_status == "no_minors":
+    if may_train:
         record_legal_acceptance(
             "fight_training_consent", SETTINGS.policy_version,
             resource_id=job_id,

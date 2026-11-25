@@ -148,3 +148,19 @@ def test_the_box_switches_off_for_footage_with_a_minor():
     assert 'id="trainingMinorNote" hidden' in page
     script = page.split("const syncTraining=")[1].split("};")[0]
     assert "guardian_authorized" in script and "trainingBox.checked=false" in script and "trainingBox.disabled=minor" in script
+
+
+def test_an_under_18_account_cannot_opt_in_and_is_not_offered_it(signed_in, tmp_path, monkeypatch):
+    """Security review, 2026-11-25: the server checked only the footage answer,
+    so an under-18 account could tick the box and answer "all 18 or over" about
+    its own fight. Quick checks and coaching already leave these accounts out."""
+    web, client = signed_in
+    monkeypatch.setattr(web.social, "is_minor_account", lambda account: True)
+    assert '<input type="checkbox" name="training_consent"' not in client.get("/analyze/kickboxing").text
+    data = {"rights_confirmed": "true", "people_permissions_confirmed": "true",
+            "minor_permission_status": "no_minors", "training_consent": "true"}
+    with _clip(tmp_path / "fight.mp4").open("rb") as handle:
+        response = client.post("/upload", headers={"Accept": "application/json"},
+                               files={"video": ("fight.mp4", handle, "video/mp4")}, data=data)
+    assert response.status_code == 201, response.text
+    assert web.get_job(response.json()["job_id"])["training_consent"] is False
