@@ -164,3 +164,41 @@ def test_an_under_18_account_cannot_opt_in_and_is_not_offered_it(signed_in, tmp_
                                files={"video": ("fight.mp4", handle, "video/mp4")}, data=data)
     assert response.status_code == 201, response.text
     assert web.get_job(response.json()["job_id"])["training_consent"] is False
+
+
+def test_the_admin_can_take_fights_from_under_18_accounts_out_of_training(folder, monkeypatch):
+    """Kept before the 2026-11-25 fix: listed on /admin and removed on request,
+    the training copy only."""
+    import app.main as web
+    from app import accuracy
+    from browser_client import BrowserClient
+    from core import db
+    from core.auth import issue_session
+
+    adult = db.create_account(f"adult-{uuid.uuid4().hex[:8]}@example.test", "x")
+    young = db.create_account(f"young-{uuid.uuid4().hex[:8]}@example.test", "x")
+    for job_id, owner in (("aaaa1111bbbb", adult), ("cccc2222dddd", young)):
+        video, run = folder / f"{job_id}.mp4", folder / f"run-{job_id}"
+        video.write_bytes(b"video bytes")
+        run.mkdir()
+        (run / "report.json").write_text("{}")
+        assert training_consent.keep(job_id, video, run, {"profile_id": owner["profile_id"]})
+    from core import social
+
+    monkeypatch.setattr(social, "is_minor_account", lambda account: bool(account) and account["id"] == young["id"])
+    assert accuracy.kept_from_minors(training_consent.kept()) == ["cccc2222dddd"]
+
+    admin = db.create_account(f"admin-{uuid.uuid4().hex[:8]}@example.test", "x")
+    client = BrowserClient(web.app)
+    client.cookies.set(web.SESSION_COOKIE, issue_session(admin["id"]))
+    previous = web.SETTINGS.admin_emails
+    object.__setattr__(web.SETTINGS, "admin_emails", (admin["email"].lower(),))
+    try:
+        refused = client.post("/admin/training/remove-minors", data={}, follow_redirects=False)
+        assert "training_minors_none" in refused.headers["location"]
+        assert len(training_consent.kept()) == 2
+        done = client.post("/admin/training/remove-minors", data={"confirm": "yes"}, follow_redirects=False)
+    finally:
+        object.__setattr__(web.SETTINGS, "admin_emails", previous)
+    assert "training_minors_removed" in done.headers["location"]
+    assert [f["job_id"] for f in training_consent.kept()] == ["aaaa1111bbbb"]

@@ -137,4 +137,4 @@ def test_the_admin_counts_fights_shared_for_training(monkeypatch):
 
     monkeypatch.setattr(training_consent, "kept", lambda: [{"job_id": "a"}, {"job_id": "b"}])
     jobs = [("1", {"training_consent": True}), ("2", {}), ("3", {"training_consent": True})]
-    assert accuracy.shared_fights(jobs) == {"uploads": 3, "ticked": 2, "kept": 2}
+    assert accuracy.shared_fights(jobs) == {"uploads": 3, "ticked": 2, "kept": 2, "from_minors": 0}

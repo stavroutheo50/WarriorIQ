@@ -117,8 +117,28 @@ def shared_fights(jobs: list[tuple[str, dict]]) -> dict:
     """
     from core import training_consent
 
+    kept = training_consent.kept()
     return {"uploads": len(jobs), "ticked": sum(1 for _, job in jobs if job.get("training_consent")),
-            "kept": len(training_consent.kept())}
+            "kept": len(kept), "from_minors": len(kept_from_minors(kept))}
+
+
+def kept_from_minors(kept: list[dict]) -> list[str]:
+    """Kept fights whose account is under 18.
+
+    Before 2026-11-25 the upload honoured "Help WarriorIQ get better" from an
+    under-18 account that answered "all 18 or over" about its own footage. The
+    privacy policy says never for footage with anyone under 18, so these are
+    listed for the administrator to take out of training (/admin).
+    """
+    from core.db import get_account_by_profile
+    from core.social import is_minor_account
+
+    out = []
+    for fight in kept:
+        profile_id = fight.get("profile_id")
+        if str(profile_id or "").isdigit() and is_minor_account(get_account_by_profile(int(profile_id))):
+            out.append(str(fight.get("job_id") or ""))
+    return [job_id for job_id in out if job_id]
 
 
 def summary(jobs: list[tuple[str, dict]], anchors_for: Callable[[str, dict], list[dict]],

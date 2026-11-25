@@ -95,6 +95,8 @@ _ADMIN_TOOL_RESULTS = {
     "leftovers_none": "Nothing was deleted: tick the confirmation and at least one copy.",
     "qa_archived": "The QA test fighters were archived. Their fights were kept; adding a fighter with the same name brings one back.",
     "qa_none": "Nothing was archived: tick the confirmation first.",
+    "training_minors_removed": "Fights from under-18 accounts were taken out of training. The fights and reports themselves were kept.",
+    "training_minors_none": "Nothing was removed: tick the confirmation first.",
     "plan_granted": "Plan given. The person was emailed if email is working; the Email section shows whether it was sent.",
     "plan_declined": "Request declined. The person's plan was not changed.",
     "plan_ended": "The plan was taken away. The person is back on the plan they pay for, or Starter.",
@@ -150,6 +152,30 @@ async def admin_delete_leftovers(request: Request):
         m.record_security_event("orphan_web_video_deleted", account_id=int(actor["id"]), resource_type="fight",
                               resource_id=name[: -len("_web.mp4")], metadata={"tool": "admin_page"})
     return RedirectResponse("/admin?tool=leftovers_deleted#adminTools", status_code=303)
+
+
+@app.post("/admin/training/remove-minors", dependencies=[Depends(m.require_csrf)])
+async def admin_remove_minor_training_copies(request: Request):
+    """Take fights from under-18 accounts out of training (security review, 2026-11-25).
+
+    Deletes only the training copy (core/training_consent.forget); the fight,
+    its report and its own video stay with the account, as before the opt-in.
+    """
+    if not m._is_admin(request):
+        raise HTTPException(404)
+    form = await request.form()
+    if form.get("confirm") != "yes":
+        return RedirectResponse("/admin?tool=training_minors_none#adminTools", status_code=303)
+    from app import accuracy
+    from core import training_consent
+
+    actor = m._account(request)
+    for job_id in accuracy.kept_from_minors(training_consent.kept()):
+        training_consent.forget(job_id)
+        m.record_security_event("training_copy_removed", account_id=int(actor["id"]), resource_type="fight",
+                                resource_id=job_id, metadata={"reason": "under_18_account"})
+    accuracy._cache.clear()
+    return RedirectResponse("/admin?tool=training_minors_removed#adminTools", status_code=303)
 
 
 @app.post("/admin/qa-fighters/archive", dependencies=[Depends(m.require_csrf)])
