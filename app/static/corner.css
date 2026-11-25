@@ -1,0 +1,58 @@
+/* ============================================================================
+   "Corner Light" on every page (owner, 2026-11-25: "do this redesign for all
+   of the pages"). The home page's own layout is in home-corner.css; this file
+   carries the parts every page shares:
+
+   - Archivo, the wide heavy face of the home headline, for page titles and
+     section headings. Self-hosted like Inter: a font request to Google would
+     send every visitor's address there first.
+   - A flat navy ground. The soft coloured light at the top of every page
+     (glass.css, 2026-10-28) is gone: the owner asked for no background
+     gradient.
+
+   Page titles share one size, smaller than before: the owner found the big
+   headline too big. The home page keeps its own (.cg-title, .cg-h2).
+   Loaded after glass.css and walkthrough.css, before interaction.css and
+   a11y.css, which stay last.
+   ========================================================================= */
+
+@font-face {
+  font-family: "Archivo";
+  src: url("/static/fonts/archivo-latin.woff2") format("woff2");
+  font-weight: 700 900;
+  font-stretch: 100% 125%;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+                 U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root { --wiq-display: "Archivo", "Arial Black", "Helvetica Neue", Arial, sans-serif; }
+
+/* No glow: the same navy from top to bottom. */
+body { background: var(--glass-canvas) !important; }
+
+/* Page titles. */
+main h1:not(.cg-title) {
+  font-family: var(--wiq-display);
+  font-weight: 900 !important;
+  font-stretch: 108%;
+  text-transform: uppercase;
+  font-size: clamp(30px, 3.8vw, 50px) !important;
+  line-height: .98 !important;
+  letter-spacing: -.02em !important;
+  overflow-wrap: anywhere;
+}
+/* A title's second, quieter half (h1 em) keeps its colour, in the same face. */
+main h1:not(.cg-title) em { font-style: normal; }
+
+/* Section headings: the same face at normal width, so long ones still fit
+   inside cards; sizes stay what each page set. */
+main h2:not(.cg-h2) {
+  font-family: var(--wiq-display);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -.01em;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}

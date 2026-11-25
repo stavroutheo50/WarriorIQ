@@ -475,8 +475,10 @@ CSS_BUNDLES: dict[str, tuple[str, ...]] = {
     # walkthrough.css (2026-11-16) adjusts spacing and alignment on top of glass.
     # interaction.css (2026-11-24): the one button and motion layer, after
     # everything it replaces.
-    "shell": ("premium.css", "motion.css", "redesign.css", "glass.css", "walkthrough.css", "interaction.css",
-              "a11y.css"),
+    # corner.css (2026-11-25): the home page's "Corner Light" look on every
+    # page - Archivo headings, a flat navy ground with no glow.
+    "shell": ("premium.css", "motion.css", "redesign.css", "glass.css", "walkthrough.css", "corner.css",
+              "interaction.css", "a11y.css"),
 }
 
 
