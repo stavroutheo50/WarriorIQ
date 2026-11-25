@@ -1008,7 +1008,7 @@ class PublicPageTests(unittest.TestCase):
         # Shortened on 2026-10-19 (owner): the outcomes and trust panels are gone;
         # what is measured, plans and the FAQ carry the product and the trust.
         self.assertIn('id="what-is-measured"', response.text)
-        self.assertIn('class="product-section faq"', response.text)
+        self.assertIn('class="product-section faq', response.text)
         self.assertNotIn("V" + "4", self._without_random_tokens(response.text))
 
     def test_the_version_marker_check_is_not_defeated_by_the_masking(self):
@@ -1037,11 +1037,11 @@ class PublicPageTests(unittest.TestCase):
 
         self.assertIn('/assets/base.css', shell)
         self.assertIn("product.css", CSS_BUNDLES["base"])
-        self.assertIn("Improve your game.", home)
+        self.assertIn("Train what it shows.", home)
         # The report excerpt is gone (owner, 2026-11-09): its strike numbers
         # were a selling point the counts cannot yet support.
         self.assertNotIn('class="home-proof"', home)
-        self.assertIn('class="home-steps"', home)
+        self.assertIn('class="cg-steps"', home)
         self.assertIn("glass.css", CSS_BUNDLES["shell"])
         self.assertEqual("a11y.css", CSS_BUNDLES["shell"][-1])
         self.assertIn('class="fight-archive"', history)
@@ -1204,9 +1204,9 @@ class PublicPageTests(unittest.TestCase):
 
     def test_home_copy_uses_the_warrioriq_combat_sports_voice(self):
         page = self.client.get("/").text
-        # The homepage headline (owner's brief, 2026-11-14; it was "Your
-        # fight. In numbers." from 2026-10-28).
-        self.assertIn("Understand your performance.<br><em>Improve your game.</em>", page)
+        # The homepage headline (design G, approved by the owner 2026-11-25;
+        # "Understand your performance. Improve your game." from 2026-11-14).
+        self.assertIn('<span>Read the fight.</span><span class="cg-title-blue">Train what it shows.</span>', page)
         # Who it is for, and what happens to the footage - each line something
         # the product does now.
         self.assertIn('id="whoTitle"', page)

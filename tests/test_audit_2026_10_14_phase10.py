@@ -86,10 +86,12 @@ def test_the_hero_shows_a_real_tracking_example():
     # a stock clip with WarriorIQ's own tracking drawn on it, never a placeholder.
     # Since 2026-11-22 it is a still picture, not a video: the owner found the
     # moving clip behind the headline confusing. Still no sample report.
+    # Since 2026-11-25 (home redesign "Corner Light") it is one frame with both
+    # fighters in full view and the pose model's skeleton drawn on each.
     page = BrowserClient(web.app).get("/").text
-    assert 'src="/static/hero-fight.jpg' in page
-    assert "Real WarriorIQ tracking on a stock clip" in page
-    hero = page[page.index('class="hx-hero hx-hero-still"'):page.index("</section>", page.index('class="hx-hero hx-hero-still"'))]
+    assert 'src="/static/home/hero-corners.jpg' in page
+    assert "Real WarriorIQ tracking" in page
+    hero = page[page.index('class="cg-hero"'):page.index("</section>", page.index('class="cg-hero"'))]
     assert "<video" not in hero and "autoplay" not in hero
     assert "<video" not in page                        # no looping video anywhere on the home page
     # The clip shows tracking only (owner, 2026-11-01): its strike names were
@@ -114,14 +116,16 @@ def test_there_is_no_sample_report():
 # --------------------------------------------------------------------- #55
 def test_the_homepage_has_the_new_sections():
     page = BrowserClient(web.app).get("/").text
-    for anchor in ('id="what-is-measured"', 'id="plans"', 'class="product-section faq"', 'href="/accuracy"'):
+    for anchor in ('id="what-is-measured"', 'class="product-section faq', 'href="/accuracy"'):
         assert anchor in page, anchor
     for sport in ("Kickboxing", "Boxing", "Muay Thai", "Taekwondo", "MMA"):
         assert f"<h3>{sport}</h3>" in page
     assert "about a third" not in page                     # moved to /accuracy (2026-10-19)
     accuracy = BrowserClient(web.app).get("/accuracy").text
     assert "about a third" in accuracy and "11 of 16" in accuracy
-    assert "€9.99" in page and 'href="/pricing">Compare every plan' in page
+    # The plans block left the home page in the 2026-11-25 redesign (owner
+    # approved design G); prices live on /pricing, linked from the menu.
+    assert 'id="plans"' not in page
 
 
 @pytest.mark.parametrize("published", [True, False])
