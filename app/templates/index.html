@@ -27,7 +27,7 @@
 
 <section class="cg-hero" aria-labelledby="heroTitle">
   <div class="cg-hero-copy">
-    <h1 id="heroTitle" class="cg-title"><span>Your fight.</span><span class="cg-title-blue">Analysed.</span></h1>
+    <h1 id="heroTitle" class="cg-title"><span>See every</span><span class="cg-title-blue">round.</span></h1>
     <div class="cg-cta">
       {% if request.state.account %}<a class="btn cg-btn" data-motion-primary href="/analyze">Analyse my video</a>{% else %}<a class="btn cg-btn" data-motion-primary href="/signup?next=/analyze">Analyse a fight free</a>{% endif %}
       <ul class="cg-trust hx-trust">{% if not request.state.account %}<li>Free account</li>{% endif %}<li>Your footage stays private</li><li>Delete it any time</li></ul>

@@ -56,3 +56,18 @@ main h2:not(.cg-h2) {
   line-height: 1.05;
   overflow-wrap: anywhere;
 }
+
+/* --- No glows (owner, 2026-11-26: "finish on all of the other pages") -------
+   The coloured light some cards and panels still carried in a corner is
+   gone too: each keeps its border and its flat panel colour. */
+.ringside-more { background: var(--glass-fill); }
+[data-page="camp"] .camp-today { background: var(--glass-fill); }
+.ux-setup .file-button { background: rgba(10, 15, 24, .4) !important; }
+.ux-setup .file-button.uploaded { background: rgba(61, 220, 151, .08) !important; }
+.step-card:after { display: none; }
+.performance-card { background: var(--wiq-field-bg); }
+.analysis-quality, .replay-callout, .accuracy-next-step { background: var(--wiq-field-bg); }
+
+/* Small labels above titles keep their words, without the dash in front:
+   the home page has none, and the rest of the site now matches it. */
+.eyebrow::before { display: none !important; }
