@@ -26,18 +26,20 @@
 <div class="cg">
 
 <section class="cg-hero" aria-labelledby="heroTitle">
-  <div class="cg-hero-copy">
-    <h1 id="heroTitle" class="cg-title"><span>See every</span><span class="cg-title-blue">round.</span></h1>
-    <div class="cg-cta">
-      {% if request.state.account %}<a class="btn cg-btn" data-motion-primary href="/analyze">Analyse my video</a>{% else %}<a class="btn cg-btn" data-motion-primary href="/signup?next=/analyze">Analyse a fight free</a>{% endif %}
-      <ul class="cg-trust hx-trust">{% if not request.state.account %}<li>Free account</li>{% endif %}<li>Your footage stays private</li><li>Delete it any time</li></ul>
+  <div class="cg-hero-grid">
+    <div class="cg-hero-copy">
+      <h1 id="heroTitle" class="cg-title"><span>Film your fight.</span><span class="cg-title-blue">Know what to fix.</span></h1>
+      <div class="cg-cta">
+        <a class="btn cg-btn" data-motion-primary href="{% if request.state.account %}/analyze{% else %}/signup?next=/analyze{% endif %}">Analyse a fight</a>
+        <ul class="cg-trust hx-trust">{% if not request.state.account %}<li>Free account</li>{% endif %}<li>Your footage stays private</li><li>Delete it any time</li></ul>
+      </div>
     </div>
-  </div>
-  <div class="cg-shot">
-    <figure class="cg-shot-frame">
-      <img src="/static/home/hero-corners.jpg?v={{asset_version}}" width="1280" height="720" alt="An example fight: two kickboxers sparring in a ring, each with the skeleton WarriorIQ tracks drawn on, the fighter on the left in blue and the one on the right in red" fetchpriority="high" decoding="async">
-    </figure>
-    <p class="cg-credit">Example fight · real WarriorIQ tracking</p>
+    <div class="cg-shot">
+      <figure class="cg-shot-frame">
+        <img src="/static/home/hero-corners.jpg?v={{asset_version}}" width="1280" height="720" alt="An example fight: two kickboxers sparring in a ring, each with the skeleton WarriorIQ tracks drawn on, the fighter on the left in blue and the one on the right in red" fetchpriority="high" decoding="async">
+      </figure>
+      <p class="cg-credit">Example fight · real WarriorIQ tracking</p>
+    </div>
   </div>
 </section>
 
@@ -129,7 +131,7 @@
 <section class="cg-band cg-ground cg-end" aria-labelledby="endTitle">
   <div class="cg-wrap">
     <h2 id="endTitle" class="cg-h2 hx-reveal">Your next round starts with the last one.</h2>
-    {% if request.state.account %}<a class="btn cg-btn" href="/analyze">Analyse my video</a>{% else %}<a class="btn cg-btn" href="/signup?next=/analyze">Analyse a fight free</a>{% endif %}
+    <a class="btn cg-btn" href="{% if request.state.account %}/analyze{% else %}/signup?next=/analyze{% endif %}">Analyse a fight</a>
     <p class="cg-credits hx-credits">Footage: Mixkit (Mixkit Free License); MCCS Okinawa MMA Fight Night, US Marine Corps (public domain); kickboxing and Muay Thai sparring, Pexels (Pexels License).</p>
   </div>
 </section>
