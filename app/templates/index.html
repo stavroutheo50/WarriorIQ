@@ -20,6 +20,8 @@
       boxing        Mixkit 40954 "Boxers during an amateur fight" (Mixkit Free License)
       kickboxing    Pexels 4761806 (Pexels License)
       mma           Commons "MCCS Okinawa hosts 2025 MMA Fight Night (991725)", US Marine Corps (public domain)
+      track-*       the kickboxing clip (a frame at 20%), the Muay Thai, boxing (a frame at 75%) and MMA
+                    footage above, with both fighters' skeletons drawn from yolo26m-pose, 2026-11-26
       muaythai      Pexels 8612111 "Man and woman sparring in a boxing ring" (Pexels License)
       taekwondo     supplied by the owner 2026-11-13; source and licence NOT yet confirmed (OPS_TODO.md)
     The CC BY and public-domain sources are credited at the foot of the page. -#}
@@ -43,17 +45,36 @@
   </div>
 </section>
 
+<section class="cg-band cg-ground cg-show" aria-labelledby="sportsTitle">
+  {#- Every frame here is a real WarriorIQ pose-model result on licensed footage
+      (2026-11-26): the skeletons are drawn from the model's own keypoints. The
+      taekwondo photo is shown without tracking until its licence is confirmed. -#}
+  <div class="cg-wrap">
+    <div class="cg-row-head hx-reveal">
+      <h2 id="sportsTitle" class="cg-h2">Tracked in every ring.</h2>
+      <p class="cg-lead">Real WarriorIQ tracking on real sparring. Pick your sport; the report follows its rules.</p>
+    </div>
+    <div class="cg-bento">
+      <a class="cg-tile cg-tile-xl hx-reveal" href="/analyze/kickboxing"><img src="/static/home/track-kickboxing.jpg?v={{asset_version}}" width="1280" height="720" alt="Two kickboxers in a ring, one throwing a jab, each with WarriorIQ's tracked skeleton" loading="lazy" decoding="async"><span class="cg-tile-go" aria-hidden="true">&#8599;</span><div><h3>Kickboxing</h3><span>K-1, Low Kick, Kick Light, Point Fighting</span></div></a>
+      <a class="cg-tile hx-reveal" style="--i:1" href="/analyze/muay_thai"><img src="/static/home/track-muaythai.jpg?v={{asset_version}}" width="1280" height="720" alt="Two Muay Thai fighters sparring, each with WarriorIQ's tracked skeleton" loading="lazy" decoding="async"><span class="cg-tile-go" aria-hidden="true">&#8599;</span><div><h3>Muay Thai</h3><span>Punches, kicks, knees and elbows</span></div></a>
+      <a class="cg-tile hx-reveal" style="--i:2" href="/analyze/boxing"><img src="/static/home/track-boxing.jpg?v={{asset_version}}" width="960" height="540" alt="Two boxers in an amateur bout, each with WarriorIQ's tracked skeleton" loading="lazy" decoding="async"><span class="cg-tile-go" aria-hidden="true">&#8599;</span><div><h3>Boxing</h3><span>Punches only, ten-point must</span></div></a>
+      <a class="cg-tile hx-reveal" style="--i:3" href="/analyze/mma"><img src="/static/home/track-mma.jpg?v={{asset_version}}" width="700" height="440" alt="Two MMA fighters in a cage, each with WarriorIQ's tracked skeleton" loading="lazy" decoding="async"><span class="cg-tile-go" aria-hidden="true">&#8599;</span><div><h3>MMA</h3><span>Strikes and time on the ground</span></div></a>
+      <a class="cg-tile hx-reveal" style="--i:4" href="/analyze/taekwondo"><img src="/static/home/taekwondo.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><span class="cg-tile-go" aria-hidden="true">&#8599;</span><div><h3>Taekwondo</h3><span>World Taekwondo and ITF</span></div></a>
+    </div>
+  </div>
+</section>
+
 <section class="cg-band cg-ground" id="what-you-get" aria-labelledby="getTitle">
-  <div class="cg-wrap cg-reads">
-    <div class="cg-reads-head hx-reveal">
-      <h2 id="getTitle" class="cg-h2">What a coach sees from the corner.</h2>
+  <div class="cg-wrap">
+    <div class="cg-row-head hx-reveal">
+      <h2 id="getTitle" class="cg-h2">What it reads.</h2>
       <p class="cg-lead">Four things decide most rounds before anyone counts a punch. WarriorIQ watches all four for both fighters, then builds a four-week plan from your own rounds{% if features.scoring.on %}, with a round-by-round score estimate{% endif %}.{% if not features.scoring.on %} Score estimates are coming.{% endif %}</p>
     </div>
-    <ul class="cg-list">
-      <li class="hx-reveal"><span class="cg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6M5 6v12"/></svg></span><div><h3>Movement</h3><p>How much ground each fighter covers, and who owns the centre of the ring.</p></div></li>
-      <li class="hx-reveal" style="--i:1"><span class="cg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12h10M10 6l6 6-6 6M20 5v14"/></svg></span><div><h3>Pressure</h3><p>Who walks forward, who gets backed up, and when the round turned.</p></div></li>
-      <li class="hx-reveal" style="--i:2"><span class="cg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/></svg></span><div><h3>Guard</h3><p>How often the hands stay up, and how long they drop after an exchange.</p></div></li>
-      <li class="hx-reveal" style="--i:3"><span class="cg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v16M6 20h12M8 9h8M6 9l-3 6h6l-3-6zM18 9l-3 6h6l-3-6z"/></svg></span><div><h3>Balance</h3><p>How steady each stance stays, and what happens to your feet after you throw.</p></div></li>
+    <ul class="cg-reads">
+      <li class="hx-reveal"><span class="cg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6M5 6v12"/></svg></span><h3>Movement</h3><p>Ground covered, and who owns the centre.</p></li>
+      <li class="hx-reveal" style="--i:1"><span class="cg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12h10M10 6l6 6-6 6M20 5v14"/></svg></span><h3>Pressure</h3><p>Who walks forward, and when the round turned.</p></li>
+      <li class="hx-reveal" style="--i:2"><span class="cg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/></svg></span><h3>Guard</h3><p>When the hands drop, and for how long.</p></li>
+      <li class="hx-reveal" style="--i:3"><span class="cg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v16M6 20h12M8 9h8M6 9l-3 6h6l-3-6zM18 9l-3 6h6l-3-6z"/></svg></span><h3>Balance</h3><p>How steady you stay after you throw.</p></li>
     </ul>
   </div>
 </section>
@@ -69,21 +90,7 @@
   </div>
 </section>
 
-<section class="cg-band cg-ground" aria-labelledby="sportsTitle">
-  <div class="cg-wrap">
-    <div class="cg-row-head hx-reveal">
-      <h2 id="sportsTitle" class="cg-h2">Your sport. Your rules.</h2>
-      <p class="cg-lead">Each report is scored under the rules you fight under, and says plainly what it can and cannot read.</p>
-    </div>
-    <div class="cg-sports">
-      <a class="cg-sport hx-reveal" href="/analyze/kickboxing"><img src="/static/home/kickboxing.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><h3>Kickboxing</h3><span>K-1, Low Kick, Kick Light, Point Fighting</span></a>
-      <a class="cg-sport hx-reveal" style="--i:1" href="/analyze/boxing"><img src="/static/home/boxing.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><h3>Boxing</h3><span>Punches only, ten-point must</span></a>
-      <a class="cg-sport hx-reveal" style="--i:2" href="/analyze/muay_thai"><img src="/static/home/muaythai.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><h3>Muay Thai</h3><span>Punches, kicks, knees and elbows</span></a>
-      <a class="cg-sport hx-reveal" style="--i:3" href="/analyze/taekwondo"><img src="/static/home/taekwondo.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><h3>Taekwondo</h3><span>World Taekwondo and ITF</span></a>
-      <a class="cg-sport hx-reveal" style="--i:4" href="/analyze/mma"><img src="/static/home/mma-still.jpg?v={{asset_version}}" alt="" loading="lazy" decoding="async"><h3>MMA</h3><span>Strikes and time on the ground</span></a>
-    </div>
-  </div>
-</section>
+
 
 <section class="cg-band cg-deep" aria-labelledby="whoTitle">
   {#- Only what the product does today (owner's brief, 2026-11-14). -#}

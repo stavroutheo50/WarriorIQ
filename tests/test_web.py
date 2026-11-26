@@ -3166,11 +3166,11 @@ class HomepagePromiseTests(unittest.TestCase):
 
         Since 2026-11-25 the hero is the headline, the button and the example
         fight only (owner: "remove the paragraph"); the deliverables are named
-        in the first section under it."""
+        just under it, after the tracked sports (2026-11-26)."""
         from pathlib import Path
 
         home = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
-        hero = "</section>".join(home.split("</section>")[:2]).lower()
+        hero = "</section>".join(home.split("</section>")[:3]).lower()  # hero, sports, what it reads
         self.assertIn("score estimate", hero, "the scorecard is the headline deliverable")
         self.assertIn("four-week plan", hero, "so is the training plan")
         self.assertIn("guard", hero, "and the measurements that are actually real")
