@@ -65,6 +65,9 @@ Privacy: fights are private to the account unless shared; uploaded videos are de
 - [K-1 fight analysis]({base}/k1-fight-analysis)
 - [Muay Thai fight analysis]({base}/muay-thai-fight-analysis)
 - [MMA fight analysis]({base}/mma-fight-analysis)
+- [Boxing fight analysis]({base}/boxing-fight-analysis)
+- [Taekwondo analysis (WT and ITF)]({base}/taekwondo-fight-analysis)
+- [AI sparring analysis]({base}/ai-sparring-analysis)
 
 ## Trust
 
