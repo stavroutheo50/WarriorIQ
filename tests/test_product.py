@@ -715,7 +715,7 @@ class AccountAndProductIntegrationTests(unittest.TestCase):
     def test_primary_actions_are_real_and_explain_their_state(self):
         self._sign_in("actions@example.com")
         home = self.client.get("/").text
-        self.assertIn('href="/analyze">Analyse my video', home)
+        self.assertIn('href="/analyze">Analyse a fight', home)  # owner, 2026-11-26
         for link in ('href="/">Home', 'href="/camp">Fight Camp', 'href="/pricing">Plans'):
             self.assertIn(link, home)  # in the bar itself, not under a More menu
         # Compare fights moved into the Fight library (owner, 2026-10-28).

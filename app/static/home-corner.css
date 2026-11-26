@@ -10,6 +10,9 @@
    2026-11-25, second pass (owner): a shorter headline, no paragraph, labels
    or tip over the photo (the skeletons only), a smaller photo, a bigger
    button and less space at the top.
+   2026-11-26 (owner): a smaller headline beside the example fight, as the
+   hero was before; "Analyse a fight" on a bigger button; no divider lines
+   between sections and less empty space.
    Motion: the headline and button rise in on load, the photo settles in,
    sections reveal as they scroll in (home.js, .hx-reveal). prefers-reduced-motion
    turns all of it off.
@@ -33,41 +36,42 @@
 .cg h1, .cg h2, .cg h3 { font-family: var(--cg-display); font-stretch: 112%; text-transform: uppercase; }
 
 /* The page runs edge to edge; each band keeps its content to one width. */
-.cg-band { width: 100vw; margin-left: calc(50% - 50vw); border-top: 1px solid var(--cg-line); }
-.cg-band.cg-deep { background: var(--cg-deep); }
-.cg-band.cg-ground { background: var(--cg-ground); }
-.cg-wrap { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: clamp(72px, 9vw, 112px) 0; box-sizing: border-box; }
+.cg-band { width: 100vw; margin-left: calc(50% - 50vw); }
+.cg-band.cg-deep { background: transparent; }  /* one navy everywhere: no edges between bands */
+.cg-band.cg-ground { background: transparent; }
+.cg-hero + .cg-band .cg-wrap { padding-top: clamp(32px, 4vw, 56px); }
+.cg-wrap { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: clamp(56px, 7vw, 88px) 0; box-sizing: border-box; }
 
 .cg-h2 { margin: 0; font-weight: 900; font-size: clamp(34px, 4.4vw, 60px); line-height: .95; letter-spacing: -.03em; text-wrap: balance; }
 .cg-lead { margin: 0; font-size: 18px; line-height: 1.6; color: var(--cg-soft); max-width: 460px; text-wrap: pretty; }
 
 /* --- Hero ------------------------------------------------------------------ */
-.cg-hero { width: 100vw; margin-left: calc(50% - 50vw); background: var(--cg-deep); position: relative; overflow: hidden; }
-.cg-hero-copy { position: relative; width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: clamp(16px, 2.4vw, 28px) 0 0;
-  display: flex; flex-direction: column; align-items: center; text-align: center; gap: clamp(18px, 2vw, 24px); }
-.cg-title { margin: 0; font-weight: 900; font-size: clamp(38px, 5.4vw, 80px); line-height: .92; letter-spacing: -.035em; text-wrap: balance; }
+.cg-hero { width: 100vw; margin-left: calc(50% - 50vw); }
+/* Words on the left, the example fight on the right; stacked on phones. */
+.cg-hero-grid { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: clamp(20px, 3vw, 40px) 0 clamp(24px, 3vw, 40px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: clamp(28px, 4vw, 56px); }
+.cg-hero-copy { display: flex; flex-direction: column; align-items: flex-start; gap: clamp(24px, 2.6vw, 32px); }
+.cg-title { margin: 0; font-weight: 900; font-size: clamp(32px, 3.4vw, 50px); line-height: .95; letter-spacing: -.03em; text-wrap: balance; }
 .cg-title span { display: block; }
 .cg-title .cg-title-blue { color: var(--cg-blue-light); }
-.cg-cta { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.cg .btn.cg-btn { min-height: 68px; padding: 0 52px; font-size: 21px; font-weight: 700; border-radius: 999px !important; }
-.cg-trust { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 20px; margin: 0; padding: 0; list-style: none; font-size: 14px; color: var(--cg-faint); }
+.cg-cta { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
+.cg .btn.cg-btn { min-height: 76px; padding: 0 60px; font-size: 23px; font-weight: 700; border-radius: 999px !important; }
+.cg-trust { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; padding: 0; list-style: none; font-size: 14px; color: var(--cg-faint); }
 .cg-trust li { display: inline-flex; align-items: center; gap: 7px; }
 .cg-trust li::before { content: "\2713"; color: var(--cg-blue-light); font-weight: 800; }
 
 /* The example fight: both fighters in full view, WarriorIQ's real skeletons on them. */
-.cg-shot { position: relative; width: min(1040px, calc(100% - 40px)); margin: clamp(28px, 3.6vw, 40px) auto 0; }
-.cg-shot-frame { position: relative; margin: 0; overflow: hidden; border: 1px solid var(--cg-line); border-bottom: 0; border-radius: 28px 28px 0 0; background: var(--cg-deep); }
+.cg-shot { margin: 0; }
+.cg-shot-frame { margin: 0; overflow: hidden; border: 1px solid var(--cg-line); border-radius: 24px; background: var(--cg-deep); }
 .cg-shot-frame img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
-.cg-shot-frame::after { content: ""; position: absolute; inset: auto 0 0 0; height: 22%; pointer-events: none;
-  background: linear-gradient(180deg, rgba(7, 11, 18, 0), rgba(7, 11, 18, .8)); }
-.cg-credit { position: absolute; z-index: 1; right: 22px; bottom: 18px; margin: 0; font-size: 12px; color: var(--cg-soft); }
+.cg-credit { margin: 10px 4px 0; font-size: 12px; color: var(--cg-faint); text-align: right; }
 
 /* --- What a coach sees -------------------------------------------------------- */
 .cg-reads { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: clamp(32px, 6vw, 64px); align-items: start; }
 .cg-reads-head { display: flex; flex-direction: column; gap: 20px; }
 @media (min-width: 900px) { .cg-reads-head { position: sticky; top: 110px; } }
 .cg-list { margin: 0; padding: 0; list-style: none; }
-.cg-list li { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 20px; padding: 28px 0; border-top: 1px solid var(--cg-line); }
+.cg-list li { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 20px; padding: 20px 0; }
 .cg-icon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--cg-panel); border: 1px solid var(--cg-line); }
 .cg-icon svg { width: 26px; height: 26px; stroke: var(--cg-blue-light); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .cg-list h3 { margin: 0 0 6px; font-weight: 800; font-size: 24px; letter-spacing: -.01em; }
@@ -116,18 +120,24 @@
 .cg .cg-faq > h2 { margin-bottom: 24px; }
 
 /* --- Last word ---------------------------------------------------------------- */
-.cg-end .cg-wrap { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px; padding-block: clamp(96px, 11vw, 140px); }
+.cg-end .cg-wrap { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px; padding-block: clamp(72px, 9vw, 112px); }
 .cg-end h2 { font-weight: 900; font-size: clamp(40px, 6.4vw, 96px); line-height: .92; letter-spacing: -.035em; max-width: 1000px; }
 .cg-credits { margin: 0; padding: 20px 0 0; font-size: 12px; color: var(--cg-faint); }
 
 /* --- Phones ------------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .cg-hero-grid { grid-template-columns: minmax(0, 1fr); }
+  .cg-hero-copy, .cg-cta { align-items: center; text-align: center; }
+  .cg-trust { justify-content: center; }
+}
 @media (max-width: 700px) {
-  .cg-shot { width: 100%; }
-  .cg-shot-frame { border-radius: 0; border-left: 0; border-right: 0; }
-  .cg-credit { position: static; margin: 10px 20px 0; text-align: right; }
-  .cg-shot-frame::after { display: none; }
+  .cg-hero-grid { width: calc(100% - 32px); padding-top: 16px; gap: 24px; }
+  .cg .btn.cg-btn { width: 100%; min-height: 68px; padding: 0 24px; font-size: 21px; }
+  .cg-cta { align-self: stretch; }
+  .cg-shot-frame { border-radius: 18px; }
   .cg-sport { min-height: 240px; }
 }
+
 
 /* --- Motion ------------------------------------------------------------------- */
 @media (prefers-reduced-motion: no-preference) {

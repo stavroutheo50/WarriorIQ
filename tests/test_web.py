@@ -1037,7 +1037,7 @@ class PublicPageTests(unittest.TestCase):
 
         self.assertIn('/assets/base.css', shell)
         self.assertIn("product.css", CSS_BUNDLES["base"])
-        self.assertIn("See every", home)
+        self.assertIn("Know what to fix.", home)
         # The report excerpt is gone (owner, 2026-11-09): its strike numbers
         # were a selling point the counts cannot yet support.
         self.assertNotIn('class="home-proof"', home)
@@ -1204,10 +1204,10 @@ class PublicPageTests(unittest.TestCase):
 
     def test_home_copy_uses_the_warrioriq_combat_sports_voice(self):
         page = self.client.get("/").text
-        # The homepage headline (owner, 2026-11-26: "See every round."; before
-        # it "Your fight. Analysed.", "Read the fight. Train what it shows.",
-        # and "Understand your performance. Improve your game." from 2026-11-14).
-        self.assertIn('<span>See every</span><span class="cg-title-blue">round.</span>', page)
+        # The homepage headline (owner, 2026-11-26: "See every round." was not
+        # good; before it "Your fight. Analysed.", "Read the fight. Train what
+        # it shows.", and "Understand your performance. Improve your game.").
+        self.assertIn('<span>Film your fight.</span><span class="cg-title-blue">Know what to fix.</span>', page)
         # Who it is for, and what happens to the footage - each line something
         # the product does now.
         self.assertIn('id="whoTitle"', page)
