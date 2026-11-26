@@ -206,12 +206,18 @@
 {% set ff = fix_first(report, ff_focus if ff_focus in ['A', 'B'] else 'A', training_items=report_access.training_items) if not identity_failed and numbers.state not in ('movement_only', 'no_fight') else none %}
 {% set fix_html %}
 {% if ff %}
+{#- On phones the top cards are a row you swipe through (2026-11-26), the
+    full report still below them; on wider screens they stack as before. -#}
+<div class="report-story" aria-label="Your report in brief">
 <section class="card fix-first" id="fix-first" aria-labelledby="fixFirstTitle" data-reveal>
   <div class="eyebrow">Fix this first</div>
   <h2 id="fixFirstTitle">{{ ff.title }}</h2>
   <p class="fix-first-detail">{{ ff.detail }}</p>
-  {% if ff.moment_seconds is not none %}<div class="fix-first-moment"><a class="btn" href="/replay/{{ job_id }}?t={{ '%.2f'|format([ff.moment_seconds - 1, 0]|max) }}">Watch it at {{ ff.moment_clock }}</a>{% if ff.more_moments %}<small class="muted">and {{ ff.more_moments }} more time{{ '' if ff.more_moments == 1 else 's' }} in the replay</small>{% endif %}</div>{% endif %}
-  {% if ff.drill %}<div class="fix-first-drill"><span>Your drill</span><strong>{{ ff.drill.name }}</strong><p>{{ ff.drill.prescription }}</p>{% if ff.drill.goal %}<small>Goal: {{ ff.drill.goal }}</small>{% endif %}</div>{% endif %}
+  {% if ff.moment_seconds is not none %}<div class="fix-first-moment"><a class="btn" href="/replay/{{ job_id }}?t={{ '%.2f'|format([ff.moment_seconds - 1, 0]|max) }}">Watch it at {{ ff.moment_clock }}</a>{% if ff.moments|length > 1 %}<span class="fix-first-times" aria-label="Other moments in the replay">{% for m in ff.moments[1:] %}<a class="fix-first-time" href="/replay/{{ job_id }}?t={{ '%.2f'|format([m.seconds - 1, 0]|max) }}">{{ m.clock }}</a>{% endfor %}</span>{% if ff.more_moments > ff.moments|length - 1 %}<small class="muted">and {{ ff.more_moments - (ff.moments|length - 1) }} more in the replay</small>{% endif %}{% endif %}</div>{% endif %}
+  {% if ff.drill %}<div class="fix-first-drill"><span>Your drill</span><strong>{{ ff.drill.name }}</strong><p>{{ ff.drill.prescription }}</p>{% if ff.drill.goal %}<small>Goal: {{ ff.drill.goal }}</small>{% endif %}
+    {% if ff.drill.how %}<ol class="drill-steps">{% for step in ff.drill.how.steps %}<li><b>{{ step.label }}</b><span>{{ step.text }}</span></li>{% endfor %}</ol>
+    <p class="drill-note"><b>Orthodox or southpaw</b> {{ ff.drill.how.stance }}</p>
+    <p class="drill-note">{{ ff.drill.how.solo }}</p>{% endif %}</div>{% endif %}
   <p class="small muted">Measured from your video. A second pair of eyes, not a replacement for your coach.</p>
 </section>
 {#- One thing to keep beside the one to fix (core.report.did_well): the
@@ -225,6 +231,7 @@
   {% if dw.moment_seconds is not none %}<a class="text-link" href="/replay/{{ job_id }}?t={{ '%.2f'|format([dw.moment_seconds - 1, 0]|max) }}">Watch it at {{ dw.moment_clock }}</a>{% endif %}
 </section>
 {% endif %}
+</div>
 {% endif %}
 {% endset %}
 {% if not lead_with_numbers %}{{ fix_html }}{% endif %}

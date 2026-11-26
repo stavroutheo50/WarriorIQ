@@ -6,6 +6,7 @@ from html import escape
 from pathlib import Path
 
 from core.count_plausibility import counts_implausible
+from core.drills import drill_steps
 from core.coaching import (
     POSE_DIMENSIONS,
     build_coaching, build_pose_coaching, build_training_plan, build_training_progression, drop_work_prefix,
@@ -1841,6 +1842,8 @@ def fix_first(report: dict, fighter: str, *, training_items: int | None = None) 
         "moment_seconds": times[0] if times else None,
         "moment_clock": _clock(times[0]) if times else None,
         "more_moments": max(0, len(times) - 1),
+        # Every moment it was seen, each one a link into the replay (2026-11-26).
+        "moments": [{"seconds": t, "clock": _clock(t)} for t in times[:6]],
         "drill": None,
     }
     if drill is not None and training_items != 0:
@@ -1851,6 +1854,9 @@ def fix_first(report: dict, fighter: str, *, training_items: int | None = None) 
             "name": str(drill.get("name") or "").split(" · ", 1)[-1],
             "prescription": str(drill.get("prescription") or ""),
             "goal": str((plan or {}).get("goal") or ""),
+            # Set it up, do it, a clean rep, reset (core/drills.py); None for
+            # drills that have no step-by-step version yet.
+            "how": drill_steps(str(drill.get("name") or "")),
         }
     return card
 

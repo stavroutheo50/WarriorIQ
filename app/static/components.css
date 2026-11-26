@@ -739,6 +739,24 @@
 .fix-first-drill span{display:block;color:var(--wiq-text-tertiary);font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.8px}
 .fix-first-drill strong{display:block;margin:4px 0;font-size:17px}
 .fix-first-drill p{margin:0 0 6px}
+/* Every moment the fault was seen, and the drill as steps (2026-11-26). */
+.fix-first-times{display:inline-flex;flex-wrap:wrap;gap:6px}
+.fix-first-time{display:inline-flex;align-items:center;min-height:36px;padding:0 12px;border:1px solid rgba(255,255,255,.14);border-radius:999px;font-variant-numeric:tabular-nums;font-weight:700;font-size:14px;text-decoration:none}
+.fix-first-time:hover{border-color:var(--wiq-a)}
+.drill-steps{display:grid;gap:10px;margin:14px 0 12px;padding:0;list-style:none;counter-reset:drill}
+.drill-steps li{display:grid;grid-template-columns:30px minmax(0,1fr);gap:4px 12px;counter-increment:drill}
+.drill-steps li::before{content:counter(drill);grid-row:span 2;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--wiq-a);color:var(--wiq-ink-on-bright);font-weight:800;font-size:14px}
+.drill-steps b{font-size:15px}
+.fix-first-drill .drill-steps span{display:block;color:var(--glass-text-soft);font-size:15px;font-weight:400;text-transform:none;letter-spacing:0}
+.drill-note{margin:8px 0 0;color:var(--glass-text-soft);font-size:14px}
+.drill-note b{margin-right:6px;color:var(--wiq-text)}
+/* Phones: the top cards side by side, swiped one at a time. */
+@media (max-width:700px){
+.report-story{display:flex;gap:12px;margin:0 -16px 18px;padding:0 16px 6px;overflow-x:auto;scroll-snap-type:x mandatory;scroll-padding:0 16px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.report-story::-webkit-scrollbar{display:none}
+.report-story>.card{flex:0 0 88%;margin:0;scroll-snap-align:start}
+.report-story>.card:only-child{flex-basis:100%}
+}
 /* With the fault moved to the top, "Keep doing" may stand alone. */
 .keep-fix-row article:only-child{grid-column:1/-1}
 /* Since your last fight, near the top (result.html): arrows, never a verdict. */

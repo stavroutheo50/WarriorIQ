@@ -23,7 +23,7 @@ def _report(*, trusted=True, improvements=None, drills=None, plan=None):
                 "why": "You 22%, them 31% - behind your opponent here.", "metric": "guard_index"}],
         }},
         "training_plan": {"A": plan if plan is not None else [{
-            "work": "3 x 2 min: return both hands to the chin.", "goal": "Raise guard from 22% to 30%."}]},
+            "work": "3 x 2 min: return both hands to the chin.", "goal": "Raise guard from 22% to 30%.", "how": None}]},
     }
 
 
@@ -36,7 +36,7 @@ class FixFirstTests(unittest.TestCase):
         self.assertEqual(card["more_moments"], 2)
         self.assertEqual(card["drill"], {"name": "Hands-home rounds",
                                          "prescription": "3 x 2 min: return both hands to the chin.",
-                                         "goal": "Raise guard from 22% to 30%."})
+                                         "goal": "Raise guard from 22% to 30%.", "how": None})
 
     def test_older_reports_match_the_drill_by_its_sentence(self):
         report = _report()
