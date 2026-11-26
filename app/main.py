@@ -592,6 +592,7 @@ PUBLIC_INDEX_ROUTES = (
     "/subprocessors", "/contact", "/kickboxing-fight-analysis", "/k1-fight-analysis",
     "/fight-video-analysis-for-coaches", "/how-to-record-a-fight-for-analysis",
     "/muay-thai-fight-analysis", "/mma-fight-analysis",
+    "/boxing-fight-analysis", "/taekwondo-fight-analysis", "/ai-sparring-analysis",
     "/analyze", "/analyze/kickboxing", "/analyze/boxing", "/analyze/muay_thai",
     "/analyze/taekwondo", "/analyze/mma", "/scorer",
 )
@@ -738,6 +739,64 @@ SEARCH_GUIDES = {
             {"question": "What footage works best?", "answer": "A stable, elevated view of the whole cage or ring with both fighters head to feet. Fence and net mesh in front of the lens make tracking harder."},
         ],
         "related": [("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
+    },
+    # Boxing, taekwondo and "AI sparring analysis" (owner, 2026-11-26: the
+    # competitor teardown found no WarriorIQ page for these searches). Same
+    # rule as above: only what the analysis does, and what it does not see.
+    "boxing-fight-analysis": {
+        "title": "Boxing Fight Analysis from Video | WarriorIQ",
+        "description": "Upload a boxing fight or sparring video. WarriorIQ follows both boxers and measures footwork, ring position, pressure, guard and balance, round by round, with a training plan from your own numbers.",
+        "eyebrow": "Boxing fight analysis",
+        "heading": "Review a boxing fight round by round.",
+        "intro": "WarriorIQ follows both boxers through the whole video and measures how each one moved: footwork, who held the centre of the ring, who walked forward, when the guard came down and how steady each stance stayed. The fighter you choose gets the detailed report and a four-week plan.",
+        "sections": [
+            {"title": "What is measured", "body": "One tap on each boxer at the start, then both are followed to the final bell. Every number is tied to the round it came from.", "items": ["Footwork, distance covered and ring-centre time", "Pressure: who walks forward and who gets backed up", "Guard (experimental) and balance after punching", *(["Punches thrown, as rough estimates"] if feature_is_on("strike_counts") else []), "A four-week training plan from your own numbers"]},
+            {"title": "Ten-point must, in context", "body": (
+                "Choose boxing before analysis and any score estimate follows the ten-point must system. It is a training estimate for review, never an official result."
+                if feature_is_on("scoring") else
+                "WarriorIQ does not score boxing rounds yet: score estimates are coming once punches can be counted accurately. When they arrive they will follow the ten-point must system as training estimates, not official results.")},
+            {"title": "Honest limits", "body": "Punch counts from a single camera are rough, and the report labels them that way. Fast exchanges, the referee or the ropes between the camera and the boxers make any count less certain; the accuracy page shows how far off they can be."},
+        ],
+        "faqs": [
+            {"question": "Does it work on sparring as well as fights?", "answer": "Yes. Sparring is analysed exactly like a bout. For bag or pad work with one person in view, choose Solo session."},
+            {"question": "What footage works best?", "answer": "A stable, wide view from outside the ring at chest height or higher, with both boxers head to feet. Avoid zooming and panning."},
+        ],
+        "related": [("AI sparring analysis", "/ai-sparring-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
+    },
+    "taekwondo-fight-analysis": {
+        "title": "Taekwondo Sparring Analysis from Video (WT and ITF) | WarriorIQ",
+        "description": "Upload a taekwondo sparring or match video. WarriorIQ follows both athletes and measures movement, distance, pressure, guard and balance under World Taekwondo or ITF rules, round by round.",
+        "eyebrow": "Taekwondo analysis",
+        "heading": "Review taekwondo sparring under your federation's rules.",
+        "intro": "Choose World Taekwondo or ITF, tap each athlete once, and WarriorIQ follows both through the match. It measures movement, distance management, pressure, guard and balance, round by round, and says plainly which parts of taekwondo scoring a video cannot read.",
+        "sections": [
+            {"title": "What is measured", "body": "Both athletes are tracked; the one you choose gets the detailed report and a four-week plan built from their own numbers.", "items": ["Movement and distance management", "Pressure: who drives forward and who gives ground", "Guard (experimental) and balance after kicking", *(["Kicks and punches, as rough estimates"] if feature_is_on("strike_counts") else []), "World Taekwondo or ITF context for the report"]},
+            {"title": "What it does not see", "body": "Electronic body and head protector scoring is not read from video, and neither are points awarded from penalties against the opponent. Jumping and spinning bonuses that some national bodies use, but the ITF championship rules do not, are not added either. The report says so instead of guessing."},
+            {"title": "Training, not judging", "body": "Everything is for review and training. WarriorIQ is not an official referee or scoring system, and any score estimate is a training estimate, never a match result."},
+        ],
+        "faqs": [
+            {"question": "Can junior athletes use it?", "answer": "Yes, with a parent or guardian: accounts under 18 are approved by a parent or guardian by email before any video is uploaded, and the uploader must have permission for everyone filmed."},
+            {"question": "What footage works best?", "answer": "A stable side view of the whole mat with both athletes head to feet, filmed at chest height or higher, without zooming or panning."},
+        ],
+        "related": [("AI sparring analysis", "/ai-sparring-analysis"), ("Record better analysis footage", "/how-to-record-a-fight-for-analysis")],
+    },
+    "ai-sparring-analysis": {
+        "title": "AI Sparring Analysis: Track Both Fighters from One Video | WarriorIQ",
+        "description": "Film a sparring round on your phone and get AI analysis of both fighters: movement, pressure, guard and balance round by round, a real skeleton replay and a four-week plan. Kickboxing, boxing, Muay Thai, taekwondo and MMA.",
+        "eyebrow": "AI sparring analysis",
+        "heading": "Film a sparring round. See both fighters clearly.",
+        "intro": "Most sparring footage is watched once and forgotten. WarriorIQ follows both fighters through every round with pose tracking, draws the skeleton it tracked on the replay, and turns the round into measurements and one clear thing to train next.",
+        "sections": [
+            {"title": "Both fighters, the whole round", "body": "Tap each fighter once. WarriorIQ keeps track of who is who through exchanges and clinches, and when it cannot be sure it asks you to point them out again instead of guessing.", "items": ["Movement, ring-centre time and distance", "Pressure: who walks forward and who gets backed up", "Guard (experimental) and balance after you throw", "A skeleton replay drawn from the real tracking", "A four-week training plan from your own numbers"]},
+            {"title": "Built for your sport's rules", "body": "Kickboxing (K-1, Low Kick, Kick Light, Point Fighting), boxing, Muay Thai, taekwondo (World Taekwondo and ITF) and MMA. Each report says what that sport's video can and cannot show."},
+            {"title": "Honest about accuracy", "body": "The measurements are checked against hand-marked footage, and the accuracy page shows the results, including where the analysis is still rough. Strike counts are labelled as estimates wherever they appear."},
+            {"title": "Free to start", "body": f"A free account gives one analysis a day, with no card. Your videos stay private and are deleted after {SETTINGS.saved_video_retention_days} days unless you choose otherwise."},
+        ],
+        "faqs": [
+            {"question": "Do I need special cameras or sensors?", "answer": "No. One phone filming from outside the ring, both fighters head to feet, is enough."},
+            {"question": "Can it analyse a coach holding pads or one person on the bag?", "answer": "Yes: choose Solo session to get movement, guard and balance for the one person in view."},
+        ],
+        "related": [("Boxing fight analysis", "/boxing-fight-analysis"), ("Kickboxing fight analysis", "/kickboxing-fight-analysis"), ("Taekwondo analysis", "/taekwondo-fight-analysis")],
     },
     "how-to-record-a-fight-for-analysis": {
         "title": "How to Record a Kickboxing Fight for Video Analysis | WarriorIQ",
@@ -10414,6 +10473,9 @@ def ringside_score(request: Request, payload: RingsidePayload):
 @app.get("/k1-fight-analysis", response_class=HTMLResponse)
 @app.get("/muay-thai-fight-analysis", response_class=HTMLResponse)
 @app.get("/mma-fight-analysis", response_class=HTMLResponse)
+@app.get("/boxing-fight-analysis", response_class=HTMLResponse)
+@app.get("/taekwondo-fight-analysis", response_class=HTMLResponse)
+@app.get("/ai-sparring-analysis", response_class=HTMLResponse)
 @app.get("/fight-video-analysis-for-coaches", response_class=HTMLResponse)
 @app.get("/how-to-record-a-fight-for-analysis", response_class=HTMLResponse)
 def search_guide_page(request: Request):
